@@ -1,0 +1,102 @@
+name: Build and Release DMG
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version number (e.g., 1.0.0)'
+        required: true
+        default: '1.0.0'
+
+jobs:
+  build-macos:
+    runs-on: macos-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        cache-dependency-path: app/package-lock.json
+    
+    - name: Install Electron dependencies
+      working-directory: app
+      run: npm ci
+    
+    - name: Build DMG for Intel
+      working-directory: app
+      run: npm run build:intel
+      env:
+        CSC_IDENTITY_AUTO_DISCOVERY: false
+        
+    - name: Build DMG for Apple Silicon  
+      working-directory: app
+      run: npm run build:arm64
+      env:
+        CSC_IDENTITY_AUTO_DISCOVERY: false
+    
+    - name: Create Release
+      id: create_release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ github.event.inputs.version && format('v{0}', github.event.inputs.version) || github.ref }}
+        release_name: StenoAI ${{ github.event.inputs.version || github.ref_name }}
+        draft: false
+        prerelease: false
+        body: |
+          ## StenoAI v${{ github.event.inputs.version || github.ref_name }}
+          
+          ### 🎙️ Meeting Transcription & Analysis
+          
+          **Features:**
+          - Desktop app with real-time recording
+          - Whisper speech transcription
+          - AI meeting summarization with Ollama
+          - In-window settings panel
+          - Progress indicators for setup
+          - Automatic dependency installation
+          
+          **Download:**
+          - **Intel Macs**: StenoAI-${{ github.event.inputs.version || github.ref_name }}.dmg
+          - **Apple Silicon**: StenoAI-${{ github.event.inputs.version || github.ref_name }}-arm64.dmg
+          
+          **Requirements:**
+          - macOS 10.14+
+          - Internet connection for initial setup
+          - Microphone access permissions
+          
+          ### First Time Setup
+          1. Download appropriate DMG for your Mac
+          2. Install app by dragging to Applications
+          3. Launch StenoAI - setup wizard will run automatically
+          4. Grant microphone permissions when prompted
+          5. Start recording meetings!
+
+    - name: Upload Intel DMG
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: app/dist/StenoAI-${{ github.event.inputs.version || github.ref_name }}.dmg
+        asset_name: StenoAI-${{ github.event.inputs.version || github.ref_name }}.dmg
+        asset_content_type: application/octet-stream
+
+    - name: Upload Apple Silicon DMG
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: app/dist/StenoAI-${{ github.event.inputs.version || github.ref_name }}-arm64.dmg
+        asset_name: StenoAI-${{ github.event.inputs.version || github.ref_name }}-arm64.dmg
+        asset_content_type: application/octet-stream

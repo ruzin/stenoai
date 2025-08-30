@@ -12,6 +12,8 @@
     "start": "electron .",
     "build": "electron-builder",
     "build-mac": "electron-builder --mac",
+    "build:intel": "electron-builder --mac --x64",
+    "build:arm64": "electron-builder --mac --arm64",
     "dist": "electron-builder --publish=never",
     "pack": "electron-builder --dir",
     "release": "electron-builder --publish=always"
