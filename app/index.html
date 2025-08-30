@@ -1,0 +1,1741 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Steno Recorder</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #000;
+            color: #fff;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        
+        /* Header with record controls */
+        .header {
+            background: #111;
+            border-bottom: 1px solid #333;
+            padding: 36px 24px 16px 16px; /* More top padding, move content left */
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        
+        .brand h1 {
+            font-size: 20px;
+            font-weight: 600;
+            color: #fff;
+        }
+        
+        .header-actions {
+            display: flex;
+            align-items: center;
+        }
+        
+        .settings-btn {
+            background: transparent;
+            border: 1px solid #444;
+            color: #ccc;
+            padding: 8px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: all 0.2s ease;
+        }
+        
+        .settings-btn:hover {
+            background: #333;
+            border-color: #555;
+            color: #fff;
+        }
+        
+        .record-controls {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+        
+        .session-input {
+            background: #222;
+            border: 1px solid #444;
+            color: #fff;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 14px;
+            min-width: 200px;
+            outline: none;
+        }
+        
+        .session-input:focus {
+            border-color: #666;
+            background: #333;
+        }
+        
+        .status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-right: 16px;
+        }
+        
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #666;
+        }
+        
+        .status-dot.ready { background: #22c55e; }
+        .status-dot.recording { 
+            background: #ef4444; 
+            animation: pulse 1s infinite;
+        }
+        .status-dot.processing { 
+            background: #f59e0b; 
+            animation: pulse 1s infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        .btn {
+            background: #333;
+            color: #fff;
+            border: 1px solid #555;
+            padding: 8px 16px;
+            border-radius: 6px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        
+        .btn:hover {
+            background: #444;
+            border-color: #666;
+        }
+        
+        .btn-primary {
+            background: #fff;
+            color: #000;
+            border-color: #fff;
+        }
+        
+        .btn-primary:hover {
+            background: #f5f5f5;
+        }
+        
+        .btn-danger {
+            background: #ef4444;
+            border-color: #ef4444;
+        }
+        
+        .btn-danger:hover {
+            background: #dc2626;
+        }
+        
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        /* Settings Panel */
+        .settings-panel {
+            position: fixed;
+            top: 0;
+            right: -400px;
+            width: 400px;
+            height: 100vh;
+            background: #111;
+            border-left: 1px solid #333;
+            transition: right 0.3s ease;
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .settings-header {
+            padding: 20px;
+            border-bottom: 1px solid #333;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .settings-header h2 {
+            margin: 0;
+            font-size: 18px;
+            color: #fff;
+        }
+        
+        .close-settings {
+            background: none;
+            border: none;
+            color: #ccc;
+            font-size: 18px;
+            cursor: pointer;
+            padding: 4px 8px;
+            border-radius: 4px;
+        }
+        
+        .close-settings:hover {
+            background: #333;
+            color: #fff;
+        }
+        
+        .settings-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+        }
+        
+        .settings-section {
+            margin-bottom: 32px;
+        }
+        
+        .settings-section h3 {
+            margin: 0 0 12px 0;
+            font-size: 16px;
+            color: #fff;
+        }
+        
+        .settings-section h4 {
+            margin: 16px 0 8px 0;
+            font-size: 14px;
+            color: #ccc;
+        }
+        
+        .settings-section p {
+            margin: 0 0 16px 0;
+            color: #aaa;
+            font-size: 14px;
+            line-height: 1.4;
+        }
+        
+        .setup-info ul {
+            margin: 16px 0;
+            padding-left: 20px;
+            color: #ccc;
+        }
+        
+        .setup-info li {
+            margin-bottom: 4px;
+            font-size: 14px;
+        }
+        
+        .prompt-viewer {
+            background: #1a1a1a;
+            border: 1px solid #333;
+            border-radius: 6px;
+            padding: 16px;
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 12px;
+            line-height: 1.4;
+            white-space: pre-wrap;
+            color: #ccc;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        
+        /* Main content area */
+        .main {
+            flex: 1;
+            display: flex;
+            overflow: hidden;
+        }
+        
+        /* Sidebar with meetings list */
+        .sidebar {
+            width: 320px;
+            background: #111;
+            border-right: 1px solid #333;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .sidebar-header {
+            padding: 20px;
+            border-bottom: 1px solid #333;
+        }
+        
+        .sidebar-title {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 8px;
+        }
+        
+        .sidebar-header h2 {
+            font-size: 16px;
+            font-weight: 600;
+            color: #fff;
+        }
+        
+        .refresh-btn {
+            background: transparent;
+            border: 1px solid #444;
+            color: #888;
+            border-radius: 4px;
+            padding: 4px 8px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .refresh-btn:hover:not(:disabled) {
+            background: #222;
+            color: #fff;
+            border-color: #666;
+        }
+        
+        .refresh-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .search-input {
+            background: #222;
+            border: 1px solid #444;
+            color: #fff;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 14px;
+            width: 100%;
+            outline: none;
+            margin: 12px 0 8px 0;
+        }
+        
+        .search-input:focus {
+            border-color: #666;
+            background: #333;
+        }
+        
+        .sidebar-header p {
+            font-size: 14px;
+            color: #888;
+        }
+        
+        .meetings-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 8px;
+        }
+        
+        .meeting-item {
+            background: #1a1a1a;
+            border: 1px solid #333;
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+            position: relative;
+        }
+        
+        .meeting-delete {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            background: #444;
+            border: none;
+            color: #999;
+            border-radius: 4px;
+            padding: 4px 6px;
+            font-size: 12px;
+            cursor: pointer;
+            opacity: 0;
+            transition: all 0.2s;
+        }
+        
+        .meeting-item:hover .meeting-delete {
+            opacity: 1;
+        }
+        
+        .meeting-delete:hover {
+            background: #ef4444;
+            color: #fff;
+        }
+        
+        .meeting-item:hover {
+            background: #222;
+            border-color: #444;
+        }
+        
+        .meeting-item.active {
+            background: #333;
+            border-color: #555;
+        }
+        
+        .meeting-item h3 {
+            font-size: 14px;
+            font-weight: 600;
+            color: #fff;
+            margin-bottom: 6px;
+            line-height: 1.3;
+        }
+        
+        .meeting-meta {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+        
+        .meeting-date {
+            font-size: 12px;
+            color: #888;
+        }
+        
+        .meeting-duration {
+            font-size: 12px;
+            color: #666;
+            background: #222;
+            padding: 2px 6px;
+            border-radius: 3px;
+        }
+        
+        .meeting-preview {
+            font-size: 13px;
+            color: #aaa;
+            line-height: 1.4;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+        
+        /* Main content area */
+        .content {
+            flex: 1;
+            background: #000;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .content-empty {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            flex-direction: column;
+            color: #666;
+        }
+        
+        .content-empty-icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+            opacity: 0.5;
+        }
+        
+        .content-empty h3 {
+            font-size: 18px;
+            margin-bottom: 8px;
+            font-weight: 500;
+        }
+        
+        .content-empty p {
+            font-size: 14px;
+            color: #888;
+        }
+        
+        /* Meeting detail view */
+        .meeting-detail {
+            padding: 32px;
+            height: 100%;
+            overflow-y: auto;
+            display: none;
+        }
+        
+        .meeting-detail.show {
+            display: block;
+        }
+        
+        .meeting-header {
+            margin-bottom: 32px;
+            padding-bottom: 24px;
+            border-bottom: 1px solid #333;
+        }
+        
+        .meeting-title {
+            font-size: 24px;
+            font-weight: 700;
+            color: #fff;
+            margin-bottom: 8px;
+        }
+        
+        .meeting-info {
+            display: flex;
+            gap: 24px;
+            color: #888;
+            font-size: 14px;
+        }
+        
+        .meeting-section {
+            margin-bottom: 32px;
+        }
+        
+        .section-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: #fff;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .section-content {
+            color: #ccc;
+            line-height: 1.6;
+        }
+        
+        .key-points-list {
+            list-style: none;
+            padding: 0;
+        }
+        
+        .key-points-list li {
+            padding: 8px 0;
+            padding-left: 20px;
+            position: relative;
+            color: #ccc;
+            line-height: 1.5;
+        }
+        
+        .key-points-list li:before {
+            content: "•";
+            position: absolute;
+            left: 0;
+            color: #666;
+            font-weight: bold;
+        }
+        
+        .action-items-list {
+            list-style: none;
+            padding: 0;
+        }
+        
+        .action-items-list li {
+            background: #1a1a1a;
+            border: 1px solid #333;
+            border-radius: 6px;
+            padding: 12px;
+            margin-bottom: 8px;
+            color: #ccc;
+            line-height: 1.5;
+        }
+        
+        /* Transcript section */
+        .transcript-content {
+            background: #111;
+            border: 1px solid #333;
+            border-radius: 8px;
+            padding: 20px;
+            font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+            font-size: 14px;
+            line-height: 1.6;
+            color: #ddd;
+            white-space: pre-wrap;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        
+        /* File drop area */
+        .drop-zone {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.9);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+        
+        .drop-zone.active {
+            display: flex;
+        }
+        
+        .drop-message {
+            text-align: center;
+            color: #fff;
+            font-size: 24px;
+            font-weight: 600;
+        }
+        
+        /* Scrollbar styling */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        
+        ::-webkit-scrollbar-track {
+            background: #111;
+        }
+        
+        ::-webkit-scrollbar-thumb {
+            background: #333;
+            border-radius: 4px;
+        }
+        
+        ::-webkit-scrollbar-thumb:hover {
+            background: #444;
+        }
+        
+        /* Setup Modal */
+        .setup-modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.95);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 2000;
+        }
+        
+        .setup-content {
+            background: #111;
+            border: 1px solid #333;
+            border-radius: 12px;
+            padding: 32px;
+            width: 600px;
+            max-width: 90vw;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+        
+        .setup-header {
+            text-align: center;
+            margin-bottom: 32px;
+        }
+        
+        .setup-header h2 {
+            font-size: 24px;
+            font-weight: 600;
+            color: #fff;
+            margin-bottom: 8px;
+        }
+        
+        .setup-header p {
+            font-size: 16px;
+            color: #888;
+        }
+        
+        .setup-steps {
+            margin-bottom: 32px;
+        }
+        
+        .setup-step {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            padding: 16px;
+            margin-bottom: 12px;
+            background: #1a1a1a;
+            border: 1px solid #333;
+            border-radius: 8px;
+            transition: all 0.3s;
+        }
+        
+        .setup-step.active {
+            border-color: #555;
+            background: #222;
+        }
+        
+        .setup-step.completed {
+            border-color: #22c55e;
+            background: #0f1f0f;
+        }
+        
+        .setup-step.failed {
+            border-color: #ef4444;
+            background: #1f0f0f;
+        }
+        
+        .step-icon {
+            font-size: 24px;
+            width: 40px;
+            text-align: center;
+        }
+        
+        .step-content {
+            flex: 1;
+        }
+        
+        .step-content h3 {
+            font-size: 16px;
+            font-weight: 600;
+            color: #fff;
+            margin-bottom: 4px;
+        }
+        
+        .step-content p {
+            font-size: 14px;
+            color: #888;
+            margin-bottom: 8px;
+        }
+        
+        .step-status {
+            font-size: 13px;
+            color: #666;
+            font-weight: 500;
+        }
+        
+        .progress-bar {
+            width: 100%;
+            height: 4px;
+            background: #333;
+            border-radius: 2px;
+            margin-top: 8px;
+            overflow: hidden;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: #f59e0b;
+            width: 0%;
+            transition: width 0.3s ease;
+            border-radius: 2px;
+        }
+        
+        .setup-step.completed .progress-fill {
+            background: #22c55e;
+            width: 100%;
+        }
+        
+        .setup-step.active .step-status {
+            color: #f59e0b;
+        }
+        
+        .setup-step.completed .step-status {
+            color: #22c55e;
+        }
+        
+        .setup-step.failed .step-status {
+            color: #ef4444;
+        }
+        
+        .setup-actions {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+        }
+        
+        .setup-actions .btn {
+            flex: 1;
+        }
+    </style>
+</head>
+<body>
+    <!-- Header with recording controls -->
+    <div class="header">
+        <div class="brand">
+            <span>🎙️</span>
+            <h1>StenoAI</h1>
+        </div>
+        
+        <div class="record-controls">
+            <div class="status">
+                <div class="status-dot ready" id="status-dot"></div>
+                <span id="status-text">Ready</span>
+            </div>
+            
+            <input type="text" class="session-input" id="session-name" placeholder="Enter meeting name..." value="Meeting">
+            
+            
+            <button class="btn btn-primary" id="start-btn">
+                <span>●</span> Start Recording
+            </button>
+            
+            <button class="btn btn-danger" id="stop-btn" style="display: none;">
+                <span>■</span> Stop Recording
+            </button>
+        </div>
+        
+        <div class="header-actions">
+            <button class="settings-btn" id="settings-btn" title="Settings">⚙️</button>
+        </div>
+    </div>
+
+    <!-- Main content area -->
+    <div class="main">
+        <!-- Sidebar with meetings -->
+        <div class="sidebar">
+            <div class="sidebar-header">
+                <div class="sidebar-title">
+                    <h2>Meetings</h2>
+                    <button class="refresh-btn" id="refresh-btn">🔄 Refresh</button>
+                </div>
+                <input type="text" class="search-input" id="search-input" placeholder="Search meetings...">
+                <p>Recent recordings and transcripts</p>
+            </div>
+            
+            <div class="meetings-list" id="meetings-list">
+                <!-- Meetings will be loaded here -->
+            </div>
+        </div>
+
+        <!-- Main content -->
+        <div class="content">
+            <!-- Empty state -->
+            <div class="content-empty" id="empty-state">
+                <div class="content-empty-icon">📝</div>
+                <h3>No meeting selected</h3>
+                <p>Select a meeting from the sidebar or record a new one</p>
+            </div>
+
+            <!-- Meeting detail view -->
+            <div class="meeting-detail" id="meeting-detail">
+                <div class="meeting-header">
+                    <h1 class="meeting-title" id="detail-title">Meeting Title</h1>
+                    <div class="meeting-info">
+                        <span id="detail-date">Date</span>
+                        <span id="detail-duration">Duration</span>
+                    </div>
+                </div>
+
+                <div class="meeting-section">
+                    <h2 class="section-title">
+                        <span>📋</span> Summary
+                    </h2>
+                    <div class="section-content" id="detail-summary">
+                        Meeting summary will appear here...
+                    </div>
+                </div>
+
+                <div class="meeting-section">
+                    <h2 class="section-title">
+                        <span>🔑</span> Key Points
+                    </h2>
+                    <ul class="key-points-list" id="detail-key-points">
+                        <!-- Key points will be loaded here -->
+                    </ul>
+                </div>
+
+                <div class="meeting-section">
+                    <h2 class="section-title">
+                        <span>✅</span> Action Items
+                    </h2>
+                    <ul class="action-items-list" id="detail-action-items">
+                        <!-- Action items will be loaded here -->
+                    </ul>
+                </div>
+
+                <div class="meeting-section">
+                    <h2 class="section-title">
+                        <span>📄</span> Full Transcript
+                    </h2>
+                    <div class="transcript-content" id="detail-transcript">
+                        Full transcript will appear here...
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Drop zone for files -->
+    <div class="drop-zone" id="drop-zone">
+        <div class="drop-message">
+            Drop audio file to process
+        </div>
+    </div>
+
+    <!-- Setup overlay -->
+    <div class="setup-modal" id="setup-overlay" style="display: none;">
+        <div class="setup-content">
+            <div class="setup-header">
+                <h2>🚀 Welcome to StenoAI</h2>
+                <p>Setting up your system for meeting transcription...</p>
+            </div>
+            
+            <div class="setup-steps" id="setup-steps">
+                <div class="setup-step" id="step-system">
+                    <div class="step-icon">🖥️</div>
+                    <div class="step-content">
+                        <h3>System Check</h3>
+                        <p>Checking Python and system requirements...</p>
+                        <div class="step-status" id="system-status">Checking...</div>
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="system-progress"></div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="setup-step" id="step-python">
+                    <div class="step-icon">🐍</div>
+                    <div class="step-content">
+                        <h3>Python Dependencies</h3>
+                        <p>Installing audio libraries</p>
+                        <div class="step-status" id="python-status">Pending...</div>
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="python-progress"></div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="setup-step" id="step-whisper">
+                    <div class="step-icon">🎤</div>
+                    <div class="step-content">
+                        <h3>Install Whisper</h3>
+                        <p>OpenAI's speech recognition engine</p>
+                        <div class="step-status" id="whisper-status">Pending...</div>
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="whisper-progress"></div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="setup-step" id="step-ollama">
+                    <div class="step-icon">🧠</div>
+                    <div class="step-content">
+                        <h3>Install Ollama + AI Model</h3>
+                        <p>Homebrew (if needed) → Ollama → Llama 3.2 model (~2GB)</p>
+                        <div class="step-status" id="ollama-status">Pending...</div>
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="ollama-progress"></div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="setup-step" id="step-test">
+                    <div class="step-icon">✅</div>
+                    <div class="step-content">
+                        <h3>Test System</h3>
+                        <p>Verifying everything works</p>
+                        <div class="step-status" id="test-status">Pending...</div>
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="test-progress"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="setup-actions">
+                <button class="btn btn-primary" id="setup-auto-start" style="display: none;">Begin Setup</button>
+                <button class="btn btn-primary" id="setup-continue" style="display: none;">Continue to App</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Settings Panel (slides in from right) -->
+    <div class="settings-panel" id="settings-panel">
+        <div class="settings-header">
+            <h2>⚙️ Settings</h2>
+            <button class="close-settings" onclick="toggleSettings()">✕</button>
+        </div>
+        
+        <div class="settings-content">
+            <div class="settings-section">
+                <h3>🔧 Setup Wizard</h3>
+                <p>Run the setup process again to reinstall dependencies or fix configuration issues.</p>
+                
+                <div class="setup-info">
+                    <ul>
+                        <li>Python virtual environment</li>
+                        <li>Audio recording libraries</li>
+                        <li>Whisper speech recognition</li>
+                        <li>Ollama AI service and models</li>
+                    </ul>
+                </div>
+                
+                <button class="btn btn-primary" id="run-setup-btn" onclick="runSetupFromSettings()">
+                    Run Setup Wizard
+                </button>
+            </div>
+            
+            <div class="settings-section">
+                <h3>🧠 AI Prompts</h3>
+                <p>View the prompts used for meeting summarization and analysis.</p>
+                
+                <h4>Summarization Prompt</h4>
+                <div class="prompt-viewer" id="summarization-prompt">
+                    Loading prompt...
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const { ipcRenderer } = require('electron');
+        
+        // UI Elements
+        const statusDot = document.getElementById('status-dot');
+        const statusText = document.getElementById('status-text');
+        const sessionNameInput = document.getElementById('session-name');
+        const startBtn = document.getElementById('start-btn');
+        const stopBtn = document.getElementById('stop-btn');
+        const refreshBtn = document.getElementById('refresh-btn');
+        const settingsBtn = document.getElementById('settings-btn');
+        const meetingsList = document.getElementById('meetings-list');
+        const emptyState = document.getElementById('empty-state');
+        const meetingDetail = document.getElementById('meeting-detail');
+        const dropZone = document.getElementById('drop-zone');
+        
+        // Detail elements
+        const detailTitle = document.getElementById('detail-title');
+        const detailDate = document.getElementById('detail-date');
+        const detailDuration = document.getElementById('detail-duration');
+        const detailSummary = document.getElementById('detail-summary');
+        const detailKeyPoints = document.getElementById('detail-key-points');
+        const detailActionItems = document.getElementById('detail-action-items');
+        const detailTranscript = document.getElementById('detail-transcript');
+        
+        // Setup elements
+        const setupOverlay = document.getElementById('setup-overlay');
+        const setupAutoStart = document.getElementById('setup-auto-start');
+        const setupContinue = document.getElementById('setup-continue');
+        
+        let uiState = 'ready'; // ready, recording, processing, setup-needed
+        let meetings = [];
+        let filteredMeetings = [];
+        let selectedMeeting = null;
+        let recordingProcess = null;
+        let statusCheckInterval = null;
+        let searchQuery = '';
+        let recordingStartTime = null;
+        let recordingTimer = null;
+        
+        // Utility functions
+        function log(message) {
+            console.log(`[${new Date().toLocaleTimeString()}] ${message}`);
+        }
+        
+        function generateMeetingHash() {
+            // Generate short hash for meeting names
+            return Math.random().toString(36).substring(2, 8).toUpperCase();
+        }
+        
+        function setStatus(status, message) {
+            statusDot.className = `status-dot ${status}`;
+            statusText.textContent = message;
+            log(`Status: ${message}`);
+        }
+        
+        function startRecordingTimer() {
+            recordingStartTime = Date.now();
+            recordingTimer = setInterval(() => {
+                const elapsed = Math.floor((Date.now() - recordingStartTime) / 1000);
+                const minutes = Math.floor(elapsed / 60);
+                const seconds = elapsed % 60;
+                const timeStr = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+                setStatus('recording', `Recording... ${timeStr}`);
+            }, 1000);
+        }
+        
+        function stopRecordingTimer() {
+            if (recordingTimer) {
+                clearInterval(recordingTimer);
+                recordingTimer = null;
+            }
+            recordingStartTime = null;
+        }
+        
+        function setUIState(state) {
+            uiState = state;
+            log(`UI State: ${state}`);
+            
+            // Update UI elements based on state
+            switch(state) {
+                case 'ready':
+                    startBtn.style.display = 'inline-flex';
+                    stopBtn.style.display = 'none';
+                    startBtn.disabled = false;
+                    sessionNameInput.disabled = false;
+                    stopRecordingTimer();
+                    setStatus('ready', 'Ready');
+                    break;
+                    
+                case 'recording':
+                    startBtn.style.display = 'none';
+                    stopBtn.style.display = 'inline-flex';
+                    startBtn.disabled = true;
+                    sessionNameInput.disabled = true;
+                    stopBtn.disabled = false;
+                    startRecordingTimer();
+                    break;
+                    
+                case 'processing':
+                    startBtn.style.display = 'inline-flex';
+                    stopBtn.style.display = 'none';
+                    startBtn.disabled = true;
+                    sessionNameInput.disabled = true;
+                    stopRecordingTimer();
+                    setStatus('processing', 'Processing...');
+                    break;
+            }
+        }
+        
+        function startStatusMonitoring() {
+            // Only check status when we think we're recording
+            if (statusCheckInterval) clearInterval(statusCheckInterval);
+            
+            statusCheckInterval = setInterval(async () => {
+                if (uiState === 'recording') {
+                    try {
+                        const result = await ipcRenderer.invoke('get-status');
+                        if (result.success && !result.status.includes('RECORDING')) {
+                            // Backend says not recording but UI thinks it is - sync up
+                            log('⚠️ Backend/UI state mismatch - syncing');
+                            setUIState('ready');
+                            stopStatusMonitoring();
+                        }
+                    } catch (error) {
+                        log(`Status check failed: ${error.message}`);
+                    }
+                }
+            }, 10000); // Check every 10 seconds only when recording
+        }
+        
+        function stopStatusMonitoring() {
+            if (statusCheckInterval) {
+                clearInterval(statusCheckInterval);
+                statusCheckInterval = null;
+            }
+        }
+        
+        
+        function formatDate(dateString) {
+            if (!dateString) return 'Unknown date';
+            try {
+                return new Date(dateString).toLocaleDateString('en-US', {
+                    year: 'numeric',
+                    month: 'short',
+                    day: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                });
+            } catch {
+                return 'Unknown date';
+            }
+        }
+        
+        function formatDuration(startTime, endTime) {
+            if (!startTime || !endTime) return 'Unknown';
+            try {
+                const start = new Date(startTime);
+                const end = new Date(endTime);
+                const minutes = Math.round((end - start) / 60000);
+                return `${minutes} min`;
+            } catch {
+                return 'Unknown';
+            }
+        }
+        
+        // Delete meeting function
+        async function deleteMeeting(index, event) {
+            event.stopPropagation(); // Prevent selecting the meeting
+            
+            const meeting = filteredMeetings[index];
+            if (!meeting) return;
+            
+            const confirmed = confirm(`Delete meeting "${meeting.session_info?.name || 'Untitled Meeting'}"?\n\nThis will delete the transcript, summary, and all associated files.`);
+            if (!confirmed) return;
+            
+            try {
+                // Pass the entire meeting object to the backend
+                const result = await ipcRenderer.invoke('delete-meeting', meeting);
+                
+                if (result.success) {
+                    log(`Meeting deleted: ${result.message}`);
+                    await loadMeetings(); // Refresh the list
+                    
+                    // Clear selected meeting if it was deleted
+                    if (selectedMeeting === meeting) {
+                        selectedMeeting = null;
+                        emptyState.style.display = 'flex';
+                        meetingDetail.classList.remove('show');
+                    }
+                } else {
+                    log(`Failed to delete meeting: ${result.error}`);
+                    alert(`Failed to delete meeting: ${result.error}`);
+                }
+            } catch (error) {
+                log(`Error deleting meeting: ${error.message}`);
+                alert(`Error deleting meeting: ${error.message}`);
+            }
+        }
+        
+        // Filter meetings based on search query
+        function filterMeetings() {
+            if (!searchQuery.trim()) {
+                filteredMeetings = [...meetings];
+            } else {
+                const query = searchQuery.toLowerCase();
+                filteredMeetings = meetings.filter(meeting => {
+                    const name = (meeting.session_info?.name || '').toLowerCase();
+                    const summary = (meeting.summary || '').toLowerCase();
+                    const keyPoints = (meeting.key_points || []).join(' ').toLowerCase();
+                    const actionItems = (meeting.action_items || []).join(' ').toLowerCase();
+                    
+                    return name.includes(query) || 
+                           summary.includes(query) || 
+                           keyPoints.includes(query) || 
+                           actionItems.includes(query);
+                });
+            }
+            renderMeetingsList();
+        }
+        
+        // Load meetings from backend
+        async function loadMeetings() {
+            // Show loading state
+            meetingsList.innerHTML = `
+                <div style="padding: 20px; text-align: center; color: #666;">
+                    <div style="font-size: 24px; margin-bottom: 8px;">⟳</div>
+                    <p>Loading meetings...</p>
+                </div>
+            `;
+            
+            try {
+                const result = await ipcRenderer.invoke('list-meetings');
+                if (result.success) {
+                    meetings = result.meetings || [];
+                    filterMeetings(); // Apply current search filter
+                }
+            } catch (error) {
+                log(`Failed to load meetings: ${error.message}`);
+                // Show error state
+                meetingsList.innerHTML = `
+                    <div style="padding: 20px; text-align: center; color: #666;">
+                        <div style="font-size: 24px; margin-bottom: 8px;">⚠️</div>
+                        <p>Failed to load meetings</p>
+                        <p style="font-size: 12px; margin-top: 4px;">Try refreshing</p>
+                    </div>
+                `;
+            }
+        }
+        
+        // Render meetings list
+        function renderMeetingsList() {
+            if (filteredMeetings.length === 0 && searchQuery.trim()) {
+                meetingsList.innerHTML = `
+                    <div style="padding: 20px; text-align: center; color: #666;">
+                        <div style="font-size: 24px; margin-bottom: 8px;">🔍</div>
+                        <p>No meetings match "${searchQuery}"</p>
+                        <p style="font-size: 12px; margin-top: 4px;">Try a different search term</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            if (meetings.length === 0) {
+                meetingsList.innerHTML = `
+                    <div style="padding: 20px; text-align: center; color: #666;">
+                        <div style="font-size: 24px; margin-bottom: 8px;">🎙️</div>
+                        <p>No meetings recorded yet</p>
+                        <p style="font-size: 12px; margin-top: 4px;">Start recording to see your meetings here</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            meetingsList.innerHTML = filteredMeetings.map((meeting, index) => `
+                <div class="meeting-item" data-index="${index}">
+                    <button class="meeting-delete" onclick="deleteMeeting(${index}, event)" title="Delete meeting">✕</button>
+                    <h3>${meeting.session_info?.name || 'Untitled Meeting'}</h3>
+                    <div class="meeting-meta">
+                        <span class="meeting-date">${formatDate(meeting.session_info?.processed_at)}</span>
+                        <span class="meeting-duration">${
+                            meeting.session_info?.duration_seconds ? 
+                                (() => {
+                                    const totalSecs = meeting.session_info.duration_seconds;
+                                    const hours = Math.floor(totalSecs / 3600);
+                                    const mins = Math.floor((totalSecs % 3600) / 60);
+                                    const secs = totalSecs % 60;
+                                    
+                                    if (hours > 0) return `${hours}h ${mins}m`;
+                                    if (mins > 0) return `${mins}m ${secs}s`;
+                                    return `${secs}s`;
+                                })() :
+                                (meeting.session_info?.duration_minutes ? `${meeting.session_info.duration_minutes}m` : '📄')
+                        }</span>
+                    </div>
+                    <div class="meeting-preview">
+                        ${(meeting.summary || 'No summary available').substring(0, 100)}...
+                    </div>
+                </div>
+            `).join('');
+            
+            // Add click handlers
+            document.querySelectorAll('.meeting-item').forEach(item => {
+                item.addEventListener('click', () => {
+                    const index = parseInt(item.dataset.index);
+                    selectMeeting(index);
+                });
+            });
+        }
+        
+        // Select and display meeting details
+        function selectMeeting(index) {
+            selectedMeeting = filteredMeetings[index];
+            if (!selectedMeeting) return;
+            
+            // Update active state
+            document.querySelectorAll('.meeting-item').forEach((item, i) => {
+                item.classList.toggle('active', i === index);
+            });
+            
+            // Show meeting details
+            emptyState.style.display = 'none';
+            meetingDetail.classList.add('show');
+            
+            // Populate details
+            detailTitle.textContent = selectedMeeting.session_info?.name || 'Untitled Meeting';
+            detailDate.textContent = formatDate(selectedMeeting.session_info?.processed_at);
+            const durationText = selectedMeeting.session_info?.duration_seconds ? 
+                (() => {
+                    const totalSecs = selectedMeeting.session_info.duration_seconds;
+                    const hours = Math.floor(totalSecs / 3600);
+                    const mins = Math.floor((totalSecs % 3600) / 60);
+                    const secs = totalSecs % 60;
+                    
+                    if (hours > 0) return `🕒 ${hours}h ${mins}m`;
+                    if (mins > 0) return `🕒 ${mins}m ${secs}s`;
+                    return `🕒 ${secs}s`;
+                })() :
+                (selectedMeeting.session_info?.duration_minutes ? 
+                    `🕒 ${selectedMeeting.session_info.duration_minutes} minutes` : '📄 Processed');
+            detailDuration.textContent = durationText;
+            
+            detailSummary.textContent = selectedMeeting.summary || 'No summary available';
+            
+            // Key points
+            detailKeyPoints.innerHTML = '';
+            if (selectedMeeting.key_points && selectedMeeting.key_points.length > 0) {
+                selectedMeeting.key_points.forEach(point => {
+                    const li = document.createElement('li');
+                    li.textContent = point;
+                    detailKeyPoints.appendChild(li);
+                });
+            } else {
+                detailKeyPoints.innerHTML = '<li style="color: #666;">No key points identified</li>';
+            }
+            
+            // Action items
+            detailActionItems.innerHTML = '';
+            if (selectedMeeting.action_items && selectedMeeting.action_items.length > 0) {
+                selectedMeeting.action_items.forEach(item => {
+                    const li = document.createElement('li');
+                    li.textContent = item;
+                    detailActionItems.appendChild(li);
+                });
+            } else {
+                detailActionItems.innerHTML = '<li style="color: #666;">No action items identified</li>';
+            }
+            
+            // Transcript
+            detailTranscript.textContent = selectedMeeting.transcript || 'No transcript available';
+        }
+        
+        // Manual start/stop recording functions
+        startBtn.addEventListener('click', async () => {
+            // Generate session name if empty or use Meeting-HASH format
+            let sessionName = sessionNameInput.value.trim();
+            if (!sessionName || sessionName === 'Meeting') {
+                sessionName = `Meeting-${generateMeetingHash()}`;
+                sessionNameInput.value = sessionName;
+            }
+            
+            log(`🎙️ Starting recording: ${sessionName}`);
+            setUIState('recording');
+            
+            try {
+                const result = await ipcRenderer.invoke('start-recording-ui', sessionName);
+                if (result.success) {
+                    log(`✅ Recording started: ${result.message}`);
+                    startStatusMonitoring();
+                } else {
+                    log(`❌ Failed to start: ${result.error}`);
+                    setUIState('ready');
+                }
+            } catch (error) {
+                log(`🚫 Start error: ${error.message}`);
+                setUIState('ready');
+            }
+        });
+        
+        stopBtn.addEventListener('click', async () => {
+            log('⏹️ Stopping recording...');
+            setUIState('processing');
+            stopStatusMonitoring();
+            
+            try {
+                const result = await ipcRenderer.invoke('stop-recording-ui');
+                if (result.success) {
+                    log(`✅ Recording stopped: ${result.message}`);
+                    log('🔄 Processing audio - transcription and summarization running in background');
+                    log('💡 Meeting list will refresh automatically when processing completes');
+                    
+                    // Return to ready state quickly so user can start another recording if needed
+                    setTimeout(() => {
+                        setUIState('ready');
+                        sessionNameInput.value = 'Meeting';
+                    }, 5000); // 5 seconds
+                    
+                } else {
+                    log(`❌ Failed to stop: ${result.error}`);
+                    setUIState('ready');
+                }
+            } catch (error) {
+                log(`🚫 Stop error: ${error.message}`);
+                setUIState('ready');
+            }
+        });
+        
+        // Search functionality
+        const searchInput = document.getElementById('search-input');
+        searchInput.addEventListener('input', (e) => {
+            searchQuery = e.target.value;
+            filterMeetings();
+        });
+        
+        // Refresh button functionality
+        refreshBtn.addEventListener('click', async () => {
+            log('Refreshing meetings list...');
+            refreshBtn.textContent = '⟳ Refreshing...';
+            refreshBtn.disabled = true;
+            
+            try {
+                await loadMeetings();
+                log('Meetings list refreshed successfully');
+            } catch (error) {
+                log(`Error refreshing meetings: ${error.message}`);
+            } finally {
+                setTimeout(() => {
+                    refreshBtn.textContent = '🔄 Refresh';
+                    refreshBtn.disabled = false;
+                }, 500);
+            }
+        });
+        
+        // File drop handling
+        document.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('active');
+        });
+        
+        document.addEventListener('dragleave', (e) => {
+            if (!e.relatedTarget) {
+                dropZone.classList.remove('active');
+            }
+        });
+        
+        document.addEventListener('drop', async (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('active');
+            
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                const file = files[0];
+                if (file.type.startsWith('audio/') || file.name.match(/\.(wav|mp3|m4a|aac)$/i)) {
+                    log(`Processing dropped file: ${file.name}`);
+                    setStatus('processing', 'Processing file...');
+                    
+                    try {
+                        const sessionName = file.name.replace(/\.[^/.]+$/, ''); // Remove extension
+                        const result = await ipcRenderer.invoke('process-recording', file.path, sessionName);
+                        
+                        if (result.success) {
+                            log('File processed successfully');
+                            setStatus('ready', 'Complete');
+                            
+                            // Reload meetings list
+                            setTimeout(() => {
+                                loadMeetings();
+                            }, 1000);
+                        } else {
+                            log(`Processing failed: ${result.error}`);
+                            setStatus('ready', 'Processing failed');
+                        }
+                    } catch (error) {
+                        log(`Processing error: ${error.message}`);
+                        setStatus('ready', 'Error');
+                    }
+                } else {
+                    log('Invalid file type. Please drop an audio file.');
+                }
+            }
+        });
+        
+        // Check initial recording status once
+        async function checkInitialStatus() {
+            try {
+                const result = await ipcRenderer.invoke('get-status');
+                if (result.success && result.status.includes('RECORDING')) {
+                    log('Found active recording session - syncing UI state');
+                    setUIState('recording');
+                    startStatusMonitoring();
+                } else {
+                    setUIState('ready');
+                }
+            } catch (error) {
+                log(`Failed to check initial status: ${error.message}`);
+                setUIState('ready');
+            }
+        }
+
+        // Auto-clear state on startup
+        async function initializeApp() {
+            log('🚀 Initializing Steno Recorder...');
+            try {
+                await ipcRenderer.invoke('clear-state');
+                log('✅ State cleared on startup');
+            } catch (error) {
+                log(`⚠️ Failed to clear state: ${error.message}`);
+            }
+            
+            // Load meetings and check status once
+            await Promise.all([
+                loadMeetings(),
+                checkInitialStatus()
+            ]);
+            
+            log('📱 Steno Recorder ready');
+        }
+
+        // Startup setup flow
+        let setupInProgress = false;
+        
+        setupAutoStart.addEventListener('click', async () => {
+            if (setupInProgress) return;
+            await runSetupProcess();
+        });
+        
+        setupContinue.addEventListener('click', () => {
+            setupOverlay.style.display = 'none';
+        });
+        
+        // Settings button click handler
+        settingsBtn.addEventListener('click', () => {
+            toggleSettings();
+        });
+        
+        async function runSetupProcess() {
+            setupInProgress = true;
+            setupAutoStart.style.display = 'none';
+            
+            const steps = [
+                { id: 'step-system', handler: 'setup-system-check' },
+                { id: 'step-python', handler: 'setup-python' },
+                { id: 'step-whisper', handler: 'setup-whisper' },
+                { id: 'step-ollama', handler: 'setup-ollama-and-model' },
+                { id: 'step-test', handler: 'setup-test' }
+            ];
+            
+            for (const step of steps) {
+                const element = document.getElementById(step.id);
+                const statusElement = document.getElementById(step.id.replace('step-', '') + '-status');
+                
+                // Mark as active
+                element.classList.remove('completed', 'failed');
+                element.classList.add('active');
+                statusElement.textContent = 'Running...';
+                
+                try {
+                    const result = await ipcRenderer.invoke(step.handler);
+                    
+                    if (result.success) {
+                        element.classList.remove('active');
+                        element.classList.add('completed');
+                        statusElement.textContent = result.message || 'Completed';
+                    } else {
+                        element.classList.remove('active');
+                        element.classList.add('failed');
+                        statusElement.textContent = result.error || 'Failed';
+                        
+                        // Show retry button on failure
+                        setupAutoStart.textContent = 'Retry Setup';
+                        setupAutoStart.style.display = 'block';
+                        setupInProgress = false;
+                        return;
+                    }
+                } catch (error) {
+                    element.classList.remove('active');
+                    element.classList.add('failed');
+                    statusElement.textContent = 'Failed';
+                    
+                    // Show retry button on failure
+                    setupAutoStart.textContent = 'Retry Setup';
+                    setupAutoStart.style.display = 'block';
+                    setupInProgress = false;
+                    return;
+                }
+                
+                // Small delay between steps
+                await new Promise(resolve => setTimeout(resolve, 500));
+            }
+            
+            log('🎉 Setup completed successfully!');
+            setupContinue.style.display = 'block';
+            setupInProgress = false;
+        }
+        
+        // Smooth startup with automatic setup detection
+        async function runStartupCheck() {
+            log('🔍 Checking system setup...');
+            
+            try {
+                const result = await ipcRenderer.invoke('startup-setup-check');
+                
+                if (result.success && result.allGood) {
+                    // Everything is ready - continue to main app
+                    log('✅ System ready!');
+                    return;
+                } else {
+                    // Show setup overlay with current status
+                    log('⚙️ Setup needed - showing guided setup');
+                    showSetupOverlay(result.checks || []);
+                }
+            } catch (error) {
+                log(`Setup check failed: ${error.message}`);
+                // Show setup overlay as fallback - assume first time setup needed
+                log('🆕 First time setup detected');
+                showSetupOverlay([]);
+            }
+        }
+        
+        function showSetupOverlay(checks) {
+            setupOverlay.style.display = 'flex';
+            
+            // Reset all steps to default state
+            document.querySelectorAll('.setup-step').forEach(step => {
+                step.classList.remove('active', 'completed', 'failed');
+            });
+            
+            // Update step statuses based on backend check
+            checks.forEach(check => {
+                const [status, detail] = check;
+                updateStepStatus(status, detail);
+            });
+            
+            // Show appropriate button
+            const hasFailures = checks.length === 0 || checks.some(([status]) => status.startsWith('❌'));
+            if (hasFailures || checks.length === 0) {
+                setupAutoStart.style.display = 'block';
+                setupAutoStart.textContent = checks.length === 0 ? 'Begin First-Time Setup' : 'Install Missing Dependencies';
+                setupContinue.style.display = 'none';
+            } else {
+                setupContinue.style.display = 'block';
+                setupAutoStart.style.display = 'none';
+            }
+        }
+        
+        function updateStepStatus(status, detail) {
+            // Map backend check results to UI steps - only show setup for missing installations
+            if (status.includes('Python')) {
+                updateStep('step-system', status.startsWith('✅') ? 'completed' : 'failed', detail);
+            } else if (status.includes('sounddevice')) {
+                updateStep('step-python', status.startsWith('✅') ? 'completed' : 'failed', detail);
+            } else if (status.includes('whisper')) {
+                updateStep('step-whisper', status.startsWith('✅') ? 'completed' : 'failed', detail);
+            } else if (status.includes('Ollama') || status.includes('Llama')) {
+                // Only show as failed if actually missing, not just service down
+                if (detail.includes('not installed') || detail.includes('missing')) {
+                    updateStep('step-ollama', status.startsWith('✅') ? 'completed' : 'failed', detail);
+                } else if (status.startsWith('✅')) {
+                    updateStep('step-ollama', 'completed', detail);
+                }
+            }
+        }
+        
+        function updateStep(stepId, state, message) {
+            const element = document.getElementById(stepId);
+            const statusElement = document.getElementById(stepId.replace('step-', '') + '-status');
+            
+            element.classList.remove('active', 'completed', 'failed');
+            element.classList.add(state);
+            statusElement.textContent = message;
+        }
+
+        // Listen for automatic meetings refresh from backend
+        ipcRenderer.on('meetings-refreshed', (event, meetingsData) => {
+            log('✅ Processing complete! Meeting list automatically refreshed');
+            meetings = meetingsData || [];
+            filterMeetings(); // Apply current search filter and render
+        });
+        
+        // Settings panel functionality
+        let settingsVisible = false;
+        
+        function toggleSettings() {
+            const settingsPanel = document.getElementById('settings-panel');
+            settingsVisible = !settingsVisible;
+            
+            if (settingsVisible) {
+                settingsPanel.style.right = '0';
+                loadPrompts();
+            } else {
+                settingsPanel.style.right = '-400px';
+            }
+        }
+        
+        async function loadPrompts() {
+            try {
+                const prompts = await ipcRenderer.invoke('get-ai-prompts');
+                const promptElement = document.getElementById('summarization-prompt');
+                
+                if (prompts.success) {
+                    promptElement.textContent = prompts.summarization || 'Prompt not available';
+                } else {
+                    promptElement.textContent = 'Failed to load prompts';
+                }
+            } catch (error) {
+                document.getElementById('summarization-prompt').textContent = 'Failed to load prompts';
+            }
+        }
+        
+        async function runSetupFromSettings() {
+            const btn = document.getElementById('run-setup-btn');
+            btn.textContent = 'Running Setup...';
+            btn.disabled = true;
+            
+            try {
+                // Show setup overlay in main window
+                document.getElementById('setup-overlay').style.display = 'flex';
+                
+                // Run the setup process
+                await runSetupProcess();
+                
+                btn.textContent = 'Setup Complete!';
+                setTimeout(() => {
+                    btn.textContent = 'Run Setup Wizard';
+                    btn.disabled = false;
+                }, 3000);
+            } catch (error) {
+                console.error('Setup failed:', error);
+                btn.textContent = 'Setup Failed - Try Again';
+                btn.disabled = false;
+            }
+        }
+        
+        // Initialize
+        initializeApp().then(() => {
+            runStartupCheck();
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>StenoAI Settings</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background: #0a0a0a;
+            color: #e5e5e5;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .header {
+            background: #111;
+            border-bottom: 1px solid #333;
+            padding: 24px;
+            display: flex;
+            align-items: center;
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .brand h1 {
+            font-size: 20px;
+            font-weight: 600;
+            color: #fff;
+            margin: 0;
+        }
+
+        .main {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+        }
+
+        .sidebar {
+            width: 250px;
+            background: #111;
+            border-right: 1px solid #333;
+            padding: 24px;
+        }
+
+        .sidebar h2 {
+            font-size: 16px;
+            margin: 0 0 16px 0;
+            color: #fff;
+        }
+
+        .nav-item {
+            padding: 12px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            margin-bottom: 4px;
+            transition: background 0.2s ease;
+        }
+
+        .nav-item:hover {
+            background: #222;
+        }
+
+        .nav-item.active {
+            background: #333;
+            color: #f59e0b;
+        }
+
+        .content {
+            flex: 1;
+            padding: 24px;
+            overflow-y: auto;
+        }
+
+        .section {
+            display: none;
+        }
+
+        .section.active {
+            display: block;
+        }
+
+        .section h2 {
+            margin: 0 0 16px 0;
+            color: #fff;
+        }
+
+        .setup-wizard {
+            background: #1a1a1a;
+            border: 1px solid #333;
+            border-radius: 8px;
+            padding: 24px;
+        }
+
+        .prompt-viewer {
+            background: #1a1a1a;
+            border: 1px solid #333;
+            border-radius: 8px;
+            padding: 24px;
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 14px;
+            line-height: 1.5;
+            white-space: pre-wrap;
+            color: #ccc;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .btn {
+            background: #f59e0b;
+            color: #000;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.2s ease;
+        }
+
+        .btn:hover {
+            background: #d97706;
+        }
+
+        .btn:disabled {
+            background: #666;
+            cursor: not-allowed;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="brand">
+            <span>⚙️</span>
+            <h1>StenoAI Settings</h1>
+        </div>
+    </div>
+
+    <div class="main">
+        <div class="sidebar">
+            <h2>Settings</h2>
+            <div class="nav-item active" data-section="setup">Setup Wizard</div>
+            <div class="nav-item" data-section="prompts">AI Prompts</div>
+        </div>
+
+        <div class="content">
+            <div class="section active" id="setup-section">
+                <h2>Setup Wizard</h2>
+                <p>Run the setup process again to reinstall dependencies or fix configuration issues.</p>
+                
+                <div class="setup-wizard">
+                    <h3>🔧 System Setup</h3>
+                    <p>This will check your system and install any missing dependencies:</p>
+                    <ul>
+                        <li>Python virtual environment</li>
+                        <li>Audio recording libraries (sounddevice)</li>
+                        <li>Whisper speech recognition</li>
+                        <li>Ollama AI service and models</li>
+                    </ul>
+                    
+                    <button class="btn" id="run-setup-btn">Run Setup Wizard</button>
+                </div>
+            </div>
+
+            <div class="section" id="prompts-section">
+                <h2>AI Prompts</h2>
+                <p>View the prompts used for meeting summarization and analysis.</p>
+                
+                <h3>Summarization Prompt</h3>
+                <div class="prompt-viewer" id="summarization-prompt">
+Loading prompt...
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const { ipcRenderer } = require('electron');
+
+        // Navigation
+        document.querySelectorAll('.nav-item').forEach(item => {
+            item.addEventListener('click', () => {
+                // Update nav
+                document.querySelectorAll('.nav-item').forEach(nav => nav.classList.remove('active'));
+                item.classList.add('active');
+
+                // Update sections
+                const sectionId = item.dataset.section + '-section';
+                document.querySelectorAll('.section').forEach(section => section.classList.remove('active'));
+                document.getElementById(sectionId).classList.add('active');
+            });
+        });
+
+        // Setup wizard button
+        document.getElementById('run-setup-btn').addEventListener('click', async () => {
+            const btn = document.getElementById('run-setup-btn');
+            btn.textContent = 'Running Setup...';
+            btn.disabled = true;
+
+            try {
+                // This will trigger the main window's setup process
+                await ipcRenderer.invoke('trigger-setup-wizard');
+                btn.textContent = 'Setup Complete!';
+                setTimeout(() => {
+                    btn.textContent = 'Run Setup Wizard';
+                    btn.disabled = false;
+                }, 3000);
+            } catch (error) {
+                console.error('Setup failed:', error);
+                btn.textContent = 'Setup Failed - Try Again';
+                btn.disabled = false;
+            }
+        });
+
+        // Load prompts
+        async function loadPrompts() {
+            try {
+                const prompts = await ipcRenderer.invoke('get-ai-prompts');
+                document.getElementById('summarization-prompt').textContent = prompts.summarization || 'Prompt not available';
+            } catch (error) {
+                document.getElementById('summarization-prompt').textContent = 'Failed to load prompts';
+            }
+        }
+
+        // Load prompts on startup
+        loadPrompts();
+    </script>
+</body>
+</html>
