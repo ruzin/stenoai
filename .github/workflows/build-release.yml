@@ -88,7 +88,7 @@ jobs:
       with:
         upload_url: ${{ steps.create_release.outputs.upload_url }}
         asset_path: app/dist/StenoAI-${{ github.event.inputs.version || github.ref_name }}.dmg
-        asset_name: StenoAI-${{ github.event.inputs.version || github.ref_name }}.dmg
+        asset_name: stenoAI-macos-intel.dmg
         asset_content_type: application/octet-stream
 
     - name: Upload Apple Silicon DMG
@@ -98,5 +98,5 @@ jobs:
       with:
         upload_url: ${{ steps.create_release.outputs.upload_url }}
         asset_path: app/dist/StenoAI-${{ github.event.inputs.version || github.ref_name }}-arm64.dmg
-        asset_name: StenoAI-${{ github.event.inputs.version || github.ref_name }}-arm64.dmg
+        asset_name: stenoAI-macos-arm64.dmg
         asset_content_type: application/octet-stream
