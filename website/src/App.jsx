@@ -1,6 +1,6 @@
 import React from "react";
 import { motion } from "framer-motion";
-import { Mic, ShieldCheck, Zap, Sparkles, Cpu, FileText, Lock, Download, ArrowRight, Github } from "lucide-react";
+import { Mic, ShieldCheck, Zap, Sparkles, Cpu, FileText, Lock, Download, Github } from "lucide-react";
 
 // Update with actual GitHub repo URL
 const GITHUB_URL = "https://github.com/ruzin/steno-AI";
@@ -78,9 +78,6 @@ export default function App() {
             </a>
             <a href="#download" className="hidden sm:inline-flex items-center gap-2 rounded-2xl border border-white/10 px-3 py-2 text-sm hover:bg-white/5">
               <Download className="w-4 h-4" aria-hidden="true" /> Download
-            </a>
-            <a href="#cta" className="inline-flex items-center gap-2 rounded-2xl bg-white text-slate-900 px-3 py-2 text-sm font-semibold hover:bg-slate-100">
-              Try Free <ArrowRight className="w-4 h-4" aria-hidden="true" />
             </a>
           </div>
         </div>
