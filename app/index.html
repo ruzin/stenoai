@@ -633,6 +633,12 @@
             margin-bottom: 32px;
         }
         
+        .setup-header .btn-primary {
+            margin-top: 20px;
+            font-size: 16px;
+            padding: 12px 24px;
+        }
+        
         .setup-header h2 {
             font-size: 24px;
             font-weight: 600;
@@ -870,6 +876,7 @@
             <div class="setup-header">
                 <h2>🚀 Welcome to StenoAI</h2>
                 <p>Setting up your system for meeting transcription...</p>
+                <button class="btn btn-primary" id="setup-auto-start">Begin First-Time Setup</button>
             </div>
             
             <div class="setup-steps" id="setup-steps">
@@ -878,7 +885,7 @@
                     <div class="step-content">
                         <h3>System Check</h3>
                         <p>Checking Python and system requirements...</p>
-                        <div class="step-status" id="system-status">Checking...</div>
+                        <div class="step-status" id="system-status">Pending...</div>
                         <div class="progress-bar">
                             <div class="progress-fill" id="system-progress"></div>
                         </div>
@@ -935,7 +942,6 @@
             </div>
             
             <div class="setup-actions">
-                <button class="btn btn-primary" id="setup-auto-start" style="display: none;">Begin Setup</button>
                 <button class="btn btn-primary" id="setup-continue" style="display: none;">Continue to App</button>
             </div>
         </div>
