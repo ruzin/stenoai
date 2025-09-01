@@ -71,8 +71,8 @@
     },
     "publish": {
       "provider": "github",
-      "owner": "your-org",
-      "repo": "stenoai"
+      "owner": "ruzin",
+      "repo": "steno-AI"
     }
   }
 }
