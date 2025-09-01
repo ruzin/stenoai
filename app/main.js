@@ -659,7 +659,7 @@ ipcMain.handle('setup-ollama-and-model', async () => {
     await new Promise(resolve => setTimeout(resolve, 3000));
     
     return new Promise((resolve) => {
-      exec('ollama pull llama3.2:3b', { timeout: 600000 }, (error, stdout, stderr) => {
+      exec('ollama pull qwen2.5:1.5b', { timeout: 600000 }, (error, stdout, stderr) => {
         if (!error) {
           resolve({ success: true, message: 'Ollama and AI model ready' });
         } else {
