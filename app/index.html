@@ -385,6 +385,49 @@
             border-color: #555;
         }
         
+        .meeting-item.processing {
+            background: #1a1a1a;
+            border-color: #f59e0b;
+            opacity: 0.7;
+            position: relative;
+        }
+        
+        .meeting-item.processing .processing-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.3);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 8px;
+        }
+        
+        .processing-indicator {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: #f59e0b;
+            font-size: 12px;
+            font-weight: 500;
+        }
+        
+        .processing-spinner {
+            width: 16px;
+            height: 16px;
+            border: 2px solid #333;
+            border-top: 2px solid #f59e0b;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
         .meeting-item h3 {
             font-size: 14px;
             font-weight: 600;
@@ -760,7 +803,12 @@
     <!-- Header with recording controls -->
     <div class="header">
         <div class="brand">
-            <span>🎙️</span>
+            <svg width="28" height="28" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <rect width="32" height="32" rx="8" fill="#1e293b"/>
+                <rect width="30" height="30" x="1" y="1" rx="7" stroke="rgba(255,255,255,0.1)"/>
+                <path d="M16 10c-1.1 0-2 .9-2 2v4c0 1.1.9 2 2 2s2-.9 2-2v-4c0-1.1-.9-2-2-2z" fill="white"/>
+                <path d="M12 15v1c0 2.2 1.8 4 4 4s4-1.8 4-4v-1h1v1c0 2.7-1.9 4.9-4.5 5.4v1.6h2v1h-5v-1h2v-1.6c-2.6-.5-4.5-2.7-4.5-5.4v-1h1z" fill="white"/>
+            </svg>
             <h1>StenoAI</h1>
         </div>
         
@@ -1024,6 +1072,7 @@
         let searchQuery = '';
         let recordingStartTime = null;
         let recordingTimer = null;
+        let processingMeetings = new Set();
         
         // Utility functions
         function log(message) {
@@ -1259,8 +1308,11 @@
                 return;
             }
             
-            meetingsList.innerHTML = filteredMeetings.map((meeting, index) => `
-                <div class="meeting-item" data-index="${index}">
+            meetingsList.innerHTML = filteredMeetings.map((meeting, index) => {
+                const isProcessing = processingMeetings.has(meeting.session_info?.name);
+                return `
+                <div class="meeting-item ${isProcessing ? 'processing' : ''}" data-index="${index}">
+                    ${isProcessing ? '<div class="processing-overlay"><div class="processing-indicator"><div class="processing-spinner"></div>Processing...</div></div>' : ''}
                     <button class="meeting-delete" onclick="deleteMeeting(${index}, event)" title="Delete meeting">✕</button>
                     <h3>${meeting.session_info?.name || 'Untitled Meeting'}</h3>
                     <div class="meeting-meta">
@@ -1284,7 +1336,8 @@
                         ${(meeting.summary || 'No summary available').substring(0, 100)}...
                     </div>
                 </div>
-            `).join('');
+                `;
+            }).join('');
             
             // Add click handlers
             document.querySelectorAll('.meeting-item').forEach(item => {
@@ -1389,6 +1442,27 @@
             setUIState('processing');
             stopStatusMonitoring();
             
+            // Add current session to processing list immediately
+            const currentSessionName = sessionNameInput.value.trim() || 'Meeting';
+            processingMeetings.add(currentSessionName);
+            
+            // Add a temporary meeting entry to show processing
+            const tempMeeting = {
+                session_info: {
+                    name: currentSessionName,
+                    processed_at: new Date().toISOString(),
+                    duration_seconds: null
+                },
+                summary: 'Processing...',
+                key_points: [],
+                action_items: [],
+                transcript: ''
+            };
+            
+            // Add to beginning of meetings array temporarily
+            meetings.unshift(tempMeeting);
+            filterMeetings(); // Update UI to show processing state
+            
             try {
                 const result = await ipcRenderer.invoke('stop-recording-ui');
                 if (result.success) {
@@ -1405,10 +1479,14 @@
                 } else {
                     log(`❌ Failed to stop: ${result.error}`);
                     setUIState('ready');
+                    processingMeetings.delete(currentSessionName);
+                    renderMeetingsList();
                 }
             } catch (error) {
                 log(`🚫 Stop error: ${error.message}`);
                 setUIState('ready');
+                processingMeetings.delete(currentSessionName);
+                renderMeetingsList();
             }
         });
         
@@ -1463,11 +1541,14 @@
                     
                     try {
                         const sessionName = file.name.replace(/\.[^/.]+$/, ''); // Remove extension
+                        processingMeetings.add(sessionName);
+                        renderMeetingsList(); // Update UI to show processing state
                         const result = await ipcRenderer.invoke('process-recording', file.path, sessionName);
                         
                         if (result.success) {
                             log('File processed successfully');
                             setStatus('ready', 'Complete');
+                            processingMeetings.delete(sessionName);
                             
                             // Reload meetings list
                             setTimeout(() => {
@@ -1476,10 +1557,14 @@
                         } else {
                             log(`Processing failed: ${result.error}`);
                             setStatus('ready', 'Processing failed');
+                            processingMeetings.delete(sessionName);
+                            renderMeetingsList();
                         }
                     } catch (error) {
                         log(`Processing error: ${error.message}`);
                         setStatus('ready', 'Error');
+                        processingMeetings.delete(sessionName);
+                        renderMeetingsList();
                     }
                 } else {
                     log('Invalid file type. Please drop an audio file.');
@@ -1682,6 +1767,27 @@
             log('✅ Processing complete! Meeting list automatically refreshed');
             meetings = meetingsData || [];
             filterMeetings(); // Apply current search filter and render
+        });
+        
+        // Listen for processing completion events
+        ipcRenderer.on('processing-complete', (event, data) => {
+            log(`✅ Processing complete for: ${data.sessionName}`);
+            processingMeetings.delete(data.sessionName);
+            
+            // Remove temporary meeting entry
+            meetings = meetings.filter(meeting => 
+                !(meeting.session_info?.name === data.sessionName && meeting.summary === 'Processing...')
+            );
+            
+            // Refresh meetings to get the real processed data
+            loadMeetings();
+            
+            if (data.success) {
+                setStatus('ready', 'Processing complete');
+            } else {
+                setStatus('ready', 'Processing failed');
+                log(`❌ Processing failed: ${data.error}`);
+            }
         });
         
         // Settings panel functionality

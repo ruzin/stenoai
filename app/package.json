@@ -3,10 +3,10 @@
   "version": "0.0.2",
   "description": "AI-powered meeting transcription and analysis for Mac",
   "main": "main.js",
-  "homepage": "https://github.com/ruzin/steno-AI",
+  "homepage": "https://github.com/ruzin/stenoai",
   "repository": {
     "type": "git",
-    "url": "https://github.com/ruzin/steno-AI.git"
+    "url": "https://github.com/ruzin/stenoai.git"
   },
   "scripts": {
     "start": "electron .",
@@ -90,7 +90,7 @@
     "publish": {
       "provider": "github",
       "owner": "ruzin",
-      "repo": "steno-AI"
+      "repo": "stenoai"
     }
   }
 }
