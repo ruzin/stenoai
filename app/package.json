@@ -68,8 +68,6 @@
     },
     "dmg": {
       "title": "StenoAI Installer",
-      "icon": "build/icon.icns",
-      "iconSize": 100,
       "contents": [
         {
           "x": 130,
