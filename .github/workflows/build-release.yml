@@ -11,6 +11,9 @@ on:
         required: true
         default: '1.0.0'
 
+permissions:
+  contents: write
+
 jobs:
   build-macos:
     runs-on: macos-latest
@@ -35,12 +38,14 @@ jobs:
       run: npm run build:intel
       env:
         CSC_IDENTITY_AUTO_DISCOVERY: false
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         
     - name: Build DMG for Apple Silicon  
       working-directory: app
       run: npm run build:arm64
       env:
         CSC_IDENTITY_AUTO_DISCOVERY: false
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     
     - name: Create Release
       id: create_release
