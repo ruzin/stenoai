@@ -1,6 +1,6 @@
 {
   "name": "stenoai",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "AI-powered meeting transcription and analysis for Mac",
   "main": "main.js",
   "homepage": "https://github.com/your-org/stenoai",
