@@ -1,4 +1,8 @@
-# StenoAI - Meeting Transcription & Analysis
+<div align="center">
+<img src="website/public/stenoai-logo-512.svg" width="128" height="128" alt="stenoAI Logo">
+
+# stenoAI
+</div>
 
 A comprehensive meeting transcription service with desktop UI and intelligent summarization. Records audio, transcribes speech, and generates structured meeting summaries with action items and decisions.
 
@@ -191,7 +195,7 @@ Each meeting generates structured JSON with comprehensive analysis:
 ## Project Structure
 
 ```
-steno-poc/
+stenoai/
 ├── app/                    # Electron frontend
 │   ├── main.js            # Main process & IPC handlers
 │   ├── index.html         # UI interface

@@ -4,7 +4,7 @@ with open("requirements.txt", "r") as f:
     requirements = [line.strip() for line in f if line.strip() and not line.startswith("#")]
 
 setup(
-    name="steno-poc",
+    name="stenoai",
     version="0.1.0",
     packages=find_packages(where="src"),
     package_dir={"": "src"},
@@ -16,7 +16,7 @@ setup(
         ],
     },
     author="Your Name",
-    description="A proof of concept for meeting transcription service",
+    description="AI-powered meeting transcription and analysis for Mac",
     long_description=open("README.md").read(),
     long_description_content_type="text/markdown",
 )

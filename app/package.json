@@ -1,12 +1,12 @@
 {
   "name": "stenoai",
-  "version": "1.0.1",
+  "version": "0.0.1",
   "description": "AI-powered meeting transcription and analysis for Mac",
   "main": "main.js",
-  "homepage": "https://github.com/your-org/stenoai",
+  "homepage": "https://github.com/ruzin/steno-AI",
   "repository": {
     "type": "git",
-    "url": "https://github.com/your-org/stenoai.git"
+    "url": "https://github.com/ruzin/steno-AI.git"
   },
   "scripts": {
     "start": "electron .",
