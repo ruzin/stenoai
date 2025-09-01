@@ -41,7 +41,6 @@ graph TD
         O --> P[Generate Summary]
         P --> Q[Save Results]
     end
-end
 ```
 
 ### Components
