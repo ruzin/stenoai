@@ -521,7 +521,7 @@ ipcMain.handle('setup-ollama', async () => {
   try {
     // Check if Ollama is already installed
     const checkResult = await new Promise((resolve) => {
-      exec('which ollama', { timeout: 5000 }, (error, stdout, stderr) => {
+      exec('which ollama || /opt/homebrew/bin/ollama --version || /usr/local/bin/ollama --version', { timeout: 5000 }, (error, stdout, stderr) => {
         resolve(!error && stdout.trim());
       });
     });
@@ -611,7 +611,7 @@ ipcMain.handle('setup-ollama-and-model', async () => {
   try {
     // Check if Ollama is already installed
     const checkResult = await new Promise((resolve) => {
-      exec('which ollama', { timeout: 5000 }, (error, stdout, stderr) => {
+      exec('which ollama || /opt/homebrew/bin/ollama --version || /usr/local/bin/ollama --version', { timeout: 5000 }, (error, stdout, stderr) => {
         resolve(!error && stdout.trim());
       });
     });
@@ -620,7 +620,7 @@ ipcMain.handle('setup-ollama-and-model', async () => {
     if (!checkResult) {
       // First check if Homebrew is installed
       const brewCheck = await new Promise((resolve) => {
-        exec('which brew', { timeout: 5000 }, (error, stdout, stderr) => {
+        exec('which brew || /opt/homebrew/bin/brew --version || /usr/local/bin/brew --version', { timeout: 5000 }, (error, stdout, stderr) => {
           resolve(!error && stdout.trim());
         });
       });
