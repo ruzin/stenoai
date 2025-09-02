@@ -1547,6 +1547,11 @@
                 log(`⚠️ Failed to clear state: ${error.message}`);
             }
             
+            // Request notification permission
+            if (Notification.permission === 'default') {
+                await Notification.requestPermission();
+            }
+            
             // Load meetings and check status once
             await Promise.all([
                 loadMeetings(),
@@ -1738,6 +1743,15 @@
                 
                 // Re-render the meetings list with updated data
                 filterMeetings();
+                
+                // Show native notification
+                if (Notification.permission === 'granted') {
+                    new Notification('StenoAI - Meeting Notes Ready', {
+                        body: `"${data.sessionName}" has been transcribed and summarized`,
+                        icon: 'build/icon.png',
+                        requireInteraction: false
+                    });
+                }
                 
                 setStatus('ready', 'Processing complete');
             } else {
