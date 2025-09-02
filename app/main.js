@@ -291,20 +291,27 @@ async function processNextInQueue() {
     const result = await runPythonScript('simple_recorder.py', ['process', job.audioFile, '--name', job.sessionName]);
     console.log(`✅ Completed processing: ${job.sessionName}`);
     
-    // Notify frontend about completion and refresh meetings list
+    // Notify frontend about completion with processed meeting data
     if (mainWindow) {
-      mainWindow.webContents.send('processing-complete', { 
-        success: true, 
-        sessionName: job.sessionName,
-        message: 'Processing completed successfully'
-      });
-      
-      // Refresh meetings list
       try {
+        // Get the specific processed meeting data
         const meetingsResult = await runPythonScript('simple_recorder.py', ['list-meetings']);
-        mainWindow.webContents.send('meetings-refreshed', JSON.parse(meetingsResult));
+        const allMeetings = JSON.parse(meetingsResult);
+        const processedMeeting = allMeetings.find(m => m.session_info?.name === job.sessionName);
+        
+        mainWindow.webContents.send('processing-complete', { 
+          success: true, 
+          sessionName: job.sessionName,
+          message: 'Processing completed successfully',
+          meetingData: processedMeeting
+        });
       } catch (error) {
-        console.error('Error refreshing meetings after processing:', error);
+        console.error('Error getting processed meeting data:', error);
+        mainWindow.webContents.send('processing-complete', { 
+          success: true, 
+          sessionName: job.sessionName,
+          message: 'Processing completed successfully'
+        });
       }
     }
     
@@ -347,8 +354,8 @@ ipcMain.handle('start-recording-ui', async (_, sessionName) => {
     
     const actualSessionName = sessionName || 'Meeting';
     
-    // Start background recording with no time limit using 'record' command with very long duration
-    currentRecordingProcess = spawn(pythonPath, [scriptPath, 'record', '999999', actualSessionName], {
+    // Start background recording with 60-minute limit
+    currentRecordingProcess = spawn(pythonPath, [scriptPath, 'record', '3600', actualSessionName], {
       cwd: path.join(__dirname, '..')
     });
 

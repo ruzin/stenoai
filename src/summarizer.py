@@ -216,7 +216,7 @@ Provide a thorough, professional analysis in the JSON format above."""
                             }
                         ],
                         options={
-                            'timeout': 120  # 2 minute timeout
+                            'timeout': 1800  # 30 minute timeout for longer meetings
                         }
                     )
                     break  # Success, exit retry loop

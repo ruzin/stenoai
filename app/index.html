@@ -290,27 +290,6 @@
             color: #fff;
         }
         
-        .refresh-btn {
-            background: transparent;
-            border: 1px solid #444;
-            color: #888;
-            border-radius: 4px;
-            padding: 4px 8px;
-            font-size: 12px;
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-        
-        .refresh-btn:hover:not(:disabled) {
-            background: #222;
-            color: #fff;
-            border-color: #666;
-        }
-        
-        .refresh-btn:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-        }
         
         .search-input {
             background: #222;
@@ -525,6 +504,7 @@
         .meeting-info {
             display: flex;
             gap: 24px;
+            align-items: center;
             color: #888;
             font-size: 14px;
         }
@@ -838,10 +818,8 @@
             <div class="sidebar-header">
                 <div class="sidebar-title">
                     <h2>Meetings</h2>
-                    <button class="refresh-btn" id="refresh-btn">🔄 Refresh</button>
                 </div>
                 <input type="text" class="search-input" id="search-input" placeholder="Search meetings...">
-                <p>Recent recordings and transcripts</p>
             </div>
             
             <div class="meetings-list" id="meetings-list">
@@ -920,7 +898,7 @@
             <div class="setup-header">
                 <h2>🚀 Welcome to StenoAI</h2>
                 <p>Setting up your system for meeting transcription...</p>
-                <button class="btn btn-primary" id="setup-auto-start">Begin First-Time Setup</button>
+                <p style="font-size: 12px; color: #888; margin-top: 8px;">💡 Scroll down to begin setup</p>
             </div>
             
             <div class="setup-steps" id="setup-steps">
@@ -964,7 +942,7 @@
                     <div class="step-icon">🧠</div>
                     <div class="step-content">
                         <h3>Install Ollama + AI Model</h3>
-                        <p>Homebrew (if needed) → Ollama → Llama 3.2 model (~2GB)</p>
+                        <p>Homebrew (if needed) → Ollama → Qwen 2.5 model (~1GB)</p>
                         <div class="step-status" id="ollama-status">Pending...</div>
                         <div class="progress-bar">
                             <div class="progress-fill" id="ollama-progress"></div>
@@ -986,6 +964,7 @@
             </div>
             
             <div class="setup-actions">
+                <button class="btn btn-primary" id="setup-auto-start">Begin First-Time Setup</button>
                 <button class="btn btn-primary" id="setup-continue" style="display: none;">Continue to App</button>
             </div>
         </div>
@@ -1038,7 +1017,6 @@
         const sessionNameInput = document.getElementById('session-name');
         const startBtn = document.getElementById('start-btn');
         const stopBtn = document.getElementById('stop-btn');
-        const refreshBtn = document.getElementById('refresh-btn');
         const settingsBtn = document.getElementById('settings-btn');
         const meetingsList = document.getElementById('meetings-list');
         const emptyState = document.getElementById('empty-state');
@@ -1212,7 +1190,13 @@
                 
                 if (result.success) {
                     log(`Meeting deleted: ${result.message}`);
-                    await loadMeetings(); // Refresh the list
+                    
+                    // Remove meeting from local arrays
+                    meetings = meetings.filter(m => m !== meeting);
+                    filteredMeetings = filteredMeetings.filter(m => m !== meeting);
+                    
+                    // Re-render the meetings list
+                    filterMeetings();
                     
                     // Clear selected meeting if it was deleted
                     if (selectedMeeting === meeting) {
@@ -1313,20 +1297,6 @@
                     <h3>${meeting.session_info?.name || 'Untitled Meeting'}</h3>
                     <div class="meeting-meta">
                         <span class="meeting-date">${formatDate(meeting.session_info?.processed_at)}</span>
-                        <span class="meeting-duration">${
-                            meeting.session_info?.duration_seconds ? 
-                                (() => {
-                                    const totalSecs = meeting.session_info.duration_seconds;
-                                    const hours = Math.floor(totalSecs / 3600);
-                                    const mins = Math.floor((totalSecs % 3600) / 60);
-                                    const secs = totalSecs % 60;
-                                    
-                                    if (hours > 0) return `${hours}h ${mins}m`;
-                                    if (mins > 0) return `${mins}m ${secs}s`;
-                                    return `${secs}s`;
-                                })() :
-                                (meeting.session_info?.duration_minutes ? `${meeting.session_info.duration_minutes}m` : '📄')
-                        }</span>
                     </div>
                     <div class="meeting-preview">
                         ${(meeting.summary || 'No summary available').substring(0, 100)}...
@@ -1368,12 +1338,12 @@
                     const mins = Math.floor((totalSecs % 3600) / 60);
                     const secs = totalSecs % 60;
                     
-                    if (hours > 0) return `🕒 ${hours}h ${mins}m`;
-                    if (mins > 0) return `🕒 ${mins}m ${secs}s`;
-                    return `🕒 ${secs}s`;
+                    if (hours > 0) return `🕒 Meeting Duration: ${hours}h ${mins}m`;
+                    if (mins > 0) return `🕒 Meeting Duration: ${mins}m ${secs}s`;
+                    return `🕒 Meeting Duration: ${secs}s`;
                 })() :
                 (selectedMeeting.session_info?.duration_minutes ? 
-                    `🕒 ${selectedMeeting.session_info.duration_minutes} minutes` : '📄 Processed');
+                    `🕒 Meeting Duration: ${selectedMeeting.session_info.duration_minutes} minutes` : '📄 Processed');
             detailDuration.textContent = durationText;
             
             detailSummary.textContent = selectedMeeting.summary || 'No summary available';
@@ -1449,7 +1419,7 @@
                     processed_at: new Date().toISOString(),
                     duration_seconds: null
                 },
-                summary: 'Processing...',
+                summary: 'Pending...',
                 key_points: [],
                 action_items: [],
                 transcript: ''
@@ -1493,24 +1463,6 @@
             filterMeetings();
         });
         
-        // Refresh button functionality
-        refreshBtn.addEventListener('click', async () => {
-            log('Refreshing meetings list...');
-            refreshBtn.textContent = '⟳ Refreshing...';
-            refreshBtn.disabled = true;
-            
-            try {
-                await loadMeetings();
-                log('Meetings list refreshed successfully');
-            } catch (error) {
-                log(`Error refreshing meetings: ${error.message}`);
-            } finally {
-                setTimeout(() => {
-                    refreshBtn.textContent = '🔄 Refresh';
-                    refreshBtn.disabled = false;
-                }, 500);
-            }
-        });
         
         // File drop handling
         document.addEventListener('dragover', (e) => {
@@ -1758,7 +1710,7 @@
             statusElement.textContent = message;
         }
 
-        // Listen for automatic meetings refresh from backend
+        // Listen for automatic meetings refresh from backend (legacy - kept for compatibility)
         ipcRenderer.on('meetings-refreshed', (event, meetingsData) => {
             log('✅ Processing complete! Meeting list automatically refreshed');
             meetings = meetingsData || [];
@@ -1770,19 +1722,33 @@
             log(`✅ Processing complete for: ${data.sessionName}`);
             processingMeetings.delete(data.sessionName);
             
-            // Remove temporary meeting entry
-            meetings = meetings.filter(meeting => 
-                !(meeting.session_info?.name === data.sessionName && meeting.summary === 'Processing...')
-            );
-            
-            // Refresh meetings to get the real processed data
-            loadMeetings();
-            
-            if (data.success) {
+            if (data.success && data.meetingData) {
+                // Update the specific meeting instead of refreshing the entire list
+                const tempMeetingIndex = meetings.findIndex(meeting => 
+                    meeting.session_info?.name === data.sessionName && meeting.summary === 'Pending...'
+                );
+                
+                if (tempMeetingIndex !== -1) {
+                    // Replace temporary meeting with processed data
+                    meetings[tempMeetingIndex] = data.meetingData;
+                } else {
+                    // Add new meeting if temp entry not found
+                    meetings.unshift(data.meetingData);
+                }
+                
+                // Re-render the meetings list with updated data
+                filterMeetings();
+                
                 setStatus('ready', 'Processing complete');
             } else {
+                // Remove temporary meeting entry on failure
+                meetings = meetings.filter(meeting => 
+                    !(meeting.session_info?.name === data.sessionName && meeting.summary === 'Pending...')
+                );
+                
                 setStatus('ready', 'Processing failed');
                 log(`❌ Processing failed: ${data.error}`);
+                filterMeetings();
             }
         });
         

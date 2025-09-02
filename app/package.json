@@ -1,6 +1,6 @@
 {
   "name": "stenoai",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "AI-powered meeting transcription and analysis for Mac",
   "main": "main.js",
   "homepage": "https://github.com/ruzin/stenoai",
@@ -85,7 +85,9 @@
       "window": {
         "width": 540,
         "height": 380
-      }
+      },
+      "artifactName": "${productName}-${version}-${arch}.${ext}",
+      "sign": false
     },
     "publish": {
       "provider": "github",
