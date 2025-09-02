@@ -29,6 +29,11 @@ jobs:
         cache: 'npm'
         cache-dependency-path: app/package-lock.json
     
+    - name: Get version from package.json
+      id: package_version
+      working-directory: app
+      run: echo "version=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
+    
     - name: Install Electron dependencies
       working-directory: app
       run: npm ci
@@ -54,11 +59,11 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         tag_name: ${{ github.event.inputs.version && format('v{0}', github.event.inputs.version) || github.ref }}
-        release_name: StenoAI ${{ github.event.inputs.version || github.ref_name }}
+        release_name: StenoAI ${{ github.event.inputs.version || steps.package_version.outputs.version }}
         draft: false
         prerelease: false
         body: |
-          ## StenoAI v${{ github.event.inputs.version || github.ref_name }}
+          ## StenoAI v${{ github.event.inputs.version || steps.package_version.outputs.version }}
           
           ### 🎙️ Meeting Transcription & Analysis
           
@@ -71,8 +76,8 @@ jobs:
           - Automatic dependency installation
           
           **Download:**
-          - **Intel Macs**: StenoAI-${{ github.event.inputs.version || github.ref_name }}.dmg
-          - **Apple Silicon**: StenoAI-${{ github.event.inputs.version || github.ref_name }}-arm64.dmg
+          - **Intel Macs**: StenoAI-${{ github.event.inputs.version || steps.package_version.outputs.version }}.dmg
+          - **Apple Silicon**: StenoAI-${{ github.event.inputs.version || steps.package_version.outputs.version }}-arm64.dmg
           
           **Requirements:**
           - macOS 10.14+
@@ -92,7 +97,7 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: app/dist/StenoAI-${{ github.event.inputs.version || github.ref_name }}.dmg
+        asset_path: app/dist/StenoAI-${{ github.event.inputs.version || steps.package_version.outputs.version }}.dmg
         asset_name: stenoAI-macos-intel.dmg
         asset_content_type: application/octet-stream
 
@@ -102,6 +107,6 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: app/dist/StenoAI-${{ github.event.inputs.version || github.ref_name }}-arm64.dmg
+        asset_path: app/dist/StenoAI-${{ github.event.inputs.version || steps.package_version.outputs.version }}-arm64.dmg
         asset_name: stenoAI-macos-arm64.dmg
         asset_content_type: application/octet-stream
