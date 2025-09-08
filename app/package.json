@@ -16,7 +16,13 @@
     "build:arm64": "electron-builder --mac --arm64",
     "dist": "electron-builder --publish=never",
     "pack": "electron-builder --dir",
-    "release": "electron-builder --publish=always"
+    "release": "electron-builder --publish=always",
+    "version:patch": "npm version patch && git push && git push --tags",
+    "version:minor": "npm version minor && git push && git push --tags",
+    "version:major": "npm version major && git push && git push --tags",
+    "release:patch": "npm run version:patch && npm run build",
+    "release:minor": "npm run version:minor && npm run build",
+    "release:major": "npm run version:major && npm run build"
   },
   "keywords": ["audio", "transcription", "recording", "whisper", "ollama", "ai", "meetings"],
   "author": "StenoAI Team",

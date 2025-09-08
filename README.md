@@ -1,4 +1,8 @@
-# StenoAI
+<div align="center">
+  <img src="website/public/stenoai-logo.svg" alt="StenoAI Logo" width="120" height="120">
+  
+  # StenoAI
+</div>
 
 AI-powered meeting transcription and summarization that runs entirely on your device.
 
@@ -36,7 +40,7 @@ pip install -r requirements.txt
 # Install Ollama
 brew install ollama
 ollama serve &
-ollama pull qwen2.5:1.5b
+ollama pull llama3.2:3b
 
 # Frontend
 cd app
@@ -47,8 +51,30 @@ npm start
 ### Build
 ```bash
 cd app
-npm run dist
+npm run build
 ```
+
+## Release Process
+
+### Automated Version Management
+```bash
+cd app
+
+# Version bump only (creates git tag and pushes)
+npm run version:patch   # 0.0.4 → 0.0.5
+npm run version:minor   # 0.0.4 → 0.1.0  
+npm run version:major   # 0.0.4 → 1.0.0
+
+# Complete release (version bump + build DMGs)
+npm run release:patch   # Most common for bug fixes
+npm run release:minor   # New features
+npm run release:major   # Breaking changes
+```
+
+The GitHub Actions workflow will automatically:
+- Detect the new git tag
+- Build DMGs for both Intel and Apple Silicon
+- Create a GitHub release with downloadable assets
 
 ## Models & Performance
 
@@ -58,9 +84,7 @@ npm run dist
 - `medium`: High accuracy for important meetings
 
 **Summarization Models** (Ollama):
-- `qwen2.5:1.5b`: Fast, efficient (recommended)
-- `llama3.2:3b`: Good quality, moderate speed
-- `llama3.1:8b`: High quality, slower processing
+- `llama3.2:3b`: Good quality, moderate speed (recommended)
 
 ## Project Structure
 
@@ -83,7 +107,6 @@ stenoai/
 - User choice between local and cloud processing
 
 ### Enhanced Features
-- Real-time transcription during meetings
 - Multi-language support
 - Custom summarization templates
 - Meeting analytics and insights

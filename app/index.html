@@ -942,7 +942,7 @@
                     <div class="step-icon">🧠</div>
                     <div class="step-content">
                         <h3>Install Ollama + AI Model</h3>
-                        <p>Homebrew (if needed) → Ollama → Qwen 2.5 model (~1GB)</p>
+                        <p>Homebrew (if needed) → Ollama → Llama 3.2 model (~2GB)</p>
                         <div class="step-status" id="ollama-status">Pending...</div>
                         <div class="progress-bar">
                             <div class="progress-fill" id="ollama-progress"></div>
@@ -979,7 +979,10 @@
         
         <div class="settings-content">
             <div class="settings-section">
-                <h3>🔧 Setup Wizard</h3>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                    <h3>🔧 Setup Wizard</h3>
+                    <span style="font-size: 12px; color: #888;">Version: <span id="app-version">Loading...</span></span>
+                </div>
                 <p>Run the setup process again to reinstall dependencies or fix configuration issues.</p>
                 
                 <div class="setup-info">
@@ -994,6 +997,18 @@
                 <button class="btn btn-primary" id="run-setup-btn" onclick="runSetupFromSettings()">
                     Run Setup Wizard
                 </button>
+            </div>
+            
+            <div class="settings-section">
+                <h3>🛠️ System Recovery</h3>
+                <p>Tools to recover from stuck recordings or processing issues.</p>
+                
+                <button class="btn" id="clear-state-btn" onclick="clearSystemState()">
+                    Clear Recording State
+                </button>
+                <p style="font-size: 12px; color: #888; margin-top: 8px;">
+                    Use this if recordings appear stuck or the system won't start new recordings.
+                </p>
             </div>
             
             <div class="settings-section">
@@ -1794,6 +1809,20 @@
             } catch (error) {
                 document.getElementById('summarization-prompt').textContent = 'Failed to load prompts';
             }
+            
+            // Load app version
+            try {
+                const versionInfo = await ipcRenderer.invoke('get-app-version');
+                const versionElement = document.getElementById('app-version');
+                
+                if (versionInfo.success) {
+                    versionElement.textContent = `v${versionInfo.version}`;
+                } else {
+                    versionElement.textContent = 'Unknown';
+                }
+            } catch (error) {
+                document.getElementById('app-version').textContent = 'Unknown';
+            }
         }
         
         async function runSetupFromSettings() {
@@ -1817,6 +1846,35 @@
                 console.error('Setup failed:', error);
                 btn.textContent = 'Setup Failed - Try Again';
                 btn.disabled = false;
+            }
+        }
+        
+        async function clearSystemState() {
+            const btn = document.getElementById('clear-state-btn');
+            btn.textContent = 'Clearing...';
+            btn.disabled = true;
+            
+            try {
+                const result = await ipcRenderer.invoke('clear-state');
+                if (result.success) {
+                    btn.textContent = 'State Cleared!';
+                    log('✅ Manual state clear successful');
+                } else {
+                    btn.textContent = 'Clear Failed';
+                    log('❌ Manual state clear failed: ' + result.error);
+                }
+                
+                setTimeout(() => {
+                    btn.textContent = 'Clear Recording State';
+                    btn.disabled = false;
+                }, 2000);
+            } catch (error) {
+                console.error('Clear state failed:', error);
+                btn.textContent = 'Clear Failed';
+                btn.disabled = false;
+                setTimeout(() => {
+                    btn.textContent = 'Clear Recording State';
+                }, 2000);
             }
         }
         

@@ -129,10 +129,7 @@ function runPythonScript(script, args = []) {
 // IPC Handlers - Separate start/stop with better error handling
 ipcMain.handle('start-recording', async (event, sessionName) => {
   try {
-    // Clear any stuck state first
-    await runPythonScript('simple_recorder.py', ['clear-state']);
-    
-    // Start fresh recording
+    // Start recording (removed clear-state to prevent race conditions)
     const result = await runPythonScript('simple_recorder.py', ['start', sessionName || 'Meeting']);
     
     if (result.includes('SUCCESS')) {
@@ -271,10 +268,22 @@ ipcMain.handle('delete-meeting', async (event, meetingData) => {
   }
 });
 
+// Queue status handler
+ipcMain.handle('get-queue-status', async () => {
+  return {
+    success: true,
+    isProcessing,
+    queueSize: processingQueue.length,
+    currentJob: currentProcessingJob?.sessionName || null,
+    hasRecording: currentRecordingProcess !== null
+  };
+});
+
 // Global recording state management
 let currentRecordingProcess = null;
 let processingQueue = [];
 let isProcessing = false;
+let currentProcessingJob = null;
 
 // Processing queue management
 async function processNextInQueue() {
@@ -283,13 +292,13 @@ async function processNextInQueue() {
   }
   
   isProcessing = true;
-  const job = processingQueue.shift();
+  currentProcessingJob = processingQueue.shift();
   
-  console.log(`🔄 Processing queued job: ${job.sessionName}`);
+  console.log(`🔄 Processing queued job: ${currentProcessingJob.sessionName}`);
   
   try {
-    const result = await runPythonScript('simple_recorder.py', ['process', job.audioFile, '--name', job.sessionName]);
-    console.log(`✅ Completed processing: ${job.sessionName}`);
+    const result = await runPythonScript('simple_recorder.py', ['process', currentProcessingJob.audioFile, '--name', currentProcessingJob.sessionName]);
+    console.log(`✅ Completed processing: ${currentProcessingJob.sessionName}`);
     
     // Notify frontend about completion with processed meeting data
     if (mainWindow) {
@@ -297,11 +306,11 @@ async function processNextInQueue() {
         // Get the specific processed meeting data
         const meetingsResult = await runPythonScript('simple_recorder.py', ['list-meetings']);
         const allMeetings = JSON.parse(meetingsResult);
-        const processedMeeting = allMeetings.find(m => m.session_info?.name === job.sessionName);
+        const processedMeeting = allMeetings.find(m => m.session_info?.name === currentProcessingJob.sessionName);
         
         mainWindow.webContents.send('processing-complete', { 
           success: true, 
-          sessionName: job.sessionName,
+          sessionName: currentProcessingJob.sessionName,
           message: 'Processing completed successfully',
           meetingData: processedMeeting
         });
@@ -309,25 +318,26 @@ async function processNextInQueue() {
         console.error('Error getting processed meeting data:', error);
         mainWindow.webContents.send('processing-complete', { 
           success: true, 
-          sessionName: job.sessionName,
+          sessionName: currentProcessingJob.sessionName,
           message: 'Processing completed successfully'
         });
       }
     }
     
   } catch (error) {
-    console.error(`❌ Processing failed for ${job.sessionName}:`, error);
+    console.error(`❌ Processing failed for ${currentProcessingJob.sessionName}:`, error);
     
     // Notify frontend about failure
     if (mainWindow) {
       mainWindow.webContents.send('processing-complete', { 
         success: false, 
-        sessionName: job.sessionName,
+        sessionName: currentProcessingJob.sessionName,
         error: error.message
       });
     }
   } finally {
     isProcessing = false;
+    currentProcessingJob = null;
     // Process next job in queue
     setTimeout(processNextInQueue, 1000);
   }
@@ -345,8 +355,7 @@ ipcMain.handle('start-recording-ui', async (_, sessionName) => {
       return { success: false, error: 'Recording already in progress' };
     }
 
-    // Clear any stuck state first
-    await runPythonScript('simple_recorder.py', ['clear-state']);
+    // Start recording (removed clear-state to prevent race conditions)
     
     console.log('Starting long recording process...');
     const pythonPath = path.join(__dirname, '..', 'venv', 'bin', 'python');
@@ -666,7 +675,7 @@ ipcMain.handle('setup-ollama-and-model', async () => {
     await new Promise(resolve => setTimeout(resolve, 3000));
     
     return new Promise((resolve) => {
-      exec('ollama pull qwen2.5:1.5b', { timeout: 600000 }, (error, stdout, stderr) => {
+      exec('ollama pull llama3.2:3b', { timeout: 600000 }, (error, stdout, stderr) => {
         if (!error) {
           resolve({ success: true, message: 'Ollama and AI model ready' });
         } else {
@@ -744,6 +753,20 @@ ipcMain.handle('trigger-setup-wizard', async () => {
     return { success: true, message: 'Setup wizard triggered in main window' };
   } catch (error) {
     console.error('Setup wizard failed:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('get-app-version', async () => {
+  try {
+    const packagePath = path.join(__dirname, 'package.json');
+    const packageContent = JSON.parse(fs.readFileSync(packagePath, 'utf8'));
+    return {
+      success: true,
+      version: packageContent.version,
+      name: packageContent.productName || packageContent.name
+    };
+  } catch (error) {
     return { success: false, error: error.message };
   }
 });

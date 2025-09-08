@@ -63,7 +63,7 @@ export default function App() {
         <div className="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
           <a href="#" className="flex items-center gap-2 hover:opacity-80 transition-opacity">
             <div className="p-2 rounded-xl bg-slate-800 border border-white/10"><Mic className="w-5 h-5" aria-hidden="true" /></div>
-            <span className="font-semibold tracking-tight">stenoAI</span>
+            <span className="text-lg font-semibold tracking-tight">stenoAI</span>
           </a>
           <nav className="hidden md:flex items-center gap-6 text-sm text-slate-300">
             <a href="#features" className="hover:text-white">Features</a>
@@ -197,7 +197,7 @@ export default function App() {
       <footer className="border-t border-white/10">
         <div className="max-w-6xl mx-auto px-4 py-10 text-sm text-slate-400 flex flex-col md:flex-row gap-4 md:items-center md:justify-between">
           <div className="flex items-center gap-2 text-slate-300">
-            <Mic className="w-4 h-4" aria-hidden="true" /> stenoAI
+            <Mic className="w-4 h-4" aria-hidden="true" /> <span className="font-semibold">stenoAI</span>
           </div>
           <div className="flex gap-4">
             <a href="#" className="hover:text-white">Privacy</a>
