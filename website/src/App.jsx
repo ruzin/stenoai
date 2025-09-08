@@ -25,7 +25,7 @@ const features = [
   {
     icon: <Sparkles className="w-6 h-6" aria-hidden="true" />,
     title: "Pro Summaries (Cloud)",
-    desc: "Bring your own model via API key (e.g., OpenAI or Anthropic). Only when you enable it.",
+    desc: "Bring your own model via API key (e.g., OpenAI or Anthropic). Coming soon.",
     pill: "Bring your Own AI Model",
   },
   {
