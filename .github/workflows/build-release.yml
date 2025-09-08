@@ -52,61 +52,33 @@ jobs:
         CSC_IDENTITY_AUTO_DISCOVERY: false
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     
-    - name: Create Release
-      id: create_release
-      uses: actions/create-release@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    - name: Create Release with Assets
+      uses: softprops/action-gh-release@v1
       with:
-        tag_name: ${{ github.event.inputs.version && format('v{0}', github.event.inputs.version) || github.ref }}
-        release_name: StenoAI ${{ github.event.inputs.version || steps.package_version.outputs.version }}
-        draft: false
-        prerelease: false
+        name: StenoAI ${{ github.event.inputs.version || steps.package_version.outputs.version }}
         body: |
           ## StenoAI v${{ github.event.inputs.version || steps.package_version.outputs.version }}
           
-          ### 🎙️ Meeting Transcription & Analysis
+          ### What's New
           
-          **Features:**
-          - Desktop app with real-time recording
-          - Whisper speech transcription
-          - AI meeting summarization with Ollama
-          - In-window settings panel
-          - Progress indicators for setup
-          - Automatic dependency installation
+          ${{ github.event.head_commit.message }}
           
-          **Download:**
-          - **Intel Macs**: StenoAI-${{ github.event.inputs.version || steps.package_version.outputs.version }}.dmg
-          - **Apple Silicon**: StenoAI-${{ github.event.inputs.version || steps.package_version.outputs.version }}-arm64.dmg
+          ### 📦 Downloads
           
-          **Requirements:**
-          - macOS 10.14+
-          - Internet connection for initial setup
-          - Microphone access permissions
+          - **Apple Silicon (M1-M4)**: `stenoAI-macos-arm64.dmg`
+          - **Intel Macs**: `stenoAI-macos-intel.dmg`
           
-          ### First Time Setup
-          1. Download appropriate DMG for your Mac
-          2. Install app by dragging to Applications
-          3. Launch StenoAI - setup wizard will run automatically
+          ### 🚀 First Time Setup
+          1. Download the appropriate DMG for your Mac
+          2. Install by dragging StenoAI to Applications
+          3. Launch app - setup wizard runs automatically
           4. Grant microphone permissions when prompted
           5. Start recording meetings!
-
-    - name: Upload Intel DMG
-      uses: actions/upload-release-asset@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: app/dist/StenoAI-${{ github.event.inputs.version || steps.package_version.outputs.version }}.dmg
-        asset_name: stenoAI-macos-intel.dmg
-        asset_content_type: application/octet-stream
-
-    - name: Upload Apple Silicon DMG
-      uses: actions/upload-release-asset@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: app/dist/StenoAI-${{ github.event.inputs.version || steps.package_version.outputs.version }}-arm64.dmg
-        asset_name: stenoAI-macos-arm64.dmg
-        asset_content_type: application/octet-stream
+          
+          ### 📋 Requirements
+          - macOS 10.14 or later
+          - Internet connection for initial setup
+          - Microphone access permissions
+        files: |
+          app/dist/StenoAI-${{ github.event.inputs.version || steps.package_version.outputs.version }}-x64.dmg
+          app/dist/StenoAI-${{ github.event.inputs.version || steps.package_version.outputs.version }}-arm64.dmg
