@@ -1,6 +1,6 @@
 {
   "name": "stenoai",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "description": "AI-powered meeting transcription and analysis for Mac",
   "main": "main.js",
   "homepage": "https://github.com/ruzin/stenoai",
@@ -24,7 +24,15 @@
     "release:minor": "npm run version:minor && npm run build",
     "release:major": "npm run version:major && npm run build"
   },
-  "keywords": ["audio", "transcription", "recording", "whisper", "ollama", "ai", "meetings"],
+  "keywords": [
+    "audio",
+    "transcription",
+    "recording",
+    "whisper",
+    "ollama",
+    "ai",
+    "meetings"
+  ],
   "author": "StenoAI Team",
   "license": "MIT",
   "devDependencies": {
@@ -52,7 +60,9 @@
       {
         "from": "../src",
         "to": "src",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       },
       {
         "from": "../simple_recorder.py",
@@ -68,7 +78,10 @@
       "category": "public.app-category.productivity",
       "target": {
         "target": "dmg",
-        "arch": ["x64", "arm64"]
+        "arch": [
+          "x64",
+          "arm64"
+        ]
       },
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist"
