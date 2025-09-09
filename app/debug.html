@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>StenoAI Debug Logs</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
+            background: #0a0a0a;
+            color: #e5e5e5;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .header {
+            background: #111;
+            border-bottom: 1px solid #333;
+            padding: 16px 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-shrink: 0;
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .brand h1 {
+            font-size: 18px;
+            font-weight: 600;
+            color: #fff;
+            margin: 0;
+        }
+
+        .controls {
+            display: flex;
+            gap: 8px;
+        }
+
+        .btn {
+            background: #333;
+            color: #fff;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 500;
+            transition: all 0.2s ease;
+        }
+
+        .btn:hover {
+            background: #444;
+        }
+
+        .btn.primary {
+            background: #f59e0b;
+            color: #000;
+        }
+
+        .btn.primary:hover {
+            background: #d97706;
+        }
+
+        .btn.danger {
+            background: #dc2626;
+        }
+
+        .btn.danger:hover {
+            background: #b91c1c;
+        }
+
+        .debug-console {
+            flex: 1;
+            background: #000;
+            color: #00ff00;
+            padding: 20px;
+            font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
+            font-size: 12px;
+            line-height: 1.4;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            border: none;
+            resize: none;
+            outline: none;
+        }
+
+        .debug-console::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .debug-console::-webkit-scrollbar-track {
+            background: #111;
+        }
+
+        .debug-console::-webkit-scrollbar-thumb {
+            background: #333;
+            border-radius: 4px;
+        }
+
+        .debug-console::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+
+        .status-bar {
+            background: #111;
+            border-top: 1px solid #333;
+            padding: 8px 24px;
+            font-size: 11px;
+            color: #888;
+            display: flex;
+            justify-content: space-between;
+            flex-shrink: 0;
+        }
+
+        .timestamp {
+            color: #666;
+        }
+
+        .log-level-error {
+            color: #ff6b6b;
+        }
+
+        .log-level-warn {
+            color: #ffd93d;
+        }
+
+        .log-level-success {
+            color: #6bcf7f;
+        }
+
+        .log-level-info {
+            color: #4ecdc4;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="brand">
+            <span>🐛</span>
+            <h1>Debug Logs</h1>
+        </div>
+        <div class="controls">
+            <button class="btn" id="save-logs-btn">💾 Save Logs</button>
+            <button class="btn danger" id="clear-logs-btn">🗑️ Clear</button>
+            <button class="btn primary" id="auto-scroll-btn">📄 Auto-scroll</button>
+        </div>
+    </div>
+
+    <div class="debug-console" id="debug-console">
+🐛 StenoAI Debug Console
+📅 Session started at: [timestamp]
+🔄 Waiting for debug messages...
+
+    </div>
+
+    <div class="status-bar">
+        <span id="log-count">0 messages</span>
+        <span id="status-text">Ready</span>
+    </div>
+
+    <script>
+        const { ipcRenderer } = require('electron');
+        const fs = require('fs');
+        const path = require('path');
+        const os = require('os');
+
+        let logCount = 0;
+        let autoScroll = true;
+        const debugConsole = document.getElementById('debug-console');
+        const logCountElement = document.getElementById('log-count');
+        const statusText = document.getElementById('status-text');
+        const autoScrollBtn = document.getElementById('auto-scroll-btn');
+
+        // Initialize with timestamp
+        const timestamp = new Date().toLocaleString();
+        debugConsole.textContent = debugConsole.textContent.replace('[timestamp]', timestamp);
+
+        // Listen for debug messages from backend
+        ipcRenderer.on('debug-log', (event, message) => {
+            addLogMessage(message);
+        });
+
+        function addLogMessage(message) {
+            const timestamp = new Date().toLocaleTimeString();
+            const formattedMessage = `[${timestamp}] ${message}`;
+            
+            debugConsole.textContent += formattedMessage + '\n';
+            logCount++;
+            updateStatus();
+            
+            if (autoScroll) {
+                debugConsole.scrollTop = debugConsole.scrollHeight;
+            }
+        }
+
+        function updateStatus() {
+            logCountElement.textContent = `${logCount} messages`;
+            statusText.textContent = 'Active';
+        }
+
+        // Controls
+        document.getElementById('clear-logs-btn').addEventListener('click', () => {
+            debugConsole.textContent = `🐛 StenoAI Debug Console\n📅 Session cleared at: ${new Date().toLocaleString()}\n🔄 Waiting for debug messages...\n\n`;
+            logCount = 0;
+            updateStatus();
+            statusText.textContent = 'Cleared';
+        });
+
+        document.getElementById('auto-scroll-btn').addEventListener('click', () => {
+            autoScroll = !autoScroll;
+            autoScrollBtn.textContent = autoScroll ? '📄 Auto-scroll' : '⏸️ Manual';
+            autoScrollBtn.className = autoScroll ? 'btn primary' : 'btn';
+            
+            if (autoScroll) {
+                debugConsole.scrollTop = debugConsole.scrollHeight;
+            }
+        });
+
+        document.getElementById('save-logs-btn').addEventListener('click', () => {
+            const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+            const filename = `stenoai-debug-${timestamp}.log`;
+            const filepath = path.join(os.homedir(), 'Desktop', filename);
+            
+            try {
+                fs.writeFileSync(filepath, debugConsole.textContent);
+                statusText.textContent = `Saved to ${filename}`;
+                setTimeout(() => statusText.textContent = 'Ready', 3000);
+            } catch (error) {
+                statusText.textContent = 'Save failed';
+                console.error('Failed to save logs:', error);
+            }
+        });
+
+        // Window focus handling
+        window.addEventListener('focus', () => {
+            if (autoScroll) {
+                debugConsole.scrollTop = debugConsole.scrollHeight;
+            }
+        });
+    </script>
+</body>
+</html>

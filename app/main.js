@@ -82,10 +82,13 @@ function createSettingsWindow() {
   });
 }
 
+
 // IPC handler for opening settings
 ipcMain.handle('open-settings', () => {
   createSettingsWindow();
 });
+
+// Debug functionality handled by side panel now
 
 // Python backend communication
 function runPythonScript(script, args = []) {
@@ -93,7 +96,10 @@ function runPythonScript(script, args = []) {
     const pythonPath = path.join(__dirname, '..', 'venv', 'bin', 'python');
     const scriptPath = path.join(__dirname, '..', script);
     
-    console.log('Running:', pythonPath, scriptPath, ...args);
+    // Log the command being executed
+    const command = `${pythonPath} ${scriptPath} ${args.join(' ')}`;
+    console.log('Running:', command);
+    sendDebugLog(`$ ${script} ${args.join(' ')}`);
     
     const process = spawn(pythonPath, [scriptPath, ...args], {
       cwd: path.join(__dirname, '..')
@@ -103,16 +109,27 @@ function runPythonScript(script, args = []) {
     let stderr = '';
     
     process.stdout.on('data', (data) => {
-      stdout += data.toString();
-      console.log('Python stdout:', data.toString());
+      const output = data.toString();
+      stdout += output;
+      console.log('Python stdout:', output);
+      // Stream stdout to debug panel in real-time
+      output.split('\n').forEach(line => {
+        if (line.trim()) sendDebugLog(line.trim());
+      });
     });
     
     process.stderr.on('data', (data) => {
-      stderr += data.toString();
-      console.log('Python stderr:', data.toString());
+      const output = data.toString();
+      stderr += output;
+      console.log('Python stderr:', output);
+      // Stream stderr to debug panel in real-time
+      output.split('\n').forEach(line => {
+        if (line.trim()) sendDebugLog('STDERR: ' + line.trim());
+      });
     });
     
     process.on('close', (code) => {
+      sendDebugLog(`Command completed with exit code: ${code}`);
       if (code === 0) {
         resolve(stdout);
       } else {
@@ -121,6 +138,7 @@ function runPythonScript(script, args = []) {
     });
     
     process.on('error', (error) => {
+      sendDebugLog(`Command error: ${error.message}`);
       reject(error);
     });
   });
@@ -129,16 +147,22 @@ function runPythonScript(script, args = []) {
 // IPC Handlers - Separate start/stop with better error handling
 ipcMain.handle('start-recording', async (event, sessionName) => {
   try {
+    sendDebugLog(`Starting recording session: ${sessionName || 'Meeting'}`);
+    sendDebugLog('$ python simple_recorder.py start');
+    
     // Start recording (removed clear-state to prevent race conditions)
     const result = await runPythonScript('simple_recorder.py', ['start', sessionName || 'Meeting']);
     
     if (result.includes('SUCCESS')) {
+      sendDebugLog('Recording started successfully');
       return { success: true, message: result };
     } else {
+      sendDebugLog(`Recording failed: ${result}`);
       return { success: false, error: result };
     }
   } catch (error) {
     console.error('Start recording error:', error.message);
+    sendDebugLog(`Recording error: ${error.message}`);
     return { success: false, error: error.message };
   }
 });
@@ -374,15 +398,37 @@ ipcMain.handle('start-recording-ui', async (_, sessionName) => {
       const output = data.toString();
       console.log('Recording stdout:', output);
       
-      // Check for recording completion and extract audio file path
-      if (output.includes('✅ Recording saved:')) {
-        const match = output.match(/✅ Recording saved: (.+)/);
-        if (match) {
-          const audioFile = match[1].trim();
-          console.log(`📋 Recording completed: ${audioFile} - adding to processing queue`);
-          addToProcessingQueue(audioFile, actualSessionName);
+      // Background recording process handles complete pipeline - just notify when done
+      if (output.includes('✅ Complete processing finished!')) {
+        console.log(`🎉 Recording and processing completed for: ${actualSessionName}`);
+        // Notify frontend that everything is done
+        if (mainWindow) {
+          // Get the processed meeting data to send to frontend
+          runPythonScript('simple_recorder.py', ['list-meetings'])
+            .then(meetingsResult => {
+              const allMeetings = JSON.parse(meetingsResult);
+              const processedMeeting = allMeetings.find(m => m.session_info?.name === actualSessionName);
+              
+              mainWindow.webContents.send('processing-complete', { 
+                success: true, 
+                sessionName: actualSessionName,
+                message: 'Recording and processing completed successfully',
+                meetingData: processedMeeting
+              });
+            })
+            .catch(error => {
+              console.error('Error getting processed meeting data:', error);
+              // Fallback - send without meetingData, frontend will refresh
+              mainWindow.webContents.send('processing-complete', { 
+                success: true, 
+                sessionName: actualSessionName,
+                message: 'Recording and processing completed successfully'
+              });
+            });
         }
       }
+      
+      // Don't queue background recordings for additional processing - they handle it themselves!
       
       if (output.includes('Recording to:') && !hasStarted) {
         hasStarted = true;
@@ -496,18 +542,31 @@ ipcMain.handle('setup-system-check', async () => {
       return { success: false, error: 'Python 3 not found. Please install Python 3.8+' };
     }
     
-    // Create required directories
-    const projectRoot = path.join(__dirname, '..');
+    // Create required directories - match Python logic for DMG vs development
+    const os = require('os');
+    const currentPath = __dirname;
+    let baseDir;
+    
+    // Detect if running from app bundle (DMG install) or development
+    if (currentPath.includes('StenoAI.app') || currentPath.includes('Applications')) {
+      // DMG/Production: Use Application Support folder
+      baseDir = path.join(os.homedir(), 'Library', 'Application Support', 'stenoai');
+    } else {
+      // Development: Use project relative paths  
+      baseDir = path.join(__dirname, '..');
+    }
+    
     const dirs = ['recordings', 'transcripts', 'output'];
     
     for (const dir of dirs) {
-      const dirPath = path.join(projectRoot, dir);
+      const dirPath = path.join(baseDir, dir);
       if (!fs.existsSync(dirPath)) {
         fs.mkdirSync(dirPath, { recursive: true });
       }
     }
     
-    // Create venv directory if it doesn't exist
+    // Create venv directory if it doesn't exist  
+    const projectRoot = path.join(__dirname, '..');
     const venvPath = path.join(projectRoot, 'venv');
     if (!fs.existsSync(venvPath)) {
       await new Promise((resolve, reject) => {
@@ -641,10 +700,10 @@ ipcMain.handle('setup-python', async () => {
       
       process.on('close', (code) => {
         if (code === 0) {
-          sendDebugLog('✅ Python dependencies installation completed successfully');
+          sendDebugLog('Python dependencies installation completed successfully');
           resolve({ success: true, message: 'Python dependencies and Whisper installed' });
         } else {
-          sendDebugLog(`❌ Python dependencies installation failed with exit code: ${code}`);
+          sendDebugLog(`Python dependencies installation failed with exit code: ${code}`);
           resolve({ success: false, error: `Installation failed: ${output}` });
         }
       });
@@ -660,11 +719,10 @@ ipcMain.handle('setup-python', async () => {
 
 // Add IPC handler for sending debug logs to frontend
 function sendDebugLog(message) {
-  // Send to all windows (in case there are multiple)
-  const allWindows = BrowserWindow.getAllWindows();
-  allWindows.forEach(window => {
-    window.webContents.send('debug-log', message);
-  });
+  // Send to main window (both setup console and debug panel)
+  if (mainWindow) {
+    mainWindow.webContents.send('debug-log', message);
+  }
 }
 
 ipcMain.handle('setup-ollama-and-model', async () => {
@@ -672,18 +730,37 @@ ipcMain.handle('setup-ollama-and-model', async () => {
     sendDebugLog('$ Checking for existing Ollama installation...');
     sendDebugLog('$ which ollama || /opt/homebrew/bin/ollama --version || /usr/local/bin/ollama --version');
     
-    // Check if Ollama is already installed
-    const checkResult = await new Promise((resolve) => {
-      exec('which ollama || /opt/homebrew/bin/ollama --version || /usr/local/bin/ollama --version', { timeout: 5000 }, (error, stdout, stderr) => {
-        if (stdout) sendDebugLog(stdout.trim());
-        if (stderr) sendDebugLog('STDERR: ' + stderr.trim());
-        if (error) sendDebugLog('ERROR: ' + error.message);
-        resolve(!error && stdout.trim());
+    // Check if Ollama is already installed and get its path
+    const ollamaPath = await new Promise((resolve) => {
+      exec('which ollama', { timeout: 5000 }, (error, stdout, stderr) => {
+        if (!error && stdout.trim()) {
+          const path = stdout.trim();
+          sendDebugLog(`Found Ollama at: ${path}`);
+          resolve(path);
+        } else {
+          // Try common Homebrew locations
+          exec('/opt/homebrew/bin/ollama --version', { timeout: 5000 }, (error2, stdout2) => {
+            if (!error2) {
+              sendDebugLog('Found Ollama at: /opt/homebrew/bin/ollama');
+              resolve('/opt/homebrew/bin/ollama');
+            } else {
+              exec('/usr/local/bin/ollama --version', { timeout: 5000 }, (error3, stdout3) => {
+                if (!error3) {
+                  sendDebugLog('Found Ollama at: /usr/local/bin/ollama');
+                  resolve('/usr/local/bin/ollama');
+                } else {
+                  sendDebugLog('Ollama not found in any common locations');
+                  resolve(null);
+                }
+              });
+            }
+          });
+        }
       });
     });
     
     // Install Ollama if not present
-    if (!checkResult) {
+    if (!ollamaPath) {
       sendDebugLog('Ollama not found, checking for Homebrew...');
       sendDebugLog('$ which brew || /opt/homebrew/bin/brew --version || /usr/local/bin/brew --version');
       
@@ -754,20 +831,23 @@ ipcMain.handle('setup-ollama-and-model', async () => {
       sendDebugLog('Ollama already installed, skipping installation step');
     }
     
+    // Determine final ollama path (either found or newly installed)
+    const finalOllamaPath = ollamaPath || '/opt/homebrew/bin/ollama';
+    
     // Start Ollama service
     sendDebugLog('Starting Ollama service...');
-    sendDebugLog('$ ollama serve &');
-    exec('ollama serve', { detached: true });
+    sendDebugLog(`$ ${finalOllamaPath} serve &`);
+    exec(`${finalOllamaPath} serve`, { detached: true });
     
     // Wait for service to start then pull model
     sendDebugLog('Waiting 3 seconds for Ollama service to start...');
     await new Promise(resolve => setTimeout(resolve, 3000));
     
     sendDebugLog('Downloading AI model (this may take several minutes)...');
-    sendDebugLog('$ ollama pull llama3.2:3b');
+    sendDebugLog(`$ ${finalOllamaPath} pull llama3.2:3b`);
     
     return new Promise((resolve) => {
-      const process = exec('ollama pull llama3.2:3b', { timeout: 600000 });
+      const process = exec(`${finalOllamaPath} pull llama3.2:3b`, { timeout: 600000 });
       
       process.stdout.on('data', (data) => {
         sendDebugLog(data.toString().trim());
@@ -779,10 +859,10 @@ ipcMain.handle('setup-ollama-and-model', async () => {
       
       process.on('close', (code) => {
         if (code === 0) {
-          sendDebugLog('✅ AI model download completed successfully');
+          sendDebugLog('AI model download completed successfully');
           resolve({ success: true, message: 'Ollama and AI model ready' });
         } else {
-          sendDebugLog(`❌ AI model download failed with exit code: ${code}`);
+          sendDebugLog(`AI model download failed with exit code: ${code}`);
           resolve({ 
             success: false, 
             error: 'Failed to download AI model', 
@@ -792,7 +872,7 @@ ipcMain.handle('setup-ollama-and-model', async () => {
       });
       
       process.on('error', (error) => {
-        sendDebugLog(`❌ Process error: ${error.message}`);
+        sendDebugLog(`Process error: ${error.message}`);
         resolve({ 
           success: false, 
           error: 'Failed to download AI model', 
@@ -839,10 +919,10 @@ ipcMain.handle('setup-whisper', async () => {
       
       process.on('close', (code) => {
         if (code === 0) {
-          sendDebugLog('✅ Whisper installation completed successfully');
+          sendDebugLog('Whisper installation completed successfully');
           resolve({ success: true, message: 'Whisper installed successfully' });
         } else {
-          sendDebugLog(`❌ Whisper installation failed with exit code: ${code}`);
+          sendDebugLog(`Whisper installation failed with exit code: ${code}`);
           resolve({ success: false, error: `Whisper installation failed: ${output}` });
         }
       });
@@ -858,15 +938,29 @@ ipcMain.handle('setup-whisper', async () => {
 
 ipcMain.handle('setup-test', async () => {
   try {
+    sendDebugLog('Running system test...');
+    sendDebugLog('$ python simple_recorder.py test');
+    
     // Test the complete system
     const result = await runPythonScript('simple_recorder.py', ['test']);
     
+    // Log the full result to debug console
+    result.split('\n').forEach(line => {
+      if (line.trim()) sendDebugLog(line.trim());
+    });
+    
     if (result.includes('System check passed') || result.includes('SUCCESS')) {
+      sendDebugLog('System test completed successfully');
       return { success: true, message: 'System test passed' };
     } else {
-      return { success: false, error: 'System test failed' };
+      // Extract specific error details from the output
+      const errorLines = result.split('\n').filter(line => line.includes('ERROR:'));
+      const specificError = errorLines.length > 0 ? errorLines[errorLines.length - 1].replace('ERROR: ', '') : 'Unknown error';
+      sendDebugLog(`System test failed: ${specificError}`);
+      return { success: false, error: `System test failed: ${specificError}`, details: result };
     }
   } catch (error) {
+    sendDebugLog(`System test error: ${error.message}`);
     return { success: false, error: error.message };
   }
 });

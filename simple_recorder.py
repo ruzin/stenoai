@@ -61,20 +61,20 @@ class SimpleRecorder:
         # Detect if running from app bundle (DMG install) or development
         current_path = Path(__file__).parent
         if "StenoAI.app" in str(current_path) or "Applications" in str(current_path):
-            # DMG/Production: Use user Documents folder
-            user_docs = Path.home() / "Documents" / "StenoAI"
-            self.recordings_dir = user_docs / "recordings"
-            self.transcripts_dir = user_docs / "transcripts" 
-            self.output_dir = user_docs / "output"
+            # DMG/Production: Use Application Support folder
+            app_support = Path.home() / "Library" / "Application Support" / "stenoai"
+            self.recordings_dir = app_support / "recordings"
+            self.transcripts_dir = app_support / "transcripts" 
+            self.output_dir = app_support / "output"
         else:
             # Development: Use project relative paths
             self.recordings_dir = Path("recordings")
             self.transcripts_dir = Path("transcripts") 
             self.output_dir = Path("output")
         
-        # Create directories
+        # Create directories (including parent directories)
         for dir_path in [self.recordings_dir, self.transcripts_dir, self.output_dir]:
-            dir_path.mkdir(exist_ok=True)
+            dir_path.mkdir(parents=True, exist_ok=True)
         
         # State file
         self.state_file = Path("recorder_state.json")
@@ -757,27 +757,52 @@ def test():
     except Exception as e:
         print(f"❌ System test failed: {e}")
         print(f"ERROR: {e}")
+        return
 
 
 @cli.command()
 def list_meetings():
-    """List all processed meetings"""
-    recorder = SimpleRecorder()
+    """List all processed meetings - optimized for fast loading"""
+    # Don't initialize SimpleRecorder to avoid Ollama checks - just get the output directory
+    current_path = Path(__file__).parent
+    if "StenoAI.app" in str(current_path) or "Applications" in str(current_path):
+        # DMG/Production: Use Application Support folder
+        app_support = Path.home() / "Library" / "Application Support" / "stenoai"
+        output_dir = app_support / "output"
+    else:
+        # Development: Use project relative paths
+        output_dir = Path("output")
     
-    # Get all summary files
-    summaries = list(recorder.output_dir.glob("*_summary.json"))
+    # Ensure output directory exists
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Get all summary files - use glob pattern for speed
+    summaries = list(output_dir.glob("*_summary.json"))
     meetings = []
     
-    for summary_file in sorted(summaries, key=lambda x: x.stat().st_mtime, reverse=True):
-        try:
-            with open(summary_file, 'r') as f:
-                data = json.load(f)
-                meetings.append(data)
-        except Exception as e:
-            logger.warning(f"Failed to load {summary_file}: {e}")
+    # Sort by modification time first, then process (faster than reading all files first)
+    summaries.sort(key=lambda x: x.stat().st_mtime, reverse=True)
     
-    # Output as JSON for Electron
-    print(json.dumps(meetings, indent=2))
+    for summary_file in summaries:
+        try:
+            with open(summary_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                # Only include essential fields for faster loading
+                essential_meeting = {
+                    "session_info": data.get("session_info", {}),
+                    "summary": data.get("summary", ""),
+                    "key_points": data.get("key_points", []),
+                    "action_items": data.get("action_items", []),
+                    "transcript": data.get("transcript", "")
+                }
+                meetings.append(essential_meeting)
+        except Exception as e:
+            # Log warning but continue processing other files
+            logger.warning(f"Failed to load {summary_file}: {e}")
+            continue
+    
+    # Output as compact JSON for Electron (no indentation for speed)
+    print(json.dumps(meetings, separators=(',', ':')))
 
 
 @cli.command()
@@ -814,22 +839,55 @@ def setup_check():
     except Exception as e:
         checks.append(("❌ Python", f"Error: {e}"))
     
-    # Check required directories
-    dirs = ["recordings", "transcripts", "output"]
-    for dir_name in dirs:
-        dir_path = Path(dir_name)
-        if dir_path.exists():
-            checks.append((f"✅ {dir_name}/", "exists"))
-        else:
-            dir_path.mkdir(exist_ok=True)
-            checks.append((f"✅ {dir_name}/", "created"))
+    # Check required directories - use same logic as SimpleRecorder.__init__
+    current_path = Path(__file__).parent
+    if "StenoAI.app" in str(current_path) or "Applications" in str(current_path):
+        # DMG/Production: Use Application Support folder
+        app_support = Path.home() / "Library" / "Application Support" / "stenoai"
+        base_dirs = {
+            "recordings": app_support / "recordings",
+            "transcripts": app_support / "transcripts", 
+            "output": app_support / "output"
+        }
+    else:
+        # Development: Use project relative paths
+        base_dirs = {
+            "recordings": Path("recordings"),
+            "transcripts": Path("transcripts"), 
+            "output": Path("output")
+        }
     
-    # Check Ollama
-    try:
-        result = subprocess.run(['which', 'ollama'], capture_output=True, text=True, timeout=5)
-        if result.returncode == 0:
-            checks.append(("✅ Ollama", result.stdout.strip()))
+    for dir_name, dir_path in base_dirs.items():
+        if dir_path.exists():
+            checks.append((f"✅ {dir_name}/", f"exists at {dir_path}"))
         else:
+            dir_path.mkdir(parents=True, exist_ok=True)
+            checks.append((f"✅ {dir_name}/", f"created at {dir_path}"))
+    
+    # Check Ollama - use same path resolution as summarizer
+    try:
+        ollama_found = False
+        ollama_path = None
+        possible_paths = [
+            'ollama',  # Try PATH first
+            '/opt/homebrew/bin/ollama',  # Homebrew on Apple Silicon
+            '/usr/local/bin/ollama',     # Homebrew on Intel
+            '/usr/bin/ollama',           # System installation
+        ]
+        
+        for path in possible_paths:
+            try:
+                result = subprocess.run([path, '--version'], 
+                                      capture_output=True, timeout=5)
+                if result.returncode == 0:
+                    checks.append(("✅ Ollama", f"found at {path}"))
+                    ollama_found = True
+                    ollama_path = path
+                    break
+            except (subprocess.TimeoutExpired, FileNotFoundError):
+                continue
+        
+        if not ollama_found:
             checks.append(("❌ Ollama", "not found - run: brew install ollama"))
     except Exception as e:
         checks.append(("❌ Ollama", f"Error: {e}"))

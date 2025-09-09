@@ -44,21 +44,44 @@ class OllamaSummarizer:
         except:
             return False
     
+    def _find_ollama_path(self) -> Optional[str]:
+        """Find the Ollama executable path, handling DMG vs development environments."""
+        # Try common locations where Ollama might be installed
+        possible_paths = [
+            'ollama',  # Try PATH first
+            '/opt/homebrew/bin/ollama',  # Homebrew on Apple Silicon
+            '/usr/local/bin/ollama',     # Homebrew on Intel
+            '/usr/bin/ollama',           # System installation
+        ]
+        
+        for path in possible_paths:
+            try:
+                result = subprocess.run([path, '--version'], 
+                                      capture_output=True, timeout=5)
+                if result.returncode == 0:
+                    logger.info(f"Found Ollama at: {path}")
+                    return path
+            except (subprocess.TimeoutExpired, FileNotFoundError):
+                continue
+        
+        logger.error("Ollama executable not found in any common location")
+        return None
+    
     def _start_ollama_service(self) -> bool:
         """Start the Ollama service if not running."""
         logger.info("Starting Ollama service...")
         
         try:
-            # Check if ollama command exists
-            result = subprocess.run(['which', 'ollama'], capture_output=True, text=True)
-            if result.returncode != 0:
-                logger.error("Ollama not found in PATH. Please install Ollama first.")
+            # Find the Ollama executable path
+            ollama_path = self._find_ollama_path()
+            if not ollama_path:
+                logger.error("Ollama executable not found. Please install Ollama first.")
                 logger.info("Install with: brew install ollama (macOS) or visit https://ollama.com")
                 return False
             
             # Start ollama serve in background
             self.ollama_process = subprocess.Popen(
-                ['ollama', 'serve'],
+                [ollama_path, 'serve'],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 start_new_session=True  # Detach from parent process
@@ -82,15 +105,21 @@ class OllamaSummarizer:
     def _ensure_model_available(self) -> bool:
         """Ensure the required model is downloaded and available."""
         try:
+            # Find the Ollama executable path
+            ollama_path = self._find_ollama_path()
+            if not ollama_path:
+                logger.error("Ollama executable not found")
+                return False
+            
             # Check if model is already available
-            result = subprocess.run(['ollama', 'list'], capture_output=True, text=True, timeout=10)
+            result = subprocess.run([ollama_path, 'list'], capture_output=True, text=True, timeout=10)
             if result.returncode == 0 and self.model_name in result.stdout:
                 logger.info(f"Model {self.model_name} is already available")
                 return True
             
             # Model not found, try to pull it
             logger.info(f"Downloading model {self.model_name}...")
-            result = subprocess.run(['ollama', 'pull', self.model_name], 
+            result = subprocess.run([ollama_path, 'pull', self.model_name], 
                                   capture_output=True, text=True, timeout=300)  # 5 min timeout
             
             if result.returncode == 0:
@@ -103,7 +132,7 @@ class OllamaSummarizer:
                 fallback_models = ["llama3.1:8b", "llama2:7b", "llama2:latest"]
                 for fallback in fallback_models:
                     logger.info(f"Trying fallback model: {fallback}")
-                    result = subprocess.run(['ollama', 'pull', fallback], 
+                    result = subprocess.run([ollama_path, 'pull', fallback], 
                                           capture_output=True, text=True, timeout=300)
                     if result.returncode == 0:
                         logger.info(f"Successfully downloaded fallback model {fallback}")
@@ -192,6 +221,17 @@ Provide a thorough, professional analysis in the JSON format above."""
             MeetingTranscript object or None if summarization failed
         """
         try:
+            # Handle empty or None transcripts
+            if not transcript or transcript.strip() == "" or transcript.lower().strip() == "none":
+                logger.warning("Empty or None transcript provided, returning placeholder summary")
+                return MeetingTranscript(
+                    overview="No transcript was generated for this recording. This may be due to poor audio quality, silence throughout the recording, or technical issues with the speech recognition system.",
+                    participants=[],
+                    action_items=[],
+                    decisions=[],
+                    duration_minutes=duration_minutes
+                )
+            
             prompt = self._create_prompt(transcript)
             logger.info(f"Sending transcript to Ollama model: {self.model_name}")
             logger.info(f"Transcript length: {len(transcript)} characters")

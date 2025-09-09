@@ -256,6 +256,69 @@
             overflow-y: auto;
         }
         
+        /* Debug Panel */
+        .debug-panel {
+            position: fixed;
+            top: 0;
+            right: -500px;
+            width: 500px;
+            height: 100vh;
+            background: #0a0a0a;
+            border-left: 1px solid #333;
+            transition: right 0.3s ease;
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .debug-header {
+            padding: 20px;
+            border-bottom: 1px solid #333;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: #111;
+        }
+        
+        .debug-header h2 {
+            margin: 0;
+            font-size: 18px;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .debug-console {
+            flex: 1;
+            background: #000;
+            color: #a0a0a0;
+            padding: 20px;
+            font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
+            font-size: 11px;
+            line-height: 1.4;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        
+        .debug-console::-webkit-scrollbar {
+            width: 8px;
+        }
+        
+        .debug-console::-webkit-scrollbar-track {
+            background: #111;
+        }
+        
+        .debug-console::-webkit-scrollbar-thumb {
+            background: #333;
+            border-radius: 4px;
+        }
+        
+        .debug-console::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+        
         /* Main content area */
         .main {
             flex: 1;
@@ -807,6 +870,7 @@
         </div>
         
         <div class="header-actions">
+            <button class="settings-btn" id="debug-btn" title="Debug Logs" style="margin-right: 8px;">🔨</button>
             <button class="settings-btn" id="settings-btn" title="Settings">⚙️</button>
         </div>
     </div>
@@ -968,7 +1032,7 @@
                     <span>🐛 Debug Console</span>
                     <button onclick="toggleDebugConsole()" style="background: none; border: 1px solid #444; color: #888; padding: 4px 8px; border-radius: 4px; font-size: 11px; cursor: pointer;">Toggle</button>
                 </h3>
-                <div id="debug-console" style="background: #000; border: 1px solid #333; border-radius: 6px; padding: 12px; font-family: 'Monaco', 'Menlo', monospace; font-size: 11px; line-height: 1.4; color: #0f0; height: 200px; overflow-y: auto; white-space: pre-wrap;">Welcome to StenoAI Setup Debug Console
+                <div id="debug-console" style="background: #000; border: 1px solid #333; border-radius: 6px; padding: 12px; font-family: 'Monaco', 'Menlo', monospace; font-size: 11px; line-height: 1.4; color: #a0a0a0; height: 200px; overflow-y: auto; white-space: pre-wrap;">Welcome to StenoAI Setup Debug Console
 Commands and output will appear here...
 
 </div>
@@ -1021,12 +1085,6 @@ Commands and output will appear here...
                     Use this if recordings appear stuck or the system won't start new recordings.
                 </p>
                 
-                <button class="btn" id="test-setup-btn" onclick="testSetupWizard()" style="margin-top: 12px;">
-                    Test Setup Wizard
-                </button>
-                <p style="font-size: 12px; color: #888; margin-top: 8px;">
-                    Run the first-time setup process to test installation and see detailed logs.
-                </p>
             </div>
             
             <div class="settings-section">
@@ -1041,6 +1099,19 @@ Commands and output will appear here...
         </div>
     </div>
 
+    <!-- Debug Panel (slides in from right) -->
+    <div class="debug-panel" id="debug-panel">
+        <div class="debug-header">
+            <h2>🔨 Debug Logs</h2>
+            <button class="close-settings" onclick="toggleDebug()">✕</button>
+        </div>
+        
+        <div class="debug-console" id="debug-console-panel">StenoAI Debug Console
+Session started - waiting for activity...
+
+</div>
+    </div>
+
     <script>
         const { ipcRenderer } = require('electron');
         
@@ -1051,6 +1122,7 @@ Commands and output will appear here...
         const startBtn = document.getElementById('start-btn');
         const stopBtn = document.getElementById('stop-btn');
         const settingsBtn = document.getElementById('settings-btn');
+        const debugBtn = document.getElementById('debug-btn');
         const meetingsList = document.getElementById('meetings-list');
         const emptyState = document.getElementById('empty-state');
         const meetingDetail = document.getElementById('meeting-detail');
@@ -1080,6 +1152,7 @@ Commands and output will appear here...
         let recordingStartTime = null;
         let recordingTimer = null;
         let processingMeetings = new Set();
+        let meetingsLastLoaded = 0; // Cache timestamp
         
         // Utility functions
         function log(message) {
@@ -1161,7 +1234,7 @@ Commands and output will appear here...
                         const result = await ipcRenderer.invoke('get-status');
                         if (result.success && !result.status.includes('RECORDING')) {
                             // Backend says not recording but UI thinks it is - sync up
-                            log('⚠️ Backend/UI state mismatch - syncing');
+                            log('Backend/UI state mismatch - syncing');
                             setUIState('ready');
                             stopStatusMonitoring();
                         }
@@ -1268,32 +1341,53 @@ Commands and output will appear here...
             renderMeetingsList();
         }
         
-        // Load meetings from backend
-        async function loadMeetings() {
-            // Show loading state
-            meetingsList.innerHTML = `
-                <div style="padding: 20px; text-align: center; color: #666;">
-                    <div style="font-size: 24px; margin-bottom: 8px;">⟳</div>
-                    <p>Loading meetings...</p>
-                </div>
-            `;
+        // Load meetings from backend with caching
+        async function loadMeetings(forceRefresh = false) {
+            const now = Date.now();
+            
+            // Use cache if data is less than 30 seconds old and not forced refresh
+            if (!forceRefresh && meetings.length > 0 && (now - meetingsLastLoaded) < 30000) {
+                log('Using cached meetings data');
+                filterMeetings();
+                return;
+            }
+            
+            // Show loading state only if we don't have cached data
+            if (meetings.length === 0) {
+                meetingsList.innerHTML = `
+                    <div style="padding: 20px; text-align: center; color: #666;">
+                        <div style="font-size: 24px; margin-bottom: 8px;">⟳</div>
+                        <p>Loading meetings...</p>
+                    </div>
+                `;
+            }
             
             try {
                 const result = await ipcRenderer.invoke('list-meetings');
                 if (result.success) {
                     meetings = result.meetings || [];
+                    meetingsLastLoaded = now;
                     filterMeetings(); // Apply current search filter
+                    log(`Loaded ${meetings.length} meetings`);
+                } else {
+                    throw new Error(result.error || 'Unknown error');
                 }
             } catch (error) {
                 log(`Failed to load meetings: ${error.message}`);
-                // Show error state
-                meetingsList.innerHTML = `
-                    <div style="padding: 20px; text-align: center; color: #666;">
-                        <div style="font-size: 24px; margin-bottom: 8px;">⚠️</div>
-                        <p>Failed to load meetings</p>
-                        <p style="font-size: 12px; margin-top: 4px;">Try refreshing</p>
-                    </div>
-                `;
+                // Only show error if we don't have cached data
+                if (meetings.length === 0) {
+                    meetingsList.innerHTML = `
+                        <div style="padding: 20px; text-align: center; color: #666;">
+                            <div style="font-size: 24px; margin-bottom: 8px;">⚠️</div>
+                            <p>Failed to load meetings</p>
+                            <p style="font-size: 12px; margin-top: 4px;">Using cached data if available</p>
+                        </div>
+                    `;
+                } else {
+                    // We have cached data, just log the error
+                    log('Using cached meetings data due to load failure');
+                    filterMeetings();
+                }
             }
         }
         
@@ -1424,10 +1518,10 @@ Commands and output will appear here...
             try {
                 const result = await ipcRenderer.invoke('start-recording-ui', sessionName);
                 if (result.success) {
-                    log(`✅ Recording started: ${result.message}`);
+                    log(`Recording started: ${result.message}`);
                     startStatusMonitoring();
                 } else {
-                    log(`❌ Failed to start: ${result.error}`);
+                    log(`Failed to start: ${result.error}`);
                     setUIState('ready');
                 }
             } catch (error) {
@@ -1465,7 +1559,7 @@ Commands and output will appear here...
             try {
                 const result = await ipcRenderer.invoke('stop-recording-ui');
                 if (result.success) {
-                    log(`✅ Recording stopped: ${result.message}`);
+                    log(`Recording stopped: ${result.message}`);
                     log('🔄 Processing audio - transcription and summarization running in background');
                     log('💡 Meeting list will refresh automatically when processing completes');
                     
@@ -1476,7 +1570,7 @@ Commands and output will appear here...
                     }, 5000); // 5 seconds
                     
                 } else {
-                    log(`❌ Failed to stop: ${result.error}`);
+                    log(`Failed to stop: ${result.error}`);
                     setUIState('ready');
                     processingMeetings.delete(currentSessionName);
                     renderMeetingsList();
@@ -1531,9 +1625,9 @@ Commands and output will appear here...
                             setStatus('ready', 'Complete');
                             processingMeetings.delete(sessionName);
                             
-                            // Reload meetings list
+                            // Force refresh meetings list after processing
                             setTimeout(() => {
-                                loadMeetings();
+                                loadMeetings(true);
                             }, 1000);
                         } else {
                             log(`Processing failed: ${result.error}`);
@@ -1572,26 +1666,47 @@ Commands and output will appear here...
 
         // Auto-clear state on startup
         async function initializeApp() {
-            log('🚀 Initializing Steno Recorder...');
-            try {
-                await ipcRenderer.invoke('clear-state');
-                log('✅ State cleared on startup');
-            } catch (error) {
-                log(`⚠️ Failed to clear state: ${error.message}`);
-            }
+            // Clear debug logs for fresh start
+            clearDebugLog();
             
-            // Request notification permission
+            log('Initializing Steno Recorder...');
+            
+            // Request notification permission early (non-blocking)
             if (Notification.permission === 'default') {
-                await Notification.requestPermission();
+                Notification.requestPermission().catch(() => {}); // Don't wait for this
             }
             
-            // Load meetings and check status once
-            await Promise.all([
-                loadMeetings(),
-                checkInitialStatus()
-            ]);
+            // Parallel startup: Load meetings first (user sees content immediately),
+            // then clear state and check status in background
+            const startTime = Date.now();
             
-            log('📱 Steno Recorder ready');
+            try {
+                // Start loading meetings immediately (most important for user experience)
+                const meetingsPromise = loadMeetings();
+                
+                // Do maintenance tasks in parallel
+                const maintenancePromise = Promise.all([
+                    ipcRenderer.invoke('clear-state').catch(err => 
+                        log(`State clear failed: ${err.message}`)
+                    ),
+                    checkInitialStatus().catch(err => 
+                        log(`Status check failed: ${err.message}`)
+                    )
+                ]);
+                
+                // Wait for meetings to load (priority), maintenance can finish in background
+                await meetingsPromise;
+                log(`Meetings loaded (${Date.now() - startTime}ms)`);
+                
+                // Wait for maintenance to complete
+                await maintenancePromise;
+                
+            } catch (error) {
+                log(`Initialization error: ${error.message}`);
+                // Continue anyway - app should still be usable
+            }
+            
+            log(`Steno Recorder ready (${Date.now() - startTime}ms total)`);
         }
 
         // Startup setup flow
@@ -1609,6 +1724,11 @@ Commands and output will appear here...
         // Settings button click handler
         settingsBtn.addEventListener('click', () => {
             toggleSettings();
+        });
+        
+        // Debug button click handler
+        debugBtn.addEventListener('click', () => {
+            toggleDebug();
         });
         
         // Listen for debug messages from backend
@@ -1714,7 +1834,7 @@ Commands and output will appear here...
                 
                 if (result.success && result.allGood) {
                     // Everything is ready - continue to main app
-                    log('✅ System ready!');
+                    log('System ready!');
                     return;
                 } else {
                     // Show setup overlay with current status
@@ -1784,32 +1904,40 @@ Commands and output will appear here...
 
         // Listen for automatic meetings refresh from backend (legacy - kept for compatibility)
         ipcRenderer.on('meetings-refreshed', (event, meetingsData) => {
-            log('✅ Processing complete! Meeting list automatically refreshed');
+            log('Processing complete! Meeting list automatically refreshed');
             meetings = meetingsData || [];
             filterMeetings(); // Apply current search filter and render
         });
         
         // Listen for processing completion events
         ipcRenderer.on('processing-complete', (event, data) => {
-            log(`✅ Processing complete for: ${data.sessionName}`);
+            log(`Processing complete for: ${data.sessionName}`);
             processingMeetings.delete(data.sessionName);
             
-            if (data.success && data.meetingData) {
-                // Update the specific meeting instead of refreshing the entire list
-                const tempMeetingIndex = meetings.findIndex(meeting => 
-                    meeting.session_info?.name === data.sessionName && meeting.summary === 'Pending...'
-                );
-                
-                if (tempMeetingIndex !== -1) {
-                    // Replace temporary meeting with processed data
-                    meetings[tempMeetingIndex] = data.meetingData;
+            if (data.success) {
+                if (data.meetingData) {
+                    // Update the specific meeting with processed data
+                    const tempMeetingIndex = meetings.findIndex(meeting => 
+                        meeting.session_info?.name === data.sessionName && meeting.summary === 'Pending...'
+                    );
+                    
+                    if (tempMeetingIndex !== -1) {
+                        // Replace temporary meeting with processed data
+                        meetings[tempMeetingIndex] = data.meetingData;
+                        meetingsLastLoaded = Date.now(); // Update cache timestamp
+                    } else {
+                        // Add new meeting if temp entry not found
+                        meetings.unshift(data.meetingData);
+                        meetingsLastLoaded = Date.now(); // Update cache timestamp
+                    }
+                    
+                    // Re-render the meetings list with updated data
+                    filterMeetings();
                 } else {
-                    // Add new meeting if temp entry not found
-                    meetings.unshift(data.meetingData);
+                    // No meetingData provided - force refresh from backend
+                    log('No meeting data in completion event - forcing refresh');
+                    loadMeetings(true);
                 }
-                
-                // Re-render the meetings list with updated data
-                filterMeetings();
                 
                 // Show native notification
                 if (Notification.permission === 'granted') {
@@ -1828,7 +1956,7 @@ Commands and output will appear here...
                 );
                 
                 setStatus('ready', 'Processing failed');
-                log(`❌ Processing failed: ${data.error}`);
+                log(`Processing failed: ${data.error}`);
                 filterMeetings();
             }
         });
@@ -1845,6 +1973,19 @@ Commands and output will appear here...
                 loadPrompts();
             } else {
                 settingsPanel.style.right = '-400px';
+            }
+        }
+        
+        let debugVisible = false;
+        
+        function toggleDebug() {
+            const debugPanel = document.getElementById('debug-panel');
+            debugVisible = !debugVisible;
+            
+            if (debugVisible) {
+                debugPanel.style.right = '0';
+            } else {
+                debugPanel.style.right = '-500px';
             }
         }
         
@@ -1910,32 +2051,38 @@ Commands and output will appear here...
             }
         }
         
+        function clearDebugLog() {
+            // Clear both debug consoles
+            const setupConsole = document.getElementById('debug-console');
+            if (setupConsole) {
+                setupConsole.textContent = 'StenoAI Setup Debug Console\nCommands and output will appear here...\n\n';
+            }
+            
+            const debugPanel = document.getElementById('debug-console-panel');
+            if (debugPanel) {
+                debugPanel.textContent = 'StenoAI Debug Console\nSession started - ready for activity...\n\n';
+            }
+        }
+
         function debugLog(message) {
-            const console = document.getElementById('debug-console');
             const timestamp = new Date().toLocaleTimeString();
-            console.textContent += `[${timestamp}] ${message}\n`;
-            console.scrollTop = console.scrollHeight;
+            const formattedMessage = `[${timestamp}] ${message}\n`;
+            
+            // Log to setup wizard console if it exists (during setup)
+            const setupConsole = document.getElementById('debug-console');
+            if (setupConsole) {
+                setupConsole.textContent += formattedMessage;
+                setupConsole.scrollTop = setupConsole.scrollHeight;
+            }
+            
+            // Always log to debug panel
+            const debugPanel = document.getElementById('debug-console-panel');
+            if (debugPanel) {
+                debugPanel.textContent += formattedMessage;
+                debugPanel.scrollTop = debugPanel.scrollHeight;
+            }
         }
         
-        async function testSetupWizard() {
-            const btn = document.getElementById('test-setup-btn');
-            btn.textContent = 'Opening Setup...';
-            btn.disabled = true;
-            
-            // Switch to setup view
-            showSetup();
-            
-            // Clear and initialize debug console
-            const console = document.getElementById('debug-console');
-            console.textContent = 'StenoAI Setup Debug Console - Session Started\n';
-            debugLog('Setup wizard opened from settings');
-            
-            // Reset button after a moment
-            setTimeout(() => {
-                btn.textContent = 'Test Setup Wizard';
-                btn.disabled = false;
-            }, 2000);
-        }
         
         async function clearSystemState() {
             const btn = document.getElementById('clear-state-btn');
@@ -1946,10 +2093,10 @@ Commands and output will appear here...
                 const result = await ipcRenderer.invoke('clear-state');
                 if (result.success) {
                     btn.textContent = 'State Cleared!';
-                    log('✅ Manual state clear successful');
+                    log('Manual state clear successful');
                 } else {
                     btn.textContent = 'Clear Failed';
-                    log('❌ Manual state clear failed: ' + result.error);
+                    log('Manual state clear failed: ' + result.error);
                 }
                 
                 setTimeout(() => {
