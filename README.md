@@ -60,31 +60,40 @@ npm run build
 ```bash
 cd app
 
-# Patch release (bug fixes): 0.0.4 → 0.0.5
-npm version patch && git push && git push --tags
+# Patch release (bug fixes): 0.0.5 → 0.0.6
+npm version patch
+git add package.json package-lock.json
+git commit -m "Version bump to $(node -p "require('./package.json').version")"
+git push
+git tag v$(node -p "require('./package.json').version")
+git push origin v$(node -p "require('./package.json').version")
 
-# Minor release (new features): 0.0.4 → 0.1.0
-npm version minor && git push && git push --tags
+# Minor release (new features): 0.0.6 → 0.1.0
+npm version minor
+git add package.json package-lock.json
+git commit -m "Version bump to $(node -p "require('./package.json').version")"
+git push
+git tag v$(node -p "require('./package.json').version")
+git push origin v$(node -p "require('./package.json').version")
 
-# Major release (breaking changes): 0.0.4 → 1.0.0
-npm version major && git push && git push --tags
+# Major release (breaking changes): 0.0.6 → 1.0.0
+npm version major
+git add package.json package-lock.json
+git commit -m "Version bump to $(node -p "require('./package.json').version")"
+git push
+git tag v$(node -p "require('./package.json').version")
+git push origin v$(node -p "require('./package.json').version")
 ```
 
 **What happens:**
-1. `npm version` updates package.json, creates commit & git tag
-2. `git push` sends the version commit to GitHub
-3. `git push --tags` triggers GitHub Actions workflow
-4. Workflow automatically builds DMGs for Intel & Apple Silicon
-5. Creates GitHub release with downloadable assets
+1. `npm version` updates package.json and package-lock.json locally
+2. Manual commit ensures version changes are saved to git
+3. `git push` sends the version commit to GitHub
+4. `git tag` creates the version tag locally
+5. `git push origin tag` triggers GitHub Actions workflow
+6. Workflow automatically builds DMGs for Intel & Apple Silicon
+7. Creates GitHub release with downloadable assets
 
-**Example release workflow:**
-```bash
-cd app
-npm version patch    # Creates commit "0.0.5" and tag "v0.0.5"
-git push            # Push the version commit
-git push --tags     # Trigger release workflow
-# ✅ Release appears at: github.com/ruzin/stenoai/releases
-```
 
 ## Models & Performance
 

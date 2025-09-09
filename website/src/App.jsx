@@ -6,8 +6,9 @@ import { Mic, ShieldCheck, Zap, Sparkles, Cpu, FileText, Lock, Download, Github 
 const GITHUB_URL = "https://github.com/ruzin/stenoai";
 
 // Download URLs pointing to latest release assets
+// GitHub's /latest/download/ automatically finds the correct versioned file
 const DOWNLOAD_URL_MAC_SILICON = "https://github.com/ruzin/stenoai/releases/latest/download/stenoAI-macos-arm64.dmg";
-const DOWNLOAD_URL_MAC_INTEL = "https://github.com/ruzin/stenoai/releases/latest/download/stenoAI-macos-intel.dmg";
+const DOWNLOAD_URL_MAC_INTEL = "https://github.com/ruzin/stenoai/releases/latest/download/stenoAI-macos-x64.dmg";
 
 const features = [
   {

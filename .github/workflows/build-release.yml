@@ -66,7 +66,7 @@ jobs:
           ### 📦 Downloads
           
           - **Apple Silicon (M1-M4)**: `stenoAI-macos-arm64.dmg`
-          - **Intel Macs**: `stenoAI-macos-intel.dmg`
+          - **Intel Macs**: `stenoAI-macos-x64.dmg`
           
           ### 🚀 First Time Setup
           1. Download the appropriate DMG for your Mac
@@ -80,5 +80,18 @@ jobs:
           - Internet connection for initial setup
           - Microphone access permissions
         files: |
-          app/dist/StenoAI-${{ github.event.inputs.version || steps.package_version.outputs.version }}-x64.dmg
-          app/dist/StenoAI-${{ github.event.inputs.version || steps.package_version.outputs.version }}-arm64.dmg
+          app/dist/stenoAI-macos-${{ github.event.inputs.version || steps.package_version.outputs.version }}-x64.dmg
+          app/dist/stenoAI-macos-${{ github.event.inputs.version || steps.package_version.outputs.version }}-arm64.dmg
+    
+    - name: Create website-friendly download aliases
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      working-directory: app/dist
+      run: |
+        version="${{ github.event.inputs.version || steps.package_version.outputs.version }}"
+        # Create copies with website-expected filenames
+        cp "stenoAI-macos-${version}-x64.dmg" "stenoAI-macos-x64.dmg"
+        cp "stenoAI-macos-${version}-arm64.dmg" "stenoAI-macos-arm64.dmg"
+        # Upload to the same release
+        gh release upload "${GITHUB_REF_NAME}" stenoAI-macos-x64.dmg --clobber
+        gh release upload "${GITHUB_REF_NAME}" stenoAI-macos-arm64.dmg --clobber
