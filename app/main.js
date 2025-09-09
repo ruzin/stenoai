@@ -570,26 +570,50 @@ ipcMain.handle('setup-python', async () => {
     const projectRoot = path.join(__dirname, '..');
     const venvPath = path.join(projectRoot, 'venv');
     
+    sendDebugLog(`Working directory: ${projectRoot}`);
+    
     // Create virtual environment if it doesn't exist
     if (!fs.existsSync(venvPath)) {
+      sendDebugLog('Python virtual environment not found, creating...');
+      sendDebugLog('$ python3 -m venv venv');
+      
       await new Promise((resolve, reject) => {
         const process = spawn('python3', ['-m', 'venv', 'venv'], {
-          cwd: projectRoot
+          cwd: projectRoot,
+          stdio: 'pipe'
+        });
+        
+        process.stdout.on('data', (data) => {
+          sendDebugLog(data.toString().trim());
+        });
+        
+        process.stderr.on('data', (data) => {
+          sendDebugLog('STDERR: ' + data.toString().trim());
         });
         
         process.on('close', (code) => {
           if (code === 0) {
+            sendDebugLog('Virtual environment created successfully');
             resolve();
           } else {
+            sendDebugLog(`Virtual environment creation failed with exit code: ${code}`);
             reject(new Error('Failed to create virtual environment'));
           }
         });
         
-        process.on('error', reject);
+        process.on('error', (error) => {
+          sendDebugLog(`Process error: ${error.message}`);
+          reject(error);
+        });
       });
+    } else {
+      sendDebugLog('Python virtual environment already exists');
     }
     
     // Install requirements including Whisper
+    sendDebugLog('Installing Python dependencies...');
+    sendDebugLog('$ pip install -r requirements.txt openai-whisper');
+    
     return new Promise((resolve) => {
       const pythonPath = path.join(venvPath, 'bin', 'python');
       const process = spawn(pythonPath, ['-m', 'pip', 'install', '-r', 'requirements.txt', 'openai-whisper'], {
@@ -598,18 +622,29 @@ ipcMain.handle('setup-python', async () => {
       });
       
       let output = '';
+      
       process.stdout.on('data', (data) => {
-        output += data.toString();
+        const text = data.toString().trim();
+        if (text) {
+          sendDebugLog(text);
+          output += text;
+        }
       });
       
       process.stderr.on('data', (data) => {
-        output += data.toString();
+        const text = data.toString().trim();
+        if (text) {
+          sendDebugLog('STDERR: ' + text);
+          output += text;
+        }
       });
       
       process.on('close', (code) => {
         if (code === 0) {
+          sendDebugLog('✅ Python dependencies installation completed successfully');
           resolve({ success: true, message: 'Python dependencies and Whisper installed' });
         } else {
+          sendDebugLog(`❌ Python dependencies installation failed with exit code: ${code}`);
           resolve({ success: false, error: `Installation failed: ${output}` });
         }
       });
@@ -623,64 +658,146 @@ ipcMain.handle('setup-python', async () => {
   }
 });
 
+// Add IPC handler for sending debug logs to frontend
+function sendDebugLog(message) {
+  // Send to all windows (in case there are multiple)
+  const allWindows = BrowserWindow.getAllWindows();
+  allWindows.forEach(window => {
+    window.webContents.send('debug-log', message);
+  });
+}
+
 ipcMain.handle('setup-ollama-and-model', async () => {
   try {
+    sendDebugLog('$ Checking for existing Ollama installation...');
+    sendDebugLog('$ which ollama || /opt/homebrew/bin/ollama --version || /usr/local/bin/ollama --version');
+    
     // Check if Ollama is already installed
     const checkResult = await new Promise((resolve) => {
       exec('which ollama || /opt/homebrew/bin/ollama --version || /usr/local/bin/ollama --version', { timeout: 5000 }, (error, stdout, stderr) => {
+        if (stdout) sendDebugLog(stdout.trim());
+        if (stderr) sendDebugLog('STDERR: ' + stderr.trim());
+        if (error) sendDebugLog('ERROR: ' + error.message);
         resolve(!error && stdout.trim());
       });
     });
     
     // Install Ollama if not present
     if (!checkResult) {
+      sendDebugLog('Ollama not found, checking for Homebrew...');
+      sendDebugLog('$ which brew || /opt/homebrew/bin/brew --version || /usr/local/bin/brew --version');
+      
       // First check if Homebrew is installed
       const brewCheck = await new Promise((resolve) => {
         exec('which brew || /opt/homebrew/bin/brew --version || /usr/local/bin/brew --version', { timeout: 5000 }, (error, stdout, stderr) => {
+          if (stdout) sendDebugLog(stdout.trim());
+          if (stderr) sendDebugLog('STDERR: ' + stderr.trim());
+          if (error) sendDebugLog('ERROR: ' + error.message);
           resolve(!error && stdout.trim());
         });
       });
       
       // Install Homebrew if missing
       if (!brewCheck) {
-        console.log('Installing Homebrew...');
+        sendDebugLog('Homebrew not found, installing...');
+        sendDebugLog('$ /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"');
         await new Promise((resolve, reject) => {
-          exec('/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"', 
-               { timeout: 600000 }, (error, stdout, stderr) => {
-            if (!error) {
+          const process = exec('/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"', 
+               { timeout: 600000 });
+          
+          process.stdout.on('data', (data) => {
+            sendDebugLog(data.toString().trim());
+          });
+          
+          process.stderr.on('data', (data) => {
+            sendDebugLog('STDERR: ' + data.toString().trim());
+          });
+          
+          process.on('close', (code) => {
+            if (code === 0) {
+              sendDebugLog('Homebrew installation completed successfully');
               resolve();
             } else {
+              sendDebugLog(`Homebrew installation failed with exit code: ${code}`);
               reject(new Error('Failed to install Homebrew automatically'));
             }
           });
         });
+      } else {
+        sendDebugLog('Homebrew found, proceeding with Ollama installation...');
       }
       
       // Now install Ollama via Homebrew
+      sendDebugLog('$ brew install ollama');
       await new Promise((resolve, reject) => {
-        exec('brew install ollama', { timeout: 300000 }, (error, stdout, stderr) => {
-          if (!error) {
+        const process = exec('brew install ollama', { timeout: 300000 });
+        
+        process.stdout.on('data', (data) => {
+          sendDebugLog(data.toString().trim());
+        });
+        
+        process.stderr.on('data', (data) => {
+          sendDebugLog('STDERR: ' + data.toString().trim());
+        });
+        
+        process.on('close', (code) => {
+          if (code === 0) {
+            sendDebugLog('Ollama installation completed successfully');
             resolve();
           } else {
+            sendDebugLog(`Ollama installation failed with exit code: ${code}`);
             reject(new Error('Failed to install Ollama via Homebrew'));
           }
         });
       });
+    } else {
+      sendDebugLog('Ollama already installed, skipping installation step');
     }
     
     // Start Ollama service
+    sendDebugLog('Starting Ollama service...');
+    sendDebugLog('$ ollama serve &');
     exec('ollama serve', { detached: true });
     
     // Wait for service to start then pull model
+    sendDebugLog('Waiting 3 seconds for Ollama service to start...');
     await new Promise(resolve => setTimeout(resolve, 3000));
     
+    sendDebugLog('Downloading AI model (this may take several minutes)...');
+    sendDebugLog('$ ollama pull llama3.2:3b');
+    
     return new Promise((resolve) => {
-      exec('ollama pull llama3.2:3b', { timeout: 600000 }, (error, stdout, stderr) => {
-        if (!error) {
+      const process = exec('ollama pull llama3.2:3b', { timeout: 600000 });
+      
+      process.stdout.on('data', (data) => {
+        sendDebugLog(data.toString().trim());
+      });
+      
+      process.stderr.on('data', (data) => {
+        sendDebugLog('STDERR: ' + data.toString().trim());
+      });
+      
+      process.on('close', (code) => {
+        if (code === 0) {
+          sendDebugLog('✅ AI model download completed successfully');
           resolve({ success: true, message: 'Ollama and AI model ready' });
         } else {
-          resolve({ success: false, error: 'Failed to download AI model' });
+          sendDebugLog(`❌ AI model download failed with exit code: ${code}`);
+          resolve({ 
+            success: false, 
+            error: 'Failed to download AI model', 
+            details: `Exit code: ${code}` 
+          });
         }
+      });
+      
+      process.on('error', (error) => {
+        sendDebugLog(`❌ Process error: ${error.message}`);
+        resolve({ 
+          success: false, 
+          error: 'Failed to download AI model', 
+          details: error.message 
+        });
       });
     });
   } catch (error) {
@@ -693,6 +810,9 @@ ipcMain.handle('setup-whisper', async () => {
     const projectRoot = path.join(__dirname, '..');
     const pythonPath = path.join(projectRoot, 'venv', 'bin', 'python');
     
+    sendDebugLog('Installing Whisper speech recognition...');
+    sendDebugLog(`$ ${pythonPath} -m pip install openai-whisper`);
+    
     return new Promise((resolve) => {
       const process = spawn(pythonPath, ['-m', 'pip', 'install', 'openai-whisper'], {
         cwd: projectRoot,
@@ -700,18 +820,29 @@ ipcMain.handle('setup-whisper', async () => {
       });
       
       let output = '';
+      
       process.stdout.on('data', (data) => {
-        output += data.toString();
+        const text = data.toString().trim();
+        if (text) {
+          sendDebugLog(text);
+          output += text;
+        }
       });
       
       process.stderr.on('data', (data) => {
-        output += data.toString();
+        const text = data.toString().trim();
+        if (text) {
+          sendDebugLog('STDERR: ' + text);
+          output += text;
+        }
       });
       
       process.on('close', (code) => {
         if (code === 0) {
+          sendDebugLog('✅ Whisper installation completed successfully');
           resolve({ success: true, message: 'Whisper installed successfully' });
         } else {
+          sendDebugLog(`❌ Whisper installation failed with exit code: ${code}`);
           resolve({ success: false, error: `Whisper installation failed: ${output}` });
         }
       });

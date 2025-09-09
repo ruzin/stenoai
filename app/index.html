@@ -963,6 +963,17 @@
                 </div>
             </div>
             
+            <div class="setup-debug" style="margin: 24px 0;">
+                <h3 style="margin-bottom: 12px; display: flex; align-items: center; gap: 8px; font-size: 16px;">
+                    <span>🐛 Debug Console</span>
+                    <button onclick="toggleDebugConsole()" style="background: none; border: 1px solid #444; color: #888; padding: 4px 8px; border-radius: 4px; font-size: 11px; cursor: pointer;">Toggle</button>
+                </h3>
+                <div id="debug-console" style="background: #000; border: 1px solid #333; border-radius: 6px; padding: 12px; font-family: 'Monaco', 'Menlo', monospace; font-size: 11px; line-height: 1.4; color: #0f0; height: 200px; overflow-y: auto; white-space: pre-wrap;">Welcome to StenoAI Setup Debug Console
+Commands and output will appear here...
+
+</div>
+            </div>
+            
             <div class="setup-actions">
                 <button class="btn btn-primary" id="setup-auto-start">Begin First-Time Setup</button>
                 <button class="btn btn-primary" id="setup-continue" style="display: none;">Continue to App</button>
@@ -1008,6 +1019,13 @@
                 </button>
                 <p style="font-size: 12px; color: #888; margin-top: 8px;">
                     Use this if recordings appear stuck or the system won't start new recordings.
+                </p>
+                
+                <button class="btn" id="test-setup-btn" onclick="testSetupWizard()" style="margin-top: 12px;">
+                    Test Setup Wizard
+                </button>
+                <p style="font-size: 12px; color: #888; margin-top: 8px;">
+                    Run the first-time setup process to test installation and see detailed logs.
                 </p>
             </div>
             
@@ -1593,16 +1611,28 @@
             toggleSettings();
         });
         
+        // Listen for debug messages from backend
+        ipcRenderer.on('debug-log', (event, message) => {
+            debugLog(message);
+        });
+        
         async function runSetupProcess() {
             setupInProgress = true;
             setupAutoStart.style.display = 'none';
             
+            // Clear and initialize debug console
+            const debugConsole = document.getElementById('debug-console');
+            debugConsole.textContent = 'StenoAI Setup Debug Console - Setup Started\n';
+            debugLog('='.repeat(50));
+            debugLog('Starting First-Time Setup Process');
+            debugLog('='.repeat(50));
+            
             const steps = [
-                { id: 'step-system', handler: 'setup-system-check' },
-                { id: 'step-python', handler: 'setup-python' },
-                { id: 'step-whisper', handler: 'setup-whisper' },
-                { id: 'step-ollama', handler: 'setup-ollama-and-model' },
-                { id: 'step-test', handler: 'setup-test' }
+                { id: 'step-system', handler: 'setup-system-check', name: 'System Check' },
+                { id: 'step-python', handler: 'setup-python', name: 'Python Dependencies' },
+                { id: 'step-whisper', handler: 'setup-whisper', name: 'Whisper Installation' },
+                { id: 'step-ollama', handler: 'setup-ollama-and-model', name: 'Ollama + AI Model' },
+                { id: 'step-test', handler: 'setup-test', name: 'System Test' }
             ];
             
             for (const step of steps) {
@@ -1614,6 +1644,10 @@
                 element.classList.add('active');
                 statusElement.textContent = 'Running...';
                 
+                // Log to debug console
+                debugLog(`\n>>> Starting: ${step.name}`);
+                debugLog(`Command: ${step.handler}`);
+                
                 try {
                     const result = await ipcRenderer.invoke(step.handler);
                     
@@ -1621,10 +1655,20 @@
                         element.classList.remove('active');
                         element.classList.add('completed');
                         statusElement.textContent = result.message || 'Completed';
+                        debugLog(`✅ SUCCESS: ${result.message || 'Completed'}`);
                     } else {
                         element.classList.remove('active');
                         element.classList.add('failed');
                         statusElement.textContent = result.error || 'Failed';
+                        
+                        debugLog(`❌ FAILED: ${result.error || 'Failed'}`);
+                        
+                        // Show detailed error in debug console if available
+                        if (result.details) {
+                            debugLog('--- Error Details ---');
+                            debugLog(result.details);
+                            debugLog('--- End Error Details ---');
+                        }
                         
                         // Show retry button on failure
                         setupAutoStart.textContent = 'Retry Setup';
@@ -1636,6 +1680,9 @@
                     element.classList.remove('active');
                     element.classList.add('failed');
                     statusElement.textContent = 'Failed';
+                    
+                    debugLog(`❌ EXCEPTION: ${error.message}`);
+                    debugLog(`Stack trace: ${error.stack}`);
                     
                     // Show retry button on failure
                     setupAutoStart.textContent = 'Retry Setup';
@@ -1649,6 +1696,11 @@
             }
             
             log('🎉 Setup completed successfully!');
+            debugLog('\n' + '='.repeat(50));
+            debugLog('🎉 Setup completed successfully!');
+            debugLog('All components installed and tested.');
+            debugLog('='.repeat(50));
+            
             setupContinue.style.display = 'block';
             setupInProgress = false;
         }
@@ -1847,6 +1899,42 @@
                 btn.textContent = 'Setup Failed - Try Again';
                 btn.disabled = false;
             }
+        }
+        
+        function toggleDebugConsole() {
+            const console = document.getElementById('debug-console');
+            if (console.style.display === 'none') {
+                console.style.display = 'block';
+            } else {
+                console.style.display = 'none';
+            }
+        }
+        
+        function debugLog(message) {
+            const console = document.getElementById('debug-console');
+            const timestamp = new Date().toLocaleTimeString();
+            console.textContent += `[${timestamp}] ${message}\n`;
+            console.scrollTop = console.scrollHeight;
+        }
+        
+        async function testSetupWizard() {
+            const btn = document.getElementById('test-setup-btn');
+            btn.textContent = 'Opening Setup...';
+            btn.disabled = true;
+            
+            // Switch to setup view
+            showSetup();
+            
+            // Clear and initialize debug console
+            const console = document.getElementById('debug-console');
+            console.textContent = 'StenoAI Setup Debug Console - Session Started\n';
+            debugLog('Setup wizard opened from settings');
+            
+            // Reset button after a moment
+            setTimeout(() => {
+                btn.textContent = 'Test Setup Wizard';
+                btn.disabled = false;
+            }, 2000);
         }
         
         async function clearSystemState() {
