@@ -1,10 +1,14 @@
 <div align="center">
-  <img src="website/public/stenoai-logo.svg" alt="StenoAI Logo" width="120" height="120">
+  <img src="website/public/stenoai-logo-512.svg" alt="StenoAI Logo" width="120" height="120">
   
   # StenoAI
 </div>
 
 AI-powered meeting transcription and summarization that runs entirely on your device using small lanuage model locally hosted or Bring you Own AI (OpenAI or Anthropic) API keys. Privacy first approach & zero service costs.
+
+<div align="center">
+  <img src="website/public/app-screenshot.png" alt="StenoAI Interface" width="600">
+</div>
 
 ## Features
 
