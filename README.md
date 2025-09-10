@@ -4,7 +4,7 @@
   # StenoAI
 </div>
 
-AI-powered meeting transcription and summarization that runs entirely on your device.
+AI-powered meeting transcription and summarization that runs entirely on your device using small lanuage model locally hosted or Bring you Own AI (OpenAI or Anthropic) API keys. Privacy first approach & zero service costs.
 
 ## Features
 
@@ -19,6 +19,54 @@ Download the latest release for your Mac:
 
 - [Apple Silicon (M1/M2/M3/M4)](https://github.com/ruzin/stenoai/releases/latest/download/stenoAI-macos-arm64.dmg)
 - [Intel Macs](https://github.com/ruzin/stenoai/releases/latest/download/stenoAI-macos-intel.dmg)
+
+## Troubleshooting
+
+### Debug Logs
+
+StenoAI includes a built-in debug panel for troubleshooting issues:
+
+**In-App Debug Panel:**
+1. Launch StenoAI
+2. Click the 🔨 hammer icon (next to settings)
+3. The debug panel shows real-time logs of all operations
+
+**Terminal Logging (Advanced):**
+For detailed system-level logs, run the app from Terminal:
+```bash
+# Launch StenoAI with full logging
+/Applications/StenoAI.app/Contents/MacOS/StenoAI
+```
+
+This displays comprehensive logs including:
+- Python subprocess output
+- Whisper transcription details  
+- Ollama API communication
+- HTTP requests and responses
+- Error stack traces
+- Performance timing
+
+**System Console Logs:**
+For system-level debugging:
+```bash
+# View recent StenoAI-related logs
+log show --last 10m --predicate 'process CONTAINS "StenoAI" OR eventMessage CONTAINS "ollama"' --info
+
+# Monitor live logs
+log stream --predicate 'eventMessage CONTAINS "ollama" OR process CONTAINS "StenoAI"' --level info
+```
+
+**Common Issues:**
+- **Recording stops early**: Check microphone permissions and available disk space
+- **"Processing failed"**: Usually Ollama service or model issues - check terminal logs
+- **Empty transcripts**: Whisper couldn't detect speech - verify audio input levels
+- **Slow processing**: Normal for longer recordings - Ollama processing is CPU-intensive
+
+### Logs Location
+- **User Data**: `~/Library/Application Support/stenoai/`
+- **Recordings**: `~/Library/Application Support/stenoai/recordings/`
+- **Transcripts**: `~/Library/Application Support/stenoai/transcripts/`
+- **Summaries**: `~/Library/Application Support/stenoai/output/`
 
 ## Development
 

@@ -1719,6 +1719,8 @@ Session started - waiting for activity...
         
         setupContinue.addEventListener('click', () => {
             setupOverlay.style.display = 'none';
+            // Refresh meetings after setup completion to ensure fresh data
+            loadMeetings(true);
         });
         
         // Settings button click handler
