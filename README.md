@@ -60,7 +60,7 @@ log stream --predicate 'eventMessage CONTAINS "ollama" OR process CONTAINS "Sten
 - **Recording stops early**: Check microphone permissions and available disk space
 - **"Processing failed"**: Usually Ollama service or model issues - check terminal logs
 - **Empty transcripts**: Whisper couldn't detect speech - verify audio input levels
-- **Slow processing**: Normal for longer recordings - Ollama processing is CPU-intensive
+- **Slow processing**: Normal for longer recordings - Ollama processing is CPU-intensive especially on older intel Macs
 
 ### Logs Location
 - **User Data**: `~/Library/Application Support/stenoai/`
