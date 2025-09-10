@@ -4,7 +4,7 @@
   # StenoAI
 </div>
 
-AI-powered meeting transcription and summarization that runs entirely on your device using small lanuage model locally hosted or Bring you Own AI (OpenAI or Anthropic) API keys. Privacy first approach & zero service costs.
+AI-powered meeting transcription and summarization that runs entirely on your device using small lanuage models locally hosted. Privacy first approach & zero service costs.
 
 <div align="center">
   <img src="website/public/app-screenshot.png" alt="StenoAI Interface" width="600">
