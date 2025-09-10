@@ -921,6 +921,15 @@
 
                 <div class="meeting-section">
                     <h2 class="section-title">
+                        <span>👥</span> Participants
+                    </h2>
+                    <div class="section-content" id="detail-participants">
+                        <!-- Participants will be loaded here -->
+                    </div>
+                </div>
+
+                <div class="meeting-section">
+                    <h2 class="section-title">
                         <span>🔑</span> Key Points
                     </h2>
                     <ul class="key-points-list" id="detail-key-points">
@@ -1133,6 +1142,7 @@ Session started - waiting for activity...
         const detailDate = document.getElementById('detail-date');
         const detailDuration = document.getElementById('detail-duration');
         const detailSummary = document.getElementById('detail-summary');
+        const detailParticipants = document.getElementById('detail-participants');
         const detailKeyPoints = document.getElementById('detail-key-points');
         const detailActionItems = document.getElementById('detail-action-items');
         const detailTranscript = document.getElementById('detail-transcript');
@@ -1474,6 +1484,13 @@ Session started - waiting for activity...
             detailDuration.textContent = durationText;
             
             detailSummary.textContent = selectedMeeting.summary || 'No summary available';
+            
+            // Participants
+            if (selectedMeeting.participants && selectedMeeting.participants.length > 0) {
+                detailParticipants.textContent = selectedMeeting.participants.join(', ');
+            } else {
+                detailParticipants.innerHTML = '<span style="color: #666;">No participants identified</span>';
+            }
             
             // Key points
             detailKeyPoints.innerHTML = '';

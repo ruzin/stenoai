@@ -163,9 +163,10 @@ class OllamaSummarizer:
         logger.info(f"Ollama ready with model {self.model_name}")
         return True
         
-    def _create_prompt(self, transcript: str, *, meeting_title: str = "", meeting_date: str = "", timezone: str = "Europe/London") -> str:
+    def _create_detailed_prompt(self, transcript: str, *, meeting_title: str = "", meeting_date: str = "", timezone: str = "Europe/London") -> str:
         """
         Create a comprehensive prompt for high-quality meeting analysis like Claude.
+        (Legacy detailed prompt - kept for reference and can be switched back if needed)
         """
         return f"""You are an expert meeting analyst. Provide a comprehensive, detailed analysis of this meeting transcript.
 
@@ -208,6 +209,36 @@ TRANSCRIPT TO ANALYZE:
 {transcript}
 
 Provide a thorough, professional analysis in the JSON format above."""
+
+    def _create_prompt(self, transcript: str, *, meeting_title: str = "", meeting_date: str = "", timezone: str = "Europe/London") -> str:
+        """
+        Create a simple, clear prompt for meeting analysis.
+        """
+        return f"""You are a helpful meeting assistant. Summarise this meeting transcript into participants, key points and any next steps mentioned. Only base your summary on what was explicitly discussed in the transcript. 
+
+IMPORTANT: Do not infer or assume information that wasn't directly mentioned. If you need to make any reasonable inference, clearly indicate it as such (e.g., "Based on the discussion, it appears...").
+
+Include a brief overview so someone can quickly understand what happened in the meeting, who were the participants, what were the key points discussed, and what are the next steps if any were mentioned.
+
+Return the response in this exact JSON format:
+{{
+  "overview": "Brief overview of what happened in the meeting",
+  "participants": ["List actual participant names mentioned, or leave empty if none identified"],
+  "key_points": [
+    "Important point or topic discussed",
+    "Another key point from the meeting"
+  ],
+  "next_steps": [
+    {{
+      "description": "Next step or action item as explicitly mentioned", 
+      "assignee": "Person responsible or null if unclear",
+      "deadline": "Deadline mentioned or null"
+    }}
+  ]
+}}
+
+TRANSCRIPT:
+{transcript}"""
 
     def summarize_transcript(self, transcript: str, duration_minutes: int) -> Optional[MeetingTranscript]:
         """
@@ -317,23 +348,32 @@ Provide a thorough, professional analysis in the JSON format above."""
             
             # Create MeetingTranscript object
             try:
-                # Parse action items
+                # Parse next steps (formerly key_actions)
                 actions = []
-                for action_data in structured_data.get('key_actions', []):
+                for action_data in structured_data.get('next_steps', []):
                     actions.append(ActionItem(
                         description=action_data.get('description', ''),
                         assignee=action_data.get('assignee', '') or '',
                         deadline=action_data.get('deadline')
                     ))
                 
-                # Parse decisions
+                # Parse key points as decisions (keeping the same data structure for compatibility)
                 decisions = []
-                for decision_data in structured_data.get('key_decisions', []):
-                    decisions.append(Decision(
-                        decision=decision_data.get('decision', ''),
-                        assignee=decision_data.get('assignee', '') or '',
-                        context=decision_data.get('context', '')
-                    ))
+                for point in structured_data.get('key_points', []):
+                    if isinstance(point, str):
+                        # Simple string format
+                        decisions.append(Decision(
+                            decision=point,
+                            assignee='',
+                            context=''
+                        ))
+                    elif isinstance(point, dict):
+                        # Object format (fallback for complex key points)
+                        decisions.append(Decision(
+                            decision=point.get('point', ''),
+                            assignee='',
+                            context=point.get('context', '')
+                        ))
                 
                 meeting_summary = MeetingTranscript(
                     duration=f"{duration_minutes} minutes",

@@ -260,8 +260,9 @@ Transcript:
         
         return {
             "summary": summary_result.overview,  # MeetingTranscript uses 'overview'
-            "key_points": [decision.decision for decision in summary_result.key_decisions],  # Extract decision text
-            "action_items": [action.description for action in summary_result.key_actions]  # Extract action description
+            "participants": summary_result.participants,  # Extract participants list
+            "key_points": [decision.decision for decision in summary_result.key_decisions],  # Extract key points from decisions
+            "action_items": [action.description for action in summary_result.key_actions]  # Extract next steps from actions
         }
     
     async def process_recording(self, audio_file: str, session_name: str = "Recording") -> dict:
@@ -334,6 +335,7 @@ Transcript:
                 "duration_minutes": duration_minutes
             },
             "summary": summary_data["summary"],
+            "participants": summary_data["participants"],
             "key_points": summary_data["key_points"], 
             "action_items": summary_data["action_items"],
             "transcript": transcript_data["transcript_text"]
@@ -791,6 +793,7 @@ def list_meetings():
                 essential_meeting = {
                     "session_info": data.get("session_info", {}),
                     "summary": data.get("summary", ""),
+                    "participants": data.get("participants", []),
                     "key_points": data.get("key_points", []),
                     "action_items": data.get("action_items", []),
                     "transcript": data.get("transcript", "")
