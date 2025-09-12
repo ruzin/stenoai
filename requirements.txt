@@ -5,13 +5,3 @@ ollama>=0.1.7
 click>=8.1.0
 pydantic>=2.5.0
 pathlib2>=2.3.7
-
-# Teams Integration Dependencies
-msal>=1.24.0
-msgraph-core>=0.2.2
-msgraph-sdk>=1.0.0
-botbuilder-core>=4.15.0
-botbuilder-schema>=4.15.0
-azure-identity>=1.14.0
-aiohttp>=3.8.0
-python-dotenv>=1.0.0

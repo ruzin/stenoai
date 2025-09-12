@@ -3,58 +3,43 @@
 This file contains instructions for Claude Code to help with this meeting transcription POC project.
 
 ## Project Overview
-This is a comprehensive meeting transcription service with two modes:
+This is a local meeting transcription service:
 
-### Local POC (Original)
+### Desktop App
 - sounddevice for audio recording
 - OpenAI Whisper for transcription
 - Ollama for LLM summarization
-- Click for CLI interface
-
-### Teams Integration (New)
-- Microsoft Graph API for calendar monitoring
-- Bot Framework for automated meeting joining
-- Teams transcript download and processing
-- Integration with existing LLM pipeline
+- Electron GUI with CLI backend
 
 ## Project Structure
 ```
 steno-poc/
-├── src/
+├── app/                  # Electron desktop app
+├── src/                  # Python backend
 │   ├── audio_recorder.py      # Local audio recording
 │   ├── transcriber.py         # Whisper transcription
 │   ├── summarizer.py          # Ollama LLM processing
-│   ├── models.py             # Data models
-│   └── teams/                # Teams integration
-│       ├── auth.py           # Azure authentication
-│       ├── graph_client.py   # Microsoft Graph API
-│       └── calendar_monitor.py # Meeting detection
-├── main.py                   # Local POC CLI
-├── teams_main.py            # Teams integration CLI
-├── config/                  # Configuration files
-├── recordings/              # Local audio files
-├── transcripts/             # Local transcripts
-└── output/                  # Processed summaries
+│   └── models.py             # Data models
+├── simple_recorder.py    # CLI interface
+├── website/              # Marketing site
+├── recordings/           # Local audio files
+├── transcripts/          # Local transcripts
+└── output/              # Processed summaries
 ```
 
 ## Development Commands
 
-### Local POC Commands
-- Check status: `python main.py status`
-- Start recording: `python main.py start --output meeting_name`
-- Stop recording: `python main.py stop`
-- Transcribe audio: `python main.py transcribe filename.wav`
-- Summarize transcript: `python main.py summarize filename.txt`
-- Full pipeline: `python main.py pipeline filename.wav`
+### CLI Commands
+- Check status: `python simple_recorder.py status`
+- Start recording: `python simple_recorder.py start --name meeting_name`
+- Stop recording: `python simple_recorder.py stop`
+- Transcribe audio: `python simple_recorder.py transcribe filename.wav`
+- Summarize transcript: `python simple_recorder.py summarize filename.txt`
+- Full pipeline: `python simple_recorder.py pipeline filename.wav`
 
-### Teams Integration Commands
-- Setup guide: `python teams_main.py setup`
-- Install dependencies: `python teams_main.py install-deps`
-- Test authentication: `python teams_main.py test-auth`
-- Test Graph API: `python teams_main.py test-graph`
-- Monitor calendar: `python teams_main.py monitor --duration 300`
-- List meetings: `python teams_main.py list-meetings`
-- Check status: `python teams_main.py status`
+### Desktop App Commands
+- Start app: `cd app && npm start`
+- Build app: `cd app && npm run build`
 
 ## Setup Instructions
 1. Install Ollama: `brew install ollama` (macOS)
@@ -66,7 +51,7 @@ steno-poc/
 7. Install package: `pip install -e .`
 
 ## Testing Commands
-- Test basic functionality: `python main.py status`
+- Test basic functionality: `python simple_recorder.py status`
 - Test audio devices: `python -c "import sounddevice; print(sounddevice.query_devices())"`
 - Test Ollama: `ollama list`
 
