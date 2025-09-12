@@ -382,6 +382,9 @@ ipcMain.handle('start-recording-ui', async (_, sessionName) => {
     // Start recording (removed clear-state to prevent race conditions)
     
     console.log('Starting long recording process...');
+    sendDebugLog(`Starting recording process: ${sessionName || 'Meeting'}`);
+    sendDebugLog('$ python simple_recorder.py record 3600');
+    
     const pythonPath = path.join(__dirname, '..', 'venv', 'bin', 'python');
     const scriptPath = path.join(__dirname, '..', 'simple_recorder.py');
     
@@ -397,6 +400,11 @@ ipcMain.handle('start-recording-ui', async (_, sessionName) => {
     currentRecordingProcess.stdout.on('data', (data) => {
       const output = data.toString();
       console.log('Recording stdout:', output);
+      
+      // Send real-time output to debug panel (same as runPythonScript)
+      output.split('\n').forEach(line => {
+        if (line.trim()) sendDebugLog(line.trim());
+      });
       
       // Background recording process handles complete pipeline - just notify when done
       if (output.includes('✅ Complete processing finished!')) {
@@ -436,11 +444,18 @@ ipcMain.handle('start-recording-ui', async (_, sessionName) => {
     });
 
     currentRecordingProcess.stderr.on('data', (data) => {
-      console.log('Recording stderr:', data.toString());
+      const output = data.toString();
+      console.log('Recording stderr:', output);
+      
+      // Send real-time stderr to debug panel (same as runPythonScript)
+      output.split('\n').forEach(line => {
+        if (line.trim()) sendDebugLog('STDERR: ' + line.trim());
+      });
     });
 
     currentRecordingProcess.on('close', (code) => {
       console.log(`Recording process closed with code ${code}`);
+      sendDebugLog(`Recording process completed with exit code: ${code}`);
       currentRecordingProcess = null;
     });
 
