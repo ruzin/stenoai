@@ -17,6 +17,20 @@ AI-powered meeting transcription and summarization that runs entirely on your de
 - **Privacy-first** - no cloud dependencies
 - **macOS desktop app** with intuitive interface
 
+## Future Roadmap
+
+### Enhanced Features
+- Custom summarization templates
+- Speaker Diarisation
+- Ability to select different local models like qwen, gemma etc. Currently, limited to llama3.2
+
+### Bring Your Own AI API
+- Support for OpenAI GPT models via API key
+- Anthropic Claude integration for summarization
+- Azure OpenAI service compatibility
+- User choice between local and cloud processing
+- Web Browser/Web GPU based processing
+
 ## Installation
 
 Download the latest release for your Mac:
@@ -140,18 +154,6 @@ stenoai/
 ├── transcripts/          # Text output
 └── output/              # Summaries
 ```
-
-## Future Roadmap
-
-### Bring Your Own AI API
-- Support for OpenAI GPT models via API key
-- Anthropic Claude integration for summarization
-- Azure OpenAI service compatibility
-- User choice between local and cloud processing
-- Web Browser/Web GPU based processing
-
-### Enhanced Features
-- Custom summarization templates
 
 ## Troubleshooting
 
