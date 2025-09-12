@@ -122,9 +122,9 @@ git push origin v$(node -p "require('./package.json').version")
 ## Models & Performance
 
 **Transcription Models** (Whisper):
-- `base`: Fast, good for most meetings
-- `small`: Better accuracy for complex audio
-- `medium`: High accuracy for important meetings
+- `small`: Default model - good accuracy and speed on Apple Silicon (recommended)
+- `base`: Faster but lower accuracy for basic meetings
+- `medium`: High accuracy for important meetings (slower)
 
 **Summarization Models** (Ollama):
 - `llama3.2:3b`: Good quality, moderate speed (recommended)
@@ -148,11 +148,10 @@ stenoai/
 - Anthropic Claude integration for summarization
 - Azure OpenAI service compatibility
 - User choice between local and cloud processing
+- Web Browser/Web GPU based processing
 
 ### Enhanced Features
-- Multi-language support
 - Custom summarization templates
-- Meeting analytics and insights
 
 ## Troubleshooting
 

@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 class WhisperTranscriber:
-    def __init__(self, model_size: str = "base"):
+    def __init__(self, model_size: str = "small"):
         if not WHISPER_AVAILABLE:
             raise ImportError("Whisper is not installed. Please install openai-whisper.")
         """
