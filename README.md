@@ -2,8 +2,6 @@
   <img src="website/public/stenoai-logo-512.svg" alt="StenoAI Logo" width="120" height="120">
   
   # StenoAI
-  
-  [🌐 Website](https://ruzin.github.io/stenoai/)
 </div>
 
 AI-powered meeting transcription and summarization that runs entirely on your device using small lanuage models locally hosted. Privacy first approach & zero service costs.
