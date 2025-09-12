@@ -22,9 +22,22 @@ AI-powered meeting transcription and summarization that runs entirely on your de
 Download the latest release for your Mac:
 
 - [Apple Silicon (M1/M2/M3/M4)](https://github.com/ruzin/stenoai/releases/latest/download/stenoAI-macos-arm64.dmg)
-- [Intel Macs](https://github.com/ruzin/stenoai/releases/latest/download/stenoAI-macos-intel.dmg)
+- [Intel Macs](https://github.com/ruzin/stenoai/releases/latest/download/stenoAI-macos-x64.dmg)
 
-Note: I havent yet signed up for an Apple developer account, so apple with complain when you try to open it the first time, so just right click and press open again and it should be ok.
+### Installing on macOS
+
+Since StenoAI is not code-signed with an Apple Developer certificate, you'll need to bypass macOS security warnings:
+
+1. **Download DMG** → You may see "StenoAI is damaged and can't be opened"
+2. **Right-click the DMG** → Select **"Open"** → Click **"Open"** in the dialog
+3. **Drag StenoAI to Applications** folder
+4. **If the app won't launch**, run this command in Terminal:
+   ```bash
+   xattr -cr /Applications/StenoAI.app
+   ```
+5. **Right-click StenoAI in Applications** → Select **"Open"** → Click **"Open"**
+
+The app will then work normally on subsequent launches.
 
 You can run it locally as well (see below) if you dont want to install a dmg.
 
@@ -49,6 +62,9 @@ pip install -r requirements.txt
 brew install ollama
 ollama serve &
 ollama pull llama3.2:3b
+
+# Install ffmpeg (required for audio processing)
+brew install ffmpeg
 
 # Frontend
 cd app

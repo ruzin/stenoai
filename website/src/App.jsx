@@ -43,6 +43,10 @@ const faqs = [
     a: "Unlimited local transcription and local summarisation on your device, with no account required.",
   },
   {
+    q: "How do I install on macOS?",
+    a: "Since stenoAI isn't code-signed, you'll need to: (1) Right-click the DMG and select 'Open', (2) Drag the app to Applications, (3) If it won't launch, run 'xattr -cr /Applications/StenoAI.app' in Terminal, then (4) Right-click the app and select 'Open'. It will work normally after that.",
+  },
+  {
     q: "What does Pro add?",
     a: "When available, stenoAI can send your notes to your chosen provider (e.g., OpenAI or Anthropic) using your own API key to generate richer executive summaries, action items, and sentiment tags — only when you explicitly enable it.",
   },
@@ -52,7 +56,7 @@ const faqs = [
   },
   {
     q: "What platforms are supported?",
-    a: "Currently macOS (Apple Silicon & Intel). Windows, Linux, iOS, and Android are on our roadmap.",
+    a: "Currently macOS only (Apple Silicon & Intel). Performance on non M series Macs is limited due to lack of dedicated AI inference in older intel chips.",
   },
 ];
 

@@ -254,16 +254,27 @@ Transcript:
         if summary_result is None:
             return {
                 "summary": "Failed to generate summary",
+                "participants": [],
                 "key_points": [],
                 "action_items": []
             }
         
-        return {
-            "summary": summary_result.overview,  # MeetingTranscript uses 'overview'
-            "participants": summary_result.participants,  # Extract participants list
-            "key_points": [decision.decision for decision in summary_result.key_decisions],  # Extract key points from decisions
-            "action_items": [action.description for action in summary_result.key_actions]  # Extract next steps from actions
-        }
+        # Defensive extraction from summary_result
+        try:
+            return {
+                "summary": getattr(summary_result, 'overview', '') or '',
+                "participants": getattr(summary_result, 'participants', []) or [],
+                "key_points": [getattr(decision, 'decision', '') for decision in getattr(summary_result, 'key_decisions', [])],
+                "action_items": [getattr(action, 'description', '') for action in getattr(summary_result, 'key_actions', [])]
+            }
+        except Exception as e:
+            print(f"⚠️ Error extracting summary data: {e}")
+            return {
+                "summary": "Summary extraction failed",
+                "participants": [],
+                "key_points": [],
+                "action_items": []
+            }
     
     async def process_recording(self, audio_file: str, session_name: str = "Recording") -> dict:
         """Complete processing: transcribe + summarize."""
@@ -334,10 +345,10 @@ Transcript:
                 "duration_seconds": int(duration_seconds) if 'duration_seconds' in locals() else None,
                 "duration_minutes": duration_minutes
             },
-            "summary": summary_data["summary"],
-            "participants": summary_data["participants"],
-            "key_points": summary_data["key_points"], 
-            "action_items": summary_data["action_items"],
+            "summary": summary_data.get("summary", "") or "",
+            "participants": summary_data.get("participants", []) or [],
+            "key_points": summary_data.get("key_points", []) or [], 
+            "action_items": summary_data.get("action_items", []) or [],
             "transcript": transcript_data["transcript_text"]
         }
         
@@ -894,6 +905,32 @@ def setup_check():
             checks.append(("❌ Ollama", "not found - run: brew install ollama"))
     except Exception as e:
         checks.append(("❌ Ollama", f"Error: {e}"))
+    
+    # Check ffmpeg
+    try:
+        ffmpeg_found = False
+        possible_ffmpeg_paths = [
+            'ffmpeg',  # Try PATH first
+            '/opt/homebrew/bin/ffmpeg',  # Homebrew on Apple Silicon
+            '/usr/local/bin/ffmpeg',     # Homebrew on Intel
+            '/usr/bin/ffmpeg',           # System installation
+        ]
+        
+        for path in possible_ffmpeg_paths:
+            try:
+                result = subprocess.run([path, '-version'], 
+                                      capture_output=True, timeout=5)
+                if result.returncode == 0:
+                    checks.append(("✅ ffmpeg", f"found at {path}"))
+                    ffmpeg_found = True
+                    break
+            except (subprocess.TimeoutExpired, FileNotFoundError):
+                continue
+        
+        if not ffmpeg_found:
+            checks.append(("❌ ffmpeg", "not found - run: brew install ffmpeg"))
+    except Exception as e:
+        checks.append(("❌ ffmpeg", f"Error: {e}"))
     
     # Skip Ollama model check during setup - service starts automatically when needed
     # Just verify Ollama binary is installed
