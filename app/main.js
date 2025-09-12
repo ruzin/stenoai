@@ -624,6 +624,119 @@ ipcMain.handle('setup-ollama', async () => {
   }
 });
 
+ipcMain.handle('setup-ffmpeg', async () => {
+  try {
+    sendDebugLog('$ Checking for existing ffmpeg installation...');
+    sendDebugLog('$ which ffmpeg || /opt/homebrew/bin/ffmpeg -version || /usr/local/bin/ffmpeg -version');
+    
+    // Check if ffmpeg is already installed and get its path
+    const ffmpegPath = await new Promise((resolve) => {
+      exec('which ffmpeg', { timeout: 5000 }, (error, stdout, stderr) => {
+        if (!error && stdout.trim()) {
+          const path = stdout.trim();
+          sendDebugLog(`Found ffmpeg at: ${path}`);
+          resolve(path);
+        } else {
+          // Try common Homebrew locations
+          exec('/opt/homebrew/bin/ffmpeg -version', { timeout: 5000 }, (error2, stdout2) => {
+            if (!error2) {
+              sendDebugLog('Found ffmpeg at: /opt/homebrew/bin/ffmpeg');
+              resolve('/opt/homebrew/bin/ffmpeg');
+            } else {
+              exec('/usr/local/bin/ffmpeg -version', { timeout: 5000 }, (error3, stdout3) => {
+                if (!error3) {
+                  sendDebugLog('Found ffmpeg at: /usr/local/bin/ffmpeg');
+                  resolve('/usr/local/bin/ffmpeg');
+                } else {
+                  sendDebugLog('ffmpeg not found in any common locations');
+                  resolve(null);
+                }
+              });
+            }
+          });
+        }
+      });
+    });
+    
+    // Install ffmpeg if not present
+    if (!ffmpegPath) {
+      sendDebugLog('ffmpeg not found, checking for Homebrew...');
+      sendDebugLog('$ which brew || /opt/homebrew/bin/brew --version || /usr/local/bin/brew --version');
+      
+      // First check if Homebrew is installed
+      const brewCheck = await new Promise((resolve) => {
+        exec('which brew || /opt/homebrew/bin/brew --version || /usr/local/bin/brew --version', { timeout: 5000 }, (error, stdout, stderr) => {
+          if (stdout) sendDebugLog(stdout.trim());
+          if (stderr) sendDebugLog('STDERR: ' + stderr.trim());
+          if (error) sendDebugLog('ERROR: ' + error.message);
+          resolve(!error && stdout.trim());
+        });
+      });
+      
+      // Install Homebrew if missing (same logic as ollama)
+      if (!brewCheck) {
+        sendDebugLog('Homebrew not found, installing...');
+        sendDebugLog('$ /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"');
+        await new Promise((resolve, reject) => {
+          const process = exec('/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"', 
+               { timeout: 600000 });
+          
+          process.stdout.on('data', (data) => {
+            sendDebugLog(data.toString().trim());
+          });
+          
+          process.stderr.on('data', (data) => {
+            sendDebugLog('STDERR: ' + data.toString().trim());
+          });
+          
+          process.on('close', (code) => {
+            if (code === 0) {
+              sendDebugLog('Homebrew installation completed successfully');
+              resolve();
+            } else {
+              sendDebugLog(`Homebrew installation failed with exit code: ${code}`);
+              reject(new Error('Failed to install Homebrew automatically'));
+            }
+          });
+        });
+      } else {
+        sendDebugLog('Homebrew found, proceeding with ffmpeg installation...');
+      }
+      
+      // Now install ffmpeg via Homebrew
+      sendDebugLog('$ brew install ffmpeg');
+      await new Promise((resolve, reject) => {
+        const process = exec('brew install ffmpeg', { timeout: 300000 });
+        
+        process.stdout.on('data', (data) => {
+          sendDebugLog(data.toString().trim());
+        });
+        
+        process.stderr.on('data', (data) => {
+          sendDebugLog('STDERR: ' + data.toString().trim());
+        });
+        
+        process.on('close', (code) => {
+          if (code === 0) {
+            sendDebugLog('ffmpeg installation completed successfully');
+            resolve();
+          } else {
+            sendDebugLog(`ffmpeg installation failed with exit code: ${code}`);
+            reject(new Error('Failed to install ffmpeg via Homebrew'));
+          }
+        });
+      });
+    } else {
+      sendDebugLog('ffmpeg already installed, skipping installation');
+    }
+    
+    return { success: true, message: 'ffmpeg ready' };
+  } catch (error) {
+    sendDebugLog(`ffmpeg setup failed: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+});
+
 ipcMain.handle('setup-python', async () => {
   try {
     const projectRoot = path.join(__dirname, '..');

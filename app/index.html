@@ -1023,6 +1023,18 @@
                     </div>
                 </div>
                 
+                <div class="setup-step" id="step-ffmpeg">
+                    <div class="step-icon">🎥</div>
+                    <div class="step-content">
+                        <h3>Install ffmpeg</h3>
+                        <p>Audio/video processing toolkit for advanced audio handling</p>
+                        <div class="step-status" id="ffmpeg-status">Pending...</div>
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="ffmpeg-progress"></div>
+                        </div>
+                    </div>
+                </div>
+                
                 <div class="setup-step" id="step-test">
                     <div class="step-icon">✅</div>
                     <div class="step-content">
@@ -1075,6 +1087,7 @@ Commands and output will appear here...
                         <li>Audio recording libraries</li>
                         <li>Whisper speech recognition</li>
                         <li>Ollama AI service and models</li>
+                        <li>ffmpeg audio processing toolkit</li>
                     </ul>
                 </div>
                 
@@ -1771,6 +1784,7 @@ Session started - waiting for activity...
                 { id: 'step-python', handler: 'setup-python', name: 'Python Dependencies' },
                 { id: 'step-whisper', handler: 'setup-whisper', name: 'Whisper Installation' },
                 { id: 'step-ollama', handler: 'setup-ollama-and-model', name: 'Ollama + AI Model' },
+                { id: 'step-ffmpeg', handler: 'setup-ffmpeg', name: 'ffmpeg Installation' },
                 { id: 'step-test', handler: 'setup-test', name: 'System Test' }
             ];
             
