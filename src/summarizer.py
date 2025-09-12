@@ -102,6 +102,123 @@ class OllamaSummarizer:
             logger.error(f"Failed to start Ollama service: {e}")
             return False
     
+    def _repair_json(self, json_text: str) -> Optional[str]:
+        """
+        Attempt to repair common JSON formatting issues.
+        
+        Args:
+            json_text: The malformed JSON string
+            
+        Returns:
+            Repaired JSON string or None if repair fails
+        """
+        try:
+            logger.info("Attempting JSON repair...")
+            repaired = json_text
+            
+            # Common repair patterns
+            repairs = [
+                # Fix unquoted strings in arrays (the original issue)
+                (r'(\[|\,)\s*([^"\[\]{},:]+?)\s*(\]|\,)', r'\1 "\2" \3'),
+                # Fix trailing commas
+                (r',\s*}', '}'),
+                (r',\s*]', ']'),
+                # Fix missing quotes around object keys
+                (r'(\{|\,)\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*:', r'\1 "\2":'),
+                # Fix single quotes to double quotes
+                (r"'([^']*)'", r'"\1"'),
+            ]
+            
+            for pattern, replacement in repairs:
+                import re
+                old_repaired = repaired
+                repaired = re.sub(pattern, replacement, repaired)
+                if old_repaired != repaired:
+                    logger.info(f"Applied repair: {pattern}")
+            
+            # Test if repaired JSON is valid
+            json.loads(repaired)
+            logger.info("JSON repair successful")
+            return repaired
+            
+        except Exception as e:
+            logger.error(f"JSON repair failed: {e}")
+            return None
+    
+    def _create_enhanced_fallback(self, malformed_response: str, transcript: str, duration_minutes: int) -> MeetingTranscript:
+        """
+        Create an enhanced fallback summary by extracting whatever data we can.
+        
+        Args:
+            malformed_response: The malformed JSON response from Ollama
+            transcript: Original transcript
+            duration_minutes: Meeting duration
+            
+        Returns:
+            MeetingTranscript with extracted data
+        """
+        logger.info("Creating enhanced fallback summary...")
+        
+        # Try to extract useful information from malformed response
+        overview = "Meeting transcript was processed but JSON parsing failed."
+        participants = []
+        key_points = []
+        
+        try:
+            # Extract overview if present
+            if '"overview"' in malformed_response:
+                import re
+                overview_match = re.search(r'"overview":\s*"([^"]*)"', malformed_response)
+                if overview_match:
+                    overview = overview_match.group(1)
+                    logger.info("Extracted overview from malformed response")
+            
+            # Extract participants if present
+            if '"participants"' in malformed_response:
+                # Try to find participant names between quotes
+                import re
+                participants_section = re.search(r'"participants":\s*\[(.*?)\]', malformed_response, re.DOTALL)
+                if participants_section:
+                    # Extract quoted strings
+                    quoted_names = re.findall(r'"([^"]+)"', participants_section.group(1))
+                    participants = quoted_names
+                    logger.info(f"Extracted {len(participants)} participants from malformed response")
+            
+            # Extract key points if present
+            if '"key_points"' in malformed_response:
+                import re
+                key_points_section = re.search(r'"key_points":\s*\[(.*?)\]', malformed_response, re.DOTALL)
+                if key_points_section:
+                    # Extract quoted strings
+                    quoted_points = re.findall(r'"([^"]+)"', key_points_section.group(1))
+                    key_points = quoted_points
+                    logger.info(f"Extracted {len(key_points)} key points from malformed response")
+            
+        except Exception as e:
+            logger.warning(f"Failed to extract data from malformed response: {e}")
+        
+        # Create fallback summary with extracted data
+        fallback_summary = MeetingTranscript(
+            duration=f"{duration_minutes} minutes",
+            overview=overview,
+            participants=participants,
+            key_actions=[],  # Create empty action items since parsing failed
+            key_decisions=[],  # Create empty decisions since parsing failed  
+            transcript=transcript
+        )
+        
+        # Add key points as decisions for now (since we don't have proper action items)
+        for point in key_points:
+            from .models import Decision
+            fallback_summary.key_decisions.append(Decision(
+                decision=point,
+                assignee='',
+                context='Extracted from partially parsed response'
+            ))
+        
+        logger.info("Created enhanced fallback summary with extracted data")
+        return fallback_summary
+    
     def _ensure_model_available(self) -> bool:
         """Ensure the required model is downloaded and available."""
         try:
@@ -220,10 +337,30 @@ IMPORTANT: Do not infer or assume information that wasn't directly mentioned. If
 
 Include a brief overview so someone can quickly understand what happened in the meeting, who were the participants, what were the key points discussed, and what are the next steps if any were mentioned.
 
-Return the response in this exact JSON format:
+CRITICAL JSON FORMATTING RULES:
+1. ALL strings must be enclosed in double quotes "like this"
+2. Use null (not "null") for empty values
+3. NO trailing commas anywhere
+4. NO comments or extra text outside the JSON
+5. ALL array elements must be properly quoted strings
+6. If no participants, key points, or next steps are mentioned, return an empty array [] for that field.
+
+CORRECT FORMAT EXAMPLE:
+{{
+  "participants": ["John Smith", "Sarah Wilson"],
+  "key_points": ["Budget discussion", "Timeline review"]
+}}
+
+INCORRECT FORMAT (DO NOT DO THIS):
+{{
+  "participants": ["John", no other participants mentioned],
+  "key_points": ["Budget", timeline,]
+}}
+
+Return ONLY the response in this exact JSON format:
 {{
   "overview": "Brief overview of what happened in the meeting",
-  "participants": ["List actual participant names mentioned, or leave empty if none identified"],
+  "participants": [""],
   "key_points": [
     "Important point or topic discussed",
     "Another key point from the meeting"
@@ -305,7 +442,7 @@ TRANSCRIPT:
             logger.info(f"Response length: {len(response_text)} characters")
             logger.info(f"Response preview: {response_text[:200]}...")
             
-            # Try to parse JSON response
+            # Try to parse JSON response with repair functionality
             try:
                 # Remove any markdown formatting
                 if response_text.startswith('```json'):
@@ -320,6 +457,7 @@ TRANSCRIPT:
                     json_end = response_text.rfind('}') + 1
                     response_text = response_text[json_start:json_end].strip()
                 
+                # First attempt - try parsing as-is
                 structured_data = json.loads(response_text)
                 logger.info("Successfully parsed JSON response")
                 
@@ -327,14 +465,22 @@ TRANSCRIPT:
                 logger.error(f"Ollama returned invalid JSON: {e}")
                 logger.error(f"JSON parse error at position: {e.pos}")
                 logger.error(f"Full Ollama response: {response_text}")
-                logger.error(f"Response type: {type(response_text)}")
-                logger.info("Creating fallback summary due to JSON parsing failure...")
+                logger.info("Attempting simple JSON repair for unquoted strings...")
                 
-                # Create a basic fallback summary for non-English or failed parsing
+                # Simple fix for unquoted strings in arrays (the actual issue we encountered)
+                import re
+                repaired_json = re.sub(r'(\[|\,)\s*([^"\[\]{},:]+?)\s*(\]|\,)', r'\1 "\2" \3', response_text)
+                
                 try:
+                    structured_data = json.loads(repaired_json)
+                    logger.info("Successfully parsed repaired JSON response")
+                except json.JSONDecodeError:
+                    logger.error("JSON repair failed, creating fallback summary")
+                    
+                    # Create simple fallback summary with original user-friendly message
                     fallback_summary = MeetingTranscript(
                         duration=f"{duration_minutes} minutes",
-                        overview=f"Meeting transcript recorded but detailed analysis failed. Content appears to be in a non-English language or format not fully supported.",
+                        overview="Meeting transcript recorded but detailed analysis failed. Content appears to be in a non-English language or format not fully supported.",
                         participants=[],
                         key_actions=[],
                         key_decisions=[],
@@ -342,9 +488,6 @@ TRANSCRIPT:
                     )
                     logger.info("Created fallback summary")
                     return fallback_summary
-                except Exception as fallback_error:
-                    logger.error(f"Even fallback summary creation failed: {fallback_error}")
-                    return None
             
             # Create MeetingTranscript object
             try:
