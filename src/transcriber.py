@@ -6,6 +6,8 @@ except ImportError:
     WHISPER_AVAILABLE = False
 
 import logging
+import os
+import subprocess
 from pathlib import Path
 from typing import Optional
 
@@ -24,7 +26,49 @@ class WhisperTranscriber:
         """
         self.model_size = model_size
         self.model = None
+        self._ensure_ffmpeg_in_path()
         self._load_model()
+    
+    def _ensure_ffmpeg_in_path(self) -> None:
+        """
+        Ensure ffmpeg is in PATH for Whisper to use, handling DMG vs development environments.
+        This uses the same logic as Ollama path resolution.
+        """
+        # Check if ffmpeg is already in PATH
+        try:
+            subprocess.run(['ffmpeg', '-version'], capture_output=True, timeout=5, check=True)
+            logger.info("ffmpeg found in PATH")
+            return
+        except (subprocess.TimeoutExpired, subprocess.CalledProcessError, FileNotFoundError):
+            pass
+        
+        # ffmpeg not in PATH, try common Homebrew locations
+        possible_ffmpeg_paths = [
+            '/opt/homebrew/bin/ffmpeg',  # Homebrew on Apple Silicon
+            '/usr/local/bin/ffmpeg',     # Homebrew on Intel
+            '/usr/bin/ffmpeg',           # System installation
+        ]
+        
+        ffmpeg_found_path = None
+        for path in possible_ffmpeg_paths:
+            try:
+                result = subprocess.run([path, '-version'], 
+                                      capture_output=True, timeout=5, check=True)
+                ffmpeg_found_path = path
+                logger.info(f"Found ffmpeg at: {path}")
+                break
+            except (subprocess.TimeoutExpired, subprocess.CalledProcessError, FileNotFoundError):
+                continue
+        
+        if ffmpeg_found_path:
+            # Add the directory containing ffmpeg to PATH for this process
+            ffmpeg_dir = os.path.dirname(ffmpeg_found_path)
+            current_path = os.environ.get('PATH', '')
+            if ffmpeg_dir not in current_path:
+                os.environ['PATH'] = f"{ffmpeg_dir}:{current_path}"
+                logger.info(f"Added {ffmpeg_dir} to PATH for Whisper ffmpeg access")
+        else:
+            logger.warning("ffmpeg not found in any common location - transcription may fail")
         
     def _load_model(self) -> None:
         """Load the Whisper model."""
