@@ -3,6 +3,13 @@ name: Auto Release
 on:
   push:
     branches: [ main ]
+    paths:
+      - 'app/**'
+      - 'src/**'
+      - 'simple_recorder.py'
+      - 'requirements.txt'
+      - 'setup.py'
+      - 'CLAUDE.md'
   pull_request:
     branches: [ main ]
 
@@ -60,9 +67,9 @@ jobs:
           echo "🔨 Testing Electron build..."
           npm run pack
 
-  # Auto-versioning and release (runs on main push only)
+  # Auto-versioning and release (runs on main push of code changes only)
   release:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && !contains(github.event.head_commit.message, '[skip-release]')
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: macos-latest
     steps:
       - name: Checkout code
