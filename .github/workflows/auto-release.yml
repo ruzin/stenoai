@@ -13,6 +13,11 @@ on:
   pull_request:
     branches: [ main ]
 
+permissions:
+  contents: write
+  pull-requests: read
+  actions: read
+
 jobs:
   # CI Tests (runs on every PR)
   test:
