@@ -1,6 +1,6 @@
 # Claude Code Instructions
 
-This file contains instructions for Claude Code to help with this meeting transcription POC project.
+This file contains instructions for Claude Code to help with this meeting transcription POC project. Do not use excessive emojis anywhere.
 
 ## Project Overview
 This is a local meeting transcription service:
