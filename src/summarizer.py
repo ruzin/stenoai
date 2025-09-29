@@ -357,6 +357,9 @@ INCORRECT FORMAT (DO NOT DO THIS):
   "key_points": ["Budget", timeline,]
 }}
 
+TRANSCRIPT:
+{transcript}
+
 Return ONLY the response in this exact JSON format:
 {{
   "overview": "Brief overview of what happened in the meeting",
@@ -372,11 +375,8 @@ Return ONLY the response in this exact JSON format:
       "deadline": "Deadline mentioned or null"
     }}
   ]
-}}
-
-TRANSCRIPT:
-{transcript}"""
-
+}}"""
+        
     def summarize_transcript(self, transcript: str, duration_minutes: int) -> Optional[MeetingTranscript]:
         """
         Summarize a meeting transcript using Ollama.

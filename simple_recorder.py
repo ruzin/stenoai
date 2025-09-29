@@ -793,8 +793,17 @@ def list_meetings():
     summaries = list(output_dir.glob("*_summary.json"))
     meetings = []
     
-    # Sort by modification time first, then process (faster than reading all files first)
-    summaries.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+    # Sort by actual meeting date, with fallback to modification time
+    def get_meeting_date(summary_file):
+        try:
+            with open(summary_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                return data.get('session_info', {}).get('processed_at', '')
+        except:
+            # Fallback to file modification time if JSON read fails
+            return summary_file.stat().st_mtime
+    
+    summaries.sort(key=get_meeting_date, reverse=True)
     
     for summary_file in summaries:
         try:
@@ -817,6 +826,117 @@ def list_meetings():
     
     # Output as compact JSON for Electron (no indentation for speed)
     print(json.dumps(meetings, separators=(',', ':')))
+
+
+@cli.command()
+@click.argument('summary_file', required=True)
+def reprocess(summary_file):
+    """Reprocess a failed summary by re-running Ollama analysis on existing transcript"""
+    import json
+    from pathlib import Path
+    
+    async def run_reprocess():
+        recorder = SimpleRecorder()
+        summary_path = Path(summary_file)
+        
+        if not summary_path.exists():
+            print(f"ERROR: Summary file not found: {summary_file}")
+            return
+        
+        try:
+            # Load existing summary file
+            with open(summary_path, 'r') as f:
+                existing_data = json.load(f)
+            
+            # Get transcript from the data
+            transcript = existing_data.get('transcript', '')
+            if not transcript:
+                print("ERROR: No transcript found in summary file")
+                return
+            
+            session_name = existing_data.get('session_info', {}).get('name', 'Reprocessed')
+            duration_minutes = existing_data.get('session_info', {}).get('duration_minutes', 10)
+            
+            print(f"🔄 Reprocessing summary for: {session_name}")
+            print(f"📝 Transcript length: {len(transcript)} characters")
+            
+            # Re-run summarization
+            summary_data = await recorder.summarize_transcript(transcript, session_name)
+            
+            # Update the existing data with new summary
+            existing_data.update({
+                "summary": summary_data.get("summary", "") or "",
+                "participants": summary_data.get("participants", []) or [],
+                "key_points": summary_data.get("key_points", []) or [], 
+                "action_items": summary_data.get("action_items", []) or [],
+            })
+            
+            # Add reprocess timestamp
+            existing_data["session_info"]["reprocessed_at"] = datetime.now().isoformat()
+            
+            # Save updated summary
+            with open(summary_path, 'w') as f:
+                json.dump(existing_data, f, indent=2)
+            
+            print(f"✅ Summary reprocessed successfully: {summary_path}")
+            print(f"📋 New summary: {existing_data['summary'][:100]}...")
+            
+        except Exception as e:
+            print(f"ERROR: Failed to reprocess summary: {e}")
+    
+    asyncio.run(run_reprocess())
+
+
+@cli.command()
+def list_failed():
+    """List summary files that failed processing (have fallback summaries)"""
+    import json
+    # Don't initialize SimpleRecorder to avoid Ollama checks - just get the output directory
+    current_path = Path(__file__).parent
+    if "StenoAI.app" in str(current_path) or "Applications" in str(current_path):
+        # DMG/Production: Use Application Support folder
+        app_support = Path.home() / "Library" / "Application Support" / "stenoai"
+        output_dir = app_support / "output"
+    else:
+        # Development: Use project relative paths
+        output_dir = Path("output")
+    
+    # Get all summary files
+    summaries = list(output_dir.glob("*_summary.json"))
+    failed_summaries = []
+    
+    for summary_file in summaries:
+        try:
+            with open(summary_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                
+                # Check for signs of failed processing
+                summary_text = data.get("summary", "")
+                if (summary_text.startswith("Meeting transcript recorded but detailed analysis failed") or 
+                    summary_text.startswith("No transcript was generated") or
+                    len(data.get("participants", [])) == 0 and len(data.get("key_points", [])) == 0):
+                    failed_summaries.append({
+                        "file": str(summary_file),
+                        "name": data.get("session_info", {}).get("name", "Unknown"),
+                        "processed_at": data.get("session_info", {}).get("processed_at", "Unknown"),
+                        "summary": summary_text[:100] + "..." if len(summary_text) > 100 else summary_text
+                    })
+        except Exception as e:
+            continue
+    
+    if failed_summaries:
+        print("🔍 Failed Summaries Found:")
+        print("=" * 50)
+        for failed in failed_summaries:
+            print(f"📁 File: {failed['file']}")
+            print(f"📊 Name: {failed['name']}")
+            print(f"🕐 Processed: {failed['processed_at']}")
+            print(f"📝 Summary: {failed['summary']}")
+            print(f"🔄 Reprocess: python simple_recorder.py reprocess \"{failed['file']}\"")
+            print("-" * 50)
+        print(f"Total failed summaries: {len(failed_summaries)}")
+    else:
+        print("✅ No failed summaries found - all processing completed successfully!")
 
 
 @cli.command()

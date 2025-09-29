@@ -1,7 +1,8 @@
-const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
 const path = require('path');
 const { spawn, exec } = require('child_process');
 const fs = require('fs');
+const https = require('https');
 
 let mainWindow;
 let settingsWindow = null;
@@ -238,6 +239,21 @@ ipcMain.handle('clear-state', async () => {
     const result = await runPythonScript('simple_recorder.py', ['clear-state']);
     return { success: true, message: result };
   } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('reprocess-meeting', async (event, summaryFile) => {
+  try {
+    sendDebugLog(`🔄 Reprocessing meeting: ${summaryFile}`);
+    sendDebugLog(`$ python simple_recorder.py reprocess "${summaryFile}"`);
+    
+    const result = await runPythonScript('simple_recorder.py', ['reprocess', summaryFile]);
+    
+    sendDebugLog('✅ Meeting reprocessed successfully');
+    return { success: true, message: result };
+  } catch (error) {
+    sendDebugLog(`❌ Reprocessing failed: ${error.message}`);
     return { success: false, error: error.message };
   }
 });
@@ -1147,6 +1163,122 @@ ipcMain.handle('get-ai-prompts', async () => {
       success: true,
       summarization: 'Prompt not found in summarizer.py'
     };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+// Update checking functionality
+async function checkForUpdates() {
+  return new Promise((resolve) => {
+    const options = {
+      hostname: 'api.github.com',
+      path: '/repos/ruzin/stenoai/releases/latest',
+      method: 'GET',
+      headers: {
+        'User-Agent': 'StenoAI-Updater'
+      }
+    };
+
+    const req = https.request(options, (res) => {
+      let data = '';
+      
+      res.on('data', (chunk) => {
+        data += chunk;
+      });
+      
+      res.on('end', () => {
+        try {
+          const release = JSON.parse(data);
+          const latestVersion = release.tag_name.replace(/^v/, ''); // Remove 'v' prefix if present
+          
+          // Get current version from package.json
+          const packagePath = path.join(__dirname, 'package.json');
+          const packageContent = JSON.parse(fs.readFileSync(packagePath, 'utf8'));
+          const currentVersion = packageContent.version;
+          
+          console.log(`Current version: ${currentVersion}, Latest version: ${latestVersion}`);
+          
+          // Simple version comparison (works for semantic versioning)
+          const isUpdateAvailable = compareVersions(currentVersion, latestVersion) < 0;
+          
+          resolve({
+            success: true,
+            updateAvailable: isUpdateAvailable,
+            currentVersion: currentVersion,
+            latestVersion: latestVersion,
+            releaseUrl: release.html_url,
+            releaseName: release.name || `Version ${latestVersion}`,
+            downloadUrl: getDownloadUrl(release.assets)
+          });
+        } catch (error) {
+          console.error('Error parsing GitHub API response:', error);
+          resolve({ success: false, error: 'Failed to parse update data' });
+        }
+      });
+    });
+    
+    req.on('error', (error) => {
+      console.error('Error checking for updates:', error);
+      resolve({ success: false, error: error.message });
+    });
+    
+    req.setTimeout(10000, () => {
+      req.destroy();
+      resolve({ success: false, error: 'Update check timeout' });
+    });
+    
+    req.end();
+  });
+}
+
+function compareVersions(current, latest) {
+  const currentParts = current.split('.').map(Number);
+  const latestParts = latest.split('.').map(Number);
+  
+  for (let i = 0; i < Math.max(currentParts.length, latestParts.length); i++) {
+    const currentPart = currentParts[i] || 0;
+    const latestPart = latestParts[i] || 0;
+    
+    if (currentPart < latestPart) return -1;
+    if (currentPart > latestPart) return 1;
+  }
+  
+  return 0;
+}
+
+function getDownloadUrl(assets) {
+  // Find the appropriate download URL based on platform/architecture
+  const platform = process.platform;
+  const arch = process.arch;
+  
+  if (platform === 'darwin') {
+    // Look for macOS DMG files
+    const armAsset = assets.find(asset => 
+      asset.name.includes('arm64') && asset.name.includes('dmg')
+    );
+    const intelAsset = assets.find(asset => 
+      asset.name.includes('x64') && asset.name.includes('dmg')
+    );
+    
+    // Prefer ARM64 for Apple Silicon, fallback to Intel
+    if (arch === 'arm64' && armAsset) return armAsset.browser_download_url;
+    if (intelAsset) return intelAsset.browser_download_url;
+    if (armAsset) return armAsset.browser_download_url;
+  }
+  
+  // Fallback to first asset or releases page
+  return assets.length > 0 ? assets[0].browser_download_url : null;
+}
+
+ipcMain.handle('check-for-updates', async () => {
+  return await checkForUpdates();
+});
+
+ipcMain.handle('open-release-page', async (event, url) => {
+  try {
+    await shell.openExternal(url);
+    return { success: true };
   } catch (error) {
     return { success: false, error: error.message };
   }

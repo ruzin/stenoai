@@ -36,6 +36,8 @@ steno-poc/
 - Transcribe audio: `python simple_recorder.py transcribe filename.wav`
 - Summarize transcript: `python simple_recorder.py summarize filename.txt`
 - Full pipeline: `python simple_recorder.py pipeline filename.wav`
+- List failed summaries: `python simple_recorder.py list_failed`
+- Reprocess failed summary: `python simple_recorder.py reprocess path/to/summary.json`
 
 ### Desktop App Commands
 - Start app: `cd app && npm start`
