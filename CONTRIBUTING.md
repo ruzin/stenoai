@@ -87,8 +87,8 @@ Thank you for your interest in contributing to StenoAI! This guide will help you
 
 5. **Create a Pull Request**
    - Use the PR template to describe your changes
-   - Add appropriate labels (`major`, `minor`, or `patch`)
-   - If no labels are added, the change will be treated as a patch release
+   - Focus on clear description and testing details
+   - Be responsive to review feedback
 
 ### Code Style
 
@@ -108,19 +108,16 @@ Thank you for your interest in contributing to StenoAI! This guide will help you
 Before submitting a PR, please ensure:
 
 - [ ] CLI functionality works: `python simple_recorder.py --help`
-- [ ] Python modules import correctly
-- [ ] Electron app starts and basic functions work
-- [ ] No new linting errors introduced
+- [ ] Electron app starts: `cd app && npm start`
+- [ ] No breaking changes to existing functionality
 
 ## Versioning
 
-This project uses automated semantic versioning based on PR labels:
+This project uses manual semantic versioning:
 
-- **patch** (default): Bug fixes, small improvements
-- **minor**: New features, enhancements
-- **major**: Breaking changes
-
-When you create a PR, please add one of these labels. If no label is added, it will default to a patch release.
+- Maintainers handle version bumps and releases
+- Contributors focus on code quality, not versioning
+- Releases are created manually using `npm version` commands
 
 ## Types of Contributions
 
