@@ -3,8 +3,6 @@ from pydantic import BaseModel, Field
 from datetime import datetime
 import uuid
 
-# Data models for meeting transcription and analysis
-
 
 class ActionItem(BaseModel):
     description: str
