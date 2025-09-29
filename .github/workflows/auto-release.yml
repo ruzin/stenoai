@@ -1,0 +1,185 @@
+name: Auto Release
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  # CI Tests (runs on every PR)
+  test:
+    if: github.event_name == 'pull_request'
+    runs-on: macos-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install ruff black
+          pip install -r requirements.txt
+
+      - name: Lint Python code
+        run: |
+          echo "🐍 Linting Python code..."
+          ruff check . --fix
+          black --check .
+
+      - name: Test Python CLI
+        run: |
+          echo "🧪 Testing CLI functionality..."
+          python simple_recorder.py --help
+          python -c "import src.audio_recorder, src.transcriber, src.summarizer, src.models; print('✅ All Python modules import successfully')"
+
+      - name: Install Node.js dependencies
+        run: |
+          cd app
+          npm install
+
+      - name: Lint JavaScript code
+        run: |
+          cd app
+          echo "🔍 Linting JavaScript code..."
+          npx eslint main.js --fix || echo "⚠️ ESLint warnings (non-blocking)"
+
+      - name: Test Electron app build
+        run: |
+          cd app
+          echo "🔨 Testing Electron build..."
+          npm run pack
+
+  # Auto-versioning and release (runs on main push only)
+  release:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && !contains(github.event.head_commit.message, '[skip-release]')
+    runs-on: macos-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
+        run: |
+          cd app
+          npm install
+
+      - name: Determine version bump
+        id: version
+        run: |
+          echo "🏷️ Determining version bump from PR labels..."
+          
+          # Get the merge commit message to find PR number
+          COMMIT_MESSAGE=$(git log -1 --pretty=%B)
+          echo "Commit message: $COMMIT_MESSAGE"
+          
+          # Extract PR number from merge commit message
+          PR_NUMBER=$(echo "$COMMIT_MESSAGE" | grep -o '#[0-9]\+' | head -1 | sed 's/#//')
+          echo "PR Number: $PR_NUMBER"
+          
+          # Default to patch if no PR number found
+          BUMP_TYPE="patch"
+          
+          if [ ! -z "$PR_NUMBER" ]; then
+            # Get PR labels
+            LABELS=$(gh pr view $PR_NUMBER --json labels --jq '.labels[].name' || echo "")
+            echo "PR Labels: $LABELS"
+            
+            # Determine bump type from labels (priority: major > minor > patch)
+            if echo "$LABELS" | grep -q "major"; then
+              BUMP_TYPE="major"
+            elif echo "$LABELS" | grep -q "minor"; then
+              BUMP_TYPE="minor"
+            elif echo "$LABELS" | grep -q "patch"; then
+              BUMP_TYPE="patch"
+            else
+              # No version labels found, default to patch
+              BUMP_TYPE="patch"
+              echo "ℹ️ No version labels found, defaulting to patch"
+            fi
+          else
+            echo "ℹ️ No PR number found, defaulting to patch"
+          fi
+          
+          echo "bump_type=$BUMP_TYPE" >> $GITHUB_OUTPUT
+          echo "🎯 Version bump type: $BUMP_TYPE"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Bump version and create tag
+        id: bump
+        run: |
+          cd app
+          echo "📦 Current version: $(node -p "require('./package.json').version")"
+          
+          # Bump version using npm
+          npm version ${{ steps.version.outputs.bump_type }} --no-git-tag-version
+          
+          NEW_VERSION=$(node -p "require('./package.json').version")
+          echo "🚀 New version: $NEW_VERSION"
+          
+          # Commit version bump
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add package.json
+          git commit -m "Bump version to $NEW_VERSION"
+          
+          # Create and push tag
+          git tag "v$NEW_VERSION"
+          git push origin main
+          git push origin "v$NEW_VERSION"
+          
+          echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+
+      - name: Build release assets
+        run: |
+          cd app
+          echo "🔨 Building release assets..."
+          npm run build
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ steps.bump.outputs.new_version }}
+          name: "StenoAI v${{ steps.bump.outputs.new_version }}"
+          body: |
+            ## What's Changed
+            
+            Automatic release v${{ steps.bump.outputs.new_version }} with latest improvements.
+            
+            ### Installation
+            
+            **macOS Users:**
+            1. Download the appropriate DMG for your Mac
+            2. Drag StenoAI to Applications folder  
+            3. If the app won't open, run: `xattr -cr /Applications/StenoAI.app`
+            4. Right-click StenoAI → Open
+            
+            ### Downloads
+            - **Apple Silicon (M1/M2/M3/M4)**: Download `stenoAI-macos-*-arm64.dmg`
+            - **Intel Macs**: Download `stenoAI-macos-*-x64.dmg`
+            
+            **Full Changelog**: https://github.com/ruzin/stenoai/compare/v${{ steps.bump.outputs.old_version }}...v${{ steps.bump.outputs.new_version }}
+          files: |
+            app/dist/*.dmg
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
