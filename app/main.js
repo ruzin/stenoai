@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, systemPreferences } = require('electron');
 const path = require('path');
 const { spawn, exec } = require('child_process');
 const fs = require('fs');
@@ -83,6 +83,30 @@ function createSettingsWindow() {
   });
 }
 
+
+// Microphone permission handlers
+ipcMain.handle('check-microphone-permission', async () => {
+  try {
+    const status = systemPreferences.getMediaAccessStatus('microphone');
+    console.log('Microphone permission status:', status);
+    return { success: true, status };
+  } catch (error) {
+    console.error('Error checking microphone permission:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('request-microphone-permission', async () => {
+  try {
+    console.log('Requesting microphone permission...');
+    const granted = await systemPreferences.askForMediaAccess('microphone');
+    console.log('Microphone permission granted:', granted);
+    return { success: true, granted };
+  } catch (error) {
+    console.error('Error requesting microphone permission:', error);
+    return { success: false, error: error.message };
+  }
+});
 
 // IPC handler for opening settings
 ipcMain.handle('open-settings', () => {

@@ -1073,7 +1073,6 @@
             
             <input type="text" class="session-input" id="session-name" placeholder="Enter meeting name..." value="Meeting">
             
-            
             <button class="btn btn-primary" id="start-btn">
                 <span>●</span> Start Recording
             </button>
@@ -1202,6 +1201,18 @@
             </div>
             
             <div class="setup-steps" id="setup-steps">
+                <div class="setup-step" id="step-microphone">
+                    <div class="step-icon">🎤</div>
+                    <div class="step-content">
+                        <h3>Microphone Access</h3>
+                        <p>Grant microphone permission for meeting recording</p>
+                        <div class="step-status" id="microphone-status">Pending...</div>
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="microphone-progress"></div>
+                        </div>
+                    </div>
+                </div>
+                
                 <div class="setup-step" id="step-system">
                     <div class="step-icon">🖥️</div>
                     <div class="step-content">
@@ -1830,6 +1841,7 @@ Session started - waiting for activity...
             */
         }
         
+        
         // Manual start/stop recording functions
         startBtn.addEventListener('click', async () => {
             // Generate session name if empty or use Meeting-HASH format
@@ -2177,6 +2189,7 @@ Session started - waiting for activity...
             debugLog('='.repeat(50));
             
             const steps = [
+                { id: 'step-microphone', handler: 'request-microphone-permission', name: 'Microphone Access' },
                 { id: 'step-system', handler: 'setup-system-check', name: 'System Check' },
                 { id: 'step-python', handler: 'setup-python', name: 'Python Dependencies' },
                 { id: 'step-whisper', handler: 'setup-whisper', name: 'Whisper Installation' },
@@ -2206,6 +2219,7 @@ Session started - waiting for activity...
                         element.classList.add('completed');
                         statusElement.textContent = result.message || 'Completed';
                         debugLog(`✅ SUCCESS: ${result.message || 'Completed'}`);
+                        
                     } else {
                         element.classList.remove('active');
                         element.classList.add('failed');
@@ -2260,14 +2274,18 @@ Session started - waiting for activity...
             log('🔍 Checking system setup...');
             
             try {
+                // Check microphone permission first
+                const micResult = await ipcRenderer.invoke('check-microphone-permission');
+                const micGranted = micResult.success && micResult.status === 'granted';
+                
                 const result = await ipcRenderer.invoke('startup-setup-check');
                 
-                if (result.success && result.allGood) {
+                if (result.success && result.allGood && micGranted) {
                     // Everything is ready - continue to main app
                     log('System ready!');
                     return;
                 } else {
-                    // Show setup overlay with current status
+                    // Show setup overlay - either system issues or microphone permission needed
                     log('⚙️ Setup needed - showing guided setup');
                     showSetupOverlay(result.checks || []);
                 }

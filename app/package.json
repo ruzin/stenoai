@@ -80,7 +80,10 @@
         "target": "dmg"
       },
       "entitlements": "build/entitlements.mac.plist",
-      "entitlementsInherit": "build/entitlements.mac.plist"
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "StenoAI needs microphone access to record and transcribe meetings."
+      }
     },
     "dmg": {
       "title": "StenoAI Installer",
