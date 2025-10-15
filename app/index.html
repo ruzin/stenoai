@@ -1073,7 +1073,6 @@
             
             <input type="text" class="session-input" id="session-name" placeholder="Enter meeting name..." value="Meeting">
             
-            
             <button class="btn btn-primary" id="start-btn">
                 <span>●</span> Start Recording
             </button>
@@ -1202,6 +1201,18 @@
             </div>
             
             <div class="setup-steps" id="setup-steps">
+                <div class="setup-step" id="step-microphone">
+                    <div class="step-icon">🎤</div>
+                    <div class="step-content">
+                        <h3>Microphone Access</h3>
+                        <p>Grant microphone permission for meeting recording</p>
+                        <div class="step-status" id="microphone-status">Pending...</div>
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="microphone-progress"></div>
+                        </div>
+                    </div>
+                </div>
+                
                 <div class="setup-step" id="step-system">
                     <div class="step-icon">🖥️</div>
                     <div class="step-content">
@@ -1213,6 +1224,7 @@
                         </div>
                     </div>
                 </div>
+
                 
                 <div class="setup-step" id="step-python">
                     <div class="step-icon">🐍</div>
@@ -1508,6 +1520,17 @@ Session started - waiting for activity...
             statusCheckInterval = setInterval(async () => {
                 if (uiState === 'recording') {
                     try {
+                        // Check if microphone permission was revoked during recording
+                        const micResult = await ipcRenderer.invoke('check-microphone-permission');
+                        if (!micResult.success || micResult.status !== 'granted') {
+                            log('🚫 Microphone permission revoked during recording - stopping');
+                            alert('❌ Microphone access was revoked! Recording stopped.\n\nPlease grant microphone permission to continue recording.');
+                            setUIState('ready');
+                            stopStatusMonitoring();
+                            showSetupOverlay([]);
+                            return;
+                        }
+                        
                         const result = await ipcRenderer.invoke('get-status');
                         if (result.success && !result.status.includes('RECORDING')) {
                             // Backend says not recording but UI thinks it is - sync up
@@ -1830,8 +1853,29 @@ Session started - waiting for activity...
             */
         }
         
+        
         // Manual start/stop recording functions
         startBtn.addEventListener('click', async () => {
+            // Check microphone permission before allowing recording
+            try {
+                const micResult = await ipcRenderer.invoke('check-microphone-permission');
+                if (!micResult.success || micResult.status !== 'granted') {
+                    log('🚫 Cannot start recording - microphone permission denied');
+                    
+                    // Show clear error message
+                    const micStatus = micResult.status || 'unknown';
+                    alert(`❌ Recording blocked: Microphone permission is ${micStatus}.\n\nStenoAI requires microphone access to record meetings. Please grant permission and try again.`);
+                    
+                    // Force show setup wizard to fix the issue
+                    showSetupOverlay([]);
+                    return;
+                }
+            } catch (error) {
+                log(`🚫 Failed to check microphone permission: ${error.message}`);
+                alert('❌ Cannot verify microphone permission. Please ensure the app has proper access.');
+                return;
+            }
+            
             // Generate session name if empty or use Meeting-HASH format
             let sessionName = sessionNameInput.value.trim();
             if (!sessionName || sessionName === 'Meeting') {
@@ -2177,6 +2221,7 @@ Session started - waiting for activity...
             debugLog('='.repeat(50));
             
             const steps = [
+                { id: 'step-microphone', handler: 'request-microphone-permission', name: 'Microphone Access' },
                 { id: 'step-system', handler: 'setup-system-check', name: 'System Check' },
                 { id: 'step-python', handler: 'setup-python', name: 'Python Dependencies' },
                 { id: 'step-whisper', handler: 'setup-whisper', name: 'Whisper Installation' },
@@ -2206,6 +2251,13 @@ Session started - waiting for activity...
                         element.classList.add('completed');
                         statusElement.textContent = result.message || 'Completed';
                         debugLog(`✅ SUCCESS: ${result.message || 'Completed'}`);
+                        
+                        // Special handling for microphone permission completion
+                        if (step.id === 'step-microphone') {
+                            statusElement.textContent = 'Permission granted!';
+                            debugLog('Microphone permission granted - can proceed with other setup steps');
+                        }
+                        
                     } else {
                         element.classList.remove('active');
                         element.classList.add('failed');
@@ -2260,34 +2312,77 @@ Session started - waiting for activity...
             log('🔍 Checking system setup...');
             
             try {
-                const result = await ipcRenderer.invoke('startup-setup-check');
+                // Check microphone permission and system setup together
+                const micResult = await ipcRenderer.invoke('check-microphone-permission');
+                const micGranted = micResult.success && micResult.status === 'granted';
                 
-                if (result.success && result.allGood) {
+                const result = await ipcRenderer.invoke('startup-setup-check');
+                const systemReady = result.success && result.allGood;
+                
+                if (micGranted && systemReady) {
                     // Everything is ready - continue to main app
                     log('System ready!');
                     return;
                 } else {
-                    // Show setup overlay with current status
-                    log('⚙️ Setup needed - showing guided setup');
+                    // Show unified setup wizard (includes microphone + system setup)
+                    log('⚙️ Setup needed - showing unified setup wizard');
                     showSetupOverlay(result.checks || []);
                 }
             } catch (error) {
                 log(`Setup check failed: ${error.message}`);
-                // Show setup overlay as fallback - assume first time setup needed
+                // Show setup overlay as fallback
                 log('🆕 First time setup detected');
                 showSetupOverlay([]);
             }
         }
         
-        function showSetupOverlay(checks) {
+        async function showSetupOverlay(checks) {
             setupOverlay.style.display = 'flex';
             
-            // Reset all steps to default state
+            // Show ALL steps and reset their state
             document.querySelectorAll('.setup-step').forEach(step => {
+                step.style.display = 'flex'; // Make sure all steps are visible
                 step.classList.remove('active', 'completed', 'failed');
             });
             
-            // Update step statuses based on backend check
+            // Check and update microphone permission status
+            try {
+                const micResult = await ipcRenderer.invoke('check-microphone-permission');
+                const micStep = document.getElementById('step-microphone');
+                const micStatus = document.getElementById('microphone-status');
+                
+                if (micResult.success && micResult.status === 'granted') {
+                    micStep.classList.add('completed');
+                    micStatus.textContent = 'Permission granted';
+                } else {
+                    micStep.classList.add('failed');
+                    micStatus.textContent = 'Requesting microphone permission...';
+                    
+                    // Automatically request microphone permission if missing
+                    log('🎤 Microphone permission missing - automatically requesting...');
+                    setTimeout(async () => {
+                        try {
+                            const requestResult = await ipcRenderer.invoke('request-microphone-permission');
+                            if (requestResult.success && requestResult.granted) {
+                                micStep.classList.remove('failed');
+                                micStep.classList.add('completed');
+                                micStatus.textContent = 'Permission granted!';
+                                log('✅ Microphone permission granted automatically');
+                            } else {
+                                micStatus.textContent = 'Permission denied - please grant in System Preferences';
+                                log('❌ Microphone permission denied by user');
+                            }
+                        } catch (error) {
+                            micStatus.textContent = 'Failed to request permission';
+                            log(`❌ Error requesting microphone permission: ${error.message}`);
+                        }
+                    }, 1000); // Small delay to show the status message
+                }
+            } catch (error) {
+                console.error('Failed to check microphone permission:', error);
+            }
+            
+            // Update other step statuses based on backend check
             checks.forEach(check => {
                 const [status, detail] = check;
                 updateStepStatus(status, detail);
