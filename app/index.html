@@ -1224,60 +1224,60 @@
                         </div>
                     </div>
                 </div>
-                
+
                 <div class="setup-step" id="step-python">
                     <div class="step-icon">🐍</div>
                     <div class="step-content">
                         <h3>Python Dependencies</h3>
-                        <p>Installing audio libraries</p>
+                        <p>Installing required Python packages...</p>
                         <div class="step-status" id="python-status">Pending...</div>
                         <div class="progress-bar">
                             <div class="progress-fill" id="python-progress"></div>
                         </div>
                     </div>
                 </div>
-                
+
                 <div class="setup-step" id="step-whisper">
-                    <div class="step-icon">🎤</div>
+                    <div class="step-icon">🗣️</div>
                     <div class="step-content">
-                        <h3>Install Whisper</h3>
-                        <p>OpenAI's speech recognition engine</p>
+                        <h3>Whisper Installation</h3>
+                        <p>Setting up OpenAI Whisper for transcription...</p>
                         <div class="step-status" id="whisper-status">Pending...</div>
                         <div class="progress-bar">
                             <div class="progress-fill" id="whisper-progress"></div>
                         </div>
                     </div>
                 </div>
-                
+
                 <div class="setup-step" id="step-ollama">
-                    <div class="step-icon">🧠</div>
+                    <div class="step-icon">🤖</div>
                     <div class="step-content">
-                        <h3>Install Ollama + AI Model</h3>
-                        <p>Homebrew (if needed) → Ollama → Llama 3.2 model (~2GB)</p>
+                        <h3>Ollama + AI Model</h3>
+                        <p>Installing Ollama and downloading AI model...</p>
                         <div class="step-status" id="ollama-status">Pending...</div>
                         <div class="progress-bar">
                             <div class="progress-fill" id="ollama-progress"></div>
                         </div>
                     </div>
                 </div>
-                
+
                 <div class="setup-step" id="step-ffmpeg">
-                    <div class="step-icon">🎥</div>
+                    <div class="step-icon">🎬</div>
                     <div class="step-content">
-                        <h3>Install ffmpeg</h3>
-                        <p>Audio/video processing toolkit for advanced audio handling</p>
+                        <h3>ffmpeg Installation</h3>
+                        <p>Installing ffmpeg for audio processing...</p>
                         <div class="step-status" id="ffmpeg-status">Pending...</div>
                         <div class="progress-bar">
                             <div class="progress-fill" id="ffmpeg-progress"></div>
                         </div>
                     </div>
                 </div>
-                
+
                 <div class="setup-step" id="step-test">
-                    <div class="step-icon">✅</div>
+                    <div class="step-icon">🧪</div>
                     <div class="step-content">
-                        <h3>Test System</h3>
-                        <p>Verifying everything works</p>
+                        <h3>System Test</h3>
+                        <p>Verifying all components are working...</p>
                         <div class="step-status" id="test-status">Pending...</div>
                         <div class="progress-bar">
                             <div class="progress-fill" id="test-progress"></div>
@@ -1519,6 +1519,17 @@ Session started - waiting for activity...
             statusCheckInterval = setInterval(async () => {
                 if (uiState === 'recording') {
                     try {
+                        // Check if microphone permission was revoked during recording
+                        const micResult = await ipcRenderer.invoke('check-microphone-permission');
+                        if (!micResult.success || micResult.status !== 'granted') {
+                            log('🚫 Microphone permission revoked during recording - stopping');
+                            alert('❌ Microphone access was revoked! Recording stopped.\n\nPlease grant microphone permission to continue recording.');
+                            setUIState('ready');
+                            stopStatusMonitoring();
+                            showSetupOverlay([]);
+                            return;
+                        }
+                        
                         const result = await ipcRenderer.invoke('get-status');
                         if (result.success && !result.status.includes('RECORDING')) {
                             // Backend says not recording but UI thinks it is - sync up
@@ -1844,6 +1855,26 @@ Session started - waiting for activity...
         
         // Manual start/stop recording functions
         startBtn.addEventListener('click', async () => {
+            // Check microphone permission before allowing recording
+            try {
+                const micResult = await ipcRenderer.invoke('check-microphone-permission');
+                if (!micResult.success || micResult.status !== 'granted') {
+                    log('🚫 Cannot start recording - microphone permission denied');
+                    
+                    // Show clear error message
+                    const micStatus = micResult.status || 'unknown';
+                    alert(`❌ Recording blocked: Microphone permission is ${micStatus}.\n\nStenoAI requires microphone access to record meetings. Please grant permission and try again.`);
+                    
+                    // Force show setup wizard to fix the issue
+                    showSetupOverlay([]);
+                    return;
+                }
+            } catch (error) {
+                log(`🚫 Failed to check microphone permission: ${error.message}`);
+                alert('❌ Cannot verify microphone permission. Please ensure the app has proper access.');
+                return;
+            }
+            
             // Generate session name if empty or use Meeting-HASH format
             let sessionName = sessionNameInput.value.trim();
             if (!sessionName || sessionName === 'Meeting') {
@@ -2220,6 +2251,12 @@ Session started - waiting for activity...
                         statusElement.textContent = result.message || 'Completed';
                         debugLog(`✅ SUCCESS: ${result.message || 'Completed'}`);
                         
+                        // Special handling for microphone permission completion
+                        if (step.id === 'step-microphone') {
+                            statusElement.textContent = 'Permission granted!';
+                            debugLog('Microphone permission granted - can proceed with other setup steps');
+                        }
+                        
                     } else {
                         element.classList.remove('active');
                         element.classList.add('failed');
@@ -2274,38 +2311,86 @@ Session started - waiting for activity...
             log('🔍 Checking system setup...');
             
             try {
-                // Check microphone permission first
+                // Check microphone permission and system setup together
                 const micResult = await ipcRenderer.invoke('check-microphone-permission');
                 const micGranted = micResult.success && micResult.status === 'granted';
                 
                 const result = await ipcRenderer.invoke('startup-setup-check');
+                const systemReady = result.success && result.allGood;
                 
-                if (result.success && result.allGood && micGranted) {
+                if (micGranted && systemReady) {
                     // Everything is ready - continue to main app
                     log('System ready!');
                     return;
                 } else {
-                    // Show setup overlay - either system issues or microphone permission needed
-                    log('⚙️ Setup needed - showing guided setup');
+                    // Show unified setup wizard (includes microphone + system setup)
+                    log('⚙️ Setup needed - showing unified setup wizard');
                     showSetupOverlay(result.checks || []);
                 }
             } catch (error) {
                 log(`Setup check failed: ${error.message}`);
-                // Show setup overlay as fallback - assume first time setup needed
+                // Show setup overlay as fallback
                 log('🆕 First time setup detected');
                 showSetupOverlay([]);
             }
         }
         
-        function showSetupOverlay(checks) {
+        async function showSetupOverlay(checks) {
             setupOverlay.style.display = 'flex';
             
-            // Reset all steps to default state
+            // Reset header to normal setup
+            const setupHeader = document.querySelector('.setup-header h2');
+            const setupSubtext = document.querySelector('.setup-header p');
+            setupHeader.textContent = '🚀 Welcome to StenoAI';
+            setupSubtext.innerHTML = `
+                Setting up your system for meeting transcription...<br>
+                <span style="font-size: 12px; color: #888; margin-top: 8px;">💡 Scroll down to begin setup</span>
+            `;
+            
+            // Show ALL steps and reset their state
             document.querySelectorAll('.setup-step').forEach(step => {
+                step.style.display = 'flex'; // Make sure all steps are visible
                 step.classList.remove('active', 'completed', 'failed');
             });
             
-            // Update step statuses based on backend check
+            // Check and update microphone permission status
+            try {
+                const micResult = await ipcRenderer.invoke('check-microphone-permission');
+                const micStep = document.getElementById('step-microphone');
+                const micStatus = document.getElementById('microphone-status');
+                
+                if (micResult.success && micResult.status === 'granted') {
+                    micStep.classList.add('completed');
+                    micStatus.textContent = 'Permission granted';
+                } else {
+                    micStep.classList.add('failed');
+                    micStatus.textContent = 'Requesting microphone permission...';
+                    
+                    // Automatically request microphone permission if missing
+                    log('🎤 Microphone permission missing - automatically requesting...');
+                    setTimeout(async () => {
+                        try {
+                            const requestResult = await ipcRenderer.invoke('request-microphone-permission');
+                            if (requestResult.success && requestResult.granted) {
+                                micStep.classList.remove('failed');
+                                micStep.classList.add('completed');
+                                micStatus.textContent = 'Permission granted!';
+                                log('✅ Microphone permission granted automatically');
+                            } else {
+                                micStatus.textContent = 'Permission denied - please grant in System Preferences';
+                                log('❌ Microphone permission denied by user');
+                            }
+                        } catch (error) {
+                            micStatus.textContent = 'Failed to request permission';
+                            log(`❌ Error requesting microphone permission: ${error.message}`);
+                        }
+                    }, 1000); // Small delay to show the status message
+                }
+            } catch (error) {
+                console.error('Failed to check microphone permission:', error);
+            }
+            
+            // Update other step statuses based on backend check
             checks.forEach(check => {
                 const [status, detail] = check;
                 updateStepStatus(status, detail);
