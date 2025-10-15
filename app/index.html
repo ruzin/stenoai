@@ -2339,15 +2339,6 @@ Session started - waiting for activity...
         async function showSetupOverlay(checks) {
             setupOverlay.style.display = 'flex';
             
-            // Reset header to normal setup
-            const setupHeader = document.querySelector('.setup-header h2');
-            const setupSubtext = document.querySelector('.setup-header p');
-            setupHeader.textContent = '🚀 Welcome to StenoAI';
-            setupSubtext.innerHTML = `
-                Setting up your system for meeting transcription...<br>
-                <span style="font-size: 12px; color: #888; margin-top: 8px;">💡 Scroll down to begin setup</span>
-            `;
-            
             // Show ALL steps and reset their state
             document.querySelectorAll('.setup-step').forEach(step => {
                 step.style.display = 'flex'; // Make sure all steps are visible
