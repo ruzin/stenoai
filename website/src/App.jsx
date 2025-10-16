@@ -97,7 +97,7 @@ export default function App() {
               <span className="block bg-gradient-to-r from-indigo-400 via-sky-400 to-cyan-300 text-transparent bg-clip-text">Private. Fast. Accurate.</span>
             </motion.h1>
             <p className="mt-6 text-slate-300 text-lg leading-relaxed max-w-prose">
-              stenoAI is an AI transcriber & stenographer app that runs locally. Get studio‑grade transcription and on‑device summaries for free. Pro cloud‑powered deep summaries with OpenAI or Anthropic are coming soon.
+              stenoAI is an AI transcriber & summarisation app that runs locally. Get studio‑grade transcription and on-device meeting summaries for free. Your very own stenographer for every meeting.
             </p>
             <div className="mt-8 flex flex-col sm:flex-row gap-3">
               <a href="#download" className="inline-flex items-center justify-center gap-2 rounded-2xl bg-white text-slate-900 px-5 py-3 font-semibold hover:bg-slate-100">
