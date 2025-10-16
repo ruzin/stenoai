@@ -2,7 +2,6 @@
   <img src="website/public/stenoai-logo-512.svg" alt="StenoAI Logo" width="120" height="120">
   
   # StenoAI
-  
   *Your very own Stenographer for every meeting*
 </div>
 
