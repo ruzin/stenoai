@@ -9,7 +9,7 @@
 AI-powered meeting transcription and summarization that runs entirely on your device using small language models locally hosted. Privacy first approach & zero service costs.
 
 <div align="center">
-  <img src="website/public/app-screenshot.png" alt="StenoAI Interface" width="600">
+  <img src="website/public/app-screenshot-new.png" alt="StenoAI Interface" width="600">
 </div>
 
 ## Features
