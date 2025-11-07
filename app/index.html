@@ -20,6 +20,24 @@
             overflow: hidden;
         }
         
+        /* Window drag area - make the top portion draggable */
+        .drag-area {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 40px;
+            -webkit-app-region: drag;
+            z-index: 100;
+            pointer-events: none; /* Allow clicks to pass through to content below */
+        }
+        
+        /* Make interactive elements non-draggable */
+        .no-drag, .btn, .session-input, .settings-btn, button, input, select, textarea {
+            -webkit-app-region: no-drag;
+            pointer-events: auto;
+        }
+        
         /* Header with record controls */
         .header {
             background: #111;
@@ -1037,6 +1055,9 @@
     </style>
 </head>
 <body>
+    <!-- Window drag area -->
+    <div class="drag-area"></div>
+    
     <!-- Update Banner -->
     <div class="update-banner" id="update-banner">
         <div class="update-info">

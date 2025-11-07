@@ -662,18 +662,32 @@ ipcMain.handle('setup-ollama', async () => {
       return { success: true, message: 'Ollama ready and service started' };
     }
     
-    // Install Ollama using Homebrew
-    return new Promise((resolve) => {
-      exec('brew install ollama', { timeout: 300000 }, (error, stdout, stderr) => {
-        if (!error) {
-          // Start Ollama service after installation
-          exec('ollama serve', { detached: true });
-          resolve({ success: true, message: 'Ollama installed and started' });
-        } else {
-          resolve({ success: false, error: 'Failed to install Ollama. Please install Homebrew and try again.' });
+    // Install Ollama using Homebrew - try common brew paths
+    const brewPaths = ['brew', '/opt/homebrew/bin/brew', '/usr/local/bin/brew'];
+    
+    for (const brewPath of brewPaths) {
+      try {
+        const result = await new Promise((resolve) => {
+          exec(`${brewPath} install ollama`, { timeout: 300000 }, (error, stdout, stderr) => {
+            if (!error) {
+              // Start Ollama service after installation
+              exec('ollama serve', { detached: true });
+              resolve({ success: true, message: 'Ollama installed and started' });
+            } else {
+              resolve({ success: false, error: `Failed with ${brewPath}: ${error.message}` });
+            }
+          });
+        });
+        
+        if (result.success) {
+          return result;
         }
-      });
-    });
+      } catch (error) {
+        console.log(`Failed to install with ${brewPath}: ${error.message}`);
+      }
+    }
+    
+    return { success: false, error: 'Failed to install Ollama. Please install Homebrew and try again.' };
   } catch (error) {
     return { success: false, error: error.message };
   }
@@ -718,18 +732,37 @@ ipcMain.handle('setup-ffmpeg', async () => {
       sendDebugLog('ffmpeg not found, checking for Homebrew...');
       sendDebugLog('$ which brew || /opt/homebrew/bin/brew --version || /usr/local/bin/brew --version');
       
-      // First check if Homebrew is installed
-      const brewCheck = await new Promise((resolve) => {
-        exec('which brew || /opt/homebrew/bin/brew --version || /usr/local/bin/brew --version', { timeout: 5000 }, (error, stdout, stderr) => {
-          if (stdout) sendDebugLog(stdout.trim());
-          if (stderr) sendDebugLog('STDERR: ' + stderr.trim());
-          if (error) sendDebugLog('ERROR: ' + error.message);
-          resolve(!error && stdout.trim());
+      // First check if Homebrew is installed and get its path
+      const brewPath = await new Promise((resolve) => {
+        exec('which brew', { timeout: 5000 }, (error, stdout, stderr) => {
+          if (!error && stdout.trim()) {
+            const path = stdout.trim();
+            sendDebugLog(`Found Homebrew at: ${path}`);
+            resolve(path);
+          } else {
+            // Try common Homebrew locations
+            exec('/opt/homebrew/bin/brew --version', { timeout: 5000 }, (error2, stdout2) => {
+              if (!error2) {
+                sendDebugLog('Found Homebrew at: /opt/homebrew/bin/brew');
+                resolve('/opt/homebrew/bin/brew');
+              } else {
+                exec('/usr/local/bin/brew --version', { timeout: 5000 }, (error3, stdout3) => {
+                  if (!error3) {
+                    sendDebugLog('Found Homebrew at: /usr/local/bin/brew');
+                    resolve('/usr/local/bin/brew');
+                  } else {
+                    sendDebugLog('Homebrew not found in any common locations');
+                    resolve(null);
+                  }
+                });
+              }
+            });
+          }
         });
       });
       
       // Install Homebrew if missing (same logic as ollama)
-      if (!brewCheck) {
+      if (!brewPath) {
         sendDebugLog('Homebrew not found, installing...');
         sendDebugLog('$ /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"');
         await new Promise((resolve, reject) => {
@@ -758,10 +791,13 @@ ipcMain.handle('setup-ffmpeg', async () => {
         sendDebugLog('Homebrew found, proceeding with ffmpeg installation...');
       }
       
+      // Determine final brew path (either found or newly installed)
+      const finalBrewPath = brewPath || '/opt/homebrew/bin/brew';
+      
       // Now install ffmpeg via Homebrew
-      sendDebugLog('$ brew install ffmpeg');
+      sendDebugLog(`$ ${finalBrewPath} install ffmpeg`);
       await new Promise((resolve, reject) => {
-        const process = exec('brew install ffmpeg', { timeout: 300000 });
+        const process = exec(`${finalBrewPath} install ffmpeg`, { timeout: 300000 });
         
         process.stdout.on('data', (data) => {
           sendDebugLog(data.toString().trim());
@@ -932,18 +968,37 @@ ipcMain.handle('setup-ollama-and-model', async () => {
       sendDebugLog('Ollama not found, checking for Homebrew...');
       sendDebugLog('$ which brew || /opt/homebrew/bin/brew --version || /usr/local/bin/brew --version');
       
-      // First check if Homebrew is installed
-      const brewCheck = await new Promise((resolve) => {
-        exec('which brew || /opt/homebrew/bin/brew --version || /usr/local/bin/brew --version', { timeout: 5000 }, (error, stdout, stderr) => {
-          if (stdout) sendDebugLog(stdout.trim());
-          if (stderr) sendDebugLog('STDERR: ' + stderr.trim());
-          if (error) sendDebugLog('ERROR: ' + error.message);
-          resolve(!error && stdout.trim());
+      // First check if Homebrew is installed and get its path
+      const brewPath = await new Promise((resolve) => {
+        exec('which brew', { timeout: 5000 }, (error, stdout, stderr) => {
+          if (!error && stdout.trim()) {
+            const path = stdout.trim();
+            sendDebugLog(`Found Homebrew at: ${path}`);
+            resolve(path);
+          } else {
+            // Try common Homebrew locations
+            exec('/opt/homebrew/bin/brew --version', { timeout: 5000 }, (error2, stdout2) => {
+              if (!error2) {
+                sendDebugLog('Found Homebrew at: /opt/homebrew/bin/brew');
+                resolve('/opt/homebrew/bin/brew');
+              } else {
+                exec('/usr/local/bin/brew --version', { timeout: 5000 }, (error3, stdout3) => {
+                  if (!error3) {
+                    sendDebugLog('Found Homebrew at: /usr/local/bin/brew');
+                    resolve('/usr/local/bin/brew');
+                  } else {
+                    sendDebugLog('Homebrew not found in any common locations');
+                    resolve(null);
+                  }
+                });
+              }
+            });
+          }
         });
       });
       
       // Install Homebrew if missing
-      if (!brewCheck) {
+      if (!brewPath) {
         sendDebugLog('Homebrew not found, installing...');
         sendDebugLog('$ /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"');
         await new Promise((resolve, reject) => {
@@ -972,10 +1027,13 @@ ipcMain.handle('setup-ollama-and-model', async () => {
         sendDebugLog('Homebrew found, proceeding with Ollama installation...');
       }
       
+      // Determine final brew path (either found or newly installed)
+      const finalBrewPath = brewPath || '/opt/homebrew/bin/brew';
+      
       // Now install Ollama via Homebrew
-      sendDebugLog('$ brew install ollama');
+      sendDebugLog(`$ ${finalBrewPath} install ollama`);
       await new Promise((resolve, reject) => {
-        const process = exec('brew install ollama', { timeout: 300000 });
+        const process = exec(`${finalBrewPath} install ollama`, { timeout: 300000 });
         
         process.stdout.on('data', (data) => {
           sendDebugLog(data.toString().trim());
