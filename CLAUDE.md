@@ -70,3 +70,9 @@ steno-poc/
 - Use type hints where appropriate
 - Write docstrings for functions and classes
 - Use logging for debugging and monitoring
+
+## Git Commit Guidelines
+- Do NOT include "🤖 Generated with Claude Code" attribution in commit messages
+- Do NOT include "Co-Authored-By: Claude <noreply@anthropic.com>" in commit messages
+- Keep commit messages concise and focused on what changed
+- Use conventional commit format when appropriate (feat:, fix:, docs:, etc.)
