@@ -4,4 +4,4 @@ openai-whisper>=20230918
 ollama>=0.1.7
 click>=8.1.0
 pydantic>=2.5.0
-pathlib2>=2.3.7
+python-dateutil>=2.8.0

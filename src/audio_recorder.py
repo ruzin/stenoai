@@ -21,9 +21,11 @@ logger = logging.getLogger(__name__)
 def cleanup_sounddevice():
     """Clean up sounddevice resources on exit"""
     try:
-        sd._terminate()
-    except:
-        pass
+        if sd is not None:
+            sd._terminate()
+    except (AttributeError, RuntimeError, Exception) as e:
+        # Log but don't raise - this is cleanup code
+        logger.debug(f"Error during sounddevice cleanup: {e}")
 
 atexit.register(cleanup_sounddevice)
 
@@ -32,13 +34,16 @@ class AudioRecorder:
     def __init__(self, sample_rate: int = 44100, channels: int = 1):
         if not AUDIO_AVAILABLE:
             raise ImportError("Audio dependencies not available. Please install sounddevice and numpy.")
-            
+
         self.sample_rate = sample_rate
         self.channels = channels
         self.recording = False
         self.audio_data = []
         self.recording_thread: Optional[threading.Thread] = None
-        
+
+        # Thread safety lock for audio_data access
+        self.audio_lock = threading.Lock()
+
         # Simple state - no persistence for now
         self.stream = None
     
@@ -60,15 +65,18 @@ class AudioRecorder:
         if self.recording:
             logger.warning("Recording is already in progress")
             return
-            
+
         self.recording = True
-        self.audio_data = []
-        
+
+        # Clear audio data with thread safety
+        with self.audio_lock:
+            self.audio_data = []
+
         logger.info("Creating recording thread...")
         self.recording_thread = threading.Thread(target=self._record)
         self.recording_thread.start()
         logger.info("Started recording thread")
-        
+
         # Give thread a moment to start
         time.sleep(0.2)
         if not self.recording:
@@ -119,8 +127,8 @@ class AudioRecorder:
                     stream.stop()
                     stream.close()
                     logger.info("Audio stream closed")
-                except:
-                    pass
+                except (AttributeError, RuntimeError, Exception) as e:
+                    logger.warning(f"Error closing audio stream: {e}")
             self.stream = None
             
     def _audio_callback(self, indata, frames, time, status):
@@ -128,48 +136,57 @@ class AudioRecorder:
         if status:
             logger.warning(f"Audio callback status: {status}")
         if self.recording:
-            self.audio_data.append(indata.copy())
+            # Thread-safe append to audio_data
+            with self.audio_lock:
+                self.audio_data.append(indata.copy())
             
     def save_recording(self, filepath: Path) -> bool:
         """Save the recorded audio to a WAV file."""
-        if not self.audio_data:
-            logger.error("No audio data to save")
-            return False
-            
+        # Thread-safe check and copy of audio data
+        with self.audio_lock:
+            if not self.audio_data:
+                logger.error("No audio data to save")
+                return False
+            # Create a copy to release lock quickly
+            audio_data_copy = self.audio_data.copy()
+
         try:
             # Convert list of numpy arrays to single array
-            audio_array = np.concatenate(self.audio_data, axis=0)
-            
+            audio_array = np.concatenate(audio_data_copy, axis=0)
+
             # Ensure the directory exists
             filepath.parent.mkdir(parents=True, exist_ok=True)
-            
+
             # Save as WAV file
             with wave.open(str(filepath), 'wb') as wav_file:
                 wav_file.setnchannels(self.channels)
                 wav_file.setsampwidth(2)  # 16-bit
                 wav_file.setframerate(self.sample_rate)
-                
+
                 # Convert float32 to int16
                 audio_int16 = (audio_array * 32767).astype(np.int16)
                 wav_file.writeframes(audio_int16.tobytes())
-                
+
             logger.info(f"Audio saved to {filepath}")
-            
-            # Clear audio data after successful save
-            self.audio_data = []
+
+            # Clear audio data after successful save (thread-safe)
+            with self.audio_lock:
+                self.audio_data = []
             self.recording = False
-            
+
             return True
-            
+
         except Exception as e:
             logger.error(f"Error saving audio: {e}")
             return False
             
     def get_recording_duration(self) -> float:
         """Get the duration of the current recording in seconds."""
-        if not self.audio_data:
-            return 0.0
-        total_frames = sum(len(chunk) for chunk in self.audio_data)
+        # Thread-safe read of audio data
+        with self.audio_lock:
+            if not self.audio_data:
+                return 0.0
+            total_frames = sum(len(chunk) for chunk in self.audio_data)
         return total_frames / self.sample_rate
         
     def is_recording(self) -> bool:
@@ -185,9 +202,9 @@ class AudioRecorder:
                 try:
                     self.stream.stop()
                     self.stream.close()
-                except:
-                    pass
+                except (AttributeError, RuntimeError, Exception) as e:
+                    logger.debug(f"Error closing stream in __del__: {e}")
             if self.recording_thread and self.recording_thread.is_alive():
                 self.recording_thread.join(timeout=1.0)
-        except:
-            pass
+        except (AttributeError, RuntimeError, Exception) as e:
+            logger.debug(f"Error in __del__: {e}")

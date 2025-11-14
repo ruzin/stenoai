@@ -3,10 +3,38 @@ const path = require('path');
 const { spawn, exec } = require('child_process');
 const fs = require('fs');
 const https = require('https');
+const os = require('os');
 
 let mainWindow;
 let settingsWindow = null;
 let pythonProcess;
+
+/**
+ * Validate that a file path is within allowed directories (security)
+ * Prevents path traversal attacks by ensuring files are only accessed
+ * within the app's designated data directories
+ */
+function validateSafeFilePath(filepath, allowedBaseDirs) {
+  if (!filepath) return false;
+
+  try {
+    // Resolve to absolute path and normalize
+    const resolvedPath = path.resolve(filepath);
+
+    // Ensure it's within one of the allowed base directories
+    for (const baseDir of allowedBaseDirs) {
+      const resolvedBase = path.resolve(baseDir);
+      if (resolvedPath.startsWith(resolvedBase + path.sep) || resolvedPath === resolvedBase) {
+        return true;
+      }
+    }
+
+    return false;
+  } catch (error) {
+    console.error('Error validating file path:', error);
+    return false;
+  }
+}
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -286,15 +314,22 @@ ipcMain.handle('delete-meeting', async (event, meetingData) => {
   try {
     const fs = require('fs');
     const path = require('path');
-    
+
     // meetingData is the actual meeting object, not a file path
     const meeting = meetingData;
-    
+
     // Build correct file paths from the meeting data - convert to absolute paths
     const projectRoot = path.join(__dirname, '..');
+
+    // Define allowed base directories for file operations
+    const allowedBaseDirs = [
+      projectRoot,
+      path.join(os.homedir(), 'Library', 'Application Support', 'stenoai')
+    ];
+
     const summaryFile = meeting.session_info?.summary_file;
     const transcriptFile = meeting.session_info?.transcript_file;
-    
+
     // Convert relative paths to absolute paths
     const absolutePaths = [];
     if (summaryFile) {
@@ -303,13 +338,22 @@ ipcMain.handle('delete-meeting', async (event, meetingData) => {
     if (transcriptFile) {
       absolutePaths.push(path.isAbsolute(transcriptFile) ? transcriptFile : path.join(projectRoot, transcriptFile));
     }
-    
+
     console.log('Attempting to delete files:', absolutePaths);
-    
+
     let deletedCount = 0;
-    // Delete all related files
+    let validationErrors = 0;
+
+    // Delete all related files with path validation
     for (const file of absolutePaths) {
       try {
+        // Security: Validate file path is within allowed directories
+        if (!validateSafeFilePath(file, allowedBaseDirs)) {
+          console.error(`Security: Blocked attempt to delete file outside allowed directories: ${file}`);
+          validationErrors++;
+          continue;
+        }
+
         if (fs.existsSync(file)) {
           fs.unlinkSync(file);
           deletedCount++;
@@ -320,6 +364,13 @@ ipcMain.handle('delete-meeting', async (event, meetingData) => {
       } catch (err) {
         console.warn(`Could not delete ${file}:`, err.message);
       }
+    }
+
+    if (validationErrors > 0) {
+      return {
+        success: false,
+        error: `Blocked ${validationErrors} file deletion(s) due to security validation`
+      };
     }
     
     return { 
@@ -649,36 +700,57 @@ ipcMain.handle('setup-system-check', async () => {
 
 ipcMain.handle('setup-ollama', async () => {
   try {
-    // Check if Ollama is already installed
-    const checkResult = await new Promise((resolve) => {
-      exec('which ollama || /opt/homebrew/bin/ollama --version || /usr/local/bin/ollama --version', { timeout: 5000 }, (error, stdout, stderr) => {
-        resolve(!error && stdout.trim());
-      });
-    });
-    
-    if (checkResult) {
-      // Also start Ollama service if not running
-      exec('ollama serve', { detached: true });
+    // Check if Ollama is already installed - try multiple common paths
+    const ollamaPaths = ['ollama', '/opt/homebrew/bin/ollama', '/usr/local/bin/ollama'];
+    let ollamaFound = false;
+
+    for (const ollamaPath of ollamaPaths) {
+      try {
+        const checkResult = await new Promise((resolve) => {
+          const proc = spawn(ollamaPath, ['--version'], { timeout: 5000 });
+          proc.on('error', () => resolve(false));
+          proc.on('close', (code) => resolve(code === 0));
+        });
+
+        if (checkResult) {
+          ollamaFound = true;
+          break;
+        }
+      } catch (error) {
+        // Try next path
+        continue;
+      }
+    }
+
+    if (ollamaFound) {
+      // Start Ollama service if not running (use spawn instead of exec)
+      spawn('ollama', ['serve'], { detached: true, stdio: 'ignore' }).unref();
       return { success: true, message: 'Ollama ready and service started' };
     }
-    
+
     // Install Ollama using Homebrew - try common brew paths
     const brewPaths = ['brew', '/opt/homebrew/bin/brew', '/usr/local/bin/brew'];
-    
+
     for (const brewPath of brewPaths) {
       try {
         const result = await new Promise((resolve) => {
-          exec(`${brewPath} install ollama`, { timeout: 300000 }, (error, stdout, stderr) => {
-            if (!error) {
+          const proc = spawn(brewPath, ['install', 'ollama'], { timeout: 300000 });
+
+          proc.on('error', (error) => {
+            resolve({ success: false, error: `Failed with ${brewPath}: ${error.message}` });
+          });
+
+          proc.on('close', (code) => {
+            if (code === 0) {
               // Start Ollama service after installation
-              exec('ollama serve', { detached: true });
+              spawn('ollama', ['serve'], { detached: true, stdio: 'ignore' }).unref();
               resolve({ success: true, message: 'Ollama installed and started' });
             } else {
-              resolve({ success: false, error: `Failed with ${brewPath}: ${error.message}` });
+              resolve({ success: false, error: `Failed with ${brewPath}: exit code ${code}` });
             }
           });
         });
-        
+
         if (result.success) {
           return result;
         }
@@ -686,7 +758,7 @@ ipcMain.handle('setup-ollama', async () => {
         console.log(`Failed to install with ${brewPath}: ${error.message}`);
       }
     }
-    
+
     return { success: false, error: 'Failed to install Ollama. Please install Homebrew and try again.' };
   } catch (error) {
     return { success: false, error: error.message };
@@ -696,87 +768,87 @@ ipcMain.handle('setup-ollama', async () => {
 ipcMain.handle('setup-ffmpeg', async () => {
   try {
     sendDebugLog('$ Checking for existing ffmpeg installation...');
-    sendDebugLog('$ which ffmpeg || /opt/homebrew/bin/ffmpeg -version || /usr/local/bin/ffmpeg -version');
-    
-    // Check if ffmpeg is already installed and get its path
-    const ffmpegPath = await new Promise((resolve) => {
-      exec('which ffmpeg', { timeout: 5000 }, (error, stdout, stderr) => {
-        if (!error && stdout.trim()) {
-          const path = stdout.trim();
-          sendDebugLog(`Found ffmpeg at: ${path}`);
-          resolve(path);
-        } else {
-          // Try common Homebrew locations
-          exec('/opt/homebrew/bin/ffmpeg -version', { timeout: 5000 }, (error2, stdout2) => {
-            if (!error2) {
-              sendDebugLog('Found ffmpeg at: /opt/homebrew/bin/ffmpeg');
-              resolve('/opt/homebrew/bin/ffmpeg');
-            } else {
-              exec('/usr/local/bin/ffmpeg -version', { timeout: 5000 }, (error3, stdout3) => {
-                if (!error3) {
-                  sendDebugLog('Found ffmpeg at: /usr/local/bin/ffmpeg');
-                  resolve('/usr/local/bin/ffmpeg');
-                } else {
-                  sendDebugLog('ffmpeg not found in any common locations');
-                  resolve(null);
-                }
-              });
-            }
-          });
+    sendDebugLog('$ Checking: ffmpeg -version, /opt/homebrew/bin/ffmpeg, /usr/local/bin/ffmpeg');
+
+    // Check if ffmpeg is already installed - try multiple common paths
+    const ffmpegPaths = ['ffmpeg', '/opt/homebrew/bin/ffmpeg', '/usr/local/bin/ffmpeg'];
+    let ffmpegPath = null;
+
+    for (const testPath of ffmpegPaths) {
+      try {
+        const found = await new Promise((resolve) => {
+          const proc = spawn(testPath, ['-version'], { timeout: 5000 });
+          proc.on('error', () => resolve(false));
+          proc.on('close', (code) => resolve(code === 0));
+        });
+
+        if (found) {
+          ffmpegPath = testPath;
+          sendDebugLog(`Found ffmpeg at: ${testPath}`);
+          break;
         }
-      });
-    });
+      } catch (error) {
+        // Try next path
+        continue;
+      }
+    }
+
+    if (!ffmpegPath) {
+      sendDebugLog('ffmpeg not found in any common locations');
+    }
     
     // Install ffmpeg if not present
     if (!ffmpegPath) {
       sendDebugLog('ffmpeg not found, checking for Homebrew...');
-      sendDebugLog('$ which brew || /opt/homebrew/bin/brew --version || /usr/local/bin/brew --version');
-      
+      sendDebugLog('$ Checking: brew, /opt/homebrew/bin/brew, /usr/local/bin/brew');
+
       // First check if Homebrew is installed and get its path
-      const brewPath = await new Promise((resolve) => {
-        exec('which brew', { timeout: 5000 }, (error, stdout, stderr) => {
-          if (!error && stdout.trim()) {
-            const path = stdout.trim();
-            sendDebugLog(`Found Homebrew at: ${path}`);
-            resolve(path);
-          } else {
-            // Try common Homebrew locations
-            exec('/opt/homebrew/bin/brew --version', { timeout: 5000 }, (error2, stdout2) => {
-              if (!error2) {
-                sendDebugLog('Found Homebrew at: /opt/homebrew/bin/brew');
-                resolve('/opt/homebrew/bin/brew');
-              } else {
-                exec('/usr/local/bin/brew --version', { timeout: 5000 }, (error3, stdout3) => {
-                  if (!error3) {
-                    sendDebugLog('Found Homebrew at: /usr/local/bin/brew');
-                    resolve('/usr/local/bin/brew');
-                  } else {
-                    sendDebugLog('Homebrew not found in any common locations');
-                    resolve(null);
-                  }
-                });
-              }
-            });
+      const brewPaths = ['brew', '/opt/homebrew/bin/brew', '/usr/local/bin/brew'];
+      let brewPath = null;
+
+      for (const testPath of brewPaths) {
+        try {
+          const found = await new Promise((resolve) => {
+            const proc = spawn(testPath, ['--version'], { timeout: 5000 });
+            proc.on('error', () => resolve(false));
+            proc.on('close', (code) => resolve(code === 0));
+          });
+
+          if (found) {
+            brewPath = testPath;
+            sendDebugLog(`Found Homebrew at: ${testPath}`);
+            break;
           }
-        });
-      });
+        } catch (error) {
+          // Try next path
+          continue;
+        }
+      }
+
+      if (!brewPath) {
+        sendDebugLog('Homebrew not found in any common locations');
+      }
       
-      // Install Homebrew if missing (same logic as ollama)
+      // Install Homebrew if missing
       if (!brewPath) {
         sendDebugLog('Homebrew not found, installing...');
         sendDebugLog('$ /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"');
+
+        // Note: This uses the official Homebrew installation script
+        // Using exec here is intentional as this is the documented installation method
+        // The URL is hardcoded and not user-controlled
         await new Promise((resolve, reject) => {
-          const process = exec('/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"', 
+          const process = exec('/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"',
                { timeout: 600000 });
-          
+
           process.stdout.on('data', (data) => {
             sendDebugLog(data.toString().trim());
           });
-          
+
           process.stderr.on('data', (data) => {
             sendDebugLog('STDERR: ' + data.toString().trim());
           });
-          
+
           process.on('close', (code) => {
             if (code === 0) {
               sendDebugLog('Homebrew installation completed successfully');
@@ -787,26 +859,26 @@ ipcMain.handle('setup-ffmpeg', async () => {
             }
           });
         });
+
+        // After installing, set brewPath to the default location
+        brewPath = '/opt/homebrew/bin/brew';
       } else {
         sendDebugLog('Homebrew found, proceeding with ffmpeg installation...');
       }
-      
-      // Determine final brew path (either found or newly installed)
-      const finalBrewPath = brewPath || '/opt/homebrew/bin/brew';
-      
-      // Now install ffmpeg via Homebrew
-      sendDebugLog(`$ ${finalBrewPath} install ffmpeg`);
+
+      // Now install ffmpeg via Homebrew using spawn for security
+      sendDebugLog(`$ ${brewPath} install ffmpeg`);
       await new Promise((resolve, reject) => {
-        const process = exec(`${finalBrewPath} install ffmpeg`, { timeout: 300000 });
-        
+        const process = spawn(brewPath, ['install', 'ffmpeg'], { timeout: 300000 });
+
         process.stdout.on('data', (data) => {
           sendDebugLog(data.toString().trim());
         });
-        
+
         process.stderr.on('data', (data) => {
           sendDebugLog('STDERR: ' + data.toString().trim());
         });
-        
+
         process.on('close', (code) => {
           if (code === 0) {
             sendDebugLog('ffmpeg installation completed successfully');
@@ -815,6 +887,11 @@ ipcMain.handle('setup-ffmpeg', async () => {
             sendDebugLog(`ffmpeg installation failed with exit code: ${code}`);
             reject(new Error('Failed to install ffmpeg via Homebrew'));
           }
+        });
+
+        process.on('error', (error) => {
+          sendDebugLog(`ffmpeg installation error: ${error.message}`);
+          reject(error);
         });
       });
     } else {
