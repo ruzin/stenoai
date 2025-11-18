@@ -676,7 +676,131 @@
             border-color: #4CAF50;
             opacity: 1;
         }
-        
+
+        .copy-notes-btn {
+            background: #333;
+            color: #fff;
+            border: 1px solid #555;
+            border-radius: 6px;
+            padding: 8px 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 14px;
+        }
+
+        .copy-notes-btn:hover {
+            background: #444;
+            border-color: #666;
+        }
+
+        .copy-notes-btn:active {
+            transform: translateY(1px);
+        }
+
+        .copy-notes-btn.copied {
+            background: #4CAF50;
+            border-color: #4CAF50;
+        }
+
+        .meeting-title-container {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex: 0;
+            max-width: fit-content;
+        }
+
+        .meeting-title {
+            margin: 0;
+            color: #fff;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 600px;
+        }
+
+        .meeting-title-input {
+            background: #222;
+            border: 1px solid #666;
+            color: #fff;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 24px;
+            font-weight: 600;
+            outline: none;
+            flex: 1;
+        }
+
+        .meeting-title-input:focus {
+            border-color: #888;
+            background: #333;
+        }
+
+        .edit-title-btn {
+            background: transparent;
+            border: 1px solid #555;
+            color: #888;
+            padding: 6px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            opacity: 0;
+        }
+
+        .meeting-title-container:hover .edit-title-btn {
+            opacity: 1;
+        }
+
+        .edit-title-btn:hover {
+            background: #333;
+            border-color: #666;
+            color: #fff;
+        }
+
+        .title-edit-actions {
+            display: flex;
+            gap: 8px;
+        }
+
+        .save-title-btn, .cancel-title-btn {
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 14px;
+            border: 1px solid;
+        }
+
+        .save-title-btn {
+            background: #4CAF50;
+            border-color: #4CAF50;
+            color: #fff;
+        }
+
+        .save-title-btn:hover {
+            background: #45a049;
+        }
+
+        .cancel-title-btn {
+            background: transparent;
+            border-color: #555;
+            color: #888;
+        }
+
+        .cancel-title-btn:hover {
+            background: #333;
+            color: #fff;
+        }
+
         @keyframes spin {
             from { transform: rotate(0deg); }
             to { transform: rotate(360deg); }
@@ -1138,10 +1262,26 @@
             <div class="meeting-detail" id="meeting-detail">
                 <div class="meeting-header">
                     <div class="meeting-header-top">
-                        <h1 class="meeting-title" id="detail-title">Meeting Title</h1>
-                        <button class="reprocess-btn" id="reprocess-btn" title="Reprocess current meeting if analysis failed or needs improvement">
-                            Reprocess
-                        </button>
+                        <div class="meeting-title-container">
+                            <h1 class="meeting-title" id="detail-title">Meeting Title</h1>
+                            <button class="edit-title-btn" id="edit-title-btn" title="Edit meeting name">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                                </svg>
+                            </button>
+                        </div>
+                        <div style="display: flex; gap: 0px;">
+                            <button class="copy-notes-btn" id="copy-notes-btn" title="Copy all meeting notes to clipboard">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                                </svg>
+                            </button>
+                            <button class="reprocess-btn" id="reprocess-btn" title="Reprocess current meeting if analysis failed or needs improvement">
+                                Reprocess
+                            </button>
+                        </div>
                     </div>
                     <div class="meeting-info">
                         <span id="detail-date">Date</span>
@@ -1441,7 +1581,9 @@ Session started - waiting for activity...
         const detailTranscript = document.getElementById('detail-transcript');
         const reprocessBtn = document.getElementById('reprocess-btn');
         const copyTranscriptBtn = document.getElementById('copy-transcript-btn');
-        
+        const copyNotesBtn = document.getElementById('copy-notes-btn');
+        const editTitleBtn = document.getElementById('edit-title-btn');
+
         // Setup elements
         const setupOverlay = document.getElementById('setup-overlay');
         const setupAutoStart = document.getElementById('setup-auto-start');
@@ -2224,7 +2366,179 @@ Session started - waiting for activity...
                 log(`❌ Failed to copy transcript: ${error.message}`);
             }
         });
-        
+
+        // Copy all meeting notes to clipboard
+        copyNotesBtn.addEventListener('click', async () => {
+            try {
+                if (!selectedMeeting) {
+                    log('❌ No meeting selected to copy');
+                    return;
+                }
+
+                // Format meeting notes as text
+                const meetingName = selectedMeeting.session_info?.name || 'Untitled Meeting';
+                const date = formatDate(selectedMeeting.session_info?.processed_at);
+                const duration = selectedMeeting.session_info?.duration_seconds ?
+                    `${Math.floor(selectedMeeting.session_info.duration_seconds / 60)}m ${selectedMeeting.session_info.duration_seconds % 60}s` :
+                    'Unknown';
+
+                let notesText = `${meetingName}\n`;
+                notesText += `Date: ${date}\n`;
+                notesText += `Duration: ${duration}\n`;
+                notesText += `\n`;
+
+                // Summary
+                if (selectedMeeting.summary) {
+                    notesText += `SUMMARY\n`;
+                    notesText += `${selectedMeeting.summary}\n\n`;
+                }
+
+                // Participants
+                if (selectedMeeting.participants && selectedMeeting.participants.length > 0) {
+                    notesText += `PARTICIPANTS\n`;
+                    selectedMeeting.participants.forEach(participant => {
+                        notesText += `- ${participant}\n`;
+                    });
+                    notesText += `\n`;
+                }
+
+                // Key Points
+                if (selectedMeeting.key_points && selectedMeeting.key_points.length > 0) {
+                    notesText += `KEY POINTS\n`;
+                    selectedMeeting.key_points.forEach(point => {
+                        notesText += `- ${point}\n`;
+                    });
+                    notesText += `\n`;
+                }
+
+                // Action Items
+                if (selectedMeeting.action_items && selectedMeeting.action_items.length > 0) {
+                    notesText += `ACTION ITEMS\n`;
+                    selectedMeeting.action_items.forEach(item => {
+                        notesText += `- ${item}\n`;
+                    });
+                }
+
+                await navigator.clipboard.writeText(notesText);
+
+                // Visual feedback
+                copyNotesBtn.classList.add('copied');
+                const originalHTML = copyNotesBtn.innerHTML;
+                copyNotesBtn.innerHTML = `
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="20,6 9,17 4,12"></polyline>
+                    </svg>
+                    Copied!
+                `;
+
+                // Reset after 2 seconds
+                setTimeout(() => {
+                    copyNotesBtn.classList.remove('copied');
+                    copyNotesBtn.innerHTML = originalHTML;
+                }, 2000);
+
+                log('📋 Meeting notes copied to clipboard');
+            } catch (error) {
+                log(`❌ Failed to copy notes: ${error.message}`);
+            }
+        });
+
+        // Edit meeting title - define as a reusable function
+        function startEditingTitle() {
+            if (!selectedMeeting) return;
+
+            const titleElement = document.getElementById('detail-title');
+            const editBtn = document.getElementById('edit-title-btn');
+            const currentTitle = titleElement.textContent;
+
+            // Hide title and edit button
+            titleElement.style.display = 'none';
+            editBtn.style.display = 'none';
+
+            // Create input and buttons
+            const titleContainer = document.querySelector('.meeting-title-container');
+            const inputHTML = `
+                <input type="text" class="meeting-title-input" id="title-input" value="${currentTitle}">
+                <div class="title-edit-actions">
+                    <button class="save-title-btn" id="save-title-btn">Save</button>
+                    <button class="cancel-title-btn" id="cancel-title-btn">Cancel</button>
+                </div>
+            `;
+            titleContainer.insertAdjacentHTML('beforeend', inputHTML);
+
+            const titleInput = document.getElementById('title-input');
+            const saveTitleBtn = document.getElementById('save-title-btn');
+            const cancelTitleBtn = document.getElementById('cancel-title-btn');
+
+            // Focus and select the input
+            titleInput.focus();
+            titleInput.select();
+
+            // Save on Enter key
+            titleInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    saveTitleBtn.click();
+                } else if (e.key === 'Escape') {
+                    cancelTitleBtn.click();
+                }
+            });
+
+            // Cancel function
+            const cancelEdit = () => {
+                titleInput.remove();
+                document.querySelector('.title-edit-actions').remove();
+                titleElement.style.display = '';
+                editBtn.style.display = '';
+            };
+
+            // Save function
+            const saveTitle = async () => {
+                const newTitle = titleInput.value.trim();
+                if (!newTitle || newTitle === currentTitle) {
+                    cancelEdit();
+                    return;
+                }
+
+                try {
+                    const result = await ipcRenderer.invoke('update-meeting',
+                        selectedMeeting.session_info.summary_file,
+                        { name: newTitle }
+                    );
+
+                    if (result.success) {
+                        // Update local data
+                        selectedMeeting.session_info.name = newTitle;
+
+                        // Update the SAME title element (keeps detailTitle reference valid)
+                        titleElement.textContent = newTitle;
+
+                        // Remove input and show title again
+                        titleInput.remove();
+                        document.querySelector('.title-edit-actions').remove();
+                        titleElement.style.display = '';
+                        editBtn.style.display = '';
+
+                        // Reload meetings list to show updated name
+                        await loadMeetings(true);
+
+                        log(`✏️ Meeting name updated to: ${newTitle}`);
+                    } else {
+                        log(`❌ Failed to update meeting name: ${result.error}`);
+                        cancelEdit();
+                    }
+                } catch (error) {
+                    log(`❌ Error updating meeting name: ${error.message}`);
+                    cancelEdit();
+                }
+            };
+
+            cancelTitleBtn.addEventListener('click', cancelEdit);
+            saveTitleBtn.addEventListener('click', saveTitle);
+        }
+
+        // Attach the initial event listener
+        editTitleBtn.addEventListener('click', startEditingTitle);
+
         // Listen for debug messages from backend
         ipcRenderer.on('debug-log', (event, message) => {
             debugLog(message);

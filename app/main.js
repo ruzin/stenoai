@@ -310,6 +310,76 @@ ipcMain.handle('reprocess-meeting', async (event, summaryFile) => {
   }
 });
 
+ipcMain.handle('update-meeting', async (event, summaryFilePath, updates) => {
+  try {
+    const projectRoot = path.join(__dirname, '..');
+
+    // Define allowed base directories for file operations
+    const allowedBaseDirs = [
+      projectRoot,
+      path.join(os.homedir(), 'Library', 'Application Support', 'stenoai')
+    ];
+
+    // Convert to absolute path if needed
+    const absolutePath = path.isAbsolute(summaryFilePath)
+      ? summaryFilePath
+      : path.join(projectRoot, summaryFilePath);
+
+    // Security: Validate file path is within allowed directories
+    if (!validateSafeFilePath(absolutePath, allowedBaseDirs)) {
+      console.error(`Security: Blocked attempt to update file outside allowed directories: ${absolutePath}`);
+      return {
+        success: false,
+        error: 'Invalid file path'
+      };
+    }
+
+    // Read existing data
+    if (!fs.existsSync(absolutePath)) {
+      return {
+        success: false,
+        error: 'Meeting file not found'
+      };
+    }
+
+    const data = JSON.parse(fs.readFileSync(absolutePath, 'utf8'));
+
+    // Update fields - only update fields that are provided
+    if (updates.name !== undefined) {
+      data.session_info.name = updates.name;
+    }
+    if (updates.summary !== undefined) {
+      data.summary = updates.summary;
+    }
+    if (updates.participants !== undefined) {
+      data.participants = updates.participants;
+    }
+    if (updates.key_points !== undefined) {
+      data.key_points = updates.key_points;
+    }
+    if (updates.action_items !== undefined) {
+      data.action_items = updates.action_items;
+    }
+
+    // Add updated timestamp
+    data.session_info.updated_at = new Date().toISOString();
+
+    // Write back to file
+    fs.writeFileSync(absolutePath, JSON.stringify(data, null, 2), 'utf8');
+
+    console.log(`Updated meeting: ${absolutePath}`);
+
+    return {
+      success: true,
+      message: 'Meeting updated successfully',
+      updatedData: data
+    };
+  } catch (error) {
+    console.error('Update meeting error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
 ipcMain.handle('delete-meeting', async (event, meetingData) => {
   try {
     const fs = require('fs');
