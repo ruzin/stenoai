@@ -1091,5 +1091,95 @@ def setup_check():
     return {"success": all_good, "checks": checks}
 
 
+@cli.command()
+def list_models():
+    """List all supported models with metadata"""
+    from src.config import get_config
+
+    config = get_config()
+    models = config.list_supported_models()
+    current_model = config.get_model()
+
+    result = {
+        "current_model": current_model,
+        "supported_models": models
+    }
+
+    print(json.dumps(result, indent=2))
+
+
+@cli.command()
+def get_model():
+    """Get the currently configured model"""
+    from src.config import get_config
+
+    config = get_config()
+    current_model = config.get_model()
+    model_info = config.get_model_info(current_model)
+
+    result = {
+        "model": current_model,
+        "info": model_info
+    }
+
+    print(json.dumps(result, indent=2))
+
+
+@cli.command()
+@click.argument('model_name')
+def set_model(model_name):
+    """Set the preferred model for summarization"""
+    from src.config import get_config
+
+    config = get_config()
+
+    # Validate model
+    if model_name not in config.SUPPORTED_MODELS:
+        print(f"WARNING: Model '{model_name}' is not in the recommended list.")
+        print(f"Supported models: {', '.join(config.SUPPORTED_MODELS.keys())}")
+        print(f"Setting anyway (make sure it's installed with 'ollama pull {model_name}')")
+
+    success = config.set_model(model_name)
+
+    if success:
+        print(f"SUCCESS: Model set to {model_name}")
+        print(json.dumps({"success": True, "model": model_name}))
+    else:
+        print(f"ERROR: Failed to save model configuration")
+        print(json.dumps({"success": False, "error": "Failed to save config"}))
+
+
+@cli.command()
+def get_notifications():
+    """Get the current notification preference"""
+    from src.config import get_config
+
+    config = get_config()
+    enabled = config.get_notifications_enabled()
+
+    result = {
+        "notifications_enabled": enabled
+    }
+
+    print(json.dumps(result, indent=2))
+
+
+@cli.command()
+@click.argument('enabled', type=bool)
+def set_notifications(enabled):
+    """Set notification preference (True/False)"""
+    from src.config import get_config
+
+    config = get_config()
+    success = config.set_notifications_enabled(enabled)
+
+    if success:
+        print(f"SUCCESS: Notifications {'enabled' if enabled else 'disabled'}")
+        print(json.dumps({"success": True, "notifications_enabled": enabled}))
+    else:
+        print(f"ERROR: Failed to save notification preference")
+        print(json.dumps({"success": False, "error": "Failed to save config"}))
+
+
 if __name__ == '__main__':
     cli()

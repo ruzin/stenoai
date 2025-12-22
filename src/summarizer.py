@@ -16,20 +16,31 @@ logger = logging.getLogger(__name__)
 
 
 class OllamaSummarizer:
-    def __init__(self, model_name: str = "llama3.2:3b"):
+    def __init__(self, model_name: Optional[str] = None):
         """
         Initialize the Ollama summarizer with automatic service management.
-        
+
         Args:
-            model_name: Name of the Ollama model to use
+            model_name: Name of the Ollama model to use. If None, loads from config.
         """
         if not OLLAMA_AVAILABLE:
             raise ImportError("Ollama is not installed. Please install ollama-python.")
-            
+
+        # Load model from config if not specified
+        if model_name is None:
+            try:
+                from .config import get_config
+                config = get_config()
+                model_name = config.get_model()
+                logger.info(f"Using configured model: {model_name}")
+            except Exception as e:
+                logger.warning(f"Failed to load model from config: {e}, using default")
+                model_name = "llama3.2:3b"  # Default model
+
         self.model_name = model_name
         self.client = None
         self.ollama_process = None
-        
+
         # Ensure Ollama is ready before initializing client
         self._ensure_ollama_ready()
         self.client = ollama.Client()
@@ -245,8 +256,8 @@ class OllamaSummarizer:
             else:
                 logger.error(f"Failed to download model {self.model_name}: {result.stderr}")
                 
-                # Try fallback models
-                fallback_models = ["llama3.1:8b", "llama2:7b", "llama2:latest"]
+                # Try fallback models from supported list
+                fallback_models = ["llama3.2:3b", "gemma3:4b", "qwen3:8b", "deepseek-r1:8b"]
                 for fallback in fallback_models:
                     logger.info(f"Trying fallback model: {fallback}")
                     result = subprocess.run([ollama_path, 'pull', fallback], 

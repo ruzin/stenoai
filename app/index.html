@@ -341,7 +341,26 @@
         .debug-console::-webkit-scrollbar-thumb:hover {
             background: #555;
         }
-        
+
+        /* Model list scrollbar */
+        #model-list::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        #model-list::-webkit-scrollbar-track {
+            background: #1a1a1a;
+            border-radius: 4px;
+        }
+
+        #model-list::-webkit-scrollbar-thumb {
+            background: #333;
+            border-radius: 4px;
+        }
+
+        #model-list::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+
         /* Main content area */
         .main {
             flex: 1;
@@ -954,7 +973,29 @@
                 opacity: 1;
             }
         }
-        
+
+        @keyframes slideInFromBottom {
+            from {
+                transform: translateY(100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+
+        @keyframes slideOutToBottom {
+            from {
+                transform: translateY(0);
+                opacity: 1;
+            }
+            to {
+                transform: translateY(100%);
+                opacity: 0;
+            }
+        }
+
         .update-banner.show {
             display: flex;
         }
@@ -1229,6 +1270,7 @@
         
         <div class="header-actions">
             <button class="settings-btn" id="debug-btn" title="Debug Logs" style="margin-right: 8px;">🔨</button>
+            <button class="settings-btn" id="ai-settings-btn" title="AI Settings" style="margin-right: 8px;">🧠</button>
             <button class="settings-btn" id="settings-btn" title="Settings">⚙️</button>
         </div>
     </div>
@@ -1358,9 +1400,9 @@
             <div class="setup-header">
                 <h2>🚀 Welcome to StenoAI</h2>
                 <p>Setting up your system for meeting transcription...</p>
-                <p style="font-size: 12px; color: #888; margin-top: 8px;">💡 Scroll down to begin setup</p>
+                <p style="font-size: 14px; color: #aaa; margin-top: 12px;">💡 Scroll down to see logs</p>
             </div>
-            
+
             <div class="setup-steps" id="setup-steps">
                 <div class="setup-step" id="step-microphone">
                     <div class="step-icon">🎤</div>
@@ -1373,7 +1415,7 @@
                         </div>
                     </div>
                 </div>
-                
+
                 <div class="setup-step" id="step-system">
                     <div class="step-icon">🖥️</div>
                     <div class="step-content">
@@ -1447,7 +1489,7 @@
                     </div>
                 </div>
             </div>
-            
+
             <div class="setup-debug" style="margin: 24px 0;">
                 <h3 style="margin-bottom: 12px; display: flex; align-items: center; gap: 8px; font-size: 16px;">
                     <span>🐛 Debug Console</span>
@@ -1458,7 +1500,7 @@ Commands and output will appear here...
 
 </div>
             </div>
-            
+
             <div class="setup-actions">
                 <button class="btn btn-primary" id="setup-auto-start">Begin First-Time Setup</button>
                 <button class="btn btn-primary" id="setup-continue" style="display: none;">Continue to App</button>
@@ -1495,18 +1537,29 @@ Commands and output will appear here...
                     Run Setup Wizard
                 </button>
             </div>
-            
+
+            <div class="settings-section">
+                <h3>🔔 Notifications</h3>
+
+                <div style="margin-top: 15px;">
+                    <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                        <input type="checkbox" id="notifications-toggle" style="width: 18px; height: 18px; cursor: pointer;">
+                        <span style="color: #ccc;">Show desktop notifications for meeting completions</span>
+                    </label>
+                    <p style="font-size: 12px; color: #888; margin-top: 8px; margin-left: 28px;">
+                        Get notified when your meetings finish processing (even when the app is in the background)
+                    </p>
+                </div>
+            </div>
+
             <div class="settings-section">
                 <h3>🛠️ System Recovery</h3>
                 <p>Tools to recover from stuck recordings or processing issues.</p>
-                
+
                 <button class="btn" id="clear-state-btn" onclick="clearSystemState()">
                     Clear Recording State
                 </button>
-                <p style="font-size: 12px; color: #888; margin-top: 8px;">
-                    Use this if recordings appear stuck or the system won't start new recordings.
-                </p>
-                
+
             </div>
             
             <div class="settings-section">
@@ -1516,20 +1569,7 @@ Commands and output will appear here...
                 <button class="btn" id="test-update-btn" onclick="testUpdateCheck()">
                     Check for Updates
                 </button>
-                <p style="font-size: 12px; color: #888; margin-top: 8px;">
-                    Manually check if a newer version is available on GitHub.
-                </p>
-                
-            </div>
-            
-            <div class="settings-section">
-                <h3>🧠 AI Prompts</h3>
-                <p>View the prompts used for meeting summarization and analysis.</p>
-                
-                <h4>Summarization Prompt</h4>
-                <div class="prompt-viewer" id="summarization-prompt">
-                    Loading prompt...
-                </div>
+
             </div>
         </div>
     </div>
@@ -1540,11 +1580,48 @@ Commands and output will appear here...
             <h2>🔨 Debug Logs</h2>
             <button class="close-settings" onclick="toggleDebug()">✕</button>
         </div>
-        
+
         <div class="debug-console" id="debug-console-panel">StenoAI Debug Console
 Session started - waiting for activity...
 
 </div>
+    </div>
+
+    <!-- AI Settings Panel (slides in from right) -->
+    <div class="settings-panel" id="ai-settings-panel">
+        <div class="settings-header">
+            <h2>🧠 AI Settings</h2>
+            <button class="close-settings" onclick="toggleAISettings()">✕</button>
+        </div>
+
+        <div class="settings-content">
+            <div class="settings-section">
+                <h3>🤖 Model Selection</h3>
+                <p>Choose which AI model to use for meeting summarization. Larger models provide better quality but take longer to process.</p>
+
+                <div style="margin-top: 15px;">
+                    <label style="display: block; margin-bottom: 8px; font-weight: 500;">Current Model:</label>
+                    <div id="current-model-display" style="padding: 10px; background: #2a2a2a; border-radius: 4px; margin-bottom: 15px;">
+                        <span style="font-family: Monaco, monospace; color: #4CAF50;">Loading...</span>
+                    </div>
+
+                    <label style="display: block; margin-bottom: 8px; font-weight: 500;">Select Model:</label>
+                    <div id="model-list" style="display: flex; flex-direction: column; gap: 10px; max-height: 450px; overflow-y: auto; padding-right: 5px;">
+                        Loading models...
+                    </div>
+                </div>
+            </div>
+
+            <div class="settings-section">
+                <h3>🧠 AI Prompts</h3>
+                <p>View the prompts used for meeting summarization and analysis.</p>
+
+                <h4>Summarization Prompt</h4>
+                <div class="prompt-viewer" id="summarization-prompt">
+                    Loading prompt...
+                </div>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -1558,6 +1635,7 @@ Session started - waiting for activity...
         const stopBtn = document.getElementById('stop-btn');
         const settingsBtn = document.getElementById('settings-btn');
         const debugBtn = document.getElementById('debug-btn');
+        const aiSettingsBtn = document.getElementById('ai-settings-btn');
         const meetingsList = document.getElementById('meetings-list');
         const emptyState = document.getElementById('empty-state');
         const meetingDetail = document.getElementById('meeting-detail');
@@ -2261,10 +2339,15 @@ Session started - waiting for activity...
         settingsBtn.addEventListener('click', () => {
             toggleSettings();
         });
-        
+
         // Debug button click handler
         debugBtn.addEventListener('click', () => {
             toggleDebug();
+        });
+
+        // AI Settings button click handler
+        aiSettingsBtn.addEventListener('click', () => {
+            toggleAISettings();
         });
         
         // Reprocess button click handler
@@ -2296,13 +2379,10 @@ Session started - waiting for activity...
                     log('✅ Meeting reprocessed successfully');
                     
                     // Send notification for reprocessing completion
-                    if (Notification.permission === 'granted') {
-                        new Notification('StenoAI - Reprocessing Complete', {
-                            body: `"${meetingBeingProcessed.session_info?.name || 'Meeting'}" has been reanalyzed`,
-                            icon: 'build/icon.png',
-                            requireInteraction: false
-                        });
-                    }
+                    showDesktopNotification('StenoAI - Reprocessing Complete', {
+                        body: `"${meetingBeingProcessed.session_info?.name || 'Meeting'}" has been reanalyzed`,
+                        requireInteraction: false
+                    });
                     
                     // Reload meetings to show updated data
                     await loadMeetings(true);
@@ -2577,16 +2657,16 @@ Session started - waiting for activity...
                 // Log to debug console
                 debugLog(`\n>>> Starting: ${step.name}`);
                 debugLog(`Command: ${step.handler}`);
-                
+
                 try {
                     const result = await ipcRenderer.invoke(step.handler);
-                    
+
                     if (result.success) {
                         element.classList.remove('active');
                         element.classList.add('completed');
                         statusElement.textContent = result.message || 'Completed';
                         debugLog(`✅ SUCCESS: ${result.message || 'Completed'}`);
-                        
+
                         // Special handling for microphone permission completion
                         if (step.id === 'step-microphone') {
                             statusElement.textContent = 'Permission granted!';
@@ -2769,6 +2849,23 @@ Session started - waiting for activity...
             filterMeetings(); // Apply current search filter and render
         });
         
+        // Listen for model pull progress
+        ipcRenderer.on('model-pull-progress', (event, data) => {
+            updateModelProgress(data.model, data.progress);
+        });
+
+        // Listen for model pull completion
+        ipcRenderer.on('model-pull-complete', (event, data) => {
+            hideModelDownloading(data.model);
+
+            if (data.success) {
+                showModelNotification(`Successfully downloaded ${data.model}!`, 'success');
+                loadModels(); // Reload to show as installed
+            } else {
+                showModelNotification(`Failed to download ${data.model}: ${data.error}`, 'error');
+            }
+        });
+
         // Listen for processing completion events
         ipcRenderer.on('processing-complete', (event, data) => {
             log(`Processing complete for: ${data.sessionName}`);
@@ -2800,13 +2897,10 @@ Session started - waiting for activity...
                 }
                 
                 // Show native notification
-                if (Notification.permission === 'granted') {
-                    new Notification('StenoAI - Meeting Notes Ready', {
-                        body: `"${data.sessionName}" has been transcribed and summarized`,
-                        icon: 'build/icon.png',
-                        requireInteraction: false
-                    });
-                }
+                showDesktopNotification('StenoAI - Meeting Notes Ready', {
+                    body: `"${data.sessionName}" has been transcribed and summarized`,
+                    requireInteraction: false
+                });
                 
                 setStatus('ready', 'Processing complete');
             } else {
@@ -2823,29 +2917,44 @@ Session started - waiting for activity...
         
         // Settings panel functionality
         let settingsVisible = false;
-        
+
         function toggleSettings() {
             const settingsPanel = document.getElementById('settings-panel');
             settingsVisible = !settingsVisible;
-            
+
             if (settingsVisible) {
                 settingsPanel.style.right = '0';
-                loadPrompts();
+                loadNotificationSettings();
             } else {
                 settingsPanel.style.right = '-400px';
             }
         }
-        
+
         let debugVisible = false;
-        
+
         function toggleDebug() {
             const debugPanel = document.getElementById('debug-panel');
             debugVisible = !debugVisible;
-            
+
             if (debugVisible) {
                 debugPanel.style.right = '0';
             } else {
                 debugPanel.style.right = '-500px';
+            }
+        }
+
+        let aiSettingsVisible = false;
+
+        function toggleAISettings() {
+            const aiSettingsPanel = document.getElementById('ai-settings-panel');
+            aiSettingsVisible = !aiSettingsVisible;
+
+            if (aiSettingsVisible) {
+                aiSettingsPanel.style.right = '0';
+                loadPrompts();
+                loadModels();
+            } else {
+                aiSettingsPanel.style.right = '-400px';
             }
         }
         
@@ -2877,7 +2986,281 @@ Session started - waiting for activity...
                 document.getElementById('app-version').textContent = 'Unknown';
             }
         }
-        
+
+        // Model management functions
+        async function loadModels() {
+            try {
+                const result = await ipcRenderer.invoke('list-models');
+
+                if (result.success) {
+                    displayCurrentModel(result.current_model);
+                    displayModelList(result.supported_models, result.current_model);
+                } else {
+                    document.getElementById('current-model-display').innerHTML = '<span style="color: #f44336;">Failed to load models</span>';
+                    document.getElementById('model-list').innerHTML = '<span style="color: #f44336;">Failed to load model list</span>';
+                }
+            } catch (error) {
+                console.error('Error loading models:', error);
+                document.getElementById('current-model-display').innerHTML = '<span style="color: #f44336;">Error loading models</span>';
+                document.getElementById('model-list').innerHTML = '<span style="color: #f44336;">Error loading model list</span>';
+            }
+        }
+
+        function displayCurrentModel(modelName) {
+            const currentModelDisplay = document.getElementById('current-model-display');
+            currentModelDisplay.innerHTML = `<span style="font-family: Monaco, monospace; color: #4CAF50;">${modelName}</span>`;
+        }
+
+        function displayModelList(models, currentModel) {
+            const modelListDiv = document.getElementById('model-list');
+            modelListDiv.innerHTML = '';
+
+            for (const [modelName, modelInfo] of Object.entries(models)) {
+                const isCurrentModel = modelName === currentModel;
+
+                const modelCard = document.createElement('div');
+                modelCard.style.cssText = `
+                    padding: 12px;
+                    background: ${isCurrentModel ? '#2a4a2a' : '#2a2a2a'};
+                    border: 2px solid ${isCurrentModel ? '#4CAF50' : '#444'};
+                    border-radius: 6px;
+                    cursor: pointer;
+                    transition: all 0.2s;
+                `;
+
+                modelCard.setAttribute('data-model-name', modelName);
+                modelCard.setAttribute('data-model-size', modelInfo.size);
+
+                // Extract tag from description (e.g., "(default)")
+                const tagMatch = modelInfo.description.match(/\((default|recommended)\)/i);
+                const tag = tagMatch ? ` ${tagMatch[0]}` : '';
+
+                modelCard.innerHTML = `
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <div style="flex: 1;">
+                            <div style="font-weight: 600; margin-bottom: 4px; font-family: Monaco, monospace;">
+                                ${modelName}${tag}
+                                ${isCurrentModel ? '<span style="color: #4CAF50; margin-left: 8px;">✓ Active</span>' : ''}
+                            </div>
+                            <div style="font-size: 12px; color: #aaa;">
+                                Size: ${modelInfo.size} | Speed: ${modelInfo.speed} | Quality: ${modelInfo.quality}
+                            </div>
+                            <div class="model-progress" style="display: none; margin-top: 8px; padding: 8px; background: #1a1a1a; border-radius: 4px;">
+                                <div class="progress-text" style="font-size: 11px; color: #4CAF50; font-family: Monaco, monospace;">Downloading...</div>
+                            </div>
+                        </div>
+                        <div style="margin-left: 15px;">
+                            ${isCurrentModel ?
+                                '<span style="color: #4CAF50; font-size: 24px;">●</span>' :
+                                '<button class="btn" onclick="selectModel(\'' + modelName + '\')" style="margin: 0; padding: 6px 12px; font-size: 12px;">Select</button>'
+                            }
+                        </div>
+                    </div>
+                `;
+
+                if (!isCurrentModel) {
+                    modelCard.onmouseenter = () => {
+                        modelCard.style.borderColor = '#4CAF50';
+                        modelCard.style.background = '#2a3a2a';
+                    };
+                    modelCard.onmouseleave = () => {
+                        modelCard.style.borderColor = '#444';
+                        modelCard.style.background = '#2a2a2a';
+                    };
+                }
+
+                modelListDiv.appendChild(modelCard);
+            }
+        }
+
+        async function selectModel(modelName) {
+            try {
+                // Check if model is already installed
+                const checkResult = await ipcRenderer.invoke('check-model-installed', modelName);
+
+                if (!checkResult.success) {
+                    alert(`Error checking model status: ${checkResult.error}`);
+                    return;
+                }
+
+                const isInstalled = checkResult.installed;
+                let confirmMsg;
+
+                if (isInstalled) {
+                    confirmMsg = `Switch to model: ${modelName}?\n\nThis model is already installed and ready to use.`;
+                } else {
+                    confirmMsg = `Switch to model: ${modelName}?\n\nThis model will be downloaded (${getModelSize(modelName)}).\n\n⚠️ WARNING: Model downloads will pause any active summarization.\nWait for current processing to finish before downloading.`;
+                }
+
+                if (!confirm(confirmMsg)) {
+                    return;
+                }
+
+                // Set the model preference
+                const result = await ipcRenderer.invoke('set-model', modelName);
+
+                if (!result.success) {
+                    alert(`Failed to set model: ${result.error}`);
+                    return;
+                }
+
+                // If already installed, just reload and show success
+                if (isInstalled) {
+                    showModelNotification(`Switched to ${modelName}!`, 'success');
+                    loadModels();
+                    return;
+                }
+
+                // Model needs to be downloaded - start non-blocking pull
+                showModelDownloading(modelName);
+
+                // Start download (non-blocking - returns immediately)
+                ipcRenderer.invoke('pull-model', modelName).catch(error => {
+                    console.error('Error starting model pull:', error);
+                    hideModelDownloading(modelName);
+                    showModelNotification(`Failed to start download: ${error.message}`, 'error');
+                });
+
+            } catch (error) {
+                console.error('Error selecting model:', error);
+                alert(`Error selecting model: ${error.message}`);
+            }
+        }
+
+        function getModelSize(modelName) {
+            const modelList = document.getElementById('model-list');
+            const modelCards = modelList.querySelectorAll('[data-model-name]');
+            for (const card of modelCards) {
+                if (card.dataset.modelName === modelName) {
+                    const sizeText = card.dataset.modelSize;
+                    return sizeText || 'unknown size';
+                }
+            }
+            return 'unknown size';
+        }
+
+        function showModelDownloading(modelName) {
+            const modelCard = document.querySelector(`[data-model-name="${modelName}"]`);
+            if (!modelCard) return;
+
+            const progressDiv = modelCard.querySelector('.model-progress');
+            if (progressDiv) {
+                progressDiv.style.display = 'block';
+                progressDiv.querySelector('.progress-text').textContent = 'Starting download...';
+            }
+        }
+
+        function hideModelDownloading(modelName) {
+            const modelCard = document.querySelector(`[data-model-name="${modelName}"]`);
+            if (!modelCard) return;
+
+            const progressDiv = modelCard.querySelector('.model-progress');
+            if (progressDiv) {
+                progressDiv.style.display = 'none';
+            }
+        }
+
+        function updateModelProgress(modelName, progressText) {
+            const modelCard = document.querySelector(`[data-model-name="${modelName}"]`);
+            if (!modelCard) return;
+
+            const progressDiv = modelCard.querySelector('.model-progress');
+            if (progressDiv) {
+                progressDiv.querySelector('.progress-text').textContent = progressText;
+            }
+        }
+
+        function showModelNotification(message, type = 'info') {
+            // In-app notification toast (bottom-right, matches app theme)
+            const notification = document.createElement('div');
+            notification.style.cssText = `
+                position: fixed;
+                bottom: 20px;
+                right: 20px;
+                padding: 15px 20px;
+                background: ${type === 'success' ? '#22c55e' : type === 'error' ? '#ef4444' : '#3b82f6'};
+                color: white;
+                border-radius: 6px;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+                z-index: 10000;
+                font-size: 14px;
+                max-width: 350px;
+                animation: slideInFromBottom 0.3s ease-out;
+            `;
+            notification.textContent = message;
+            document.body.appendChild(notification);
+
+            const duration = type === 'error' ? 5000 : 3000;
+            setTimeout(() => {
+                notification.style.animation = 'slideOutToBottom 0.3s ease-in';
+                setTimeout(() => notification.remove(), 300);
+            }, duration);
+        }
+
+        async function loadNotificationSettings() {
+            try {
+                const result = await ipcRenderer.invoke('get-notifications');
+                const toggle = document.getElementById('notifications-toggle');
+
+                if (result.success) {
+                    toggle.checked = result.notifications_enabled;
+                } else {
+                    console.error('Failed to load notification settings:', result.error);
+                    toggle.checked = true; // Default to enabled
+                }
+            } catch (error) {
+                console.error('Error loading notification settings:', error);
+                document.getElementById('notifications-toggle').checked = true;
+            }
+        }
+
+        async function showDesktopNotification(title, options) {
+            // Check if desktop notifications are enabled in settings
+            try {
+                const result = await ipcRenderer.invoke('get-notifications');
+                const notificationsEnabled = result.success ? result.notifications_enabled : true;
+
+                if (Notification.permission === 'granted' && notificationsEnabled) {
+                    new Notification(title, options);
+                }
+            } catch (error) {
+                console.error('Error checking notification settings:', error);
+                // Default to showing if error
+                if (Notification.permission === 'granted') {
+                    new Notification(title, options);
+                }
+            }
+        }
+
+        // Setup notification toggle event listener
+        document.addEventListener('DOMContentLoaded', () => {
+            const notificationsToggle = document.getElementById('notifications-toggle');
+            if (notificationsToggle) {
+                notificationsToggle.addEventListener('change', async (e) => {
+                    try {
+                        const enabled = e.target.checked;
+                        const result = await ipcRenderer.invoke('set-notifications', enabled);
+
+                        if (result.success) {
+                            showModelNotification(
+                                `Desktop notifications ${enabled ? 'enabled' : 'disabled'}`,
+                                'success'
+                            );
+                        } else {
+                            console.error('Failed to save notification setting:', result.error);
+                            showModelNotification('Failed to save setting', 'error');
+                            // Revert toggle
+                            e.target.checked = !enabled;
+                        }
+                    } catch (error) {
+                        console.error('Error saving notification setting:', error);
+                        showModelNotification('Failed to save setting', 'error');
+                        e.target.checked = !e.target.checked;
+                    }
+                });
+            }
+        });
+
         async function runSetupFromSettings() {
             const btn = document.getElementById('run-setup-btn');
             btn.textContent = 'Running Setup...';

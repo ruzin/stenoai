@@ -1,0 +1,5 @@
+{
+  "model": "llama3.2:3b",
+  "notifications_enabled": true,
+  "version": "1.0"
+}
