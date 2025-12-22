@@ -19,21 +19,21 @@ const features = [
   },
   {
     icon: <FileText className="w-6 h-6" aria-hidden="true" />,
-    title: "Local Summaries (Free)",
+    title: "Local Summaries",
     desc: "Generate smart, on‑device bullet points and outlines for meetings, lectures, and podcasts.",
     pill: "Offline mode",
   },
   {
     icon: <Sparkles className="w-6 h-6" aria-hidden="true" />,
-    title: "Pro Summaries (Cloud)",
-    desc: "Bring your own model via API key (e.g., OpenAI or Anthropic). Coming soon.",
-    pill: "Bring your Own AI Model",
+    title: "Multiple AI Models",
+    desc: "Choose from open-source models like Qwen, Llama, DeepSeek & Gemma",
+    pill: "Multi-Model Support",
   },
   {
     icon: <ShieldCheck className="w-6 h-6" aria-hidden="true" />,
-    title: "End‑to‑End Control",
-    desc: "Choose where your data is processed. Local by default. Cloud only with your consent.",
-    pill: "Your data, your rules",
+    title: "Privacy First",
+    desc: "All processing happens locally on your Mac. Your data never leaves your device.",
+    pill: "100% Privacy",
   },
 ];
 
@@ -47,12 +47,16 @@ const faqs = [
     a: "Since stenoAI isn't code-signed, you'll need to: (1) Right-click the DMG and select 'Open', (2) Drag the app to Applications, (3) If it won't launch, run 'xattr -cr /Applications/StenoAI.app' in Terminal, then (4) Right-click the app and select 'Open'. It will work normally after that.",
   },
   {
-    q: "What does Pro add?",
-    a: "When available, stenoAI can send your notes to your chosen provider (e.g., OpenAI or Anthropic) using your own API key to generate richer executive summaries, action items, and sentiment tags — only when you explicitly enable it.",
+    q: "What AI models are available?",
+    a: "Choose from 4 cutting-edge open-source models: Llama 3.2 3B (fastest, default), Gemma 3 4B (efficient), Qwen 3 8B (best for structured notes), and DeepSeek-R1 8B (superior reasoning). All models run 100% locally on your Mac.",
   },
   {
-    q: "Is my audio ever uploaded?",
-    a: "Not for local features. Audio and text stay on your device by default. Cloud summaries are strictly opt‑in and send only the text you choose, secured in transit.",
+    q: "Is my data private and secure?",
+    a: "Absolutely. stenoAI runs 100% locally with zero cloud dependencies. Your audio recordings and transcripts stay on your Mac and are never uploaded anywhere.",
+  },
+  {
+    q: "How accurate is the transcription?",
+    a: "stenoAI uses OpenAI's Whisper model, known for high accuracy across accents and languages. Quality depends on audio clarity—quiet rooms with good microphones produce the best results.",
   },
   {
     q: "What platforms are supported?",
@@ -97,7 +101,7 @@ export default function App() {
               <span className="block bg-gradient-to-r from-indigo-400 via-sky-400 to-cyan-300 text-transparent bg-clip-text">Private. Fast. Accurate.</span>
             </motion.h1>
             <p className="mt-6 text-slate-300 text-lg leading-relaxed max-w-prose">
-              stenoAI is an AI transcriber & summarisation app that runs locally. Get studio‑grade transcription and on-device meeting summaries for free. Your very own stenographer for every meeting.
+              stenoAI is an AI transcriber & summarisation app that runs locally. Get studio‑grade transcription and on-device meeting summaries for free — Your very own stenographer for every meeting.
             </p>
             <div className="mt-8 flex flex-col sm:flex-row gap-3">
               <a href="#download" className="inline-flex items-center justify-center gap-2 rounded-2xl bg-white text-slate-900 px-5 py-3 font-semibold hover:bg-slate-100">
@@ -106,7 +110,7 @@ export default function App() {
               </div>
             <div className="mt-6 flex items-center gap-4 text-sm text-slate-400">
               <div className="flex items-center gap-1"><Lock className="w-4 h-4" aria-hidden="true" /> Local by default</div>
-              <div className="flex items-center gap-1"><Zap className="w-4 h-4" aria-hidden="true" /> Realtime captions</div>
+              <div className="flex items-center gap-1"><Zap className="w-4 h-4" aria-hidden="true" /> Realtime transcripts</div>
               <div className="flex items-center gap-1"><Sparkles className="w-4 h-4" aria-hidden="true" /> Smart highlights</div>
             </div>
           </div>
@@ -144,7 +148,7 @@ export default function App() {
       <section id="features" className="max-w-6xl mx-auto px-4 py-16 md:py-24">
         <div className="text-center max-w-3xl mx-auto">
           <h2 className="text-3xl md:text-4xl font-bold">Built for focus, engineered for privacy</h2>
-          <p className="mt-4 text-slate-300">Record, transcribe, and summarise without sending your audio anywhere. When you want deeper insights, Pro summaries will be available soon.</p>
+          <p className="mt-4 text-slate-300">Record, transcribe, and summarise without sending your audio anywhere. Choose from 4 powerful AI models for deeper meeting insights.</p>
         </div>
         <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-10">
           {features.map((f, i) => (
@@ -157,17 +161,6 @@ export default function App() {
               <span className="inline-flex mt-4 text-xs rounded-full border border-white/10 px-2 py-1 text-slate-300">{f.pill}</span>
             </motion.div>
           ))}
-        </div>
-      </section>
-
-      {/* Trust & privacy */}
-      <section className="max-w-6xl mx-auto px-4 py-12">
-        <div className="rounded-3xl border border-white/10 bg-slate-900/50 p-6 md:p-8 flex flex-col md:flex-row items-start md:items-center gap-6">
-          <div className="p-3 rounded-2xl bg-slate-800 border border-white/10"><ShieldCheck className="w-6 h-6" aria-hidden="true" /></div>
-          <div className="flex-1">
-            <h3 className="text-xl font-semibold">Privacy first, always</h3>
-            <p className="mt-2 text-slate-300 text-sm">stenoAI processes your recordings locally by default. Pro's cloud summaries (coming soon) will be strictly opt‑in and can be disabled at any time. We never sell your data.</p>
-          </div>
         </div>
       </section>
 
@@ -191,7 +184,7 @@ export default function App() {
       <section id="download" className="max-w-6xl mx-auto px-4 py-16 md:py-24">
         <div className="rounded-3xl border border-white/10 bg-gradient-to-r from-indigo-600/20 via-sky-600/20 to-cyan-600/20 p-8 md:p-12 text-center">
           <h2 className="text-3xl md:text-4xl font-bold">Start capturing brilliant notes today</h2>
-          <p className="mt-4 text-slate-200">Download the free app for macOS. Pro is coming soon.</p>
+          <p className="mt-4 text-slate-200">Download the free app for macOS.</p>
           <div className="mt-6 flex flex-col sm:flex-row gap-3 justify-center">
             <a href={DOWNLOAD_URL_MAC_SILICON} className="inline-flex items-center gap-2 rounded-2xl bg-white text-slate-900 px-5 py-3 font-semibold hover:bg-slate-100"><Download className="w-5 h-5" aria-hidden="true" /> Apple Silicon (M1–M4)</a>
             <a href={DOWNLOAD_URL_MAC_INTEL} className="inline-flex items-center gap-2 rounded-2xl border border-white/10 px-5 py-3 font-semibold hover:bg-white/5"><Download className="w-5 h-5" aria-hidden="true" /> Intel Macs</a>
@@ -209,7 +202,7 @@ export default function App() {
             <a href="#" className="hover:text-white">Terms</a>
             <a href="#" className="hover:text-white">Contact</a>
           </div>
-          <div>© {new Date().getFullYear()} stenoAI</div>
+          <div>© 2026 stenoAI</div>
         </div>
       </footer>
     </div>
