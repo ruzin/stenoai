@@ -146,11 +146,11 @@ export default function App() {
 
       {/* Feature grid */}
       <section id="features" className="max-w-6xl mx-auto px-4 py-16 md:py-24">
-        <div className="flex items-center justify-center gap-8 md:gap-12 flex-wrap mb-12 opacity-40">
-          <img src="/llama-text.svg" alt="Meta Llama" className="h-5 md:h-6" />
-          <img src="/gemma-text.svg" alt="Google Gemma" className="h-5 md:h-6" />
-          <img src="/qwen-text.svg" alt="Qwen" className="h-5 md:h-6" />
-          <img src="/deepseek-text.svg" alt="DeepSeek" className="h-5 md:h-6" />
+        <div className="flex items-center justify-center gap-8 md:gap-12 flex-wrap mb-12">
+          <img src="/meta-text.svg" alt="Meta Llama" className="h-6 md:h-7 brightness-0 invert opacity-40" />
+          <img src="/gemma-text.svg" alt="Google Gemma" className="h-6 md:h-7 brightness-0 invert opacity-40" />
+          <img src="/qwen-text.svg" alt="Qwen" className="h-6 md:h-7 brightness-0 invert opacity-40" />
+          <img src="/deepseek-text.svg" alt="DeepSeek" className="h-6 md:h-7 brightness-0 invert opacity-40" />
         </div>
         <div className="text-center max-w-3xl mx-auto">
           <h2 className="text-3xl md:text-4xl font-bold">Built for focus, engineered for privacy</h2>
