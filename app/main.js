@@ -1218,7 +1218,7 @@ ipcMain.handle('setup-ollama-and-model', async () => {
     
     sendDebugLog('Downloading AI model (this may take several minutes)...');
     sendDebugLog(`$ ${finalOllamaPath} pull llama3.2:3b`);
-    
+
     return new Promise((resolve) => {
       const process = exec(`${finalOllamaPath} pull llama3.2:3b`, { timeout: 600000 });
       
@@ -1396,6 +1396,270 @@ ipcMain.handle('get-ai-prompts', async () => {
     return { success: false, error: error.message };
   }
 });
+
+// Helper function to ensure Ollama service is running
+async function ensureOllamaRunning() {
+  try {
+    // Check if Ollama service is responding
+    const { exec } = require('child_process');
+    const response = await new Promise((resolve) => {
+      exec('curl -s http://localhost:11434/api/version', (error, stdout) => {
+        resolve(!error && stdout);
+      });
+    });
+
+    if (response) {
+      return true; // Service is running
+    }
+
+    // Service not running, try to start it
+    const ollamaPath = await findOllamaExecutable();
+    if (!ollamaPath) {
+      return false;
+    }
+
+    // Start Ollama service in background
+    spawn(ollamaPath, ['serve'], { detached: true, stdio: 'ignore' }).unref();
+
+    // Wait for service to start
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    return true;
+  } catch (error) {
+    console.error('Error ensuring Ollama is running:', error);
+    return false;
+  }
+}
+
+// Model management handlers
+ipcMain.handle('check-model-installed', async (event, modelName) => {
+  try {
+    const ollamaPath = await findOllamaExecutable();
+    if (!ollamaPath) {
+      return { success: false, installed: false, error: 'Ollama not found. Please install Ollama first.' };
+    }
+
+    // Ensure Ollama service is running
+    const isRunning = await ensureOllamaRunning();
+    if (!isRunning) {
+      return { success: false, installed: false, error: 'Could not start Ollama service' };
+    }
+
+    return new Promise((resolve) => {
+      const { exec } = require('child_process');
+      exec(`${ollamaPath} list`, (error, stdout) => {
+        if (error) {
+          resolve({ success: false, installed: false, error: error.message });
+          return;
+        }
+
+        // Check if model name appears in the list
+        const installed = stdout.toLowerCase().includes(modelName.toLowerCase());
+        resolve({ success: true, installed: installed });
+      });
+    });
+  } catch (error) {
+    return { success: false, installed: false, error: error.message };
+  }
+});
+
+ipcMain.handle('list-models', async () => {
+  try {
+    const result = await runPythonScript('simple_recorder.py', ['list-models']);
+    const jsonData = JSON.parse(result);
+
+    return {
+      success: true,
+      ...jsonData
+    };
+  } catch (error) {
+    sendDebugLog(`Error listing models: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('get-current-model', async () => {
+  try {
+    const result = await runPythonScript('simple_recorder.py', ['get-model']);
+    const jsonData = JSON.parse(result);
+
+    return {
+      success: true,
+      ...jsonData
+    };
+  } catch (error) {
+    sendDebugLog(`Error getting current model: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('set-model', async (event, modelName) => {
+  try {
+    sendDebugLog(`Setting model to: ${modelName}`);
+    const result = await runPythonScript('simple_recorder.py', ['set-model', modelName]);
+
+    // Extract JSON from output (might have other text before it)
+    const jsonMatch = result.match(/\{.*\}/s);
+    if (jsonMatch) {
+      const jsonData = JSON.parse(jsonMatch[0]);
+      return jsonData;
+    }
+
+    return { success: true, model: modelName };
+  } catch (error) {
+    sendDebugLog(`Error setting model: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('get-notifications', async () => {
+  try {
+    const result = await runPythonScript('simple_recorder.py', ['get-notifications']);
+    const jsonData = JSON.parse(result);
+
+    return {
+      success: true,
+      ...jsonData
+    };
+  } catch (error) {
+    sendDebugLog(`Error getting notification settings: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('set-notifications', async (event, enabled) => {
+  try {
+    sendDebugLog(`Setting notifications to: ${enabled}`);
+    const result = await runPythonScript('simple_recorder.py', ['set-notifications', enabled ? 'True' : 'False']);
+
+    // Extract JSON from output
+    const jsonMatch = result.match(/\{.*\}/s);
+    if (jsonMatch) {
+      const jsonData = JSON.parse(jsonMatch[0]);
+      return jsonData;
+    }
+
+    return { success: true, notifications_enabled: enabled };
+  } catch (error) {
+    sendDebugLog(`Error setting notifications: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('pull-model', async (event, modelName) => {
+  try {
+    sendDebugLog(`Pulling model: ${modelName}`);
+    sendDebugLog('This may take several minutes...');
+
+    // Find Ollama path
+    const ollamaPath = await findOllamaExecutable();
+    if (!ollamaPath) {
+      return { success: false, error: 'Ollama not found. Please install Ollama first.' };
+    }
+
+    return new Promise((resolve) => {
+      const { spawn } = require('child_process');
+      const process = spawn(ollamaPath, ['pull', modelName]);
+
+      process.stdout.on('data', (data) => {
+        const output = data.toString().trim();
+        sendDebugLog(output);
+
+        // Parse progress from ollama output (format: "pulling manifest... 45%")
+        // Send progress event to frontend
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('model-pull-progress', {
+            model: modelName,
+            progress: output
+          });
+        }
+      });
+
+      process.stderr.on('data', (data) => {
+        const output = data.toString().trim();
+        sendDebugLog(output);
+
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('model-pull-progress', {
+            model: modelName,
+            progress: output
+          });
+        }
+      });
+
+      process.on('close', (code) => {
+        if (code === 0) {
+          sendDebugLog(`Successfully pulled model: ${modelName}`);
+
+          // Send completion event
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('model-pull-complete', {
+              model: modelName,
+              success: true
+            });
+          }
+
+          resolve({ success: true, model: modelName });
+        } else {
+          sendDebugLog(`Failed to pull model: ${modelName}`);
+
+          // Send failure event
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('model-pull-complete', {
+              model: modelName,
+              success: false,
+              error: `Process exited with code ${code}`
+            });
+          }
+
+          resolve({ success: false, error: `Process exited with code ${code}` });
+        }
+      });
+
+      process.on('error', (error) => {
+        sendDebugLog(`Error pulling model: ${error.message}`);
+
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('model-pull-complete', {
+            model: modelName,
+            success: false,
+            error: error.message
+          });
+        }
+
+        resolve({ success: false, error: error.message });
+      });
+    });
+  } catch (error) {
+    sendDebugLog(`Error in pull-model handler: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+});
+
+// Helper function to find Ollama executable
+async function findOllamaExecutable() {
+  const { exec } = require('child_process');
+  const possiblePaths = [
+    '/opt/homebrew/bin/ollama',
+    '/usr/local/bin/ollama',
+    'ollama'
+  ];
+
+  for (const ollamaPath of possiblePaths) {
+    try {
+      await new Promise((resolve, reject) => {
+        exec(`${ollamaPath} --version`, (error) => {
+          if (error) reject(error);
+          else resolve();
+        });
+      });
+      return ollamaPath;
+    } catch (error) {
+      continue;
+    }
+  }
+
+  return null;
+}
 
 // Update checking functionality
 async function checkForUpdates() {
