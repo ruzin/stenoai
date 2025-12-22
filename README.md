@@ -16,6 +16,7 @@ AI-powered meeting transcription and summarization that runs entirely on your de
 
 - **Local transcription** using OpenAI Whisper
 - **AI summarization** with Ollama models
+- **Multiple AI models** - Choose from 4 models optimized for different use cases
 - **Privacy-first** - no cloud dependencies
 - **macOS desktop app** with intuitive interface
 
@@ -24,7 +25,6 @@ AI-powered meeting transcription and summarization that runs entirely on your de
 ### Enhanced Features
 - Custom summarization templates
 - Speaker Diarisation
-- Ability to select different local models like qwen, gemma etc. Currently, limited to llama3.2
 
 ### Bring Your Own AI API
 - Support for OpenAI GPT models via API key
@@ -143,7 +143,16 @@ git push origin v$(node -p "require('./package.json').version")
 - `medium`: High accuracy for important meetings (slower)
 
 **Summarization Models** (Ollama):
-- `llama3.2:3b`: Good quality, moderate speed (recommended)
+- `llama3.2:3b` (2GB): Fastest option for quick meetings **(default)**
+- `gemma3:4b` (2.5GB): Lightweight and efficient
+- `qwen3:8b` (4.7GB): Excellent at structured output and action items
+- `deepseek-r1:8b` (4.7GB): Strong reasoning and analysis capabilities
+
+**Switching Models:**
+- Click the 🧠 AI Settings icon in the app
+- Select your preferred model
+- Models download automatically when selected
+- ⚠️ Note: Downloads will pause any active summarization
 
 ## Project Structure
 
