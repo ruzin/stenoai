@@ -93,7 +93,7 @@ export default function App() {
       </header>
 
       {/* Hero */}
-      <section id="cta" className="max-w-6xl mx-auto px-4 pt-20 pb-16 md:pt-28 md:pb-24">
+      <section id="cta" className="max-w-6xl mx-auto px-4 pt-16 pb-12 md:pt-24 md:pb-20">
         <div className="grid md:grid-cols-2 gap-10 items-center">
           <div>
             <motion.h1 initial={{opacity:0, y:8}} animate={{opacity:1, y:0}} transition={{duration:0.6}} className="text-4xl md:text-6xl font-extrabold leading-tight">
@@ -145,7 +145,7 @@ export default function App() {
       </section>
 
       {/* Feature grid */}
-      <section id="features" className="max-w-6xl mx-auto px-4 py-16 md:py-24">
+      <section id="features" className="max-w-6xl mx-auto px-4 py-12 md:py-20">
         <div className="text-center max-w-3xl mx-auto">
           <h2 className="text-3xl md:text-4xl font-bold">Built for focus, engineered for privacy</h2>
           <p className="mt-4 text-slate-300">Record, transcribe, and summarise without sending your audio anywhere. Choose from 4 powerful AI models for deeper meeting insights.</p>
@@ -165,7 +165,7 @@ export default function App() {
       </section>
 
       {/* FAQ */}
-      <section id="faq" className="max-w-6xl mx-auto px-4 py-16 md:py-24">
+      <section id="faq" className="max-w-6xl mx-auto px-4 py-12 md:py-20">
         <div className="text-center max-w-2xl mx-auto">
           <h2 className="text-3xl md:text-4xl font-bold">Frequently asked questions</h2>
           <p className="mt-4 text-slate-300">Everything you need to know about stenoAI.</p>
@@ -181,7 +181,7 @@ export default function App() {
       </section>
 
       {/* CTA footer */}
-      <section id="download" className="max-w-6xl mx-auto px-4 py-16 md:py-24">
+      <section id="download" className="max-w-6xl mx-auto px-4 py-12 md:py-20">
         <div className="rounded-3xl border border-white/10 bg-gradient-to-r from-indigo-600/20 via-sky-600/20 to-cyan-600/20 p-8 md:p-12 text-center">
           <h2 className="text-3xl md:text-4xl font-bold">Start capturing brilliant notes today</h2>
           <p className="mt-4 text-slate-200">Download the free app for macOS.</p>
