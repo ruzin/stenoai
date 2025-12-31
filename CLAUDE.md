@@ -76,3 +76,11 @@ steno-poc/
 - Do NOT include "Co-Authored-By: Claude <noreply@anthropic.com>" in commit messages
 - Keep commit messages concise and focused on what changed
 - Use conventional commit format when appropriate (feat:, fix:, docs:, etc.)
+
+## Session Logging
+When the user says "log session" or similar (e.g., "update session log", "document this session"):
+1. Update SESSION_LOG.md in the root directory with the current session details
+2. Include: date/time, summary of work, key decisions, files modified, issues resolved, next steps
+3. REPLACE or CONDENSE previous session entries to keep the file concise (max 2-3 most recent sessions)
+4. Keep only relevant context for the next Claude session - remove outdated or completed work details
+5. Format with clear headers and organized sections

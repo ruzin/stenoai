@@ -149,6 +149,7 @@ config/
 
 # Local documentation and review notes
 CODE_REVIEW.md
+SESSION_LOG.md
 
-# Prompt testing folder (experimental)
-prompt_tests/
+# Prompt testing outputs
+prompt_tests/outputs/
