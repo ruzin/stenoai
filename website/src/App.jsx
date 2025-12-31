@@ -44,7 +44,7 @@ const faqs = [
   },
   {
     q: "How do I install on macOS?",
-    a: "Since stenoAI isn't code-signed, you'll need to: (1) Right-click the DMG and select 'Open', (2) Drag the app to Applications, (3) If it won't launch, run 'xattr -cr /Applications/StenoAI.app' in Terminal, then (4) Right-click the app and select 'Open'. It will work normally after that.",
+    a: "(1) Download and open the DMG file, (2) Drag the app to Applications, (3) When you first launch the app, macOS may show a security warning, (4) To fix this: Go to System Settings > Privacy & Security, scroll down and click 'Open Anyway'. Alternatively, run in Terminal: 'xattr -cr /Applications/StenoAI.app' (5) The app will work normally on subsequent launches.",
   },
   {
     q: "What AI models are available?",

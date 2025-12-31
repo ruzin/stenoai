@@ -54,18 +54,16 @@ Download the latest release for your Mac:
 
 ### Installing on macOS
 
-Since StenoAI is not code-signed with an Apple Developer certificate, you'll need to bypass macOS security warnings:
+1. **Download and open the DMG file**
+2. **Drag the app to Applications**
+3. **When you first launch the app**, macOS may show a security warning
+4. **To fix this warning:**
+   - Go to **System Settings > Privacy & Security** and click **"Open Anyway"**
 
-1. **Download DMG** → You may see "StenoAI is damaged and can't be opened"
-2. **Right-click the DMG** → Select **"Open"** → Click **"Open"** in the dialog
-3. **Drag StenoAI to Applications** folder
-4. **If the app won't launch**, run this command in Terminal:
-   ```bash
-   xattr -cr /Applications/StenoAI.app
-   ```
-5. **Right-click StenoAI in Applications** → Select **"Open"** → Click **"Open"**
-
-The app will then work normally on subsequent launches.
+   **Alternatively:**
+   - Right-click StenoAI in Applications and select **"Open"**
+   - Or run in Terminal: `xattr -cr /Applications/StenoAI.app`
+5. **The app will work normally on subsequent launches**
 
 You can run it locally as well (see below) if you dont want to install a dmg.
 
@@ -208,4 +206,4 @@ log stream --predicate 'eventMessage CONTAINS "ollama" OR process CONTAINS "Sten
 
 ## License
 
-MIT
+CC BY-NC 4.0 (Creative Commons Attribution-NonCommercial 4.0 International)
