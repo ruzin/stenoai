@@ -9,6 +9,10 @@ __pycache__/
 # Distribution / packaging
 .Python
 build/
+!app/build/
+app/build/*
+!app/build/entitlements.mac.plist
+!app/build/icon.icns
 develop-eggs/
 dist/
 downloads/

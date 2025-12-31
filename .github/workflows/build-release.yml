@@ -37,19 +37,59 @@ jobs:
     - name: Install Electron dependencies
       working-directory: app
       run: npm ci
-    
+
+    - name: Import code signing certificate
+      env:
+        CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE }}
+        CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      run: |
+        # Create temporary keychain
+        KEYCHAIN_PATH=$RUNNER_TEMP/build.keychain
+        KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
+
+        # Decode certificate
+        echo "$CERTIFICATE_BASE64" | base64 --decode > $RUNNER_TEMP/certificate.p12
+
+        # Create keychain
+        security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+        security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
+        security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+
+        # Import certificate
+        security import $RUNNER_TEMP/certificate.p12 \
+          -k $KEYCHAIN_PATH \
+          -P "$CERTIFICATE_PASSWORD" \
+          -T /usr/bin/codesign \
+          -T /usr/bin/productsign
+
+        # Set key partition list
+        security set-key-partition-list \
+          -S apple-tool:,apple:,codesign: \
+          -s -k "$KEYCHAIN_PASSWORD" \
+          $KEYCHAIN_PATH
+
+        # Add keychain to search list
+        security list-keychains -d user -s $KEYCHAIN_PATH login.keychain
+
+        # Verify certificate is available
+        security find-identity -v -p codesigning
+
     - name: Build DMG for Intel
       working-directory: app
       run: npm run build:intel
       env:
-        CSC_IDENTITY_AUTO_DISCOVERY: false
+        APPLE_ID: ${{ secrets.APPLE_ID }}
+        APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+        APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        
-    - name: Build DMG for Apple Silicon  
+
+    - name: Build DMG for Apple Silicon
       working-directory: app
       run: npm run build:arm64
       env:
-        CSC_IDENTITY_AUTO_DISCOVERY: false
+        APPLE_ID: ${{ secrets.APPLE_ID }}
+        APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+        APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     
     - name: Create Release with Assets
@@ -95,3 +135,12 @@ jobs:
         # Upload to the same release
         gh release upload "${GITHUB_REF_NAME}" stenoAI-macos-x64.dmg --clobber
         gh release upload "${GITHUB_REF_NAME}" stenoAI-macos-arm64.dmg --clobber
+
+    - name: Cleanup keychain and certificate
+      if: always()
+      run: |
+        KEYCHAIN_PATH=$RUNNER_TEMP/build.keychain
+        if [ -f "$KEYCHAIN_PATH" ]; then
+          security delete-keychain $KEYCHAIN_PATH || true
+        fi
+        rm -f $RUNNER_TEMP/certificate.p12

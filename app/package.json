@@ -81,6 +81,10 @@
       },
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "identity": "Skrape Limited (HSDX294RG4)",
+      "notarize": false,
       "extendInfo": {
         "NSMicrophoneUsageDescription": "StenoAI needs microphone access to record and transcribe meetings."
       }
@@ -105,7 +109,7 @@
         "height": 380
       },
       "artifactName": "stenoAI-macos-${version}-${arch}.${ext}",
-      "sign": false
+      "sign": true
     },
     "publish": {
       "provider": "github",
