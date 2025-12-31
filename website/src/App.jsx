@@ -44,7 +44,7 @@ const faqs = [
   },
   {
     q: "How do I install on macOS?",
-    a: "(1) Download and open the DMG file, (2) Drag the app to Applications, (3) When you first launch the app, macOS may show a security warning, (4) To fix this, you can either: a) Go to System Settings > Privacy & Security, scroll down and click 'Open Anyway' or b) Run in Terminal: 'xattr -cr /Applications/StenoAI.app' (5) The app will work normally on subsequent launches.",
+    a: "(1) Download and open the DMG file, (2) Drag the app to Applications, (3) When you first launch the app, macOS may show a security warning, (4) To fix this: Go to System Settings > Privacy & Security, scroll down and click 'Open Anyway'. Alternatively, run in Terminal: 'xattr -cr /Applications/StenoAI.app' (5) The app will work normally on subsequent launches.",
   },
   {
     q: "What AI models are available?",
