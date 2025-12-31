@@ -57,10 +57,12 @@ Download the latest release for your Mac:
 1. **Download and open the DMG file**
 2. **Drag the app to Applications**
 3. **When you first launch the app**, macOS may show a security warning
-4. **To fix this warning, choose one of the options below:**
-   - **a)** Go to **System Settings > Privacy & Security** and click **"Open Anyway"**
-   - **OR b)** Right-click StenoAI in Finder and select **"Open"**
-   - **OR c)** Run in Terminal: `xattr -cr /Applications/StenoAI.app`
+4. **To fix this warning:**
+   - Go to **System Settings > Privacy & Security** and click **"Open Anyway"**
+
+   **Alternatively:**
+   - Right-click StenoAI in Finder and select **"Open"**
+   - Or run in Terminal: `xattr -cr /Applications/StenoAI.app`
 5. **The app will work normally on subsequent launches**
 
 You can run it locally as well (see below) if you dont want to install a dmg.
