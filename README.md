@@ -61,7 +61,7 @@ Download the latest release for your Mac:
    - Go to **System Settings > Privacy & Security** and click **"Open Anyway"**
 
    **Alternatively:**
-   - Right-click StenoAI in Finder and select **"Open"**
+   - Right-click StenoAI in Applications and select **"Open"**
    - Or run in Terminal: `xattr -cr /Applications/StenoAI.app`
 5. **The app will work normally on subsequent launches**
 
