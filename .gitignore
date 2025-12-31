@@ -152,4 +152,5 @@ config/
 !app/package*.json
 
 # Local documentation and review notes
-CODE_REVIEW.mdprompt_tests/
+CODE_REVIEW.md
+prompt_tests/
