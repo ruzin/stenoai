@@ -12,18 +12,6 @@ AI-powered meeting transcription and summarization that runs entirely on your de
   <img src="website/public/app-screenshot-new.png" alt="StenoAI Interface" width="600">
 </div>
 
-## Table of Contents
-
-- [Features](#features)
-- [Models & Performance](#models--performance)
-- [Installation](#installation)
-- [Local Development](#local-developmentuse-locally)
-- [Prompt Testing](#prompt-testing)
-- [Project Structure](#project-structure)
-- [Troubleshooting](#troubleshooting)
-- [Release Process](#release-process)
-- [License](#license)
-
 ## Features
 
 - **Local transcription** using OpenAI Whisper
@@ -165,30 +153,8 @@ stenoai/
 ├── website/              # Marketing site
 ├── recordings/           # Audio files
 ├── transcripts/          # Text output
-├── output/              # Summaries
-└── prompt_tests/        # Prompt testing framework
+└── output/              # Summaries
 ```
-
-## Prompt Testing
-
-StenoAI includes a testing framework to compare different prompt templates and optimize summarization quality.
-
-**Quick Start:**
-```bash
-# List available prompts
-python prompt_tests/test_prompts.py list-prompts
-
-# Compare prompts on a transcript
-python prompt_tests/test_prompts.py compare transcripts/YOUR_FILE.txt
-```
-
-**Available Prompts:**
-- `current_simple` - Conservative prompt that avoids hallucinations
-- `enhanced_simple` - Encourages comprehensive extraction of discussion areas and action items
-
-Results are saved to `prompt_tests/prompt_comparison_TIMESTAMP.json` for detailed analysis.
-
-📖 **Full Documentation:** See [prompt_tests/PROMPT_TESTING.md](prompt_tests/PROMPT_TESTING.md) for detailed usage, examples, and how to create custom prompts.
 
 ## Troubleshooting
 
