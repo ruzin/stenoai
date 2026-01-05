@@ -255,6 +255,7 @@ Transcript:
             return {
                 "summary": "Failed to generate summary",
                 "participants": [],
+                "discussion_areas": [],
                 "key_points": [],
                 "action_items": []
             }
@@ -264,14 +265,21 @@ Transcript:
             return {
                 "summary": getattr(summary_result, 'overview', '') or '',
                 "participants": getattr(summary_result, 'participants', []) or [],
-                "key_points": [getattr(decision, 'decision', '') for decision in getattr(summary_result, 'key_decisions', [])],
-                "action_items": [getattr(action, 'description', '') for action in getattr(summary_result, 'key_actions', [])]
+                "discussion_areas": [
+                    {
+                        "title": getattr(area, 'title', ''),
+                        "analysis": getattr(area, 'analysis', '')
+                    } for area in getattr(summary_result, 'discussion_areas', [])
+                ],
+                "key_points": [getattr(decision, 'decision', '') for decision in getattr(summary_result, 'key_points', [])],
+                "action_items": [getattr(action, 'description', '') for action in getattr(summary_result, 'next_steps', [])]
             }
         except Exception as e:
             print(f"⚠️ Error extracting summary data: {e}")
             return {
                 "summary": "Summary extraction failed",
                 "participants": [],
+                "discussion_areas": [],
                 "key_points": [],
                 "action_items": []
             }
@@ -347,7 +355,8 @@ Transcript:
             },
             "summary": summary_data.get("summary", "") or "",
             "participants": summary_data.get("participants", []) or [],
-            "key_points": summary_data.get("key_points", []) or [], 
+            "discussion_areas": summary_data.get("discussion_areas", []) or [],
+            "key_points": summary_data.get("key_points", []) or [],
             "action_items": summary_data.get("action_items", []) or [],
             "transcript": transcript_data["transcript_text"]
         }
@@ -814,6 +823,7 @@ def list_meetings():
                     "session_info": data.get("session_info", {}),
                     "summary": data.get("summary", ""),
                     "participants": data.get("participants", []),
+                    "discussion_areas": data.get("discussion_areas", []),
                     "key_points": data.get("key_points", []),
                     "action_items": data.get("action_items", []),
                     "transcript": data.get("transcript", "")
@@ -867,7 +877,8 @@ def reprocess(summary_file):
             existing_data.update({
                 "summary": summary_data.get("summary", "") or "",
                 "participants": summary_data.get("participants", []) or [],
-                "key_points": summary_data.get("key_points", []) or [], 
+                "discussion_areas": summary_data.get("discussion_areas", []) or [],
+                "key_points": summary_data.get("key_points", []) or [],
                 "action_items": summary_data.get("action_items", []) or [],
             })
             

@@ -213,15 +213,15 @@ class OllamaSummarizer:
             duration=f"{duration_minutes} minutes",
             overview=overview,
             participants=participants,
-            key_actions=[],  # Create empty action items since parsing failed
-            key_decisions=[],  # Create empty decisions since parsing failed  
+            next_steps=[],  # Create empty action items since parsing failed
+            key_points=[],  # Create empty key points since parsing failed  
             transcript=transcript
         )
         
-        # Add key points as decisions for now (since we don't have proper action items)
+        # Add key points
         for point in key_points:
             from .models import Decision
-            fallback_summary.key_decisions.append(Decision(
+            fallback_summary.key_points.append(Decision(
                 decision=point,
                 assignee='',
                 context='Extracted from partially parsed response'
@@ -291,53 +291,6 @@ class OllamaSummarizer:
         logger.info(f"Ollama ready with model {self.model_name}")
         return True
         
-    def _create_detailed_prompt(self, transcript: str, *, meeting_title: str = "", meeting_date: str = "", timezone: str = "Europe/London") -> str:
-        """
-        Create a comprehensive prompt for high-quality meeting analysis like Claude.
-        (Legacy detailed prompt - kept for reference and can be switched back if needed)
-        """
-        return f"""You are an expert meeting analyst. Provide a comprehensive, detailed analysis of this meeting transcript.
-
-INSTRUCTIONS:
-1. Read the entire transcript carefully and understand the context
-2. Identify the main topics, technical details, challenges, and outcomes
-3. Extract specific action items with clear owners and deadlines
-4. Provide a thorough but concise analysis
-5. Return ONLY valid JSON - no markdown, no extra text
-
-ANALYSIS REQUIREMENTS:
-- Overview: 3-4 sentences explaining the meeting purpose, key outcomes, and next steps
-- Participants: List all people mentioned by name in the transcript
-- Key Actions: Specific, actionable items with clear assignees and deadlines where mentioned
-- Key Decisions: Important decisions made during the meeting with context
-
-Focus on being thorough like a professional meeting analyst would be. Include technical details, specific challenges mentioned, current status updates, and concrete next steps.
-
-OUTPUT FORMAT (JSON only):
-{{
-  "overview": "Comprehensive 3-4 sentence summary including meeting purpose, main topics discussed, key outcomes, and next steps",
-  "participants": ["Name1", "Name2"],
-  "key_actions": [
-    {{
-      "description": "Specific actionable task description", 
-      "assignee": "Person name or null if unclear",
-      "deadline": "Deadline mentioned or null"
-    }}
-  ],
-  "key_decisions": [
-    {{
-      "decision": "The specific decision made",
-      "assignee": "Decision owner or null", 
-      "context": "Why this decision was made or background context"
-    }}
-  ]
-}}
-
-TRANSCRIPT TO ANALYZE:
-{transcript}
-
-Provide a thorough, professional analysis in the JSON format above."""
-
     def _create_prompt(self, transcript: str, *, meeting_title: str = "", meeting_date: str = "", timezone: str = "Europe/London") -> str:
         """
         Create a simple, clear prompt for meeting analysis.
@@ -387,7 +340,96 @@ Return ONLY the response in this exact JSON format:
     }}
   ]
 }}"""
-        
+
+    def _create_permissive_prompt(self, transcript: str) -> str:
+        """
+        Create an enhanced prompt with discussion_areas and improved extraction.
+        Uses more examples in schema to permit more detailed summaries.
+        """
+        return f"""You are a helpful meeting assistant. Summarise this meeting transcript into participants, discussion areas, key points and any next steps mentioned. Only base your summary on what was explicitly discussed in the transcript.
+
+IMPORTANT: Do not infer or assume information that wasn't directly mentioned.
+
+Include a brief overview so someone can quickly understand what happened in the meeting, who were the participants, what areas/topics were discussed, what were the key points, and what are the next steps if any were mentioned.
+
+CRITICAL JSON FORMATTING RULES:
+1. ALL strings must be enclosed in double quotes "like this"
+2. Use null (not "null") for empty values
+3. NO trailing commas anywhere
+4. NO comments or extra text outside the JSON
+5. ALL array elements must be properly quoted strings
+6. If no participants, discussion areas, key points, or next steps are mentioned, return an empty array [] for that field.
+
+IMPORTANT - VARIABLE NUMBER OF ITEMS:
+- Discussion areas: Include as many as needed to organize the topics (1-2 for short meetings, 4-5 for complex discussions)
+- Key points: Extract as many as were actually discussed (2-3 for short meetings, 6-8 for detailed discussions)
+- Next steps: Include only action items that were clearly mentioned (could be 1, could be 6+)
+- The examples below are illustrative - do not feel obligated to match the exact number shown
+
+CORRECT FORMAT EXAMPLE:
+{{
+  "participants": ["John Smith", "Sarah Wilson"],
+  "key_points": ["Budget discussion", "Timeline review"]
+}}
+
+INCORRECT FORMAT (DO NOT DO THIS):
+{{
+  "participants": ["John", no other participants mentioned],
+  "key_points": ["Budget", timeline,]
+}}
+
+TRANSCRIPT:
+{transcript}
+
+Return ONLY the response in this exact JSON format:
+{{
+  "overview": "Brief overview of what happened in the meeting",
+  "participants": [""],
+  "discussion_areas": [
+    {{
+      "title": "First main topic discussed",
+      "analysis": "Short paragraph about what was discussed in this topic"
+    }},
+    {{
+      "title": "Second main topic discussed",
+      "analysis": "Short paragraph about what was discussed in this topic"
+    }},
+    {{
+      "title": "Third main topic discussed",
+      "analysis": "Short paragraph about what was discussed in this topic"
+    }}
+  ],
+  "key_points": [
+    "First important point or topic discussed",
+    "Second key point from the meeting",
+    "Third key point from the meeting",
+    "Fourth key point from the meeting",
+    "Fifth key point from the meeting"
+  ],
+  "next_steps": [
+    {{
+      "description": "First next step or action item as explicitly mentioned",
+      "assignee": "Person responsible or null if unclear",
+      "deadline": "Deadline mentioned or null"
+    }},
+    {{
+      "description": "Second next step or action item",
+      "assignee": "Person responsible or null if unclear",
+      "deadline": "Deadline mentioned or null"
+    }},
+    {{
+      "description": "Third next step or action item",
+      "assignee": "Person responsible or null if unclear",
+      "deadline": "Deadline mentioned or null"
+    }},
+    {{
+      "description": "Fourth next step or action item",
+      "assignee": "Person responsible or null if unclear",
+      "deadline": "Deadline mentioned or null"
+    }}
+  ]
+}}"""
+
     def summarize_transcript(self, transcript: str, duration_minutes: int) -> Optional[MeetingTranscript]:
         """
         Summarize a meeting transcript using Ollama.
@@ -411,7 +453,7 @@ Return ONLY the response in this exact JSON format:
                     duration_minutes=duration_minutes
                 )
             
-            prompt = self._create_prompt(transcript)
+            prompt = self._create_permissive_prompt(transcript)
             logger.info(f"Sending transcript to Ollama model: {self.model_name}")
             logger.info(f"Transcript length: {len(transcript)} characters")
             
@@ -493,8 +535,8 @@ Return ONLY the response in this exact JSON format:
                         duration=f"{duration_minutes} minutes",
                         overview="Meeting transcript recorded but detailed analysis failed. Content appears to be in a non-English language or format not fully supported.",
                         participants=[],
-                        key_actions=[],
-                        key_decisions=[],
+                        next_steps=[],
+                        key_points=[],
                         transcript=transcript
                     )
                     logger.info("Created fallback summary")
@@ -528,13 +570,24 @@ Return ONLY the response in this exact JSON format:
                             assignee='',
                             context=point.get('context', '')
                         ))
-                
+
+                # Parse discussion areas (new field from permissive prompt)
+                from .models import DiscussionArea
+                discussion_areas = []
+                for area_data in structured_data.get('discussion_areas', []):
+                    if isinstance(area_data, dict):
+                        discussion_areas.append(DiscussionArea(
+                            title=area_data.get('title', ''),
+                            analysis=area_data.get('analysis', '')
+                        ))
+
                 meeting_summary = MeetingTranscript(
                     duration=f"{duration_minutes} minutes",
                     overview=structured_data.get('overview', ''),
                     participants=structured_data.get('participants', []),
-                    key_actions=actions,
-                    key_decisions=decisions,
+                    discussion_areas=discussion_areas,
+                    next_steps=actions,
+                    key_points=decisions,
                     transcript=transcript
                 )
                 

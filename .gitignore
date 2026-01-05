@@ -153,4 +153,7 @@ config/
 
 # Local documentation and review notes
 CODE_REVIEW.md
-prompt_tests/
+SESSION_LOG.md
+
+# Prompt testing outputs
+prompt_tests/outputs/

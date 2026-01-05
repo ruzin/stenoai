@@ -16,14 +16,20 @@ class Decision(BaseModel):
     context: str
 
 
+class DiscussionArea(BaseModel):
+    title: str
+    analysis: str
+
+
 class MeetingTranscript(BaseModel):
     meeting_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     date: str = Field(default_factory=lambda: datetime.now().strftime("%Y-%m-%d"))
     duration: str
     overview: str
     participants: List[str]
-    key_actions: List[ActionItem]
-    key_decisions: List[Decision]
+    discussion_areas: List[DiscussionArea] = []  # New field - optional for backwards compatibility
+    key_points: List[Decision]
+    next_steps: List[ActionItem]
     transcript: str
 
     def to_json_file(self, filepath: str) -> None:
