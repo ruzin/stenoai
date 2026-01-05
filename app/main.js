@@ -144,45 +144,53 @@ ipcMain.handle('open-settings', () => {
 // Debug functionality handled by side panel now
 
 // Python backend communication
-function runPythonScript(script, args = []) {
+function runPythonScript(script, args = [], silent = false) {
   return new Promise((resolve, reject) => {
     const pythonPath = path.join(__dirname, '..', 'venv', 'bin', 'python');
     const scriptPath = path.join(__dirname, '..', script);
-    
-    // Log the command being executed
+
+    // Log the command being executed (unless silent)
     const command = `${pythonPath} ${scriptPath} ${args.join(' ')}`;
     console.log('Running:', command);
-    sendDebugLog(`$ ${script} ${args.join(' ')}`);
-    
+    if (!silent) {
+      sendDebugLog(`$ ${script} ${args.join(' ')}`);
+    }
+
     const process = spawn(pythonPath, [scriptPath, ...args], {
       cwd: path.join(__dirname, '..')
     });
-    
+
     let stdout = '';
     let stderr = '';
-    
+
     process.stdout.on('data', (data) => {
       const output = data.toString();
       stdout += output;
       console.log('Python stdout:', output);
-      // Stream stdout to debug panel in real-time
-      output.split('\n').forEach(line => {
-        if (line.trim()) sendDebugLog(line.trim());
-      });
+      // Stream stdout to debug panel in real-time (unless silent)
+      if (!silent) {
+        output.split('\n').forEach(line => {
+          if (line.trim()) sendDebugLog(line.trim());
+        });
+      }
     });
-    
+
     process.stderr.on('data', (data) => {
       const output = data.toString();
       stderr += output;
       console.log('Python stderr:', output);
-      // Stream stderr to debug panel in real-time
-      output.split('\n').forEach(line => {
-        if (line.trim()) sendDebugLog('STDERR: ' + line.trim());
-      });
+      // Stream stderr to debug panel in real-time (unless silent)
+      if (!silent) {
+        output.split('\n').forEach(line => {
+          if (line.trim()) sendDebugLog('STDERR: ' + line.trim());
+        });
+      }
     });
-    
+
     process.on('close', (code) => {
-      sendDebugLog(`Command completed with exit code: ${code}`);
+      if (!silent) {
+        sendDebugLog(`Command completed with exit code: ${code}`);
+      }
       if (code === 0) {
         resolve(stdout);
       } else {
@@ -237,7 +245,7 @@ ipcMain.handle('stop-recording', async () => {
 
 ipcMain.handle('get-status', async () => {
   try {
-    const result = await runPythonScript('simple_recorder.py', ['status']);
+    const result = await runPythonScript('simple_recorder.py', ['status'], true); // Silent mode
     return { success: true, status: result };
   } catch (error) {
     return { success: false, error: error.message };

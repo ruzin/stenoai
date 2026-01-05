@@ -872,7 +872,7 @@
             color: #666;
             font-weight: bold;
         }
-        
+
         .action-items-list {
             list-style: none;
             padding: 0;
@@ -1349,6 +1349,15 @@
                     </div>
                 </div>
 
+                <div class="meeting-section" id="discussion-areas-section">
+                    <h2 class="section-title">
+                        <span>💬</span> Key Topics
+                    </h2>
+                    <div class="discussion-areas-container" id="detail-discussion-areas">
+                        <!-- Key topics will be loaded here -->
+                    </div>
+                </div>
+
                 <div class="meeting-section">
                     <h2 class="section-title">
                         <span>🔑</span> Key Points
@@ -1564,7 +1573,7 @@ Commands and output will appear here...
             
             <div class="settings-section">
                 <h3>🔄 Updates</h3>
-                <p>Check for the latest version of StenoAI. After downloading, you may need to run <code style="background: #333; padding: 2px 4px; border-radius: 2px; font-family: Monaco, monospace;">xattr -cr /Applications/StenoAI.app</code> before launching.</p>
+                <p>Check for the latest version of StenoAI. After installing, if macOS shows a security warning, go to <strong>System Settings > Privacy & Security</strong>, scroll down and click <strong>'Open Anyway'</strong>.</p>
                 
                 <button class="btn" id="test-update-btn" onclick="testUpdateCheck()">
                     Check for Updates
@@ -2022,7 +2031,42 @@ Session started - waiting for activity...
             } else {
                 detailParticipants.innerHTML = '<span style="color: #666;">No participants identified</span>';
             }
-            
+
+            // Key topics
+            const detailDiscussionAreas = document.getElementById('detail-discussion-areas');
+            const discussionAreasSection = document.getElementById('discussion-areas-section');
+            detailDiscussionAreas.innerHTML = '';
+            if (selectedMeeting.discussion_areas && selectedMeeting.discussion_areas.length > 0) {
+                discussionAreasSection.style.display = 'block';
+                selectedMeeting.discussion_areas.forEach(area => {
+                    const areaDiv = document.createElement('div');
+                    areaDiv.style.marginBottom = '15px';
+                    areaDiv.style.padding = '12px';
+                    areaDiv.style.background = 'rgba(255, 255, 255, 0.03)';
+                    areaDiv.style.borderRadius = '6px';
+                    areaDiv.style.borderLeft = '3px solid rgba(99, 102, 241, 0.5)';
+
+                    const title = document.createElement('h4');
+                    title.textContent = area.title || 'Discussion Topic';
+                    title.style.margin = '0 0 8px 0';
+                    title.style.color = 'rgba(99, 102, 241, 1)';
+                    title.style.fontSize = '14px';
+                    title.style.fontWeight = '600';
+
+                    const analysis = document.createElement('p');
+                    analysis.textContent = area.analysis || '';
+                    analysis.style.margin = '0';
+                    analysis.style.color = '#ccc';
+                    analysis.style.lineHeight = '1.5';
+
+                    areaDiv.appendChild(title);
+                    areaDiv.appendChild(analysis);
+                    detailDiscussionAreas.appendChild(areaDiv);
+                });
+            } else {
+                discussionAreasSection.style.display = 'none';
+            }
+
             // Key points
             detailKeyPoints.innerHTML = '';
             if (selectedMeeting.key_points && selectedMeeting.key_points.length > 0) {
@@ -2478,6 +2522,16 @@ Session started - waiting for activity...
                     notesText += `PARTICIPANTS\n`;
                     selectedMeeting.participants.forEach(participant => {
                         notesText += `- ${participant}\n`;
+                    });
+                    notesText += `\n`;
+                }
+
+                // Key Topics (Discussion Areas)
+                if (selectedMeeting.discussion_areas && selectedMeeting.discussion_areas.length > 0) {
+                    notesText += `KEY TOPICS\n`;
+                    selectedMeeting.discussion_areas.forEach(area => {
+                        notesText += `\n${area.title}\n`;
+                        notesText += `${area.analysis}\n`;
                     });
                     notesText += `\n`;
                 }

@@ -10,11 +10,8 @@ python test_prompts.py list-prompts
 ```
 
 Available prompts:
-- **current_simple** - Your current conservative prompt that avoids hallucinations
-- **detailed_professional** - More comprehensive analysis with technical details
-- **balanced** - Middle ground between simple and detailed
-- **detailed_contextual** - Very thorough with context and reasoning
-- **concise_bullet** - Ultra-brief, scannable format
+- **current_simple** - Conservative prompt that avoids hallucinations, includes discussion areas
+- **enhanced_simple** - Encourages more comprehensive extraction of discussion areas, key points, and action items
 
 ### 2. Compare all prompts on a transcript
 ```bash
@@ -22,13 +19,13 @@ python test_prompts.py compare transcripts/20251116_204017_Meeting-ZNZXC3_transc
 ```
 
 This will:
-- Run all 5 prompt templates on the same transcript
+- Run all 2 prompt templates on the same transcript
 - Show a side-by-side comparison in the terminal
 - Save detailed results to `prompt_tests/prompt_comparison_TIMESTAMP.json`
 
 ### 3. Test specific prompts only
 ```bash
-python test_prompts.py compare transcripts/YOUR_FILE.txt -p current_simple -p balanced -p detailed_professional
+python test_prompts.py compare transcripts/YOUR_FILE.txt -p current_simple -p enhanced_simple
 ```
 
 ### 4. Use a different model
@@ -92,4 +89,4 @@ PROMPT_TEMPLATES = {
   - **Structure**: Is the output well-organized?
   - **JSON reliability**: Does it consistently return valid JSON?
 
-- The `balanced` and `detailed_professional` prompts are good starting points for getting more detail while still being grounded in the transcript
+- The `enhanced_simple` prompt encourages more comprehensive extraction while staying grounded in the transcript
