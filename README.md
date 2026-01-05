@@ -4,13 +4,11 @@
   # StenoAI
 
   *Your very own Stenographer for every meeting*
-
-  **Turn your Mac into an AI meeting assistant**
-
-  [![Twitter Follow](https://img.shields.io/twitter/follow/ruzin?style=social)](https://x.com/ruzin_saleem)
 </div>
 
 AI-powered meeting transcription and summarization that runs entirely on your device using small language models locally hosted. Privacy first approach & zero service costs.
+
+[![Twitter Follow](https://img.shields.io/twitter/follow/ruzin?style=social)](https://x.com/ruzin_saleem)
 
 <div align="center">
   <img src="website/public/app-screenshot-new.png" alt="StenoAI Interface" width="600">
