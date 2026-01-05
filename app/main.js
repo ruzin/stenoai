@@ -1385,8 +1385,8 @@ ipcMain.handle('get-ai-prompts', async () => {
     if (fs.existsSync(summarizerPath)) {
       const content = fs.readFileSync(summarizerPath, 'utf8');
       
-      // Extract the full prompt from the _create_prompt method
-      const promptMatch = content.match(/def _create_prompt[\s\S]*?return f"""([\s\S]*?)"""/);
+      // Extract the full prompt from the _create_permissive_prompt method
+      const promptMatch = content.match(/def _create_permissive_prompt[\s\S]*?return f"""([\s\S]*?)"""/);
       
       if (promptMatch) {
         return {
