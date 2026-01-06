@@ -1,0 +1,6 @@
+{
+  "contributors": [],
+  "message": "Thank you for your pull request! Before we can merge it, we need you to sign our [Contributor License Agreement (CLA)](https://github.com/ruzin/stenoai/blob/main/CLA.md).\n\n**To sign the CLA, please comment on this PR with:**\n\n> I have read the CLA Document and I hereby sign the CLA\n\nThis is a one-time process. Once you've signed, all your future contributions to StenoAI will be covered.",
+  "label": "cla-signed",
+  "recheckComment": "I have read the CLA Document and I hereby sign the CLA"
+}

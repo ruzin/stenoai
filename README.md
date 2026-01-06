@@ -208,4 +208,6 @@ log stream --predicate 'eventMessage CONTAINS "ollama" OR process CONTAINS "Sten
 
 ## License
 
+**StenoAI is free for personal use. Commercial and enterprise licensing available.**
+
 CC BY-NC 4.0 (Creative Commons Attribution-NonCommercial 4.0 International)
