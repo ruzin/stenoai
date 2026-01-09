@@ -6,7 +6,7 @@
   *Your very own Stenographer for every meeting*
 </div>
 
-AI-powered meeting transcription and summarization that runs entirely on your device using small language models locally hosted. Privacy first approach & zero service costs.
+AI-powered meeting notes assistant that runs entirely on your device using small language models locally hosted. Privacy first approach & zero service costs.
 
 <div align="center">
   <img src="website/public/app-demo.png" alt="StenoAI Interface" width="600">
