@@ -14,6 +14,8 @@ AI-powered meeting notes assistant that runs entirely on your device using small
   [![Twitter Follow](https://img.shields.io/twitter/follow/ruzin?style=social)](https://x.com/ruzin_saleem)
 </div>
 
+<p align="center"><sub><i>Disclaimer: This is an independent open-source project for meeting-notes productivity and is not affiliated with, endorsed by, or associated with any similarly named company.</i></sub></p>
+
 ## Features
 
 - **Local transcription** using OpenAI Whisper
@@ -208,6 +210,6 @@ log stream --predicate 'eventMessage CONTAINS "ollama" OR process CONTAINS "Sten
 
 ## License
 
-**StenoAI is free for personal use. Commercial and enterprise licensing available.**
+**StenoAI is free for personal, non-commercial use.**
 
 CC BY-NC 4.0 (Creative Commons Attribution-NonCommercial 4.0 International)
