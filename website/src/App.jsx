@@ -13,14 +13,14 @@ const DOWNLOAD_URL_MAC_INTEL = "https://github.com/ruzin/stenoai/releases/latest
 const features = [
   {
     icon: <Cpu className="w-6 h-6" aria-hidden="true" />,
-    title: "Local Transcription",
+    title: "Local Meeting Transcription",
     desc: "Blazing‑fast speech‑to‑text that runs entirely on your device. No uploads. No lag.",
     pill: "Private by design",
   },
   {
     icon: <FileText className="w-6 h-6" aria-hidden="true" />,
     title: "Local Summaries",
-    desc: "Generate smart, on‑device bullet points and outlines for meetings, lectures, and podcasts.",
+    desc: "Generate smart, on‑device bullet points and outlines for meetings and lectures.",
     pill: "Offline mode",
   },
   {
@@ -52,11 +52,11 @@ const faqs = [
   },
   {
     q: "Is my data private and secure?",
-    a: "Absolutely. stenoAI runs 100% locally with zero cloud dependencies. Your audio recordings and transcripts stay on your Mac and are never uploaded anywhere.",
+    a: "Absolutely. stenoAI runs 100% locally with zero cloud dependencies. Your meeting recordings and transcripts stay on your Mac and are never uploaded anywhere.",
   },
   {
-    q: "How accurate is the transcription?",
-    a: "stenoAI uses OpenAI's Whisper model, known for high accuracy across accents and languages. Quality depends on audio clarity—quiet rooms with good microphones produce the best results.",
+    q: "How accurate is the meeting transcription?",
+    a: "StenoAI uses OpenAI's Whisper model to generate accurate text from meeting recordings across accents and languages. Results depend on audio clarity — quiet rooms and good microphones produce the best outcomes.",
   },
   {
     q: "What platforms are supported?",
@@ -101,7 +101,7 @@ export default function App() {
               <span className="block bg-gradient-to-r from-indigo-400 via-sky-400 to-cyan-300 text-transparent bg-clip-text">Private. Fast. Accurate.</span>
             </motion.h1>
             <p className="mt-6 text-slate-300 text-lg leading-relaxed max-w-prose">
-              stenoAI is an AI transcriber & summarisation app that runs locally. Get studio‑grade transcription and on-device meeting summaries for free — Your very own stenographer for every meeting.
+              StenoAI is an AI-powered meeting notes assistant that runs locally on your device. Engineered for privacy - your data never leaves your device. No cloud accounts, no bots joining calls, and free to use.
             </p>
             <div className="mt-8 flex flex-col sm:flex-row gap-3">
               <a href="#download" className="inline-flex items-center justify-center gap-2 rounded-2xl bg-white text-slate-900 px-5 py-3 font-semibold hover:bg-slate-100">
@@ -109,8 +109,8 @@ export default function App() {
               </a>
               </div>
             <div className="mt-6 flex items-center gap-4 text-sm text-slate-400">
-              <div className="flex items-center gap-1"><Lock className="w-4 h-4" aria-hidden="true" /> Local by default</div>
-              <div className="flex items-center gap-1"><Zap className="w-4 h-4" aria-hidden="true" /> Realtime transcripts</div>
+              <div className="flex items-center gap-1"><Lock className="w-4 h-4" aria-hidden="true" /> Private by default</div>
+              <div className="flex items-center gap-1"><Zap className="w-4 h-4" aria-hidden="true" /> Blazing fast summaries</div>
               <div className="flex items-center gap-1"><Sparkles className="w-4 h-4" aria-hidden="true" /> Smart highlights</div>
             </div>
           </div>
@@ -148,7 +148,7 @@ export default function App() {
       <section id="features" className="max-w-6xl mx-auto px-4 py-12 md:py-20">
         <div className="text-center max-w-3xl mx-auto">
           <h2 className="text-3xl md:text-4xl font-bold">Built for focus, engineered for privacy</h2>
-          <p className="mt-4 text-slate-300">Record, transcribe, and summarise without sending your audio anywhere. Choose from 4 powerful AI models for deeper meeting insights.</p>
+          <p className="mt-4 text-slate-300">Record, transcribe, and summarise your meetings without sending your data anywhere. Choose from 4 powerful AI models for deeper meeting insights.</p>
         </div>
         <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-10">
           {features.map((f, i) => (
@@ -193,16 +193,21 @@ export default function App() {
       </section>
 
       <footer className="border-t border-white/10">
-        <div className="max-w-6xl mx-auto px-4 py-10 text-sm text-slate-400 flex flex-col md:flex-row gap-4 md:items-center md:justify-between">
-          <div className="flex items-center gap-2 text-slate-300">
-            <Mic className="w-4 h-4" aria-hidden="true" /> <span className="font-semibold">stenoAI</span>
+        <div className="max-w-6xl mx-auto px-4 py-10 text-sm text-slate-400">
+          <div className="flex flex-col md:flex-row gap-4 md:items-center md:justify-between">
+            <div className="flex items-center gap-2 text-slate-300">
+              <Mic className="w-4 h-4" aria-hidden="true" /> <span className="font-semibold">stenoAI</span>
+            </div>
+            <div className="flex gap-4">
+              <a href="#" className="hover:text-white">Privacy</a>
+              <a href="#" className="hover:text-white">Terms</a>
+              <a href="#" className="hover:text-white">Contact</a>
+            </div>
+            <div>© 2026 stenoAI</div>
           </div>
-          <div className="flex gap-4">
-            <a href="#" className="hover:text-white">Privacy</a>
-            <a href="#" className="hover:text-white">Terms</a>
-            <a href="#" className="hover:text-white">Contact</a>
+          <div className="mt-6 text-center text-xs text-slate-500">
+            <i>Disclaimer: This is an independent open-source project for meeting-notes productivity and is not affiliated with, endorsed by, or associated with any similarly named company.</i>
           </div>
-          <div>© 2026 stenoAI</div>
         </div>
       </footer>
     </div>
