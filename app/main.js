@@ -560,7 +560,7 @@ ipcMain.handle('start-recording-ui', async (_, sessionName) => {
     const actualSessionName = sessionName || 'Meeting';
     
     // Start background recording with 60-minute limit
-    currentRecordingProcess = spawn(pythonPath, [scriptPath, 'record', '3600', actualSessionName], {
+    currentRecordingProcess = spawn(pythonPath, ['-u', scriptPath, 'record', '3600', actualSessionName], {
       cwd: path.join(__dirname, '..')
     });
 
