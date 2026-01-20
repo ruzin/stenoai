@@ -13,7 +13,7 @@ AI-powered meeting notes assistant that runs entirely on your device using small
 
   <br>
 
-  Have questions or suggestions?
+  *Have questions or suggestions? Chat with the community*
 
   [![Discord](https://img.shields.io/badge/Join%20our%20Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/EHxvAdKf)
 </div>
@@ -52,8 +52,6 @@ AI-powered meeting notes assistant that runs entirely on your device using small
 ### Enhanced Features
 - Custom summarization templates
 - Speaker Diarisation
-
-## Community
 
 Have questions or suggestions? [Join our Discord](https://discord.gg/EHxvAdKf) to chat with the community.
 
