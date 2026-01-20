@@ -11,6 +11,8 @@ AI-powered meeting notes assistant that runs entirely on your device using small
 <div align="center">
   <img src="website/public/app-demo.png" alt="StenoAI Interface" width="600">
 
+  <br><br>
+
   [![Discord](https://img.shields.io/badge/Discord-Join%20Server-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/EHxvAdKf)
 </div>
 
