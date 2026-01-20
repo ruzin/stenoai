@@ -13,9 +13,8 @@ AI-powered meeting notes assistant that runs entirely on your device using small
 
   <br>
 
-  *Have questions or suggestions? Chat with the community*
-
-  [![Discord](https://img.shields.io/badge/Join%20our%20Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/EHxvAdKf)
+  [![Discord](https://img.shields.io/badge/Discord-Join%20Server-5865F2?logo=discord&logoColor=white)](https://discord.gg/EHxvAdKf)
+  [![Twitter Follow](https://img.shields.io/twitter/follow/ruzin?style=social)](https://x.com/ruzin_saleem)
 </div>
 
 <p align="center"><sub><i>Disclaimer: This is an independent open-source project for meeting-notes productivity and is not affiliated with, endorsed by, or associated with any similarly named company.</i></sub></p>
@@ -27,6 +26,8 @@ AI-powered meeting notes assistant that runs entirely on your device using small
 - **Multiple AI models** - Choose from 4 models optimized for different use cases
 - **Privacy-first** - no cloud dependencies
 - **macOS desktop app** with intuitive interface
+
+Have questions or suggestions? [Join our Discord](https://discord.gg/EHxvAdKf) to chat with the community.
 
 ## Models & Performance
 
@@ -52,8 +53,6 @@ AI-powered meeting notes assistant that runs entirely on your device using small
 ### Enhanced Features
 - Custom summarization templates
 - Speaker Diarisation
-
-Have questions or suggestions? [Join our Discord](https://discord.gg/EHxvAdKf) to chat with the community.
 
 ## Installation
 
