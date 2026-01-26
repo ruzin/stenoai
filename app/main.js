@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell, systemPreferences } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, systemPreferences, globalShortcut } = require('electron');
 const path = require('path');
 const { spawn, exec } = require('child_process');
 const fs = require('fs');
@@ -64,7 +64,29 @@ function createWindow() {
   });
 }
 
-app.whenReady().then(createWindow);
+app.whenReady().then(() => {
+  createWindow();
+
+  // Register global hotkey for toggle recording (Cmd+Shift+R on macOS, Ctrl+Shift+R on Windows/Linux)
+  const hotkeyModifier = process.platform === 'darwin' ? 'Command+Shift+R' : 'Ctrl+Shift+R';
+  const registered = globalShortcut.register(hotkeyModifier, () => {
+    console.log('Global hotkey triggered: toggle recording');
+    if (mainWindow) {
+      mainWindow.webContents.send('toggle-recording-hotkey');
+    }
+  });
+
+  if (registered) {
+    console.log(`Global hotkey registered: ${hotkeyModifier}`);
+  } else {
+    console.error(`Failed to register global hotkey: ${hotkeyModifier}`);
+  }
+});
+
+app.on('will-quit', () => {
+  // Unregister all shortcuts when the app is about to quit
+  globalShortcut.unregisterAll();
+});
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
@@ -552,15 +574,15 @@ ipcMain.handle('start-recording-ui', async (_, sessionName) => {
     
     console.log('Starting long recording process...');
     sendDebugLog(`Starting recording process: ${sessionName || 'Meeting'}`);
-    sendDebugLog('$ python simple_recorder.py record 3600');
+    sendDebugLog('$ python simple_recorder.py record 7200');
     
     const pythonPath = path.join(__dirname, '..', 'venv', 'bin', 'python');
     const scriptPath = path.join(__dirname, '..', 'simple_recorder.py');
     
     const actualSessionName = sessionName || 'Meeting';
     
-    // Start background recording with 60-minute limit
-    currentRecordingProcess = spawn(pythonPath, ['-u', scriptPath, 'record', '3600', actualSessionName], {
+    // Start background recording with 2-hour limit
+    currentRecordingProcess = spawn(pythonPath, ['-u', scriptPath, 'record', '7200', actualSessionName], {
       cwd: path.join(__dirname, '..')
     });
 
@@ -639,6 +661,48 @@ ipcMain.handle('start-recording-ui', async (_, sessionName) => {
   } catch (error) {
     console.error('Start recording UI error:', error.message);
     currentRecordingProcess = null;
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('pause-recording-ui', async () => {
+  try {
+    if (!currentRecordingProcess) {
+      return { success: false, error: 'No recording in progress' };
+    }
+
+    console.log('Pausing recording process...');
+
+    // Send SIGUSR1 to pause recording (Unix only)
+    if (process.platform !== 'win32') {
+      currentRecordingProcess.kill('SIGUSR1');
+      return { success: true, message: 'Recording paused' };
+    } else {
+      return { success: false, error: 'Pause not supported on Windows' };
+    }
+  } catch (error) {
+    console.error('Pause recording UI error:', error.message);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('resume-recording-ui', async () => {
+  try {
+    if (!currentRecordingProcess) {
+      return { success: false, error: 'No recording in progress' };
+    }
+
+    console.log('Resuming recording process...');
+
+    // Send SIGUSR2 to resume recording (Unix only)
+    if (process.platform !== 'win32') {
+      currentRecordingProcess.kill('SIGUSR2');
+      return { success: true, message: 'Recording resumed' };
+    } else {
+      return { success: false, error: 'Resume not supported on Windows' };
+    }
+  } catch (error) {
+    console.error('Resume recording UI error:', error.message);
     return { success: false, error: error.message };
   }
 });

@@ -1266,6 +1266,10 @@
             <button class="btn btn-danger" id="stop-btn" style="display: none;">
                 <span>■</span> Stop Recording
             </button>
+
+            <button class="btn" id="pause-btn" style="display: none;">
+                <span>⏸</span> Pause
+            </button>
         </div>
         
         <div class="header-actions">
@@ -1642,6 +1646,7 @@ Session started - waiting for activity...
         const sessionNameInput = document.getElementById('session-name');
         const startBtn = document.getElementById('start-btn');
         const stopBtn = document.getElementById('stop-btn');
+        const pauseBtn = document.getElementById('pause-btn');
         const settingsBtn = document.getElementById('settings-btn');
         const debugBtn = document.getElementById('debug-btn');
         const aiSettingsBtn = document.getElementById('ai-settings-btn');
@@ -1731,30 +1736,47 @@ Session started - waiting for activity...
         function setUIState(state) {
             uiState = state;
             log(`UI State: ${state}`);
-            
+
             // Update UI elements based on state
             switch(state) {
                 case 'ready':
                     startBtn.style.display = 'inline-flex';
                     stopBtn.style.display = 'none';
+                    pauseBtn.style.display = 'none';
                     startBtn.disabled = false;
                     sessionNameInput.disabled = false;
                     stopRecordingTimer();
                     setStatus('ready', 'Ready');
                     break;
-                    
+
                 case 'recording':
                     startBtn.style.display = 'none';
                     stopBtn.style.display = 'inline-flex';
+                    pauseBtn.style.display = 'inline-flex';
+                    pauseBtn.innerHTML = '<span>⏸</span> Pause';
                     startBtn.disabled = true;
                     sessionNameInput.disabled = true;
                     stopBtn.disabled = false;
+                    pauseBtn.disabled = false;
                     startRecordingTimer();
                     break;
-                    
+
+                case 'paused':
+                    startBtn.style.display = 'none';
+                    stopBtn.style.display = 'inline-flex';
+                    pauseBtn.style.display = 'inline-flex';
+                    pauseBtn.innerHTML = '<span>▶</span> Resume';
+                    startBtn.disabled = true;
+                    sessionNameInput.disabled = true;
+                    stopBtn.disabled = false;
+                    pauseBtn.disabled = false;
+                    setStatus('recording', 'Paused');
+                    break;
+
                 case 'processing':
                     startBtn.style.display = 'inline-flex';
                     stopBtn.style.display = 'none';
+                    pauseBtn.style.display = 'none';
                     startBtn.disabled = true;
                     sessionNameInput.disabled = true;
                     stopRecordingTimer();
@@ -2238,7 +2260,37 @@ Session started - waiting for activity...
                 renderMeetingsList();
             }
         });
-        
+
+        pauseBtn.addEventListener('click', async () => {
+            if (uiState === 'recording') {
+                // Pause recording
+                log('⏸️ Pausing recording...');
+                try {
+                    const result = await ipcRenderer.invoke('pause-recording-ui');
+                    if (result.success) {
+                        setUIState('paused');
+                    } else {
+                        log(`Failed to pause: ${result.error}`);
+                    }
+                } catch (error) {
+                    log(`🚫 Pause error: ${error.message}`);
+                }
+            } else if (uiState === 'paused') {
+                // Resume recording
+                log('▶️ Resuming recording...');
+                try {
+                    const result = await ipcRenderer.invoke('resume-recording-ui');
+                    if (result.success) {
+                        setUIState('recording');
+                    } else {
+                        log(`Failed to resume: ${result.error}`);
+                    }
+                } catch (error) {
+                    log(`🚫 Resume error: ${error.message}`);
+                }
+            }
+        });
+
         // Search functionality
         const searchInput = document.getElementById('search-input');
         searchInput.addEventListener('input', (e) => {
@@ -2676,6 +2728,19 @@ Session started - waiting for activity...
         // Listen for debug messages from backend
         ipcRenderer.on('debug-log', (event, message) => {
             debugLog(message);
+        });
+
+        // Listen for global hotkey toggle recording
+        ipcRenderer.on('toggle-recording-hotkey', () => {
+            log('Global hotkey received: toggle recording');
+            if (uiState === 'recording') {
+                // Stop recording
+                stopBtn.click();
+            } else if (uiState === 'ready') {
+                // Start recording
+                startBtn.click();
+            }
+            // Ignore if in 'processing' state
         });
         
         async function runSetupProcess() {

@@ -456,6 +456,13 @@ Return ONLY the response in this exact JSON format:
             prompt = self._create_permissive_prompt(transcript)
             logger.info(f"Sending transcript to Ollama model: {self.model_name}")
             logger.info(f"Transcript length: {len(transcript)} characters")
+
+            # Calculate dynamic timeout based on transcript length
+            # Base 30 min + 10 min per 10k chars, capped at 2 hours
+            base_timeout = 1800  # 30 minutes
+            extra_timeout = (len(transcript) // 10000) * 600  # 10 min per 10k chars
+            timeout_seconds = min(base_timeout + extra_timeout, 7200)  # Cap at 2 hours
+            logger.info(f"Using timeout: {timeout_seconds} seconds ({timeout_seconds // 60} minutes)")
             
             # Retry logic for Ollama API calls
             max_retries = 3
@@ -477,7 +484,7 @@ Return ONLY the response in this exact JSON format:
                             }
                         ],
                         options={
-                            'timeout': 1800  # 30 minute timeout for longer meetings
+                            'timeout': timeout_seconds  # Dynamic timeout based on transcript length
                         }
                     )
                     break  # Success, exit retry loop

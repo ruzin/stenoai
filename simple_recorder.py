@@ -223,7 +223,7 @@ Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
             "session_name": session_name
         }
     
-    async def summarize_transcript(self, transcript_text: str, session_name: str = "Recording") -> dict:
+    async def summarize_transcript(self, transcript_text: str, session_name: str = "Recording", duration_minutes: int = 10) -> dict:
         """Summarize transcript text."""
         print("🧠 Generating summary...")
         
@@ -249,7 +249,7 @@ Transcript:
 """
         
         # Generate summary (using correct method name and parameters)
-        summary_result = self.summarizer.summarize_transcript(transcript_text, 10)  # 10 minutes duration estimate
+        summary_result = self.summarizer.summarize_transcript(transcript_text, duration_minutes)
         
         if summary_result is None:
             return {
@@ -336,8 +336,9 @@ Transcript:
         
         # Step 2: Summarize with actual duration
         summary_data = await self.summarize_transcript(
-            transcript_data["transcript_text"], 
-            session_name
+            transcript_data["transcript_text"],
+            session_name,
+            duration_minutes
         )
         
         # Step 3: Save complete summary
@@ -603,13 +604,45 @@ def status():
 def record(duration, session_name):
     """Record audio for specified duration and process it"""
     import signal
-    
+    import sys
+
     print(f"🎤 Recording {duration} seconds of audio for '{session_name}'...")
-    
+
     recorder = SimpleRecorder()
     recording_path = None
     recording_started = False
-    
+    is_paused = False
+
+    def pause_handler(signum, frame):
+        """Handle SIGUSR1 to pause recording"""
+        nonlocal is_paused
+        if recording_started and recorder and recorder.audio_recorder:
+            if not is_paused:
+                recorder.audio_recorder.pause_recording()
+                is_paused = True
+                print("⏸️ Recording paused")
+            else:
+                print("⏸️ Already paused")
+
+    def resume_handler(signum, frame):
+        """Handle SIGUSR2 to resume recording"""
+        nonlocal is_paused
+        if recording_started and recorder and recorder.audio_recorder:
+            if is_paused:
+                recorder.audio_recorder.resume_recording()
+                is_paused = False
+                print("▶️ Recording resumed")
+            else:
+                print("▶️ Not paused")
+
+    # Register pause/resume signal handlers (Unix only)
+    if sys.platform != 'win32':
+        try:
+            signal.signal(signal.SIGUSR1, pause_handler)
+            signal.signal(signal.SIGUSR2, resume_handler)
+        except (AttributeError, ValueError) as e:
+            print(f"⚠️ Could not register pause/resume signals: {e}")
+
     def signal_handler(signum, frame):
         """Handle SIGTERM gracefully by stopping recording and processing"""
         print(f"\n🛑 Received termination signal ({signum})")
