@@ -616,24 +616,32 @@ def record(duration, session_name):
     def pause_handler(signum, frame):
         """Handle SIGUSR1 to pause recording"""
         nonlocal is_paused
+        print(f"📨 Received SIGUSR1 signal (pause request)")
+        print(f"   recording_started={recording_started}, has_recorder={recorder is not None}, has_audio={recorder.audio_recorder is not None if recorder else False}")
         if recording_started and recorder and recorder.audio_recorder:
             if not is_paused:
                 recorder.audio_recorder.pause_recording()
                 is_paused = True
-                print("⏸️ Recording paused")
+                print("⏸️ Recording paused successfully")
             else:
-                print("⏸️ Already paused")
+                print("⏸️ Already paused - ignoring")
+        else:
+            print("⚠️ Cannot pause - recording not active")
 
     def resume_handler(signum, frame):
         """Handle SIGUSR2 to resume recording"""
         nonlocal is_paused
+        print(f"📨 Received SIGUSR2 signal (resume request)")
+        print(f"   recording_started={recording_started}, is_paused={is_paused}")
         if recording_started and recorder and recorder.audio_recorder:
             if is_paused:
                 recorder.audio_recorder.resume_recording()
                 is_paused = False
-                print("▶️ Recording resumed")
+                print("▶️ Recording resumed successfully")
             else:
-                print("▶️ Not paused")
+                print("▶️ Not paused - ignoring")
+        else:
+            print("⚠️ Cannot resume - recording not active")
 
     # Register pause/resume signal handlers (Unix only)
     if sys.platform != 'win32':

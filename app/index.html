@@ -1691,6 +1691,7 @@ Session started - waiting for activity...
         let searchQuery = '';
         let recordingStartTime = null;
         let recordingTimer = null;
+        let pausedElapsedTime = 0; // Track elapsed time when paused
         let processingMeetings = new Set();
         let meetingsLastLoaded = 0; // Cache timestamp
         
@@ -1714,8 +1715,14 @@ Session started - waiting for activity...
             log(`Status: ${message}`);
         }
         
-        function startRecordingTimer() {
-            recordingStartTime = Date.now();
+        function startRecordingTimer(resume = false) {
+            // If resuming, adjust start time to account for already elapsed time
+            if (resume && pausedElapsedTime > 0) {
+                recordingStartTime = Date.now() - (pausedElapsedTime * 1000);
+            } else {
+                recordingStartTime = Date.now();
+                pausedElapsedTime = 0;
+            }
             recordingTimer = setInterval(() => {
                 const elapsed = Math.floor((Date.now() - recordingStartTime) / 1000);
                 const minutes = Math.floor(elapsed / 60);
@@ -1724,13 +1731,25 @@ Session started - waiting for activity...
                 setStatus('recording', `Recording... ${timeStr}`);
             }, 1000);
         }
-        
+
+        function pauseRecordingTimer() {
+            if (recordingTimer) {
+                clearInterval(recordingTimer);
+                recordingTimer = null;
+            }
+            // Save elapsed time before pausing
+            if (recordingStartTime) {
+                pausedElapsedTime = Math.floor((Date.now() - recordingStartTime) / 1000);
+            }
+        }
+
         function stopRecordingTimer() {
             if (recordingTimer) {
                 clearInterval(recordingTimer);
                 recordingTimer = null;
             }
             recordingStartTime = null;
+            pausedElapsedTime = 0;
         }
         
         function setUIState(state) {
@@ -1758,7 +1777,8 @@ Session started - waiting for activity...
                     sessionNameInput.disabled = true;
                     stopBtn.disabled = false;
                     pauseBtn.disabled = false;
-                    startRecordingTimer();
+                    // Check if resuming from paused state (pausedElapsedTime > 0)
+                    startRecordingTimer(pausedElapsedTime > 0);
                     break;
 
                 case 'paused':
@@ -1770,7 +1790,12 @@ Session started - waiting for activity...
                     sessionNameInput.disabled = true;
                     stopBtn.disabled = false;
                     pauseBtn.disabled = false;
-                    setStatus('recording', 'Paused');
+                    pauseRecordingTimer();
+                    // Show paused status with the frozen time
+                    const minutes = Math.floor(pausedElapsedTime / 60);
+                    const seconds = pausedElapsedTime % 60;
+                    const timeStr = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+                    setStatus('recording', `Paused ${timeStr}`);
                     break;
 
                 case 'processing':

@@ -668,20 +668,24 @@ ipcMain.handle('start-recording-ui', async (_, sessionName) => {
 ipcMain.handle('pause-recording-ui', async () => {
   try {
     if (!currentRecordingProcess) {
+      sendDebugLog('Pause failed: No recording process found');
       return { success: false, error: 'No recording in progress' };
     }
 
     console.log('Pausing recording process...');
+    sendDebugLog('Sending SIGUSR1 to pause recording...');
 
     // Send SIGUSR1 to pause recording (Unix only)
     if (process.platform !== 'win32') {
       currentRecordingProcess.kill('SIGUSR1');
+      sendDebugLog('SIGUSR1 sent successfully');
       return { success: true, message: 'Recording paused' };
     } else {
       return { success: false, error: 'Pause not supported on Windows' };
     }
   } catch (error) {
     console.error('Pause recording UI error:', error.message);
+    sendDebugLog(`Pause error: ${error.message}`);
     return { success: false, error: error.message };
   }
 });
@@ -689,20 +693,24 @@ ipcMain.handle('pause-recording-ui', async () => {
 ipcMain.handle('resume-recording-ui', async () => {
   try {
     if (!currentRecordingProcess) {
+      sendDebugLog('Resume failed: No recording process found');
       return { success: false, error: 'No recording in progress' };
     }
 
     console.log('Resuming recording process...');
+    sendDebugLog('Sending SIGUSR2 to resume recording...');
 
     // Send SIGUSR2 to resume recording (Unix only)
     if (process.platform !== 'win32') {
       currentRecordingProcess.kill('SIGUSR2');
+      sendDebugLog('SIGUSR2 sent successfully');
       return { success: true, message: 'Recording resumed' };
     } else {
       return { success: false, error: 'Resume not supported on Windows' };
     }
   } catch (error) {
     console.error('Resume recording UI error:', error.message);
+    sendDebugLog(`Resume error: ${error.message}`);
     return { success: false, error: error.message };
   }
 });
