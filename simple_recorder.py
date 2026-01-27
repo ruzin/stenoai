@@ -981,9 +981,9 @@ def query(transcript_file, question):
         print(json.dumps({"success": False, "error": "Transcript is empty"}))
         return
 
-    # Initialize summarizer and query
+    # Always use llama3.2:3b for queries (fastest response times)
     try:
-        summarizer = OllamaSummarizer()
+        summarizer = OllamaSummarizer(model_name="llama3.2:3b")
         answer = summarizer.query_transcript(transcript_text, question)
 
         if answer:
@@ -1285,6 +1285,40 @@ def set_notifications(enabled):
         print(json.dumps({"success": True, "notifications_enabled": enabled}))
     else:
         print(f"ERROR: Failed to save notification preference")
+        print(json.dumps({"success": False, "error": "Failed to save config"}))
+
+
+@cli.command()
+def get_telemetry():
+    """Get the current telemetry preference and anonymous ID"""
+    from src.config import get_config
+
+    config = get_config()
+    enabled = config.get_telemetry_enabled()
+    anonymous_id = config.get_anonymous_id()
+
+    result = {
+        "telemetry_enabled": enabled,
+        "anonymous_id": anonymous_id
+    }
+
+    print(json.dumps(result, indent=2))
+
+
+@cli.command()
+@click.argument('enabled', type=bool)
+def set_telemetry(enabled):
+    """Set telemetry preference (True/False)"""
+    from src.config import get_config
+
+    config = get_config()
+    success = config.set_telemetry_enabled(enabled)
+
+    if success:
+        print(f"SUCCESS: Telemetry {'enabled' if enabled else 'disabled'}")
+        print(json.dumps({"success": True, "telemetry_enabled": enabled}))
+    else:
+        print(f"ERROR: Failed to save telemetry preference")
         print(json.dumps({"success": False, "error": "Failed to save config"}))
 
 

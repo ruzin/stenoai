@@ -2423,6 +2423,17 @@ Commands and output will appear here...
                         </label>
                     </div>
 
+                    <div class="settings-row">
+                        <div class="settings-row-text">
+                            <span>Anonymous usage analytics</span>
+                            <small>Help improve StenoAI -- no meeting content is ever sent</small>
+                        </div>
+                        <label class="settings-toggle">
+                            <input type="checkbox" id="telemetry-toggle">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+
                     <div class="settings-version">
                         StenoAI <span id="app-version">Loading...</span>
                     </div>
@@ -3287,6 +3298,9 @@ Session started - waiting for activity...
                     ),
                     loadNotificationSettings().catch(err =>
                         log(`Notification settings load failed: ${err.message}`)
+                    ),
+                    loadTelemetrySettings().catch(err =>
+                        log(`Telemetry settings load failed: ${err.message}`)
                     )
                 ]);
                 
@@ -3405,6 +3419,24 @@ Session started - waiting for activity...
             aiQueryResponse.classList.remove('show');
         }
 
+        function formatAiResponse(text) {
+            // Escape HTML
+            const escaped = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            // Bold **text**
+            let html = escaped.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+            // Bullet points: lines starting with * or -
+            html = html.replace(/^[\*\-]\s+(.+)$/gm, '<li>$1</li>');
+            // Wrap consecutive <li> in <ul>
+            html = html.replace(/((?:<li>.*<\/li>\n?)+)/g, '<ul>$1</ul>');
+            // Line breaks for remaining newlines
+            html = html.replace(/\n/g, '<br>');
+            // Clean up <br> inside/around <ul>
+            html = html.replace(/<br><ul>/g, '<ul>');
+            html = html.replace(/<\/ul><br>/g, '</ul>');
+            html = html.replace(/<ul><br>/g, '<ul>');
+            return html;
+        }
+
         async function submitAiQuery() {
             const question = aiQueryInput.value.trim();
             if (!question) return;
@@ -3433,7 +3465,7 @@ Session started - waiting for activity...
 
                 if (result.success) {
                     aiQueryResponseContent.classList.remove('loading');
-                    aiQueryResponseContent.textContent = result.answer;
+                    aiQueryResponseContent.innerHTML = formatAiResponse(result.answer);
                     log('AI response received');
                 } else {
                     aiQueryResponseContent.classList.remove('loading');
@@ -4328,6 +4360,23 @@ Session started - waiting for activity...
             }
         }
 
+        async function loadTelemetrySettings() {
+            try {
+                const result = await ipcRenderer.invoke('get-telemetry');
+                const toggle = document.getElementById('telemetry-toggle');
+
+                if (result.success) {
+                    toggle.checked = result.telemetry_enabled;
+                } else {
+                    console.error('Failed to load telemetry settings:', result.error);
+                    toggle.checked = true; // Default to enabled
+                }
+            } catch (error) {
+                console.error('Error loading telemetry settings:', error);
+                document.getElementById('telemetry-toggle').checked = true;
+            }
+        }
+
         async function showDesktopNotification(title, options) {
             // Check if desktop notifications are enabled in settings
             try {
@@ -4368,6 +4417,31 @@ Session started - waiting for activity...
                         }
                     } catch (error) {
                         console.error('Error saving notification setting:', error);
+                        showModelNotification('Failed to save setting', 'error');
+                        e.target.checked = !e.target.checked;
+                    }
+                });
+            }
+
+            const telemetryToggle = document.getElementById('telemetry-toggle');
+            if (telemetryToggle) {
+                telemetryToggle.addEventListener('change', async (e) => {
+                    try {
+                        const enabled = e.target.checked;
+                        const result = await ipcRenderer.invoke('set-telemetry', enabled);
+
+                        if (result.success) {
+                            showModelNotification(
+                                `Usage analytics ${enabled ? 'enabled' : 'disabled'}`,
+                                'success'
+                            );
+                        } else {
+                            console.error('Failed to save telemetry setting:', result.error);
+                            showModelNotification('Failed to save setting', 'error');
+                            e.target.checked = !enabled;
+                        }
+                    } catch (error) {
+                        console.error('Error saving telemetry setting:', error);
                         showModelNotification('Failed to save setting', 'error');
                         e.target.checked = !e.target.checked;
                     }

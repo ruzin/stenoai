@@ -4,9 +4,107 @@ const { spawn, exec } = require('child_process');
 const fs = require('fs');
 const https = require('https');
 const os = require('os');
+const { PostHog } = require('posthog-node');
 
 let mainWindow;
 let pythonProcess;
+
+// Telemetry state
+let posthogClient = null;
+let telemetryEnabled = false;
+let anonymousId = null;
+
+const POSTHOG_API_KEY = 'phc_U2cnTyIyKGNSVaK18FyBMltd8nmN7uHxhhm21fAHwqb';
+const POSTHOG_HOST = 'https://us.i.posthog.com';
+
+/**
+ * Return a privacy-safe duration bucket string.
+ */
+function durationBucket(seconds) {
+  if (seconds < 60) return '<1m';
+  if (seconds < 300) return '1-5m';
+  if (seconds < 900) return '5-15m';
+  if (seconds < 1800) return '15-30m';
+  if (seconds < 3600) return '30-60m';
+  return '60m+';
+}
+
+/**
+ * Initialize PostHog telemetry by reading config from Python backend.
+ */
+async function initTelemetry() {
+  try {
+    const pythonPath = path.join(__dirname, '..', 'venv', 'bin', 'python');
+    const scriptPath = path.join(__dirname, '..', 'simple_recorder.py');
+
+    const result = await new Promise((resolve, reject) => {
+      const proc = spawn(pythonPath, [scriptPath, 'get-telemetry'], {
+        cwd: path.join(__dirname, '..')
+      });
+      let stdout = '';
+      proc.stdout.on('data', (data) => { stdout += data.toString(); });
+      proc.on('close', (code) => {
+        if (code === 0) resolve(stdout);
+        else reject(new Error(`get-telemetry exited with code ${code}`));
+      });
+      proc.on('error', reject);
+    });
+
+    const config = JSON.parse(result.trim());
+    telemetryEnabled = config.telemetry_enabled;
+    anonymousId = config.anonymous_id;
+
+    if (telemetryEnabled) {
+      posthogClient = new PostHog(POSTHOG_API_KEY, { host: POSTHOG_HOST });
+      console.log('Telemetry initialized (anonymous analytics enabled)');
+    } else {
+      console.log('Telemetry disabled by user preference');
+    }
+  } catch (error) {
+    console.error('Failed to initialize telemetry:', error.message);
+    telemetryEnabled = false;
+  }
+}
+
+/**
+ * Track an analytics event. Silent fail -- never throws.
+ */
+function trackEvent(eventName, properties = {}) {
+  try {
+    if (!telemetryEnabled || !posthogClient || !anonymousId) return;
+
+    const packagePath = path.join(__dirname, 'package.json');
+    const packageContent = JSON.parse(fs.readFileSync(packagePath, 'utf8'));
+
+    posthogClient.capture({
+      distinctId: anonymousId,
+      event: eventName,
+      properties: {
+        app_version: packageContent.version,
+        platform: process.platform,
+        arch: process.arch,
+        ...properties
+      }
+    });
+  } catch (error) {
+    // Silent fail -- telemetry must never break the app
+  }
+}
+
+/**
+ * Flush and shut down the PostHog client.
+ */
+async function shutdownTelemetry() {
+  try {
+    if (posthogClient) {
+      await posthogClient.shutdown();
+      posthogClient = null;
+      console.log('Telemetry shut down');
+    }
+  } catch (error) {
+    // Silent fail
+  }
+}
 
 /**
  * Validate that a file path is within allowed directories (security)
@@ -63,8 +161,12 @@ function createWindow() {
   });
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   createWindow();
+
+  // Initialize telemetry and track app open
+  await initTelemetry();
+  trackEvent('app_opened');
 
   // Register global hotkey for toggle recording (Cmd+Shift+R on macOS, Ctrl+Shift+R on Windows/Linux)
   const hotkeyModifier = process.platform === 'darwin' ? 'Command+Shift+R' : 'Ctrl+Shift+R';
@@ -82,9 +184,10 @@ app.whenReady().then(() => {
   }
 });
 
-app.on('will-quit', () => {
+app.on('will-quit', async () => {
   // Unregister all shortcuts when the app is about to quit
   globalShortcut.unregisterAll();
+  await shutdownTelemetry();
 });
 
 app.on('window-all-closed', () => {
@@ -192,12 +295,13 @@ ipcMain.handle('start-recording', async (event, sessionName) => {
   try {
     sendDebugLog(`Starting recording session: ${sessionName || 'Meeting'}`);
     sendDebugLog('$ python simple_recorder.py start');
-    
+
     // Start recording (removed clear-state to prevent race conditions)
     const result = await runPythonScript('simple_recorder.py', ['start', sessionName || 'Meeting']);
-    
+
     if (result.includes('SUCCESS')) {
       sendDebugLog('Recording started successfully');
+      trackEvent('recording_started');
       return { success: true, message: result };
     } else {
       sendDebugLog(`Recording failed: ${result}`);
@@ -206,6 +310,7 @@ ipcMain.handle('start-recording', async (event, sessionName) => {
   } catch (error) {
     console.error('Start recording error:', error.message);
     sendDebugLog(`Recording error: ${error.message}`);
+    trackEvent('error_occurred', { error_type: 'start_recording' });
     return { success: false, error: error.message };
   }
 });
@@ -213,14 +318,16 @@ ipcMain.handle('start-recording', async (event, sessionName) => {
 ipcMain.handle('stop-recording', async () => {
   try {
     const result = await runPythonScript('simple_recorder.py', ['stop']);
-    
+
     if (result.includes('SUCCESS') || result.includes('Recording saved')) {
+      trackEvent('recording_stopped');
       return { success: true, message: result };
     } else {
       return { success: false, error: result };
     }
   } catch (error) {
     console.error('Stop recording error:', error.message);
+    trackEvent('error_occurred', { error_type: 'stop_recording' });
     return { success: false, error: error.message };
   }
 });
@@ -237,8 +344,11 @@ ipcMain.handle('get-status', async () => {
 ipcMain.handle('process-recording', async (event, audioFile, sessionName) => {
   try {
     const result = await runPythonScript('simple_recorder.py', ['process', audioFile, '--name', sessionName]);
+    trackEvent('transcription_completed', { success: true });
+    trackEvent('summarization_completed', { success: true });
     return { success: true, result: result };
   } catch (error) {
+    trackEvent('error_occurred', { error_type: 'process_recording' });
     return { success: false, error: error.message };
   }
 });
@@ -312,9 +422,11 @@ ipcMain.handle('query-transcript', async (event, summaryFile, question) => {
       const jsonResponse = JSON.parse(result.trim());
       if (jsonResponse.success) {
         sendDebugLog('✅ Query answered successfully');
+        trackEvent('ai_query_used', { success: true });
         return { success: true, answer: jsonResponse.answer };
       } else {
         sendDebugLog(`❌ Query failed: ${jsonResponse.error}`);
+        trackEvent('ai_query_used', { success: false });
         return { success: false, error: jsonResponse.error };
       }
     } catch (parseError) {
@@ -323,16 +435,20 @@ ipcMain.handle('query-transcript', async (event, summaryFile, question) => {
       if (jsonMatch) {
         const jsonResponse = JSON.parse(jsonMatch[0]);
         if (jsonResponse.success) {
+          trackEvent('ai_query_used', { success: true });
           return { success: true, answer: jsonResponse.answer };
         } else {
+          trackEvent('ai_query_used', { success: false });
           return { success: false, error: jsonResponse.error };
         }
       }
       sendDebugLog(`❌ Failed to parse query response: ${parseError.message}`);
+      trackEvent('ai_query_used', { success: false });
       return { success: false, error: 'Failed to parse AI response' };
     }
   } catch (error) {
     sendDebugLog(`❌ Query failed: ${error.message}`);
+    trackEvent('error_occurred', { error_type: 'query_transcript' });
     return { success: false, error: error.message };
   }
 });
@@ -511,6 +627,8 @@ async function processNextInQueue() {
   try {
     const result = await runPythonScript('simple_recorder.py', ['process', currentProcessingJob.audioFile, '--name', currentProcessingJob.sessionName]);
     console.log(`✅ Completed processing: ${currentProcessingJob.sessionName}`);
+    trackEvent('transcription_completed', { success: true });
+    trackEvent('summarization_completed', { success: true });
     
     // Notify frontend about completion with processed meeting data
     if (mainWindow) {
@@ -538,7 +656,8 @@ async function processNextInQueue() {
     
   } catch (error) {
     console.error(`❌ Processing failed for ${currentProcessingJob.sessionName}:`, error);
-    
+    trackEvent('error_occurred', { error_type: 'processing_queue' });
+
     // Notify frontend about failure
     if (mainWindow) {
       mainWindow.webContents.send('processing-complete', { 
@@ -651,6 +770,7 @@ ipcMain.handle('start-recording-ui', async (_, sessionName) => {
     await new Promise(resolve => setTimeout(resolve, 2000));
     
     if (currentRecordingProcess) {
+      trackEvent('recording_started');
       return { success: true, message: 'Recording started successfully' };
     } else {
       return { success: false, error: 'Failed to start recording process' };
@@ -658,6 +778,7 @@ ipcMain.handle('start-recording-ui', async (_, sessionName) => {
   } catch (error) {
     console.error('Start recording UI error:', error.message);
     currentRecordingProcess = null;
+    trackEvent('error_occurred', { error_type: 'start_recording_ui' });
     return { success: false, error: error.message };
   }
 });
@@ -719,21 +840,23 @@ ipcMain.handle('stop-recording-ui', async () => {
     }
 
     console.log('Stopping recording process...');
-    
+
     // Send SIGTERM to trigger graceful stop and processing
     currentRecordingProcess.kill('SIGTERM');
-    
+
     // Don't wait - let the process complete independently
     // The process will handle: stop recording → transcribe → summarize → exit
     currentRecordingProcess = null;
-    
-    return { 
-      success: true, 
+
+    trackEvent('recording_stopped');
+    return {
+      success: true,
       message: 'Recording stopped - processing will complete in background'
     };
   } catch (error) {
     console.error('Stop recording UI error:', error.message);
     currentRecordingProcess = null;
+    trackEvent('error_occurred', { error_type: 'stop_recording_ui' });
     return { success: false, error: error.message };
   }
 });
@@ -839,8 +962,10 @@ ipcMain.handle('setup-system-check', async () => {
       });
     }
     
+    trackEvent('setup_completed', { step: 'system_check' });
     return { success: true, message: 'System setup complete - Python and directories ready' };
   } catch (error) {
+    trackEvent('setup_failed', { step: 'system_check' });
     return { success: false, error: error.message };
   }
 });
@@ -1129,9 +1254,11 @@ ipcMain.handle('setup-python', async () => {
       process.on('close', (code) => {
         if (code === 0) {
           sendDebugLog('Python dependencies installation completed successfully');
+          trackEvent('setup_completed', { step: 'python_dependencies' });
           resolve({ success: true, message: 'Python dependencies and Whisper installed' });
         } else {
           sendDebugLog(`Python dependencies installation failed with exit code: ${code}`);
+          trackEvent('setup_failed', { step: 'python_dependencies' });
           resolve({ success: false, error: `Installation failed: ${output}` });
         }
       });
@@ -1310,13 +1437,15 @@ ipcMain.handle('setup-ollama-and-model', async () => {
       process.on('close', (code) => {
         if (code === 0) {
           sendDebugLog('AI model download completed successfully');
+          trackEvent('setup_completed', { step: 'ollama_and_model' });
           resolve({ success: true, message: 'Ollama and AI model ready' });
         } else {
           sendDebugLog(`AI model download failed with exit code: ${code}`);
-          resolve({ 
-            success: false, 
-            error: 'Failed to download AI model', 
-            details: `Exit code: ${code}` 
+          trackEvent('setup_failed', { step: 'ollama_and_model' });
+          resolve({
+            success: false,
+            error: 'Failed to download AI model',
+            details: `Exit code: ${code}`
           });
         }
       });
@@ -1401,12 +1530,14 @@ ipcMain.handle('setup-test', async () => {
     
     if (result.includes('System check passed') || result.includes('SUCCESS')) {
       sendDebugLog('System test completed successfully');
+      trackEvent('setup_completed', { step: 'system_test' });
       return { success: true, message: 'System test passed' };
     } else {
       // Extract specific error details from the output
       const errorLines = result.split('\n').filter(line => line.includes('ERROR:'));
       const specificError = errorLines.length > 0 ? errorLines[errorLines.length - 1].replace('ERROR: ', '') : 'Unknown error';
       sendDebugLog(`System test failed: ${specificError}`);
+      trackEvent('setup_failed', { step: 'system_test' });
       return { success: false, error: `System test failed: ${specificError}`, details: result };
     }
   } catch (error) {
@@ -1578,9 +1709,11 @@ ipcMain.handle('set-model', async (event, modelName) => {
     const jsonMatch = result.match(/\{.*\}/s);
     if (jsonMatch) {
       const jsonData = JSON.parse(jsonMatch[0]);
+      trackEvent('model_changed', { model: modelName });
       return jsonData;
     }
 
+    trackEvent('model_changed', { model: modelName });
     return { success: true, model: modelName };
   } catch (error) {
     sendDebugLog(`Error setting model: ${error.message}`);
@@ -1618,6 +1751,51 @@ ipcMain.handle('set-notifications', async (event, enabled) => {
     return { success: true, notifications_enabled: enabled };
   } catch (error) {
     sendDebugLog(`Error setting notifications: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('get-telemetry', async () => {
+  try {
+    const result = await runPythonScript('simple_recorder.py', ['get-telemetry']);
+    const jsonData = JSON.parse(result);
+
+    return {
+      success: true,
+      ...jsonData
+    };
+  } catch (error) {
+    sendDebugLog(`Error getting telemetry settings: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('set-telemetry', async (event, enabled) => {
+  try {
+    sendDebugLog(`Setting telemetry to: ${enabled}`);
+    const result = await runPythonScript('simple_recorder.py', ['set-telemetry', enabled ? 'True' : 'False']);
+
+    // Update in-memory state
+    telemetryEnabled = enabled;
+
+    if (enabled && !posthogClient) {
+      posthogClient = new PostHog(POSTHOG_API_KEY, { host: POSTHOG_HOST });
+      console.log('Telemetry re-enabled');
+    } else if (!enabled && posthogClient) {
+      await shutdownTelemetry();
+      console.log('Telemetry disabled');
+    }
+
+    // Extract JSON from output
+    const jsonMatch = result.match(/\{.*\}/s);
+    if (jsonMatch) {
+      const jsonData = JSON.parse(jsonMatch[0]);
+      return jsonData;
+    }
+
+    return { success: true, telemetry_enabled: enabled };
+  } catch (error) {
+    sendDebugLog(`Error setting telemetry: ${error.message}`);
     return { success: false, error: error.message };
   }
 });
