@@ -157,6 +157,7 @@ Thumbs.db
 config/
 *.env
 *_config.json
+config.json
 !app/package*.json
 
 # Local documentation and review notes
