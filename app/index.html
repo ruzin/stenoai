@@ -4871,7 +4871,13 @@ Session started - waiting for activity...
             ]);
 
             const allAnnouncements = [...remoteData.announcements];
-            if (updateAnn) allAnnouncements.push(updateAnn);
+            // Only use auto-detected update if no eligible remote announcements
+            const hasEligibleRemote = remoteData.announcements.some(a =>
+                !isAnnouncementDismissed(a.id) && !isAnnouncementExpired(a)
+            );
+            if (updateAnn && !hasEligibleRemote) {
+                allAnnouncements.push(updateAnn);
+            }
 
             const winner = resolveAnnouncement(allAnnouncements, remoteData.currentVersion);
             if (winner) {
