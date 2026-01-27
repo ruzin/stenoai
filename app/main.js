@@ -2023,6 +2023,74 @@ ipcMain.handle('check-for-updates', async () => {
   return await checkForUpdates();
 });
 
+ipcMain.handle('check-announcements', async () => {
+  const packagePath = path.join(__dirname, 'package.json');
+  const packageContent = JSON.parse(fs.readFileSync(packagePath, 'utf8'));
+  const currentVersion = packageContent.version;
+
+  // Try local file first (for development/testing)
+  const localPath = path.join(__dirname, '..', 'announcements.json');
+  if (fs.existsSync(localPath)) {
+    try {
+      const localData = JSON.parse(fs.readFileSync(localPath, 'utf8'));
+      console.log('Loaded announcements from local file');
+      return {
+        success: true,
+        announcements: localData.announcements || [],
+        currentVersion
+      };
+    } catch (error) {
+      console.error('Error reading local announcements.json:', error);
+    }
+  }
+
+  // Fall back to remote
+  return new Promise((resolve) => {
+    const options = {
+      hostname: 'raw.githubusercontent.com',
+      path: '/ruzin/stenoai/main/announcements.json',
+      method: 'GET',
+      headers: {
+        'User-Agent': 'StenoAI-App'
+      }
+    };
+
+    const req = https.request(options, (res) => {
+      let data = '';
+
+      res.on('data', (chunk) => {
+        data += chunk;
+      });
+
+      res.on('end', () => {
+        try {
+          const parsed = JSON.parse(data);
+          resolve({
+            success: true,
+            announcements: parsed.announcements || [],
+            currentVersion
+          });
+        } catch (error) {
+          console.error('Error parsing announcements:', error);
+          resolve({ success: false, error: 'Failed to parse announcements' });
+        }
+      });
+    });
+
+    req.on('error', (error) => {
+      console.error('Error fetching announcements:', error);
+      resolve({ success: false, error: error.message });
+    });
+
+    req.setTimeout(10000, () => {
+      req.destroy();
+      resolve({ success: false, error: 'Announcements fetch timeout' });
+    });
+
+    req.end();
+  });
+});
+
 ipcMain.handle('open-release-page', async (event, url) => {
   try {
     await shell.openExternal(url);
