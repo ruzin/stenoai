@@ -6,7 +6,6 @@ const https = require('https');
 const os = require('os');
 
 let mainWindow;
-let settingsWindow = null;
 let pythonProcess;
 
 /**
@@ -100,40 +99,6 @@ app.on('activate', () => {
   }
 });
 
-function createSettingsWindow() {
-  if (settingsWindow) {
-    settingsWindow.focus();
-    return;
-  }
-
-  settingsWindow = new BrowserWindow({
-    width: 900,
-    height: 700,
-    minWidth: 800,
-    minHeight: 600,
-    parent: mainWindow,
-    modal: false,
-    webPreferences: {
-      nodeIntegration: true,
-      contextIsolation: false
-    },
-    titleBarStyle: 'hiddenInset',
-    show: false,
-    backgroundColor: '#1a1a1a'
-  });
-
-  settingsWindow.loadFile(path.join(__dirname, 'settings.html'));
-
-  settingsWindow.once('ready-to-show', () => {
-    settingsWindow.show();
-  });
-
-  settingsWindow.on('closed', () => {
-    settingsWindow = null;
-  });
-}
-
-
 // Microphone permission handlers
 ipcMain.handle('check-microphone-permission', async () => {
   try {
@@ -156,11 +121,6 @@ ipcMain.handle('request-microphone-permission', async () => {
     console.error('Error requesting microphone permission:', error);
     return { success: false, error: error.message };
   }
-});
-
-// IPC handler for opening settings
-ipcMain.handle('open-settings', () => {
-  createSettingsWindow();
 });
 
 // Debug functionality handled by side panel now

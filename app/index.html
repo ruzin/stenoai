@@ -72,7 +72,6 @@
             align-items: center;
             justify-content: space-between;
             transition: padding-top 0.3s ease;
-            /* Subtle gradient for depth */
             background: linear-gradient(180deg, var(--bg-elevated) 0%, var(--bg-primary) 100%);
         }
 
@@ -114,12 +113,12 @@
             border: 1px solid rgba(239, 68, 68, 0.2);
             letter-spacing: 0.05em;
         }
-        
+
         .header-actions {
             display: flex;
             align-items: center;
         }
-        
+
         .settings-btn {
             background: transparent;
             border: 1px solid var(--border-subtle);
@@ -141,13 +140,13 @@
         .settings-btn:active {
             transform: translateY(0);
         }
-        
+
         .record-controls {
             display: flex;
             align-items: center;
-            gap: 16px;
+            gap: 10px;
         }
-        
+
         .session-input {
             background: var(--bg-surface);
             border: 1px solid var(--border-default);
@@ -170,7 +169,7 @@
         .session-input::placeholder {
             color: var(--text-muted);
         }
-        
+
         .status {
             display: flex;
             align-items: center;
@@ -179,8 +178,8 @@
         }
         
         .status-dot {
-            width: 10px;
-            height: 10px;
+            width: 8px;
+            height: 8px;
             border-radius: 50%;
             background: var(--text-muted);
             transition: all 0.3s ease;
@@ -303,184 +302,434 @@
             transform: none;
         }
         
-        /* Settings Panel */
+        /* Unified Settings Panel */
         .settings-panel {
             position: fixed;
             top: 0;
-            right: -400px;
-            width: 400px;
+            right: -480px;
+            width: 480px;
             height: 100vh;
-            background: #111;
-            border-left: 1px solid #333;
+            background: var(--bg-primary);
+            border-left: 1px solid var(--border-subtle);
             transition: right 0.3s ease;
             z-index: 1000;
             display: flex;
             flex-direction: column;
         }
-        
+
+        .settings-panel.open {
+            right: 0;
+        }
+
         .settings-header {
             padding: 20px;
-            border-bottom: 1px solid #333;
+            border-bottom: 1px solid var(--border-subtle);
             display: flex;
             justify-content: space-between;
             align-items: center;
         }
-        
+
         .settings-header h2 {
             margin: 0;
             font-size: 18px;
-            color: #fff;
+            font-weight: 600;
+            color: var(--text-primary);
         }
-        
-        .close-settings {
+
+        .settings-close {
             background: none;
             border: none;
-            color: #ccc;
+            color: var(--text-muted);
             font-size: 18px;
             cursor: pointer;
             padding: 4px 8px;
             border-radius: 4px;
+            transition: all 0.2s ease;
         }
-        
-        .close-settings:hover {
-            background: #333;
-            color: #fff;
+
+        .settings-close:hover {
+            background: var(--bg-surface);
+            color: var(--text-primary);
         }
-        
+
+        .settings-body {
+            flex: 1;
+            display: flex;
+            overflow: hidden;
+        }
+
+        .settings-nav {
+            width: 140px;
+            background: var(--bg-elevated);
+            border-right: 1px solid var(--border-subtle);
+            padding: 12px 0;
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            flex-shrink: 0;
+        }
+
+        .settings-nav-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 16px;
+            background: transparent;
+            border: none;
+            color: var(--text-secondary);
+            font-size: 13px;
+            font-weight: 500;
+            font-family: inherit;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            text-align: left;
+            border-left: 2px solid transparent;
+        }
+
+        .settings-nav-item:hover {
+            background: var(--bg-surface);
+            color: var(--text-primary);
+        }
+
+        .settings-nav-item.active {
+            background: var(--bg-surface);
+            color: var(--accent-primary);
+            border-left-color: var(--accent-primary);
+        }
+
+        .settings-nav-item svg {
+            width: 16px;
+            height: 16px;
+            flex-shrink: 0;
+        }
+
         .settings-content {
             flex: 1;
             overflow-y: auto;
             padding: 20px;
         }
-        
+
+        .settings-tab {
+            display: none;
+        }
+
+        .settings-tab.active {
+            display: block;
+        }
+
         .settings-section {
-            margin-bottom: 32px;
+            margin-bottom: 28px;
         }
-        
+
         .settings-section h3 {
-            margin: 0 0 12px 0;
-            font-size: 16px;
-            color: #fff;
+            margin: 0 0 8px 0;
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-primary);
         }
-        
+
         .settings-section h4 {
             margin: 16px 0 8px 0;
-            font-size: 14px;
-            color: #ccc;
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--text-secondary);
         }
-        
+
         .settings-section p {
-            margin: 0 0 16px 0;
-            color: #aaa;
-            font-size: 14px;
-            line-height: 1.4;
+            margin: 0 0 12px 0;
+            color: var(--text-muted);
+            font-size: 13px;
+            line-height: 1.5;
         }
-        
-        .setup-info ul {
-            margin: 16px 0;
-            padding-left: 20px;
-            color: #ccc;
+
+        /* Settings row layout */
+        .settings-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 0;
+            border-bottom: 1px solid var(--border-subtle);
         }
-        
-        .setup-info li {
-            margin-bottom: 4px;
-            font-size: 14px;
+
+        .settings-row:last-of-type {
+            border-bottom: none;
         }
-        
-        .prompt-viewer {
-            background: #1a1a1a;
-            border: 1px solid #333;
-            border-radius: 6px;
-            padding: 16px;
-            font-family: 'Monaco', 'Menlo', monospace;
-            font-size: 12px;
-            line-height: 1.4;
-            white-space: pre-wrap;
-            color: #ccc;
-            max-height: 300px;
-            overflow-y: auto;
-        }
-        
-        /* Debug Panel */
-        .debug-panel {
-            position: fixed;
-            top: 0;
-            right: -500px;
-            width: 500px;
-            height: 100vh;
-            background: #0a0a0a;
-            border-left: 1px solid #333;
-            transition: right 0.3s ease;
-            z-index: 1000;
+
+        .settings-row-text {
             display: flex;
             flex-direction: column;
+            gap: 2px;
+            flex: 1;
+            min-width: 0;
         }
-        
-        .debug-header {
-            padding: 20px;
-            border-bottom: 1px solid #333;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            background: #111;
+
+        .settings-row-text span {
+            font-size: 13px;
+            color: var(--text-primary);
         }
-        
-        .debug-header h2 {
-            margin: 0;
-            font-size: 18px;
-            color: #fff;
+
+        .settings-row-text small {
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        .settings-action-btn {
+            background: var(--bg-surface);
+            color: var(--text-secondary);
+            border: 1px solid var(--border-default);
+            border-radius: 4px;
+            padding: 4px 10px;
+            font-size: 12px;
+            font-family: inherit;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            flex-shrink: 0;
+            margin-left: 12px;
+        }
+
+        .settings-action-btn:hover {
+            background: var(--bg-elevated);
+            color: var(--text-primary);
+        }
+
+        .settings-action-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .settings-toggle {
+            position: relative;
+            width: 40px;
+            height: 22px;
+            flex-shrink: 0;
+        }
+
+        .settings-toggle input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .settings-toggle .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: var(--border-default);
+            border-radius: 11px;
+            transition: background 0.2s ease;
+        }
+
+        .settings-toggle .toggle-slider:before {
+            content: "";
+            position: absolute;
+            height: 16px;
+            width: 16px;
+            left: 3px;
+            bottom: 3px;
+            background: var(--text-primary);
+            border-radius: 50%;
+            transition: transform 0.2s ease;
+        }
+
+        .settings-toggle input:checked + .toggle-slider {
+            background: var(--accent-primary);
+        }
+
+        .settings-toggle input:checked + .toggle-slider:before {
+            transform: translateX(18px);
+        }
+
+        /* Full-width developer tab: hide nav */
+        .settings-body.developer-active .settings-nav {
+            display: none;
+        }
+
+        .dev-tab-header {
             display: flex;
             align-items: center;
             gap: 8px;
+            margin-bottom: 12px;
         }
-        
+
+        .dev-back-btn {
+            background: none;
+            border: 1px solid var(--border-subtle);
+            color: var(--text-muted);
+            padding: 4px 8px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            font-family: inherit;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            transition: all 0.15s ease;
+        }
+
+        .dev-back-btn:hover {
+            background: var(--bg-surface);
+            color: var(--text-primary);
+            border-color: var(--border-default);
+        }
+
+        /* Debug console in developer tab */
         .debug-console {
             flex: 1;
-            background: #000;
-            color: #a0a0a0;
-            padding: 20px;
-            font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
+            background: var(--bg-deep);
+            color: var(--text-muted);
+            padding: 16px;
+            font-family: 'JetBrains Mono', 'Monaco', 'Menlo', 'Consolas', monospace;
             font-size: 11px;
             line-height: 1.4;
             overflow-y: auto;
             white-space: pre-wrap;
             word-wrap: break-word;
+            border: 1px solid var(--border-subtle);
+            border-radius: 6px;
+            min-height: 300px;
+            max-height: calc(100vh - 200px);
         }
-        
+
         .debug-console::-webkit-scrollbar {
             width: 8px;
         }
-        
+
         .debug-console::-webkit-scrollbar-track {
-            background: #111;
+            background: var(--bg-primary);
         }
-        
+
         .debug-console::-webkit-scrollbar-thumb {
-            background: #333;
+            background: var(--border-default);
             border-radius: 4px;
         }
-        
+
         .debug-console::-webkit-scrollbar-thumb:hover {
-            background: #555;
+            background: var(--text-muted);
+        }
+
+        .settings-version {
+            margin-top: 20px;
+            padding-top: 16px;
+            border-top: 1px solid var(--border-subtle);
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        /* Model list in AI tab */
+        .model-list {
+            display: flex;
+            flex-direction: column;
+            gap: 1px;
+            background: var(--border-subtle);
+            border: 1px solid var(--border-subtle);
+            border-radius: 6px;
+            overflow: hidden;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .model-list-loading {
+            padding: 12px;
+            color: var(--text-muted);
+            font-size: 13px;
+            background: var(--bg-elevated);
+        }
+
+        .model-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 12px;
+            background: var(--bg-elevated);
+            cursor: pointer;
+            transition: background 0.15s ease;
+        }
+
+        .model-item:hover {
+            background: var(--bg-surface);
+        }
+
+        .model-item.active {
+            background: rgba(129, 140, 248, 0.08);
+        }
+
+        .model-item-info {
+            display: flex;
+            flex-direction: column;
+            gap: 1px;
+            min-width: 0;
+            flex: 1;
+        }
+
+        .model-item-name {
+            font-size: 13px;
+            font-weight: 500;
+            font-family: 'JetBrains Mono', Monaco, monospace;
+            color: var(--text-primary);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .model-item-name .model-tag {
+            font-size: 10px;
+            font-weight: 500;
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            color: var(--text-muted);
+            background: var(--bg-deep);
+            padding: 1px 5px;
+            border-radius: 3px;
+        }
+
+        .model-item-name .model-active-badge {
+            font-size: 10px;
+            font-weight: 600;
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            color: var(--accent-primary);
+        }
+
+        .model-item-meta {
+            font-size: 11px;
+            color: var(--text-muted);
+        }
+
+        .model-item-action {
+            flex-shrink: 0;
+            margin-left: 12px;
+        }
+
+        .model-item .model-progress {
+            display: none;
+            margin-top: 4px;
+        }
+
+        .model-item .progress-text {
+            font-size: 10px;
+            color: var(--success-green);
+            font-family: 'JetBrains Mono', Monaco, monospace;
         }
 
         /* Model list scrollbar */
-        #model-list::-webkit-scrollbar {
+        .model-list::-webkit-scrollbar {
             width: 8px;
         }
 
-        #model-list::-webkit-scrollbar-track {
-            background: #1a1a1a;
+        .model-list::-webkit-scrollbar-track {
+            background: var(--bg-primary);
             border-radius: 4px;
         }
 
-        #model-list::-webkit-scrollbar-thumb {
-            background: #333;
+        .model-list::-webkit-scrollbar-thumb {
+            background: var(--border-default);
             border-radius: 4px;
         }
 
-        #model-list::-webkit-scrollbar-thumb:hover {
-            background: #555;
+        .model-list::-webkit-scrollbar-thumb:hover {
+            background: var(--text-muted);
         }
 
         /* Main content area */
@@ -1758,7 +2007,7 @@
         <div class="record-controls">
             <div class="status" id="status-container">
                 <div class="status-dot ready" id="status-dot"></div>
-                <span id="status-text">Ready</span>
+                <span id="status-text" style="font-size: 13px; color: var(--text-secondary);">Ready</span>
                 <div class="waveform" id="waveform">
                     <div class="waveform-bar"></div>
                     <div class="waveform-bar"></div>
@@ -1784,9 +2033,12 @@
         </div>
         
         <div class="header-actions">
-            <button class="settings-btn" id="debug-btn" title="Debug Logs" style="margin-right: 8px;">🔨</button>
-            <button class="settings-btn" id="ai-settings-btn" title="AI Settings" style="margin-right: 8px;">🧠</button>
-            <button class="settings-btn" id="settings-btn" title="Settings">⚙️</button>
+            <button class="settings-btn" id="settings-btn" title="Settings (Cmd+,)">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="3"></circle>
+                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                </svg>
+            </button>
         </div>
     </div>
 
@@ -2078,117 +2330,128 @@ Commands and output will appear here...
         </div>
     </div>
 
-    <!-- Settings Panel (slides in from right) -->
+    <!-- Unified Settings Panel -->
     <div class="settings-panel" id="settings-panel">
         <div class="settings-header">
-            <h2>⚙️ Settings</h2>
-            <button class="close-settings" onclick="toggleSettings()">✕</button>
+            <h2>Settings</h2>
+            <button class="settings-close" onclick="toggleSettings()">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+            </button>
         </div>
-        
-        <div class="settings-content">
-            <div class="settings-section">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                    <h3>🔧 Setup Wizard</h3>
-                    <span style="font-size: 12px; color: #888;">Version: <span id="app-version">Loading...</span></span>
-                </div>
-                <p>Run the setup process again to reinstall dependencies or fix configuration issues.</p>
-                
-                <div class="setup-info">
-                    <ul>
-                        <li>Python virtual environment</li>
-                        <li>Audio recording libraries</li>
-                        <li>Whisper speech recognition</li>
-                        <li>Ollama AI service and models</li>
-                        <li>ffmpeg audio processing toolkit</li>
-                    </ul>
-                </div>
-                
-                <button class="btn btn-primary" id="run-setup-btn" onclick="runSetupFromSettings()">
-                    Run Setup Wizard
+        <div class="settings-body">
+            <nav class="settings-nav">
+                <button class="settings-nav-item active" data-tab="general">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="3"></circle>
+                        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                    </svg>
+                    General
                 </button>
-            </div>
+                <button class="settings-nav-item" data-tab="ai">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 2a4 4 0 0 1 4 4c0 1.1-.9 2-2 2h-4c-1.1 0-2-.9-2-2a4 4 0 0 1 4-4z"></path>
+                        <path d="M12 8v2"></path>
+                        <path d="M8 14h8"></path>
+                        <path d="M9 18h6"></path>
+                        <path d="M10 22h4"></path>
+                        <path d="M12 10v4"></path>
+                    </svg>
+                    AI
+                </button>
+                <button class="settings-nav-item" data-tab="developer" id="developer-nav-item" style="display: none;">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="16 18 22 12 16 6"></polyline>
+                        <polyline points="8 6 2 12 8 18"></polyline>
+                    </svg>
+                    Developer
+                </button>
+            </nav>
+            <div class="settings-content">
+                <!-- General Tab -->
+                <div class="settings-tab active" id="tab-general">
+                    <div class="settings-row">
+                        <div class="settings-row-text">
+                            <span>Desktop notifications</span>
+                            <small>Notify when meetings finish processing</small>
+                        </div>
+                        <label class="settings-toggle">
+                            <input type="checkbox" id="notifications-toggle">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
 
-            <div class="settings-section">
-                <h3>🔔 Notifications</h3>
+                    <div class="settings-row">
+                        <div class="settings-row-text">
+                            <span>Check for updates</span>
+                            <small>Download from System Settings if prompted</small>
+                        </div>
+                        <button class="settings-action-btn" id="test-update-btn" onclick="testUpdateCheck()">Check</button>
+                    </div>
 
-                <div style="margin-top: 15px;">
-                    <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
-                        <input type="checkbox" id="notifications-toggle" style="width: 18px; height: 18px; cursor: pointer;">
-                        <span style="color: #ccc;">Show desktop notifications for meeting completions</span>
-                    </label>
-                    <p style="font-size: 12px; color: #888; margin-top: 8px; margin-left: 28px;">
-                        Get notified when your meetings finish processing (even when the app is in the background)
-                    </p>
+                    <div class="settings-row">
+                        <div class="settings-row-text">
+                            <span>Setup wizard</span>
+                            <small>Reinstall dependencies or fix configuration</small>
+                        </div>
+                        <button class="settings-action-btn" id="run-setup-btn" onclick="runSetupFromSettings()">Run</button>
+                    </div>
+
+                    <div class="settings-row">
+                        <div class="settings-row-text">
+                            <span>Clear recording state</span>
+                            <small>Fix stuck recordings or processing</small>
+                        </div>
+                        <button class="settings-action-btn" id="clear-state-btn" onclick="clearSystemState()">Clear</button>
+                    </div>
+
+                    <div class="settings-row">
+                        <div class="settings-row-text">
+                            <span>Developer mode</span>
+                            <small>Show debug logs and developer tools</small>
+                        </div>
+                        <label class="settings-toggle">
+                            <input type="checkbox" id="developer-mode-toggle">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+
+                    <div class="settings-version">
+                        StenoAI <span id="app-version">Loading...</span>
+                    </div>
                 </div>
-            </div>
 
-            <div class="settings-section">
-                <h3>🛠️ System Recovery</h3>
-                <p>Tools to recover from stuck recordings or processing issues.</p>
+                <!-- AI Tab -->
+                <div class="settings-tab" id="tab-ai">
+                    <div class="settings-section">
+                        <h3>Model</h3>
+                        <div id="model-list" class="model-list">
+                            <div class="model-list-loading">Loading models...</div>
+                        </div>
+                    </div>
 
-                <button class="btn" id="clear-state-btn" onclick="clearSystemState()">
-                    Clear Recording State
-                </button>
+                </div>
 
-            </div>
-            
-            <div class="settings-section">
-                <h3>🔄 Updates</h3>
-                <p>Check for the latest version of StenoAI. After installing, if macOS shows a security warning, go to <strong>System Settings > Privacy & Security</strong>, scroll down and click <strong>'Open Anyway'</strong>.</p>
-                
-                <button class="btn" id="test-update-btn" onclick="testUpdateCheck()">
-                    Check for Updates
-                </button>
-
-            </div>
-        </div>
-    </div>
-
-    <!-- Debug Panel (slides in from right) -->
-    <div class="debug-panel" id="debug-panel">
-        <div class="debug-header">
-            <h2>🔨 Debug Logs</h2>
-            <button class="close-settings" onclick="toggleDebug()">✕</button>
-        </div>
-
-        <div class="debug-console" id="debug-console-panel">StenoAI Debug Console
+                <!-- Developer Tab -->
+                <div class="settings-tab" id="tab-developer">
+                    <div class="dev-tab-header">
+                        <button class="dev-back-btn" id="dev-back-btn">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <polyline points="15 18 9 12 15 6"></polyline>
+                            </svg>
+                            Back
+                        </button>
+                        <h3 style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin: 0;">Debug Console</h3>
+                    </div>
+                    <div class="settings-section" style="margin-bottom: 0;">
+                        <p>Real-time log output from the backend processes.</p>
+                        <div class="debug-console" id="debug-console-panel">StenoAI Debug Console
 Session started - waiting for activity...
 
 </div>
-    </div>
-
-    <!-- AI Settings Panel (slides in from right) -->
-    <div class="settings-panel" id="ai-settings-panel">
-        <div class="settings-header">
-            <h2>🧠 AI Settings</h2>
-            <button class="close-settings" onclick="toggleAISettings()">✕</button>
-        </div>
-
-        <div class="settings-content">
-            <div class="settings-section">
-                <h3>🤖 Model Selection</h3>
-                <p>Choose which AI model to use for meeting summarization. Larger models provide better quality but take longer to process.</p>
-
-                <div style="margin-top: 15px;">
-                    <label style="display: block; margin-bottom: 8px; font-weight: 500;">Current Model:</label>
-                    <div id="current-model-display" style="padding: 10px; background: #2a2a2a; border-radius: 4px; margin-bottom: 15px;">
-                        <span style="font-family: Monaco, monospace; color: #4CAF50;">Loading...</span>
                     </div>
-
-                    <label style="display: block; margin-bottom: 8px; font-weight: 500;">Select Model:</label>
-                    <div id="model-list" style="display: flex; flex-direction: column; gap: 10px; max-height: 450px; overflow-y: auto; padding-right: 5px;">
-                        Loading models...
-                    </div>
-                </div>
-            </div>
-
-            <div class="settings-section">
-                <h3>🧠 AI Prompts</h3>
-                <p>View the prompts used for meeting summarization and analysis.</p>
-
-                <h4>Summarization Prompt</h4>
-                <div class="prompt-viewer" id="summarization-prompt">
-                    Loading prompt...
                 </div>
             </div>
         </div>
@@ -2221,8 +2484,6 @@ Session started - waiting for activity...
         const stopBtn = document.getElementById('stop-btn');
         const pauseBtn = document.getElementById('pause-btn');
         const settingsBtn = document.getElementById('settings-btn');
-        const debugBtn = document.getElementById('debug-btn');
-        const aiSettingsBtn = document.getElementById('ai-settings-btn');
         const meetingsList = document.getElementById('meetings-list');
         const emptyState = document.getElementById('empty-state');
         const meetingDetail = document.getElementById('meeting-detail');
@@ -3013,11 +3274,14 @@ Session started - waiting for activity...
                 
                 // Do maintenance tasks in parallel
                 const maintenancePromise = Promise.all([
-                    ipcRenderer.invoke('clear-state').catch(err => 
+                    ipcRenderer.invoke('clear-state').catch(err =>
                         log(`State clear failed: ${err.message}`)
                     ),
-                    checkInitialStatus().catch(err => 
+                    checkInitialStatus().catch(err =>
                         log(`Status check failed: ${err.message}`)
+                    ),
+                    loadNotificationSettings().catch(err =>
+                        log(`Notification settings load failed: ${err.message}`)
                     )
                 ]);
                 
@@ -3053,16 +3317,6 @@ Session started - waiting for activity...
         // Settings button click handler
         settingsBtn.addEventListener('click', () => {
             toggleSettings();
-        });
-
-        // Debug button click handler
-        debugBtn.addEventListener('click', () => {
-            toggleDebug();
-        });
-
-        // AI Settings button click handler
-        aiSettingsBtn.addEventListener('click', () => {
-            toggleAISettings();
         });
         
         // Reprocess button click handler
@@ -3212,7 +3466,7 @@ Session started - waiting for activity...
             }
         });
 
-        // Global keyboard shortcut for AI query (Cmd+K / Ctrl+K)
+        // Global keyboard shortcuts
         document.addEventListener('keydown', (e) => {
             // Cmd+K or Ctrl+K to open AI query
             if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
@@ -3223,9 +3477,18 @@ Session started - waiting for activity...
                     showAiQueryPopup();
                 }
             }
-            // Escape to close AI query popup
-            if (e.key === 'Escape' && aiQueryPopup.classList.contains('show')) {
-                hideAiQueryPopup();
+            // Cmd+, or Ctrl+, to toggle settings
+            if ((e.metaKey || e.ctrlKey) && e.key === ',') {
+                e.preventDefault();
+                toggleSettings();
+            }
+            // Escape to close panels
+            if (e.key === 'Escape') {
+                if (aiQueryPopup.classList.contains('show')) {
+                    hideAiQueryPopup();
+                } else if (settingsVisible) {
+                    toggleSettings();
+                }
             }
         });
 
@@ -3763,7 +4026,7 @@ Session started - waiting for activity...
             }
         });
         
-        // Settings panel functionality
+        // Unified settings panel functionality
         let settingsVisible = false;
 
         function toggleSettings() {
@@ -3771,60 +4034,81 @@ Session started - waiting for activity...
             settingsVisible = !settingsVisible;
 
             if (settingsVisible) {
-                settingsPanel.style.right = '0';
-                loadNotificationSettings();
+                // Prepare content before slide-in to avoid stagger
+                switchSettingsTab('general');
+                restoreDeveloperMode();
+                // Force layout calc so tab state is committed before transition
+                settingsPanel.offsetHeight;
+                settingsPanel.classList.add('open');
+                loadSettingsVersionInfo();
             } else {
-                settingsPanel.style.right = '-400px';
+                settingsPanel.classList.remove('open');
             }
         }
 
-        let debugVisible = false;
-
-        function toggleDebug() {
-            const debugPanel = document.getElementById('debug-panel');
-            debugVisible = !debugVisible;
-
-            if (debugVisible) {
-                debugPanel.style.right = '0';
+        // Tab switching logic
+        function switchSettingsTab(tabName) {
+            // Update nav active state
+            document.querySelectorAll('.settings-nav-item').forEach(n => n.classList.remove('active'));
+            const navItem = document.querySelector(`.settings-nav-item[data-tab="${tabName}"]`);
+            if (navItem) navItem.classList.add('active');
+            // Update tab visibility
+            document.querySelectorAll('.settings-tab').forEach(t => t.classList.remove('active'));
+            document.getElementById('tab-' + tabName).classList.add('active');
+            // Full-width mode for developer tab
+            const settingsBody = document.querySelector('.settings-body');
+            if (tabName === 'developer') {
+                settingsBody.classList.add('developer-active');
             } else {
-                debugPanel.style.right = '-500px';
+                settingsBody.classList.remove('developer-active');
             }
-        }
-
-        let aiSettingsVisible = false;
-
-        function toggleAISettings() {
-            const aiSettingsPanel = document.getElementById('ai-settings-panel');
-            aiSettingsVisible = !aiSettingsVisible;
-
-            if (aiSettingsVisible) {
-                aiSettingsPanel.style.right = '0';
-                loadPrompts();
+            // Load tab-specific data
+            if (tabName === 'ai') {
                 loadModels();
-            } else {
-                aiSettingsPanel.style.right = '-400px';
             }
         }
-        
-        async function loadPrompts() {
-            try {
-                const prompts = await ipcRenderer.invoke('get-ai-prompts');
-                const promptElement = document.getElementById('summarization-prompt');
-                
-                if (prompts.success) {
-                    promptElement.textContent = prompts.summarization || 'Prompt not available';
-                } else {
-                    promptElement.textContent = 'Failed to load prompts';
-                }
-            } catch (error) {
-                document.getElementById('summarization-prompt').textContent = 'Failed to load prompts';
+
+        document.querySelectorAll('.settings-nav-item').forEach(navItem => {
+            navItem.addEventListener('click', () => switchSettingsTab(navItem.dataset.tab));
+        });
+
+        // Developer tab back button
+        document.getElementById('dev-back-btn').addEventListener('click', () => {
+            switchSettingsTab('general');
+        });
+
+        // Developer mode toggle
+        function restoreDeveloperMode() {
+            const devToggle = document.getElementById('developer-mode-toggle');
+            const devNavItem = document.getElementById('developer-nav-item');
+            const enabled = localStorage.getItem('developerMode') === 'true';
+            devToggle.checked = enabled;
+            devNavItem.style.display = enabled ? '' : 'none';
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const devToggle = document.getElementById('developer-mode-toggle');
+            if (devToggle) {
+                devToggle.addEventListener('change', (e) => {
+                    const enabled = e.target.checked;
+                    localStorage.setItem('developerMode', enabled);
+                    const devNavItem = document.getElementById('developer-nav-item');
+                    devNavItem.style.display = enabled ? '' : 'none';
+                    // If disabling and currently on developer tab, switch to general
+                    if (!enabled) {
+                        const activeTab = document.querySelector('.settings-nav-item.active');
+                        if (activeTab && activeTab.dataset.tab === 'developer') {
+                            switchSettingsTab('general');
+                        }
+                    }
+                });
             }
-            
-            // Load app version
+        });
+
+        async function loadSettingsVersionInfo() {
             try {
                 const versionInfo = await ipcRenderer.invoke('get-app-version');
                 const versionElement = document.getElementById('app-version');
-                
                 if (versionInfo.success) {
                     versionElement.textContent = `v${versionInfo.version}`;
                 } else {
@@ -3834,6 +4118,7 @@ Session started - waiting for activity...
                 document.getElementById('app-version').textContent = 'Unknown';
             }
         }
+        
 
         // Model management functions
         async function loadModels() {
@@ -3841,22 +4126,18 @@ Session started - waiting for activity...
                 const result = await ipcRenderer.invoke('list-models');
 
                 if (result.success) {
-                    displayCurrentModel(result.current_model);
                     displayModelList(result.supported_models, result.current_model);
                 } else {
-                    document.getElementById('current-model-display').innerHTML = '<span style="color: #f44336;">Failed to load models</span>';
-                    document.getElementById('model-list').innerHTML = '<span style="color: #f44336;">Failed to load model list</span>';
+                    document.getElementById('model-list').innerHTML = '<div class="model-list-loading" style="color: var(--recording-red);">Failed to load models</div>';
                 }
             } catch (error) {
                 console.error('Error loading models:', error);
-                document.getElementById('current-model-display').innerHTML = '<span style="color: #f44336;">Error loading models</span>';
-                document.getElementById('model-list').innerHTML = '<span style="color: #f44336;">Error loading model list</span>';
+                document.getElementById('model-list').innerHTML = '<div class="model-list-loading" style="color: var(--recording-red);">Error loading models</div>';
             }
         }
 
         function displayCurrentModel(modelName) {
-            const currentModelDisplay = document.getElementById('current-model-display');
-            currentModelDisplay.innerHTML = `<span style="font-family: Monaco, monospace; color: #4CAF50;">${modelName}</span>`;
+            // No longer a separate display - handled inline in model list
         }
 
         function displayModelList(models, currentModel) {
@@ -3866,58 +4147,38 @@ Session started - waiting for activity...
             for (const [modelName, modelInfo] of Object.entries(models)) {
                 const isCurrentModel = modelName === currentModel;
 
-                const modelCard = document.createElement('div');
-                modelCard.style.cssText = `
-                    padding: 12px;
-                    background: ${isCurrentModel ? '#2a4a2a' : '#2a2a2a'};
-                    border: 2px solid ${isCurrentModel ? '#4CAF50' : '#444'};
-                    border-radius: 6px;
-                    cursor: pointer;
-                    transition: all 0.2s;
-                `;
+                const modelItem = document.createElement('div');
+                modelItem.className = 'model-item' + (isCurrentModel ? ' active' : '');
+                modelItem.setAttribute('data-model-name', modelName);
+                modelItem.setAttribute('data-model-size', modelInfo.size);
 
-                modelCard.setAttribute('data-model-name', modelName);
-                modelCard.setAttribute('data-model-size', modelInfo.size);
-
-                // Extract tag from description (e.g., "(default)")
                 const tagMatch = modelInfo.description.match(/\((default|recommended)\)/i);
-                const tag = tagMatch ? ` ${tagMatch[0]}` : '';
+                const tagHtml = tagMatch ? `<span class="model-tag">${tagMatch[1]}</span>` : '';
+                const activeHtml = isCurrentModel ? '<span class="model-active-badge">Active</span>' : '';
 
-                modelCard.innerHTML = `
-                    <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <div style="flex: 1;">
-                            <div style="font-weight: 600; margin-bottom: 4px; font-family: Monaco, monospace;">
-                                ${modelName}${tag}
-                                ${isCurrentModel ? '<span style="color: #4CAF50; margin-left: 8px;">✓ Active</span>' : ''}
-                            </div>
-                            <div style="font-size: 12px; color: #aaa;">
-                                Size: ${modelInfo.size} | Speed: ${modelInfo.speed} | Quality: ${modelInfo.quality}
-                            </div>
-                            <div class="model-progress" style="display: none; margin-top: 8px; padding: 8px; background: #1a1a1a; border-radius: 4px;">
-                                <div class="progress-text" style="font-size: 11px; color: #4CAF50; font-family: Monaco, monospace;">Downloading...</div>
-                            </div>
+                modelItem.innerHTML = `
+                    <div class="model-item-info">
+                        <div class="model-item-name">
+                            ${modelName}${tagHtml}${activeHtml}
                         </div>
-                        <div style="margin-left: 15px;">
-                            ${isCurrentModel ?
-                                '<span style="color: #4CAF50; font-size: 24px;">●</span>' :
-                                '<button class="btn" onclick="selectModel(\'' + modelName + '\')" style="margin: 0; padding: 6px 12px; font-size: 12px;">Select</button>'
-                            }
+                        <div class="model-item-meta">${modelInfo.size} &middot; ${modelInfo.speed} speed &middot; ${modelInfo.quality} quality</div>
+                        <div class="model-progress">
+                            <div class="progress-text">Downloading...</div>
                         </div>
+                    </div>
+                    <div class="model-item-action">
+                        ${isCurrentModel
+                            ? ''
+                            : '<button class="settings-action-btn" onclick="event.stopPropagation(); selectModel(\'' + modelName + '\')">Select</button>'
+                        }
                     </div>
                 `;
 
                 if (!isCurrentModel) {
-                    modelCard.onmouseenter = () => {
-                        modelCard.style.borderColor = '#4CAF50';
-                        modelCard.style.background = '#2a3a2a';
-                    };
-                    modelCard.onmouseleave = () => {
-                        modelCard.style.borderColor = '#444';
-                        modelCard.style.background = '#2a2a2a';
-                    };
+                    modelItem.addEventListener('click', () => selectModel(modelName));
                 }
 
-                modelListDiv.appendChild(modelCard);
+                modelListDiv.appendChild(modelItem);
             }
         }
 
@@ -4111,25 +4372,26 @@ Session started - waiting for activity...
 
         async function runSetupFromSettings() {
             const btn = document.getElementById('run-setup-btn');
-            btn.textContent = 'Running Setup...';
+            btn.textContent = 'Running...';
             btn.disabled = true;
-            
+
             try {
                 // Show setup overlay in main window
                 document.getElementById('setup-overlay').style.display = 'flex';
-                
+
                 // Run the setup process
                 await runSetupProcess();
-                
-                btn.textContent = 'Setup Complete!';
+
+                btn.textContent = 'Done';
                 setTimeout(() => {
-                    btn.textContent = 'Run Setup Wizard';
+                    btn.textContent = 'Run';
                     btn.disabled = false;
                 }, 3000);
             } catch (error) {
                 console.error('Setup failed:', error);
-                btn.textContent = 'Setup Failed - Try Again';
+                btn.textContent = 'Failed';
                 btn.disabled = false;
+                setTimeout(() => { btn.textContent = 'Run'; }, 3000);
             }
         }
         
@@ -4179,27 +4441,27 @@ Session started - waiting for activity...
             const btn = document.getElementById('clear-state-btn');
             btn.textContent = 'Clearing...';
             btn.disabled = true;
-            
+
             try {
                 const result = await ipcRenderer.invoke('clear-state');
                 if (result.success) {
-                    btn.textContent = 'State Cleared!';
+                    btn.textContent = 'Done';
                     log('Manual state clear successful');
                 } else {
-                    btn.textContent = 'Clear Failed';
+                    btn.textContent = 'Failed';
                     log('Manual state clear failed: ' + result.error);
                 }
-                
+
                 setTimeout(() => {
-                    btn.textContent = 'Clear Recording State';
+                    btn.textContent = 'Clear';
                     btn.disabled = false;
                 }, 2000);
             } catch (error) {
                 console.error('Clear state failed:', error);
-                btn.textContent = 'Clear Failed';
+                btn.textContent = 'Failed';
                 btn.disabled = false;
                 setTimeout(() => {
-                    btn.textContent = 'Clear Recording State';
+                    btn.textContent = 'Clear';
                 }, 2000);
             }
         }
@@ -4208,24 +4470,24 @@ Session started - waiting for activity...
             const btn = document.getElementById('test-update-btn');
             btn.textContent = 'Checking...';
             btn.disabled = true;
-            
+
             try {
                 // Clear any previous dismissal to force showing banner
                 sessionStorage.removeItem('updateDismissed');
-                
+
                 await checkForUpdates();
-                
-                btn.textContent = 'Check Complete!';
+
+                btn.textContent = 'Done';
                 setTimeout(() => {
-                    btn.textContent = 'Test Update Check';
+                    btn.textContent = 'Check';
                     btn.disabled = false;
                 }, 2000);
             } catch (error) {
                 console.error('Update check test failed:', error);
-                btn.textContent = 'Test Failed';
+                btn.textContent = 'Failed';
                 btn.disabled = false;
                 setTimeout(() => {
-                    btn.textContent = 'Test Update Check';
+                    btn.textContent = 'Check';
                 }, 2000);
             }
         }
