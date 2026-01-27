@@ -65,6 +65,15 @@ steno-poc/
 - click>=8.1.0 (CLI interface)
 - pydantic>=2.5.0 (data validation)
 
+## Brand Colors
+StenoAI logo gradient (used in website logo SVG and app header):
+- Indigo: `#6366f1`
+- Sky blue: `#0ea5e9`
+- Cyan: `#06b6d4`
+- CSS: `linear-gradient(135deg, #6366f1, #0ea5e9, #06b6d4)`
+
+App UI accent: `--accent-primary: #818cf8` (lighter indigo, used for focus states, active tabs, toggles)
+
 ## Code Style
 - Follow PEP 8 guidelines
 - Use type hints where appropriate

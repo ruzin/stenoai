@@ -67,7 +67,7 @@
         .header {
             background: var(--bg-primary);
             border-bottom: 1px solid var(--border-subtle);
-            padding: 36px 24px 16px 16px;
+            padding: 36px 20px 12px 20px;
             display: flex;
             align-items: center;
             justify-content: space-between;
@@ -97,8 +97,10 @@
         .brand h1 {
             font-size: 20px;
             font-weight: 700;
-            color: var(--text-primary);
             letter-spacing: -0.02em;
+            background: linear-gradient(135deg, #6366f1, #818cf8);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
         }
 
         /* Prominent recording timer */
@@ -148,22 +150,26 @@
         }
 
         .session-input {
-            background: var(--bg-surface);
-            border: 1px solid var(--border-default);
+            background: transparent;
+            border: none;
+            border-bottom: 1px solid transparent;
             color: var(--text-primary);
-            padding: 10px 14px;
-            border-radius: 8px;
+            padding: 6px 4px;
             font-size: 14px;
             font-family: inherit;
-            min-width: 220px;
+            min-width: 180px;
             outline: none;
             transition: all 0.2s ease;
         }
 
+        .session-input:hover {
+            border-bottom-color: var(--border-subtle);
+        }
+
         .session-input:focus {
-            border-color: var(--accent-primary);
-            background: var(--bg-elevated);
-            box-shadow: 0 0 0 3px var(--accent-glow);
+            border-bottom-color: var(--accent-primary);
+            background: transparent;
+            box-shadow: none;
         }
 
         .session-input::placeholder {
@@ -174,7 +180,6 @@
             display: flex;
             align-items: center;
             gap: 8px;
-            margin-right: 16px;
         }
         
         .status-dot {
@@ -251,15 +256,15 @@
             background: var(--bg-surface);
             color: var(--text-primary);
             border: 1px solid var(--border-default);
-            padding: 10px 18px;
-            border-radius: 8px;
-            font-size: 14px;
+            padding: 8px 16px;
+            border-radius: 7px;
+            font-size: 13px;
             font-weight: 500;
             cursor: pointer;
             transition: all 0.2s ease;
             display: flex;
             align-items: center;
-            gap: 8px;
+            gap: 7px;
             font-family: inherit;
         }
 
@@ -1996,7 +2001,7 @@
     <div class="header">
         <div class="brand">
             <svg width="28" height="28" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <rect width="32" height="32" rx="8" fill="#1e293b"/>
+                <rect width="32" height="32" rx="8" fill="#0f172a"/>
                 <rect width="30" height="30" x="1" y="1" rx="7" stroke="rgba(255,255,255,0.1)"/>
                 <path d="M16 10c-1.1 0-2 .9-2 2v4c0 1.1.9 2 2 2s2-.9 2-2v-4c0-1.1-.9-2-2-2z" fill="white"/>
                 <path d="M12 15v1c0 2.2 1.8 4 4 4s4-1.8 4-4v-1h1v1c0 2.7-1.9 4.9-4.5 5.4v1.6h2v1h-5v-1h2v-1.6c-2.6-.5-4.5-2.7-4.5-5.4v-1h1z" fill="white"/>
@@ -2017,14 +2022,14 @@
                 </div>
             </div>
             
-            <input type="text" class="session-input" id="session-name" placeholder="Enter meeting name..." value="Meeting">
+            <input type="text" class="session-input" id="session-name" placeholder="Name this session...">
             
             <button class="btn btn-primary" id="start-btn">
-                <span>●</span> Start Recording
+                <span>●</span> Record
             </button>
 
             <button class="btn btn-danger" id="stop-btn" style="display: none;">
-                <span>■</span> Stop Recording
+                <span>■</span> Stop
             </button>
 
             <button class="btn" id="pause-btn" style="display: none;">
@@ -2055,7 +2060,7 @@
                 <div class="sidebar-title">
                     <h2>Meetings</h2>
                 </div>
-                <input type="text" class="search-input" id="search-input" placeholder="Search  meetings...">
+                <input type="text" class="search-input" id="search-input" placeholder="Search meetings...">
             </div>
             
             <div class="meetings-list" id="meetings-list">
@@ -2200,7 +2205,7 @@
                         <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
                         <line x1="12" y1="17" x2="12.01" y2="17"></line>
                     </svg>
-                    Ask about this meeting
+                    Ask Steno about this meeting
                 </span>
                 <button class="ai-query-close" id="ai-query-close">&times;</button>
             </div>
@@ -3124,7 +3129,7 @@ Session started - waiting for activity...
                     // Return to ready state quickly so user can start another recording if needed
                     setTimeout(() => {
                         setUIState('ready');
-                        sessionNameInput.value = 'Meeting';
+                        sessionNameInput.value = '';
                     }, 5000); // 5 seconds
                     
                 } else {
