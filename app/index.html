@@ -2,22 +2,47 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Steno Recorder</title>
+    <title>StenoAI</title>
+    <!-- Distinctive typography - refined, professional -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <style>
+        :root {
+            /* Refined color palette - softer contrast */
+            --bg-deep: #0a0a0b;
+            --bg-primary: #111113;
+            --bg-elevated: #18181b;
+            --bg-surface: #1f1f23;
+            --border-subtle: #27272a;
+            --border-default: #3f3f46;
+            --text-primary: #e4e4e7;
+            --text-secondary: #a1a1aa;
+            --text-muted: #71717a;
+            --accent-primary: #818cf8;
+            --accent-glow: rgba(129, 140, 248, 0.15);
+            --recording-red: #ef4444;
+            --recording-glow: rgba(239, 68, 68, 0.2);
+            --success-green: #22c55e;
+            --warning-amber: #f59e0b;
+        }
+
         * {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
         }
-        
+
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: #000;
-            color: #fff;
+            font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg-deep);
+            color: var(--text-primary);
             height: 100vh;
             display: flex;
             flex-direction: column;
             overflow: hidden;
+            /* Subtle noise texture for depth */
+            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.03'/%3E%3C/svg%3E");
         }
         
         /* Window drag area - make the top portion draggable */
@@ -40,29 +65,54 @@
         
         /* Header with record controls */
         .header {
-            background: #111;
-            border-bottom: 1px solid #333;
-            padding: 36px 24px 16px 16px; /* More top padding, move content left */
+            background: var(--bg-primary);
+            border-bottom: 1px solid var(--border-subtle);
+            padding: 36px 24px 16px 16px;
             display: flex;
             align-items: center;
             justify-content: space-between;
             transition: padding-top 0.3s ease;
+            /* Subtle gradient for depth */
+            background: linear-gradient(180deg, var(--bg-elevated) 0%, var(--bg-primary) 100%);
         }
-        
+
         .header.with-update-banner {
-            padding-top: 84px; /* Additional space when update banner is shown */
+            padding-top: 84px;
         }
-        
+
         .brand {
             display: flex;
             align-items: center;
             gap: 12px;
         }
-        
+
+        .brand svg {
+            transition: all 0.3s ease;
+        }
+
+        .brand:hover svg {
+            filter: drop-shadow(0 0 8px rgba(99, 102, 241, 0.5));
+            transform: scale(1.05);
+        }
+
         .brand h1 {
             font-size: 20px;
+            font-weight: 700;
+            color: var(--text-primary);
+            letter-spacing: -0.02em;
+        }
+
+        /* Prominent recording timer */
+        .recording-timer {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 15px;
             font-weight: 600;
-            color: #fff;
+            color: var(--recording-red);
+            background: rgba(239, 68, 68, 0.1);
+            padding: 6px 12px;
+            border-radius: 6px;
+            border: 1px solid rgba(239, 68, 68, 0.2);
+            letter-spacing: 0.05em;
         }
         
         .header-actions {
@@ -72,19 +122,24 @@
         
         .settings-btn {
             background: transparent;
-            border: 1px solid #444;
-            color: #ccc;
+            border: 1px solid var(--border-subtle);
+            color: var(--text-muted);
             padding: 8px 12px;
-            border-radius: 6px;
+            border-radius: 8px;
             cursor: pointer;
             font-size: 16px;
             transition: all 0.2s ease;
         }
-        
+
         .settings-btn:hover {
-            background: #333;
-            border-color: #555;
-            color: #fff;
+            background: var(--bg-surface);
+            border-color: var(--border-default);
+            color: var(--text-primary);
+            transform: translateY(-1px);
+        }
+
+        .settings-btn:active {
+            transform: translateY(0);
         }
         
         .record-controls {
@@ -94,19 +149,26 @@
         }
         
         .session-input {
-            background: #222;
-            border: 1px solid #444;
-            color: #fff;
-            padding: 8px 12px;
-            border-radius: 6px;
+            background: var(--bg-surface);
+            border: 1px solid var(--border-default);
+            color: var(--text-primary);
+            padding: 10px 14px;
+            border-radius: 8px;
             font-size: 14px;
-            min-width: 200px;
+            font-family: inherit;
+            min-width: 220px;
             outline: none;
+            transition: all 0.2s ease;
         }
-        
+
         .session-input:focus {
-            border-color: #666;
-            background: #333;
+            border-color: var(--accent-primary);
+            background: var(--bg-elevated);
+            box-shadow: 0 0 0 3px var(--accent-glow);
+        }
+
+        .session-input::placeholder {
+            color: var(--text-muted);
         }
         
         .status {
@@ -117,68 +179,128 @@
         }
         
         .status-dot {
-            width: 8px;
-            height: 8px;
+            width: 10px;
+            height: 10px;
             border-radius: 50%;
-            background: #666;
+            background: var(--text-muted);
+            transition: all 0.3s ease;
         }
-        
-        .status-dot.ready { background: #22c55e; }
-        .status-dot.recording { 
-            background: #ef4444; 
+
+        .status-dot.ready {
+            background: var(--success-green);
+            box-shadow: 0 0 8px rgba(34, 197, 94, 0.4);
+        }
+        .status-dot.recording {
+            background: var(--recording-red);
+            box-shadow: 0 0 12px var(--recording-glow), 0 0 24px var(--recording-glow);
+            animation: recordingPulse 1.5s ease-in-out infinite;
+        }
+        .status-dot.processing {
+            background: var(--warning-amber);
+            box-shadow: 0 0 8px rgba(245, 158, 11, 0.4);
             animation: pulse 1s infinite;
         }
-        .status-dot.processing { 
-            background: #f59e0b; 
-            animation: pulse 1s infinite;
-        }
-        
+
         @keyframes pulse {
             0%, 100% { opacity: 1; }
             50% { opacity: 0.5; }
         }
+
+        @keyframes recordingPulse {
+            0%, 100% {
+                transform: scale(1);
+                box-shadow: 0 0 12px var(--recording-glow), 0 0 24px var(--recording-glow);
+            }
+            50% {
+                transform: scale(1.15);
+                box-shadow: 0 0 16px var(--recording-glow), 0 0 32px var(--recording-glow);
+            }
+        }
+
+        /* Audio waveform animation for recording state */
+        .waveform {
+            display: none;
+            align-items: center;
+            gap: 2px;
+            height: 16px;
+            margin-left: 8px;
+        }
+
+        .recording .waveform {
+            display: flex;
+        }
+
+        .waveform-bar {
+            width: 3px;
+            background: var(--recording-red);
+            border-radius: 2px;
+            animation: waveform 0.8s ease-in-out infinite;
+        }
+
+        .waveform-bar:nth-child(1) { animation-delay: 0s; height: 8px; }
+        .waveform-bar:nth-child(2) { animation-delay: 0.1s; height: 12px; }
+        .waveform-bar:nth-child(3) { animation-delay: 0.2s; height: 16px; }
+        .waveform-bar:nth-child(4) { animation-delay: 0.3s; height: 10px; }
+        .waveform-bar:nth-child(5) { animation-delay: 0.4s; height: 6px; }
+
+        @keyframes waveform {
+            0%, 100% { transform: scaleY(0.5); }
+            50% { transform: scaleY(1); }
+        }
         
         .btn {
-            background: #333;
-            color: #fff;
-            border: 1px solid #555;
-            padding: 8px 16px;
-            border-radius: 6px;
+            background: var(--bg-surface);
+            color: var(--text-primary);
+            border: 1px solid var(--border-default);
+            padding: 10px 18px;
+            border-radius: 8px;
             font-size: 14px;
+            font-weight: 500;
             cursor: pointer;
-            transition: all 0.2s;
+            transition: all 0.2s ease;
             display: flex;
             align-items: center;
-            gap: 6px;
+            gap: 8px;
+            font-family: inherit;
         }
-        
+
         .btn:hover {
-            background: #444;
-            border-color: #666;
+            background: var(--bg-elevated);
+            border-color: var(--border-default);
+            transform: translateY(-1px);
         }
-        
+
+        .btn:active {
+            transform: translateY(0);
+        }
+
         .btn-primary {
-            background: #fff;
-            color: #000;
-            border-color: #fff;
+            background: var(--bg-surface);
+            color: var(--text-primary);
+            border-color: var(--border-default);
+            font-weight: 600;
         }
-        
+
         .btn-primary:hover {
-            background: #f5f5f5;
+            background: #2a2a2e;
+            border-color: #52525b;
         }
-        
+
         .btn-danger {
-            background: #ef4444;
-            border-color: #ef4444;
+            background: var(--recording-red);
+            border-color: var(--recording-red);
+            box-shadow: 0 0 20px var(--recording-glow);
         }
-        
+
         .btn-danger:hover {
             background: #dc2626;
+            box-shadow: 0 0 28px var(--recording-glow);
         }
-        
+
         .btn:disabled {
             opacity: 0.5;
             cursor: not-allowed;
+            transform: none;
         }
         
         /* Settings Panel */
@@ -371,46 +493,106 @@
         /* Sidebar with meetings list */
         .sidebar {
             width: 320px;
-            background: #111;
-            border-right: 1px solid #333;
+            background: var(--bg-primary);
+            border-right: 1px solid var(--border-subtle);
             display: flex;
             flex-direction: column;
+            transition: width 0.3s ease;
+            position: relative;
         }
-        
+
+        .sidebar.collapsed {
+            width: 0;
+            min-width: 0;
+        }
+
+        .sidebar.collapsed .sidebar-header,
+        .sidebar.collapsed .meetings-list {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .sidebar-toggle {
+            position: fixed;
+            left: 319px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 24px;
+            height: 48px;
+            background: var(--bg-elevated);
+            border: 1px solid var(--border-subtle);
+            border-left: none;
+            border-radius: 0 6px 6px 0;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-muted);
+            font-size: 12px;
+            z-index: 100;
+            transition: left 0.3s ease, background 0.2s ease;
+        }
+
+        .sidebar-toggle:hover {
+            background: var(--bg-surface);
+            color: var(--text-primary);
+        }
+
+        .sidebar-toggle.collapsed {
+            left: 0;
+        }
+
+        .sidebar-toggle-icon {
+            transition: transform 0.3s ease;
+        }
+
+        .sidebar-toggle.collapsed .sidebar-toggle-icon {
+            transform: rotate(180deg);
+        }
+
         .sidebar-header {
             padding: 20px;
-            border-bottom: 1px solid #333;
+            border-bottom: 1px solid var(--border-subtle);
         }
-        
+
         .sidebar-title {
             display: flex;
             align-items: center;
             justify-content: space-between;
             margin-bottom: 8px;
         }
-        
+
         .sidebar-header h2 {
-            font-size: 16px;
+            font-size: 13px;
             font-weight: 600;
-            color: #fff;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
         }
         
         
         .search-input {
-            background: #222;
-            border: 1px solid #444;
-            color: #fff;
-            padding: 8px 12px;
-            border-radius: 6px;
+            background: var(--bg-surface);
+            border: 1px solid var(--border-subtle);
+            color: var(--text-primary);
+            padding: 10px 14px;
+            border-radius: 8px;
             font-size: 14px;
+            font-family: inherit;
             width: 100%;
             outline: none;
             margin: 12px 0 8px 0;
+            transition: all 0.2s ease;
         }
-        
+
         .search-input:focus {
-            border-color: #666;
-            background: #333;
+            border-color: var(--accent-primary);
+            background: var(--bg-elevated);
+            box-shadow: 0 0 0 3px var(--accent-glow);
+        }
+
+        .search-input::placeholder {
+            color: var(--text-muted);
         }
         
         .sidebar-header p {
@@ -425,48 +607,107 @@
         }
         
         .meeting-item {
-            background: #1a1a1a;
-            border: 1px solid #333;
+            background: var(--bg-elevated);
+            border: 1px solid var(--border-subtle);
             border-radius: 8px;
-            padding: 16px;
-            margin-bottom: 8px;
+            padding: 10px 12px;
+            margin-bottom: 6px;
             cursor: pointer;
-            transition: all 0.2s;
+            transition: all 0.2s ease;
             position: relative;
         }
-        
+
         .meeting-delete {
             position: absolute;
             top: 8px;
             right: 8px;
-            background: #444;
+            background: var(--bg-surface);
             border: none;
-            color: #999;
-            border-radius: 4px;
-            padding: 4px 6px;
+            color: var(--text-muted);
+            border-radius: 6px;
+            padding: 4px 8px;
             font-size: 12px;
             cursor: pointer;
             opacity: 0;
             transition: all 0.2s;
         }
-        
+
         .meeting-item:hover .meeting-delete {
             opacity: 1;
         }
-        
+
         .meeting-delete:hover {
-            background: #ef4444;
-            color: #fff;
+            background: var(--recording-red);
+            color: var(--text-primary);
         }
-        
+
         .meeting-item:hover {
-            background: #222;
-            border-color: #444;
+            background: var(--bg-surface);
+            border-color: var(--border-default);
+            transform: translateX(2px);
         }
-        
+
         .meeting-item.active {
-            background: #333;
-            border-color: #555;
+            background: var(--bg-surface);
+            border-color: var(--accent-primary);
+            box-shadow: 0 0 0 1px var(--accent-primary), 0 0 20px var(--accent-glow);
+        }
+
+        /* Staggered fade-in animation for meeting items */
+        .meeting-item {
+            animation: fadeSlideIn 0.3s ease-out forwards;
+            opacity: 0;
+        }
+
+        @keyframes fadeSlideIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .meeting-item:nth-child(1) { animation-delay: 0.02s; }
+        .meeting-item:nth-child(2) { animation-delay: 0.04s; }
+        .meeting-item:nth-child(3) { animation-delay: 0.06s; }
+        .meeting-item:nth-child(4) { animation-delay: 0.08s; }
+        .meeting-item:nth-child(5) { animation-delay: 0.10s; }
+        .meeting-item:nth-child(6) { animation-delay: 0.12s; }
+        .meeting-item:nth-child(7) { animation-delay: 0.14s; }
+        .meeting-item:nth-child(8) { animation-delay: 0.16s; }
+        .meeting-item:nth-child(9) { animation-delay: 0.18s; }
+        .meeting-item:nth-child(10) { animation-delay: 0.20s; }
+
+        /* Action items badge on meeting cards */
+        .meeting-badges {
+            display: flex;
+            gap: 6px;
+            margin-top: 6px;
+        }
+
+        .meeting-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 11px;
+            font-weight: 500;
+            padding: 3px 8px;
+            border-radius: 4px;
+            background: var(--bg-deep);
+            color: var(--text-muted);
+        }
+
+        .meeting-badge.actions {
+            background: rgba(99, 102, 241, 0.15);
+            color: var(--accent-primary);
+        }
+
+        .meeting-badge.participants {
+            background: rgba(34, 197, 94, 0.15);
+            color: var(--success-green);
         }
         
         .meeting-item.processing {
@@ -509,36 +750,38 @@
         }
         
         .meeting-item h3 {
-            font-size: 14px;
+            font-size: 13px;
             font-weight: 600;
-            color: #fff;
-            margin-bottom: 6px;
+            color: var(--text-primary);
+            margin-bottom: 4px;
             line-height: 1.3;
         }
-        
+
         .meeting-meta {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 8px;
+            margin-bottom: 6px;
         }
-        
+
         .meeting-date {
             font-size: 12px;
-            color: #888;
+            color: var(--text-muted);
         }
-        
+
         .meeting-duration {
-            font-size: 12px;
-            color: #666;
-            background: #222;
-            padding: 2px 6px;
-            border-radius: 3px;
+            font-size: 11px;
+            font-weight: 500;
+            color: var(--text-secondary);
+            background: var(--bg-deep);
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-family: 'JetBrains Mono', monospace;
         }
-        
+
         .meeting-preview {
-            font-size: 13px;
-            color: #aaa;
+            font-size: 12px;
+            color: var(--text-secondary);
             line-height: 1.4;
             display: -webkit-box;
             -webkit-line-clamp: 2;
@@ -549,36 +792,68 @@
         /* Main content area */
         .content {
             flex: 1;
-            background: #000;
+            background: var(--bg-deep);
             overflow: hidden;
             display: flex;
             flex-direction: column;
         }
-        
+
         .content-empty {
             display: flex;
             align-items: center;
             justify-content: center;
             height: 100%;
             flex-direction: column;
-            color: #666;
+            color: var(--text-muted);
+            padding: 40px;
         }
-        
+
         .content-empty-icon {
-            font-size: 48px;
-            margin-bottom: 16px;
-            opacity: 0.5;
+            font-size: 64px;
+            margin-bottom: 24px;
+            opacity: 0.3;
+            filter: grayscale(0.5);
         }
-        
+
         .content-empty h3 {
-            font-size: 18px;
+            font-size: 20px;
             margin-bottom: 8px;
-            font-weight: 500;
+            font-weight: 600;
+            color: var(--text-secondary);
         }
-        
+
         .content-empty p {
             font-size: 14px;
-            color: #888;
+            color: var(--text-muted);
+            margin-bottom: 24px;
+        }
+
+        .shortcut-hint {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: var(--bg-elevated);
+            border: 1px solid var(--border-subtle);
+            padding: 12px 20px;
+            border-radius: 10px;
+            margin-top: 8px;
+        }
+
+        .shortcut-hint span {
+            color: var(--text-muted);
+            font-size: 13px;
+        }
+
+        .kbd {
+            background: var(--bg-surface);
+            border: 1px solid var(--border-default);
+            border-bottom-width: 2px;
+            padding: 4px 8px;
+            border-radius: 6px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px;
+            font-weight: 500;
+            color: var(--text-primary);
         }
         
         /* Meeting detail view */
@@ -594,9 +869,9 @@
         }
         
         .meeting-header {
-            margin-bottom: 32px;
-            padding-bottom: 24px;
-            border-bottom: 1px solid #333;
+            margin-bottom: 36px;
+            padding-bottom: 28px;
+            border-bottom: 1px solid var(--border-subtle);
         }
         
         .meeting-header-top {
@@ -607,49 +882,52 @@
         }
         
         .meeting-title {
-            font-size: 24px;
+            font-size: 26px;
             font-weight: 700;
-            color: #fff;
+            color: #8a8a8f;
             margin: 0;
             flex: 1;
+            letter-spacing: -0.02em;
+            line-height: 1.3;
         }
         
         .reprocess-btn {
-            background: #333;
-            color: #fff;
-            border: 1px solid #555;
-            border-radius: 6px;
-            padding: 8px 16px;
-            font-size: 14px;
+            background: var(--bg-surface);
+            color: var(--text-secondary);
+            border: 1px solid var(--border-default);
+            border-radius: 4px;
+            padding: 4px 6px;
+            font-size: 12px;
             cursor: pointer;
             transition: all 0.2s;
             display: flex;
             align-items: center;
-            gap: 8px;
-            margin-left: 16px;
+            gap: 4px;
+            margin-left: 8px;
             flex-shrink: 0;
         }
-        
+
         .reprocess-btn:hover {
-            background: #444;
+            background: var(--bg-elevated);
+            color: var(--text-primary);
         }
-        
+
         .reprocess-btn:active {
             transform: translateY(0);
         }
-        
+
         .reprocess-btn:disabled {
-            background: #333;
-            color: #999;
-            border-color: #555;
+            background: var(--bg-surface);
+            color: var(--text-muted);
+            border-color: var(--border-subtle);
             cursor: not-allowed;
-            transform: none;
+            opacity: 0.5;
         }
-        
+
         .reprocess-btn.processing {
-            background: #FF9800;
-            color: #fff;
-            border-color: #FF9800;
+            background: var(--warning-amber);
+            color: var(--bg-deep);
+            border-color: var(--warning-amber);
         }
         
         .reprocess-spinner {
@@ -697,22 +975,22 @@
         }
 
         .copy-notes-btn {
-            background: #333;
-            color: #fff;
-            border: 1px solid #555;
-            border-radius: 6px;
-            padding: 8px 12px;
+            background: var(--bg-surface);
+            color: var(--text-secondary);
+            border: 1px solid var(--border-default);
+            border-radius: 4px;
+            padding: 4px 6px;
             cursor: pointer;
             transition: all 0.2s;
             display: flex;
             align-items: center;
-            gap: 6px;
-            font-size: 14px;
+            gap: 4px;
+            font-size: 12px;
         }
 
         .copy-notes-btn:hover {
-            background: #444;
-            border-color: #666;
+            background: var(--bg-elevated);
+            color: var(--text-primary);
         }
 
         .copy-notes-btn:active {
@@ -720,8 +998,9 @@
         }
 
         .copy-notes-btn.copied {
-            background: #4CAF50;
-            border-color: #4CAF50;
+            background: var(--success-green);
+            border-color: var(--success-green);
+            color: #fff;
         }
 
         .meeting-title-container {
@@ -829,75 +1108,88 @@
             display: flex;
             gap: 24px;
             align-items: center;
-            color: #888;
-            font-size: 14px;
+            color: var(--text-muted);
+            font-size: 12px;
+            margin-top: 10px;
         }
         
         .meeting-section {
-            margin-bottom: 32px;
+            margin-bottom: 36px;
         }
-        
+
         .section-title {
-            font-size: 16px;
+            font-size: 12px;
             font-weight: 600;
-            color: #fff;
+            color: var(--text-secondary);
+            letter-spacing: -0.01em;
             margin-bottom: 12px;
             display: flex;
             align-items: center;
             gap: 8px;
         }
-        
+
         .section-content {
-            color: #ccc;
-            line-height: 1.6;
+            color: var(--text-secondary);
+            line-height: 1.7;
+            font-size: 15px;
         }
         
         .key-points-list {
             list-style: none;
             padding: 0;
         }
-        
+
         .key-points-list li {
             padding: 8px 0;
             padding-left: 20px;
             position: relative;
-            color: #ccc;
-            line-height: 1.5;
+            color: var(--text-secondary);
+            line-height: 1.6;
         }
-        
+
         .key-points-list li:before {
-            content: "•";
+            content: "";
             position: absolute;
             left: 0;
-            color: #666;
-            font-weight: bold;
+            top: 14px;
+            width: 5px;
+            height: 5px;
+            background: var(--accent-primary);
+            border-radius: 50%;
         }
 
         .action-items-list {
             list-style: none;
             padding: 0;
         }
-        
+
         .action-items-list li {
-            background: #1a1a1a;
-            border: 1px solid #333;
-            border-radius: 6px;
-            padding: 12px;
-            margin-bottom: 8px;
-            color: #ccc;
-            line-height: 1.5;
+            background: var(--bg-elevated);
+            border: 1px solid var(--border-subtle);
+            border-left: 3px solid var(--accent-primary);
+            border-radius: 0 8px 8px 0;
+            padding: 14px 16px;
+            margin-bottom: 10px;
+            color: var(--text-secondary);
+            line-height: 1.6;
+            transition: all 0.2s ease;
+        }
+
+        .action-items-list li:hover {
+            background: var(--bg-surface);
+            border-left-color: var(--success-green);
         }
         
         /* Transcript section */
         .transcript-content {
-            background: #111;
-            border: 1px solid #333;
-            border-radius: 8px;
-            padding: 20px;
-            font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
-            font-size: 14px;
-            line-height: 1.6;
-            color: #ddd;
+            background: var(--bg-primary);
+            border: 1px solid var(--border-subtle);
+            border-radius: 10px;
+            padding: 24px;
+            font-family: 'JetBrains Mono', 'SF Mono', Monaco, monospace;
+            font-size: 13px;
+            line-height: 1.8;
+            color: var(--text-secondary);
             white-space: pre-wrap;
             max-height: 400px;
             overflow-y: auto;
@@ -932,18 +1224,18 @@
         ::-webkit-scrollbar {
             width: 8px;
         }
-        
+
         ::-webkit-scrollbar-track {
-            background: #111;
+            background: var(--bg-primary);
         }
-        
+
         ::-webkit-scrollbar-thumb {
-            background: #333;
+            background: var(--border-default);
             border-radius: 4px;
         }
-        
+
         ::-webkit-scrollbar-thumb:hover {
-            background: #444;
+            background: var(--text-muted);
         }
         
         /* Update Banner */
@@ -1252,9 +1544,16 @@
         </div>
         
         <div class="record-controls">
-            <div class="status">
+            <div class="status" id="status-container">
                 <div class="status-dot ready" id="status-dot"></div>
                 <span id="status-text">Ready</span>
+                <div class="waveform" id="waveform">
+                    <div class="waveform-bar"></div>
+                    <div class="waveform-bar"></div>
+                    <div class="waveform-bar"></div>
+                    <div class="waveform-bar"></div>
+                    <div class="waveform-bar"></div>
+                </div>
             </div>
             
             <input type="text" class="session-input" id="session-name" placeholder="Enter meeting name..." value="Meeting">
@@ -1262,7 +1561,7 @@
             <button class="btn btn-primary" id="start-btn">
                 <span>●</span> Start Recording
             </button>
-            
+
             <button class="btn btn-danger" id="stop-btn" style="display: none;">
                 <span>■</span> Stop Recording
             </button>
@@ -1281,13 +1580,18 @@
 
     <!-- Main content area -->
     <div class="main">
+        <!-- Sidebar toggle (outside sidebar so it's always visible) -->
+        <button class="sidebar-toggle" id="sidebar-toggle" title="Toggle sidebar">
+            <span class="sidebar-toggle-icon">◀</span>
+        </button>
+
         <!-- Sidebar with meetings -->
-        <div class="sidebar">
+        <div class="sidebar" id="sidebar">
             <div class="sidebar-header">
                 <div class="sidebar-title">
                     <h2>Meetings</h2>
                 </div>
-                <input type="text" class="search-input" id="search-input" placeholder="Search meetings...">
+                <input type="text" class="search-input" id="search-input" placeholder="Search  meetings...">
             </div>
             
             <div class="meetings-list" id="meetings-list">
@@ -1299,9 +1603,15 @@
         <div class="content">
             <!-- Empty state -->
             <div class="content-empty" id="empty-state">
-                <div class="content-empty-icon">📝</div>
-                <h3>No meeting selected</h3>
-                <p>Select a meeting from the sidebar or record a new one</p>
+                <h3>Ready to capture your meeting</h3>
+                <p>Select a meeting from the sidebar or start recording</p>
+                <div class="shortcut-hint">
+                    <span>Quick start:</span>
+                    <kbd class="kbd">⌘</kbd>
+                    <kbd class="kbd">⇧</kbd>
+                    <kbd class="kbd">R</kbd>
+                    <span>anywhere</span>
+                </div>
             </div>
 
             <!-- Meeting detail view -->
@@ -1318,14 +1628,14 @@
                             </button>
                         </div>
                         <div style="display: flex; gap: 0px;">
-                            <button class="copy-notes-btn" id="copy-notes-btn" title="Copy all meeting notes to clipboard">
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <button class="copy-notes-btn" id="copy-notes-btn" title="Copy meeting notes">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                     <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
                                     <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
                                 </svg>
                             </button>
-                            <button class="reprocess-btn" id="reprocess-btn" title="Reprocess current meeting if analysis failed or needs improvement">
-                                Reprocess
+                            <button class="reprocess-btn" id="reprocess-btn" title="Reprocess meeting">
+                                🔄
                             </button>
                         </div>
                     </div>
@@ -1644,6 +1954,22 @@ Session started - waiting for activity...
         const statusDot = document.getElementById('status-dot');
         const statusText = document.getElementById('status-text');
         const sessionNameInput = document.getElementById('session-name');
+
+        // Sidebar toggle functionality
+        const sidebar = document.getElementById('sidebar');
+        const sidebarToggle = document.getElementById('sidebar-toggle');
+
+        // Restore sidebar state from localStorage
+        if (localStorage.getItem('sidebarCollapsed') === 'true') {
+            sidebar.classList.add('collapsed');
+            sidebarToggle.classList.add('collapsed');
+        }
+
+        sidebarToggle.addEventListener('click', () => {
+            sidebar.classList.toggle('collapsed');
+            sidebarToggle.classList.toggle('collapsed');
+            localStorage.setItem('sidebarCollapsed', sidebar.classList.contains('collapsed'));
+        });
         const startBtn = document.getElementById('start-btn');
         const stopBtn = document.getElementById('stop-btn');
         const pauseBtn = document.getElementById('pause-btn');
@@ -1712,6 +2038,13 @@ Session started - waiting for activity...
         function setStatus(status, message) {
             statusDot.className = `status-dot ${status}`;
             statusText.textContent = message;
+            // Toggle waveform visibility for recording state
+            const statusContainer = document.getElementById('status-container');
+            if (status === 'recording') {
+                statusContainer.classList.add('recording');
+            } else {
+                statusContainer.classList.remove('recording');
+            }
             log(`Status: ${message}`);
         }
         
@@ -2014,6 +2347,8 @@ Session started - waiting for activity...
             
             meetingsList.innerHTML = filteredMeetings.map((meeting, index) => {
                 const isProcessing = processingMeetings.has(meeting.session_info?.name);
+                const actionCount = (meeting.action_items || []).length;
+                const participantCount = (meeting.participants || []).length;
                 return `
                 <div class="meeting-item ${isProcessing ? 'processing' : ''}" data-index="${index}">
                     ${isProcessing ? '<div class="processing-overlay"><div class="processing-indicator"><div class="processing-spinner"></div>Processing...</div></div>' : ''}
@@ -2024,6 +2359,9 @@ Session started - waiting for activity...
                     </div>
                     <div class="meeting-preview">
                         ${(meeting.summary || 'No summary available').substring(0, 100)}...
+                    </div>
+                    <div class="meeting-badges">
+                        ${actionCount > 0 ? `<span class="meeting-badge actions">✓ ${actionCount} action${actionCount > 1 ? 's' : ''}</span>` : ''}
                     </div>
                 </div>
                 `;
@@ -2103,7 +2441,7 @@ Session started - waiting for activity...
                     const analysis = document.createElement('p');
                     analysis.textContent = area.analysis || '';
                     analysis.style.margin = '0';
-                    analysis.style.color = '#ccc';
+                    analysis.style.color = '#a1a1aa';
                     analysis.style.lineHeight = '1.5';
 
                     areaDiv.appendChild(title);
