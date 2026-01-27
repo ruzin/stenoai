@@ -7,6 +7,15 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <script>
+    (function() {
+        var t = localStorage.getItem('theme') || 'system';
+        var eff = t === 'system'
+            ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+            : t;
+        if (eff === 'light') document.documentElement.setAttribute('data-theme', 'light');
+    })();
+    </script>
     <style>
         :root {
             /* Refined color palette - softer contrast */
@@ -25,6 +34,24 @@
             --recording-glow: rgba(239, 68, 68, 0.2);
             --success-green: #22c55e;
             --warning-amber: #f59e0b;
+        }
+
+        [data-theme="light"] {
+            --bg-deep: #e9ecf0;
+            --bg-primary: #f1f3f6;
+            --bg-elevated: #e1e5ea;
+            --bg-surface: #d8dce3;
+            --border-subtle: #cdd2d9;
+            --border-default: #a8b0b9;
+            --text-primary: #1a1d21;
+            --text-secondary: #495057;
+            --text-muted: #6c757d;
+            --accent-primary: #5b5fc7;
+            --accent-glow: rgba(91, 95, 199, 0.12);
+            --recording-red: #dc3545;
+            --recording-glow: rgba(220, 53, 69, 0.15);
+            --success-green: #198754;
+            --warning-amber: #d97706;
         }
 
         * {
@@ -51,10 +78,9 @@
             top: 0;
             left: 0;
             right: 0;
-            height: 40px;
+            height: 28px;
             -webkit-app-region: drag;
             z-index: 100;
-            pointer-events: none; /* Allow clicks to pass through to content below */
         }
         
         /* Make interactive elements non-draggable */
@@ -67,22 +93,23 @@
         .header {
             background: var(--bg-primary);
             border-bottom: 1px solid var(--border-subtle);
-            padding: 36px 20px 12px 20px;
+            padding: 28px 20px 10px 20px;
             display: flex;
             align-items: center;
             justify-content: space-between;
             transition: padding-top 0.3s ease;
             background: linear-gradient(180deg, var(--bg-elevated) 0%, var(--bg-primary) 100%);
+            -webkit-app-region: drag;
         }
 
         .header.with-announcement-banner {
-            padding-top: 84px;
+            padding-top: 76px;
         }
 
         .brand {
             display: flex;
             align-items: center;
-            gap: 12px;
+            gap: 10px;
         }
 
         .brand svg {
@@ -95,7 +122,7 @@
         }
 
         .brand h1 {
-            font-size: 20px;
+            font-size: 18px;
             font-weight: 700;
             letter-spacing: -0.02em;
             background: linear-gradient(135deg, #6366f1, #818cf8);
@@ -256,7 +283,7 @@
             background: var(--bg-surface);
             color: var(--text-primary);
             border: 1px solid var(--border-default);
-            padding: 8px 16px;
+            padding: 6px 14px;
             border-radius: 7px;
             font-size: 13px;
             font-weight: 500;
@@ -286,8 +313,8 @@
         }
 
         .btn-primary:hover {
-            background: #2a2a2e;
-            border-color: #52525b;
+            background: var(--bg-surface);
+            border-color: var(--border-default);
         }
 
         .btn-danger {
@@ -297,7 +324,8 @@
         }
 
         .btn-danger:hover {
-            background: #dc2626;
+            background: var(--recording-red);
+            filter: brightness(0.9);
             box-shadow: 0 0 28px var(--recording-glow);
         }
 
@@ -456,7 +484,8 @@
             border-bottom: 1px solid var(--border-subtle);
         }
 
-        .settings-row:last-of-type {
+        .settings-row:last-of-type,
+        .settings-row:last-child {
             border-bottom: none;
         }
 
@@ -619,7 +648,6 @@
         .settings-version {
             margin-top: 20px;
             padding-top: 16px;
-            border-top: 1px solid var(--border-subtle);
             font-size: 12px;
             color: var(--text-muted);
         }
@@ -851,7 +879,7 @@
         
         .sidebar-header p {
             font-size: 14px;
-            color: #888;
+            color: var(--text-muted);
         }
         
         .meetings-list {
@@ -965,8 +993,8 @@
         }
         
         .meeting-item.processing {
-            background: #1a1a1a;
-            border-color: #f59e0b;
+            background: var(--bg-elevated);
+            border-color: var(--warning-amber);
             opacity: 0.7;
             position: relative;
         }
@@ -975,16 +1003,16 @@
             position: absolute;
             bottom: 8px;
             right: 8px;
-            background: rgba(0, 0, 0, 0.8);
+            background: var(--bg-deep);
             border-radius: 4px;
             padding: 4px 8px;
         }
-        
+
         .processing-indicator {
             display: flex;
             align-items: center;
             gap: 8px;
-            color: #f59e0b;
+            color: var(--warning-amber);
             font-size: 12px;
             font-weight: 500;
         }
@@ -992,8 +1020,8 @@
         .processing-spinner {
             width: 16px;
             height: 16px;
-            border: 2px solid #333;
-            border-top: 2px solid #f59e0b;
+            border: 2px solid var(--bg-surface);
+            border-top: 2px solid var(--warning-amber);
             border-radius: 50%;
             animation: spin 1s linear infinite;
         }
@@ -1006,7 +1034,7 @@
         .meeting-item h3 {
             font-size: 13px;
             font-weight: 600;
-            color: var(--text-primary);
+            color: color-mix(in srgb, var(--text-primary) 40%, var(--text-secondary));
             margin-bottom: 4px;
             line-height: 1.3;
         }
@@ -1138,7 +1166,7 @@
         .meeting-title {
             font-size: 26px;
             font-weight: 700;
-            color: #8a8a8f;
+            color: color-mix(in srgb, var(--text-primary) 40%, var(--text-secondary));
             margin: 0;
             flex: 1;
             letter-spacing: -0.02em;
@@ -1201,9 +1229,9 @@
             position: absolute;
             top: 8px;
             right: 8px;
-            background: #333;
-            color: #fff;
-            border: 1px solid #555;
+            background: var(--bg-surface);
+            color: var(--text-primary);
+            border: 1px solid var(--border-default);
             border-radius: 4px;
             padding: 6px;
             cursor: pointer;
@@ -1213,7 +1241,7 @@
         }
         
         .copy-transcript-btn:hover {
-            background: #444;
+            background: var(--bg-elevated);
             opacity: 1;
             transform: translateY(-1px);
         }
@@ -1223,8 +1251,8 @@
         }
         
         .copy-transcript-btn.copied {
-            background: #4CAF50;
-            border-color: #4CAF50;
+            background: var(--success-green);
+            border-color: var(--success-green);
             opacity: 1;
         }
 
@@ -1254,7 +1282,7 @@
         .copy-notes-btn.copied {
             background: var(--success-green);
             border-color: var(--success-green);
-            color: #fff;
+            color: var(--bg-primary);
         }
 
         .meeting-title-container {
@@ -1267,7 +1295,7 @@
 
         .meeting-title {
             margin: 0;
-            color: #fff;
+            color: color-mix(in srgb, var(--text-primary) 40%, var(--text-secondary));
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
@@ -1275,9 +1303,9 @@
         }
 
         .meeting-title-input {
-            background: #222;
-            border: 1px solid #666;
-            color: #fff;
+            background: var(--bg-elevated);
+            border: 1px solid var(--border-default);
+            color: var(--text-primary);
             padding: 8px 12px;
             border-radius: 6px;
             font-size: 24px;
@@ -1287,14 +1315,14 @@
         }
 
         .meeting-title-input:focus {
-            border-color: #888;
-            background: #333;
+            border-color: var(--text-muted);
+            background: var(--bg-surface);
         }
 
         .edit-title-btn {
             background: transparent;
-            border: 1px solid #555;
-            color: #888;
+            border: 1px solid var(--border-default);
+            color: var(--text-muted);
             padding: 6px;
             border-radius: 4px;
             cursor: pointer;
@@ -1310,9 +1338,9 @@
         }
 
         .edit-title-btn:hover {
-            background: #333;
-            border-color: #666;
-            color: #fff;
+            background: var(--bg-surface);
+            border-color: var(--border-default);
+            color: var(--text-primary);
         }
 
         .title-edit-actions {
@@ -1333,24 +1361,25 @@
         }
 
         .save-title-btn {
-            background: #4CAF50;
-            border-color: #4CAF50;
-            color: #fff;
+            background: var(--success-green);
+            border-color: var(--success-green);
+            color: var(--bg-primary);
         }
 
         .save-title-btn:hover {
-            background: #45a049;
+            background: var(--success-green);
+            filter: brightness(0.9);
         }
 
         .cancel-title-btn {
             background: transparent;
-            border-color: #555;
-            color: #888;
+            border-color: var(--border-default);
+            color: var(--text-muted);
         }
 
         .cancel-title-btn:hover {
-            background: #333;
-            color: #fff;
+            background: var(--bg-surface);
+            color: var(--text-primary);
         }
 
         @keyframes spin {
@@ -1469,7 +1498,7 @@
         
         .drop-message {
             text-align: center;
-            color: #fff;
+            color: var(--text-primary);
             font-size: 24px;
             font-weight: 600;
         }
@@ -1651,8 +1680,8 @@
         }
         
         .setup-content {
-            background: #111;
-            border: 1px solid #333;
+            background: var(--bg-primary);
+            border: 1px solid var(--bg-surface);
             border-radius: 12px;
             padding: 32px;
             width: 600px;
@@ -1675,13 +1704,13 @@
         .setup-header h2 {
             font-size: 24px;
             font-weight: 600;
-            color: #fff;
+            color: var(--text-primary);
             margin-bottom: 8px;
         }
         
         .setup-header p {
             font-size: 16px;
-            color: #888;
+            color: var(--text-muted);
         }
         
         .setup-steps {
@@ -1694,25 +1723,25 @@
             gap: 16px;
             padding: 16px;
             margin-bottom: 12px;
-            background: #1a1a1a;
-            border: 1px solid #333;
+            background: var(--bg-elevated);
+            border: 1px solid var(--bg-surface);
             border-radius: 8px;
             transition: all 0.3s;
         }
         
         .setup-step.active {
-            border-color: #555;
-            background: #222;
+            border-color: var(--border-default);
+            background: var(--bg-surface);
         }
         
         .setup-step.completed {
-            border-color: #22c55e;
-            background: #0f1f0f;
+            border-color: var(--success-green);
+            background: rgba(34, 197, 94, 0.08);
         }
-        
+
         .setup-step.failed {
-            border-color: #ef4444;
-            background: #1f0f0f;
+            border-color: var(--recording-red);
+            background: rgba(239, 68, 68, 0.08);
         }
         
         .step-icon {
@@ -1728,26 +1757,26 @@
         .step-content h3 {
             font-size: 16px;
             font-weight: 600;
-            color: #fff;
+            color: var(--text-primary);
             margin-bottom: 4px;
         }
         
         .step-content p {
             font-size: 14px;
-            color: #888;
+            color: var(--text-muted);
             margin-bottom: 8px;
         }
         
         .step-status {
             font-size: 13px;
-            color: #666;
+            color: var(--text-muted);
             font-weight: 500;
         }
         
         .progress-bar {
             width: 100%;
             height: 4px;
-            background: #333;
+            background: var(--bg-surface);
             border-radius: 2px;
             margin-top: 8px;
             overflow: hidden;
@@ -1755,27 +1784,27 @@
         
         .progress-fill {
             height: 100%;
-            background: #f59e0b;
+            background: var(--warning-amber);
             width: 0%;
             transition: width 0.3s ease;
             border-radius: 2px;
         }
         
         .setup-step.completed .progress-fill {
-            background: #22c55e;
+            background: var(--success-green);
             width: 100%;
         }
         
         .setup-step.active .step-status {
-            color: #f59e0b;
+            color: var(--warning-amber);
         }
-        
+
         .setup-step.completed .step-status {
-            color: #22c55e;
+            color: var(--success-green);
         }
-        
+
         .setup-step.failed .step-status {
-            color: #ef4444;
+            color: var(--recording-red);
         }
         
         .setup-actions {
@@ -1906,7 +1935,8 @@
         }
 
         .ai-query-submit:hover {
-            background: #6366f1;
+            background: var(--accent-primary);
+            filter: brightness(1.1);
             transform: translateY(-1px);
         }
 
@@ -1951,7 +1981,7 @@
         }
 
         .ai-query-response-content.error {
-            color: #ef4444;
+            color: var(--recording-red);
             background: rgba(239, 68, 68, 0.1);
             border-color: rgba(239, 68, 68, 0.2);
         }
@@ -1999,6 +2029,89 @@
             font-family: inherit;
             margin-left: 4px;
         }
+
+        /* Light mode specific overrides */
+        [data-theme="light"] .brand h1 {
+            background: linear-gradient(135deg, #4338ca, #6366f1);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        [data-theme="light"] .brand svg rect:first-child {
+            fill: #e0e7ff;
+        }
+        [data-theme="light"] .brand svg path {
+            fill: #4338ca;
+        }
+
+        [data-theme="light"] body {
+            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
+        }
+
+        [data-theme="light"] .announcement-banner.type-info {
+            background: linear-gradient(135deg, #0284c7, #0891b2);
+        }
+        [data-theme="light"] .announcement-banner.type-release {
+            background: linear-gradient(135deg, #4338ca, #6366f1);
+        }
+        [data-theme="light"] .announcement-banner.type-warning {
+            background: linear-gradient(135deg, #c2410c, #d97706);
+        }
+
+        [data-theme="light"] .ai-query-container {
+            box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.08), 0 0 0 1px rgba(0, 0, 0, 0.06);
+        }
+
+        [data-theme="light"] .setup-content {
+            background: var(--bg-primary);
+            border-color: var(--border-subtle);
+        }
+
+        [data-theme="light"] .setup-step.completed {
+            border-color: var(--success-green);
+            background: rgba(25, 135, 84, 0.06);
+        }
+        [data-theme="light"] .setup-step.failed {
+            border-color: var(--recording-red);
+            background: rgba(220, 53, 69, 0.06);
+        }
+
+        [data-theme="light"] ::-webkit-scrollbar-track {
+            background: var(--bg-elevated);
+        }
+        [data-theme="light"] ::-webkit-scrollbar-thumb {
+            background: var(--border-default);
+        }
+
+        /* Theme select dropdown */
+        .theme-select {
+            background: var(--bg-surface);
+            color: var(--text-primary);
+            border: 1px solid var(--border-default);
+            border-radius: 6px;
+            padding: 5px 10px;
+            font-size: 13px;
+            font-family: inherit;
+            cursor: pointer;
+            outline: none;
+            transition: all 0.2s ease;
+            flex-shrink: 0;
+            -webkit-appearance: none;
+            appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%2371717a' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 8px center;
+            padding-right: 26px;
+        }
+
+        .theme-select:hover {
+            border-color: var(--accent-primary);
+        }
+
+        .theme-select:focus {
+            border-color: var(--accent-primary);
+            box-shadow: 0 0 0 3px var(--accent-glow);
+        }
     </style>
 </head>
 <body>
@@ -2023,7 +2136,7 @@
     <!-- Header with recording controls -->
     <div class="header">
         <div class="brand">
-            <svg width="28" height="28" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <svg width="24" height="24" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
                 <rect width="32" height="32" rx="8" fill="#0f172a"/>
                 <rect width="30" height="30" x="1" y="1" rx="7" stroke="rgba(255,255,255,0.1)"/>
                 <path d="M16 10c-1.1 0-2 .9-2 2v4c0 1.1.9 2 2 2s2-.9 2-2v-4c0-1.1-.9-2-2-2z" fill="white"/>
@@ -2048,15 +2161,15 @@
             <input type="text" class="session-input" id="session-name" placeholder="Name this session...">
             
             <button class="btn btn-primary" id="start-btn">
-                <span>●</span> Record
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor"><circle cx="6" cy="6" r="5"/></svg> Record
             </button>
 
             <button class="btn btn-danger" id="stop-btn" style="display: none;">
-                <span>■</span> Stop
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor"><rect x="1" y="1" width="10" height="10" rx="1.5"/></svg> Stop
             </button>
 
             <button class="btn" id="pause-btn" style="display: none;">
-                <span>⏸</span> Pause
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor"><rect x="1.5" y="1" width="3" height="10" rx="1"/><rect x="7.5" y="1" width="3" height="10" rx="1"/></svg> Pause
             </button>
         </div>
         
@@ -2250,7 +2363,7 @@
             <div class="setup-header">
                 <h2>🚀 Welcome to StenoAI</h2>
                 <p>Setting up your system for meeting transcription...</p>
-                <p style="font-size: 14px; color: #aaa; margin-top: 12px;">💡 Scroll down to see logs</p>
+                <p style="font-size: 14px; color: var(--text-muted); margin-top: 12px;">💡 Scroll down to see logs</p>
             </div>
 
             <div class="setup-steps" id="setup-steps">
@@ -2343,9 +2456,9 @@
             <div class="setup-debug" style="margin: 24px 0;">
                 <h3 style="margin-bottom: 12px; display: flex; align-items: center; gap: 8px; font-size: 16px;">
                     <span>🐛 Debug Console</span>
-                    <button onclick="toggleDebugConsole()" style="background: none; border: 1px solid #444; color: #888; padding: 4px 8px; border-radius: 4px; font-size: 11px; cursor: pointer;">Toggle</button>
+                    <button onclick="toggleDebugConsole()" style="background: none; border: 1px solid var(--bg-surface); color: var(--text-muted); padding: 4px 8px; border-radius: 4px; font-size: 11px; cursor: pointer;">Toggle</button>
                 </h3>
-                <div id="debug-console" style="background: #000; border: 1px solid #333; border-radius: 6px; padding: 12px; font-family: 'Monaco', 'Menlo', monospace; font-size: 11px; line-height: 1.4; color: #a0a0a0; height: 200px; overflow-y: auto; white-space: pre-wrap;">Welcome to StenoAI Setup Debug Console
+                <div id="debug-console" style="background: var(--bg-deep); border: 1px solid var(--bg-surface); border-radius: 6px; padding: 12px; font-family: 'Monaco', 'Menlo', monospace; font-size: 11px; line-height: 1.4; color: var(--text-secondary); height: 200px; overflow-y: auto; white-space: pre-wrap;">Welcome to StenoAI Setup Debug Console
 Commands and output will appear here...
 
 </div>
@@ -2400,6 +2513,18 @@ Commands and output will appear here...
             <div class="settings-content">
                 <!-- General Tab -->
                 <div class="settings-tab active" id="tab-general">
+                    <div class="settings-row">
+                        <div class="settings-row-text">
+                            <span>Appearance</span>
+                            <small>Choose light, dark, or match your system</small>
+                        </div>
+                        <select class="theme-select" id="theme-select">
+                            <option value="system">System</option>
+                            <option value="light">Light</option>
+                            <option value="dark">Dark</option>
+                        </select>
+                    </div>
+
                     <div class="settings-row">
                         <div class="settings-row-text">
                             <span>Desktop notifications</span>
@@ -2662,7 +2787,7 @@ Session started - waiting for activity...
                     startBtn.style.display = 'none';
                     stopBtn.style.display = 'inline-flex';
                     pauseBtn.style.display = 'inline-flex';
-                    pauseBtn.innerHTML = '<span>⏸</span> Pause';
+                    pauseBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor"><rect x="1.5" y="1" width="3" height="10" rx="1"/><rect x="7.5" y="1" width="3" height="10" rx="1"/></svg> Pause';
                     startBtn.disabled = true;
                     sessionNameInput.disabled = true;
                     stopBtn.disabled = false;
@@ -2675,7 +2800,7 @@ Session started - waiting for activity...
                     startBtn.style.display = 'none';
                     stopBtn.style.display = 'inline-flex';
                     pauseBtn.style.display = 'inline-flex';
-                    pauseBtn.innerHTML = '<span>▶</span> Resume';
+                    pauseBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor"><polygon points="2,1 11,6 2,11"/></svg> Resume';
                     startBtn.disabled = true;
                     sessionNameInput.disabled = true;
                     stopBtn.disabled = false;
@@ -2842,7 +2967,7 @@ Session started - waiting for activity...
             // Show loading state only if we don't have cached data
             if (meetings.length === 0) {
                 meetingsList.innerHTML = `
-                    <div style="padding: 20px; text-align: center; color: #666;">
+                    <div style="padding: 20px; text-align: center; color: var(--text-muted);">
                         <div style="font-size: 24px; margin-bottom: 8px;">⟳</div>
                         <p>Loading meetings...</p>
                     </div>
@@ -2864,7 +2989,7 @@ Session started - waiting for activity...
                 // Only show error if we don't have cached data
                 if (meetings.length === 0) {
                     meetingsList.innerHTML = `
-                        <div style="padding: 20px; text-align: center; color: #666;">
+                        <div style="padding: 20px; text-align: center; color: var(--text-muted);">
                             <div style="font-size: 24px; margin-bottom: 8px;">⚠️</div>
                             <p>Failed to load meetings</p>
                             <p style="font-size: 12px; margin-top: 4px;">Using cached data if available</p>
@@ -2882,7 +3007,7 @@ Session started - waiting for activity...
         function renderMeetingsList() {
             if (filteredMeetings.length === 0 && searchQuery.trim()) {
                 meetingsList.innerHTML = `
-                    <div style="padding: 20px; text-align: center; color: #666;">
+                    <div style="padding: 20px; text-align: center; color: var(--text-muted);">
                         <div style="font-size: 24px; margin-bottom: 8px;">🔍</div>
                         <p>No meetings match "${searchQuery}"</p>
                         <p style="font-size: 12px; margin-top: 4px;">Try a different search term</p>
@@ -2893,7 +3018,7 @@ Session started - waiting for activity...
             
             if (meetings.length === 0) {
                 meetingsList.innerHTML = `
-                    <div style="padding: 20px; text-align: center; color: #666;">
+                    <div style="padding: 20px; text-align: center; color: var(--text-muted);">
                         <div style="font-size: 24px; margin-bottom: 8px;">🎙️</div>
                         <p>No meetings recorded yet</p>
                         <p style="font-size: 12px; margin-top: 4px;">Start recording to see your meetings here</p>
@@ -2957,12 +3082,12 @@ Session started - waiting for activity...
                     const mins = Math.floor((totalSecs % 3600) / 60);
                     const secs = totalSecs % 60;
                     
-                    if (hours > 0) return `🕒 Meeting Duration: ${hours}h ${mins}m`;
-                    if (mins > 0) return `🕒 Meeting Duration: ${mins}m ${secs}s`;
-                    return `🕒 Meeting Duration: ${secs}s`;
+                    if (hours > 0) return `Meeting Duration: ${hours}h ${mins}m`;
+                    if (mins > 0) return `Meeting Duration: ${mins}m ${secs}s`;
+                    return `Meeting Duration: ${secs}s`;
                 })() :
-                (selectedMeeting.session_info?.duration_minutes ? 
-                    `🕒 Meeting Duration: ${selectedMeeting.session_info.duration_minutes} minutes` : '📄 Processed');
+                (selectedMeeting.session_info?.duration_minutes ?
+                    `Meeting Duration: ${selectedMeeting.session_info.duration_minutes} minutes` : 'Processed');
             detailDuration.textContent = durationText;
             
             detailSummary.textContent = selectedMeeting.summary || 'No summary available';
@@ -2971,7 +3096,7 @@ Session started - waiting for activity...
             if (selectedMeeting.participants && selectedMeeting.participants.length > 0) {
                 detailParticipants.textContent = selectedMeeting.participants.join(', ');
             } else {
-                detailParticipants.innerHTML = '<span style="color: #666;">No participants identified</span>';
+                detailParticipants.innerHTML = '<span style="color: var(--text-muted);">No participants identified</span>';
             }
 
             // Key topics
@@ -2984,21 +3109,21 @@ Session started - waiting for activity...
                     const areaDiv = document.createElement('div');
                     areaDiv.style.marginBottom = '15px';
                     areaDiv.style.padding = '12px';
-                    areaDiv.style.background = 'rgba(255, 255, 255, 0.03)';
+                    areaDiv.style.background = 'var(--bg-elevated)';
                     areaDiv.style.borderRadius = '6px';
-                    areaDiv.style.borderLeft = '3px solid rgba(99, 102, 241, 0.5)';
+                    areaDiv.style.borderLeft = '3px solid var(--accent-primary)';
 
                     const title = document.createElement('h4');
                     title.textContent = area.title || 'Discussion Topic';
                     title.style.margin = '0 0 8px 0';
-                    title.style.color = 'rgba(99, 102, 241, 1)';
+                    title.style.color = 'var(--accent-primary)';
                     title.style.fontSize = '14px';
                     title.style.fontWeight = '600';
 
                     const analysis = document.createElement('p');
                     analysis.textContent = area.analysis || '';
                     analysis.style.margin = '0';
-                    analysis.style.color = '#a1a1aa';
+                    analysis.style.color = 'var(--text-secondary)';
                     analysis.style.lineHeight = '1.5';
 
                     areaDiv.appendChild(title);
@@ -3018,7 +3143,7 @@ Session started - waiting for activity...
                     detailKeyPoints.appendChild(li);
                 });
             } else {
-                detailKeyPoints.innerHTML = '<li style="color: #666;">No key points identified</li>';
+                detailKeyPoints.innerHTML = '<li style="color: var(--text-muted);">No key points identified</li>';
             }
             
             // Action items
@@ -3030,7 +3155,7 @@ Session started - waiting for activity...
                     detailActionItems.appendChild(li);
                 });
             } else {
-                detailActionItems.innerHTML = '<li style="color: #666;">No action items identified</li>';
+                detailActionItems.innerHTML = '<li style="color: var(--text-muted);">No action items identified</li>';
             }
             
             // Transcript
@@ -4344,16 +4469,22 @@ Session started - waiting for activity...
 
         function showModelNotification(message, type = 'info') {
             // In-app notification toast (bottom-right, matches app theme)
+            const cs = getComputedStyle(document.documentElement);
+            const bgColor = type === 'success'
+                ? cs.getPropertyValue('--success-green').trim()
+                : type === 'error'
+                    ? cs.getPropertyValue('--recording-red').trim()
+                    : cs.getPropertyValue('--accent-primary').trim();
             const notification = document.createElement('div');
             notification.style.cssText = `
                 position: fixed;
                 bottom: 20px;
                 right: 20px;
                 padding: 15px 20px;
-                background: ${type === 'success' ? '#22c55e' : type === 'error' ? '#ef4444' : '#3b82f6'};
+                background: ${bgColor};
                 color: white;
                 border-radius: 6px;
-                box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+                box-shadow: 0 4px 12px rgba(0,0,0,0.3);
                 z-index: 10000;
                 font-size: 14px;
                 max-width: 350px;
@@ -4778,6 +4909,43 @@ Session started - waiting for activity...
             hideAnnouncementBanner();
             log('Announcement dismissed');
         });
+
+        // Theme functions
+        function getSystemTheme() {
+            return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        }
+
+        function applyTheme(pref) {
+            const eff = pref === 'system' ? getSystemTheme() : pref;
+            if (eff === 'light') {
+                document.documentElement.setAttribute('data-theme', 'light');
+            } else {
+                document.documentElement.removeAttribute('data-theme');
+            }
+        }
+
+        function initTheme() {
+            const saved = localStorage.getItem('theme') || 'system';
+            const themeSelect = document.getElementById('theme-select');
+            if (themeSelect) {
+                themeSelect.value = saved;
+                themeSelect.addEventListener('change', (e) => {
+                    const value = e.target.value;
+                    localStorage.setItem('theme', value);
+                    applyTheme(value);
+                });
+            }
+            applyTheme(saved);
+
+            window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+                if ((localStorage.getItem('theme') || 'system') === 'system') {
+                    applyTheme('system');
+                }
+            });
+        }
+
+        // Initialize theme early
+        initTheme();
 
         // Initialize
         initializeApp().then(() => {
