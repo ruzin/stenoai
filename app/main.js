@@ -329,13 +329,50 @@ ipcMain.handle('reprocess-meeting', async (event, summaryFile) => {
   try {
     sendDebugLog(`🔄 Reprocessing meeting: ${summaryFile}`);
     sendDebugLog(`$ python simple_recorder.py reprocess "${summaryFile}"`);
-    
+
     const result = await runPythonScript('simple_recorder.py', ['reprocess', summaryFile]);
-    
+
     sendDebugLog('✅ Meeting reprocessed successfully');
     return { success: true, message: result };
   } catch (error) {
     sendDebugLog(`❌ Reprocessing failed: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('query-transcript', async (event, summaryFile, question) => {
+  try {
+    sendDebugLog(`🤖 Querying transcript: ${question.substring(0, 50)}...`);
+
+    // Run the query command
+    const result = await runPythonScript('simple_recorder.py', ['query', summaryFile, '-q', question]);
+
+    // Parse the JSON response
+    try {
+      const jsonResponse = JSON.parse(result.trim());
+      if (jsonResponse.success) {
+        sendDebugLog('✅ Query answered successfully');
+        return { success: true, answer: jsonResponse.answer };
+      } else {
+        sendDebugLog(`❌ Query failed: ${jsonResponse.error}`);
+        return { success: false, error: jsonResponse.error };
+      }
+    } catch (parseError) {
+      // If parsing fails, check if the result contains any JSON
+      const jsonMatch = result.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const jsonResponse = JSON.parse(jsonMatch[0]);
+        if (jsonResponse.success) {
+          return { success: true, answer: jsonResponse.answer };
+        } else {
+          return { success: false, error: jsonResponse.error };
+        }
+      }
+      sendDebugLog(`❌ Failed to parse query response: ${parseError.message}`);
+      return { success: false, error: 'Failed to parse AI response' };
+    }
+  } catch (error) {
+    sendDebugLog(`❌ Query failed: ${error.message}`);
     return { success: false, error: error.message };
   }
 });

@@ -1509,6 +1509,218 @@
         .setup-actions .btn {
             flex: 1;
         }
+
+        /* AI Query Popup */
+        .ai-query-popup {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            z-index: 1001;
+            display: none;
+            justify-content: center;
+            padding: 24px;
+            pointer-events: none;
+        }
+
+        .ai-query-popup.show {
+            display: flex;
+        }
+
+        .ai-query-container {
+            background: var(--bg-elevated);
+            border: 1px solid var(--border-default);
+            border-radius: 16px;
+            box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.05);
+            width: 100%;
+            max-width: 600px;
+            pointer-events: auto;
+            animation: slideUp 0.2s ease-out;
+            backdrop-filter: blur(12px);
+        }
+
+        @keyframes slideUp {
+            from {
+                transform: translateY(20px);
+                opacity: 0;
+            }
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+
+        .ai-query-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--border-subtle);
+        }
+
+        .ai-query-header span {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-primary);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .ai-query-close {
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            font-size: 20px;
+            cursor: pointer;
+            padding: 4px 8px;
+            border-radius: 6px;
+            transition: all 0.2s ease;
+            line-height: 1;
+        }
+
+        .ai-query-close:hover {
+            background: var(--bg-surface);
+            color: var(--text-primary);
+        }
+
+        .ai-query-input-row {
+            display: flex;
+            gap: 12px;
+            padding: 16px 20px;
+        }
+
+        #ai-query-input {
+            flex: 1;
+            background: var(--bg-surface);
+            border: 1px solid var(--border-default);
+            color: var(--text-primary);
+            padding: 12px 16px;
+            border-radius: 10px;
+            font-size: 14px;
+            font-family: inherit;
+            outline: none;
+            transition: all 0.2s ease;
+        }
+
+        #ai-query-input:focus {
+            border-color: var(--accent-primary);
+            box-shadow: 0 0 0 3px var(--accent-glow);
+        }
+
+        #ai-query-input::placeholder {
+            color: var(--text-muted);
+        }
+
+        .ai-query-submit {
+            background: var(--accent-primary);
+            color: white;
+            border: none;
+            padding: 12px 20px;
+            border-radius: 10px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .ai-query-submit:hover {
+            background: #6366f1;
+            transform: translateY(-1px);
+        }
+
+        .ai-query-submit:active {
+            transform: translateY(0);
+        }
+
+        .ai-query-submit:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .ai-query-response {
+            padding: 0 20px 20px;
+            display: none;
+        }
+
+        .ai-query-response.show {
+            display: block;
+        }
+
+        .ai-query-response-content {
+            background: var(--bg-surface);
+            border: 1px solid var(--border-subtle);
+            border-radius: 10px;
+            padding: 16px;
+            color: var(--text-secondary);
+            font-size: 14px;
+            line-height: 1.6;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .ai-query-response-content.loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            color: var(--text-muted);
+            padding: 24px;
+        }
+
+        .ai-query-response-content.error {
+            color: #ef4444;
+            background: rgba(239, 68, 68, 0.1);
+            border-color: rgba(239, 68, 68, 0.2);
+        }
+
+        .ai-query-spinner {
+            width: 20px;
+            height: 20px;
+            border: 2px solid var(--border-default);
+            border-top-color: var(--accent-primary);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Ask AI Button */
+        .ask-ai-btn {
+            background: linear-gradient(135deg, rgba(129, 140, 248, 0.15) 0%, rgba(99, 102, 241, 0.15) 100%);
+            border: 1px solid rgba(129, 140, 248, 0.3);
+            color: var(--accent-primary);
+            padding: 6px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 500;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .ask-ai-btn:hover {
+            background: linear-gradient(135deg, rgba(129, 140, 248, 0.25) 0%, rgba(99, 102, 241, 0.25) 100%);
+            border-color: var(--accent-primary);
+            transform: translateY(-1px);
+        }
+
+        .ask-ai-btn kbd {
+            background: rgba(129, 140, 248, 0.2);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 10px;
+            font-family: inherit;
+            margin-left: 4px;
+        }
     </style>
 </head>
 <body>
@@ -1627,7 +1839,16 @@
                                 </svg>
                             </button>
                         </div>
-                        <div style="display: flex; gap: 0px;">
+                        <div style="display: flex; gap: 8px; align-items: center;">
+                            <button class="ask-ai-btn" id="ask-ai-btn" title="Ask AI about this meeting (Cmd+K)">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <circle cx="12" cy="12" r="10"></circle>
+                                    <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
+                                    <line x1="12" y1="17" x2="12.01" y2="17"></line>
+                                </svg>
+                                Ask AI
+                                <kbd>K</kbd>
+                            </button>
                             <button class="copy-notes-btn" id="copy-notes-btn" title="Copy meeting notes">
                                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                     <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
@@ -1714,6 +1935,32 @@
     <div class="drop-zone" id="drop-zone">
         <div class="drop-message">
             Drop audio file to process
+        </div>
+    </div>
+
+    <!-- AI Query Popup -->
+    <div class="ai-query-popup" id="ai-query-popup">
+        <div class="ai-query-container">
+            <div class="ai-query-header">
+                <span>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
+                        <line x1="12" y1="17" x2="12.01" y2="17"></line>
+                    </svg>
+                    Ask about this meeting
+                </span>
+                <button class="ai-query-close" id="ai-query-close">&times;</button>
+            </div>
+            <div class="ai-query-input-row">
+                <input type="text" id="ai-query-input" placeholder="What was discussed about...">
+                <button class="ai-query-submit" id="ai-query-submit">
+                    Ask
+                </button>
+            </div>
+            <div class="ai-query-response" id="ai-query-response">
+                <div class="ai-query-response-content" id="ai-query-response-content"></div>
+            </div>
         </div>
     </div>
 
@@ -2001,6 +2248,15 @@ Session started - waiting for activity...
         const copyTranscriptBtn = document.getElementById('copy-transcript-btn');
         const copyNotesBtn = document.getElementById('copy-notes-btn');
         const editTitleBtn = document.getElementById('edit-title-btn');
+
+        // AI Query elements
+        const askAiBtn = document.getElementById('ask-ai-btn');
+        const aiQueryPopup = document.getElementById('ai-query-popup');
+        const aiQueryClose = document.getElementById('ai-query-close');
+        const aiQueryInput = document.getElementById('ai-query-input');
+        const aiQuerySubmit = document.getElementById('ai-query-submit');
+        const aiQueryResponse = document.getElementById('ai-query-response');
+        const aiQueryResponseContent = document.getElementById('ai-query-response-content');
 
         // Setup elements
         const setupOverlay = document.getElementById('setup-overlay');
@@ -2869,7 +3125,117 @@ Session started - waiting for activity...
                 }
             }
         });
-        
+
+        // AI Query functionality
+        function showAiQueryPopup() {
+            if (!selectedMeeting) {
+                log('No meeting selected for AI query');
+                return;
+            }
+            aiQueryPopup.classList.add('show');
+            aiQueryInput.value = '';
+            aiQueryResponse.classList.remove('show');
+            aiQueryResponseContent.textContent = '';
+            aiQueryResponseContent.classList.remove('loading', 'error');
+            setTimeout(() => aiQueryInput.focus(), 100);
+        }
+
+        function hideAiQueryPopup() {
+            aiQueryPopup.classList.remove('show');
+            aiQueryInput.value = '';
+            aiQueryResponse.classList.remove('show');
+        }
+
+        async function submitAiQuery() {
+            const question = aiQueryInput.value.trim();
+            if (!question) return;
+            if (!selectedMeeting) {
+                log('No meeting selected for AI query');
+                return;
+            }
+
+            const summaryFile = selectedMeeting.session_info?.summary_file;
+            if (!summaryFile) {
+                log('No summary file found for AI query');
+                return;
+            }
+
+            // Show loading state
+            aiQuerySubmit.disabled = true;
+            aiQueryResponse.classList.add('show');
+            aiQueryResponseContent.classList.add('loading');
+            aiQueryResponseContent.classList.remove('error');
+            aiQueryResponseContent.innerHTML = '<div class="ai-query-spinner"></div>Thinking...';
+
+            log(`Asking AI: ${question.substring(0, 50)}...`);
+
+            try {
+                const result = await ipcRenderer.invoke('query-transcript', summaryFile, question);
+
+                if (result.success) {
+                    aiQueryResponseContent.classList.remove('loading');
+                    aiQueryResponseContent.textContent = result.answer;
+                    log('AI response received');
+                } else {
+                    aiQueryResponseContent.classList.remove('loading');
+                    aiQueryResponseContent.classList.add('error');
+                    aiQueryResponseContent.textContent = result.error || 'Failed to get response from AI';
+                    log(`AI query failed: ${result.error}`);
+                }
+            } catch (error) {
+                aiQueryResponseContent.classList.remove('loading');
+                aiQueryResponseContent.classList.add('error');
+                aiQueryResponseContent.textContent = 'Failed to query AI: ' + error.message;
+                log(`AI query error: ${error.message}`);
+            } finally {
+                aiQuerySubmit.disabled = false;
+            }
+        }
+
+        // Ask AI button click handler
+        askAiBtn.addEventListener('click', showAiQueryPopup);
+
+        // AI Query close button
+        aiQueryClose.addEventListener('click', hideAiQueryPopup);
+
+        // AI Query submit button
+        aiQuerySubmit.addEventListener('click', submitAiQuery);
+
+        // AI Query input - submit on Enter
+        aiQueryInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                submitAiQuery();
+            }
+            if (e.key === 'Escape') {
+                hideAiQueryPopup();
+            }
+        });
+
+        // Global keyboard shortcut for AI query (Cmd+K / Ctrl+K)
+        document.addEventListener('keydown', (e) => {
+            // Cmd+K or Ctrl+K to open AI query
+            if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+                e.preventDefault();
+                if (aiQueryPopup.classList.contains('show')) {
+                    hideAiQueryPopup();
+                } else if (selectedMeeting) {
+                    showAiQueryPopup();
+                }
+            }
+            // Escape to close AI query popup
+            if (e.key === 'Escape' && aiQueryPopup.classList.contains('show')) {
+                hideAiQueryPopup();
+            }
+        });
+
+        // Close AI query popup when clicking outside
+        aiQueryPopup.addEventListener('click', (e) => {
+            if (e.target === aiQueryPopup) {
+                hideAiQueryPopup();
+            }
+        });
+
         // Copy transcript to clipboard
         copyTranscriptBtn.addEventListener('click', async () => {
             try {

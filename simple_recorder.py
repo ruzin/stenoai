@@ -940,6 +940,61 @@ def reprocess(summary_file):
 
 
 @cli.command()
+@click.argument('transcript_file')
+@click.option('--question', '-q', required=True, help='Question to ask about the transcript')
+def query(transcript_file, question):
+    """Query a transcript with AI."""
+    from pathlib import Path
+
+    transcript_path = Path(transcript_file)
+
+    # Handle summary JSON files (extract transcript from them)
+    if transcript_file.endswith('.json'):
+        if not transcript_path.exists():
+            print(json.dumps({"success": False, "error": f"File not found: {transcript_file}"}))
+            return
+
+        try:
+            with open(transcript_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                transcript_text = data.get('transcript', '')
+                if not transcript_text:
+                    print(json.dumps({"success": False, "error": "No transcript found in summary file"}))
+                    return
+        except Exception as e:
+            print(json.dumps({"success": False, "error": f"Failed to read summary file: {e}"}))
+            return
+    else:
+        # Handle plain text transcript files
+        if not transcript_path.exists():
+            print(json.dumps({"success": False, "error": f"File not found: {transcript_file}"}))
+            return
+
+        try:
+            with open(transcript_path, 'r', encoding='utf-8') as f:
+                transcript_text = f.read()
+        except Exception as e:
+            print(json.dumps({"success": False, "error": f"Failed to read transcript: {e}"}))
+            return
+
+    if not transcript_text or transcript_text.strip() == "":
+        print(json.dumps({"success": False, "error": "Transcript is empty"}))
+        return
+
+    # Initialize summarizer and query
+    try:
+        summarizer = OllamaSummarizer()
+        answer = summarizer.query_transcript(transcript_text, question)
+
+        if answer:
+            print(json.dumps({"success": True, "answer": answer}))
+        else:
+            print(json.dumps({"success": False, "error": "Failed to get response from AI"}))
+    except Exception as e:
+        print(json.dumps({"success": False, "error": f"Query failed: {e}"}))
+
+
+@cli.command()
 def list_failed():
     """List summary files that failed processing (have fallback summaries)"""
     import json

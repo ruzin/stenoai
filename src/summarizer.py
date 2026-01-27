@@ -692,3 +692,74 @@ Return ONLY the response in this exact JSON format:
     def __del__(self):
         """Cleanup when object is destroyed."""
         self.cleanup()
+
+    def query_transcript(self, transcript: str, question: str) -> Optional[str]:
+        """
+        Query a transcript with a question using Ollama.
+
+        Args:
+            transcript: The meeting transcript text
+            question: The question to ask about the transcript
+
+        Returns:
+            Answer string or None if query failed
+        """
+        try:
+            if not transcript or transcript.strip() == "":
+                return "No transcript available to query."
+
+            if not question or question.strip() == "":
+                return "Please provide a question."
+
+            prompt = f"""Answer the following question based ONLY on the meeting transcript below.
+If the information is not in the transcript, say "This isn't mentioned in the transcript."
+Be concise and direct.
+
+QUESTION: {question}
+
+TRANSCRIPT:
+{transcript}
+
+ANSWER:"""
+
+            logger.info(f"Querying transcript with question: {question[:50]}...")
+
+            # Retry logic for Ollama API calls
+            max_retries = 2
+            for attempt in range(max_retries):
+                try:
+                    if attempt > 0:
+                        logger.info(f"Retry attempt {attempt + 1}/{max_retries}")
+                        self._ensure_ollama_ready()
+                        self.client = ollama.Client()
+
+                    ollama_response = self.client.chat(
+                        model=self.model_name,
+                        messages=[
+                            {
+                                'role': 'user',
+                                'content': prompt
+                            }
+                        ],
+                        options={
+                            'timeout': 120  # 2 minute timeout for queries
+                        }
+                    )
+                    break
+
+                except Exception as e:
+                    logger.error(f"Ollama API attempt {attempt + 1} failed: {e}")
+                    if attempt == max_retries - 1:
+                        raise
+                    else:
+                        logger.info("Waiting 2 seconds before retry...")
+                        time.sleep(2)
+
+            response_text = ollama_response['message']['content'].strip()
+            logger.info(f"Query response received: {len(response_text)} characters")
+
+            return response_text
+
+        except Exception as e:
+            logger.error(f"Query transcript failed: {e}")
+            return None
