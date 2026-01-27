@@ -110,6 +110,8 @@
             display: flex;
             align-items: center;
             gap: 10px;
+            cursor: pointer;
+            -webkit-app-region: no-drag;
         }
 
         .brand svg {
@@ -2644,6 +2646,15 @@ Session started - waiting for activity...
             sidebarToggle.classList.toggle('collapsed');
             localStorage.setItem('sidebarCollapsed', sidebar.classList.contains('collapsed'));
         });
+
+        // Brand click - return to home state
+        document.querySelector('.brand').addEventListener('click', () => {
+            selectedMeeting = null;
+            document.getElementById('empty-state').style.display = 'flex';
+            document.getElementById('meeting-detail').classList.remove('show');
+            document.querySelectorAll('.meeting-item').forEach(item => item.classList.remove('active'));
+        });
+
         const startBtn = document.getElementById('start-btn');
         const stopBtn = document.getElementById('stop-btn');
         const pauseBtn = document.getElementById('pause-btn');
