@@ -104,6 +104,11 @@
 
         .header.with-announcement-banner {
             padding-top: 76px;
+            -webkit-app-region: no-drag;
+        }
+
+        .announcement-visible .drag-area {
+            display: none;
         }
 
         .brand {
@@ -1550,6 +1555,7 @@
             z-index: 1500;
             box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
             animation: slideDown 0.3s ease-out;
+            -webkit-app-region: no-drag;
         }
 
         .announcement-banner.type-info {
@@ -4881,12 +4887,14 @@ Session started - waiting for activity...
             }
 
             document.querySelector('.header').classList.add('with-announcement-banner');
+            document.body.classList.add('announcement-visible');
             log(`Showing announcement: [${ann.type}] ${ann.title}`);
         }
 
         function hideAnnouncementBanner() {
             announcementBanner.className = 'announcement-banner';
             document.querySelector('.header').classList.remove('with-announcement-banner');
+            document.body.classList.remove('announcement-visible');
 
             if (currentAnnouncement) {
                 dismissAnnouncement(currentAnnouncement.id);
