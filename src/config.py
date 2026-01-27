@@ -6,6 +6,7 @@ Handles storing and loading user preferences like model selection.
 
 import json
 import logging
+import uuid
 from pathlib import Path
 from typing import Optional, Dict, Any
 
@@ -107,6 +108,8 @@ class Config:
         return {
             "model": self.DEFAULT_MODEL,
             "notifications_enabled": True,
+            "telemetry_enabled": True,
+            "anonymous_id": str(uuid.uuid4()),
             "version": "1.0"
         }
 
@@ -163,6 +166,32 @@ class Config:
         """
         self._config["notifications_enabled"] = enabled
         return self._save()
+
+    def get_telemetry_enabled(self) -> bool:
+        """Get whether anonymous usage analytics are enabled."""
+        return self._config.get("telemetry_enabled", True)
+
+    def set_telemetry_enabled(self, enabled: bool) -> bool:
+        """
+        Set whether anonymous usage analytics are enabled.
+
+        Args:
+            enabled: True to enable telemetry, False to disable
+
+        Returns:
+            True if saved successfully, False otherwise
+        """
+        self._config["telemetry_enabled"] = enabled
+        return self._save()
+
+    def get_anonymous_id(self) -> str:
+        """Get the anonymous telemetry ID, generating one if missing."""
+        anon_id = self._config.get("anonymous_id")
+        if not anon_id:
+            anon_id = str(uuid.uuid4())
+            self._config["anonymous_id"] = anon_id
+            self._save()
+        return anon_id
 
     def get(self, key: str, default: Any = None) -> Any:
         """Get a configuration value."""

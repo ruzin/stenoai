@@ -223,7 +223,7 @@ Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
             "session_name": session_name
         }
     
-    async def summarize_transcript(self, transcript_text: str, session_name: str = "Recording") -> dict:
+    async def summarize_transcript(self, transcript_text: str, session_name: str = "Recording", duration_minutes: int = 10) -> dict:
         """Summarize transcript text."""
         print("🧠 Generating summary...")
         
@@ -249,7 +249,7 @@ Transcript:
 """
         
         # Generate summary (using correct method name and parameters)
-        summary_result = self.summarizer.summarize_transcript(transcript_text, 10)  # 10 minutes duration estimate
+        summary_result = self.summarizer.summarize_transcript(transcript_text, duration_minutes)
         
         if summary_result is None:
             return {
@@ -336,8 +336,9 @@ Transcript:
         
         # Step 2: Summarize with actual duration
         summary_data = await self.summarize_transcript(
-            transcript_data["transcript_text"], 
-            session_name
+            transcript_data["transcript_text"],
+            session_name,
+            duration_minutes
         )
         
         # Step 3: Save complete summary
@@ -603,13 +604,53 @@ def status():
 def record(duration, session_name):
     """Record audio for specified duration and process it"""
     import signal
-    
+    import sys
+
     print(f"🎤 Recording {duration} seconds of audio for '{session_name}'...")
-    
+
     recorder = SimpleRecorder()
     recording_path = None
     recording_started = False
-    
+    is_paused = False
+
+    def pause_handler(signum, frame):
+        """Handle SIGUSR1 to pause recording"""
+        nonlocal is_paused
+        print(f"📨 Received SIGUSR1 signal (pause request)")
+        print(f"   recording_started={recording_started}, has_recorder={recorder is not None}, has_audio={recorder.audio_recorder is not None if recorder else False}")
+        if recording_started and recorder and recorder.audio_recorder:
+            if not is_paused:
+                recorder.audio_recorder.pause_recording()
+                is_paused = True
+                print("⏸️ Recording paused successfully")
+            else:
+                print("⏸️ Already paused - ignoring")
+        else:
+            print("⚠️ Cannot pause - recording not active")
+
+    def resume_handler(signum, frame):
+        """Handle SIGUSR2 to resume recording"""
+        nonlocal is_paused
+        print(f"📨 Received SIGUSR2 signal (resume request)")
+        print(f"   recording_started={recording_started}, is_paused={is_paused}")
+        if recording_started and recorder and recorder.audio_recorder:
+            if is_paused:
+                recorder.audio_recorder.resume_recording()
+                is_paused = False
+                print("▶️ Recording resumed successfully")
+            else:
+                print("▶️ Not paused - ignoring")
+        else:
+            print("⚠️ Cannot resume - recording not active")
+
+    # Register pause/resume signal handlers (Unix only)
+    if sys.platform != 'win32':
+        try:
+            signal.signal(signal.SIGUSR1, pause_handler)
+            signal.signal(signal.SIGUSR2, resume_handler)
+        except (AttributeError, ValueError) as e:
+            print(f"⚠️ Could not register pause/resume signals: {e}")
+
     def signal_handler(signum, frame):
         """Handle SIGTERM gracefully by stopping recording and processing"""
         print(f"\n🛑 Received termination signal ({signum})")
@@ -896,6 +937,61 @@ def reprocess(summary_file):
             print(f"ERROR: Failed to reprocess summary: {e}")
     
     asyncio.run(run_reprocess())
+
+
+@cli.command()
+@click.argument('transcript_file')
+@click.option('--question', '-q', required=True, help='Question to ask about the transcript')
+def query(transcript_file, question):
+    """Query a transcript with AI."""
+    from pathlib import Path
+
+    transcript_path = Path(transcript_file)
+
+    # Handle summary JSON files (extract transcript from them)
+    if transcript_file.endswith('.json'):
+        if not transcript_path.exists():
+            print(json.dumps({"success": False, "error": f"File not found: {transcript_file}"}))
+            return
+
+        try:
+            with open(transcript_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                transcript_text = data.get('transcript', '')
+                if not transcript_text:
+                    print(json.dumps({"success": False, "error": "No transcript found in summary file"}))
+                    return
+        except Exception as e:
+            print(json.dumps({"success": False, "error": f"Failed to read summary file: {e}"}))
+            return
+    else:
+        # Handle plain text transcript files
+        if not transcript_path.exists():
+            print(json.dumps({"success": False, "error": f"File not found: {transcript_file}"}))
+            return
+
+        try:
+            with open(transcript_path, 'r', encoding='utf-8') as f:
+                transcript_text = f.read()
+        except Exception as e:
+            print(json.dumps({"success": False, "error": f"Failed to read transcript: {e}"}))
+            return
+
+    if not transcript_text or transcript_text.strip() == "":
+        print(json.dumps({"success": False, "error": "Transcript is empty"}))
+        return
+
+    # Always use llama3.2:3b for queries (fastest response times)
+    try:
+        summarizer = OllamaSummarizer(model_name="llama3.2:3b")
+        answer = summarizer.query_transcript(transcript_text, question)
+
+        if answer:
+            print(json.dumps({"success": True, "answer": answer}))
+        else:
+            print(json.dumps({"success": False, "error": "Failed to get response from AI"}))
+    except Exception as e:
+        print(json.dumps({"success": False, "error": f"Query failed: {e}"}))
 
 
 @cli.command()
@@ -1189,6 +1285,40 @@ def set_notifications(enabled):
         print(json.dumps({"success": True, "notifications_enabled": enabled}))
     else:
         print(f"ERROR: Failed to save notification preference")
+        print(json.dumps({"success": False, "error": "Failed to save config"}))
+
+
+@cli.command()
+def get_telemetry():
+    """Get the current telemetry preference and anonymous ID"""
+    from src.config import get_config
+
+    config = get_config()
+    enabled = config.get_telemetry_enabled()
+    anonymous_id = config.get_anonymous_id()
+
+    result = {
+        "telemetry_enabled": enabled,
+        "anonymous_id": anonymous_id
+    }
+
+    print(json.dumps(result, indent=2))
+
+
+@cli.command()
+@click.argument('enabled', type=bool)
+def set_telemetry(enabled):
+    """Set telemetry preference (True/False)"""
+    from src.config import get_config
+
+    config = get_config()
+    success = config.set_telemetry_enabled(enabled)
+
+    if success:
+        print(f"SUCCESS: Telemetry {'enabled' if enabled else 'disabled'}")
+        print(json.dumps({"success": True, "telemetry_enabled": enabled}))
+    else:
+        print(f"ERROR: Failed to save telemetry preference")
         print(json.dumps({"success": False, "error": "Failed to save config"}))
 
 

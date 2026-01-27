@@ -140,6 +140,14 @@ app/node_modules/
 # IDE
 .vscode/
 .idea/
+.cursor/
+.codex/
+.opencode/
+
+# AI tool configs (user/session-specific)
+.agents/
+.claude/
+.github/skills/
 
 # OS
 .DS_Store
@@ -149,6 +157,7 @@ Thumbs.db
 config/
 *.env
 *_config.json
+config.json
 !app/package*.json
 
 # Local documentation and review notes

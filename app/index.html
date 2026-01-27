@@ -2,22 +2,74 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Steno Recorder</title>
+    <title>StenoAI</title>
+    <!-- Distinctive typography - refined, professional -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <script>
+    (function() {
+        var t = localStorage.getItem('theme') || 'system';
+        var eff = t === 'system'
+            ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+            : t;
+        if (eff === 'light') document.documentElement.setAttribute('data-theme', 'light');
+    })();
+    </script>
     <style>
+        :root {
+            /* Refined color palette - softer contrast */
+            --bg-deep: #0a0a0b;
+            --bg-primary: #111113;
+            --bg-elevated: #18181b;
+            --bg-surface: #1f1f23;
+            --border-subtle: #27272a;
+            --border-default: #3f3f46;
+            --text-primary: #e4e4e7;
+            --text-secondary: #a1a1aa;
+            --text-muted: #71717a;
+            --accent-primary: #818cf8;
+            --accent-glow: rgba(129, 140, 248, 0.15);
+            --recording-red: #ef4444;
+            --recording-glow: rgba(239, 68, 68, 0.2);
+            --success-green: #22c55e;
+            --warning-amber: #f59e0b;
+        }
+
+        [data-theme="light"] {
+            --bg-deep: #e9ecf0;
+            --bg-primary: #f1f3f6;
+            --bg-elevated: #e1e5ea;
+            --bg-surface: #d8dce3;
+            --border-subtle: #cdd2d9;
+            --border-default: #a8b0b9;
+            --text-primary: #1a1d21;
+            --text-secondary: #495057;
+            --text-muted: #6c757d;
+            --accent-primary: #5b5fc7;
+            --accent-glow: rgba(91, 95, 199, 0.12);
+            --recording-red: #dc3545;
+            --recording-glow: rgba(220, 53, 69, 0.15);
+            --success-green: #198754;
+            --warning-amber: #d97706;
+        }
+
         * {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
         }
-        
+
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: #000;
-            color: #fff;
+            font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg-deep);
+            color: var(--text-primary);
             height: 100vh;
             display: flex;
             flex-direction: column;
             overflow: hidden;
+            /* Subtle noise texture for depth */
+            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.03'/%3E%3C/svg%3E");
         }
         
         /* Window drag area - make the top portion draggable */
@@ -26,10 +78,9 @@
             top: 0;
             left: 0;
             right: 0;
-            height: 40px;
+            height: 28px;
             -webkit-app-region: drag;
             z-index: 100;
-            pointer-events: none; /* Allow clicks to pass through to content below */
         }
         
         /* Make interactive elements non-draggable */
@@ -40,325 +91,680 @@
         
         /* Header with record controls */
         .header {
-            background: #111;
-            border-bottom: 1px solid #333;
-            padding: 36px 24px 16px 16px; /* More top padding, move content left */
+            background: var(--bg-primary);
+            border-bottom: 1px solid var(--border-subtle);
+            padding: 28px 20px 10px 20px;
             display: flex;
             align-items: center;
             justify-content: space-between;
             transition: padding-top 0.3s ease;
+            background: linear-gradient(180deg, var(--bg-elevated) 0%, var(--bg-primary) 100%);
+            -webkit-app-region: drag;
         }
-        
-        .header.with-update-banner {
-            padding-top: 84px; /* Additional space when update banner is shown */
+
+        .header.with-announcement-banner {
+            padding-top: 76px;
         }
-        
+
         .brand {
             display: flex;
             align-items: center;
-            gap: 12px;
+            gap: 10px;
+            cursor: pointer;
+            -webkit-app-region: no-drag;
         }
-        
+
+        .brand svg {
+            transition: all 0.3s ease;
+        }
+
+        .brand:hover svg {
+            filter: drop-shadow(0 0 8px rgba(99, 102, 241, 0.5));
+            transform: scale(1.05);
+        }
+
         .brand h1 {
-            font-size: 20px;
-            font-weight: 600;
-            color: #fff;
+            font-size: 18px;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+            background: linear-gradient(135deg, #6366f1, #818cf8);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
         }
-        
+
+        /* Prominent recording timer */
+        .recording-timer {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 15px;
+            font-weight: 600;
+            color: var(--recording-red);
+            background: rgba(239, 68, 68, 0.1);
+            padding: 6px 12px;
+            border-radius: 6px;
+            border: 1px solid rgba(239, 68, 68, 0.2);
+            letter-spacing: 0.05em;
+        }
+
         .header-actions {
             display: flex;
             align-items: center;
         }
-        
+
         .settings-btn {
             background: transparent;
-            border: 1px solid #444;
-            color: #ccc;
+            border: 1px solid var(--border-subtle);
+            color: var(--text-muted);
             padding: 8px 12px;
-            border-radius: 6px;
+            border-radius: 8px;
             cursor: pointer;
             font-size: 16px;
             transition: all 0.2s ease;
         }
-        
+
         .settings-btn:hover {
-            background: #333;
-            border-color: #555;
-            color: #fff;
+            background: var(--bg-surface);
+            border-color: var(--border-default);
+            color: var(--text-primary);
+            transform: translateY(-1px);
         }
-        
+
+        .settings-btn:active {
+            transform: translateY(0);
+        }
+
         .record-controls {
             display: flex;
             align-items: center;
-            gap: 16px;
+            gap: 10px;
         }
-        
+
         .session-input {
-            background: #222;
-            border: 1px solid #444;
-            color: #fff;
-            padding: 8px 12px;
-            border-radius: 6px;
+            background: transparent;
+            border: none;
+            border-bottom: 1px solid transparent;
+            color: var(--text-primary);
+            padding: 6px 4px;
             font-size: 14px;
-            min-width: 200px;
+            font-family: inherit;
+            min-width: 180px;
             outline: none;
+            transition: all 0.2s ease;
         }
-        
+
+        .session-input:hover {
+            border-bottom-color: var(--border-subtle);
+        }
+
         .session-input:focus {
-            border-color: #666;
-            background: #333;
+            border-bottom-color: var(--accent-primary);
+            background: transparent;
+            box-shadow: none;
         }
-        
+
+        .session-input::placeholder {
+            color: var(--text-muted);
+        }
+
         .status {
             display: flex;
             align-items: center;
             gap: 8px;
-            margin-right: 16px;
         }
         
         .status-dot {
             width: 8px;
             height: 8px;
             border-radius: 50%;
-            background: #666;
+            background: var(--text-muted);
+            transition: all 0.3s ease;
         }
-        
-        .status-dot.ready { background: #22c55e; }
-        .status-dot.recording { 
-            background: #ef4444; 
+
+        .status-dot.ready {
+            background: var(--success-green);
+            box-shadow: 0 0 8px rgba(34, 197, 94, 0.4);
+        }
+        .status-dot.recording {
+            background: var(--recording-red);
+            box-shadow: 0 0 12px var(--recording-glow), 0 0 24px var(--recording-glow);
+            animation: recordingPulse 1.5s ease-in-out infinite;
+        }
+        .status-dot.processing {
+            background: var(--warning-amber);
+            box-shadow: 0 0 8px rgba(245, 158, 11, 0.4);
             animation: pulse 1s infinite;
         }
-        .status-dot.processing { 
-            background: #f59e0b; 
-            animation: pulse 1s infinite;
-        }
-        
+
         @keyframes pulse {
             0%, 100% { opacity: 1; }
             50% { opacity: 0.5; }
         }
+
+        @keyframes recordingPulse {
+            0%, 100% {
+                transform: scale(1);
+                box-shadow: 0 0 12px var(--recording-glow), 0 0 24px var(--recording-glow);
+            }
+            50% {
+                transform: scale(1.15);
+                box-shadow: 0 0 16px var(--recording-glow), 0 0 32px var(--recording-glow);
+            }
+        }
+
+        /* Audio waveform animation for recording state */
+        .waveform {
+            display: none;
+            align-items: center;
+            gap: 2px;
+            height: 16px;
+            margin-left: 8px;
+        }
+
+        .recording .waveform {
+            display: flex;
+        }
+
+        .waveform-bar {
+            width: 3px;
+            background: var(--recording-red);
+            border-radius: 2px;
+            animation: waveform 0.8s ease-in-out infinite;
+        }
+
+        .waveform-bar:nth-child(1) { animation-delay: 0s; height: 8px; }
+        .waveform-bar:nth-child(2) { animation-delay: 0.1s; height: 12px; }
+        .waveform-bar:nth-child(3) { animation-delay: 0.2s; height: 16px; }
+        .waveform-bar:nth-child(4) { animation-delay: 0.3s; height: 10px; }
+        .waveform-bar:nth-child(5) { animation-delay: 0.4s; height: 6px; }
+
+        @keyframes waveform {
+            0%, 100% { transform: scaleY(0.5); }
+            50% { transform: scaleY(1); }
+        }
         
         .btn {
-            background: #333;
-            color: #fff;
-            border: 1px solid #555;
-            padding: 8px 16px;
-            border-radius: 6px;
-            font-size: 14px;
+            background: var(--bg-surface);
+            color: var(--text-primary);
+            border: 1px solid var(--border-default);
+            padding: 6px 14px;
+            border-radius: 7px;
+            font-size: 13px;
+            font-weight: 500;
             cursor: pointer;
-            transition: all 0.2s;
+            transition: all 0.2s ease;
             display: flex;
             align-items: center;
-            gap: 6px;
+            gap: 7px;
+            font-family: inherit;
         }
-        
+
         .btn:hover {
-            background: #444;
-            border-color: #666;
+            background: var(--bg-elevated);
+            border-color: var(--border-default);
+            transform: translateY(-1px);
         }
-        
+
+        .btn:active {
+            transform: translateY(0);
+        }
+
         .btn-primary {
-            background: #fff;
-            color: #000;
-            border-color: #fff;
+            background: var(--bg-surface);
+            color: var(--text-primary);
+            border-color: var(--border-default);
+            font-weight: 600;
         }
-        
+
         .btn-primary:hover {
-            background: #f5f5f5;
+            background: var(--bg-surface);
+            border-color: var(--border-default);
         }
-        
+
         .btn-danger {
-            background: #ef4444;
-            border-color: #ef4444;
+            background: var(--recording-red);
+            border-color: var(--recording-red);
+            box-shadow: 0 0 20px var(--recording-glow);
         }
-        
+
         .btn-danger:hover {
-            background: #dc2626;
+            background: var(--recording-red);
+            filter: brightness(0.9);
+            box-shadow: 0 0 28px var(--recording-glow);
         }
-        
+
         .btn:disabled {
             opacity: 0.5;
             cursor: not-allowed;
+            transform: none;
         }
         
-        /* Settings Panel */
+        /* Unified Settings Panel */
         .settings-panel {
             position: fixed;
             top: 0;
-            right: -400px;
-            width: 400px;
+            right: -480px;
+            width: 480px;
             height: 100vh;
-            background: #111;
-            border-left: 1px solid #333;
+            background: var(--bg-primary);
+            border-left: 1px solid var(--border-subtle);
             transition: right 0.3s ease;
             z-index: 1000;
             display: flex;
             flex-direction: column;
         }
-        
+
+        .settings-panel.open {
+            right: 0;
+        }
+
         .settings-header {
             padding: 20px;
-            border-bottom: 1px solid #333;
+            border-bottom: 1px solid var(--border-subtle);
             display: flex;
             justify-content: space-between;
             align-items: center;
         }
-        
+
         .settings-header h2 {
             margin: 0;
             font-size: 18px;
-            color: #fff;
+            font-weight: 600;
+            color: var(--text-primary);
         }
-        
-        .close-settings {
+
+        .settings-close {
             background: none;
             border: none;
-            color: #ccc;
+            color: var(--text-muted);
             font-size: 18px;
             cursor: pointer;
             padding: 4px 8px;
             border-radius: 4px;
+            transition: all 0.2s ease;
         }
-        
-        .close-settings:hover {
-            background: #333;
-            color: #fff;
+
+        .settings-close:hover {
+            background: var(--bg-surface);
+            color: var(--text-primary);
         }
-        
+
+        .settings-body {
+            flex: 1;
+            display: flex;
+            overflow: hidden;
+        }
+
+        .settings-nav {
+            width: 140px;
+            background: var(--bg-elevated);
+            border-right: 1px solid var(--border-subtle);
+            padding: 12px 0;
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            flex-shrink: 0;
+        }
+
+        .settings-nav-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 16px;
+            background: transparent;
+            border: none;
+            color: var(--text-secondary);
+            font-size: 13px;
+            font-weight: 500;
+            font-family: inherit;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            text-align: left;
+            border-left: 2px solid transparent;
+        }
+
+        .settings-nav-item:hover {
+            background: var(--bg-surface);
+            color: var(--text-primary);
+        }
+
+        .settings-nav-item.active {
+            background: var(--bg-surface);
+            color: var(--accent-primary);
+            border-left-color: var(--accent-primary);
+        }
+
+        .settings-nav-item svg {
+            width: 16px;
+            height: 16px;
+            flex-shrink: 0;
+        }
+
         .settings-content {
             flex: 1;
             overflow-y: auto;
             padding: 20px;
         }
-        
+
+        .settings-tab {
+            display: none;
+        }
+
+        .settings-tab.active {
+            display: block;
+        }
+
         .settings-section {
-            margin-bottom: 32px;
+            margin-bottom: 28px;
         }
-        
+
         .settings-section h3 {
-            margin: 0 0 12px 0;
-            font-size: 16px;
-            color: #fff;
+            margin: 0 0 8px 0;
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-primary);
         }
-        
+
         .settings-section h4 {
             margin: 16px 0 8px 0;
-            font-size: 14px;
-            color: #ccc;
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--text-secondary);
         }
-        
+
         .settings-section p {
-            margin: 0 0 16px 0;
-            color: #aaa;
-            font-size: 14px;
-            line-height: 1.4;
+            margin: 0 0 12px 0;
+            color: var(--text-muted);
+            font-size: 13px;
+            line-height: 1.5;
         }
-        
-        .setup-info ul {
-            margin: 16px 0;
-            padding-left: 20px;
-            color: #ccc;
+
+        /* Settings row layout */
+        .settings-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 0;
+            border-bottom: 1px solid var(--border-subtle);
         }
-        
-        .setup-info li {
-            margin-bottom: 4px;
-            font-size: 14px;
+
+        .settings-row:last-of-type,
+        .settings-row:last-child {
+            border-bottom: none;
         }
-        
-        .prompt-viewer {
-            background: #1a1a1a;
-            border: 1px solid #333;
-            border-radius: 6px;
-            padding: 16px;
-            font-family: 'Monaco', 'Menlo', monospace;
-            font-size: 12px;
-            line-height: 1.4;
-            white-space: pre-wrap;
-            color: #ccc;
-            max-height: 300px;
-            overflow-y: auto;
-        }
-        
-        /* Debug Panel */
-        .debug-panel {
-            position: fixed;
-            top: 0;
-            right: -500px;
-            width: 500px;
-            height: 100vh;
-            background: #0a0a0a;
-            border-left: 1px solid #333;
-            transition: right 0.3s ease;
-            z-index: 1000;
+
+        .settings-row-text {
             display: flex;
             flex-direction: column;
+            gap: 2px;
+            flex: 1;
+            min-width: 0;
         }
-        
-        .debug-header {
-            padding: 20px;
-            border-bottom: 1px solid #333;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            background: #111;
+
+        .settings-row-text span {
+            font-size: 13px;
+            color: var(--text-primary);
         }
-        
-        .debug-header h2 {
-            margin: 0;
-            font-size: 18px;
-            color: #fff;
+
+        .settings-row-text small {
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        .settings-action-btn {
+            background: var(--bg-surface);
+            color: var(--text-secondary);
+            border: 1px solid var(--border-default);
+            border-radius: 4px;
+            padding: 4px 10px;
+            font-size: 12px;
+            font-family: inherit;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            flex-shrink: 0;
+            margin-left: 12px;
+        }
+
+        .settings-action-btn:hover {
+            background: var(--bg-elevated);
+            color: var(--text-primary);
+        }
+
+        .settings-action-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .settings-toggle {
+            position: relative;
+            width: 40px;
+            height: 22px;
+            flex-shrink: 0;
+        }
+
+        .settings-toggle input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .settings-toggle .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: var(--border-default);
+            border-radius: 11px;
+            transition: background 0.2s ease;
+        }
+
+        .settings-toggle .toggle-slider:before {
+            content: "";
+            position: absolute;
+            height: 16px;
+            width: 16px;
+            left: 3px;
+            bottom: 3px;
+            background: var(--text-primary);
+            border-radius: 50%;
+            transition: transform 0.2s ease;
+        }
+
+        .settings-toggle input:checked + .toggle-slider {
+            background: var(--accent-primary);
+        }
+
+        .settings-toggle input:checked + .toggle-slider:before {
+            transform: translateX(18px);
+        }
+
+        /* Full-width developer tab: hide nav */
+        .settings-body.developer-active .settings-nav {
+            display: none;
+        }
+
+        .dev-tab-header {
             display: flex;
             align-items: center;
             gap: 8px;
+            margin-bottom: 12px;
         }
-        
+
+        .dev-back-btn {
+            background: none;
+            border: 1px solid var(--border-subtle);
+            color: var(--text-muted);
+            padding: 4px 8px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            font-family: inherit;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            transition: all 0.15s ease;
+        }
+
+        .dev-back-btn:hover {
+            background: var(--bg-surface);
+            color: var(--text-primary);
+            border-color: var(--border-default);
+        }
+
+        /* Debug console in developer tab */
         .debug-console {
             flex: 1;
-            background: #000;
-            color: #a0a0a0;
-            padding: 20px;
-            font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
+            background: var(--bg-deep);
+            color: var(--text-muted);
+            padding: 16px;
+            font-family: 'JetBrains Mono', 'Monaco', 'Menlo', 'Consolas', monospace;
             font-size: 11px;
             line-height: 1.4;
             overflow-y: auto;
             white-space: pre-wrap;
             word-wrap: break-word;
+            border: 1px solid var(--border-subtle);
+            border-radius: 6px;
+            min-height: 300px;
+            max-height: calc(100vh - 200px);
         }
-        
+
         .debug-console::-webkit-scrollbar {
             width: 8px;
         }
-        
+
         .debug-console::-webkit-scrollbar-track {
-            background: #111;
+            background: var(--bg-primary);
         }
-        
+
         .debug-console::-webkit-scrollbar-thumb {
-            background: #333;
+            background: var(--border-default);
             border-radius: 4px;
         }
-        
+
         .debug-console::-webkit-scrollbar-thumb:hover {
-            background: #555;
+            background: var(--text-muted);
+        }
+
+        .settings-version {
+            margin-top: 20px;
+            padding-top: 16px;
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        /* Model list in AI tab */
+        .model-list {
+            display: flex;
+            flex-direction: column;
+            gap: 1px;
+            background: var(--border-subtle);
+            border: 1px solid var(--border-subtle);
+            border-radius: 6px;
+            overflow: hidden;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .model-list-loading {
+            padding: 12px;
+            color: var(--text-muted);
+            font-size: 13px;
+            background: var(--bg-elevated);
+        }
+
+        .model-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 12px;
+            background: var(--bg-elevated);
+            cursor: pointer;
+            transition: background 0.15s ease;
+        }
+
+        .model-item:hover {
+            background: var(--bg-surface);
+        }
+
+        .model-item.active {
+            background: rgba(129, 140, 248, 0.08);
+        }
+
+        .model-item-info {
+            display: flex;
+            flex-direction: column;
+            gap: 1px;
+            min-width: 0;
+            flex: 1;
+        }
+
+        .model-item-name {
+            font-size: 13px;
+            font-weight: 500;
+            font-family: 'JetBrains Mono', Monaco, monospace;
+            color: var(--text-primary);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .model-item-name .model-tag {
+            font-size: 10px;
+            font-weight: 500;
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            color: var(--text-muted);
+            background: var(--bg-deep);
+            padding: 1px 5px;
+            border-radius: 3px;
+        }
+
+        .model-item-name .model-active-badge {
+            font-size: 10px;
+            font-weight: 600;
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            color: var(--accent-primary);
+        }
+
+        .model-item-meta {
+            font-size: 11px;
+            color: var(--text-muted);
+        }
+
+        .model-item-action {
+            flex-shrink: 0;
+            margin-left: 12px;
+        }
+
+        .model-item .model-progress {
+            display: none;
+            margin-top: 4px;
+        }
+
+        .model-item .progress-text {
+            font-size: 10px;
+            color: var(--success-green);
+            font-family: 'JetBrains Mono', Monaco, monospace;
         }
 
         /* Model list scrollbar */
-        #model-list::-webkit-scrollbar {
+        .model-list::-webkit-scrollbar {
             width: 8px;
         }
 
-        #model-list::-webkit-scrollbar-track {
-            background: #1a1a1a;
+        .model-list::-webkit-scrollbar-track {
+            background: var(--bg-primary);
             border-radius: 4px;
         }
 
-        #model-list::-webkit-scrollbar-thumb {
-            background: #333;
+        .model-list::-webkit-scrollbar-thumb {
+            background: var(--border-default);
             border-radius: 4px;
         }
 
-        #model-list::-webkit-scrollbar-thumb:hover {
-            background: #555;
+        .model-list::-webkit-scrollbar-thumb:hover {
+            background: var(--text-muted);
         }
 
         /* Main content area */
@@ -371,51 +777,124 @@
         /* Sidebar with meetings list */
         .sidebar {
             width: 320px;
-            background: #111;
-            border-right: 1px solid #333;
+            background: var(--bg-primary);
+            border-right: 1px solid var(--border-subtle);
             display: flex;
             flex-direction: column;
+            transition: width 0.3s ease;
+            position: relative;
         }
-        
+
+        .sidebar.collapsed {
+            width: 0;
+            min-width: 0;
+        }
+
+        .sidebar.collapsed .sidebar-header,
+        .sidebar.collapsed .meetings-list {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .sidebar-toggle {
+            position: fixed;
+            left: 319px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 24px;
+            height: 48px;
+            background: var(--bg-elevated);
+            border: 1px solid var(--border-subtle);
+            border-left: none;
+            border-radius: 0 6px 6px 0;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-muted);
+            font-size: 12px;
+            z-index: 100;
+            transition: left 0.3s ease, background 0.2s ease;
+        }
+
+        .sidebar-toggle:hover {
+            background: var(--bg-surface);
+            color: var(--text-primary);
+        }
+
+        .sidebar-toggle.collapsed {
+            left: 0;
+        }
+
+        .sidebar-toggle-icon {
+            transition: transform 0.3s ease;
+        }
+
+        .sidebar-toggle.collapsed .sidebar-toggle-icon {
+            transform: rotate(180deg);
+        }
+
         .sidebar-header {
             padding: 20px;
-            border-bottom: 1px solid #333;
+            border-bottom: 1px solid var(--border-subtle);
         }
-        
+
         .sidebar-title {
             display: flex;
             align-items: center;
             justify-content: space-between;
             margin-bottom: 8px;
         }
-        
+
         .sidebar-header h2 {
-            font-size: 16px;
+            font-size: 13px;
             font-weight: 600;
-            color: #fff;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
         }
         
         
+        .search-wrapper {
+            position: relative;
+            margin: 8px 0 4px 0;
+        }
+
+        .search-icon {
+            position: absolute;
+            left: 10px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--text-muted);
+            pointer-events: none;
+        }
+
         .search-input {
-            background: #222;
-            border: 1px solid #444;
-            color: #fff;
-            padding: 8px 12px;
-            border-radius: 6px;
+            background: var(--bg-surface);
+            border: 1px solid var(--border-subtle);
+            color: var(--text-primary);
+            padding: 10px 14px 10px 32px;
+            border-radius: 8px;
             font-size: 14px;
+            font-family: inherit;
             width: 100%;
             outline: none;
-            margin: 12px 0 8px 0;
+            transition: all 0.2s ease;
         }
-        
+
         .search-input:focus {
-            border-color: #666;
-            background: #333;
+            border-color: var(--accent-primary);
+            background: var(--bg-elevated);
+            box-shadow: 0 0 0 3px var(--accent-glow);
+        }
+
+        .search-input::placeholder {
+            color: var(--text-muted);
         }
         
         .sidebar-header p {
             font-size: 14px;
-            color: #888;
+            color: var(--text-muted);
         }
         
         .meetings-list {
@@ -425,53 +904,112 @@
         }
         
         .meeting-item {
-            background: #1a1a1a;
-            border: 1px solid #333;
+            background: var(--bg-elevated);
+            border: 1px solid var(--border-subtle);
             border-radius: 8px;
-            padding: 16px;
-            margin-bottom: 8px;
+            padding: 10px 12px;
+            margin-bottom: 6px;
             cursor: pointer;
-            transition: all 0.2s;
+            transition: all 0.2s ease;
             position: relative;
         }
-        
+
         .meeting-delete {
             position: absolute;
             top: 8px;
             right: 8px;
-            background: #444;
+            background: var(--bg-surface);
             border: none;
-            color: #999;
-            border-radius: 4px;
-            padding: 4px 6px;
+            color: var(--text-muted);
+            border-radius: 6px;
+            padding: 4px 8px;
             font-size: 12px;
             cursor: pointer;
             opacity: 0;
             transition: all 0.2s;
         }
-        
+
         .meeting-item:hover .meeting-delete {
             opacity: 1;
         }
-        
+
         .meeting-delete:hover {
-            background: #ef4444;
-            color: #fff;
+            background: var(--recording-red);
+            color: var(--text-primary);
         }
-        
+
         .meeting-item:hover {
-            background: #222;
-            border-color: #444;
+            background: var(--bg-surface);
+            border-color: var(--border-default);
+            transform: translateX(2px);
         }
-        
+
         .meeting-item.active {
-            background: #333;
-            border-color: #555;
+            background: var(--bg-surface);
+            border-color: var(--accent-primary);
+            box-shadow: 0 0 0 1px var(--accent-primary), 0 0 20px var(--accent-glow);
+        }
+
+        /* Staggered fade-in animation for meeting items */
+        .meeting-item {
+            animation: fadeSlideIn 0.3s ease-out forwards;
+            opacity: 0;
+        }
+
+        @keyframes fadeSlideIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .meeting-item:nth-child(1) { animation-delay: 0.02s; }
+        .meeting-item:nth-child(2) { animation-delay: 0.04s; }
+        .meeting-item:nth-child(3) { animation-delay: 0.06s; }
+        .meeting-item:nth-child(4) { animation-delay: 0.08s; }
+        .meeting-item:nth-child(5) { animation-delay: 0.10s; }
+        .meeting-item:nth-child(6) { animation-delay: 0.12s; }
+        .meeting-item:nth-child(7) { animation-delay: 0.14s; }
+        .meeting-item:nth-child(8) { animation-delay: 0.16s; }
+        .meeting-item:nth-child(9) { animation-delay: 0.18s; }
+        .meeting-item:nth-child(10) { animation-delay: 0.20s; }
+
+        /* Action items badge on meeting cards */
+        .meeting-badges {
+            display: flex;
+            gap: 6px;
+            margin-top: 6px;
+        }
+
+        .meeting-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 11px;
+            font-weight: 500;
+            padding: 3px 8px;
+            border-radius: 4px;
+            background: var(--bg-deep);
+            color: var(--text-muted);
+        }
+
+        .meeting-badge.actions {
+            background: rgba(99, 102, 241, 0.15);
+            color: var(--accent-primary);
+        }
+
+        .meeting-badge.participants {
+            background: rgba(34, 197, 94, 0.15);
+            color: var(--success-green);
         }
         
         .meeting-item.processing {
-            background: #1a1a1a;
-            border-color: #f59e0b;
+            background: var(--bg-elevated);
+            border-color: var(--warning-amber);
             opacity: 0.7;
             position: relative;
         }
@@ -480,16 +1018,16 @@
             position: absolute;
             bottom: 8px;
             right: 8px;
-            background: rgba(0, 0, 0, 0.8);
+            background: var(--bg-deep);
             border-radius: 4px;
             padding: 4px 8px;
         }
-        
+
         .processing-indicator {
             display: flex;
             align-items: center;
             gap: 8px;
-            color: #f59e0b;
+            color: var(--warning-amber);
             font-size: 12px;
             font-weight: 500;
         }
@@ -497,8 +1035,8 @@
         .processing-spinner {
             width: 16px;
             height: 16px;
-            border: 2px solid #333;
-            border-top: 2px solid #f59e0b;
+            border: 2px solid var(--bg-surface);
+            border-top: 2px solid var(--warning-amber);
             border-radius: 50%;
             animation: spin 1s linear infinite;
         }
@@ -509,36 +1047,38 @@
         }
         
         .meeting-item h3 {
-            font-size: 14px;
+            font-size: 13px;
             font-weight: 600;
-            color: #fff;
-            margin-bottom: 6px;
+            color: color-mix(in srgb, var(--text-primary) 40%, var(--text-secondary));
+            margin-bottom: 4px;
             line-height: 1.3;
         }
-        
+
         .meeting-meta {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 8px;
+            margin-bottom: 6px;
         }
-        
+
         .meeting-date {
             font-size: 12px;
-            color: #888;
+            color: var(--text-muted);
         }
-        
+
         .meeting-duration {
-            font-size: 12px;
-            color: #666;
-            background: #222;
-            padding: 2px 6px;
-            border-radius: 3px;
+            font-size: 11px;
+            font-weight: 500;
+            color: var(--text-secondary);
+            background: var(--bg-deep);
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-family: 'JetBrains Mono', monospace;
         }
-        
+
         .meeting-preview {
-            font-size: 13px;
-            color: #aaa;
+            font-size: 12px;
+            color: var(--text-secondary);
             line-height: 1.4;
             display: -webkit-box;
             -webkit-line-clamp: 2;
@@ -549,36 +1089,68 @@
         /* Main content area */
         .content {
             flex: 1;
-            background: #000;
+            background: var(--bg-deep);
             overflow: hidden;
             display: flex;
             flex-direction: column;
         }
-        
+
         .content-empty {
             display: flex;
             align-items: center;
             justify-content: center;
             height: 100%;
             flex-direction: column;
-            color: #666;
+            color: var(--text-muted);
+            padding: 40px;
         }
-        
+
         .content-empty-icon {
-            font-size: 48px;
-            margin-bottom: 16px;
-            opacity: 0.5;
+            font-size: 64px;
+            margin-bottom: 24px;
+            opacity: 0.3;
+            filter: grayscale(0.5);
         }
-        
+
         .content-empty h3 {
-            font-size: 18px;
+            font-size: 20px;
             margin-bottom: 8px;
-            font-weight: 500;
+            font-weight: 600;
+            color: var(--text-secondary);
         }
-        
+
         .content-empty p {
             font-size: 14px;
-            color: #888;
+            color: var(--text-muted);
+            margin-bottom: 24px;
+        }
+
+        .shortcut-hint {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: var(--bg-elevated);
+            border: 1px solid var(--border-subtle);
+            padding: 12px 20px;
+            border-radius: 10px;
+            margin-top: 8px;
+        }
+
+        .shortcut-hint span {
+            color: var(--text-muted);
+            font-size: 13px;
+        }
+
+        .kbd {
+            background: var(--bg-surface);
+            border: 1px solid var(--border-default);
+            border-bottom-width: 2px;
+            padding: 4px 8px;
+            border-radius: 6px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px;
+            font-weight: 500;
+            color: var(--text-primary);
         }
         
         /* Meeting detail view */
@@ -594,9 +1166,9 @@
         }
         
         .meeting-header {
-            margin-bottom: 32px;
-            padding-bottom: 24px;
-            border-bottom: 1px solid #333;
+            margin-bottom: 36px;
+            padding-bottom: 28px;
+            border-bottom: 1px solid var(--border-subtle);
         }
         
         .meeting-header-top {
@@ -607,49 +1179,52 @@
         }
         
         .meeting-title {
-            font-size: 24px;
+            font-size: 26px;
             font-weight: 700;
-            color: #fff;
+            color: color-mix(in srgb, var(--text-primary) 40%, var(--text-secondary));
             margin: 0;
             flex: 1;
+            letter-spacing: -0.02em;
+            line-height: 1.3;
         }
         
         .reprocess-btn {
-            background: #333;
-            color: #fff;
-            border: 1px solid #555;
-            border-radius: 6px;
-            padding: 8px 16px;
-            font-size: 14px;
+            background: var(--bg-surface);
+            color: var(--text-secondary);
+            border: 1px solid var(--border-default);
+            border-radius: 4px;
+            padding: 4px 6px;
+            font-size: 12px;
             cursor: pointer;
             transition: all 0.2s;
             display: flex;
             align-items: center;
-            gap: 8px;
-            margin-left: 16px;
+            gap: 4px;
+            margin-left: 8px;
             flex-shrink: 0;
         }
-        
+
         .reprocess-btn:hover {
-            background: #444;
+            background: var(--bg-elevated);
+            color: var(--text-primary);
         }
-        
+
         .reprocess-btn:active {
             transform: translateY(0);
         }
-        
+
         .reprocess-btn:disabled {
-            background: #333;
-            color: #999;
-            border-color: #555;
+            background: var(--bg-surface);
+            color: var(--text-muted);
+            border-color: var(--border-subtle);
             cursor: not-allowed;
-            transform: none;
+            opacity: 0.5;
         }
-        
+
         .reprocess-btn.processing {
-            background: #FF9800;
-            color: #fff;
-            border-color: #FF9800;
+            background: var(--warning-amber);
+            color: var(--bg-deep);
+            border-color: var(--warning-amber);
         }
         
         .reprocess-spinner {
@@ -669,9 +1244,9 @@
             position: absolute;
             top: 8px;
             right: 8px;
-            background: #333;
-            color: #fff;
-            border: 1px solid #555;
+            background: var(--bg-surface);
+            color: var(--text-primary);
+            border: 1px solid var(--border-default);
             border-radius: 4px;
             padding: 6px;
             cursor: pointer;
@@ -681,7 +1256,7 @@
         }
         
         .copy-transcript-btn:hover {
-            background: #444;
+            background: var(--bg-elevated);
             opacity: 1;
             transform: translateY(-1px);
         }
@@ -691,28 +1266,28 @@
         }
         
         .copy-transcript-btn.copied {
-            background: #4CAF50;
-            border-color: #4CAF50;
+            background: var(--success-green);
+            border-color: var(--success-green);
             opacity: 1;
         }
 
         .copy-notes-btn {
-            background: #333;
-            color: #fff;
-            border: 1px solid #555;
-            border-radius: 6px;
-            padding: 8px 12px;
+            background: var(--bg-surface);
+            color: var(--text-secondary);
+            border: 1px solid var(--border-default);
+            border-radius: 4px;
+            padding: 4px 6px;
             cursor: pointer;
             transition: all 0.2s;
             display: flex;
             align-items: center;
-            gap: 6px;
-            font-size: 14px;
+            gap: 4px;
+            font-size: 12px;
         }
 
         .copy-notes-btn:hover {
-            background: #444;
-            border-color: #666;
+            background: var(--bg-elevated);
+            color: var(--text-primary);
         }
 
         .copy-notes-btn:active {
@@ -720,8 +1295,9 @@
         }
 
         .copy-notes-btn.copied {
-            background: #4CAF50;
-            border-color: #4CAF50;
+            background: var(--success-green);
+            border-color: var(--success-green);
+            color: var(--bg-primary);
         }
 
         .meeting-title-container {
@@ -734,7 +1310,7 @@
 
         .meeting-title {
             margin: 0;
-            color: #fff;
+            color: color-mix(in srgb, var(--text-primary) 40%, var(--text-secondary));
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
@@ -742,9 +1318,9 @@
         }
 
         .meeting-title-input {
-            background: #222;
-            border: 1px solid #666;
-            color: #fff;
+            background: var(--bg-elevated);
+            border: 1px solid var(--border-default);
+            color: var(--text-primary);
             padding: 8px 12px;
             border-radius: 6px;
             font-size: 24px;
@@ -754,14 +1330,14 @@
         }
 
         .meeting-title-input:focus {
-            border-color: #888;
-            background: #333;
+            border-color: var(--text-muted);
+            background: var(--bg-surface);
         }
 
         .edit-title-btn {
             background: transparent;
-            border: 1px solid #555;
-            color: #888;
+            border: 1px solid var(--border-default);
+            color: var(--text-muted);
             padding: 6px;
             border-radius: 4px;
             cursor: pointer;
@@ -777,9 +1353,9 @@
         }
 
         .edit-title-btn:hover {
-            background: #333;
-            border-color: #666;
-            color: #fff;
+            background: var(--bg-surface);
+            border-color: var(--border-default);
+            color: var(--text-primary);
         }
 
         .title-edit-actions {
@@ -800,24 +1376,25 @@
         }
 
         .save-title-btn {
-            background: #4CAF50;
-            border-color: #4CAF50;
-            color: #fff;
+            background: var(--success-green);
+            border-color: var(--success-green);
+            color: var(--bg-primary);
         }
 
         .save-title-btn:hover {
-            background: #45a049;
+            background: var(--success-green);
+            filter: brightness(0.9);
         }
 
         .cancel-title-btn {
             background: transparent;
-            border-color: #555;
-            color: #888;
+            border-color: var(--border-default);
+            color: var(--text-muted);
         }
 
         .cancel-title-btn:hover {
-            background: #333;
-            color: #fff;
+            background: var(--bg-surface);
+            color: var(--text-primary);
         }
 
         @keyframes spin {
@@ -829,75 +1406,88 @@
             display: flex;
             gap: 24px;
             align-items: center;
-            color: #888;
-            font-size: 14px;
+            color: var(--text-muted);
+            font-size: 12px;
+            margin-top: 10px;
         }
         
         .meeting-section {
-            margin-bottom: 32px;
+            margin-bottom: 36px;
         }
-        
+
         .section-title {
-            font-size: 16px;
+            font-size: 12px;
             font-weight: 600;
-            color: #fff;
+            color: var(--text-secondary);
+            letter-spacing: -0.01em;
             margin-bottom: 12px;
             display: flex;
             align-items: center;
             gap: 8px;
         }
-        
+
         .section-content {
-            color: #ccc;
-            line-height: 1.6;
+            color: var(--text-secondary);
+            line-height: 1.7;
+            font-size: 15px;
         }
         
         .key-points-list {
             list-style: none;
             padding: 0;
         }
-        
+
         .key-points-list li {
             padding: 8px 0;
             padding-left: 20px;
             position: relative;
-            color: #ccc;
-            line-height: 1.5;
+            color: var(--text-secondary);
+            line-height: 1.6;
         }
-        
+
         .key-points-list li:before {
-            content: "•";
+            content: "";
             position: absolute;
             left: 0;
-            color: #666;
-            font-weight: bold;
+            top: 14px;
+            width: 5px;
+            height: 5px;
+            background: var(--accent-primary);
+            border-radius: 50%;
         }
 
         .action-items-list {
             list-style: none;
             padding: 0;
         }
-        
+
         .action-items-list li {
-            background: #1a1a1a;
-            border: 1px solid #333;
-            border-radius: 6px;
-            padding: 12px;
-            margin-bottom: 8px;
-            color: #ccc;
-            line-height: 1.5;
+            background: var(--bg-elevated);
+            border: 1px solid var(--border-subtle);
+            border-left: 3px solid var(--accent-primary);
+            border-radius: 0 8px 8px 0;
+            padding: 14px 16px;
+            margin-bottom: 10px;
+            color: var(--text-secondary);
+            line-height: 1.6;
+            transition: all 0.2s ease;
+        }
+
+        .action-items-list li:hover {
+            background: var(--bg-surface);
+            border-left-color: var(--success-green);
         }
         
         /* Transcript section */
         .transcript-content {
-            background: #111;
-            border: 1px solid #333;
-            border-radius: 8px;
-            padding: 20px;
-            font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
-            font-size: 14px;
-            line-height: 1.6;
-            color: #ddd;
+            background: var(--bg-primary);
+            border: 1px solid var(--border-subtle);
+            border-radius: 10px;
+            padding: 24px;
+            font-family: 'JetBrains Mono', 'SF Mono', Monaco, monospace;
+            font-size: 13px;
+            line-height: 1.8;
+            color: var(--text-secondary);
             white-space: pre-wrap;
             max-height: 400px;
             overflow-y: auto;
@@ -923,7 +1513,7 @@
         
         .drop-message {
             text-align: center;
-            color: #fff;
+            color: var(--text-primary);
             font-size: 24px;
             font-weight: 600;
         }
@@ -932,29 +1522,28 @@
         ::-webkit-scrollbar {
             width: 8px;
         }
-        
+
         ::-webkit-scrollbar-track {
-            background: #111;
+            background: var(--bg-primary);
         }
-        
+
         ::-webkit-scrollbar-thumb {
-            background: #333;
+            background: var(--border-default);
             border-radius: 4px;
         }
-        
+
         ::-webkit-scrollbar-thumb:hover {
-            background: #444;
+            background: var(--text-muted);
         }
         
-        /* Update Banner */
-        .update-banner {
+        /* Announcement Banner */
+        .announcement-banner {
             position: fixed;
             top: 0;
             left: 0;
             right: 0;
-            background: linear-gradient(135deg, #4F46E5, #7C3AED);
             color: white;
-            padding: 12px 20px;
+            padding: 12px 20px 12px 80px;
             display: none;
             align-items: center;
             justify-content: space-between;
@@ -962,7 +1551,19 @@
             box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
             animation: slideDown 0.3s ease-out;
         }
-        
+
+        .announcement-banner.type-info {
+            background: linear-gradient(135deg, #0ea5e9, #06b6d4);
+        }
+
+        .announcement-banner.type-release {
+            background: linear-gradient(135deg, #4F46E5, #7C3AED);
+        }
+
+        .announcement-banner.type-warning {
+            background: linear-gradient(135deg, #d97706, #f59e0b);
+        }
+
         @keyframes slideDown {
             from {
                 transform: translateY(-100%);
@@ -996,62 +1597,75 @@
             }
         }
 
-        .update-banner.show {
+        .announcement-banner.show {
             display: flex;
         }
-        
-        .update-info {
+
+        .announcement-info {
             display: flex;
             align-items: center;
             gap: 12px;
+            min-width: 0;
         }
-        
-        .update-icon {
-            font-size: 20px;
-            animation: pulse 2s infinite;
+
+        .announcement-icon {
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
         }
-        
-        .update-text {
+
+        .announcement-icon svg {
+            width: 20px;
+            height: 20px;
+            fill: white;
+        }
+
+        .announcement-text {
             font-size: 14px;
+            min-width: 0;
         }
-        
-        .update-text .version {
+
+        .announcement-text .announcement-title {
             font-weight: 600;
         }
-        
-        .update-actions {
+
+        .announcement-text .announcement-message {
+            opacity: 0.9;
+            margin-left: 6px;
+        }
+
+        .announcement-actions {
             display: flex;
             align-items: center;
             gap: 12px;
+            flex-shrink: 0;
         }
-        
-        .update-btn {
-            background: rgba(255, 255, 255, 0.2);
-            border: 1px solid rgba(255, 255, 255, 0.3);
-            color: white;
+
+        .announcement-btn {
+            background: white;
+            border: none;
+            color: #4F46E5;
             padding: 6px 12px;
             border-radius: 4px;
             font-size: 13px;
+            font-weight: 600;
             cursor: pointer;
             transition: all 0.2s;
         }
-        
-        .update-btn:hover {
-            background: rgba(255, 255, 255, 0.3);
-            border-color: rgba(255, 255, 255, 0.5);
+
+        .type-info .announcement-btn {
+            color: #0e7490;
         }
-        
-        .update-btn.primary {
-            background: white;
-            color: #4F46E5;
-            font-weight: 600;
+
+        .type-warning .announcement-btn {
+            color: #92400e;
         }
-        
-        .update-btn.primary:hover {
+
+        .announcement-btn:hover {
             background: #f3f4f6;
         }
-        
-        .dismiss-update {
+
+        .dismiss-announcement {
             background: none;
             border: none;
             color: rgba(255, 255, 255, 0.7);
@@ -1061,8 +1675,8 @@
             border-radius: 2px;
             transition: color 0.2s;
         }
-        
-        .dismiss-update:hover {
+
+        .dismiss-announcement:hover {
             color: white;
         }
 
@@ -1081,8 +1695,8 @@
         }
         
         .setup-content {
-            background: #111;
-            border: 1px solid #333;
+            background: var(--bg-primary);
+            border: 1px solid var(--bg-surface);
             border-radius: 12px;
             padding: 32px;
             width: 600px;
@@ -1105,13 +1719,13 @@
         .setup-header h2 {
             font-size: 24px;
             font-weight: 600;
-            color: #fff;
+            color: var(--text-primary);
             margin-bottom: 8px;
         }
         
         .setup-header p {
             font-size: 16px;
-            color: #888;
+            color: var(--text-muted);
         }
         
         .setup-steps {
@@ -1124,25 +1738,25 @@
             gap: 16px;
             padding: 16px;
             margin-bottom: 12px;
-            background: #1a1a1a;
-            border: 1px solid #333;
+            background: var(--bg-elevated);
+            border: 1px solid var(--bg-surface);
             border-radius: 8px;
             transition: all 0.3s;
         }
         
         .setup-step.active {
-            border-color: #555;
-            background: #222;
+            border-color: var(--border-default);
+            background: var(--bg-surface);
         }
         
         .setup-step.completed {
-            border-color: #22c55e;
-            background: #0f1f0f;
+            border-color: var(--success-green);
+            background: rgba(34, 197, 94, 0.08);
         }
-        
+
         .setup-step.failed {
-            border-color: #ef4444;
-            background: #1f0f0f;
+            border-color: var(--recording-red);
+            background: rgba(239, 68, 68, 0.08);
         }
         
         .step-icon {
@@ -1158,26 +1772,26 @@
         .step-content h3 {
             font-size: 16px;
             font-weight: 600;
-            color: #fff;
+            color: var(--text-primary);
             margin-bottom: 4px;
         }
         
         .step-content p {
             font-size: 14px;
-            color: #888;
+            color: var(--text-muted);
             margin-bottom: 8px;
         }
         
         .step-status {
             font-size: 13px;
-            color: #666;
+            color: var(--text-muted);
             font-weight: 500;
         }
         
         .progress-bar {
             width: 100%;
             height: 4px;
-            background: #333;
+            background: var(--bg-surface);
             border-radius: 2px;
             margin-top: 8px;
             overflow: hidden;
@@ -1185,27 +1799,27 @@
         
         .progress-fill {
             height: 100%;
-            background: #f59e0b;
+            background: var(--warning-amber);
             width: 0%;
             transition: width 0.3s ease;
             border-radius: 2px;
         }
         
         .setup-step.completed .progress-fill {
-            background: #22c55e;
+            background: var(--success-green);
             width: 100%;
         }
         
         .setup-step.active .step-status {
-            color: #f59e0b;
+            color: var(--warning-amber);
         }
-        
+
         .setup-step.completed .step-status {
-            color: #22c55e;
+            color: var(--success-green);
         }
-        
+
         .setup-step.failed .step-status {
-            color: #ef4444;
+            color: var(--recording-red);
         }
         
         .setup-actions {
@@ -1217,33 +1831,328 @@
         .setup-actions .btn {
             flex: 1;
         }
+
+        /* AI Query Popup */
+        .ai-query-popup {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            z-index: 1001;
+            display: none;
+            justify-content: center;
+            padding: 24px;
+            pointer-events: none;
+        }
+
+        .ai-query-popup.show {
+            display: flex;
+        }
+
+        .ai-query-container {
+            background: var(--bg-elevated);
+            border: 1px solid var(--border-default);
+            border-radius: 16px;
+            box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.05);
+            width: 100%;
+            max-width: 600px;
+            pointer-events: auto;
+            animation: slideUp 0.2s ease-out;
+            backdrop-filter: blur(12px);
+        }
+
+        @keyframes slideUp {
+            from {
+                transform: translateY(20px);
+                opacity: 0;
+            }
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+
+        .ai-query-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--border-subtle);
+        }
+
+        .ai-query-header span {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-primary);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .ai-query-close {
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            font-size: 20px;
+            cursor: pointer;
+            padding: 4px 8px;
+            border-radius: 6px;
+            transition: all 0.2s ease;
+            line-height: 1;
+        }
+
+        .ai-query-close:hover {
+            background: var(--bg-surface);
+            color: var(--text-primary);
+        }
+
+        .ai-query-input-row {
+            display: flex;
+            gap: 12px;
+            padding: 16px 20px;
+        }
+
+        #ai-query-input {
+            flex: 1;
+            background: var(--bg-surface);
+            border: 1px solid var(--border-default);
+            color: var(--text-primary);
+            padding: 12px 16px;
+            border-radius: 10px;
+            font-size: 14px;
+            font-family: inherit;
+            outline: none;
+            transition: all 0.2s ease;
+        }
+
+        #ai-query-input:focus {
+            border-color: var(--accent-primary);
+            box-shadow: 0 0 0 3px var(--accent-glow);
+        }
+
+        #ai-query-input::placeholder {
+            color: var(--text-muted);
+        }
+
+        .ai-query-submit {
+            background: var(--accent-primary);
+            color: white;
+            border: none;
+            padding: 12px 20px;
+            border-radius: 10px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .ai-query-submit:hover {
+            background: var(--accent-primary);
+            filter: brightness(1.1);
+            transform: translateY(-1px);
+        }
+
+        .ai-query-submit:active {
+            transform: translateY(0);
+        }
+
+        .ai-query-submit:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .ai-query-response {
+            padding: 0 20px 20px;
+            display: none;
+        }
+
+        .ai-query-response.show {
+            display: block;
+        }
+
+        .ai-query-response-content {
+            background: var(--bg-surface);
+            border: 1px solid var(--border-subtle);
+            border-radius: 10px;
+            padding: 16px;
+            color: var(--text-secondary);
+            font-size: 14px;
+            line-height: 1.6;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .ai-query-response-content.loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            color: var(--text-muted);
+            padding: 24px;
+        }
+
+        .ai-query-response-content.error {
+            color: var(--recording-red);
+            background: rgba(239, 68, 68, 0.1);
+            border-color: rgba(239, 68, 68, 0.2);
+        }
+
+        .ai-query-spinner {
+            width: 20px;
+            height: 20px;
+            border: 2px solid var(--border-default);
+            border-top-color: var(--accent-primary);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Ask AI Button */
+        .ask-ai-btn {
+            background: linear-gradient(135deg, rgba(129, 140, 248, 0.15) 0%, rgba(99, 102, 241, 0.15) 100%);
+            border: 1px solid rgba(129, 140, 248, 0.3);
+            color: var(--accent-primary);
+            padding: 6px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 500;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .ask-ai-btn:hover {
+            background: linear-gradient(135deg, rgba(129, 140, 248, 0.25) 0%, rgba(99, 102, 241, 0.25) 100%);
+            border-color: var(--accent-primary);
+            transform: translateY(-1px);
+        }
+
+        .ask-ai-btn kbd {
+            background: rgba(129, 140, 248, 0.2);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 10px;
+            font-family: inherit;
+            margin-left: 4px;
+        }
+
+        /* Light mode specific overrides */
+        [data-theme="light"] .brand h1 {
+            background: linear-gradient(135deg, #4338ca, #6366f1);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        [data-theme="light"] .brand svg rect:first-child {
+            fill: #e0e7ff;
+        }
+        [data-theme="light"] .brand svg path {
+            fill: #4338ca;
+        }
+
+        [data-theme="light"] body {
+            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
+        }
+
+        [data-theme="light"] .announcement-banner.type-info {
+            background: linear-gradient(135deg, #0284c7, #0891b2);
+        }
+        [data-theme="light"] .announcement-banner.type-release {
+            background: linear-gradient(135deg, #4338ca, #6366f1);
+        }
+        [data-theme="light"] .announcement-banner.type-warning {
+            background: linear-gradient(135deg, #c2410c, #d97706);
+        }
+
+        [data-theme="light"] .ai-query-container {
+            box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.08), 0 0 0 1px rgba(0, 0, 0, 0.06);
+        }
+
+        [data-theme="light"] .setup-content {
+            background: var(--bg-primary);
+            border-color: var(--border-subtle);
+        }
+
+        [data-theme="light"] .setup-step.completed {
+            border-color: var(--success-green);
+            background: rgba(25, 135, 84, 0.06);
+        }
+        [data-theme="light"] .setup-step.failed {
+            border-color: var(--recording-red);
+            background: rgba(220, 53, 69, 0.06);
+        }
+
+        [data-theme="light"] ::-webkit-scrollbar-track {
+            background: var(--bg-elevated);
+        }
+        [data-theme="light"] ::-webkit-scrollbar-thumb {
+            background: var(--border-default);
+        }
+
+        /* Theme select dropdown */
+        .theme-select {
+            background: var(--bg-surface);
+            color: var(--text-primary);
+            border: 1px solid var(--border-default);
+            border-radius: 6px;
+            padding: 5px 10px;
+            font-size: 13px;
+            font-family: inherit;
+            cursor: pointer;
+            outline: none;
+            transition: all 0.2s ease;
+            flex-shrink: 0;
+            -webkit-appearance: none;
+            appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%2371717a' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 8px center;
+            padding-right: 26px;
+        }
+
+        .theme-select:hover {
+            border-color: var(--accent-primary);
+        }
+
+        .theme-select:focus {
+            border-color: var(--accent-primary);
+            box-shadow: 0 0 0 3px var(--accent-glow);
+        }
     </style>
 </head>
 <body>
     <!-- Window drag area -->
     <div class="drag-area"></div>
     
-    <!-- Update Banner -->
-    <div class="update-banner" id="update-banner">
-        <div class="update-info">
-            <div class="update-icon">🚀</div>
-            <div class="update-text">
-                <span>New version available: </span>
-                <span class="version" id="update-version">v0.0.17</span>
+    <!-- Announcement Banner -->
+    <div class="announcement-banner" id="announcement-banner">
+        <div class="announcement-info">
+            <div class="announcement-icon" id="announcement-icon"></div>
+            <div class="announcement-text">
+                <span class="announcement-title" id="announcement-title"></span>
+                <span class="announcement-message" id="announcement-message"></span>
             </div>
         </div>
-        <div class="update-actions">
-            <button class="update-btn" id="view-release-btn">View Release</button>
-            <button class="update-btn primary" id="download-update-btn">Download Update</button>
-            <button class="dismiss-update" id="dismiss-update-btn" title="Dismiss">✕</button>
+        <div class="announcement-actions">
+            <button class="announcement-btn" id="announcement-action-btn" style="display:none;">Learn More</button>
+            <button class="dismiss-announcement" id="dismiss-announcement-btn" title="Dismiss">&#x2715;</button>
         </div>
     </div>
 
     <!-- Header with recording controls -->
     <div class="header">
         <div class="brand">
-            <svg width="28" height="28" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <rect width="32" height="32" rx="8" fill="#1e293b"/>
+            <svg width="24" height="24" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <rect width="32" height="32" rx="8" fill="#0f172a"/>
                 <rect width="30" height="30" x="1" y="1" rx="7" stroke="rgba(255,255,255,0.1)"/>
                 <path d="M16 10c-1.1 0-2 .9-2 2v4c0 1.1.9 2 2 2s2-.9 2-2v-4c0-1.1-.9-2-2-2z" fill="white"/>
                 <path d="M12 15v1c0 2.2 1.8 4 4 4s4-1.8 4-4v-1h1v1c0 2.7-1.9 4.9-4.5 5.4v1.6h2v1h-5v-1h2v-1.6c-2.6-.5-4.5-2.7-4.5-5.4v-1h1z" fill="white"/>
@@ -1252,38 +2161,63 @@
         </div>
         
         <div class="record-controls">
-            <div class="status">
+            <div class="status" id="status-container">
                 <div class="status-dot ready" id="status-dot"></div>
-                <span id="status-text">Ready</span>
+                <span id="status-text" style="font-size: 13px; color: var(--text-secondary);">Ready</span>
+                <div class="waveform" id="waveform">
+                    <div class="waveform-bar"></div>
+                    <div class="waveform-bar"></div>
+                    <div class="waveform-bar"></div>
+                    <div class="waveform-bar"></div>
+                    <div class="waveform-bar"></div>
+                </div>
             </div>
             
-            <input type="text" class="session-input" id="session-name" placeholder="Enter meeting name..." value="Meeting">
+            <input type="text" class="session-input" id="session-name" placeholder="Name this session...">
             
             <button class="btn btn-primary" id="start-btn">
-                <span>●</span> Start Recording
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor"><circle cx="6" cy="6" r="5"/></svg> Record
             </button>
-            
+
             <button class="btn btn-danger" id="stop-btn" style="display: none;">
-                <span>■</span> Stop Recording
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor"><rect x="1" y="1" width="10" height="10" rx="1.5"/></svg> Stop
+            </button>
+
+            <button class="btn" id="pause-btn" style="display: none;">
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor"><rect x="1.5" y="1" width="3" height="10" rx="1"/><rect x="7.5" y="1" width="3" height="10" rx="1"/></svg> Pause
             </button>
         </div>
         
         <div class="header-actions">
-            <button class="settings-btn" id="debug-btn" title="Debug Logs" style="margin-right: 8px;">🔨</button>
-            <button class="settings-btn" id="ai-settings-btn" title="AI Settings" style="margin-right: 8px;">🧠</button>
-            <button class="settings-btn" id="settings-btn" title="Settings">⚙️</button>
+            <button class="settings-btn" id="settings-btn" title="Settings (Cmd+,)">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="3"></circle>
+                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                </svg>
+            </button>
         </div>
     </div>
 
     <!-- Main content area -->
     <div class="main">
+        <!-- Sidebar toggle (outside sidebar so it's always visible) -->
+        <button class="sidebar-toggle" id="sidebar-toggle" title="Toggle sidebar">
+            <span class="sidebar-toggle-icon">◀</span>
+        </button>
+
         <!-- Sidebar with meetings -->
-        <div class="sidebar">
+        <div class="sidebar" id="sidebar">
             <div class="sidebar-header">
                 <div class="sidebar-title">
                     <h2>Meetings</h2>
                 </div>
-                <input type="text" class="search-input" id="search-input" placeholder="Search meetings...">
+                <div class="search-wrapper">
+                    <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="11" cy="11" r="8"></circle>
+                        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                    </svg>
+                    <input type="text" class="search-input" id="search-input" placeholder="Search meetings...">
+                </div>
             </div>
             
             <div class="meetings-list" id="meetings-list">
@@ -1295,9 +2229,15 @@
         <div class="content">
             <!-- Empty state -->
             <div class="content-empty" id="empty-state">
-                <div class="content-empty-icon">📝</div>
-                <h3>No meeting selected</h3>
-                <p>Select a meeting from the sidebar or record a new one</p>
+                <h3>Ready to capture your meeting</h3>
+                <p>Select a meeting from the sidebar or start recording</p>
+                <div class="shortcut-hint">
+                    <span>Quick start:</span>
+                    <kbd class="kbd">⌘</kbd>
+                    <kbd class="kbd">⇧</kbd>
+                    <kbd class="kbd">R</kbd>
+                    <span>anywhere</span>
+                </div>
             </div>
 
             <!-- Meeting detail view -->
@@ -1313,15 +2253,24 @@
                                 </svg>
                             </button>
                         </div>
-                        <div style="display: flex; gap: 0px;">
-                            <button class="copy-notes-btn" id="copy-notes-btn" title="Copy all meeting notes to clipboard">
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <div style="display: flex; gap: 8px; align-items: center;">
+                            <button class="ask-ai-btn" id="ask-ai-btn" title="Ask AI about this meeting (Cmd+K)">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <circle cx="12" cy="12" r="10"></circle>
+                                    <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
+                                    <line x1="12" y1="17" x2="12.01" y2="17"></line>
+                                </svg>
+                                Ask AI
+                                <kbd>K</kbd>
+                            </button>
+                            <button class="copy-notes-btn" id="copy-notes-btn" title="Copy meeting notes">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                     <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
                                     <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
                                 </svg>
                             </button>
-                            <button class="reprocess-btn" id="reprocess-btn" title="Reprocess current meeting if analysis failed or needs improvement">
-                                Reprocess
+                            <button class="reprocess-btn" id="reprocess-btn" title="Reprocess meeting">
+                                🔄
                             </button>
                         </div>
                     </div>
@@ -1403,13 +2352,39 @@
         </div>
     </div>
 
+    <!-- AI Query Popup -->
+    <div class="ai-query-popup" id="ai-query-popup">
+        <div class="ai-query-container">
+            <div class="ai-query-header">
+                <span>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
+                        <line x1="12" y1="17" x2="12.01" y2="17"></line>
+                    </svg>
+                    Ask Steno about this meeting
+                </span>
+                <button class="ai-query-close" id="ai-query-close">&times;</button>
+            </div>
+            <div class="ai-query-input-row">
+                <input type="text" id="ai-query-input" placeholder="What was discussed about...">
+                <button class="ai-query-submit" id="ai-query-submit">
+                    Ask
+                </button>
+            </div>
+            <div class="ai-query-response" id="ai-query-response">
+                <div class="ai-query-response-content" id="ai-query-response-content"></div>
+            </div>
+        </div>
+    </div>
+
     <!-- Setup overlay -->
     <div class="setup-modal" id="setup-overlay" style="display: none;">
         <div class="setup-content">
             <div class="setup-header">
                 <h2>🚀 Welcome to StenoAI</h2>
                 <p>Setting up your system for meeting transcription...</p>
-                <p style="font-size: 14px; color: #aaa; margin-top: 12px;">💡 Scroll down to see logs</p>
+                <p style="font-size: 14px; color: var(--text-muted); margin-top: 12px;">💡 Scroll down to see logs</p>
             </div>
 
             <div class="setup-steps" id="setup-steps">
@@ -1502,9 +2477,9 @@
             <div class="setup-debug" style="margin: 24px 0;">
                 <h3 style="margin-bottom: 12px; display: flex; align-items: center; gap: 8px; font-size: 16px;">
                     <span>🐛 Debug Console</span>
-                    <button onclick="toggleDebugConsole()" style="background: none; border: 1px solid #444; color: #888; padding: 4px 8px; border-radius: 4px; font-size: 11px; cursor: pointer;">Toggle</button>
+                    <button onclick="toggleDebugConsole()" style="background: none; border: 1px solid var(--bg-surface); color: var(--text-muted); padding: 4px 8px; border-radius: 4px; font-size: 11px; cursor: pointer;">Toggle</button>
                 </h3>
-                <div id="debug-console" style="background: #000; border: 1px solid #333; border-radius: 6px; padding: 12px; font-family: 'Monaco', 'Menlo', monospace; font-size: 11px; line-height: 1.4; color: #a0a0a0; height: 200px; overflow-y: auto; white-space: pre-wrap;">Welcome to StenoAI Setup Debug Console
+                <div id="debug-console" style="background: var(--bg-deep); border: 1px solid var(--bg-surface); border-radius: 6px; padding: 12px; font-family: 'Monaco', 'Menlo', monospace; font-size: 11px; line-height: 1.4; color: var(--text-secondary); height: 200px; overflow-y: auto; white-space: pre-wrap;">Welcome to StenoAI Setup Debug Console
 Commands and output will appear here...
 
 </div>
@@ -1517,117 +2492,151 @@ Commands and output will appear here...
         </div>
     </div>
 
-    <!-- Settings Panel (slides in from right) -->
+    <!-- Unified Settings Panel -->
     <div class="settings-panel" id="settings-panel">
         <div class="settings-header">
-            <h2>⚙️ Settings</h2>
-            <button class="close-settings" onclick="toggleSettings()">✕</button>
+            <h2>Settings</h2>
+            <button class="settings-close" onclick="toggleSettings()">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+            </button>
         </div>
-        
-        <div class="settings-content">
-            <div class="settings-section">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                    <h3>🔧 Setup Wizard</h3>
-                    <span style="font-size: 12px; color: #888;">Version: <span id="app-version">Loading...</span></span>
-                </div>
-                <p>Run the setup process again to reinstall dependencies or fix configuration issues.</p>
-                
-                <div class="setup-info">
-                    <ul>
-                        <li>Python virtual environment</li>
-                        <li>Audio recording libraries</li>
-                        <li>Whisper speech recognition</li>
-                        <li>Ollama AI service and models</li>
-                        <li>ffmpeg audio processing toolkit</li>
-                    </ul>
-                </div>
-                
-                <button class="btn btn-primary" id="run-setup-btn" onclick="runSetupFromSettings()">
-                    Run Setup Wizard
+        <div class="settings-body">
+            <nav class="settings-nav">
+                <button class="settings-nav-item active" data-tab="general">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="3"></circle>
+                        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                    </svg>
+                    General
                 </button>
-            </div>
+                <button class="settings-nav-item" data-tab="ai">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 2a4 4 0 0 1 4 4c0 1.1-.9 2-2 2h-4c-1.1 0-2-.9-2-2a4 4 0 0 1 4-4z"></path>
+                        <path d="M12 8v2"></path>
+                        <path d="M8 14h8"></path>
+                        <path d="M9 18h6"></path>
+                        <path d="M10 22h4"></path>
+                        <path d="M12 10v4"></path>
+                    </svg>
+                    AI
+                </button>
+                <button class="settings-nav-item" data-tab="developer" id="developer-nav-item" style="display: none;">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="16 18 22 12 16 6"></polyline>
+                        <polyline points="8 6 2 12 8 18"></polyline>
+                    </svg>
+                    Developer
+                </button>
+            </nav>
+            <div class="settings-content">
+                <!-- General Tab -->
+                <div class="settings-tab active" id="tab-general">
+                    <div class="settings-row">
+                        <div class="settings-row-text">
+                            <span>Appearance</span>
+                            <small>Choose light, dark, or match your system</small>
+                        </div>
+                        <select class="theme-select" id="theme-select">
+                            <option value="system">System</option>
+                            <option value="light">Light</option>
+                            <option value="dark">Dark</option>
+                        </select>
+                    </div>
 
-            <div class="settings-section">
-                <h3>🔔 Notifications</h3>
+                    <div class="settings-row">
+                        <div class="settings-row-text">
+                            <span>Desktop notifications</span>
+                            <small>Notify when meetings finish processing</small>
+                        </div>
+                        <label class="settings-toggle">
+                            <input type="checkbox" id="notifications-toggle">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
 
-                <div style="margin-top: 15px;">
-                    <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
-                        <input type="checkbox" id="notifications-toggle" style="width: 18px; height: 18px; cursor: pointer;">
-                        <span style="color: #ccc;">Show desktop notifications for meeting completions</span>
-                    </label>
-                    <p style="font-size: 12px; color: #888; margin-top: 8px; margin-left: 28px;">
-                        Get notified when your meetings finish processing (even when the app is in the background)
-                    </p>
+                    <div class="settings-row">
+                        <div class="settings-row-text">
+                            <span>Check for updates</span>
+                            <small>Updates and announcements</small>
+                        </div>
+                        <button class="settings-action-btn" id="test-update-btn" onclick="testUpdateCheck()">Check</button>
+                    </div>
+
+                    <div class="settings-row">
+                        <div class="settings-row-text">
+                            <span>Setup wizard</span>
+                            <small>Reinstall dependencies or fix configuration</small>
+                        </div>
+                        <button class="settings-action-btn" id="run-setup-btn" onclick="runSetupFromSettings()">Run</button>
+                    </div>
+
+                    <div class="settings-row">
+                        <div class="settings-row-text">
+                            <span>Clear recording state</span>
+                            <small>Fix stuck recordings or processing</small>
+                        </div>
+                        <button class="settings-action-btn" id="clear-state-btn" onclick="clearSystemState()">Clear</button>
+                    </div>
+
+                    <div class="settings-row">
+                        <div class="settings-row-text">
+                            <span>Developer mode</span>
+                            <small>Show debug logs and developer tools</small>
+                        </div>
+                        <label class="settings-toggle">
+                            <input type="checkbox" id="developer-mode-toggle">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+
+                    <div class="settings-row">
+                        <div class="settings-row-text">
+                            <span>Anonymous usage analytics</span>
+                            <small>Help improve StenoAI -- no meeting content is ever sent</small>
+                        </div>
+                        <label class="settings-toggle">
+                            <input type="checkbox" id="telemetry-toggle">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+
+                    <div class="settings-version">
+                        StenoAI <span id="app-version">Loading...</span>
+                    </div>
                 </div>
-            </div>
 
-            <div class="settings-section">
-                <h3>🛠️ System Recovery</h3>
-                <p>Tools to recover from stuck recordings or processing issues.</p>
+                <!-- AI Tab -->
+                <div class="settings-tab" id="tab-ai">
+                    <div class="settings-section">
+                        <h3>Model</h3>
+                        <div id="model-list" class="model-list">
+                            <div class="model-list-loading">Loading models...</div>
+                        </div>
+                    </div>
 
-                <button class="btn" id="clear-state-btn" onclick="clearSystemState()">
-                    Clear Recording State
-                </button>
+                </div>
 
-            </div>
-            
-            <div class="settings-section">
-                <h3>🔄 Updates</h3>
-                <p>Check for the latest version of StenoAI. After installing, if macOS shows a security warning, go to <strong>System Settings > Privacy & Security</strong>, scroll down and click <strong>'Open Anyway'</strong>.</p>
-                
-                <button class="btn" id="test-update-btn" onclick="testUpdateCheck()">
-                    Check for Updates
-                </button>
-
-            </div>
-        </div>
-    </div>
-
-    <!-- Debug Panel (slides in from right) -->
-    <div class="debug-panel" id="debug-panel">
-        <div class="debug-header">
-            <h2>🔨 Debug Logs</h2>
-            <button class="close-settings" onclick="toggleDebug()">✕</button>
-        </div>
-
-        <div class="debug-console" id="debug-console-panel">StenoAI Debug Console
+                <!-- Developer Tab -->
+                <div class="settings-tab" id="tab-developer">
+                    <div class="dev-tab-header">
+                        <button class="dev-back-btn" id="dev-back-btn">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <polyline points="15 18 9 12 15 6"></polyline>
+                            </svg>
+                            Back
+                        </button>
+                        <h3 style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin: 0;">Debug Console</h3>
+                    </div>
+                    <div class="settings-section" style="margin-bottom: 0;">
+                        <p>Real-time log output from the backend processes.</p>
+                        <div class="debug-console" id="debug-console-panel">StenoAI Debug Console
 Session started - waiting for activity...
 
 </div>
-    </div>
-
-    <!-- AI Settings Panel (slides in from right) -->
-    <div class="settings-panel" id="ai-settings-panel">
-        <div class="settings-header">
-            <h2>🧠 AI Settings</h2>
-            <button class="close-settings" onclick="toggleAISettings()">✕</button>
-        </div>
-
-        <div class="settings-content">
-            <div class="settings-section">
-                <h3>🤖 Model Selection</h3>
-                <p>Choose which AI model to use for meeting summarization. Larger models provide better quality but take longer to process.</p>
-
-                <div style="margin-top: 15px;">
-                    <label style="display: block; margin-bottom: 8px; font-weight: 500;">Current Model:</label>
-                    <div id="current-model-display" style="padding: 10px; background: #2a2a2a; border-radius: 4px; margin-bottom: 15px;">
-                        <span style="font-family: Monaco, monospace; color: #4CAF50;">Loading...</span>
                     </div>
-
-                    <label style="display: block; margin-bottom: 8px; font-weight: 500;">Select Model:</label>
-                    <div id="model-list" style="display: flex; flex-direction: column; gap: 10px; max-height: 450px; overflow-y: auto; padding-right: 5px;">
-                        Loading models...
-                    </div>
-                </div>
-            </div>
-
-            <div class="settings-section">
-                <h3>🧠 AI Prompts</h3>
-                <p>View the prompts used for meeting summarization and analysis.</p>
-
-                <h4>Summarization Prompt</h4>
-                <div class="prompt-viewer" id="summarization-prompt">
-                    Loading prompt...
                 </div>
             </div>
         </div>
@@ -1640,22 +2649,47 @@ Session started - waiting for activity...
         const statusDot = document.getElementById('status-dot');
         const statusText = document.getElementById('status-text');
         const sessionNameInput = document.getElementById('session-name');
+
+        // Sidebar toggle functionality
+        const sidebar = document.getElementById('sidebar');
+        const sidebarToggle = document.getElementById('sidebar-toggle');
+
+        // Restore sidebar state from localStorage
+        if (localStorage.getItem('sidebarCollapsed') === 'true') {
+            sidebar.classList.add('collapsed');
+            sidebarToggle.classList.add('collapsed');
+        }
+
+        sidebarToggle.addEventListener('click', () => {
+            sidebar.classList.toggle('collapsed');
+            sidebarToggle.classList.toggle('collapsed');
+            localStorage.setItem('sidebarCollapsed', sidebar.classList.contains('collapsed'));
+        });
+
+        // Brand click - return to home state
+        document.querySelector('.brand').addEventListener('click', () => {
+            selectedMeeting = null;
+            document.getElementById('empty-state').style.display = 'flex';
+            document.getElementById('meeting-detail').classList.remove('show');
+            document.querySelectorAll('.meeting-item').forEach(item => item.classList.remove('active'));
+        });
+
         const startBtn = document.getElementById('start-btn');
         const stopBtn = document.getElementById('stop-btn');
+        const pauseBtn = document.getElementById('pause-btn');
         const settingsBtn = document.getElementById('settings-btn');
-        const debugBtn = document.getElementById('debug-btn');
-        const aiSettingsBtn = document.getElementById('ai-settings-btn');
         const meetingsList = document.getElementById('meetings-list');
         const emptyState = document.getElementById('empty-state');
         const meetingDetail = document.getElementById('meeting-detail');
         const dropZone = document.getElementById('drop-zone');
         
-        // Update elements
-        const updateBanner = document.getElementById('update-banner');
-        const updateVersion = document.getElementById('update-version');
-        const viewReleaseBtn = document.getElementById('view-release-btn');
-        const downloadUpdateBtn = document.getElementById('download-update-btn');
-        const dismissUpdateBtn = document.getElementById('dismiss-update-btn');
+        // Announcement elements
+        const announcementBanner = document.getElementById('announcement-banner');
+        const announcementIcon = document.getElementById('announcement-icon');
+        const announcementTitle = document.getElementById('announcement-title');
+        const announcementMessage = document.getElementById('announcement-message');
+        const announcementActionBtn = document.getElementById('announcement-action-btn');
+        const dismissAnnouncementBtn = document.getElementById('dismiss-announcement-btn');
         
         // Detail elements
         const detailTitle = document.getElementById('detail-title');
@@ -1670,6 +2704,15 @@ Session started - waiting for activity...
         const copyTranscriptBtn = document.getElementById('copy-transcript-btn');
         const copyNotesBtn = document.getElementById('copy-notes-btn');
         const editTitleBtn = document.getElementById('edit-title-btn');
+
+        // AI Query elements
+        const askAiBtn = document.getElementById('ask-ai-btn');
+        const aiQueryPopup = document.getElementById('ai-query-popup');
+        const aiQueryClose = document.getElementById('ai-query-close');
+        const aiQueryInput = document.getElementById('ai-query-input');
+        const aiQuerySubmit = document.getElementById('ai-query-submit');
+        const aiQueryResponse = document.getElementById('ai-query-response');
+        const aiQueryResponseContent = document.getElementById('ai-query-response-content');
 
         // Setup elements
         const setupOverlay = document.getElementById('setup-overlay');
@@ -1686,12 +2729,13 @@ Session started - waiting for activity...
         let searchQuery = '';
         let recordingStartTime = null;
         let recordingTimer = null;
+        let pausedElapsedTime = 0; // Track elapsed time when paused
         let processingMeetings = new Set();
         let meetingsLastLoaded = 0; // Cache timestamp
         
-        // Update checking variables
-        let updateInfo = null;
-        let updateCheckInterval = null;
+        // Announcement system variables
+        let currentAnnouncement = null;
+        let announcementCheckInterval = null;
         
         // Utility functions
         function log(message) {
@@ -1706,11 +2750,24 @@ Session started - waiting for activity...
         function setStatus(status, message) {
             statusDot.className = `status-dot ${status}`;
             statusText.textContent = message;
+            // Toggle waveform visibility for recording state
+            const statusContainer = document.getElementById('status-container');
+            if (status === 'recording') {
+                statusContainer.classList.add('recording');
+            } else {
+                statusContainer.classList.remove('recording');
+            }
             log(`Status: ${message}`);
         }
         
-        function startRecordingTimer() {
-            recordingStartTime = Date.now();
+        function startRecordingTimer(resume = false) {
+            // If resuming, adjust start time to account for already elapsed time
+            if (resume && pausedElapsedTime > 0) {
+                recordingStartTime = Date.now() - (pausedElapsedTime * 1000);
+            } else {
+                recordingStartTime = Date.now();
+                pausedElapsedTime = 0;
+            }
             recordingTimer = setInterval(() => {
                 const elapsed = Math.floor((Date.now() - recordingStartTime) / 1000);
                 const minutes = Math.floor(elapsed / 60);
@@ -1719,42 +2776,77 @@ Session started - waiting for activity...
                 setStatus('recording', `Recording... ${timeStr}`);
             }, 1000);
         }
-        
+
+        function pauseRecordingTimer() {
+            if (recordingTimer) {
+                clearInterval(recordingTimer);
+                recordingTimer = null;
+            }
+            // Save elapsed time before pausing
+            if (recordingStartTime) {
+                pausedElapsedTime = Math.floor((Date.now() - recordingStartTime) / 1000);
+            }
+        }
+
         function stopRecordingTimer() {
             if (recordingTimer) {
                 clearInterval(recordingTimer);
                 recordingTimer = null;
             }
             recordingStartTime = null;
+            pausedElapsedTime = 0;
         }
         
         function setUIState(state) {
             uiState = state;
             log(`UI State: ${state}`);
-            
+
             // Update UI elements based on state
             switch(state) {
                 case 'ready':
                     startBtn.style.display = 'inline-flex';
                     stopBtn.style.display = 'none';
+                    pauseBtn.style.display = 'none';
                     startBtn.disabled = false;
                     sessionNameInput.disabled = false;
                     stopRecordingTimer();
                     setStatus('ready', 'Ready');
                     break;
-                    
+
                 case 'recording':
                     startBtn.style.display = 'none';
                     stopBtn.style.display = 'inline-flex';
+                    pauseBtn.style.display = 'inline-flex';
+                    pauseBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor"><rect x="1.5" y="1" width="3" height="10" rx="1"/><rect x="7.5" y="1" width="3" height="10" rx="1"/></svg> Pause';
                     startBtn.disabled = true;
                     sessionNameInput.disabled = true;
                     stopBtn.disabled = false;
-                    startRecordingTimer();
+                    pauseBtn.disabled = false;
+                    // Check if resuming from paused state (pausedElapsedTime > 0)
+                    startRecordingTimer(pausedElapsedTime > 0);
                     break;
-                    
+
+                case 'paused':
+                    startBtn.style.display = 'none';
+                    stopBtn.style.display = 'inline-flex';
+                    pauseBtn.style.display = 'inline-flex';
+                    pauseBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor"><polygon points="2,1 11,6 2,11"/></svg> Resume';
+                    startBtn.disabled = true;
+                    sessionNameInput.disabled = true;
+                    stopBtn.disabled = false;
+                    pauseBtn.disabled = false;
+                    pauseRecordingTimer();
+                    // Show paused status with the frozen time
+                    const minutes = Math.floor(pausedElapsedTime / 60);
+                    const seconds = pausedElapsedTime % 60;
+                    const timeStr = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+                    setStatus('recording', `Paused ${timeStr}`);
+                    break;
+
                 case 'processing':
                     startBtn.style.display = 'inline-flex';
                     stopBtn.style.display = 'none';
+                    pauseBtn.style.display = 'none';
                     startBtn.disabled = true;
                     sessionNameInput.disabled = true;
                     stopRecordingTimer();
@@ -1905,7 +2997,7 @@ Session started - waiting for activity...
             // Show loading state only if we don't have cached data
             if (meetings.length === 0) {
                 meetingsList.innerHTML = `
-                    <div style="padding: 20px; text-align: center; color: #666;">
+                    <div style="padding: 20px; text-align: center; color: var(--text-muted);">
                         <div style="font-size: 24px; margin-bottom: 8px;">⟳</div>
                         <p>Loading meetings...</p>
                     </div>
@@ -1927,7 +3019,7 @@ Session started - waiting for activity...
                 // Only show error if we don't have cached data
                 if (meetings.length === 0) {
                     meetingsList.innerHTML = `
-                        <div style="padding: 20px; text-align: center; color: #666;">
+                        <div style="padding: 20px; text-align: center; color: var(--text-muted);">
                             <div style="font-size: 24px; margin-bottom: 8px;">⚠️</div>
                             <p>Failed to load meetings</p>
                             <p style="font-size: 12px; margin-top: 4px;">Using cached data if available</p>
@@ -1945,7 +3037,7 @@ Session started - waiting for activity...
         function renderMeetingsList() {
             if (filteredMeetings.length === 0 && searchQuery.trim()) {
                 meetingsList.innerHTML = `
-                    <div style="padding: 20px; text-align: center; color: #666;">
+                    <div style="padding: 20px; text-align: center; color: var(--text-muted);">
                         <div style="font-size: 24px; margin-bottom: 8px;">🔍</div>
                         <p>No meetings match "${searchQuery}"</p>
                         <p style="font-size: 12px; margin-top: 4px;">Try a different search term</p>
@@ -1956,7 +3048,7 @@ Session started - waiting for activity...
             
             if (meetings.length === 0) {
                 meetingsList.innerHTML = `
-                    <div style="padding: 20px; text-align: center; color: #666;">
+                    <div style="padding: 20px; text-align: center; color: var(--text-muted);">
                         <div style="font-size: 24px; margin-bottom: 8px;">🎙️</div>
                         <p>No meetings recorded yet</p>
                         <p style="font-size: 12px; margin-top: 4px;">Start recording to see your meetings here</p>
@@ -1967,6 +3059,8 @@ Session started - waiting for activity...
             
             meetingsList.innerHTML = filteredMeetings.map((meeting, index) => {
                 const isProcessing = processingMeetings.has(meeting.session_info?.name);
+                const actionCount = (meeting.action_items || []).length;
+                const participantCount = (meeting.participants || []).length;
                 return `
                 <div class="meeting-item ${isProcessing ? 'processing' : ''}" data-index="${index}">
                     ${isProcessing ? '<div class="processing-overlay"><div class="processing-indicator"><div class="processing-spinner"></div>Processing...</div></div>' : ''}
@@ -1977,6 +3071,9 @@ Session started - waiting for activity...
                     </div>
                     <div class="meeting-preview">
                         ${(meeting.summary || 'No summary available').substring(0, 100)}...
+                    </div>
+                    <div class="meeting-badges">
+                        ${actionCount > 0 ? `<span class="meeting-badge actions">✓ ${actionCount} action${actionCount > 1 ? 's' : ''}</span>` : ''}
                     </div>
                 </div>
                 `;
@@ -2015,12 +3112,12 @@ Session started - waiting for activity...
                     const mins = Math.floor((totalSecs % 3600) / 60);
                     const secs = totalSecs % 60;
                     
-                    if (hours > 0) return `🕒 Meeting Duration: ${hours}h ${mins}m`;
-                    if (mins > 0) return `🕒 Meeting Duration: ${mins}m ${secs}s`;
-                    return `🕒 Meeting Duration: ${secs}s`;
+                    if (hours > 0) return `Meeting Duration: ${hours}h ${mins}m`;
+                    if (mins > 0) return `Meeting Duration: ${mins}m ${secs}s`;
+                    return `Meeting Duration: ${secs}s`;
                 })() :
-                (selectedMeeting.session_info?.duration_minutes ? 
-                    `🕒 Meeting Duration: ${selectedMeeting.session_info.duration_minutes} minutes` : '📄 Processed');
+                (selectedMeeting.session_info?.duration_minutes ?
+                    `Meeting Duration: ${selectedMeeting.session_info.duration_minutes} minutes` : 'Processed');
             detailDuration.textContent = durationText;
             
             detailSummary.textContent = selectedMeeting.summary || 'No summary available';
@@ -2029,7 +3126,7 @@ Session started - waiting for activity...
             if (selectedMeeting.participants && selectedMeeting.participants.length > 0) {
                 detailParticipants.textContent = selectedMeeting.participants.join(', ');
             } else {
-                detailParticipants.innerHTML = '<span style="color: #666;">No participants identified</span>';
+                detailParticipants.innerHTML = '<span style="color: var(--text-muted);">No participants identified</span>';
             }
 
             // Key topics
@@ -2042,21 +3139,21 @@ Session started - waiting for activity...
                     const areaDiv = document.createElement('div');
                     areaDiv.style.marginBottom = '15px';
                     areaDiv.style.padding = '12px';
-                    areaDiv.style.background = 'rgba(255, 255, 255, 0.03)';
+                    areaDiv.style.background = 'var(--bg-elevated)';
                     areaDiv.style.borderRadius = '6px';
-                    areaDiv.style.borderLeft = '3px solid rgba(99, 102, 241, 0.5)';
+                    areaDiv.style.borderLeft = '3px solid var(--accent-primary)';
 
                     const title = document.createElement('h4');
                     title.textContent = area.title || 'Discussion Topic';
                     title.style.margin = '0 0 8px 0';
-                    title.style.color = 'rgba(99, 102, 241, 1)';
+                    title.style.color = 'var(--accent-primary)';
                     title.style.fontSize = '14px';
                     title.style.fontWeight = '600';
 
                     const analysis = document.createElement('p');
                     analysis.textContent = area.analysis || '';
                     analysis.style.margin = '0';
-                    analysis.style.color = '#ccc';
+                    analysis.style.color = 'var(--text-secondary)';
                     analysis.style.lineHeight = '1.5';
 
                     areaDiv.appendChild(title);
@@ -2076,7 +3173,7 @@ Session started - waiting for activity...
                     detailKeyPoints.appendChild(li);
                 });
             } else {
-                detailKeyPoints.innerHTML = '<li style="color: #666;">No key points identified</li>';
+                detailKeyPoints.innerHTML = '<li style="color: var(--text-muted);">No key points identified</li>';
             }
             
             // Action items
@@ -2088,7 +3185,7 @@ Session started - waiting for activity...
                     detailActionItems.appendChild(li);
                 });
             } else {
-                detailActionItems.innerHTML = '<li style="color: #666;">No action items identified</li>';
+                detailActionItems.innerHTML = '<li style="color: var(--text-muted);">No action items identified</li>';
             }
             
             // Transcript
@@ -2222,7 +3319,7 @@ Session started - waiting for activity...
                     // Return to ready state quickly so user can start another recording if needed
                     setTimeout(() => {
                         setUIState('ready');
-                        sessionNameInput.value = 'Meeting';
+                        sessionNameInput.value = '';
                     }, 5000); // 5 seconds
                     
                 } else {
@@ -2238,7 +3335,37 @@ Session started - waiting for activity...
                 renderMeetingsList();
             }
         });
-        
+
+        pauseBtn.addEventListener('click', async () => {
+            if (uiState === 'recording') {
+                // Pause recording
+                log('⏸️ Pausing recording...');
+                try {
+                    const result = await ipcRenderer.invoke('pause-recording-ui');
+                    if (result.success) {
+                        setUIState('paused');
+                    } else {
+                        log(`Failed to pause: ${result.error}`);
+                    }
+                } catch (error) {
+                    log(`🚫 Pause error: ${error.message}`);
+                }
+            } else if (uiState === 'paused') {
+                // Resume recording
+                log('▶️ Resuming recording...');
+                try {
+                    const result = await ipcRenderer.invoke('resume-recording-ui');
+                    if (result.success) {
+                        setUIState('recording');
+                    } else {
+                        log(`Failed to resume: ${result.error}`);
+                    }
+                } catch (error) {
+                    log(`🚫 Resume error: ${error.message}`);
+                }
+            }
+        });
+
         // Search functionality
         const searchInput = document.getElementById('search-input');
         searchInput.addEventListener('input', (e) => {
@@ -2342,11 +3469,17 @@ Session started - waiting for activity...
                 
                 // Do maintenance tasks in parallel
                 const maintenancePromise = Promise.all([
-                    ipcRenderer.invoke('clear-state').catch(err => 
+                    ipcRenderer.invoke('clear-state').catch(err =>
                         log(`State clear failed: ${err.message}`)
                     ),
-                    checkInitialStatus().catch(err => 
+                    checkInitialStatus().catch(err =>
                         log(`Status check failed: ${err.message}`)
+                    ),
+                    loadNotificationSettings().catch(err =>
+                        log(`Notification settings load failed: ${err.message}`)
+                    ),
+                    loadTelemetrySettings().catch(err =>
+                        log(`Telemetry settings load failed: ${err.message}`)
                     )
                 ]);
                 
@@ -2382,16 +3515,6 @@ Session started - waiting for activity...
         // Settings button click handler
         settingsBtn.addEventListener('click', () => {
             toggleSettings();
-        });
-
-        // Debug button click handler
-        debugBtn.addEventListener('click', () => {
-            toggleDebug();
-        });
-
-        // AI Settings button click handler
-        aiSettingsBtn.addEventListener('click', () => {
-            toggleAISettings();
         });
         
         // Reprocess button click handler
@@ -2454,7 +3577,144 @@ Session started - waiting for activity...
                 }
             }
         });
-        
+
+        // AI Query functionality
+        function showAiQueryPopup() {
+            if (!selectedMeeting) {
+                log('No meeting selected for AI query');
+                return;
+            }
+            aiQueryPopup.classList.add('show');
+            aiQueryInput.value = '';
+            aiQueryResponse.classList.remove('show');
+            aiQueryResponseContent.textContent = '';
+            aiQueryResponseContent.classList.remove('loading', 'error');
+            setTimeout(() => aiQueryInput.focus(), 100);
+        }
+
+        function hideAiQueryPopup() {
+            aiQueryPopup.classList.remove('show');
+            aiQueryInput.value = '';
+            aiQueryResponse.classList.remove('show');
+        }
+
+        function formatAiResponse(text) {
+            // Escape HTML
+            const escaped = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            // Bold **text**
+            let html = escaped.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+            // Bullet points: lines starting with * or -
+            html = html.replace(/^[\*\-]\s+(.+)$/gm, '<li>$1</li>');
+            // Wrap consecutive <li> in <ul>
+            html = html.replace(/((?:<li>.*<\/li>\n?)+)/g, '<ul>$1</ul>');
+            // Line breaks for remaining newlines
+            html = html.replace(/\n/g, '<br>');
+            // Clean up <br> inside/around <ul>
+            html = html.replace(/<br><ul>/g, '<ul>');
+            html = html.replace(/<\/ul><br>/g, '</ul>');
+            html = html.replace(/<ul><br>/g, '<ul>');
+            return html;
+        }
+
+        async function submitAiQuery() {
+            const question = aiQueryInput.value.trim();
+            if (!question) return;
+            if (!selectedMeeting) {
+                log('No meeting selected for AI query');
+                return;
+            }
+
+            const summaryFile = selectedMeeting.session_info?.summary_file;
+            if (!summaryFile) {
+                log('No summary file found for AI query');
+                return;
+            }
+
+            // Show loading state
+            aiQuerySubmit.disabled = true;
+            aiQueryResponse.classList.add('show');
+            aiQueryResponseContent.classList.add('loading');
+            aiQueryResponseContent.classList.remove('error');
+            aiQueryResponseContent.innerHTML = '<div class="ai-query-spinner"></div>Thinking...';
+
+            log(`Asking AI: ${question.substring(0, 50)}...`);
+
+            try {
+                const result = await ipcRenderer.invoke('query-transcript', summaryFile, question);
+
+                if (result.success) {
+                    aiQueryResponseContent.classList.remove('loading');
+                    aiQueryResponseContent.innerHTML = formatAiResponse(result.answer);
+                    log('AI response received');
+                } else {
+                    aiQueryResponseContent.classList.remove('loading');
+                    aiQueryResponseContent.classList.add('error');
+                    aiQueryResponseContent.textContent = result.error || 'Failed to get response from AI';
+                    log(`AI query failed: ${result.error}`);
+                }
+            } catch (error) {
+                aiQueryResponseContent.classList.remove('loading');
+                aiQueryResponseContent.classList.add('error');
+                aiQueryResponseContent.textContent = 'Failed to query AI: ' + error.message;
+                log(`AI query error: ${error.message}`);
+            } finally {
+                aiQuerySubmit.disabled = false;
+            }
+        }
+
+        // Ask AI button click handler
+        askAiBtn.addEventListener('click', showAiQueryPopup);
+
+        // AI Query close button
+        aiQueryClose.addEventListener('click', hideAiQueryPopup);
+
+        // AI Query submit button
+        aiQuerySubmit.addEventListener('click', submitAiQuery);
+
+        // AI Query input - submit on Enter
+        aiQueryInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                submitAiQuery();
+            }
+            if (e.key === 'Escape') {
+                hideAiQueryPopup();
+            }
+        });
+
+        // Global keyboard shortcuts
+        document.addEventListener('keydown', (e) => {
+            // Cmd+K or Ctrl+K to open AI query
+            if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+                e.preventDefault();
+                if (aiQueryPopup.classList.contains('show')) {
+                    hideAiQueryPopup();
+                } else if (selectedMeeting) {
+                    showAiQueryPopup();
+                }
+            }
+            // Cmd+, or Ctrl+, to toggle settings
+            if ((e.metaKey || e.ctrlKey) && e.key === ',') {
+                e.preventDefault();
+                toggleSettings();
+            }
+            // Escape to close panels
+            if (e.key === 'Escape') {
+                if (aiQueryPopup.classList.contains('show')) {
+                    hideAiQueryPopup();
+                } else if (settingsVisible) {
+                    toggleSettings();
+                }
+            }
+        });
+
+        // Close AI query popup when clicking outside
+        aiQueryPopup.addEventListener('click', (e) => {
+            if (e.target === aiQueryPopup) {
+                hideAiQueryPopup();
+            }
+        });
+
         // Copy transcript to clipboard
         copyTranscriptBtn.addEventListener('click', async () => {
             try {
@@ -2676,6 +3936,19 @@ Session started - waiting for activity...
         // Listen for debug messages from backend
         ipcRenderer.on('debug-log', (event, message) => {
             debugLog(message);
+        });
+
+        // Listen for global hotkey toggle recording
+        ipcRenderer.on('toggle-recording-hotkey', () => {
+            log('Global hotkey received: toggle recording');
+            if (uiState === 'recording') {
+                // Stop recording
+                stopBtn.click();
+            } else if (uiState === 'ready') {
+                // Start recording
+                startBtn.click();
+            }
+            // Ignore if in 'processing' state
         });
         
         async function runSetupProcess() {
@@ -2957,19 +4230,21 @@ Session started - waiting for activity...
                 });
                 
                 setStatus('ready', 'Processing complete');
+                setTimeout(() => setStatus('ready', 'Ready'), 3000);
             } else {
                 // Remove temporary meeting entry on failure
-                meetings = meetings.filter(meeting => 
+                meetings = meetings.filter(meeting =>
                     !(meeting.session_info?.name === data.sessionName && meeting.summary === 'Pending...')
                 );
-                
+
                 setStatus('ready', 'Processing failed');
+                setTimeout(() => setStatus('ready', 'Ready'), 5000);
                 log(`Processing failed: ${data.error}`);
                 filterMeetings();
             }
         });
         
-        // Settings panel functionality
+        // Unified settings panel functionality
         let settingsVisible = false;
 
         function toggleSettings() {
@@ -2977,60 +4252,81 @@ Session started - waiting for activity...
             settingsVisible = !settingsVisible;
 
             if (settingsVisible) {
-                settingsPanel.style.right = '0';
-                loadNotificationSettings();
+                // Prepare content before slide-in to avoid stagger
+                switchSettingsTab('general');
+                restoreDeveloperMode();
+                // Force layout calc so tab state is committed before transition
+                settingsPanel.offsetHeight;
+                settingsPanel.classList.add('open');
+                loadSettingsVersionInfo();
             } else {
-                settingsPanel.style.right = '-400px';
+                settingsPanel.classList.remove('open');
             }
         }
 
-        let debugVisible = false;
-
-        function toggleDebug() {
-            const debugPanel = document.getElementById('debug-panel');
-            debugVisible = !debugVisible;
-
-            if (debugVisible) {
-                debugPanel.style.right = '0';
+        // Tab switching logic
+        function switchSettingsTab(tabName) {
+            // Update nav active state
+            document.querySelectorAll('.settings-nav-item').forEach(n => n.classList.remove('active'));
+            const navItem = document.querySelector(`.settings-nav-item[data-tab="${tabName}"]`);
+            if (navItem) navItem.classList.add('active');
+            // Update tab visibility
+            document.querySelectorAll('.settings-tab').forEach(t => t.classList.remove('active'));
+            document.getElementById('tab-' + tabName).classList.add('active');
+            // Full-width mode for developer tab
+            const settingsBody = document.querySelector('.settings-body');
+            if (tabName === 'developer') {
+                settingsBody.classList.add('developer-active');
             } else {
-                debugPanel.style.right = '-500px';
+                settingsBody.classList.remove('developer-active');
             }
-        }
-
-        let aiSettingsVisible = false;
-
-        function toggleAISettings() {
-            const aiSettingsPanel = document.getElementById('ai-settings-panel');
-            aiSettingsVisible = !aiSettingsVisible;
-
-            if (aiSettingsVisible) {
-                aiSettingsPanel.style.right = '0';
-                loadPrompts();
+            // Load tab-specific data
+            if (tabName === 'ai') {
                 loadModels();
-            } else {
-                aiSettingsPanel.style.right = '-400px';
             }
         }
-        
-        async function loadPrompts() {
-            try {
-                const prompts = await ipcRenderer.invoke('get-ai-prompts');
-                const promptElement = document.getElementById('summarization-prompt');
-                
-                if (prompts.success) {
-                    promptElement.textContent = prompts.summarization || 'Prompt not available';
-                } else {
-                    promptElement.textContent = 'Failed to load prompts';
-                }
-            } catch (error) {
-                document.getElementById('summarization-prompt').textContent = 'Failed to load prompts';
+
+        document.querySelectorAll('.settings-nav-item').forEach(navItem => {
+            navItem.addEventListener('click', () => switchSettingsTab(navItem.dataset.tab));
+        });
+
+        // Developer tab back button
+        document.getElementById('dev-back-btn').addEventListener('click', () => {
+            switchSettingsTab('general');
+        });
+
+        // Developer mode toggle
+        function restoreDeveloperMode() {
+            const devToggle = document.getElementById('developer-mode-toggle');
+            const devNavItem = document.getElementById('developer-nav-item');
+            const enabled = localStorage.getItem('developerMode') === 'true';
+            devToggle.checked = enabled;
+            devNavItem.style.display = enabled ? '' : 'none';
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const devToggle = document.getElementById('developer-mode-toggle');
+            if (devToggle) {
+                devToggle.addEventListener('change', (e) => {
+                    const enabled = e.target.checked;
+                    localStorage.setItem('developerMode', enabled);
+                    const devNavItem = document.getElementById('developer-nav-item');
+                    devNavItem.style.display = enabled ? '' : 'none';
+                    // If disabling and currently on developer tab, switch to general
+                    if (!enabled) {
+                        const activeTab = document.querySelector('.settings-nav-item.active');
+                        if (activeTab && activeTab.dataset.tab === 'developer') {
+                            switchSettingsTab('general');
+                        }
+                    }
+                });
             }
-            
-            // Load app version
+        });
+
+        async function loadSettingsVersionInfo() {
             try {
                 const versionInfo = await ipcRenderer.invoke('get-app-version');
                 const versionElement = document.getElementById('app-version');
-                
                 if (versionInfo.success) {
                     versionElement.textContent = `v${versionInfo.version}`;
                 } else {
@@ -3040,6 +4336,7 @@ Session started - waiting for activity...
                 document.getElementById('app-version').textContent = 'Unknown';
             }
         }
+        
 
         // Model management functions
         async function loadModels() {
@@ -3047,22 +4344,18 @@ Session started - waiting for activity...
                 const result = await ipcRenderer.invoke('list-models');
 
                 if (result.success) {
-                    displayCurrentModel(result.current_model);
                     displayModelList(result.supported_models, result.current_model);
                 } else {
-                    document.getElementById('current-model-display').innerHTML = '<span style="color: #f44336;">Failed to load models</span>';
-                    document.getElementById('model-list').innerHTML = '<span style="color: #f44336;">Failed to load model list</span>';
+                    document.getElementById('model-list').innerHTML = '<div class="model-list-loading" style="color: var(--recording-red);">Failed to load models</div>';
                 }
             } catch (error) {
                 console.error('Error loading models:', error);
-                document.getElementById('current-model-display').innerHTML = '<span style="color: #f44336;">Error loading models</span>';
-                document.getElementById('model-list').innerHTML = '<span style="color: #f44336;">Error loading model list</span>';
+                document.getElementById('model-list').innerHTML = '<div class="model-list-loading" style="color: var(--recording-red);">Error loading models</div>';
             }
         }
 
         function displayCurrentModel(modelName) {
-            const currentModelDisplay = document.getElementById('current-model-display');
-            currentModelDisplay.innerHTML = `<span style="font-family: Monaco, monospace; color: #4CAF50;">${modelName}</span>`;
+            // No longer a separate display - handled inline in model list
         }
 
         function displayModelList(models, currentModel) {
@@ -3072,58 +4365,38 @@ Session started - waiting for activity...
             for (const [modelName, modelInfo] of Object.entries(models)) {
                 const isCurrentModel = modelName === currentModel;
 
-                const modelCard = document.createElement('div');
-                modelCard.style.cssText = `
-                    padding: 12px;
-                    background: ${isCurrentModel ? '#2a4a2a' : '#2a2a2a'};
-                    border: 2px solid ${isCurrentModel ? '#4CAF50' : '#444'};
-                    border-radius: 6px;
-                    cursor: pointer;
-                    transition: all 0.2s;
-                `;
+                const modelItem = document.createElement('div');
+                modelItem.className = 'model-item' + (isCurrentModel ? ' active' : '');
+                modelItem.setAttribute('data-model-name', modelName);
+                modelItem.setAttribute('data-model-size', modelInfo.size);
 
-                modelCard.setAttribute('data-model-name', modelName);
-                modelCard.setAttribute('data-model-size', modelInfo.size);
-
-                // Extract tag from description (e.g., "(default)")
                 const tagMatch = modelInfo.description.match(/\((default|recommended)\)/i);
-                const tag = tagMatch ? ` ${tagMatch[0]}` : '';
+                const tagHtml = tagMatch ? `<span class="model-tag">${tagMatch[1]}</span>` : '';
+                const activeHtml = isCurrentModel ? '<span class="model-active-badge">Active</span>' : '';
 
-                modelCard.innerHTML = `
-                    <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <div style="flex: 1;">
-                            <div style="font-weight: 600; margin-bottom: 4px; font-family: Monaco, monospace;">
-                                ${modelName}${tag}
-                                ${isCurrentModel ? '<span style="color: #4CAF50; margin-left: 8px;">✓ Active</span>' : ''}
-                            </div>
-                            <div style="font-size: 12px; color: #aaa;">
-                                Size: ${modelInfo.size} | Speed: ${modelInfo.speed} | Quality: ${modelInfo.quality}
-                            </div>
-                            <div class="model-progress" style="display: none; margin-top: 8px; padding: 8px; background: #1a1a1a; border-radius: 4px;">
-                                <div class="progress-text" style="font-size: 11px; color: #4CAF50; font-family: Monaco, monospace;">Downloading...</div>
-                            </div>
+                modelItem.innerHTML = `
+                    <div class="model-item-info">
+                        <div class="model-item-name">
+                            ${modelName}${tagHtml}${activeHtml}
                         </div>
-                        <div style="margin-left: 15px;">
-                            ${isCurrentModel ?
-                                '<span style="color: #4CAF50; font-size: 24px;">●</span>' :
-                                '<button class="btn" onclick="selectModel(\'' + modelName + '\')" style="margin: 0; padding: 6px 12px; font-size: 12px;">Select</button>'
-                            }
+                        <div class="model-item-meta">${modelInfo.size} &middot; ${modelInfo.speed} speed &middot; ${modelInfo.quality} quality</div>
+                        <div class="model-progress">
+                            <div class="progress-text">Downloading...</div>
                         </div>
+                    </div>
+                    <div class="model-item-action">
+                        ${isCurrentModel
+                            ? ''
+                            : '<button class="settings-action-btn" onclick="event.stopPropagation(); selectModel(\'' + modelName + '\')">Select</button>'
+                        }
                     </div>
                 `;
 
                 if (!isCurrentModel) {
-                    modelCard.onmouseenter = () => {
-                        modelCard.style.borderColor = '#4CAF50';
-                        modelCard.style.background = '#2a3a2a';
-                    };
-                    modelCard.onmouseleave = () => {
-                        modelCard.style.borderColor = '#444';
-                        modelCard.style.background = '#2a2a2a';
-                    };
+                    modelItem.addEventListener('click', () => selectModel(modelName));
                 }
 
-                modelListDiv.appendChild(modelCard);
+                modelListDiv.appendChild(modelItem);
             }
         }
 
@@ -3226,16 +4499,22 @@ Session started - waiting for activity...
 
         function showModelNotification(message, type = 'info') {
             // In-app notification toast (bottom-right, matches app theme)
+            const cs = getComputedStyle(document.documentElement);
+            const bgColor = type === 'success'
+                ? cs.getPropertyValue('--success-green').trim()
+                : type === 'error'
+                    ? cs.getPropertyValue('--recording-red').trim()
+                    : cs.getPropertyValue('--accent-primary').trim();
             const notification = document.createElement('div');
             notification.style.cssText = `
                 position: fixed;
                 bottom: 20px;
                 right: 20px;
                 padding: 15px 20px;
-                background: ${type === 'success' ? '#22c55e' : type === 'error' ? '#ef4444' : '#3b82f6'};
+                background: ${bgColor};
                 color: white;
                 border-radius: 6px;
-                box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+                box-shadow: 0 4px 12px rgba(0,0,0,0.3);
                 z-index: 10000;
                 font-size: 14px;
                 max-width: 350px;
@@ -3265,6 +4544,23 @@ Session started - waiting for activity...
             } catch (error) {
                 console.error('Error loading notification settings:', error);
                 document.getElementById('notifications-toggle').checked = true;
+            }
+        }
+
+        async function loadTelemetrySettings() {
+            try {
+                const result = await ipcRenderer.invoke('get-telemetry');
+                const toggle = document.getElementById('telemetry-toggle');
+
+                if (result.success) {
+                    toggle.checked = result.telemetry_enabled;
+                } else {
+                    console.error('Failed to load telemetry settings:', result.error);
+                    toggle.checked = true; // Default to enabled
+                }
+            } catch (error) {
+                console.error('Error loading telemetry settings:', error);
+                document.getElementById('telemetry-toggle').checked = true;
             }
         }
 
@@ -3313,29 +4609,55 @@ Session started - waiting for activity...
                     }
                 });
             }
+
+            const telemetryToggle = document.getElementById('telemetry-toggle');
+            if (telemetryToggle) {
+                telemetryToggle.addEventListener('change', async (e) => {
+                    try {
+                        const enabled = e.target.checked;
+                        const result = await ipcRenderer.invoke('set-telemetry', enabled);
+
+                        if (result.success) {
+                            showModelNotification(
+                                `Usage analytics ${enabled ? 'enabled' : 'disabled'}`,
+                                'success'
+                            );
+                        } else {
+                            console.error('Failed to save telemetry setting:', result.error);
+                            showModelNotification('Failed to save setting', 'error');
+                            e.target.checked = !enabled;
+                        }
+                    } catch (error) {
+                        console.error('Error saving telemetry setting:', error);
+                        showModelNotification('Failed to save setting', 'error');
+                        e.target.checked = !e.target.checked;
+                    }
+                });
+            }
         });
 
         async function runSetupFromSettings() {
             const btn = document.getElementById('run-setup-btn');
-            btn.textContent = 'Running Setup...';
+            btn.textContent = 'Running...';
             btn.disabled = true;
-            
+
             try {
                 // Show setup overlay in main window
                 document.getElementById('setup-overlay').style.display = 'flex';
-                
+
                 // Run the setup process
                 await runSetupProcess();
-                
-                btn.textContent = 'Setup Complete!';
+
+                btn.textContent = 'Done';
                 setTimeout(() => {
-                    btn.textContent = 'Run Setup Wizard';
+                    btn.textContent = 'Run';
                     btn.disabled = false;
                 }, 3000);
             } catch (error) {
                 console.error('Setup failed:', error);
-                btn.textContent = 'Setup Failed - Try Again';
+                btn.textContent = 'Failed';
                 btn.disabled = false;
+                setTimeout(() => { btn.textContent = 'Run'; }, 3000);
             }
         }
         
@@ -3385,27 +4707,27 @@ Session started - waiting for activity...
             const btn = document.getElementById('clear-state-btn');
             btn.textContent = 'Clearing...';
             btn.disabled = true;
-            
+
             try {
                 const result = await ipcRenderer.invoke('clear-state');
                 if (result.success) {
-                    btn.textContent = 'State Cleared!';
+                    btn.textContent = 'Done';
                     log('Manual state clear successful');
                 } else {
-                    btn.textContent = 'Clear Failed';
+                    btn.textContent = 'Failed';
                     log('Manual state clear failed: ' + result.error);
                 }
-                
+
                 setTimeout(() => {
-                    btn.textContent = 'Clear Recording State';
+                    btn.textContent = 'Clear';
                     btn.disabled = false;
                 }, 2000);
             } catch (error) {
                 console.error('Clear state failed:', error);
-                btn.textContent = 'Clear Failed';
+                btn.textContent = 'Failed';
                 btn.disabled = false;
                 setTimeout(() => {
-                    btn.textContent = 'Clear Recording State';
+                    btn.textContent = 'Clear';
                 }, 2000);
             }
         }
@@ -3414,123 +4736,263 @@ Session started - waiting for activity...
             const btn = document.getElementById('test-update-btn');
             btn.textContent = 'Checking...';
             btn.disabled = true;
-            
+
             try {
-                // Clear any previous dismissal to force showing banner
-                sessionStorage.removeItem('updateDismissed');
-                
-                await checkForUpdates();
-                
-                btn.textContent = 'Check Complete!';
+                // Clear dismissals to force showing banner
+                const keys = Object.keys(localStorage);
+                keys.forEach(k => { if (k.startsWith('announcement-dismissed-')) localStorage.removeItem(k); });
+
+                await runAnnouncementChecks();
+
+                btn.textContent = 'Done';
                 setTimeout(() => {
-                    btn.textContent = 'Test Update Check';
+                    btn.textContent = 'Check';
                     btn.disabled = false;
                 }, 2000);
             } catch (error) {
-                console.error('Update check test failed:', error);
-                btn.textContent = 'Test Failed';
+                console.error('Announcement check test failed:', error);
+                btn.textContent = 'Failed';
                 btn.disabled = false;
                 setTimeout(() => {
-                    btn.textContent = 'Test Update Check';
+                    btn.textContent = 'Check';
                 }, 2000);
             }
         }
-        
-        // Update checking functions
-        async function checkForUpdates() {
+
+        // Announcement system -- unified banner for updates + remote announcements
+
+        const ANNOUNCEMENT_ICONS = {
+            info: '<svg viewBox="0 0 20 20" fill="white"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg>',
+            release: '<svg viewBox="0 0 20 20" fill="white"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-8.707l-3-3a1 1 0 00-1.414 0l-3 3a1 1 0 001.414 1.414L9 9.414V13a1 1 0 102 0V9.414l1.293 1.293a1 1 0 001.414-1.414z" clip-rule="evenodd"/></svg>',
+            warning: '<svg viewBox="0 0 20 20" fill="white"><path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>'
+        };
+
+        const ANNOUNCEMENT_PRIORITY = { warning: 3, release: 2, info: 1 };
+
+        function compareVersions(a, b) {
+            const pa = a.split('.').map(Number);
+            const pb = b.split('.').map(Number);
+            for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+                const na = pa[i] || 0;
+                const nb = pb[i] || 0;
+                if (na < nb) return -1;
+                if (na > nb) return 1;
+            }
+            return 0;
+        }
+
+        async function fetchRemoteAnnouncements() {
             try {
-                log('🔍 Checking for updates...');
-                const result = await ipcRenderer.invoke('check-for-updates');
-                
+                const result = await ipcRenderer.invoke('check-announcements');
                 if (result.success) {
-                    updateInfo = result;
-                    log(`Update check: Current ${result.currentVersion}, Latest ${result.latestVersion}`);
-                    
-                    if (result.updateAvailable) {
-                        showUpdateBanner(result);
-                    }
-                } else {
-                    log(`Update check failed: ${result.error}`);
+                    return { announcements: result.announcements, currentVersion: result.currentVersion };
+                }
+            } catch (error) {
+                log(`Announcements fetch error: ${error.message}`);
+            }
+            return { announcements: [], currentVersion: null };
+        }
+
+        async function fetchUpdateAnnouncement() {
+            try {
+                log('Checking for updates...');
+                const result = await ipcRenderer.invoke('check-for-updates');
+                if (result.success && result.updateAvailable) {
+                    log(`Update available: v${result.latestVersion}`);
+                    return {
+                        id: `update-${result.latestVersion}`,
+                        type: 'release',
+                        title: `Update available: v${result.latestVersion}`,
+                        message: result.releaseName || 'A new version is available.',
+                        action_url: result.releaseUrl || null,
+                        action_label: 'Download Update',
+                        min_version: null,
+                        max_version: null,
+                        created_at: new Date().toISOString(),
+                        expires_at: null
+                    };
+                } else if (result.success) {
+                    log(`Up to date: v${result.currentVersion}`);
                 }
             } catch (error) {
                 log(`Update check error: ${error.message}`);
             }
+            return null;
         }
-        
-        function showUpdateBanner(info) {
-            updateVersion.textContent = `v${info.latestVersion}`;
-            updateBanner.classList.add('show');
-            document.querySelector('.header').classList.add('with-update-banner');
-            
-            log(`🚀 Update available: v${info.latestVersion}`);
+
+        function isAnnouncementDismissed(id) {
+            return localStorage.getItem(`announcement-dismissed-${id}`) === 'true';
         }
-        
-        function hideUpdateBanner() {
-            updateBanner.classList.remove('show');
-            document.querySelector('.header').classList.remove('with-update-banner');
-            
-            // Remember dismissal for this session (could extend to localStorage for persistence)
-            sessionStorage.setItem('updateDismissed', updateInfo?.latestVersion || '');
+
+        function dismissAnnouncement(id) {
+            localStorage.setItem(`announcement-dismissed-${id}`, 'true');
         }
-        
-        function startPeriodicUpdateCheck() {
-            // Check for updates every 6 hours
-            updateCheckInterval = setInterval(checkForUpdates, 6 * 60 * 60 * 1000);
+
+        function isAnnouncementExpired(ann) {
+            if (!ann.expires_at) return false;
+            return new Date(ann.expires_at) < new Date();
         }
-        
-        function stopPeriodicUpdateCheck() {
-            if (updateCheckInterval) {
-                clearInterval(updateCheckInterval);
-                updateCheckInterval = null;
+
+        function isAnnouncementInVersionRange(ann, currentVersion) {
+            if (!currentVersion) return true;
+            if (ann.min_version && compareVersions(currentVersion, ann.min_version) < 0) return false;
+            if (ann.max_version && compareVersions(currentVersion, ann.max_version) > 0) return false;
+            return true;
+        }
+
+        function resolveAnnouncement(allAnnouncements, currentVersion) {
+            const eligible = allAnnouncements.filter(ann => {
+                if (isAnnouncementDismissed(ann.id)) return false;
+                if (isAnnouncementExpired(ann)) return false;
+                if (!isAnnouncementInVersionRange(ann, currentVersion)) return false;
+                return true;
+            });
+
+            // Sort by priority (highest first), then by created_at (newest first)
+            eligible.sort((a, b) => {
+                const pa = ANNOUNCEMENT_PRIORITY[a.type] || 0;
+                const pb = ANNOUNCEMENT_PRIORITY[b.type] || 0;
+                if (pb !== pa) return pb - pa;
+                return new Date(b.created_at) - new Date(a.created_at);
+            });
+
+            return eligible.length > 0 ? eligible[0] : null;
+        }
+
+        function showAnnouncementBanner(ann) {
+            currentAnnouncement = ann;
+
+            // Set type class
+            announcementBanner.className = 'announcement-banner show type-' + ann.type;
+
+            // Set icon
+            announcementIcon.innerHTML = ANNOUNCEMENT_ICONS[ann.type] || ANNOUNCEMENT_ICONS.info;
+
+            // Set text
+            announcementTitle.textContent = ann.title;
+            announcementMessage.textContent = ann.message;
+
+            // Set action button
+            if (ann.action_url) {
+                announcementActionBtn.textContent = ann.action_label || 'Learn More';
+                announcementActionBtn.style.display = '';
+            } else {
+                announcementActionBtn.style.display = 'none';
+            }
+
+            document.querySelector('.header').classList.add('with-announcement-banner');
+            log(`Showing announcement: [${ann.type}] ${ann.title}`);
+        }
+
+        function hideAnnouncementBanner() {
+            announcementBanner.className = 'announcement-banner';
+            document.querySelector('.header').classList.remove('with-announcement-banner');
+
+            if (currentAnnouncement) {
+                dismissAnnouncement(currentAnnouncement.id);
+            }
+            currentAnnouncement = null;
+        }
+
+        async function runAnnouncementChecks() {
+            const [remoteData, updateAnn] = await Promise.all([
+                fetchRemoteAnnouncements(),
+                fetchUpdateAnnouncement()
+            ]);
+
+            const allAnnouncements = [...remoteData.announcements];
+            // Only use auto-detected update if no eligible remote announcements
+            const hasEligibleRemote = remoteData.announcements.some(a =>
+                !isAnnouncementDismissed(a.id) && !isAnnouncementExpired(a)
+            );
+            if (updateAnn && !hasEligibleRemote) {
+                allAnnouncements.push(updateAnn);
+            }
+
+            const winner = resolveAnnouncement(allAnnouncements, remoteData.currentVersion);
+            if (winner) {
+                showAnnouncementBanner(winner);
+            } else {
+                hideAnnouncementBanner();
             }
         }
-        
-        // Update button event listeners
-        viewReleaseBtn.addEventListener('click', async () => {
-            if (updateInfo && updateInfo.releaseUrl) {
+
+        function startPeriodicAnnouncementCheck() {
+            announcementCheckInterval = setInterval(runAnnouncementChecks, 6 * 60 * 60 * 1000);
+        }
+
+        function stopPeriodicAnnouncementCheck() {
+            if (announcementCheckInterval) {
+                clearInterval(announcementCheckInterval);
+                announcementCheckInterval = null;
+            }
+        }
+
+        // Announcement button event listeners
+        announcementActionBtn.addEventListener('click', async () => {
+            if (currentAnnouncement && currentAnnouncement.action_url) {
                 try {
-                    await ipcRenderer.invoke('open-release-page', updateInfo.releaseUrl);
-                    log('Opened release page in browser');
+                    await ipcRenderer.invoke('open-release-page', currentAnnouncement.action_url);
+                    log('Opened announcement action URL');
+                    hideAnnouncementBanner();
                 } catch (error) {
-                    log(`Failed to open release page: ${error.message}`);
+                    log(`Failed to open announcement URL: ${error.message}`);
                 }
             }
         });
-        
-        downloadUpdateBtn.addEventListener('click', async () => {
-            if (updateInfo && updateInfo.releaseUrl) {
-                try {
-                    // Open the releases page where user can download
-                    await ipcRenderer.invoke('open-release-page', updateInfo.releaseUrl);
-                    log('Opened download page in browser');
-                    
-                    // Hide banner after user clicks download
-                    hideUpdateBanner();
-                } catch (error) {
-                    log(`Failed to open download page: ${error.message}`);
-                }
+
+        dismissAnnouncementBtn.addEventListener('click', () => {
+            hideAnnouncementBanner();
+            log('Announcement dismissed');
+        });
+
+        // Theme functions
+        function getSystemTheme() {
+            return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        }
+
+        function applyTheme(pref) {
+            const eff = pref === 'system' ? getSystemTheme() : pref;
+            if (eff === 'light') {
+                document.documentElement.setAttribute('data-theme', 'light');
+            } else {
+                document.documentElement.removeAttribute('data-theme');
             }
-        });
-        
-        dismissUpdateBtn.addEventListener('click', () => {
-            hideUpdateBanner();
-            log('Update notification dismissed');
-        });
+        }
+
+        function initTheme() {
+            const saved = localStorage.getItem('theme') || 'system';
+            const themeSelect = document.getElementById('theme-select');
+            if (themeSelect) {
+                themeSelect.value = saved;
+                themeSelect.addEventListener('change', (e) => {
+                    const value = e.target.value;
+                    localStorage.setItem('theme', value);
+                    applyTheme(value);
+                });
+            }
+            applyTheme(saved);
+
+            window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+                if ((localStorage.getItem('theme') || 'system') === 'system') {
+                    applyTheme('system');
+                }
+            });
+        }
+
+        // Initialize theme early
+        initTheme();
 
         // Initialize
         initializeApp().then(() => {
             runStartupCheck().then(() => {
-                // Check for updates after app initialization
+                // Check for announcements and updates after app initialization
                 setTimeout(() => {
-                    // Only check if not dismissed this session
-                    const dismissed = sessionStorage.getItem('updateDismissed');
-                    if (!dismissed) {
-                        checkForUpdates();
-                    }
-                }, 2000); // Wait 2 seconds after startup
-                
+                    runAnnouncementChecks();
+                }, 2000);
+
                 // Start periodic checks
-                startPeriodicUpdateCheck();
+                startPeriodicAnnouncementCheck();
             });
         });
     </script>

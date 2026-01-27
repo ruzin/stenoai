@@ -1,6 +1,6 @@
 {
   "name": "stenoai",
-  "version": "0.1.4",
+  "version": "0.2.0",
   "description": "AI-powered meeting transcription and analysis for Mac",
   "main": "main.js",
   "homepage": "https://github.com/ruzin/stenoai",
@@ -40,7 +40,8 @@
     "electron-builder": "^24.0.0"
   },
   "dependencies": {
-    "axios": "^1.6.0"
+    "axios": "^1.6.0",
+    "posthog-node": "^4.18.0"
   },
   "build": {
     "appId": "com.stenoai.recorder",

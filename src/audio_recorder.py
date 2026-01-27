@@ -38,11 +38,14 @@ class AudioRecorder:
         self.sample_rate = sample_rate
         self.channels = channels
         self.recording = False
+        self.paused = False
         self.audio_data = []
         self.recording_thread: Optional[threading.Thread] = None
 
         # Thread safety lock for audio_data access
         self.audio_lock = threading.Lock()
+        # Separate lock for pause state
+        self.pause_lock = threading.Lock()
 
         # Simple state - no persistence for now
         self.stream = None
@@ -89,13 +92,44 @@ class AudioRecorder:
         if not self.recording:
             logger.warning("No recording in progress")
             return
-            
+
         self.recording = False
+        with self.pause_lock:
+            self.paused = False
         if self.recording_thread:
             self.recording_thread.join(timeout=5.0)  # Add timeout to prevent hanging
             self.recording_thread = None  # Clean up reference
-        
+
         logger.info("Stopped recording")
+
+    def pause_recording(self) -> None:
+        """Pause the current recording."""
+        if not self.recording:
+            logger.warning("No recording in progress to pause")
+            return
+        with self.pause_lock:
+            if self.paused:
+                logger.warning("Recording is already paused")
+                return
+            self.paused = True
+        logger.info("Recording paused")
+
+    def resume_recording(self) -> None:
+        """Resume a paused recording."""
+        if not self.recording:
+            logger.warning("No recording in progress to resume")
+            return
+        with self.pause_lock:
+            if not self.paused:
+                logger.warning("Recording is not paused")
+                return
+            self.paused = False
+        logger.info("Recording resumed")
+
+    def is_paused(self) -> bool:
+        """Check if recording is currently paused."""
+        with self.pause_lock:
+            return self.paused
         
     def _record(self) -> None:
         """Internal method to handle the recording process."""
@@ -135,8 +169,8 @@ class AudioRecorder:
         """Callback function for audio input stream."""
         if status:
             logger.warning(f"Audio callback status: {status}")
-        if self.recording:
-            # Thread-safe append to audio_data
+        if self.recording and not self.is_paused():
+            # Thread-safe append to audio_data (skip when paused)
             with self.audio_lock:
                 self.audio_data.append(indata.copy())
             
