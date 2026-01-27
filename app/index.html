@@ -4051,13 +4051,15 @@ Session started - waiting for activity...
                 });
                 
                 setStatus('ready', 'Processing complete');
+                setTimeout(() => setStatus('ready', 'Ready'), 3000);
             } else {
                 // Remove temporary meeting entry on failure
-                meetings = meetings.filter(meeting => 
+                meetings = meetings.filter(meeting =>
                     !(meeting.session_info?.name === data.sessionName && meeting.summary === 'Pending...')
                 );
-                
+
                 setStatus('ready', 'Processing failed');
+                setTimeout(() => setStatus('ready', 'Ready'), 5000);
                 log(`Processing failed: ${data.error}`);
                 filterMeetings();
             }
