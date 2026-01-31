@@ -163,6 +163,7 @@ config.json
 # Local documentation and review notes
 CODE_REVIEW.md
 SESSION_LOG.md
+FEATURES.md
 
 # Prompt testing outputs
 prompt_tests/outputs/
