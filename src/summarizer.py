@@ -291,56 +291,6 @@ class OllamaSummarizer:
         logger.info(f"Ollama ready with model {self.model_name}")
         return True
         
-    def _create_prompt(self, transcript: str, *, meeting_title: str = "", meeting_date: str = "", timezone: str = "Europe/London") -> str:
-        """
-        Create a simple, clear prompt for meeting analysis.
-        """
-        return f"""You are a helpful meeting assistant. Summarise this meeting transcript into participants, key points and any next steps mentioned. Only base your summary on what was explicitly discussed in the transcript. 
-
-IMPORTANT: Do not infer or assume information that wasn't directly mentioned. If you need to make any reasonable inference, clearly indicate it as such (e.g., "Based on the discussion, it appears...").
-
-Include a brief overview so someone can quickly understand what happened in the meeting, who were the participants, what were the key points discussed, and what are the next steps if any were mentioned.
-
-CRITICAL JSON FORMATTING RULES:
-1. ALL strings must be enclosed in double quotes "like this"
-2. Use null (not "null") for empty values
-3. NO trailing commas anywhere
-4. NO comments or extra text outside the JSON
-5. ALL array elements must be properly quoted strings
-6. If no participants, key points, or next steps are mentioned, return an empty array [] for that field.
-
-CORRECT FORMAT EXAMPLE:
-{{
-  "participants": ["John Smith", "Sarah Wilson"],
-  "key_points": ["Budget discussion", "Timeline review"]
-}}
-
-INCORRECT FORMAT (DO NOT DO THIS):
-{{
-  "participants": ["John", no other participants mentioned],
-  "key_points": ["Budget", timeline,]
-}}
-
-TRANSCRIPT:
-{transcript}
-
-Return ONLY the response in this exact JSON format:
-{{
-  "overview": "Brief overview of what happened in the meeting",
-  "participants": [""],
-  "key_points": [
-    "Important point or topic discussed",
-    "Another key point from the meeting"
-  ],
-  "next_steps": [
-    {{
-      "description": "Next step or action item as explicitly mentioned", 
-      "assignee": "Person responsible or null if unclear",
-      "deadline": "Deadline mentioned or null"
-    }}
-  ]
-}}"""
-
     def _create_permissive_prompt(self, transcript: str) -> str:
         """
         Create an enhanced prompt with discussion_areas and improved extraction.
