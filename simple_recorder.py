@@ -723,9 +723,10 @@ def record(duration, session_name):
             except KeyboardInterrupt:
                 signal_handler(signal.SIGINT, None)
         else:
-            # Count down for normal durations
+            # Count down for normal durations (log every 10 minutes to reduce spam)
             for i in range(duration, 0, -1):
-                print(f"   {i}...")
+                if i % 600 == 0:  # Every 10 minutes
+                    print(f"Recording... {i // 60} minutes remaining")
                 time.sleep(1)
         
         # Normal completion (if not interrupted)
