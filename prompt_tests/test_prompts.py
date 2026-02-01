@@ -240,16 +240,21 @@ def test_prompt(prompt_name: str, prompt_template: callable, transcript: str, mo
         }
 
 
-def compare_prompts(transcript_file: str, output_dir: str = "outputs", model: str = "llama3.2:3b", prompts: list = None):
+# Default output directory relative to this script
+DEFAULT_OUTPUT_DIR = Path(__file__).parent / "outputs"
+
+
+def compare_prompts(transcript_file: str, output_dir: str = None, model: str = "llama3.2:3b", prompts: list = None):
     """
     Compare multiple prompt templates on the same transcript.
 
     Args:
         transcript_file: Path to the transcript file
-        output_dir: Directory to save test results
+        output_dir: Directory to save test results (default: prompt_tests/outputs)
         model: Ollama model to use
         prompts: List of prompt names to test (default: all)
     """
+    output_dir = output_dir or str(DEFAULT_OUTPUT_DIR)
     # Load transcript
     transcript_path = Path(transcript_file)
     if not transcript_path.exists():
@@ -373,7 +378,7 @@ def cli():
 @cli.command()
 @click.argument('transcript_file', type=click.Path(exists=True))
 @click.option('--model', '-m', default='llama3.2:3b', help='Ollama model to use')
-@click.option('--output', '-o', default='outputs', help='Output directory for results')
+@click.option('--output', '-o', default=None, help='Output directory for results (default: prompt_tests/outputs)')
 @click.option('--prompts', '-p', multiple=True, help='Specific prompts to test (can specify multiple)')
 def compare(transcript_file, model, output, prompts):
     """Compare multiple prompt templates on a transcript"""
