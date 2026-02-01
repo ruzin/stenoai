@@ -24,9 +24,10 @@ logger = logging.getLogger(__name__)
 
 # Define your prompt templates here
 PROMPT_TEMPLATES = {
-    "current_simple": lambda transcript: f"""You are a helpful meeting assistant. Summarise this meeting transcript into participants, discussion areas, key points and any next steps mentioned. Only base your summary on what was explicitly discussed in the transcript.
+    # Current prompt - matches _create_permissive_prompt in src/summarizer.py
+    "current": lambda transcript: f"""You are a helpful meeting assistant. Summarise this meeting transcript into participants, discussion areas, key points and any next steps mentioned. Only base your summary on what was explicitly discussed in the transcript.
 
-IMPORTANT: Do not infer or assume information that wasn't directly mentioned. If you need to make any reasonable inference, clearly indicate it as such (e.g., "Based on the discussion, it appears...").
+IMPORTANT: Do not infer or assume information that wasn't directly mentioned.
 
 Include a brief overview so someone can quickly understand what happened in the meeting, who were the participants, what areas/topics were discussed, what were the key points, and what are the next steps if any were mentioned.
 
@@ -38,6 +39,24 @@ CRITICAL JSON FORMATTING RULES:
 5. ALL array elements must be properly quoted strings
 6. If no participants, discussion areas, key points, or next steps are mentioned, return an empty array [] for that field.
 
+IMPORTANT - VARIABLE NUMBER OF ITEMS:
+- Discussion areas: Include as many as needed to organize the topics (1-2 for short meetings, 4-5 for complex discussions)
+- Key points: Extract as many as were actually discussed (2-3 for short meetings, 6-8 for detailed discussions)
+- Next steps: Include only action items that were clearly mentioned (could be 1, could be 6+)
+- The examples below are illustrative - do not feel obligated to match the exact number shown
+
+CORRECT FORMAT EXAMPLE:
+{{
+  "participants": ["John Smith", "Sarah Wilson"],
+  "key_points": ["Budget discussion", "Timeline review"]
+}}
+
+INCORRECT FORMAT (DO NOT DO THIS):
+{{
+  "participants": ["John", no other participants mentioned],
+  "key_points": ["Budget", timeline,]
+}}
+
 TRANSCRIPT:
 {transcript}
 
@@ -47,78 +66,92 @@ Return ONLY the response in this exact JSON format:
   "participants": [""],
   "discussion_areas": [
     {{
-      "title": "Topic or area discussed",
-      "analysis": "Short paragraph about what was discussed in this area"
+      "title": "First main topic discussed",
+      "analysis": "Short paragraph about what was discussed in this topic"
+    }},
+    {{
+      "title": "Second main topic discussed",
+      "analysis": "Short paragraph about what was discussed in this topic"
+    }},
+    {{
+      "title": "Third main topic discussed",
+      "analysis": "Short paragraph about what was discussed in this topic"
     }}
   ],
   "key_points": [
-    "Important point or topic discussed",
-    "Another key point from the meeting"
+    "First important point or topic discussed",
+    "Second key point from the meeting",
+    "Third key point from the meeting",
+    "Fourth key point from the meeting",
+    "Fifth key point from the meeting"
   ],
   "next_steps": [
     {{
-      "description": "Next step or action item as explicitly mentioned",
+      "description": "First next step or action item as explicitly mentioned",
+      "assignee": "Person responsible or null if unclear",
+      "deadline": "Deadline mentioned or null"
+    }},
+    {{
+      "description": "Second next step or action item",
+      "assignee": "Person responsible or null if unclear",
+      "deadline": "Deadline mentioned or null"
+    }},
+    {{
+      "description": "Third next step or action item",
+      "assignee": "Person responsible or null if unclear",
+      "deadline": "Deadline mentioned or null"
+    }},
+    {{
+      "description": "Fourth next step or action item",
       "assignee": "Person responsible or null if unclear",
       "deadline": "Deadline mentioned or null"
     }}
   ]
 }}""",
 
-    "enhanced_simple": lambda transcript: f"""You are a meeting assistant. Create a clear, comprehensive summary of this meeting transcript.
-
-GUIDELINES:
-- Base your summary on what was explicitly discussed in the transcript
-- Provide enough detail and context so someone who missed the meeting can understand what happened
-- Organize information logically by discussion areas/topics
-- Extract ALL action items and next steps mentioned (not just 2-3)
-- Return ONLY valid JSON with no markdown formatting
-
-CRITICAL JSON FORMATTING RULES:
-1. ALL strings must be enclosed in double quotes "like this"
-2. Use null (not "null") for empty values
-3. NO trailing commas anywhere
-4. NO comments or extra text outside the JSON
-5. Return the complete JSON object with all fields
+    # Chain-of-thought prompt - step by step reasoning
+    "chain_of_thought": lambda transcript: f"""You are a meeting assistant. Analyze this transcript step by step.
 
 TRANSCRIPT:
 {transcript}
 
-Return your response in this EXACT JSON format:
+---
+
+Analyze this transcript by following these steps IN ORDER. Show your reasoning for each step before providing the final JSON.
+
+STEP 1 - IDENTIFY SPEAKERS:
+List everyone who spoke or was mentioned by name. If this is a monologue or presentation, note the speaker/presenter.
+
+STEP 2 - LIST MAIN TOPICS:
+What are the 2-5 main topics or themes discussed? List them briefly.
+
+STEP 3 - ANALYZE EACH TOPIC:
+For each topic you identified, write 1-2 sentences summarizing what was said about it.
+
+STEP 4 - EXTRACT KEY POINTS:
+What are the most important takeaways? List 3-6 concrete points.
+
+STEP 5 - FIND ACTION ITEMS:
+Were any next steps, tasks, or action items mentioned? List them with who is responsible (if stated).
+
+STEP 6 - WRITE OVERVIEW:
+Write a 2-3 sentence overview that captures the essence of this meeting/discussion.
+
+---
+
+After completing your analysis above, provide the final summary as valid JSON (no markdown):
+
 {{
-  "overview": "2-3 sentence summary of the meeting's purpose, main topics discussed, and key outcomes",
-
-  "participants": [
-    "Name or role of participant 1",
-    "Name or role of participant 2"
-  ],
-
+  "overview": "Your overview from Step 6",
+  "participants": ["Names from Step 1"],
   "discussion_areas": [
-    {{
-      "title": "Main topic or theme discussed",
-      "analysis": "Detailed paragraph explaining what was discussed about this topic, including context, decisions made, challenges mentioned, and any technical details or solutions proposed"
-    }}
+    {{"title": "Topic from Step 2", "analysis": "Analysis from Step 3"}}
   ],
-
-  "key_points": [
-    "Important takeaway 1",
-    "Important takeaway 2",
-    "Important takeaway 3"
-  ],
-
+  "key_points": ["Points from Step 4"],
   "next_steps": [
-    {{
-      "action": "What needs to be done",
-      "owner": "Person responsible (or null if not mentioned)",
-      "timeline": "When it should happen (or null if not mentioned)"
-    }}
+    {{"description": "Action from Step 5", "assignee": "Person or null", "deadline": "Date or null"}}
   ]
-}}
-
-IMPORTANT INSTRUCTIONS:
-- For discussion_areas: Group related topics together. Each area should have a clear title and a comprehensive analysis paragraph (2-4 sentences) covering what was discussed.
-- For key_points: Extract ALL important points mentioned, not just 2-3. If there are 10 key points, list all 10.
-- For next_steps: Extract ALL action items mentioned. Look for phrases like "we need to", "I'll", "should", "will", "going to", "next", "create", "set up", "test", "build". If there are 8 action items, list all 8.
-- If participants aren't mentioned by name, you can use roles like "Developer 1", "Developer 2" or leave empty array if truly no participants are identifiable."""
+}}"""
 }
 
 
