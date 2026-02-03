@@ -1638,6 +1638,19 @@ async function ensureOllamaRunning() {
   }
 }
 
+// Check if Ollama is installed (for setup wizard)
+ipcMain.handle('check-ollama-installed', async () => {
+  try {
+    const ollamaPath = await findOllamaExecutable();
+    if (!ollamaPath) {
+      return { success: true, installed: false };
+    }
+    return { success: true, installed: true, path: ollamaPath };
+  } catch (error) {
+    return { success: false, installed: false, error: error.message };
+  }
+});
+
 // Model management handlers
 ipcMain.handle('check-model-installed', async (event, modelName) => {
   try {
