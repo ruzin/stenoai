@@ -21,7 +21,7 @@ AI-powered meeting notes assistant that runs entirely on your device using small
 
 ## Features
 
-- **Local transcription** using OpenAI Whisper
+- **Local transcription** using whisper.cpp
 - **AI summarization** with Ollama models
 - **Multiple AI models** - Choose from 4 models optimized for different use cases
 - **Privacy-first** - no cloud dependencies
@@ -79,33 +79,33 @@ You can run it locally as well (see below) if you dont want to install a dmg.
 ## Local Development/Use Locally
 
 ### Prerequisites
-- Python 3.8+
+- Python 3.9+
 - Node.js 18+
-- Homebrew
 
 ### Setup
 ```bash
 git clone https://github.com/ruzin/stenoai.git
 cd stenoai
 
-# Backend
+# Backend setup
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 
-# Install Ollama
-brew install ollama
-ollama serve &
-ollama pull llama3.2:3b
+# Download bundled binaries (Ollama, ffmpeg)
+./scripts/download-ollama.sh
 
-# Install ffmpeg (required for audio processing)
-brew install ffmpeg
+# Build the Python backend
+pip install pyinstaller
+pyinstaller stenoai.spec --noconfirm
 
 # Frontend
 cd app
 npm install
 npm start
 ```
+
+Note: Ollama and ffmpeg are bundled - no system installation needed. The setup wizard in the app will download the required AI models automatically.
 
 ### Build
 ```bash

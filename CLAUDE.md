@@ -7,20 +7,26 @@ This is a local meeting transcription service:
 
 ### Desktop App
 - sounddevice for audio recording
-- OpenAI Whisper for transcription
-- Ollama for LLM summarization
-- Electron GUI with CLI backend
+- whisper.cpp (via pywhispercpp) for transcription
+- Bundled Ollama for LLM summarization
+- Electron GUI with PyInstaller-bundled Python backend
 
 ## Project Structure
 ```
-steno-poc/
+stenoai/
 ├── app/                  # Electron desktop app
 ├── src/                  # Python backend
 │   ├── audio_recorder.py      # Local audio recording
-│   ├── transcriber.py         # Whisper transcription
+│   ├── transcriber.py         # whisper.cpp transcription
 │   ├── summarizer.py          # Ollama LLM processing
-│   └── models.py             # Data models
-├── simple_recorder.py    # CLI interface
+│   ├── ollama_manager.py      # Bundled Ollama management
+│   ├── config.py              # User settings & model selection
+│   └── models.py              # Data models
+├── bin/                  # Bundled binaries (Ollama, ffmpeg)
+├── dist/                 # PyInstaller build output
+├── scripts/              # Build scripts
+├── simple_recorder.py    # CLI interface (entry point)
+├── stenoai.spec          # PyInstaller configuration
 ├── website/              # Marketing site
 ├── recordings/           # Local audio files
 ├── transcripts/          # Local transcripts
@@ -29,41 +35,46 @@ steno-poc/
 
 ## Development Commands
 
-### CLI Commands
-- Check status: `python simple_recorder.py status`
-- Start recording: `python simple_recorder.py start --name meeting_name`
-- Stop recording: `python simple_recorder.py stop`
-- Transcribe audio: `python simple_recorder.py transcribe filename.wav`
-- Summarize transcript: `python simple_recorder.py summarize filename.txt`
-- Full pipeline: `python simple_recorder.py pipeline filename.wav`
-- List failed summaries: `python simple_recorder.py list_failed`
-- Reprocess failed summary: `python simple_recorder.py reprocess path/to/summary.json`
+### CLI Commands (via bundled backend: `dist/stenoai/stenoai`)
+- Check status: `stenoai status`
+- Setup check: `stenoai setup-check`
+- Download whisper model: `stenoai download-whisper-model`
+- Start recording: `stenoai start --name meeting_name`
+- Stop recording: `stenoai stop`
+- Transcribe audio: `stenoai transcribe filename.wav`
+- Summarize transcript: `stenoai summarize filename.txt`
+- Full pipeline: `stenoai pipeline filename.wav`
+- List failed summaries: `stenoai list_failed`
+- Reprocess failed summary: `stenoai reprocess path/to/summary.json`
 
 ### Desktop App Commands
 - Start app: `cd app && npm start`
 - Build app: `cd app && npm run build`
+- Build backend: `source venv/bin/activate && pyinstaller stenoai.spec --noconfirm`
 
-## Setup Instructions
-1. Install Ollama: `brew install ollama` (macOS)
-2. Pull model: `ollama pull llama2`
-3. Start Ollama: `ollama serve`
-4. Create virtual environment: `python -m venv venv`
-5. Activate virtual environment: `source venv/bin/activate` (Linux/Mac) or `venv\Scripts\activate` (Windows)
-6. Install dependencies: `pip install -r requirements.txt`
-7. Install package: `pip install -e .`
+## Setup Instructions (Development)
+1. Create virtual environment: `python -m venv venv`
+2. Activate virtual environment: `source venv/bin/activate`
+3. Install dependencies: `pip install -r requirements.txt`
+4. Download bundled binaries: `./scripts/download-ollama.sh`
+5. Build the backend: `pyinstaller stenoai.spec --noconfirm`
+6. Start the app: `cd app && npm install && npm start`
+
+Note: Ollama is bundled in `bin/` - no system installation needed.
 
 ## Testing Commands
-- Test basic functionality: `python simple_recorder.py status`
+- Test basic functionality: `dist/stenoai/stenoai status`
+- Test setup: `dist/stenoai/stenoai setup-check`
 - Test audio devices: `python -c "import sounddevice; print(sounddevice.query_devices())"`
-- Test Ollama: `ollama list`
 
 ## Dependencies
 - sounddevice>=0.4.6 (audio recording)
 - numpy>=1.24.0 (audio processing)
-- openai-whisper>=20230918 (transcription)
-- ollama>=0.1.7 (LLM summarization)
+- pywhispercpp (whisper.cpp transcription - preferred, faster)
+- ollama>=0.1.7 (LLM client)
 - click>=8.1.0 (CLI interface)
 - pydantic>=2.5.0 (data validation)
+- pyinstaller (bundling)
 
 ## Brand Colors
 StenoAI logo gradient (used in website logo SVG and app header):
