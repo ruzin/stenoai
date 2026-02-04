@@ -3,17 +3,24 @@
 
   # StenoAI
 
-  *Your very own Stenographer for every meeting*
+  *Private AI conversation intelligence for every meeting*
 </div>
 
-AI-powered meeting notes assistant that runs entirely on your device using small language models locally hosted. Privacy first approach & zero service costs.
+<p align="center">
+  <a href="https://github.com/ruzin/stenoai/actions/workflows/build-release.yml"><img src="https://img.shields.io/github/actions/workflow/status/ruzin/stenoai/build-release.yml?branch=main&style=for-the-badge" alt="Build"></a>
+  <a href="https://github.com/ruzin/stenoai/releases"><img src="https://img.shields.io/github/v/release/ruzin/stenoai?style=for-the-badge" alt="Release"></a>
+  <a href="https://discord.gg/EHxvAdKf"><img src="https://img.shields.io/badge/Discord-Join%20Server-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-CC%20BY--NC%204.0-blue?style=for-the-badge" alt="License"></a>
+  <img src="https://img.shields.io/badge/Platform-macOS-000000?style=for-the-badge&logo=apple&logoColor=white" alt="macOS">
+</p>
+
+AI-powered conversation intelligence that runs entirely on your device. Record, transcribe, summarize, and query your meetings using local AI models. Privacy-first with zero cloud dependencies.
 
 <div align="center">
   <img src="website/public/app-demo.png" alt="StenoAI Interface" width="600">
 
   <br>
 
-  [![Discord](https://img.shields.io/badge/Discord-Join%20Server-5865F2?logo=discord&logoColor=white)](https://discord.gg/EHxvAdKf)
   [![Twitter Follow](https://img.shields.io/twitter/follow/ruzin?style=social)](https://x.com/ruzin_saleem)
 </div>
 
@@ -23,6 +30,7 @@ AI-powered meeting notes assistant that runs entirely on your device using small
 
 - **Local transcription** using whisper.cpp
 - **AI summarization** with Ollama models
+- **Ask Steno** - Query your meetings with natural language questions
 - **Multiple AI models** - Choose from 4 models optimized for different use cases
 - **Privacy-first** - no cloud dependencies
 - **macOS desktop app** with intuitive interface
