@@ -59,19 +59,11 @@
     ],
     "extraResources": [
       {
-        "from": "../src",
-        "to": "src",
+        "from": "../dist/stenoai",
+        "to": "stenoai",
         "filter": [
           "**/*"
         ]
-      },
-      {
-        "from": "../simple_recorder.py",
-        "to": "simple_recorder.py"
-      },
-      {
-        "from": "../requirements.txt",
-        "to": "requirements.txt"
       }
     ],
     "mac": {

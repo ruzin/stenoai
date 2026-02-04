@@ -9,6 +9,25 @@ const { PostHog } = require('posthog-node');
 let mainWindow;
 let pythonProcess;
 
+// Backend executable path - always use bundled stenoai
+function getBackendPath() {
+  if (app.isPackaged) {
+    // Production: bundled in app resources
+    return path.join(process.resourcesPath, 'stenoai', 'stenoai');
+  } else {
+    // Development: use local build
+    return path.join(__dirname, '..', 'dist', 'stenoai', 'stenoai');
+  }
+}
+
+function getBackendCwd() {
+  if (app.isPackaged) {
+    return path.join(process.resourcesPath, 'stenoai');
+  } else {
+    return path.join(__dirname, '..', 'dist', 'stenoai');
+  }
+}
+
 // Telemetry state
 let posthogClient = null;
 let telemetryEnabled = false;
@@ -34,12 +53,9 @@ function durationBucket(seconds) {
  */
 async function initTelemetry() {
   try {
-    const pythonPath = path.join(__dirname, '..', 'venv', 'bin', 'python');
-    const scriptPath = path.join(__dirname, '..', 'simple_recorder.py');
-
     const result = await new Promise((resolve, reject) => {
-      const proc = spawn(pythonPath, [scriptPath, 'get-telemetry'], {
-        cwd: path.join(__dirname, '..')
+      const proc = spawn(getBackendPath(), ['get-telemetry'], {
+        cwd: getBackendCwd()
       });
       let stdout = '';
       proc.stdout.on('data', (data) => { stdout += data.toString(); });
@@ -228,21 +244,20 @@ ipcMain.handle('request-microphone-permission', async () => {
 
 // Debug functionality handled by side panel now
 
-// Python backend communication
+// Backend communication - always uses bundled stenoai executable
 function runPythonScript(script, args = [], silent = false) {
   return new Promise((resolve, reject) => {
-    const pythonPath = path.join(__dirname, '..', 'venv', 'bin', 'python');
-    const scriptPath = path.join(__dirname, '..', script);
+    const backendPath = getBackendPath();
+    const command = `${backendPath} ${args.join(' ')}`;
 
     // Log the command being executed (unless silent)
-    const command = `${pythonPath} ${scriptPath} ${args.join(' ')}`;
     console.log('Running:', command);
     if (!silent) {
-      sendDebugLog(`$ ${script} ${args.join(' ')}`);
+      sendDebugLog(`$ stenoai ${args.join(' ')}`);
     }
 
-    const process = spawn(pythonPath, [scriptPath, ...args], {
-      cwd: path.join(__dirname, '..')
+    const process = spawn(backendPath, args, {
+      cwd: getBackendCwd()
     });
 
     let stdout = '';
@@ -687,19 +702,16 @@ ipcMain.handle('start-recording-ui', async (_, sessionName) => {
     }
 
     // Start recording (removed clear-state to prevent race conditions)
-    
+
     console.log('Starting long recording process...');
     sendDebugLog(`Starting recording process: ${sessionName || 'Meeting'}`);
-    sendDebugLog('$ python simple_recorder.py record 7200');
-    
-    const pythonPath = path.join(__dirname, '..', 'venv', 'bin', 'python');
-    const scriptPath = path.join(__dirname, '..', 'simple_recorder.py');
-    
+    sendDebugLog('$ stenoai record 7200');
+
     const actualSessionName = sessionName || 'Meeting';
-    
+
     // Start background recording with 2-hour limit
-    currentRecordingProcess = spawn(pythonPath, ['-u', scriptPath, 'record', '7200', actualSessionName], {
-      cwd: path.join(__dirname, '..')
+    currentRecordingProcess = spawn(getBackendPath(), ['record', '7200', actualSessionName], {
+      cwd: getBackendCwd()
     });
 
     let hasStarted = false;
@@ -1179,9 +1191,14 @@ ipcMain.handle('setup-ffmpeg', async () => {
 
 ipcMain.handle('setup-python', async () => {
   try {
+    // Python backend is bundled via PyInstaller - no setup needed
+    sendDebugLog('Python backend is bundled, skipping setup');
+    return { success: true, message: 'Python backend bundled' };
+
+    // Legacy code below - kept for reference but never runs
     const projectRoot = path.join(__dirname, '..');
     const venvPath = path.join(projectRoot, 'venv');
-    
+
     sendDebugLog(`Working directory: ${projectRoot}`);
     
     // Create virtual environment if it doesn't exist
@@ -1466,9 +1483,14 @@ ipcMain.handle('setup-ollama-and-model', async () => {
 
 ipcMain.handle('setup-whisper', async () => {
   try {
+    // Whisper is bundled via PyInstaller - no pip install needed
+    sendDebugLog('Whisper is bundled, skipping setup');
+    return { success: true, message: 'Whisper bundled' };
+
+    // Legacy code below - kept for reference but never runs
     const projectRoot = path.join(__dirname, '..');
     const pythonPath = path.join(projectRoot, 'venv', 'bin', 'python');
-    
+
     sendDebugLog('Installing Whisper speech recognition...');
     sendDebugLog(`$ ${pythonPath} -m pip install openai-whisper`);
     

@@ -66,7 +66,37 @@ class WhisperTranscriber:
     def _ensure_ffmpeg_in_path(self) -> None:
         """
         Ensure ffmpeg is in PATH for audio processing.
+        Checks bundled ffmpeg first, then system locations.
         """
+        import sys
+
+        # Build list of possible ffmpeg locations
+        possible_ffmpeg_paths = []
+
+        # Check bundled ffmpeg first (PyInstaller bundle)
+        if getattr(sys, 'frozen', False):
+            # Running from PyInstaller bundle
+            bundle_dir = Path(sys._MEIPASS) if hasattr(sys, '_MEIPASS') else Path(sys.executable).parent
+            bundled_ffmpeg = bundle_dir / 'ffmpeg'
+            if bundled_ffmpeg.exists():
+                possible_ffmpeg_paths.append(str(bundled_ffmpeg))
+            # Also check _internal directory
+            internal_ffmpeg = Path(sys.executable).parent / '_internal' / 'ffmpeg'
+            if internal_ffmpeg.exists():
+                possible_ffmpeg_paths.append(str(internal_ffmpeg))
+        else:
+            # Development mode - check bin directory
+            dev_ffmpeg = Path(__file__).parent.parent / 'bin' / 'ffmpeg'
+            if dev_ffmpeg.exists():
+                possible_ffmpeg_paths.append(str(dev_ffmpeg))
+
+        # Add system locations as fallback
+        possible_ffmpeg_paths.extend([
+            '/opt/homebrew/bin/ffmpeg',  # Homebrew on Apple Silicon
+            '/usr/local/bin/ffmpeg',     # Homebrew on Intel
+            '/usr/bin/ffmpeg',           # System installation
+        ])
+
         # Check if ffmpeg is already in PATH
         try:
             subprocess.run(['ffmpeg', '-version'], capture_output=True, timeout=5, check=True)
@@ -75,19 +105,13 @@ class WhisperTranscriber:
         except (subprocess.TimeoutExpired, subprocess.CalledProcessError, FileNotFoundError):
             pass
 
-        # ffmpeg not in PATH, try common Homebrew locations
-        possible_ffmpeg_paths = [
-            '/opt/homebrew/bin/ffmpeg',  # Homebrew on Apple Silicon
-            '/usr/local/bin/ffmpeg',     # Homebrew on Intel
-            '/usr/bin/ffmpeg',           # System installation
-        ]
-
+        # Try each possible location
         ffmpeg_found_path = None
-        for path in possible_ffmpeg_paths:
+        for ffmpeg_path in possible_ffmpeg_paths:
             try:
-                subprocess.run([path, '-version'], capture_output=True, timeout=5, check=True)
-                ffmpeg_found_path = path
-                logger.info(f"Found ffmpeg at: {path}")
+                subprocess.run([ffmpeg_path, '-version'], capture_output=True, timeout=5, check=True)
+                ffmpeg_found_path = ffmpeg_path
+                logger.info(f"Found ffmpeg at: {ffmpeg_path}")
                 break
             except (subprocess.TimeoutExpired, subprocess.CalledProcessError, FileNotFoundError):
                 continue

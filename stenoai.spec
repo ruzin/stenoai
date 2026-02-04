@@ -98,8 +98,12 @@ if os.path.exists(ollama_bin_dir):
     for filename in os.listdir(ollama_bin_dir):
         filepath = os.path.join(ollama_bin_dir, filename)
         if os.path.isfile(filepath):
-            # Put all Ollama files in 'ollama' subdirectory
-            binaries.append((filepath, 'ollama'))
+            if filename == 'ffmpeg':
+                # Put ffmpeg in root of bundle for easy PATH access
+                binaries.append((filepath, '.'))
+            else:
+                # Put Ollama files in 'ollama' subdirectory
+                binaries.append((filepath, 'ollama'))
 
 block_cipher = None
 
