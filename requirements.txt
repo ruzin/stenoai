@@ -1,6 +1,6 @@
 sounddevice>=0.4.6
 numpy>=1.24.0,<2.0
-openai-whisper>=20230918
+pywhispercpp>=1.2.0
 ollama>=0.1.7
 click>=8.1.0
 pydantic>=2.5.0

@@ -11,6 +11,7 @@ import time
 import os
 from typing import Optional, Dict, Any
 from .models import MeetingTranscript, ActionItem, Decision
+from . import ollama_manager
 
 logger = logging.getLogger(__name__)
 
@@ -47,71 +48,20 @@ class OllamaSummarizer:
     
     def _is_ollama_running(self) -> bool:
         """Check if Ollama service is running."""
-        try:
-            # Try to connect to Ollama API
-            response = subprocess.run(['curl', '-s', 'http://localhost:11434/api/version'], 
-                                    capture_output=True, timeout=5)
-            return response.returncode == 0
-        except:
-            return False
+        return ollama_manager.is_ollama_running()
     
     def _find_ollama_path(self) -> Optional[str]:
-        """Find the Ollama executable path, handling DMG vs development environments."""
-        # Try common locations where Ollama might be installed
-        possible_paths = [
-            'ollama',  # Try PATH first
-            '/opt/homebrew/bin/ollama',  # Homebrew on Apple Silicon
-            '/usr/local/bin/ollama',     # Homebrew on Intel
-            '/usr/bin/ollama',           # System installation
-        ]
-        
-        for path in possible_paths:
-            try:
-                result = subprocess.run([path, '--version'], 
-                                      capture_output=True, timeout=5)
-                if result.returncode == 0:
-                    logger.info(f"Found Ollama at: {path}")
-                    return path
-            except (subprocess.TimeoutExpired, FileNotFoundError):
-                continue
-        
-        logger.error("Ollama executable not found in any common location")
+        """Find the Ollama executable path (bundled or system)."""
+        ollama_path = ollama_manager.get_ollama_binary()
+        if ollama_path:
+            return str(ollama_path)
+        logger.error("Ollama executable not found")
         return None
     
     def _start_ollama_service(self) -> bool:
         """Start the Ollama service if not running."""
         logger.info("Starting Ollama service...")
-        
-        try:
-            # Find the Ollama executable path
-            ollama_path = self._find_ollama_path()
-            if not ollama_path:
-                logger.error("Ollama executable not found. Please install Ollama first.")
-                logger.info("Install with: brew install ollama (macOS) or visit https://ollama.com")
-                return False
-            
-            # Start ollama serve in background
-            self.ollama_process = subprocess.Popen(
-                [ollama_path, 'serve'],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                start_new_session=True  # Detach from parent process
-            )
-            
-            # Wait for service to start (up to 30 seconds)
-            logger.info("Waiting for Ollama service to start...")
-            for i in range(30):
-                time.sleep(1)
-                if self._is_ollama_running():
-                    logger.info("Ollama service started successfully")
-                    return True
-                    
-            logger.error("Ollama service failed to start within 30 seconds")
-            return False
-            
-        except Exception as e:
-            logger.error(f"Failed to start Ollama service: {e}")
-            return False
+        return ollama_manager.start_ollama_server(wait=True, timeout=30)
     
     def _repair_json(self, json_text: str) -> Optional[str]:
         """
@@ -238,37 +188,40 @@ class OllamaSummarizer:
             if not ollama_path:
                 logger.error("Ollama executable not found")
                 return False
-            
+
+            # Get environment for bundled Ollama (includes library paths)
+            env = ollama_manager.get_ollama_env()
+
             # Check if model is already available
-            result = subprocess.run([ollama_path, 'list'], capture_output=True, text=True, timeout=10)
+            result = subprocess.run([ollama_path, 'list'], capture_output=True, text=True, timeout=10, env=env)
             if result.returncode == 0 and self.model_name in result.stdout:
                 logger.info(f"Model {self.model_name} is already available")
                 return True
-            
+
             # Model not found, try to pull it
             logger.info(f"Downloading model {self.model_name}...")
-            result = subprocess.run([ollama_path, 'pull', self.model_name], 
-                                  capture_output=True, text=True, timeout=300)  # 5 min timeout
-            
+            result = subprocess.run([ollama_path, 'pull', self.model_name],
+                                  capture_output=True, text=True, timeout=300, env=env)  # 5 min timeout
+
             if result.returncode == 0:
                 logger.info(f"Successfully downloaded model {self.model_name}")
                 return True
             else:
                 logger.error(f"Failed to download model {self.model_name}: {result.stderr}")
-                
+
                 # Try fallback models from supported list
                 fallback_models = ["llama3.2:3b", "gemma3:4b", "qwen3:8b", "deepseek-r1:8b"]
                 for fallback in fallback_models:
                     logger.info(f"Trying fallback model: {fallback}")
-                    result = subprocess.run([ollama_path, 'pull', fallback], 
-                                          capture_output=True, text=True, timeout=300)
+                    result = subprocess.run([ollama_path, 'pull', fallback],
+                                          capture_output=True, text=True, timeout=300, env=env)
                     if result.returncode == 0:
                         logger.info(f"Successfully downloaded fallback model {fallback}")
                         self.model_name = fallback
                         return True
-                
+
                 return False
-                
+
         except Exception as e:
             logger.error(f"Error ensuring model availability: {e}")
             return False

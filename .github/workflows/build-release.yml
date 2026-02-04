@@ -16,24 +16,56 @@ permissions:
 
 jobs:
   build-macos:
-    runs-on: macos-latest
-    
+    strategy:
+      matrix:
+        include:
+          - runner: macos-13
+            arch: x64
+            build_cmd: build:intel
+          - runner: macos-14
+            arch: arm64
+            build_cmd: build:arm64
+    runs-on: ${{ matrix.runner }}
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-    
+
+    - name: Setup Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
         node-version: '18'
         cache: 'npm'
         cache-dependency-path: app/package-lock.json
-    
+
     - name: Get version from package.json
       id: package_version
       working-directory: app
       run: echo "version=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
-    
+
+    - name: Install Python dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pyinstaller
+
+    - name: Download bundled binaries (Ollama, ffmpeg)
+      run: |
+        chmod +x scripts/download-ollama.sh
+        ./scripts/download-ollama.sh
+
+    - name: Build Python backend with PyInstaller
+      run: |
+        pyinstaller stenoai.spec --noconfirm
+        # Verify build
+        ls -la dist/stenoai/
+        echo "Backend built successfully"
+
     - name: Install Electron dependencies
       working-directory: app
       run: npm ci
@@ -74,67 +106,21 @@ jobs:
         # Verify certificate is available
         security find-identity -v -p codesigning
 
-    - name: Build DMG for Intel
+    - name: Build DMG for ${{ matrix.arch }}
       working-directory: app
-      run: npm run build:intel
+      run: npm run ${{ matrix.build_cmd }}
       env:
         APPLE_ID: ${{ secrets.APPLE_ID }}
         APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
         APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Build DMG for Apple Silicon
-      working-directory: app
-      run: npm run build:arm64
-      env:
-        APPLE_ID: ${{ secrets.APPLE_ID }}
-        APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-        APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-    
-    - name: Create Release with Assets
-      uses: softprops/action-gh-release@v1
+    - name: Upload DMG artifact
+      uses: actions/upload-artifact@v4
       with:
-        name: StenoAI ${{ github.event.inputs.version || steps.package_version.outputs.version }}
-        body: |
-          ## StenoAI v${{ github.event.inputs.version || steps.package_version.outputs.version }}
-          
-          ### What's New
-          
-          ${{ github.event.head_commit.message }}
-          
-          ### 📦 Downloads
-          
-          - **Apple Silicon (M1-M4)**: `stenoAI-macos-arm64.dmg`
-          - **Intel Macs**: `stenoAI-macos-x64.dmg`
-          
-          ### 🚀 First Time Setup
-          1. Download the appropriate DMG for your Mac
-          2. Install by dragging StenoAI to Applications
-          3. Launch app - setup wizard runs automatically
-          4. Grant microphone permissions when prompted
-          5. Start recording meetings!
-          
-          ### 📋 Requirements
-          - macOS 10.14 or later
-          - Internet connection for initial setup
-          - Microphone access permissions
-        files: |
-          app/dist/stenoAI-macos-${{ github.event.inputs.version || steps.package_version.outputs.version }}-x64.dmg
-          app/dist/stenoAI-macos-${{ github.event.inputs.version || steps.package_version.outputs.version }}-arm64.dmg
-    
-    - name: Create website-friendly download aliases
-      env:
-        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      working-directory: app/dist
-      run: |
-        version="${{ github.event.inputs.version || steps.package_version.outputs.version }}"
-        # Create copies with website-expected filenames
-        cp "stenoAI-macos-${version}-x64.dmg" "stenoAI-macos-x64.dmg"
-        cp "stenoAI-macos-${version}-arm64.dmg" "stenoAI-macos-arm64.dmg"
-        # Upload to the same release
-        gh release upload "${GITHUB_REF_NAME}" stenoAI-macos-x64.dmg --clobber
-        gh release upload "${GITHUB_REF_NAME}" stenoAI-macos-arm64.dmg --clobber
+        name: dmg-${{ matrix.arch }}
+        path: app/dist/*.dmg
+        retention-days: 1
 
     - name: Cleanup keychain and certificate
       if: always()
@@ -144,3 +130,69 @@ jobs:
           security delete-keychain $KEYCHAIN_PATH || true
         fi
         rm -f $RUNNER_TEMP/certificate.p12
+
+  release:
+    needs: build-macos
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Get version from package.json
+      id: package_version
+      working-directory: app
+      run: echo "version=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
+
+    - name: Download all DMG artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts
+
+    - name: Prepare release files
+      run: |
+        mkdir -p release
+        find artifacts -name "*.dmg" -exec cp {} release/ \;
+        ls -la release/
+        # Create website-friendly aliases
+        version="${{ github.event.inputs.version || steps.package_version.outputs.version }}"
+        cd release
+        for dmg in *.dmg; do
+          if [[ "$dmg" == *"-x64.dmg" ]]; then
+            cp "$dmg" "stenoAI-macos-x64.dmg"
+          elif [[ "$dmg" == *"-arm64.dmg" ]]; then
+            cp "$dmg" "stenoAI-macos-arm64.dmg"
+          fi
+        done
+        ls -la
+
+    - name: Create Release with Assets
+      uses: softprops/action-gh-release@v1
+      with:
+        name: StenoAI ${{ github.event.inputs.version || steps.package_version.outputs.version }}
+        body: |
+          ## StenoAI v${{ github.event.inputs.version || steps.package_version.outputs.version }}
+
+          ### What's New
+
+          ${{ github.event.head_commit.message }}
+
+          ### Downloads
+
+          - **Apple Silicon (M1-M4)**: `stenoAI-macos-arm64.dmg`
+          - **Intel Macs**: `stenoAI-macos-x64.dmg`
+
+          ### First Time Setup
+          1. Download the appropriate DMG for your Mac
+          2. Install by dragging StenoAI to Applications
+          3. Launch app - setup wizard runs automatically
+          4. Grant microphone permissions when prompted
+          5. Start recording meetings!
+
+          ### Requirements
+          - macOS 10.14 or later
+          - Internet connection for initial setup
+          - Microphone access permissions
+        files: release/*.dmg
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

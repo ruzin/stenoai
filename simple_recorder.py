@@ -188,10 +188,6 @@ class SimpleRecorder:
         # Transcribe (pass Path object, not string)
         transcript_result = self.transcriber.transcribe_audio(audio_path)
         
-        # Debug: Check what transcript_result actually is
-        print(f"DEBUG: transcript_result type: {type(transcript_result)}")
-        print(f"DEBUG: transcript_result: {transcript_result}")
-        
         # Handle different return types
         if hasattr(transcript_result, 'text'):
             transcript_text = transcript_result.text
@@ -1106,31 +1102,17 @@ def setup_check():
             dir_path.mkdir(parents=True, exist_ok=True)
             checks.append((f"✅ {dir_name}/", f"created at {dir_path}"))
     
-    # Check Ollama - use same path resolution as summarizer
+    # Check Ollama - use bundled or system Ollama
     try:
-        ollama_found = False
-        ollama_path = None
-        possible_paths = [
-            'ollama',  # Try PATH first
-            '/opt/homebrew/bin/ollama',  # Homebrew on Apple Silicon
-            '/usr/local/bin/ollama',     # Homebrew on Intel
-            '/usr/bin/ollama',           # System installation
-        ]
-        
-        for path in possible_paths:
-            try:
-                result = subprocess.run([path, '--version'], 
-                                      capture_output=True, timeout=5)
-                if result.returncode == 0:
-                    checks.append(("✅ Ollama", f"found at {path}"))
-                    ollama_found = True
-                    ollama_path = path
-                    break
-            except (subprocess.TimeoutExpired, FileNotFoundError):
-                continue
-        
-        if not ollama_found:
-            checks.append(("❌ Ollama", "not found - run: brew install ollama"))
+        from src.ollama_manager import get_ollama_binary
+        ollama_path = get_ollama_binary()
+        if ollama_path:
+            if 'bin/ollama' in str(ollama_path) or '_internal/ollama' in str(ollama_path):
+                checks.append(("✅ Ollama", "bundled"))
+            else:
+                checks.append(("✅ Ollama", f"found at {ollama_path}"))
+        else:
+            checks.append(("❌ Ollama", "not found"))
     except Exception as e:
         checks.append(("❌ Ollama", f"Error: {e}"))
     
@@ -1171,18 +1153,49 @@ def setup_check():
     except ImportError:
         checks.append(("❌ sounddevice", "pip install sounddevice"))
     
+    # Check for whisper backend (prefer pywhispercpp, fallback to openai-whisper)
+    whisper_found = False
     try:
-        import whisper
-        checks.append(("✅ whisper", "speech transcription"))
+        import pywhispercpp
+        checks.append(("✅ whisper", "pywhispercpp (fast)"))
+        whisper_found = True
     except ImportError:
-        checks.append(("❌ whisper", "pip install openai-whisper"))
+        pass
+
+    if not whisper_found:
+        try:
+            import whisper
+            checks.append(("✅ whisper", "openai-whisper"))
+            whisper_found = True
+        except ImportError:
+            pass
+
+    if not whisper_found:
+        checks.append(("❌ whisper", "pip install pywhispercpp"))
     
     try:
         import ollama
         checks.append(("✅ ollama-python", "LLM client"))
     except ImportError:
         checks.append(("❌ ollama-python", "pip install ollama"))
-    
+
+    # Check if whisper model is downloaded (pywhispercpp stores in ~/Library/Application Support/pywhispercpp/models/)
+    whisper_model_path = Path.home() / "Library" / "Application Support" / "pywhispercpp" / "models"
+    whisper_models = list(whisper_model_path.glob("ggml-*.bin")) if whisper_model_path.exists() else []
+    if whisper_models:
+        model_name = whisper_models[0].stem.replace("ggml-", "")
+        checks.append(("✅ whisper-model", f"{model_name} downloaded"))
+    else:
+        checks.append(("⚠️ whisper-model", "will download on first use (~500MB)"))
+
+    # Check if LLM model is downloaded (check ~/.ollama/models/)
+    ollama_models_path = Path.home() / ".ollama" / "models" / "manifests" / "registry.ollama.ai" / "library"
+    if ollama_models_path.exists() and any(ollama_models_path.iterdir()):
+        model_names = [d.name for d in ollama_models_path.iterdir() if d.is_dir()]
+        checks.append(("✅ llm-model", ", ".join(model_names[:2])))
+    else:
+        checks.append(("❌ llm-model", "no model installed - needed for summaries"))
+
     # Print results
     all_good = True
     for status, detail in checks:
@@ -1321,6 +1334,25 @@ def set_telemetry(enabled):
     else:
         print(f"ERROR: Failed to save telemetry preference")
         print(json.dumps({"success": False, "error": "Failed to save config"}))
+
+
+@cli.command()
+def download_whisper_model():
+    """Download the Whisper transcription model"""
+    print("Downloading Whisper model...")
+
+    try:
+        from pywhispercpp.model import Model as WhisperCppModel
+
+        # This will trigger the model download if not present
+        print("Initializing Whisper model (will download if needed)...")
+        model = WhisperCppModel("small")
+        print("SUCCESS: Whisper model ready")
+
+    except Exception as e:
+        print(f"ERROR: Failed to download Whisper model: {e}")
+        import sys
+        sys.exit(1)
 
 
 if __name__ == '__main__':

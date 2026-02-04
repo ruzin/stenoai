@@ -9,6 +9,25 @@ const { PostHog } = require('posthog-node');
 let mainWindow;
 let pythonProcess;
 
+// Backend executable path - always use bundled stenoai
+function getBackendPath() {
+  if (app.isPackaged) {
+    // Production: bundled in app resources
+    return path.join(process.resourcesPath, 'stenoai', 'stenoai');
+  } else {
+    // Development: use local build
+    return path.join(__dirname, '..', 'dist', 'stenoai', 'stenoai');
+  }
+}
+
+function getBackendCwd() {
+  if (app.isPackaged) {
+    return path.join(process.resourcesPath, 'stenoai');
+  } else {
+    return path.join(__dirname, '..', 'dist', 'stenoai');
+  }
+}
+
 // Telemetry state
 let posthogClient = null;
 let telemetryEnabled = false;
@@ -34,12 +53,9 @@ function durationBucket(seconds) {
  */
 async function initTelemetry() {
   try {
-    const pythonPath = path.join(__dirname, '..', 'venv', 'bin', 'python');
-    const scriptPath = path.join(__dirname, '..', 'simple_recorder.py');
-
     const result = await new Promise((resolve, reject) => {
-      const proc = spawn(pythonPath, [scriptPath, 'get-telemetry'], {
-        cwd: path.join(__dirname, '..')
+      const proc = spawn(getBackendPath(), ['get-telemetry'], {
+        cwd: getBackendCwd()
       });
       let stdout = '';
       proc.stdout.on('data', (data) => { stdout += data.toString(); });
@@ -236,21 +252,20 @@ ipcMain.handle('request-microphone-permission', async () => {
 
 // Debug functionality handled by side panel now
 
-// Python backend communication
+// Backend communication - always uses bundled stenoai executable
 function runPythonScript(script, args = [], silent = false) {
   return new Promise((resolve, reject) => {
-    const pythonPath = path.join(__dirname, '..', 'venv', 'bin', 'python');
-    const scriptPath = path.join(__dirname, '..', script);
+    const backendPath = getBackendPath();
+    const command = `${backendPath} ${args.join(' ')}`;
 
     // Log the command being executed (unless silent)
-    const command = `${pythonPath} ${scriptPath} ${args.join(' ')}`;
     console.log('Running:', command);
     if (!silent) {
-      sendDebugLog(`$ ${script} ${args.join(' ')}`);
+      sendDebugLog(`$ stenoai ${args.join(' ')}`);
     }
 
-    const process = spawn(pythonPath, [scriptPath, ...args], {
-      cwd: path.join(__dirname, '..')
+    const process = spawn(backendPath, args, {
+      cwd: getBackendCwd()
     });
 
     let stdout = '';
@@ -695,19 +710,16 @@ ipcMain.handle('start-recording-ui', async (_, sessionName) => {
     }
 
     // Start recording (removed clear-state to prevent race conditions)
-    
+
     console.log('Starting long recording process...');
     sendDebugLog(`Starting recording process: ${sessionName || 'Meeting'}`);
-    sendDebugLog('$ python simple_recorder.py record 7200');
-    
-    const pythonPath = path.join(__dirname, '..', 'venv', 'bin', 'python');
-    const scriptPath = path.join(__dirname, '..', 'simple_recorder.py');
-    
+    sendDebugLog('$ stenoai record 7200');
+
     const actualSessionName = sessionName || 'Meeting';
-    
+
     // Start background recording with 2-hour limit
-    currentRecordingProcess = spawn(pythonPath, ['-u', scriptPath, 'record', '7200', actualSessionName], {
-      cwd: path.join(__dirname, '..')
+    currentRecordingProcess = spawn(getBackendPath(), ['record', '7200', actualSessionName], {
+      cwd: getBackendCwd()
     });
 
     let hasStarted = false;
@@ -1187,9 +1199,14 @@ ipcMain.handle('setup-ffmpeg', async () => {
 
 ipcMain.handle('setup-python', async () => {
   try {
+    // Python backend is bundled via PyInstaller - no setup needed
+    sendDebugLog('Python backend is bundled, skipping setup');
+    return { success: true, message: 'Python backend bundled' };
+
+    // Legacy code below - kept for reference but never runs
     const projectRoot = path.join(__dirname, '..');
     const venvPath = path.join(projectRoot, 'venv');
-    
+
     sendDebugLog(`Working directory: ${projectRoot}`);
     
     // Create virtual environment if it doesn't exist
@@ -1416,32 +1433,60 @@ ipcMain.handle('setup-ollama-and-model', async () => {
       sendDebugLog('Ollama already installed, skipping installation step');
     }
     
-    // Determine final ollama path (either found or newly installed)
-    const finalOllamaPath = ollamaPath || '/opt/homebrew/bin/ollama';
-    
+    // Use bundled Ollama path
+    const finalOllamaPath = ollamaPath;
+    if (!finalOllamaPath) {
+      sendDebugLog('Error: Bundled Ollama not found');
+      return { success: false, error: 'Bundled Ollama not found' };
+    }
+
     // Start Ollama service
     sendDebugLog('Starting Ollama service...');
     sendDebugLog(`$ ${finalOllamaPath} serve &`);
-    exec(`${finalOllamaPath} serve`, { detached: true });
-    
-    // Wait for service to start then pull model
-    sendDebugLog('Waiting 3 seconds for Ollama service to start...');
-    await new Promise(resolve => setTimeout(resolve, 3000));
+    exec(`"${finalOllamaPath}" serve`, { detached: true });
+
+    // Wait for Ollama to be ready (poll instead of fixed wait)
+    sendDebugLog('Waiting for Ollama service to be ready...');
+    const maxAttempts = 15;
+    let ready = false;
+    for (let i = 0; i < maxAttempts; i++) {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      try {
+        const http = require('http');
+        ready = await new Promise((resolve) => {
+          const req = http.get('http://127.0.0.1:11434/api/tags', { timeout: 2000 }, (res) => {
+            resolve(res.statusCode === 200);
+          });
+          req.on('error', () => resolve(false));
+          req.on('timeout', () => { req.destroy(); resolve(false); });
+        });
+        if (ready) {
+          sendDebugLog(`Ollama ready after ${i + 1} seconds`);
+          break;
+        }
+      } catch (e) {
+        // Continue polling
+      }
+    }
+
+    if (!ready) {
+      sendDebugLog('Warning: Ollama may not be fully ready, attempting pull anyway...');
+    }
     
     sendDebugLog('Downloading AI model (this may take several minutes)...');
     sendDebugLog(`$ ${finalOllamaPath} pull llama3.2:3b`);
 
     return new Promise((resolve) => {
-      const process = exec(`${finalOllamaPath} pull llama3.2:3b`, { timeout: 600000 });
-      
+      const process = exec(`"${finalOllamaPath}" pull llama3.2:3b`, { timeout: 600000 });
+
       process.stdout.on('data', (data) => {
         sendDebugLog(data.toString().trim());
       });
-      
+
       process.stderr.on('data', (data) => {
         sendDebugLog('STDERR: ' + data.toString().trim());
       });
-      
+
       process.on('close', (code) => {
         if (code === 0) {
           sendDebugLog('AI model download completed successfully');
@@ -1457,13 +1502,13 @@ ipcMain.handle('setup-ollama-and-model', async () => {
           });
         }
       });
-      
+
       process.on('error', (error) => {
         sendDebugLog(`Process error: ${error.message}`);
-        resolve({ 
-          success: false, 
-          error: 'Failed to download AI model', 
-          details: error.message 
+        resolve({
+          success: false,
+          error: 'Failed to download AI model',
+          details: error.message
         });
       });
     });
@@ -1474,9 +1519,46 @@ ipcMain.handle('setup-ollama-and-model', async () => {
 
 ipcMain.handle('setup-whisper', async () => {
   try {
+    // Download whisper model using the bundled backend
+    const backendPath = getBackendPath();
+    sendDebugLog('Downloading Whisper transcription model (~500MB)...');
+    sendDebugLog(`$ ${backendPath} download-whisper-model`);
+
+    return new Promise((resolve) => {
+      const process = spawn(backendPath, ['download-whisper-model'], {
+        stdio: 'pipe'
+      });
+
+      process.stdout.on('data', (data) => {
+        const text = data.toString().trim();
+        if (text) sendDebugLog(text);
+      });
+
+      process.stderr.on('data', (data) => {
+        const text = data.toString().trim();
+        if (text) sendDebugLog('STDERR: ' + text);
+      });
+
+      process.on('close', (code) => {
+        if (code === 0) {
+          sendDebugLog('Whisper model downloaded successfully');
+          resolve({ success: true, message: 'Whisper model ready' });
+        } else {
+          sendDebugLog(`Whisper model download failed with exit code: ${code}`);
+          resolve({ success: false, error: 'Failed to download Whisper model' });
+        }
+      });
+
+      process.on('error', (error) => {
+        sendDebugLog(`Process error: ${error.message}`);
+        resolve({ success: false, error: error.message });
+      });
+    });
+
+    // Legacy code below - kept for reference but never runs
     const projectRoot = path.join(__dirname, '..');
     const pythonPath = path.join(projectRoot, 'venv', 'bin', 'python');
-    
+
     sendDebugLog('Installing Whisper speech recognition...');
     sendDebugLog(`$ ${pythonPath} -m pip install openai-whisper`);
     
@@ -1645,6 +1727,19 @@ async function ensureOllamaRunning() {
     return false;
   }
 }
+
+// Check if Ollama is installed (for setup wizard)
+ipcMain.handle('check-ollama-installed', async () => {
+  try {
+    const ollamaPath = await findOllamaExecutable();
+    if (!ollamaPath) {
+      return { success: true, installed: false };
+    }
+    return { success: true, installed: true, path: ollamaPath };
+  } catch (error) {
+    return { success: false, installed: false, error: error.message };
+  }
+});
 
 // Model management handlers
 ipcMain.handle('check-model-installed', async (event, modelName) => {
@@ -1898,29 +1993,38 @@ ipcMain.handle('pull-model', async (event, modelName) => {
   }
 });
 
-// Helper function to find Ollama executable
+// Helper function to find Ollama executable (bundled only)
 async function findOllamaExecutable() {
   const { exec } = require('child_process');
-  const possiblePaths = [
-    '/opt/homebrew/bin/ollama',
-    '/usr/local/bin/ollama',
-    'ollama'
-  ];
+  const fs = require('fs');
 
-  for (const ollamaPath of possiblePaths) {
+  // Only use bundled Ollama
+  let bundledOllamaPath;
+  if (app.isPackaged) {
+    // Production: bundled with the app
+    bundledOllamaPath = path.join(process.resourcesPath, 'bin', 'ollama');
+  } else {
+    // Development: in project bin/ directory
+    bundledOllamaPath = path.join(__dirname, '..', 'bin', 'ollama');
+  }
+
+  // Check if bundled Ollama exists and is executable
+  if (fs.existsSync(bundledOllamaPath)) {
     try {
       await new Promise((resolve, reject) => {
-        exec(`${ollamaPath} --version`, (error) => {
+        exec(`"${bundledOllamaPath}" --version`, (error) => {
           if (error) reject(error);
           else resolve();
         });
       });
-      return ollamaPath;
+      console.log(`Using bundled Ollama: ${bundledOllamaPath}`);
+      return bundledOllamaPath;
     } catch (error) {
-      continue;
+      console.error(`Bundled Ollama found but failed to execute: ${error.message}`);
     }
   }
 
+  console.error(`Bundled Ollama not found at: ${bundledOllamaPath}`);
   return null;
 }
 

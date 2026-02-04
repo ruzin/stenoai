@@ -1686,156 +1686,480 @@
             color: white;
         }
 
-        /* Setup Modal */
+        /* Setup Modal - Redesigned */
         .setup-modal {
             position: fixed;
             top: 0;
             left: 0;
             right: 0;
             bottom: 0;
-            background: rgba(0, 0, 0, 0.95);
+            background: var(--bg-deep);
             display: flex;
             align-items: center;
             justify-content: center;
             z-index: 2000;
-        }
-        
-        .setup-content {
-            background: var(--bg-primary);
-            border: 1px solid var(--bg-surface);
-            border-radius: 12px;
-            padding: 32px;
-            width: 600px;
-            max-width: 90vw;
-            max-height: 80vh;
-            overflow-y: auto;
-        }
-        
-        .setup-header {
-            text-align: center;
-            margin-bottom: 32px;
-        }
-        
-        .setup-header .btn-primary {
-            margin-top: 20px;
-            font-size: 16px;
-            padding: 12px 24px;
-        }
-        
-        .setup-header h2 {
-            font-size: 24px;
-            font-weight: 600;
-            color: var(--text-primary);
-            margin-bottom: 8px;
-        }
-        
-        .setup-header p {
-            font-size: 16px;
-            color: var(--text-muted);
-        }
-        
-        .setup-steps {
-            margin-bottom: 32px;
-        }
-        
-        .setup-step {
-            display: flex;
-            align-items: center;
-            gap: 16px;
-            padding: 16px;
-            margin-bottom: 12px;
-            background: var(--bg-elevated);
-            border: 1px solid var(--bg-surface);
-            border-radius: 8px;
-            transition: all 0.3s;
-        }
-        
-        .setup-step.active {
-            border-color: var(--border-default);
-            background: var(--bg-surface);
-        }
-        
-        .setup-step.completed {
-            border-color: var(--success-green);
-            background: rgba(34, 197, 94, 0.08);
-        }
-
-        .setup-step.failed {
-            border-color: var(--recording-red);
-            background: rgba(239, 68, 68, 0.08);
-        }
-        
-        .step-icon {
-            font-size: 24px;
-            width: 40px;
-            text-align: center;
-        }
-        
-        .step-content {
-            flex: 1;
-        }
-        
-        .step-content h3 {
-            font-size: 16px;
-            font-weight: 600;
-            color: var(--text-primary);
-            margin-bottom: 4px;
-        }
-        
-        .step-content p {
-            font-size: 14px;
-            color: var(--text-muted);
-            margin-bottom: 8px;
-        }
-        
-        .step-status {
-            font-size: 13px;
-            color: var(--text-muted);
-            font-weight: 500;
-        }
-        
-        .progress-bar {
-            width: 100%;
-            height: 4px;
-            background: var(--bg-surface);
-            border-radius: 2px;
-            margin-top: 8px;
             overflow: hidden;
         }
-        
+
+        .setup-content {
+            width: 100%;
+            max-width: 560px;
+            height: 100%;
+            max-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            padding: 32px 24px;
+            overflow: hidden;
+        }
+
+        /* Progress Indicator - Step circles */
+        .setup-progress {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            margin-bottom: 24px;
+            flex-shrink: 0;
+        }
+
+        .setup-progress-step {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            background: var(--bg-surface);
+            color: var(--text-muted);
+            border: 2px solid var(--border-subtle);
+        }
+
+        .setup-progress-step.active {
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            border-color: var(--accent-primary);
+            box-shadow: 0 0 0 4px var(--accent-glow);
+        }
+
+        .setup-progress-step.completed {
+            background: var(--success-green) !important;
+            color: white !important;
+            border-color: var(--success-green) !important;
+        }
+
+        .setup-progress-step.completed svg {
+            width: 16px;
+            height: 16px;
+            stroke: white !important;
+        }
+
+        .setup-progress-line {
+            width: 24px;
+            height: 2px;
+            background: var(--border-subtle);
+            transition: background 0.3s ease;
+        }
+
+        .setup-progress-line.completed {
+            background: var(--success-green);
+        }
+
+        /* Setup Header */
+        .setup-header {
+            text-align: center;
+            margin-bottom: 24px;
+            flex-shrink: 0;
+        }
+
+        .setup-header h2 {
+            font-size: 28px;
+            font-weight: 700;
+            color: var(--text-primary);
+            margin-bottom: 8px;
+            letter-spacing: -0.02em;
+        }
+
+        .setup-header p {
+            font-size: 15px;
+            color: var(--text-secondary);
+            max-width: 400px;
+            margin: 0 auto;
+            line-height: 1.5;
+        }
+
+        /* Setup Steps Container - Scrollable */
+        .setup-steps {
+            flex: 1;
+            overflow-y: auto;
+            padding-right: 8px;
+            margin-bottom: 20px;
+        }
+
+        /* Download Card Style */
+        .setup-step {
+            background: var(--bg-elevated);
+            border: 1px solid var(--border-subtle);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 12px;
+            transition: all 0.3s ease;
+        }
+
+        .setup-step:last-child {
+            margin-bottom: 0;
+        }
+
+        .step-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 12px;
+        }
+
+        .step-info {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .step-icon {
+            width: 44px;
+            height: 44px;
+            border-radius: 50%;
+            background: var(--bg-surface);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            flex-shrink: 0;
+        }
+
+        .step-text h3 {
+            font-size: 15px;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 2px;
+        }
+
+        .step-text p {
+            font-size: 13px;
+            color: var(--text-muted);
+        }
+
+        .step-badge {
+            font-size: 12px;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-weight: 500;
+        }
+
+        .step-badge.waiting {
+            background: var(--bg-surface);
+            color: var(--text-muted);
+        }
+
+        .step-badge.active {
+            background: rgba(245, 158, 11, 0.15);
+            color: var(--warning-amber);
+        }
+
+        .step-badge.completed {
+            background: rgba(34, 197, 94, 0.15);
+            color: var(--success-green);
+        }
+
+        .step-badge.failed {
+            background: rgba(239, 68, 68, 0.15);
+            color: var(--recording-red);
+        }
+
+        /* Progress Bar */
+        .step-progress {
+            margin-top: 4px;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 6px;
+            background: var(--bg-surface);
+            border-radius: 3px;
+            overflow: hidden;
+        }
+
         .progress-fill {
             height: 100%;
-            background: var(--warning-amber);
+            background: linear-gradient(90deg, var(--accent-primary), #a78bfa);
             width: 0%;
             transition: width 0.3s ease;
-            border-radius: 2px;
+            border-radius: 3px;
         }
-        
+
         .setup-step.completed .progress-fill {
             background: var(--success-green);
             width: 100%;
         }
-        
-        .setup-step.active .step-status {
-            color: var(--warning-amber);
+
+        .setup-step.failed .progress-fill {
+            background: var(--recording-red);
         }
 
-        .setup-step.completed .step-status {
-            color: var(--success-green);
-        }
-
-        .setup-step.failed .step-status {
-            color: var(--recording-red);
-        }
-        
-        .setup-actions {
+        .progress-details {
             display: flex;
             justify-content: space-between;
-            gap: 12px;
+            margin-top: 8px;
+            font-size: 12px;
+            color: var(--text-muted);
         }
-        
-        .setup-actions .btn {
-            flex: 1;
+
+        .progress-details .progress-percent {
+            font-weight: 600;
+            color: var(--text-secondary);
+        }
+
+        /* Ollama Download Prompt */
+        .ollama-prompt {
+            background: linear-gradient(135deg, rgba(99, 102, 241, 0.1), rgba(14, 165, 233, 0.1));
+            border: 1px solid rgba(99, 102, 241, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            text-align: center;
+            margin-bottom: 16px;
+        }
+
+        .ollama-prompt h3 {
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 8px;
+        }
+
+        .ollama-prompt p {
+            font-size: 14px;
+            color: var(--text-secondary);
+            margin-bottom: 16px;
+            line-height: 1.5;
+        }
+
+        .ollama-prompt .btn-download {
+            background: linear-gradient(135deg, #6366f1, #0ea5e9);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 0.2s ease;
+        }
+
+        .ollama-prompt .btn-download:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 24px rgba(99, 102, 241, 0.3);
+        }
+
+        .ollama-prompt .btn-secondary {
+            background: transparent;
+            color: var(--text-secondary);
+            border: 1px solid var(--border-subtle);
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-size: 13px;
+            cursor: pointer;
+            margin-top: 12px;
+            transition: all 0.2s ease;
+        }
+
+        .ollama-prompt .btn-secondary:hover {
+            background: var(--bg-surface);
+            color: var(--text-primary);
+        }
+
+        /* Error state with retry */
+        .step-error {
+            background: rgba(239, 68, 68, 0.08);
+            border: 1px solid rgba(239, 68, 68, 0.2);
+            border-radius: 8px;
+            padding: 12px;
+            margin-top: 12px;
+        }
+
+        .step-error p {
+            font-size: 13px;
+            color: var(--recording-red);
+            margin-bottom: 8px;
+        }
+
+        .step-error .btn-retry {
+            background: var(--bg-surface);
+            color: var(--text-primary);
+            border: 1px solid var(--border-default);
+            padding: 8px 16px;
+            border-radius: 6px;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.2s ease;
+        }
+
+        .step-error .btn-retry:hover {
+            background: var(--bg-elevated);
+        }
+
+        /* Debug Console - Collapsible */
+        .setup-debug {
+            margin-bottom: 20px;
+            flex-shrink: 0;
+        }
+
+        .debug-toggle {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 16px;
+            background: var(--bg-elevated);
+            border: 1px solid var(--border-subtle);
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .debug-toggle:hover {
+            background: var(--bg-surface);
+        }
+
+        .debug-toggle span {
+            font-size: 13px;
+            color: var(--text-secondary);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .debug-toggle svg {
+            transition: transform 0.2s ease;
+        }
+
+        .debug-toggle.open svg {
+            transform: rotate(180deg);
+        }
+
+        .debug-console {
+            background: var(--bg-deep);
+            border: 1px solid var(--border-subtle);
+            border-top: none;
+            border-radius: 0 0 8px 8px;
+            padding: 12px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+            line-height: 1.5;
+            color: var(--text-muted);
+            height: 150px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            display: none;
+        }
+
+        .debug-console.show {
+            display: block;
+        }
+
+        /* Setup Actions */
+        .setup-actions {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            flex-shrink: 0;
+        }
+
+        .setup-actions .btn-primary {
+            width: 100%;
+            padding: 14px 24px;
+            font-size: 15px;
+            font-weight: 600;
+            background: var(--bg-surface);
+            color: var(--text-primary);
+            border: 1px solid var(--border-default);
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .setup-actions .btn-primary:hover:not(:disabled) {
+            background: var(--bg-elevated);
+            transform: translateY(-1px);
+        }
+
+        .setup-actions .btn-primary:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .setup-actions .btn-primary.success {
+            background: var(--success-green);
+            border-color: var(--success-green);
+            color: white;
+        }
+
+        .setup-footer {
+            text-align: center;
+            margin-top: 8px;
+        }
+
+        .setup-footer a {
+            font-size: 12px;
+            color: var(--text-muted);
+            text-decoration: none;
+            transition: color 0.2s ease;
+        }
+
+        .setup-footer a:hover {
+            color: var(--text-secondary);
+            text-decoration: underline;
+        }
+
+        /* Animations */
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .setup-step {
+            animation: fadeInUp 0.3s ease forwards;
+        }
+
+        .setup-step:nth-child(1) { animation-delay: 0s; }
+        .setup-step:nth-child(2) { animation-delay: 0.05s; }
+        .setup-step:nth-child(3) { animation-delay: 0.1s; }
+        .setup-step:nth-child(4) { animation-delay: 0.15s; }
+        .setup-step:nth-child(5) { animation-delay: 0.2s; }
+
+        /* Spinner for loading states */
+        .spinner {
+            width: 16px;
+            height: 16px;
+            border: 2px solid var(--border-subtle);
+            border-top-color: var(--accent-primary);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
         }
 
         /* AI Query Popup */
@@ -2083,8 +2407,12 @@
             box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.08), 0 0 0 1px rgba(0, 0, 0, 0.06);
         }
 
-        [data-theme="light"] .setup-content {
-            background: var(--bg-primary);
+        [data-theme="light"] .setup-modal {
+            background: var(--bg-deep);
+        }
+
+        [data-theme="light"] .setup-step {
+            background: white;
             border-color: var(--border-subtle);
         }
 
@@ -2092,9 +2420,35 @@
             border-color: var(--success-green);
             background: rgba(25, 135, 84, 0.06);
         }
+
         [data-theme="light"] .setup-step.failed {
             border-color: var(--recording-red);
             background: rgba(220, 53, 69, 0.06);
+        }
+
+        [data-theme="light"] .step-icon {
+            background: var(--bg-elevated);
+        }
+
+        [data-theme="light"] .ollama-prompt {
+            background: linear-gradient(135deg, rgba(91, 95, 199, 0.08), rgba(14, 165, 233, 0.08));
+            border-color: rgba(91, 95, 199, 0.2);
+        }
+
+        [data-theme="light"] .debug-toggle {
+            background: white;
+        }
+
+        [data-theme="light"] .debug-console {
+            background: var(--bg-elevated);
+        }
+
+        [data-theme="light"] .setup-progress-step {
+            background: white;
+        }
+
+        [data-theme="light"] .setup-progress-step.active {
+            background: white;
         }
 
         [data-theme="light"] ::-webkit-scrollbar-track {
@@ -2260,13 +2614,11 @@
                             </button>
                         </div>
                         <div style="display: flex; gap: 8px; align-items: center;">
-                            <button class="ask-ai-btn" id="ask-ai-btn" title="Ask AI about this meeting (Cmd+K)">
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                    <circle cx="12" cy="12" r="10"></circle>
-                                    <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
-                                    <line x1="12" y1="17" x2="12.01" y2="17"></line>
+                            <button class="ask-ai-btn" id="ask-ai-btn" title="Ask Steno about this meeting">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
                                 </svg>
-                                Ask AI
+Ask Steno
                             </button>
                             <button class="copy-notes-btn" id="copy-notes-btn" title="Copy meeting notes">
                                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -2383,116 +2735,225 @@
         </div>
     </div>
 
-    <!-- Setup overlay -->
+    <!-- Setup overlay - Redesigned -->
     <div class="setup-modal" id="setup-overlay" style="display: none;">
         <div class="setup-content">
-            <div class="setup-header">
-                <h2>🚀 Welcome to StenoAI</h2>
-                <p>Setting up your system for meeting transcription...</p>
-                <p style="font-size: 14px; color: var(--text-muted); margin-top: 12px;">💡 Scroll down to see logs</p>
+            <!-- Progress Indicator -->
+            <div class="setup-progress" id="setup-progress-indicator">
+                <div class="setup-progress-step active" data-step="1">1</div>
+                <div class="setup-progress-line"></div>
+                <div class="setup-progress-step" data-step="2">2</div>
+                <div class="setup-progress-line"></div>
+                <div class="setup-progress-step" data-step="3">3</div>
             </div>
 
+            <!-- Header -->
+            <div class="setup-header">
+                <h2 id="setup-title">Welcome to StenoAI</h2>
+                <p id="setup-description">We'll help you set up everything needed for meeting intelligence.</p>
+            </div>
+
+            <!-- Steps Container -->
             <div class="setup-steps" id="setup-steps">
+                <!-- Ollama Download Prompt (shown when Ollama not installed) -->
+                <div class="ollama-prompt" id="ollama-prompt" style="display: none;">
+                    <h3>Ollama Required</h3>
+                    <p>StenoAI uses Ollama to run AI models locally on your device. It's free and keeps your data private.</p>
+                    <button class="btn-download" onclick="openOllamaDownload()">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                            <polyline points="7 10 12 15 17 10"></polyline>
+                            <line x1="12" y1="15" x2="12" y2="3"></line>
+                        </svg>
+                        Download Ollama
+                    </button>
+                    <button class="btn-secondary" onclick="recheckOllama()">I've installed it - Check again</button>
+                </div>
+
+                <!-- Step 1: Permissions -->
                 <div class="setup-step" id="step-microphone">
-                    <div class="step-icon">🎤</div>
-                    <div class="step-content">
-                        <h3>Microphone Access</h3>
-                        <p>Grant microphone permission for meeting recording</p>
-                        <div class="step-status" id="microphone-status">Pending...</div>
+                    <div class="step-header">
+                        <div class="step-info">
+                            <div class="step-icon">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+                                    <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                                    <line x1="12" y1="19" x2="12" y2="23"></line>
+                                    <line x1="8" y1="23" x2="16" y2="23"></line>
+                                </svg>
+                            </div>
+                            <div class="step-text">
+                                <h3>Microphone Access</h3>
+                                <p>Required for recording meetings</p>
+                            </div>
+                        </div>
+                        <span class="step-badge waiting" id="microphone-badge">Waiting</span>
+                    </div>
+                    <div class="step-progress">
                         <div class="progress-bar">
                             <div class="progress-fill" id="microphone-progress"></div>
                         </div>
                     </div>
                 </div>
 
-                <div class="setup-step" id="step-system">
-                    <div class="step-icon">🖥️</div>
-                    <div class="step-content">
-                        <h3>System Check</h3>
-                        <p>Checking Python and system requirements...</p>
-                        <div class="step-status" id="system-status">Pending...</div>
+                <!-- Step 2: Transcription Engine (Whisper) -->
+                <div class="setup-step" id="step-whisper">
+                    <div class="step-header">
+                        <div class="step-info">
+                            <div class="step-icon">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+                                </svg>
+                            </div>
+                            <div class="step-text">
+                                <h3>Transcription Engine</h3>
+                                <p>Converts speech to text locally</p>
+                            </div>
+                        </div>
+                        <span class="step-badge waiting" id="whisper-badge">Waiting</span>
+                    </div>
+                    <div class="step-progress">
                         <div class="progress-bar">
-                            <div class="progress-fill" id="system-progress"></div>
+                            <div class="progress-fill" id="whisper-progress"></div>
+                        </div>
+                        <div class="progress-details" id="whisper-details" style="display: none;">
+                            <span class="progress-size">Installing dependencies...</span>
+                            <span class="progress-percent">0%</span>
                         </div>
                     </div>
                 </div>
 
-                
-                <div class="setup-step" id="step-python">
-                    <div class="step-icon">🐍</div>
-                    <div class="step-content">
-                        <h3>Python Dependencies</h3>
-                        <p>Installing audio libraries</p>
-                        <div class="step-status" id="python-status">Pending...</div>
-                        <div class="progress-bar">
-                            <div class="progress-fill" id="python-progress"></div>
-                        </div>
-                    </div>
-                </div>
-                
-                <div class="setup-step" id="step-whisper">
-                    <div class="step-icon">🎤</div>
-                    <div class="step-content">
-                        <h3>Install Whisper</h3>
-                        <p>OpenAI's speech recognition engine</p>
-                        <div class="step-status" id="whisper-status">Pending...</div>
-                        <div class="progress-bar">
-                            <div class="progress-fill" id="whisper-progress"></div>
-                        </div>
-                    </div>
-                </div>
-                
+                <!-- Step 3: Summarization Engine (Ollama + Model) -->
                 <div class="setup-step" id="step-ollama">
-                    <div class="step-icon">🧠</div>
-                    <div class="step-content">
-                        <h3>Install Ollama + AI Model</h3>
-                        <p>Homebrew (if needed) → Ollama → Llama 3.2 model (~2GB)</p>
-                        <div class="step-status" id="ollama-status">Pending...</div>
+                    <div class="step-header">
+                        <div class="step-info">
+                            <div class="step-icon">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+                                </svg>
+                            </div>
+                            <div class="step-text">
+                                <h3>Summarization Engine</h3>
+                                <p>AI-powered meeting summaries (~2GB)</p>
+                            </div>
+                        </div>
+                        <span class="step-badge waiting" id="ollama-badge">Waiting</span>
+                    </div>
+                    <div class="step-progress">
                         <div class="progress-bar">
                             <div class="progress-fill" id="ollama-progress"></div>
                         </div>
-                    </div>
-                </div>
-                
-                <div class="setup-step" id="step-ffmpeg">
-                    <div class="step-icon">🎥</div>
-                    <div class="step-content">
-                        <h3>Install ffmpeg</h3>
-                        <p>Audio/video processing toolkit for advanced audio handling</p>
-                        <div class="step-status" id="ffmpeg-status">Pending...</div>
-                        <div class="progress-bar">
-                            <div class="progress-fill" id="ffmpeg-progress"></div>
+                        <div class="progress-details" id="ollama-details" style="display: none;">
+                            <span class="progress-size">Downloading model...</span>
+                            <span class="progress-percent">0%</span>
                         </div>
                     </div>
                 </div>
-                
-                <div class="setup-step" id="step-test">
-                    <div class="step-icon">✅</div>
-                    <div class="step-content">
-                        <h3>Test System</h3>
-                        <p>Verifying everything works</p>
-                        <div class="step-status" id="test-status">Pending...</div>
-                        <div class="progress-bar">
-                            <div class="progress-fill" id="test-progress"></div>
+
+                <!-- Hidden steps for system checks (run silently) -->
+                <div class="setup-step" id="step-system" style="display: none;">
+                    <div class="step-header">
+                        <div class="step-info">
+                            <div class="step-icon">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+                                    <line x1="8" y1="21" x2="16" y2="21"></line>
+                                    <line x1="12" y1="17" x2="12" y2="21"></line>
+                                </svg>
+                            </div>
+                            <div class="step-text">
+                                <h3>System Check</h3>
+                                <p>Verifying requirements</p>
+                            </div>
                         </div>
+                        <span class="step-badge waiting" id="system-badge">Waiting</span>
+                    </div>
+                </div>
+
+                <div class="setup-step" id="step-python" style="display: none;">
+                    <div class="step-header">
+                        <div class="step-info">
+                            <div class="step-icon">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
+                                    <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
+                                </svg>
+                            </div>
+                            <div class="step-text">
+                                <h3>Python Dependencies</h3>
+                                <p>Installing libraries</p>
+                            </div>
+                        </div>
+                        <span class="step-badge waiting" id="python-badge">Waiting</span>
+                    </div>
+                </div>
+
+                <div class="setup-step" id="step-ffmpeg" style="display: none;">
+                    <div class="step-header">
+                        <div class="step-info">
+                            <div class="step-icon">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <polygon points="23 7 16 12 23 17 23 7"></polygon>
+                                    <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
+                                </svg>
+                            </div>
+                            <div class="step-text">
+                                <h3>Audio Processing</h3>
+                                <p>Installing ffmpeg</p>
+                            </div>
+                        </div>
+                        <span class="step-badge waiting" id="ffmpeg-badge">Waiting</span>
+                    </div>
+                </div>
+
+                <div class="setup-step" id="step-test" style="display: none;">
+                    <div class="step-header">
+                        <div class="step-info">
+                            <div class="step-icon">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <polyline points="20 6 9 17 4 12"></polyline>
+                                </svg>
+                            </div>
+                            <div class="step-text">
+                                <h3>System Test</h3>
+                                <p>Verifying installation</p>
+                            </div>
+                        </div>
+                        <span class="step-badge waiting" id="test-badge">Waiting</span>
                     </div>
                 </div>
             </div>
 
-            <div class="setup-debug" style="margin: 24px 0;">
-                <h3 style="margin-bottom: 12px; display: flex; align-items: center; gap: 8px; font-size: 16px;">
-                    <span>🐛 Debug Console</span>
-                    <button onclick="toggleDebugConsole()" style="background: none; border: 1px solid var(--bg-surface); color: var(--text-muted); padding: 4px 8px; border-radius: 4px; font-size: 11px; cursor: pointer;">Toggle</button>
-                </h3>
-                <div id="debug-console" style="background: var(--bg-deep); border: 1px solid var(--bg-surface); border-radius: 6px; padding: 12px; font-family: 'Monaco', 'Menlo', monospace; font-size: 11px; line-height: 1.4; color: var(--text-secondary); height: 200px; overflow-y: auto; white-space: pre-wrap;">Welcome to StenoAI Setup Debug Console
+            <!-- Debug Console - Collapsible -->
+            <div class="setup-debug">
+                <div class="debug-toggle" id="debug-toggle" onclick="toggleDebugConsole()">
+                    <span>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <rect x="4" y="4" width="16" height="16" rx="2" ry="2"></rect>
+                            <line x1="9" y1="4" x2="9" y2="20"></line>
+                            <line x1="4" y1="10" x2="9" y2="10"></line>
+                            <line x1="4" y1="16" x2="9" y2="16"></line>
+                        </svg>
+                        Debug Console
+                    </span>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="6 9 12 15 18 9"></polyline>
+                    </svg>
+                </div>
+                <div class="debug-console" id="debug-console">StenoAI Setup
 Commands and output will appear here...
 
 </div>
             </div>
 
+            <!-- Actions -->
             <div class="setup-actions">
-                <button class="btn btn-primary" id="setup-auto-start">Begin First-Time Setup</button>
-                <button class="btn btn-primary" id="setup-continue" style="display: none;">Continue to App</button>
+                <button class="btn-primary" id="setup-auto-start">Begin Setup</button>
+                <button class="btn-primary success" id="setup-continue" style="display: none;">Continue to App</button>
+            </div>
+
+            <div class="setup-footer">
+                <a href="https://github.com/ruzin/stenoai/issues" target="_blank">Report an issue</a>
             </div>
         </div>
     </div>
@@ -3956,222 +4417,339 @@ Session started - waiting for activity...
             // Ignore if in 'processing' state
         });
         
+        // Setup wizard state
+        let currentSetupStep = 1;
+        let ollamaInstalled = false;
+
+        // Open Ollama download page
+        function openOllamaDownload() {
+            require('electron').shell.openExternal('https://ollama.com/download');
+            debugLog('Opened Ollama download page in browser');
+        }
+
+        // Check if Ollama is installed
+        async function checkOllamaInstalled() {
+            try {
+                const result = await ipcRenderer.invoke('check-ollama-installed');
+                return result.success && result.installed;
+            } catch (error) {
+                return false;
+            }
+        }
+
+        // Recheck Ollama installation
+        async function recheckOllama() {
+            const ollamaPrompt = document.getElementById('ollama-prompt');
+            const stepOllama = document.getElementById('step-ollama');
+
+            debugLog('Rechecking Ollama installation...');
+
+            const installed = await checkOllamaInstalled();
+            if (installed) {
+                ollamaInstalled = true;
+                ollamaPrompt.style.display = 'none';
+                stepOllama.style.display = 'block';
+                debugLog('Ollama detected! Ready to continue setup.');
+                updateStepBadge('ollama', 'waiting', 'Ready');
+            } else {
+                debugLog('Ollama still not detected. Please install and try again.');
+            }
+        }
+
+        // Update progress indicator
+        function updateProgressIndicator(step) {
+            const steps = document.querySelectorAll('.setup-progress-step');
+            const lines = document.querySelectorAll('.setup-progress-line');
+
+            steps.forEach((el, i) => {
+                const stepNum = i + 1;
+                el.classList.remove('active', 'completed');
+
+                if (stepNum < step) {
+                    el.classList.add('completed');
+                    el.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>';
+                } else if (stepNum === step) {
+                    el.classList.add('active');
+                    el.textContent = stepNum;
+                } else {
+                    el.textContent = stepNum;
+                }
+            });
+
+            lines.forEach((el, i) => {
+                el.classList.toggle('completed', i < step - 1);
+            });
+        }
+
+        // Update step badge
+        function updateStepBadge(stepName, state, text) {
+            const badge = document.getElementById(`${stepName}-badge`);
+            if (badge) {
+                badge.className = `step-badge ${state}`;
+                badge.textContent = text || state.charAt(0).toUpperCase() + state.slice(1);
+            }
+        }
+
+        // Update step progress bar
+        function updateStepProgress(stepName, percent) {
+            const progress = document.getElementById(`${stepName}-progress`);
+            if (progress) {
+                progress.style.width = `${percent}%`;
+            }
+        }
+
+        // Toggle debug console
+        function toggleDebugConsole() {
+            const toggle = document.getElementById('debug-toggle');
+            const console = document.getElementById('debug-console');
+            toggle.classList.toggle('open');
+            console.classList.toggle('show');
+        }
+
         async function runSetupProcess() {
             setupInProgress = true;
             setupAutoStart.style.display = 'none';
-            
+
             // Clear and initialize debug console
             const debugConsole = document.getElementById('debug-console');
-            debugConsole.textContent = 'StenoAI Setup Debug Console - Setup Started\n';
-            debugLog('='.repeat(50));
-            debugLog('Starting First-Time Setup Process');
-            debugLog('='.repeat(50));
-            
-            const steps = [
-                { id: 'step-microphone', handler: 'request-microphone-permission', name: 'Microphone Access' },
-                { id: 'step-system', handler: 'setup-system-check', name: 'System Check' },
-                { id: 'step-python', handler: 'setup-python', name: 'Python Dependencies' },
-                { id: 'step-whisper', handler: 'setup-whisper', name: 'Whisper Installation' },
-                { id: 'step-ollama', handler: 'setup-ollama-and-model', name: 'Ollama + AI Model' },
-                { id: 'step-ffmpeg', handler: 'setup-ffmpeg', name: 'ffmpeg Installation' },
-                { id: 'step-test', handler: 'setup-test', name: 'System Test' }
-            ];
-            
-            for (const step of steps) {
-                const element = document.getElementById(step.id);
-                const statusElement = document.getElementById(step.id.replace('step-', '') + '-status');
-                
-                // Mark as active
-                element.classList.remove('completed', 'failed');
-                element.classList.add('active');
-                statusElement.textContent = 'Running...';
-                
-                // Log to debug console
-                debugLog(`\n>>> Starting: ${step.name}`);
-                debugLog(`Command: ${step.handler}`);
+            debugConsole.textContent = 'StenoAI Setup\n' + '='.repeat(40) + '\n';
+            debugLog('Starting setup process...');
 
+            // Update header for setup in progress
+            document.getElementById('setup-title').textContent = 'Setting Up';
+            document.getElementById('setup-description').textContent = 'Installing components. This may take a few minutes.';
+
+            // Define visible steps (simplified from original)
+            const visibleSteps = [
+                { id: 'step-microphone', badge: 'microphone', handler: 'request-microphone-permission', name: 'Microphone Access', progressStep: 1 },
+                { id: 'step-whisper', badge: 'whisper', handler: 'setup-whisper', name: 'Transcription Engine', progressStep: 2 },
+                { id: 'step-ollama', badge: 'ollama', handler: 'setup-ollama-and-model', name: 'Summarization Engine', progressStep: 3 }
+            ];
+
+            // Hidden background steps
+            const backgroundSteps = [
+                { id: 'step-system', badge: 'system', handler: 'setup-system-check', name: 'System Check' },
+                { id: 'step-python', badge: 'python', handler: 'setup-python', name: 'Python Dependencies' },
+                { id: 'step-ffmpeg', badge: 'ffmpeg', handler: 'setup-ffmpeg', name: 'ffmpeg' },
+                { id: 'step-test', badge: 'test', handler: 'setup-test', name: 'System Test' }
+            ];
+
+            // Run system check and python deps first (silently)
+            debugLog('\nPreparing system...');
+            for (const step of backgroundSteps.slice(0, 2)) {
+                debugLog(`Running: ${step.name}`);
                 try {
                     const result = await ipcRenderer.invoke(step.handler);
+                    if (!result.success) {
+                        debugLog(`Warning: ${step.name} - ${result.error}`);
+                    }
+                } catch (error) {
+                    debugLog(`Warning: ${step.name} failed - ${error.message}`);
+                }
+            }
+
+            // Run visible steps
+            for (const step of visibleSteps) {
+                const element = document.getElementById(step.id);
+
+                // Update progress indicator
+                updateProgressIndicator(step.progressStep);
+
+                // Mark as active
+                element.classList.remove('completed', 'failed');
+                updateStepBadge(step.badge, 'active', 'Installing...');
+                updateStepProgress(step.badge, 10);
+
+                // Show progress details
+                const details = document.getElementById(`${step.badge}-details`);
+                if (details) details.style.display = 'flex';
+
+                debugLog(`\n>>> ${step.name}`);
+
+                try {
+                    // Simulate progress during install
+                    let progress = 10;
+                    const progressInterval = setInterval(() => {
+                        progress = Math.min(progress + Math.random() * 15, 90);
+                        updateStepProgress(step.badge, progress);
+                    }, 500);
+
+                    const result = await ipcRenderer.invoke(step.handler);
+                    clearInterval(progressInterval);
 
                     if (result.success) {
-                        element.classList.remove('active');
                         element.classList.add('completed');
-                        statusElement.textContent = result.message || 'Completed';
-                        debugLog(`✅ SUCCESS: ${result.message || 'Completed'}`);
+                        updateStepBadge(step.badge, 'completed', 'Done');
+                        updateStepProgress(step.badge, 100);
+                        // Hide progress details on completion
+                        const details = document.getElementById(`${step.badge}-details`);
+                        if (details) details.style.display = 'none';
+                        debugLog(`Done: ${result.message || 'Success'}`);
 
-                        // Special handling for microphone permission completion
-                        if (step.id === 'step-microphone') {
-                            statusElement.textContent = 'Permission granted!';
-                            debugLog('Microphone permission granted - can proceed with other setup steps');
-                        }
-                        
                     } else {
-                        element.classList.remove('active');
                         element.classList.add('failed');
-                        statusElement.textContent = result.error || 'Failed';
-                        
-                        debugLog(`❌ FAILED: ${result.error || 'Failed'}`);
-                        
-                        // Show detailed error in debug console if available
-                        if (result.details) {
-                            debugLog('--- Error Details ---');
-                            debugLog(result.details);
-                            debugLog('--- End Error Details ---');
-                        }
-                        
-                        // Show retry button on failure
+                        updateStepBadge(step.badge, 'failed', 'Failed');
+
+                        debugLog(`Failed: ${result.error || 'Unknown error'}`);
+
+                        // Show retry button
                         setupAutoStart.textContent = 'Retry Setup';
                         setupAutoStart.style.display = 'block';
                         setupInProgress = false;
                         return;
                     }
                 } catch (error) {
-                    element.classList.remove('active');
                     element.classList.add('failed');
-                    statusElement.textContent = 'Failed';
-                    
-                    debugLog(`❌ EXCEPTION: ${error.message}`);
-                    debugLog(`Stack trace: ${error.stack}`);
-                    
-                    // Show retry button on failure
+                    updateStepBadge(step.badge, 'failed', 'Error');
+
+                    debugLog(`Error: ${error.message}`);
+
                     setupAutoStart.textContent = 'Retry Setup';
                     setupAutoStart.style.display = 'block';
                     setupInProgress = false;
                     return;
                 }
-                
-                // Small delay between steps
-                await new Promise(resolve => setTimeout(resolve, 500));
+
+                await new Promise(resolve => setTimeout(resolve, 300));
             }
-            
-            log('🎉 Setup completed successfully!');
-            debugLog('\n' + '='.repeat(50));
-            debugLog('🎉 Setup completed successfully!');
-            debugLog('All components installed and tested.');
-            debugLog('='.repeat(50));
-            
+
+            // Run final background steps (ffmpeg, test)
+            debugLog('\nFinalizing...');
+            for (const step of backgroundSteps.slice(2)) {
+                try {
+                    await ipcRenderer.invoke(step.handler);
+                } catch (error) {
+                    debugLog(`Warning: ${step.name} - ${error.message}`);
+                }
+            }
+
+            // Complete
+            updateProgressIndicator(4); // All done
+            document.getElementById('setup-title').textContent = 'Setup Complete';
+            document.getElementById('setup-description').textContent = 'StenoAI is ready to transcribe your meetings.';
+
+            debugLog('\n' + '='.repeat(40));
+            debugLog('Setup completed successfully!');
+
             setupContinue.style.display = 'block';
             setupInProgress = false;
         }
-        
+
         // Smooth startup with automatic setup detection
         async function runStartupCheck() {
-            log('🔍 Checking system setup...');
-            
+            log('Checking system setup...');
+
             try {
-                // Check microphone permission and system setup together
+                // Check microphone permission and system setup
                 const micResult = await ipcRenderer.invoke('check-microphone-permission');
                 const micGranted = micResult.success && micResult.status === 'granted';
-                
+
                 const result = await ipcRenderer.invoke('startup-setup-check');
                 const systemReady = result.success && result.allGood;
-                
+
                 if (micGranted && systemReady) {
-                    // Everything is ready - continue to main app
                     log('System ready!');
                     return;
                 } else {
-                    // Show unified setup wizard (includes microphone + system setup)
-                    log('⚙️ Setup needed - showing unified setup wizard');
+                    log('Setup needed');
                     showSetupOverlay(result.checks || []);
                 }
             } catch (error) {
                 log(`Setup check failed: ${error.message}`);
-                // Show setup overlay as fallback
-                log('🆕 First time setup detected');
                 showSetupOverlay([]);
             }
         }
-        
+
         async function showSetupOverlay(checks) {
             setupOverlay.style.display = 'flex';
-            
-            // Show ALL steps and reset their state
-            document.querySelectorAll('.setup-step').forEach(step => {
-                step.style.display = 'flex'; // Make sure all steps are visible
-                step.classList.remove('active', 'completed', 'failed');
+
+            // Reset progress indicator
+            updateProgressIndicator(1);
+
+            // Check if Ollama is installed
+            ollamaInstalled = await checkOllamaInstalled();
+            const ollamaPrompt = document.getElementById('ollama-prompt');
+            const stepOllama = document.getElementById('step-ollama');
+
+            if (!ollamaInstalled) {
+                // Show Ollama download prompt
+                ollamaPrompt.style.display = 'block';
+                stepOllama.style.display = 'none';
+                debugLog('Ollama not detected. Please download and install it.');
+            } else {
+                ollamaPrompt.style.display = 'none';
+                stepOllama.style.display = 'block';
+            }
+
+            // Reset visible step states
+            ['microphone', 'whisper', 'ollama'].forEach(step => {
+                const element = document.getElementById(`step-${step}`);
+                if (element) {
+                    element.classList.remove('active', 'completed', 'failed');
+                    updateStepBadge(step, 'waiting', 'Waiting');
+                    updateStepProgress(step, 0);
+                }
             });
-            
-            // Check and update microphone permission status
+
+            // Check microphone status
             try {
                 const micResult = await ipcRenderer.invoke('check-microphone-permission');
-                const micStep = document.getElementById('step-microphone');
-                const micStatus = document.getElementById('microphone-status');
-                
                 if (micResult.success && micResult.status === 'granted') {
-                    micStep.classList.add('completed');
-                    micStatus.textContent = 'Permission granted';
-                } else {
-                    micStep.classList.add('failed');
-                    micStatus.textContent = 'Requesting microphone permission...';
-                    
-                    // Automatically request microphone permission if missing
-                    log('🎤 Microphone permission missing - automatically requesting...');
-                    setTimeout(async () => {
-                        try {
-                            const requestResult = await ipcRenderer.invoke('request-microphone-permission');
-                            if (requestResult.success && requestResult.granted) {
-                                micStep.classList.remove('failed');
-                                micStep.classList.add('completed');
-                                micStatus.textContent = 'Permission granted!';
-                                log('✅ Microphone permission granted automatically');
-                            } else {
-                                micStatus.textContent = 'Permission denied - please grant in System Preferences';
-                                log('❌ Microphone permission denied by user');
-                            }
-                        } catch (error) {
-                            micStatus.textContent = 'Failed to request permission';
-                            log(`❌ Error requesting microphone permission: ${error.message}`);
-                        }
-                    }, 1000); // Small delay to show the status message
+                    document.getElementById('step-microphone').classList.add('completed');
+                    updateStepBadge('microphone', 'completed', 'Granted');
+                    updateStepProgress('microphone', 100);
                 }
             } catch (error) {
-                console.error('Failed to check microphone permission:', error);
+                console.error('Mic check failed:', error);
             }
-            
-            // Update other step statuses based on backend check
+
+            // Update based on backend checks
             checks.forEach(check => {
                 const [status, detail] = check;
-                updateStepStatus(status, detail);
+                updateStepFromCheck(status, detail);
             });
-            
+
             // Show appropriate button
             const hasFailures = checks.length === 0 || checks.some(([status]) => status.startsWith('❌'));
             if (hasFailures || checks.length === 0) {
                 setupAutoStart.style.display = 'block';
-                setupAutoStart.textContent = checks.length === 0 ? 'Begin First-Time Setup' : 'Install Missing Dependencies';
+                setupAutoStart.textContent = 'Begin Setup';
                 setupContinue.style.display = 'none';
             } else {
                 setupContinue.style.display = 'block';
                 setupAutoStart.style.display = 'none';
             }
         }
-        
-        function updateStepStatus(status, detail) {
-            // Map backend check results to UI steps - only show setup for missing installations
-            if (status.includes('Python')) {
-                updateStep('step-system', status.startsWith('✅') ? 'completed' : 'failed', detail);
-            } else if (status.includes('sounddevice')) {
-                updateStep('step-python', status.startsWith('✅') ? 'completed' : 'failed', detail);
-            } else if (status.includes('whisper')) {
-                updateStep('step-whisper', status.startsWith('✅') ? 'completed' : 'failed', detail);
-            } else if (status.includes('Ollama') || status.includes('Llama')) {
-                // Only show as failed if actually missing, not just service down
-                if (detail.includes('not installed') || detail.includes('missing')) {
-                    updateStep('step-ollama', status.startsWith('✅') ? 'completed' : 'failed', detail);
-                } else if (status.startsWith('✅')) {
-                    updateStep('step-ollama', 'completed', detail);
+
+        function updateStepFromCheck(status, detail) {
+            // Only check model status, not package status
+            if (status.includes('whisper-model')) {
+                if (status.startsWith('✅')) {
+                    document.getElementById('step-whisper').classList.add('completed');
+                    updateStepBadge('whisper', 'completed', 'Installed');
+                    updateStepProgress('whisper', 100);
+                    const details = document.getElementById('whisper-details');
+                    if (details) details.style.display = 'none';
                 }
+                // Don't mark as complete if warning or error
+            } else if (status.includes('llm-model')) {
+                if (status.startsWith('✅')) {
+                    document.getElementById('step-ollama').classList.add('completed');
+                    updateStepBadge('ollama', 'completed', 'Ready');
+                    updateStepProgress('ollama', 100);
+                    const details = document.getElementById('ollama-details');
+                    if (details) details.style.display = 'none';
+                }
+                // Don't mark as complete if warning or error
             }
         }
-        
+
         function updateStep(stepId, state, message) {
             const element = document.getElementById(stepId);
-            const statusElement = document.getElementById(stepId.replace('step-', '') + '-status');
-            
-            element.classList.remove('active', 'completed', 'failed');
-            element.classList.add(state);
-            statusElement.textContent = message;
+            if (element) {
+                element.classList.remove('active', 'completed', 'failed');
+                element.classList.add(state);
+            }
         }
 
         // Listen for automatic meetings refresh from backend (legacy - kept for compatibility)
