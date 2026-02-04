@@ -72,6 +72,14 @@ async function initTelemetry() {
 
     if (telemetryEnabled) {
       posthogClient = new PostHog(POSTHOG_API_KEY, { host: POSTHOG_HOST });
+      // Identify user for DAU tracking
+      posthogClient.identify({
+        distinctId: anonymousId,
+        properties: {
+          platform: process.platform,
+          arch: process.arch
+        }
+      });
       console.log('Telemetry initialized (anonymous analytics enabled)');
     } else {
       console.log('Telemetry disabled by user preference');
