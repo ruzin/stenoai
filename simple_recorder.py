@@ -188,10 +188,6 @@ class SimpleRecorder:
         # Transcribe (pass Path object, not string)
         transcript_result = self.transcriber.transcribe_audio(audio_path)
         
-        # Debug: Check what transcript_result actually is
-        print(f"DEBUG: transcript_result type: {type(transcript_result)}")
-        print(f"DEBUG: transcript_result: {transcript_result}")
-        
         # Handle different return types
         if hasattr(transcript_result, 'text'):
             transcript_text = transcript_result.text
@@ -1105,31 +1101,17 @@ def setup_check():
             dir_path.mkdir(parents=True, exist_ok=True)
             checks.append((f"✅ {dir_name}/", f"created at {dir_path}"))
     
-    # Check Ollama - use same path resolution as summarizer
+    # Check Ollama - use bundled or system Ollama
     try:
-        ollama_found = False
-        ollama_path = None
-        possible_paths = [
-            'ollama',  # Try PATH first
-            '/opt/homebrew/bin/ollama',  # Homebrew on Apple Silicon
-            '/usr/local/bin/ollama',     # Homebrew on Intel
-            '/usr/bin/ollama',           # System installation
-        ]
-        
-        for path in possible_paths:
-            try:
-                result = subprocess.run([path, '--version'], 
-                                      capture_output=True, timeout=5)
-                if result.returncode == 0:
-                    checks.append(("✅ Ollama", f"found at {path}"))
-                    ollama_found = True
-                    ollama_path = path
-                    break
-            except (subprocess.TimeoutExpired, FileNotFoundError):
-                continue
-        
-        if not ollama_found:
-            checks.append(("❌ Ollama", "not found - run: brew install ollama"))
+        from src.ollama_manager import get_ollama_binary
+        ollama_path = get_ollama_binary()
+        if ollama_path:
+            if 'bin/ollama' in str(ollama_path) or '_internal/ollama' in str(ollama_path):
+                checks.append(("✅ Ollama", "bundled"))
+            else:
+                checks.append(("✅ Ollama", f"found at {ollama_path}"))
+        else:
+            checks.append(("❌ Ollama", "not found"))
     except Exception as e:
         checks.append(("❌ Ollama", f"Error: {e}"))
     
@@ -1170,11 +1152,25 @@ def setup_check():
     except ImportError:
         checks.append(("❌ sounddevice", "pip install sounddevice"))
     
+    # Check for whisper backend (prefer pywhispercpp, fallback to openai-whisper)
+    whisper_found = False
     try:
-        import whisper
-        checks.append(("✅ whisper", "speech transcription"))
+        import pywhispercpp
+        checks.append(("✅ whisper", "pywhispercpp (fast)"))
+        whisper_found = True
     except ImportError:
-        checks.append(("❌ whisper", "pip install openai-whisper"))
+        pass
+
+    if not whisper_found:
+        try:
+            import whisper
+            checks.append(("✅ whisper", "openai-whisper"))
+            whisper_found = True
+        except ImportError:
+            pass
+
+    if not whisper_found:
+        checks.append(("❌ whisper", "pip install pywhispercpp"))
     
     try:
         import ollama

@@ -6,8 +6,12 @@ This bundles the Python backend into a standalone executable that can be
 distributed with the Electron app, eliminating the need for users to have
 Python installed.
 
-Uses whisper.cpp (via pywhispercpp) instead of PyTorch-based whisper,
-resulting in a much smaller bundle (~150MB vs ~1GB).
+Includes:
+- whisper.cpp (via pywhispercpp) for transcription (~70MB)
+- Bundled Ollama binary for summarization (~220MB)
+- Total bundle: ~290MB (vs ~1GB+ with PyTorch)
+
+No external dependencies required - users only need to download LLM models.
 
 Usage:
     pip install pyinstaller
@@ -85,6 +89,17 @@ try:
     binaries += collect_dynamic_libs('pywhispercpp')
 except Exception:
     pass
+
+# Bundle Ollama binary and libraries
+import os
+# SPECPATH is provided by PyInstaller and points to the spec file directory
+ollama_bin_dir = os.path.join(SPECPATH, 'bin')
+if os.path.exists(ollama_bin_dir):
+    for filename in os.listdir(ollama_bin_dir):
+        filepath = os.path.join(ollama_bin_dir, filename)
+        if os.path.isfile(filepath):
+            # Put all Ollama files in 'ollama' subdirectory
+            binaries.append((filepath, 'ollama'))
 
 block_cipher = None
 

@@ -183,17 +183,68 @@ class WhisperTranscriber:
             logger.error(f"Traceback: {traceback.format_exc()}")
             return None
 
+    def _convert_to_16khz(self, audio_filepath: Path) -> Path:
+        """Convert audio to 16kHz mono WAV for whisper.cpp compatibility."""
+        import tempfile
+
+        # Create temp file for converted audio
+        temp_dir = tempfile.gettempdir()
+        converted_path = Path(temp_dir) / f"stenoai_16khz_{audio_filepath.stem}.wav"
+
+        try:
+            # Use ffmpeg to convert to 16kHz mono WAV
+            result = subprocess.run(
+                [
+                    'ffmpeg', '-y',  # Overwrite output
+                    '-i', str(audio_filepath),
+                    '-ar', '16000',  # 16kHz sample rate
+                    '-ac', '1',      # Mono
+                    '-c:a', 'pcm_s16le',  # 16-bit PCM
+                    str(converted_path)
+                ],
+                capture_output=True,
+                timeout=60
+            )
+
+            if result.returncode == 0 and converted_path.exists():
+                logger.info(f"Converted audio to 16kHz: {converted_path}")
+                return converted_path
+            else:
+                logger.error(f"ffmpeg conversion failed: {result.stderr.decode()}")
+                return audio_filepath
+
+        except Exception as e:
+            logger.error(f"Audio conversion error: {e}")
+            return audio_filepath
+
     def _transcribe_whisper_cpp(self, audio_filepath: Path) -> Optional[str]:
         """Transcribe using whisper.cpp backend."""
-        # pywhispercpp returns a list of segments
-        segments = self.model.transcribe(str(audio_filepath))
+        # whisper.cpp requires 16kHz audio - convert if needed
+        converted_path = self._convert_to_16khz(audio_filepath)
+        cleanup_converted = converted_path != audio_filepath
 
-        if not segments:
-            return None
+        try:
+            # pywhispercpp returns a list of segments
+            # Set language='en' for English transcription
+            segments = self.model.transcribe(
+                str(converted_path),
+                language='en'
+            )
 
-        # Combine all segment texts
-        transcript = " ".join(segment.text.strip() for segment in segments)
-        return transcript.strip()
+            if not segments:
+                return None
+
+            # Combine all segment texts
+            transcript = " ".join(segment.text.strip() for segment in segments)
+            return transcript.strip()
+        finally:
+            # Clean up temp file
+            if cleanup_converted and converted_path.exists():
+                try:
+                    converted_path.unlink()
+                    logger.debug(f"Cleaned up converted audio: {converted_path}")
+                except Exception:
+                    pass
 
     def _transcribe_openai_whisper(self, audio_filepath: Path) -> Optional[str]:
         """Transcribe using openai-whisper backend."""
