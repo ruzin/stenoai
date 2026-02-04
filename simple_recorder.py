@@ -1177,7 +1177,24 @@ def setup_check():
         checks.append(("✅ ollama-python", "LLM client"))
     except ImportError:
         checks.append(("❌ ollama-python", "pip install ollama"))
-    
+
+    # Check if whisper model is downloaded (pywhispercpp stores in ~/Library/Application Support/pywhispercpp/models/)
+    whisper_model_path = Path.home() / "Library" / "Application Support" / "pywhispercpp" / "models"
+    whisper_models = list(whisper_model_path.glob("ggml-*.bin")) if whisper_model_path.exists() else []
+    if whisper_models:
+        model_name = whisper_models[0].stem.replace("ggml-", "")
+        checks.append(("✅ whisper-model", f"{model_name} downloaded"))
+    else:
+        checks.append(("⚠️ whisper-model", "will download on first use (~500MB)"))
+
+    # Check if LLM model is downloaded (check ~/.ollama/models/)
+    ollama_models_path = Path.home() / ".ollama" / "models" / "manifests" / "registry.ollama.ai" / "library"
+    if ollama_models_path.exists() and any(ollama_models_path.iterdir()):
+        model_names = [d.name for d in ollama_models_path.iterdir() if d.is_dir()]
+        checks.append(("✅ llm-model", ", ".join(model_names[:2])))
+    else:
+        checks.append(("❌ llm-model", "no model installed - needed for summaries"))
+
     # Print results
     all_good = True
     for status, detail in checks:
@@ -1316,6 +1333,25 @@ def set_telemetry(enabled):
     else:
         print(f"ERROR: Failed to save telemetry preference")
         print(json.dumps({"success": False, "error": "Failed to save config"}))
+
+
+@cli.command()
+def download_whisper_model():
+    """Download the Whisper transcription model"""
+    print("Downloading Whisper model...")
+
+    try:
+        from pywhispercpp.model import Model as WhisperCppModel
+
+        # This will trigger the model download if not present
+        print("Initializing Whisper model (will download if needed)...")
+        model = WhisperCppModel("small")
+        print("SUCCESS: Whisper model ready")
+
+    except Exception as e:
+        print(f"ERROR: Failed to download Whisper model: {e}")
+        import sys
+        sys.exit(1)
 
 
 if __name__ == '__main__':

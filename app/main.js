@@ -1425,32 +1425,60 @@ ipcMain.handle('setup-ollama-and-model', async () => {
       sendDebugLog('Ollama already installed, skipping installation step');
     }
     
-    // Determine final ollama path (either found or newly installed)
-    const finalOllamaPath = ollamaPath || '/opt/homebrew/bin/ollama';
-    
+    // Use bundled Ollama path
+    const finalOllamaPath = ollamaPath;
+    if (!finalOllamaPath) {
+      sendDebugLog('Error: Bundled Ollama not found');
+      return { success: false, error: 'Bundled Ollama not found' };
+    }
+
     // Start Ollama service
     sendDebugLog('Starting Ollama service...');
     sendDebugLog(`$ ${finalOllamaPath} serve &`);
-    exec(`${finalOllamaPath} serve`, { detached: true });
-    
-    // Wait for service to start then pull model
-    sendDebugLog('Waiting 3 seconds for Ollama service to start...');
-    await new Promise(resolve => setTimeout(resolve, 3000));
+    exec(`"${finalOllamaPath}" serve`, { detached: true });
+
+    // Wait for Ollama to be ready (poll instead of fixed wait)
+    sendDebugLog('Waiting for Ollama service to be ready...');
+    const maxAttempts = 15;
+    let ready = false;
+    for (let i = 0; i < maxAttempts; i++) {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      try {
+        const http = require('http');
+        ready = await new Promise((resolve) => {
+          const req = http.get('http://127.0.0.1:11434/api/tags', { timeout: 2000 }, (res) => {
+            resolve(res.statusCode === 200);
+          });
+          req.on('error', () => resolve(false));
+          req.on('timeout', () => { req.destroy(); resolve(false); });
+        });
+        if (ready) {
+          sendDebugLog(`Ollama ready after ${i + 1} seconds`);
+          break;
+        }
+      } catch (e) {
+        // Continue polling
+      }
+    }
+
+    if (!ready) {
+      sendDebugLog('Warning: Ollama may not be fully ready, attempting pull anyway...');
+    }
     
     sendDebugLog('Downloading AI model (this may take several minutes)...');
     sendDebugLog(`$ ${finalOllamaPath} pull llama3.2:3b`);
 
     return new Promise((resolve) => {
-      const process = exec(`${finalOllamaPath} pull llama3.2:3b`, { timeout: 600000 });
-      
+      const process = exec(`"${finalOllamaPath}" pull llama3.2:3b`, { timeout: 600000 });
+
       process.stdout.on('data', (data) => {
         sendDebugLog(data.toString().trim());
       });
-      
+
       process.stderr.on('data', (data) => {
         sendDebugLog('STDERR: ' + data.toString().trim());
       });
-      
+
       process.on('close', (code) => {
         if (code === 0) {
           sendDebugLog('AI model download completed successfully');
@@ -1466,13 +1494,13 @@ ipcMain.handle('setup-ollama-and-model', async () => {
           });
         }
       });
-      
+
       process.on('error', (error) => {
         sendDebugLog(`Process error: ${error.message}`);
-        resolve({ 
-          success: false, 
-          error: 'Failed to download AI model', 
-          details: error.message 
+        resolve({
+          success: false,
+          error: 'Failed to download AI model',
+          details: error.message
         });
       });
     });
@@ -1483,9 +1511,41 @@ ipcMain.handle('setup-ollama-and-model', async () => {
 
 ipcMain.handle('setup-whisper', async () => {
   try {
-    // Whisper is bundled via PyInstaller - no pip install needed
-    sendDebugLog('Whisper is bundled, skipping setup');
-    return { success: true, message: 'Whisper bundled' };
+    // Download whisper model using the bundled backend
+    const backendPath = getBackendPath();
+    sendDebugLog('Downloading Whisper transcription model (~500MB)...');
+    sendDebugLog(`$ ${backendPath} download-whisper-model`);
+
+    return new Promise((resolve) => {
+      const process = spawn(backendPath, ['download-whisper-model'], {
+        stdio: 'pipe'
+      });
+
+      process.stdout.on('data', (data) => {
+        const text = data.toString().trim();
+        if (text) sendDebugLog(text);
+      });
+
+      process.stderr.on('data', (data) => {
+        const text = data.toString().trim();
+        if (text) sendDebugLog('STDERR: ' + text);
+      });
+
+      process.on('close', (code) => {
+        if (code === 0) {
+          sendDebugLog('Whisper model downloaded successfully');
+          resolve({ success: true, message: 'Whisper model ready' });
+        } else {
+          sendDebugLog(`Whisper model download failed with exit code: ${code}`);
+          resolve({ success: false, error: 'Failed to download Whisper model' });
+        }
+      });
+
+      process.on('error', (error) => {
+        sendDebugLog(`Process error: ${error.message}`);
+        resolve({ success: false, error: error.message });
+      });
+    });
 
     // Legacy code below - kept for reference but never runs
     const projectRoot = path.join(__dirname, '..');
@@ -1925,29 +1985,38 @@ ipcMain.handle('pull-model', async (event, modelName) => {
   }
 });
 
-// Helper function to find Ollama executable
+// Helper function to find Ollama executable (bundled only)
 async function findOllamaExecutable() {
   const { exec } = require('child_process');
-  const possiblePaths = [
-    '/opt/homebrew/bin/ollama',
-    '/usr/local/bin/ollama',
-    'ollama'
-  ];
+  const fs = require('fs');
 
-  for (const ollamaPath of possiblePaths) {
+  // Only use bundled Ollama
+  let bundledOllamaPath;
+  if (app.isPackaged) {
+    // Production: bundled with the app
+    bundledOllamaPath = path.join(process.resourcesPath, 'bin', 'ollama');
+  } else {
+    // Development: in project bin/ directory
+    bundledOllamaPath = path.join(__dirname, '..', 'bin', 'ollama');
+  }
+
+  // Check if bundled Ollama exists and is executable
+  if (fs.existsSync(bundledOllamaPath)) {
     try {
       await new Promise((resolve, reject) => {
-        exec(`${ollamaPath} --version`, (error) => {
+        exec(`"${bundledOllamaPath}" --version`, (error) => {
           if (error) reject(error);
           else resolve();
         });
       });
-      return ollamaPath;
+      console.log(`Using bundled Ollama: ${bundledOllamaPath}`);
+      return bundledOllamaPath;
     } catch (error) {
-      continue;
+      console.error(`Bundled Ollama found but failed to execute: ${error.message}`);
     }
   }
 
+  console.error(`Bundled Ollama not found at: ${bundledOllamaPath}`);
   return null;
 }
 

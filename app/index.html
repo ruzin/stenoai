@@ -1745,14 +1745,15 @@
         }
 
         .setup-progress-step.completed {
-            background: var(--success-green);
-            color: white;
-            border-color: var(--success-green);
+            background: var(--success-green) !important;
+            color: white !important;
+            border-color: var(--success-green) !important;
         }
 
         .setup-progress-step.completed svg {
             width: 16px;
             height: 16px;
+            stroke: white !important;
         }
 
         .setup-progress-line {
@@ -2752,7 +2753,7 @@
             <!-- Header -->
             <div class="setup-header">
                 <h2 id="setup-title">Welcome to StenoAI</h2>
-                <p id="setup-description">We'll help you set up everything needed for meeting transcription.</p>
+                <p id="setup-description">We'll help you set up everything needed for meeting intelligence.</p>
             </div>
 
             <!-- Steps Container -->
@@ -2809,7 +2810,7 @@
                             </div>
                             <div class="step-text">
                                 <h3>Transcription Engine</h3>
-                                <p>OpenAI Whisper for speech-to-text</p>
+                                <p>Converts speech to text locally</p>
                             </div>
                         </div>
                         <span class="step-badge waiting" id="whisper-badge">Waiting</span>
@@ -2838,7 +2839,7 @@
                             </div>
                             <div class="step-text">
                                 <h3>Summarization Engine</h3>
-                                <p>Llama 3.2 model (~2GB download)</p>
+                                <p>AI-powered meeting summaries (~2GB)</p>
                             </div>
                         </div>
                         <span class="step-badge waiting" id="ollama-badge">Waiting</span>
@@ -2957,7 +2958,7 @@ Commands and output will appear here...
             </div>
 
             <div class="setup-footer">
-                <a href="https://github.com/anthropics/stenoai/issues" target="_blank">Report an issue</a>
+                <a href="https://github.com/ruzin/stenoai/issues" target="_blank">Report an issue</a>
             </div>
         </div>
     </div>
@@ -4471,7 +4472,7 @@ Session started - waiting for activity...
 
                 if (stepNum < step) {
                     el.classList.add('completed');
-                    el.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>';
+                    el.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>';
                 } else if (stepNum === step) {
                     el.classList.add('active');
                     el.textContent = stepNum;
@@ -4585,6 +4586,9 @@ Session started - waiting for activity...
                         element.classList.add('completed');
                         updateStepBadge(step.badge, 'completed', 'Done');
                         updateStepProgress(step.badge, 100);
+                        // Hide progress details on completion
+                        const details = document.getElementById(`${step.badge}-details`);
+                        if (details) details.style.display = 'none';
                         debugLog(`Done: ${result.message || 'Success'}`);
 
                     } else {
@@ -4723,18 +4727,25 @@ Session started - waiting for activity...
         }
 
         function updateStepFromCheck(status, detail) {
-            if (status.includes('whisper')) {
+            // Only check model status, not package status
+            if (status.includes('whisper-model')) {
                 if (status.startsWith('✅')) {
                     document.getElementById('step-whisper').classList.add('completed');
                     updateStepBadge('whisper', 'completed', 'Installed');
                     updateStepProgress('whisper', 100);
+                    const details = document.getElementById('whisper-details');
+                    if (details) details.style.display = 'none';
                 }
-            } else if (status.includes('Ollama') || status.includes('Llama')) {
+                // Don't mark as complete if warning or error
+            } else if (status.includes('llm-model')) {
                 if (status.startsWith('✅')) {
                     document.getElementById('step-ollama').classList.add('completed');
                     updateStepBadge('ollama', 'completed', 'Ready');
                     updateStepProgress('ollama', 100);
+                    const details = document.getElementById('ollama-details');
+                    if (details) details.style.display = 'none';
                 }
+                // Don't mark as complete if warning or error
             }
         }
 
