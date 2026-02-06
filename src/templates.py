@@ -26,6 +26,7 @@ class SummaryTemplate(BaseModel):
     description: str
     icon: str = "meeting"       # Icon identifier
     sections: List[TemplateSection]
+    prompt: Optional[str] = None  # Custom prompt template (use {transcript} placeholder)
 
 
 class TemplateManager:
@@ -162,3 +163,12 @@ TRANSCRIPT:
 Return ONLY the response in this exact JSON format:
 {json.dumps(json_structure, indent=2)}"""
         return prompt
+
+    def get_prompt(self, template: SummaryTemplate, transcript: str) -> str:
+        """Get the prompt for a template - uses custom prompt if defined, otherwise generates one."""
+        if template.prompt:
+            logger.info(f"Using custom prompt for template: {template.id}")
+            return template.prompt.replace("{transcript}", transcript)
+        else:
+            logger.info(f"Using generated prompt for template: {template.id}")
+            return self.generate_prompt(template, transcript)

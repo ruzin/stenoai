@@ -369,7 +369,7 @@ Return ONLY the response in this exact JSON format:
             logger.info(f"Using template: {template.id} ({template.name})")
 
             # All templates use the dynamic template generator
-            prompt = self.template_manager.generate_prompt(template, transcript)
+            prompt = self.template_manager.get_prompt(template, transcript)
             logger.info("Using template-generated prompt")
 
             # Calculate timeout
