@@ -1,0 +1,45 @@
+{
+  "id": "standard_meeting",
+  "name": "Standard Meeting",
+  "description": "General meetings with overview, decisions, and action items",
+  "icon": "meeting",
+  "sections": [
+    {
+      "key": "overview",
+      "title": "Overview",
+      "instruction": "Provide a brief 2-3 sentence summary of the meeting's purpose and outcome",
+      "format": "paragraph",
+      "required": true
+    },
+    {
+      "key": "participants",
+      "title": "Participants",
+      "instruction": "List people who actively spoke in the meeting",
+      "format": "list",
+      "required": true
+    },
+    {
+      "key": "discussion_areas",
+      "title": "Discussion Areas",
+      "instruction": "Identify main topics discussed with analysis",
+      "format": "list",
+      "item_format": "{\"title\": \"Topic\", \"analysis\": \"Brief description\"}",
+      "required": false
+    },
+    {
+      "key": "key_points",
+      "title": "Key Points",
+      "instruction": "Extract the most important points and decisions made",
+      "format": "list",
+      "required": true
+    },
+    {
+      "key": "next_steps",
+      "title": "Action Items",
+      "instruction": "List action items with assignees and deadlines if mentioned",
+      "format": "list",
+      "item_format": "{\"description\": \"Action\", \"assignee\": \"Person or null\", \"deadline\": \"Deadline or null\"}",
+      "required": true
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+Alex: Good morning everyone, let's do our standup. I'll go first. Yesterday I finished the authentication refactor and got it merged. Had some issues with the CI pipeline but Tom helped me sort that out. Today I'm picking up the user profile API endpoints. No blockers.
+
+Emma: Nice work on the auth stuff Alex. Okay, yesterday I was working on the dashboard redesign. Got the new charts component done and started on the filter system. Today I'm continuing with filters, hoping to have a PR up by end of day. I do have a blocker though - I need design specs for the mobile responsive layout. Priya, do you know when those will be ready?
+
+Priya: Oh yeah, I've got those almost done. I can send them over by lunch today.
+
+Emma: Perfect, that works.
+
+Tom: My turn. Yesterday I spent most of the day on the deployment pipeline issues Alex mentioned. Turned out to be a Docker caching problem. Fixed that and also updated our staging environment. Today I'm working on the monitoring alerts - we've been getting too many false positives. No blockers from my side.
+
+Priya: Alright, for me - yesterday I was in design reviews most of the day, finished the mobile specs Emma needs, and started on the new onboarding flow mockups. Today I'm presenting the onboarding designs to stakeholders at 2pm, and after that I'll finalize the mobile specs. My only concern is I'm waiting on copy from marketing for the onboarding screens.
+
+Alex: When do you need that copy by?
+
+Priya: Ideally by tomorrow morning so I can incorporate it before the dev handoff on Thursday.
+
+Tom: I can ping Sarah in marketing, she owes me a favor.
+
+Priya: That would be amazing, thanks Tom.
+
+Alex: Alright, sounds like everyone's making good progress. Quick reminder that we have the sprint review on Friday at 3pm. Let's make sure our demos are ready. Any other blockers or concerns?
+
+Everyone: We're good.
+
+Alex: Great, have a productive day everyone.

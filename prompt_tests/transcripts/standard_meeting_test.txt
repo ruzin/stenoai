@@ -1,0 +1,45 @@
+Sarah: Alright everyone, let's get started with our Q1 planning meeting. Thanks for joining, I know it's a busy week.
+
+Michael: Happy to be here. I've got some updates on the mobile app launch.
+
+Sarah: Perfect. Before we dive in, quick reminder that we need to finalize the budget by Friday. Jennifer, can you walk us through the current numbers?
+
+Jennifer: Sure. So we're looking at a total Q1 budget of $450,000. Marketing is requesting $120,000 for the product launch campaign, engineering needs $200,000 for the new hires, and we've allocated $80,000 for infrastructure upgrades. That leaves us with a $50,000 contingency.
+
+Michael: I think we might need to increase the engineering budget. We're planning to bring on two senior developers instead of one, and the market rate has gone up significantly.
+
+Sarah: How much more are we talking?
+
+Michael: Probably another $40,000 to be safe.
+
+Jennifer: We could pull that from the contingency, but it would leave us pretty tight.
+
+Sarah: Let's do it. The senior hires are critical for the mobile launch. Jennifer, can you update the budget spreadsheet and send it to the leadership team by end of day tomorrow?
+
+Jennifer: Will do.
+
+Sarah: Great. Now Michael, give us the mobile app update.
+
+Michael: We're on track for the March 15th launch. The beta testing phase completed last week with really positive feedback. Main issues were around the onboarding flow - users found it confusing. Tom's team is redesigning that now.
+
+Sarah: When will the new onboarding be ready?
+
+Michael: Tom promised it by next Wednesday. That gives us a week of buffer before launch.
+
+Sarah: Perfect. What about the marketing side?
+
+Jennifer: We've got the press release drafted, influencer partnerships are confirmed, and the app store assets are ready. We're planning a soft launch on the 12th to iron out any last-minute issues.
+
+Sarah: Sounds like we're in good shape. Any blockers or concerns?
+
+Michael: Just one - we still need legal sign-off on the new privacy policy. I've been chasing them for two weeks.
+
+Sarah: I'll escalate that to the VP of Legal today. We can't afford delays on that.
+
+Michael: That would be really helpful, thanks.
+
+Sarah: Alright, let's wrap up. Action items: Jennifer updates the budget by tomorrow EOD, I'll chase legal on the privacy policy, and Michael keeps us posted on the onboarding redesign. Same time next week?
+
+Everyone: Sounds good.
+
+Sarah: Great meeting everyone. Talk soon.

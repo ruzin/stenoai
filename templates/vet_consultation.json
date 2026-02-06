@@ -1,0 +1,86 @@
+{
+  "id": "vet_consultation",
+  "name": "Vet Consultation",
+  "description": "Veterinary consultation notes for UK practices",
+  "icon": "vet",
+  "sections": [
+    {
+      "key": "overview",
+      "title": "Consultation Summary",
+      "instruction": "Brief 1-2 sentence summary using only information explicitly stated - patient name, species, and primary reason for visit",
+      "format": "paragraph",
+      "required": true
+    },
+    {
+      "key": "patient",
+      "title": "Patient Details",
+      "instruction": "Only include details explicitly mentioned: name, species, breed, age, sex, weight. Use 'unknown' for any details not stated in the transcript",
+      "format": "paragraph",
+      "required": true
+    },
+    {
+      "key": "owner",
+      "title": "Owner",
+      "instruction": "Owner's name as stated in the transcript (e.g., 'Mrs Patterson', 'John'). Return null only if no owner name is mentioned",
+      "format": "string",
+      "required": false
+    },
+    {
+      "key": "presenting_complaint",
+      "title": "Presenting Complaint",
+      "instruction": "Only symptoms or concerns the owner explicitly described. Do not add typical symptoms that weren't mentioned",
+      "format": "paragraph",
+      "required": true
+    },
+    {
+      "key": "history",
+      "title": "Clinical History",
+      "instruction": "Only include medical history explicitly discussed. If no history mentioned, return null",
+      "format": "paragraph",
+      "required": false
+    },
+    {
+      "key": "examination",
+      "title": "Clinical Examination",
+      "instruction": "Only include examination findings the vet explicitly stated during the consultation. Do not infer findings from symptoms",
+      "format": "list",
+      "required": true
+    },
+    {
+      "key": "diagnosis",
+      "title": "Diagnosis",
+      "instruction": "Only include diagnoses the vet explicitly stated, not symptoms or suspected conditions. If vet said 'could be' or 'possibly', include as differential",
+      "format": "list",
+      "required": true
+    },
+    {
+      "key": "treatment",
+      "title": "Treatment Plan",
+      "instruction": "Only treatments explicitly recommended or administered. Do not add standard treatments that weren't mentioned",
+      "format": "list",
+      "required": true
+    },
+    {
+      "key": "medications",
+      "title": "Medications",
+      "instruction": "Only medications explicitly prescribed. Use exact names and dosages as stated. Use null for dosage or duration if not specified",
+      "format": "list",
+      "item_format": "{\"medication\": \"Name\", \"dosage\": \"Dose or null\", \"duration\": \"Duration or null\"}",
+      "required": false
+    },
+    {
+      "key": "follow_up",
+      "title": "Follow-up",
+      "instruction": "Only follow-up instructions explicitly given. Use exact timeframes stated (e.g., 'in two weeks', 'if symptoms persist'). If no follow-up mentioned, return null",
+      "format": "paragraph",
+      "required": false
+    },
+    {
+      "key": "owner_advice",
+      "title": "Advice to Owner",
+      "instruction": "Only home care instructions explicitly given by the vet. If no advice was given, return empty array []",
+      "format": "list",
+      "required": false
+    }
+  ]
+}

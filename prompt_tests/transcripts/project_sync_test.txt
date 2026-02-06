@@ -1,0 +1,51 @@
+PM: Good afternoon everyone. Let's go through our weekly project sync for the Customer Portal Redesign. Overall status first - we're currently tracking amber. Let me explain why.
+
+Dev Lead: Before we dive in, we finished the user authentication module yesterday, which was the biggest risk item. So that's a major milestone complete.
+
+PM: That's great news, thanks Kevin. That moves us closer to green. Let's do our progress updates around the room.
+
+Dev Lead: From the dev side, authentication is done as I mentioned. We're now working on the dashboard components. We've completed 4 of the 7 planned widgets. The remaining three are in progress and should be done by Friday.
+
+Designer: Design is on track. All the new dashboard mockups are approved. I'm now working on the settings pages. One thing to flag - the client requested some changes to the color scheme yesterday which will require some rework.
+
+PM: How significant is that rework?
+
+Designer: About two days of extra work. It affects the component library we built.
+
+PM: Okay, let's discuss that in risks. QA, how are we looking?
+
+QA Lead: We've completed testing on the auth module - found 3 critical bugs which dev has already fixed. We're now building out the dashboard test cases. We're blocked on getting access to the staging environment though.
+
+Dev Lead: I thought that was set up last week?
+
+QA Lead: The credentials were wrong. I've been back and forth with IT about it.
+
+PM: I'll escalate that today. Can't have QA blocked. Now let's talk about risks and issues.
+
+Designer: The color scheme change is a risk to our timeline. If we absorb it without adjusting scope, we might slip by a few days.
+
+PM: What if we deprioritize the settings pages polish and handle that in phase 2?
+
+Designer: That could work. The core functionality would still be there, just with the original styling.
+
+PM: Let's propose that to the client. Kevin, any risks from your side?
+
+Dev Lead: The third-party payment integration is coming up next sprint. We still don't have API documentation from the vendor.
+
+PM: When do you need it by?
+
+Dev Lead: Ideally by next Wednesday so we can plan properly.
+
+PM: I'll follow up with procurement today. They own that vendor relationship.
+
+QA Lead: Just the staging access issue from my side.
+
+PM: Noted. Decisions needed: one, do we absorb the color change or descope? I'm recommending descope. Two, do we escalate the vendor API docs to leadership? I think yes.
+
+Dev Lead: Agree on both.
+
+PM: Good. Next steps: I'll handle the staging access escalation and vendor API follow-up today. Kevin, please update the sprint board with the auth completion. Sarah, put together the descope proposal for the client call tomorrow. QA, once you have staging access, prioritize the dashboard testing.
+
+Everyone: Got it.
+
+PM: We'll sync again Thursday for a quick check-in. Thanks everyone.

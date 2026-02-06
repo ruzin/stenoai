@@ -1,0 +1,37 @@
+{
+  "id": "retrospective",
+  "name": "Retrospective",
+  "description": "Sprint review: what went well, what to improve",
+  "icon": "retro",
+  "sections": [
+    {
+      "key": "sprint_summary",
+      "title": "Sprint Summary",
+      "instruction": "Brief overview of the sprint period discussed",
+      "format": "paragraph",
+      "required": true
+    },
+    {
+      "key": "went_well",
+      "title": "What Went Well",
+      "instruction": "List positive outcomes, successes, and wins as simple strings (not objects)",
+      "format": "list",
+      "required": true
+    },
+    {
+      "key": "needs_improvement",
+      "title": "Needs Improvement",
+      "instruction": "List issues, challenges, and areas for improvement as simple strings (not objects)",
+      "format": "list",
+      "required": true
+    },
+    {
+      "key": "action_items",
+      "title": "Action Items",
+      "instruction": "Concrete next steps to address improvements",
+      "format": "list",
+      "item_format": "{\"action\": \"Description\", \"owner\": \"Person or null\"}",
+      "required": true
+    }
+  ]
+}

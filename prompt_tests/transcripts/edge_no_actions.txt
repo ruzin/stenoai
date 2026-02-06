@@ -1,0 +1,15 @@
+So I was thinking about the architecture and honestly I'm not sure we made the right choice with microservices. Like, the complexity is just insane now. Every time we deploy something breaks somewhere else. And the debugging, don't even get me started on distributed tracing.
+
+Yeah I feel you. We had the same problem at my last company. Eventually we just accepted it as the cost of scalability.
+
+But do we even need that level of scalability? Our user base is like what, ten thousand? We could run this on a single server probably.
+
+True. But the investors want to see that we're building for growth. Can't pitch "we run on one box" to VCs.
+
+I guess. Still feels like over-engineering to me. Remember when we could just deploy a monolith and call it a day?
+
+Those were simpler times. Anyway, nothing we can do about it now. The architecture is what it is.
+
+Yeah. Just venting I suppose. Coffee?
+
+Sure, let's go.

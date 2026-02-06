@@ -1,0 +1,57 @@
+{
+  "id": "one_on_one",
+  "name": "1-on-1 Meeting",
+  "description": "Manager/direct report conversations",
+  "icon": "one_on_one",
+  "sections": [
+    {
+      "key": "overview",
+      "title": "Overview",
+      "instruction": "Brief 1-2 sentence summary of the 1-on-1 - main focus areas discussed and overall tone of the conversation",
+      "format": "paragraph",
+      "required": true
+    },
+    {
+      "key": "participants",
+      "title": "Participants",
+      "instruction": "The two people in the meeting. Format as 'Name (role)' e.g. 'Rachel (Report)'. If the manager's name isn't stated, use 'Unnamed Manager'",
+      "format": "list",
+      "required": true
+    },
+    {
+      "key": "wins",
+      "title": "Wins & Accomplishments",
+      "instruction": "Recent successes and positive developments",
+      "format": "list",
+      "required": false
+    },
+    {
+      "key": "challenges",
+      "title": "Challenges",
+      "instruction": "Current difficulties or concerns raised",
+      "format": "list",
+      "required": false
+    },
+    {
+      "key": "feedback",
+      "title": "Feedback",
+      "instruction": "Any feedback given or received",
+      "format": "list",
+      "required": false
+    },
+    {
+      "key": "goals",
+      "title": "Goals & Growth",
+      "instruction": "Career goals, development areas discussed",
+      "format": "paragraph",
+      "required": false
+    },
+    {
+      "key": "action_items",
+      "title": "Follow-ups",
+      "instruction": "Action items and commitments made",
+      "format": "list",
+      "required": true
+    }
+  ]
+}

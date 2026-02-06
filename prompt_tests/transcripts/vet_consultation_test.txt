@@ -1,0 +1,89 @@
+Vet: Hello Mrs Patterson, come on through. And this must be Biscuit?
+
+Owner: Yes, that's right. He's been off his food for a few days now and I'm getting worried.
+
+Vet: Let me just get his details up. So Biscuit is a... male Cavalier King Charles Spaniel, about four years old, is that right?
+
+Owner: Yes, he turned four in March.
+
+Vet: And what's his normal weight? Do you know?
+
+Owner: Last time we were here he was around 8 kilos I think.
+
+Vet: Right, let me pop him on the scales. He's at 7.2 kilos today, so he has lost a bit of weight. You mentioned he's been off his food - when did that start?
+
+Owner: It started on Monday, so about four days ago. He normally wolfs down his breakfast but he's just been picking at it. Sometimes he won't eat at all.
+
+Vet: Is he drinking normally?
+
+Owner: Actually, now you mention it, he does seem to be drinking more than usual.
+
+Vet: And how about his energy levels? Is he his usual bouncy self?
+
+Owner: He's definitely more lethargic. He didn't even want to go for his walk yesterday, which is very unlike him.
+
+Vet: Any vomiting or diarrhoea?
+
+Owner: No vomiting, but his stools have been a bit loose.
+
+Vet: Has he had access to anything he shouldn't have? Any chance he could have eaten something in the garden or on a walk?
+
+Owner: Not that I know of, but he does like to sniff around the hedges.
+
+Vet: Okay, let me have a look at him. Come on then Biscuit, let's see what's going on.
+
+[Examination]
+
+Vet: His temperature is slightly elevated, 39.4 degrees. Heart and lungs sound fine. I'm just going to feel his tummy... he's a bit tender around the abdomen here. Can you see how he's tensing up? His gums look a little pale as well.
+
+Owner: Is that bad?
+
+Vet: It could indicate a few things. Given the combination of symptoms - the inappetence, increased thirst, lethargy, abdominal tenderness, and mild dehydration - I'd like to run some blood tests to rule out a few things. We should check his kidney and liver function, and also do a pancreatic lipase test.
+
+Owner: What do you think it might be?
+
+Vet: It could be pancreatitis, which is inflammation of the pancreas. It's quite common in Cavaliers actually. Or it could be something he's picked up, perhaps a gastric infection. The blood tests will help us narrow it down.
+
+Owner: How long do the tests take?
+
+Vet: We can do them in-house, so about twenty minutes for results. While we're waiting, I'm going to give him some fluids subcutaneously to help with the dehydration.
+
+[After tests]
+
+Vet: Right, the results are back. His pancreatic lipase levels are elevated, which confirms what I suspected - it's acute pancreatitis. The good news is his kidney and liver values are normal.
+
+Owner: Oh dear. Is it serious?
+
+Vet: It can be, but we've caught it early. The treatment is supportive care - we need to rest his pancreas and manage the symptoms. I'm going to prescribe a few things for him.
+
+First, he needs to go on a bland diet. I'd recommend our gastrointestinal food - it's low fat and easy to digest. Small frequent meals, about four times a day.
+
+Second, I'm prescribing Metoclopramide for the nausea, that's a quarter of a 5mg tablet twice daily. And also some Omeprazole to protect his stomach, one 10mg capsule once daily in the morning.
+
+For pain relief, I'm giving you some Paracetamol liquid - give him 2ml twice daily with food. That should help with any discomfort.
+
+Owner: How long does he need to be on these?
+
+Vet: The Metoclopramide and Omeprazole for five days initially. The Paracetamol for three days. The special diet needs to continue for at least two weeks, then we can gradually transition back to his normal food if he's doing well.
+
+Owner: What should I watch out for at home?
+
+Vet: Keep him calm and rested - no vigorous exercise for now. Monitor his appetite and make sure he's drinking. If he starts vomiting, stops eating completely, or seems in significant pain, bring him back straight away. Otherwise, I'd like to see him again in a week to check his progress.
+
+Owner: Should I still give him his regular medications? He's on something for his heart.
+
+Vet: What heart medication is he on?
+
+Owner: I can't remember the name, but it's a small white tablet.
+
+Vet: Ah yes, I can see here he's on Vetmedin. Yes, continue that as normal - it's important for his heart condition.
+
+Owner: Okay. And what about his evening walk?
+
+Vet: Short gentle walks are fine, just nothing too strenuous. Let him set the pace.
+
+Vet: Any other questions before we get you sorted with the medications?
+
+Owner: No, I think that covers everything. Thank you so much.
+
+Vet: No problem. The receptionist will give you the medications and book that follow-up appointment. If anything changes before then, don't hesitate to call us.

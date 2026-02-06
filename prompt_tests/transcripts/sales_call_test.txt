@@ -1,0 +1,49 @@
+Sales Rep: Hi John, thanks for taking the time to speak with me today. I'm Sarah from Acme Solutions. I understand you're looking at project management tools for your team?
+
+Prospect: Yes, that's right. We're a growing team of about 50 people and our current spreadsheet-based system isn't cutting it anymore.
+
+Sales Rep: I hear that a lot. What specific challenges are you running into?
+
+Prospect: The biggest issue is visibility. I have no idea what my team is working on at any given time. Status updates are inconsistent, and things fall through the cracks.
+
+Sales Rep: That's frustrating. How is that impacting your business?
+
+Prospect: We've missed a few client deadlines this quarter. It's starting to affect our reputation, honestly.
+
+Sales Rep: Understood. Our platform was built specifically to solve those visibility problems. We have real-time dashboards that show you exactly where every project stands. Would that help?
+
+Prospect: Potentially. But we've looked at other tools before and the onboarding was always painful. Our team is not very technical.
+
+Sales Rep: That's a great point to raise. We actually have a white-glove onboarding service where our team sets everything up for you and trains your staff. Most of our customers are fully operational within two weeks.
+
+Prospect: Two weeks is fast. What does that cost?
+
+Sales Rep: The onboarding is included in our Professional tier, which is $25 per user per month. For your team of 50, that would be $1,250 monthly.
+
+Prospect: That's more than we were hoping to spend. Our budget is closer to $800 per month.
+
+Sales Rep: I understand budget is a concern. We do have a Starter tier at $15 per user. You'd lose some features like custom reporting and the dedicated account manager, but you'd still get the core project tracking and team visibility.
+
+Prospect: What about the onboarding help at that tier?
+
+Sales Rep: Starter includes self-service onboarding with video tutorials and email support. But given you mentioned your team isn't very technical, I might suggest starting with Professional for the first three months to get everyone trained, then downgrading if you prefer.
+
+Prospect: That's an interesting approach. Can we do a trial first?
+
+Sales Rep: Absolutely. We offer a 14-day free trial of the Professional tier. No credit card required. You'll get full access plus I'll personally help you set up your first few projects.
+
+Prospect: That sounds fair. What would be the next step?
+
+Sales Rep: I'll send you a trial invitation right after this call. How about we schedule a 30-minute setup session for Thursday? I can walk your team through the basics.
+
+Prospect: Thursday works. Let's say 2pm?
+
+Sales Rep: Perfect. I'll send a calendar invite and the trial link within the hour. One more question - who else should I include on that setup call?
+
+Prospect: Add my operations manager, Lisa Chen. She'll be the main admin.
+
+Sales Rep: Great. John, it was wonderful speaking with you. I'm confident we can help you get that visibility you need. Any other questions before we wrap up?
+
+Prospect: No, I think we're good. Looking forward to Thursday.
+
+Sales Rep: Excellent. Talk to you then!

@@ -1,0 +1,49 @@
+Manager: Hey Rachel, thanks for making time for our one-on-one. How are you doing?
+
+Rachel: I'm doing well, thanks. Busy but in a good way. The project launch went smoothly and I'm feeling pretty good about it.
+
+Manager: Yeah, I wanted to congratulate you on that. The client feedback has been really positive. They specifically mentioned how well you handled the technical presentations.
+
+Rachel: That means a lot, thank you. I was nervous about those at first but I think the preparation paid off.
+
+Manager: Definitely. Speaking of which, I noticed you've been putting in some late nights. Everything okay?
+
+Rachel: Honestly, I've been a bit stretched. Between the project work and mentoring the new junior developer, it's been a lot. I'm managing, but I could use some help prioritizing.
+
+Manager: That's valid. Let's talk about that. What feels most overwhelming right now?
+
+Rachel: The documentation tasks keep getting pushed because there's always something more urgent. But I know they're important for the handoff.
+
+Manager: What if we bring James in to help with some of the documentation? He's been looking for more responsibility.
+
+Rachel: That could work. I'd need to spend some time getting him up to speed, but it would free me up longer term.
+
+Manager: Let's do that then. I'll talk to James this week. Now, let's talk about your growth. Last time you mentioned being interested in the tech lead role. How are you feeling about that?
+
+Rachel: I'm still very interested. The mentoring I've been doing with the junior dev has been really rewarding. I think I'd enjoy more of that leadership aspect.
+
+Manager: That's great to hear. There's actually a tech lead position opening up on the Platform team in Q2. Would you be interested in that?
+
+Rachel: Absolutely. What would I need to do to be considered?
+
+Manager: A few things. First, let's get you some visibility with the Platform team lead. I can set up an intro meeting. Second, I'd recommend taking the leadership training course - it's a good foundation. And third, let's make sure we document your project successes for the promotion review.
+
+Rachel: That all sounds doable. When is the leadership training offered?
+
+Manager: There's a session starting next month. I'll send you the enrollment link after this.
+
+Rachel: Perfect. Is there anything else you think I should work on?
+
+Manager: Your technical skills are solid. I'd focus on the stakeholder management side - that's a big part of the tech lead role. Maybe take point on the next client demo?
+
+Rachel: I can do that. The Henderson project has a demo coming up in two weeks.
+
+Manager: Perfect. Let's use that as a development opportunity. Anything else you want to discuss?
+
+Rachel: Just one thing - I'd like to attend the tech conference in April. I think it would be valuable for the AI work we're starting.
+
+Manager: Submit the request and I'll approve it. Good thinking ahead on the AI stuff.
+
+Rachel: Thanks. I appreciate your support.
+
+Manager: Of course. Let's check in on the tech lead progress in our next one-on-one. Great chat today.

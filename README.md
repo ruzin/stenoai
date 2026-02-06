@@ -30,6 +30,7 @@ AI-powered conversation intelligence that runs entirely on your device. Record, 
 
 - **Local transcription** using whisper.cpp
 - **AI summarization** with Ollama models
+- **Summary templates** - Standard meeting, sales call, vet consultation
 - **Ask Steno** - Query your meetings with natural language questions
 - **Multiple AI models** - Choose from 4 models optimized for different use cases
 - **Privacy-first** - no cloud dependencies
@@ -59,7 +60,6 @@ Have questions or suggestions? [Join our Discord](https://discord.gg/EHxvAdKf) t
 ## Future Roadmap
 
 ### Enhanced Features
-- Custom summarization templates
 - Speaker Diarisation
 
 ## Installation

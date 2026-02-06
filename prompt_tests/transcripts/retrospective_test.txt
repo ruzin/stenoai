@@ -1,0 +1,39 @@
+Facilitator: Alright team, welcome to our Sprint 14 retrospective. We had a pretty eventful two weeks, so let's dig into what went well, what didn't, and what we can improve. Let's start with the positives - what went well this sprint?
+
+David: I think the collaboration between frontend and backend was really smooth this sprint. We had daily sync calls and it really helped avoid the integration issues we had last time.
+
+Lisa: Agreed. Also, the new code review process is working great. Reviews are happening faster and the quality of feedback has improved.
+
+Marcus: From my side, I was really happy with how we handled the production incident on Tuesday. We detected it quickly, communicated well, and had it resolved within an hour.
+
+Facilitator: Those are great callouts. The daily syncs and code review improvements were both action items from last retro, so it's nice to see those paying off. Anything else?
+
+David: Oh, and the new testing framework Marcus set up is saving us a lot of time. Our test suite runs 40% faster now.
+
+Facilitator: Excellent. Now let's talk about what didn't go well or was frustrating.
+
+Lisa: The scope creep was real this sprint. We committed to 8 stories but ended up with 12 because stakeholders kept adding urgent requests.
+
+Marcus: Yeah, that was painful. We ended up working late several nights to get everything done.
+
+David: I also felt like our estimation was off. The payment integration took way longer than we thought - we estimated 3 points but it was really more like 8.
+
+Lisa: That's fair. We underestimated the complexity of the third-party API.
+
+Marcus: One more thing - the staging environment was down for almost a full day. We lost a lot of testing time.
+
+Facilitator: These are all valid concerns. Let's talk about improvements. What can we do differently next sprint?
+
+Lisa: We need to push back on mid-sprint scope additions. Maybe we can have a rule that anything new goes to the next sprint unless it's truly critical.
+
+Marcus: I like that. We should also add a buffer to our estimates for anything involving external integrations.
+
+David: For the staging environment, can we set up better monitoring? We didn't even know it was down until someone tried to use it.
+
+Marcus: Good idea. I can set up health checks and alerts this week.
+
+Facilitator: Great suggestions. Let me capture the action items: Lisa will draft a scope change policy, Marcus will add estimation guidelines for external integrations and set up staging monitoring, and David will schedule stakeholder training on our sprint process. Does that sound right?
+
+Everyone: Yes, that covers it.
+
+Facilitator: Perfect. Thanks everyone for a productive retro. Let's make Sprint 15 our best one yet.

@@ -9,9 +9,10 @@ import logging
 import subprocess
 import time
 import os
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from .models import MeetingTranscript, ActionItem, Decision
 from . import ollama_manager
+from .templates import TemplateManager
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +42,7 @@ class OllamaSummarizer:
         self.model_name = model_name
         self.client = None
         self.ollama_process = None
+        self.template_manager = TemplateManager()
 
         # Ensure Ollama is ready before initializing client
         self._ensure_ollama_ready()
@@ -332,6 +334,118 @@ Return ONLY the response in this exact JSON format:
     }}
   ]
 }}"""
+
+    def summarize_with_template(self, transcript: str, template_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """
+        Summarize a transcript using a specific template.
+
+        Args:
+            transcript: The meeting transcript text
+            template_id: Template ID to use. If None, loads from config.
+
+        Returns:
+            Dictionary with template-specific structured data, or None if failed
+        """
+        try:
+            # Handle empty transcripts
+            if not transcript or transcript.strip() == "" or transcript.lower().strip() == "none":
+                logger.warning("Empty transcript provided")
+                return None
+
+            # Get template
+            if template_id is None:
+                from .config import get_config
+                config = get_config()
+                template_id = config.get_template()
+
+            template = self.template_manager.get_template(template_id)
+            if not template:
+                logger.warning(f"Template '{template_id}' not found, using standard_meeting")
+                template = self.template_manager.get_template("standard_meeting")
+                if not template:
+                    logger.error("No templates available")
+                    return None
+
+            logger.info(f"Using template: {template.id} ({template.name})")
+
+            # All templates use the dynamic template generator
+            prompt = self.template_manager.generate_prompt(template, transcript)
+            logger.info("Using template-generated prompt")
+
+            # Calculate timeout
+            base_timeout = 1800
+            extra_timeout = (len(transcript) // 10000) * 600
+            timeout_seconds = min(base_timeout + extra_timeout, 7200)
+
+            # Call LLM with retry logic
+            max_retries = 3
+            response_text = None
+
+            for attempt in range(max_retries):
+                try:
+                    if attempt > 0:
+                        logger.info(f"Retry attempt {attempt + 1}/{max_retries}")
+                        self._ensure_ollama_ready()
+                        self.client = ollama.Client()
+
+                    ollama_response = self.client.chat(
+                        model=self.model_name,
+                        messages=[{'role': 'user', 'content': prompt}],
+                        options={'timeout': timeout_seconds}
+                    )
+                    response_text = ollama_response['message']['content'].strip()
+                    break
+                except Exception as e:
+                    logger.error(f"Ollama API attempt {attempt + 1} failed: {e}")
+                    if attempt == max_retries - 1:
+                        raise
+                    time.sleep(5)
+
+            if not response_text:
+                return None
+
+            # Parse JSON response
+            # Remove markdown formatting if present
+            if response_text.startswith('```json'):
+                response_text = response_text.replace('```json', '').replace('```', '').strip()
+            elif response_text.startswith('```'):
+                response_text = response_text.replace('```', '').strip()
+
+            # Extract JSON from response
+            if '{' in response_text and '}' in response_text:
+                json_start = response_text.find('{')
+                json_end = response_text.rfind('}') + 1
+                response_text = response_text[json_start:json_end]
+
+            try:
+                structured_data = json.loads(response_text)
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse template response: {e}")
+                # Try simple repair
+                import re
+                repaired = re.sub(r'(\[|\,)\s*([^"\[\]{},:]+?)\s*(\]|\,)', r'\1 "\2" \3', response_text)
+                try:
+                    structured_data = json.loads(repaired)
+                except:
+                    return None
+
+            # Add template metadata
+            structured_data['_template_id'] = template.id
+            structured_data['_template_name'] = template.name
+            structured_data['_sections'] = [
+                {
+                    'key': s.key,
+                    'title': s.title,
+                    'format': s.format
+                }
+                for s in template.sections
+            ]
+
+            return structured_data
+
+        except Exception as e:
+            logger.error(f"Template summarization failed: {e}")
+            return None
 
     def summarize_transcript(self, transcript: str, duration_minutes: int) -> Optional[MeetingTranscript]:
         """

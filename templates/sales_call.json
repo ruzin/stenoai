@@ -1,0 +1,43 @@
+{
+  "id": "sales_call",
+  "name": "Sales Call",
+  "description": "Client/prospect conversations with needs and next steps",
+  "icon": "sales",
+  "sections": [
+    {
+      "key": "prospect_info",
+      "title": "Prospect/Client",
+      "instruction": "Only include company name and attendee names explicitly stated in the transcript. If company name not mentioned, write 'Unknown company'. Do not invent surnames - if only 'John' is mentioned, write 'John' not 'John Smith'",
+      "format": "paragraph",
+      "required": true
+    },
+    {
+      "key": "pain_points",
+      "title": "Pain Points & Needs",
+      "instruction": "Only list problems or needs the prospect explicitly described in their own words. Do not infer problems from context or add industry-typical pain points that weren't mentioned",
+      "format": "list",
+      "required": true
+    },
+    {
+      "key": "objections",
+      "title": "Objections",
+      "instruction": "Only list concerns or objections the prospect explicitly raised. If no objections were voiced, return empty array []",
+      "format": "list",
+      "required": false
+    },
+    {
+      "key": "interest_signals",
+      "title": "Interest Signals",
+      "instruction": "Only list positive signals explicitly expressed by the prospect (e.g., asking about pricing, requesting a demo). If no clear interest signals, return empty array []",
+      "format": "list",
+      "required": false
+    },
+    {
+      "key": "next_steps",
+      "title": "Next Steps",
+      "instruction": "Only include follow-ups that were explicitly agreed upon during the call. Use exact timeline phrases from the conversation (e.g., 'Thursday at 2pm', 'next week') - do not convert to specific dates like '2024-01-15'",
+      "format": "list",
+      "required": true
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+The latency spike is coming from the Redis cache invalidation. When we hit the TTL expiry on the session tokens, we're seeing a thundering herd problem where all the requests simultaneously hit Postgres.
+
+Have you tried implementing a cache stampede protection? Maybe a probabilistic early expiration or a mutex-based approach?
+
+We looked at that but the distributed lock overhead was actually worse. We're thinking about switching to a write-through cache pattern instead of write-behind.
+
+What about the connection pooling? Last I checked we were at 50 connections per pod with 12 pods, that's 600 connections hitting the primary.
+
+Yeah the connection pool is sized correctly but the issue is the burst. During the cache miss storm we're seeing 3000 QPS spike to 15000 QPS for about 200 milliseconds.
+
+Could you shard the cache keys by user ID modulo? Spread the TTL expiry across a wider window?
+
+That's actually not a bad idea. We'd need to update the cache key generation in the auth middleware. I can prototype that.
+
+Do it. Also let's add some circuit breaker logic so we fail fast if Postgres latency exceeds 100ms. Better to return a 503 than hang.
+
+Agreed. I'll create the tickets. We should also set up a PagerDuty alert for cache hit ratio dropping below 95%.
+
+Good call. Ship it.

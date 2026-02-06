@@ -1,0 +1,46 @@
+{
+  "id": "daily_standup",
+  "name": "Daily Standup",
+  "description": "Engineering team updates: yesterday, today, blockers",
+  "icon": "standup",
+  "sections": [
+    {
+      "key": "overview",
+      "title": "Overview",
+      "instruction": "Brief 1-2 sentence summary of the standup - team size, overall mood, and whether any significant blockers were raised",
+      "format": "paragraph",
+      "required": true
+    },
+    {
+      "key": "attendees",
+      "title": "Attendees",
+      "instruction": "List team members present",
+      "format": "list",
+      "required": true
+    },
+    {
+      "key": "yesterday",
+      "title": "Yesterday's Progress",
+      "instruction": "What each person completed yesterday",
+      "format": "list",
+      "item_format": "{\"person\": \"Name\", \"completed\": \"Work done\"}",
+      "required": true
+    },
+    {
+      "key": "today",
+      "title": "Today's Plan",
+      "instruction": "What each person plans to work on today",
+      "format": "list",
+      "item_format": "{\"person\": \"Name\", \"planned\": \"Work planned\"}",
+      "required": true
+    },
+    {
+      "key": "blockers",
+      "title": "Blockers",
+      "instruction": "Any impediments or blockers mentioned",
+      "format": "list",
+      "item_format": "{\"person\": \"Name\", \"blocker\": \"Issue\", \"impact\": \"Description\"}",
+      "required": false
+    }
+  ]
+}

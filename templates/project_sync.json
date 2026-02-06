@@ -1,0 +1,43 @@
+{
+  "id": "project_sync",
+  "name": "Project Sync",
+  "description": "Status meetings with progress, risks, and decisions",
+  "icon": "project",
+  "sections": [
+    {
+      "key": "status_overview",
+      "title": "Status Overview",
+      "instruction": "Provide a 2-3 sentence summary of overall project health including the RAG status (Red/Amber/Green), key milestones, and main concerns",
+      "format": "paragraph",
+      "required": true
+    },
+    {
+      "key": "progress",
+      "title": "Progress Updates",
+      "instruction": "Work completed since last sync as simple bullet points",
+      "format": "list",
+      "required": true
+    },
+    {
+      "key": "risks",
+      "title": "Risks & Issues",
+      "instruction": "Identified risks, issues, or concerns",
+      "format": "list",
+      "required": false
+    },
+    {
+      "key": "decisions",
+      "title": "Decisions Made",
+      "instruction": "Key decisions and their rationale",
+      "format": "list",
+      "required": false
+    },
+    {
+      "key": "next_steps",
+      "title": "Next Steps",
+      "instruction": "Upcoming milestones and action items",
+      "format": "list",
+      "required": true
+    }
+  ]
+}

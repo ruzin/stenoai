@@ -104,3 +104,34 @@ When the user says "log session" or similar (e.g., "update session log", "docume
 3. REPLACE or CONDENSE previous session entries to keep the file concise (max 2-3 most recent sessions)
 4. Keep only relevant context for the next Claude session - remove outdated or completed work details
 5. Format with clear headers and organized sections
+
+## Template Optimization
+
+### Key Files
+- **Templates**: `templates/*.json` - section definitions and instructions
+- **Prompt generator**: `src/templates.py` - `generate_prompt()` builds LLM prompts
+- **Test suite**: `prompt_tests/test_templates.py` - runs all templates against test transcripts
+- **Test transcripts**: `prompt_tests/transcripts/` - sample transcripts for each template + edge cases
+
+### Running Tests
+```bash
+source venv/bin/activate
+cd prompt_tests && python test_templates.py
+```
+
+### Common Issues & Fixes
+| Issue | Fix |
+|-------|-----|
+| Hallucinated dates/surnames | Add "do not invent" instruction |
+| Empty strings in arrays | Use null, not empty strings |
+| Overly brief output | Specify "2-3 sentences" in instruction |
+
+### After Changes
+Rebuild backend to bundle updated templates:
+```bash
+pyinstaller stenoai.spec --noconfirm
+```
+
+### Known Limitations
+- No speaker diarization - "participants" captures names mentioned, not verified speakers
+- Results vary by LLM model - test with target model (default: deepseek-r1:8b)
