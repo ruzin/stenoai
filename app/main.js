@@ -1824,6 +1824,50 @@ ipcMain.handle('set-model', async (event, modelName) => {
   }
 });
 
+// Template management handlers
+ipcMain.handle('list-templates', async () => {
+  try {
+    const result = await runPythonScript('simple_recorder.py', ['list-templates']);
+    const jsonData = JSON.parse(result);
+    return { success: true, templates: jsonData };
+  } catch (error) {
+    sendDebugLog(`Error listing templates: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('get-template', async () => {
+  try {
+    const result = await runPythonScript('simple_recorder.py', ['get-template']);
+    const jsonData = JSON.parse(result);
+    return { success: true, ...jsonData };
+  } catch (error) {
+    sendDebugLog(`Error getting current template: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('set-template', async (event, templateId) => {
+  try {
+    sendDebugLog(`Setting template to: ${templateId}`);
+    const result = await runPythonScript('simple_recorder.py', ['set-template', templateId]);
+
+    // Extract JSON from output (might have other text before it)
+    const jsonMatch = result.match(/\{.*\}/s);
+    if (jsonMatch) {
+      const jsonData = JSON.parse(jsonMatch[0]);
+      trackEvent('template_changed', { template: templateId });
+      return jsonData;
+    }
+
+    trackEvent('template_changed', { template: templateId });
+    return { success: true, template: templateId };
+  } catch (error) {
+    sendDebugLog(`Error setting template: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+});
+
 ipcMain.handle('get-notifications', async () => {
   try {
     const result = await runPythonScript('simple_recorder.py', ['get-notifications']);
@@ -1856,6 +1900,16 @@ ipcMain.handle('set-notifications', async (event, enabled) => {
     sendDebugLog(`Error setting notifications: ${error.message}`);
     return { success: false, error: error.message };
   }
+});
+
+// Focus main window (used when notification is clicked)
+ipcMain.handle('focus-window', async () => {
+  if (mainWindow) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.focus();
+    mainWindow.show();
+  }
+  return { success: true };
 });
 
 ipcMain.handle('get-telemetry', async () => {

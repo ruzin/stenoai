@@ -183,6 +183,179 @@
             gap: 10px;
         }
 
+        /* Template Quick Selector - Precision Industrial Style */
+        .template-selector {
+            position: relative;
+            display: flex;
+            align-items: center;
+        }
+
+        .template-trigger {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 32px;
+            height: 32px;
+            padding: 0;
+            background: var(--bg-surface);
+            border: 1px solid var(--border-subtle);
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            color: var(--text-secondary);
+            font-family: inherit;
+        }
+
+        .template-trigger:hover {
+            background: var(--bg-elevated);
+            border-color: var(--border-default);
+            color: var(--text-primary);
+        }
+
+        .template-trigger:hover .template-bolt {
+            color: var(--accent-primary);
+            filter: drop-shadow(0 0 4px rgba(129, 140, 248, 0.5));
+        }
+
+        .template-trigger.active {
+            background: var(--bg-elevated);
+            border-color: var(--accent-primary);
+            color: var(--text-primary);
+        }
+
+        .template-trigger.active .template-bolt {
+            color: var(--accent-primary);
+            filter: drop-shadow(0 0 6px rgba(129, 140, 248, 0.6));
+        }
+
+        .template-bolt {
+            width: 16px;
+            height: 16px;
+            color: var(--text-muted);
+            transition: all 0.15s ease;
+        }
+
+
+        .template-dropdown {
+            position: absolute;
+            top: calc(100% + 6px);
+            left: 0;
+            min-width: 220px;
+            background: var(--bg-elevated);
+            border: 1px solid var(--border-default);
+            border-radius: 8px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 2px 8px rgba(0, 0, 0, 0.2);
+            opacity: 0;
+            visibility: hidden;
+            transform: translateY(-8px) scale(0.96);
+            transform-origin: top left;
+            transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+            z-index: 1000;
+            overflow: hidden;
+        }
+
+        .template-dropdown.open {
+            opacity: 1;
+            visibility: visible;
+            transform: translateY(0) scale(1);
+        }
+
+        .template-dropdown-header {
+            padding: 10px 12px 8px;
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+            border-bottom: 1px solid var(--border-subtle);
+        }
+
+        .template-option {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 12px;
+            cursor: pointer;
+            transition: all 0.12s ease;
+            border-left: 2px solid transparent;
+        }
+
+        .template-option:hover {
+            background: var(--bg-surface);
+        }
+
+        .template-option.selected {
+            background: rgba(129, 140, 248, 0.08);
+            border-left-color: var(--accent-primary);
+        }
+
+        .template-option.selected .template-option-icon {
+            box-shadow: 0 0 12px rgba(129, 140, 248, 0.3);
+        }
+
+        .template-option-icon {
+            width: 28px;
+            height: 28px;
+            border-radius: 6px;
+            background: var(--bg-primary);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 13px;
+            flex-shrink: 0;
+            transition: all 0.15s ease;
+        }
+
+        .template-option-info {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .template-option-name {
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--text-primary);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .template-option-desc {
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-top: 1px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .template-option-check {
+            width: 16px;
+            height: 16px;
+            color: var(--accent-primary);
+            opacity: 0;
+            transform: scale(0.8);
+            transition: all 0.15s ease;
+        }
+
+        .template-option.selected .template-option-check {
+            opacity: 1;
+            transform: scale(1);
+        }
+
+        /* Light theme adjustments */
+        [data-theme="light"] .template-dropdown {
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15), 0 2px 8px rgba(0, 0, 0, 0.08);
+        }
+
+        [data-theme="light"] .template-trigger:hover .template-bolt {
+            filter: drop-shadow(0 0 3px rgba(91, 95, 199, 0.4));
+        }
+
+        [data-theme="light"] .template-option.selected .template-option-icon {
+            box-shadow: 0 0 10px rgba(91, 95, 199, 0.25);
+        }
+
         .session-input {
             background: transparent;
             border: none;
@@ -359,6 +532,24 @@
 
         .settings-panel.open {
             right: 0;
+        }
+
+        .settings-backdrop {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.4);
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.3s ease, visibility 0.3s ease;
+            z-index: 999;
+        }
+
+        .settings-backdrop.open {
+            opacity: 1;
+            visibility: visible;
         }
 
         .settings-header {
@@ -1415,13 +1606,21 @@
             font-size: 12px;
             margin-top: 10px;
         }
-        
+
+        #detail-template {
+            background: rgba(129, 140, 248, 0.15);
+            color: var(--accent-primary);
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-weight: 500;
+        }
+
         .meeting-section {
             margin-bottom: 36px;
         }
 
         .section-title {
-            font-size: 12px;
+            font-size: 14px;
             font-weight: 600;
             color: var(--text-secondary);
             letter-spacing: -0.01em;
@@ -2052,7 +2251,7 @@
             transform: rotate(180deg);
         }
 
-        .debug-console {
+        .setup-debug .debug-console {
             background: var(--bg-deep);
             border: 1px solid var(--border-subtle);
             border-top: none;
@@ -2068,7 +2267,7 @@
             display: none;
         }
 
-        .debug-console.show {
+        .setup-debug .debug-console.show {
             display: block;
         }
 
@@ -2532,12 +2731,27 @@
                     <div class="waveform-bar"></div>
                 </div>
             </div>
-            
+
             <input type="text" class="session-input" id="session-name" placeholder="Name this session...">
-            
+
             <button class="btn btn-primary" id="start-btn">
                 <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor"><circle cx="6" cy="6" r="5"/></svg> Record
             </button>
+
+            <!-- Template Quick Selector -->
+            <div class="template-selector" id="template-selector">
+                <button class="template-trigger" id="template-trigger" title="Select template">
+                    <svg class="template-bolt" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+                    </svg>
+                </button>
+                <div class="template-dropdown" id="template-dropdown">
+                    <div class="template-dropdown-header">Meeting Template</div>
+                    <div id="template-options">
+                        <!-- Populated by JavaScript -->
+                    </div>
+                </div>
+            </div>
 
             <button class="btn btn-danger" id="stop-btn" style="display: none;">
                 <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor"><rect x="1" y="1" width="10" height="10" rx="1.5"/></svg> Stop
@@ -2634,6 +2848,7 @@ Ask Steno
                     <div class="meeting-info">
                         <span id="detail-date">Date</span>
                         <span id="detail-duration">Duration</span>
+                        <span id="detail-template" style="display: none;">Template</span>
                     </div>
                 </div>
 
@@ -2655,6 +2870,10 @@ Ask Steno
                     </div>
                 </div>
 
+                <!-- Dynamic template sections container -->
+                <div id="dynamic-sections-container"></div>
+
+                <!-- Legacy sections (hidden when using templates) -->
                 <div class="meeting-section" id="discussion-areas-section">
                     <h2 class="section-title">
                         <span>💬</span> Key Topics
@@ -2664,7 +2883,7 @@ Ask Steno
                     </div>
                 </div>
 
-                <div class="meeting-section">
+                <div class="meeting-section" id="key-points-section">
                     <h2 class="section-title">
                         <span>🔑</span> Key Points
                     </h2>
@@ -2673,7 +2892,7 @@ Ask Steno
                     </ul>
                 </div>
 
-                <div class="meeting-section">
+                <div class="meeting-section" id="action-items-section">
                     <h2 class="section-title">
                         <span>✅</span> Action Items
                     </h2>
@@ -2958,6 +3177,9 @@ Commands and output will appear here...
         </div>
     </div>
 
+    <!-- Settings Backdrop (click to close) -->
+    <div class="settings-backdrop" id="settings-backdrop"></div>
+
     <!-- Unified Settings Panel -->
     <div class="settings-panel" id="settings-panel">
         <div class="settings-header">
@@ -3161,6 +3383,7 @@ Session started - waiting for activity...
         const detailTitle = document.getElementById('detail-title');
         const detailDate = document.getElementById('detail-date');
         const detailDuration = document.getElementById('detail-duration');
+        const detailTemplate = document.getElementById('detail-template');
         const detailSummary = document.getElementById('detail-summary');
         const detailParticipants = document.getElementById('detail-participants');
         const detailKeyPoints = document.getElementById('detail-key-points');
@@ -3515,7 +3738,14 @@ Session started - waiting for activity...
             if (meetings.length === 0) {
                 meetingsList.innerHTML = `
                     <div style="padding: 20px; text-align: center; color: var(--text-muted);">
-                        <div style="font-size: 24px; margin-bottom: 8px;">🎙️</div>
+                        <div style="margin-bottom: 8px;">
+                            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="opacity: 0.5;">
+                                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+                                <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                                <line x1="12" y1="19" x2="12" y2="23"></line>
+                                <line x1="8" y1="23" x2="16" y2="23"></line>
+                            </svg>
+                        </div>
                         <p>No meetings recorded yet</p>
                         <p style="font-size: 12px; margin-top: 4px;">Start recording to see your meetings here</p>
                     </div>
@@ -3585,8 +3815,24 @@ Session started - waiting for activity...
                 (selectedMeeting.session_info?.duration_minutes ?
                     `Meeting Duration: ${selectedMeeting.session_info.duration_minutes} minutes` : 'Processed');
             detailDuration.textContent = durationText;
-            
-            detailSummary.textContent = selectedMeeting.summary || 'No summary available';
+
+            // Template name
+            if (selectedMeeting.session_info?.template_name || selectedMeeting._template_name) {
+                const templateName = selectedMeeting.session_info?.template_name || selectedMeeting._template_name;
+                detailTemplate.textContent = templateName;
+                detailTemplate.style.display = 'inline';
+            } else {
+                detailTemplate.style.display = 'none';
+            }
+
+            // Find summary from various possible fields
+            const summaryText = selectedMeeting.summary ||
+                               selectedMeeting.overview ||
+                               selectedMeeting.sprint_summary ||
+                               selectedMeeting.status_overview ||
+                               selectedMeeting.prospect_info ||
+                               'No summary available';
+            detailSummary.textContent = typeof summaryText === 'string' ? summaryText : JSON.stringify(summaryText);
             
             // Participants
             if (selectedMeeting.participants && selectedMeeting.participants.length > 0) {
@@ -3595,63 +3841,174 @@ Session started - waiting for activity...
                 detailParticipants.innerHTML = '<span style="color: var(--text-muted);">No participants identified</span>';
             }
 
-            // Key topics
-            const detailDiscussionAreas = document.getElementById('detail-discussion-areas');
+            // Check if meeting has template sections
+            const hasTemplateSections = selectedMeeting._sections && selectedMeeting._sections.length > 0;
+            const dynamicContainer = document.getElementById('dynamic-sections-container');
             const discussionAreasSection = document.getElementById('discussion-areas-section');
-            detailDiscussionAreas.innerHTML = '';
-            if (selectedMeeting.discussion_areas && selectedMeeting.discussion_areas.length > 0) {
-                discussionAreasSection.style.display = 'block';
-                selectedMeeting.discussion_areas.forEach(area => {
-                    const areaDiv = document.createElement('div');
-                    areaDiv.style.marginBottom = '15px';
-                    areaDiv.style.padding = '12px';
-                    areaDiv.style.background = 'var(--bg-elevated)';
-                    areaDiv.style.borderRadius = '6px';
-                    areaDiv.style.borderLeft = '3px solid var(--accent-primary)';
+            const keyPointsSection = document.getElementById('key-points-section');
+            const actionItemsSection = document.getElementById('action-items-section');
 
-                    const title = document.createElement('h4');
-                    title.textContent = area.title || 'Discussion Topic';
-                    title.style.margin = '0 0 8px 0';
-                    title.style.color = 'var(--accent-primary)';
-                    title.style.fontSize = '14px';
-                    title.style.fontWeight = '600';
+            // Clear dynamic container
+            dynamicContainer.innerHTML = '';
 
-                    const analysis = document.createElement('p');
-                    analysis.textContent = area.analysis || '';
-                    analysis.style.margin = '0';
-                    analysis.style.color = 'var(--text-secondary)';
-                    analysis.style.lineHeight = '1.5';
-
-                    areaDiv.appendChild(title);
-                    areaDiv.appendChild(analysis);
-                    detailDiscussionAreas.appendChild(areaDiv);
-                });
-            } else {
+            if (hasTemplateSections) {
+                // Hide legacy sections when using templates
                 discussionAreasSection.style.display = 'none';
-            }
+                keyPointsSection.style.display = 'none';
+                actionItemsSection.style.display = 'none';
 
-            // Key points
-            detailKeyPoints.innerHTML = '';
-            if (selectedMeeting.key_points && selectedMeeting.key_points.length > 0) {
-                selectedMeeting.key_points.forEach(point => {
-                    const li = document.createElement('li');
-                    li.textContent = point;
-                    detailKeyPoints.appendChild(li);
+                // Render dynamic template sections
+                const sectionIcons = {
+                    'overview': '&#128203;', 'summary': '&#128203;',
+                    'participants': '&#128101;', 'attendees': '&#128101;',
+                    'yesterday': '&#9664;', 'today': '&#9654;', 'blockers': '&#128683;',
+                    'went_well': '&#128077;', 'needs_improvement': '&#128078;',
+                    'wins': '&#127942;', 'challenges': '&#9888;', 'feedback': '&#128172;', 'goals': '&#127919;',
+                    'progress': '&#128200;', 'risks': '&#9888;', 'decisions': '&#10003;',
+                    'pain_points': '&#128148;', 'objections': '&#10060;', 'interest_signals': '&#128154;',
+                    'prospect_info': '&#127970;', 'sprint_summary': '&#128203;',
+                    'discussion_areas': '&#128172;', 'key_points': '&#128273;',
+                    'next_steps': '&#9989;', 'action_items': '&#9989;'
+                };
+
+                selectedMeeting._sections.forEach(section => {
+                    // Skip sections we handle elsewhere (overview/summary, participants)
+                    if (['overview', 'summary', 'participants', 'attendees'].includes(section.key)) return;
+
+                    const data = selectedMeeting[section.key];
+                    const isEmpty = !data || (Array.isArray(data) && data.length === 0) || data === null;
+
+                    const sectionDiv = document.createElement('div');
+                    sectionDiv.className = 'meeting-section';
+
+                    const icon = sectionIcons[section.key] || '&#128196;';
+                    const titleH2 = document.createElement('h2');
+                    titleH2.className = 'section-title';
+                    titleH2.innerHTML = `<span>${icon}</span> ${section.title}`;
+                    sectionDiv.appendChild(titleH2);
+
+                    if (isEmpty) {
+                        // Show empty state for this section
+                        const emptyMsg = document.createElement('div');
+                        emptyMsg.className = 'section-content';
+                        emptyMsg.style.color = 'var(--text-muted)';
+                        emptyMsg.style.fontStyle = 'italic';
+                        emptyMsg.textContent = `No ${section.title.toLowerCase()} identified in this recording`;
+                        sectionDiv.appendChild(emptyMsg);
+                    } else if (section.format === 'list' && Array.isArray(data)) {
+                        // Special handling for discussion_areas - use card format
+                        if (section.key === 'discussion_areas') {
+                            const container = document.createElement('div');
+                            container.className = 'discussion-areas-container';
+                            data.forEach(area => {
+                                const areaDiv = document.createElement('div');
+                                areaDiv.style.marginBottom = '15px';
+                                areaDiv.style.padding = '12px';
+                                areaDiv.style.background = 'var(--bg-elevated)';
+                                areaDiv.style.borderRadius = '6px';
+                                areaDiv.style.borderLeft = '3px solid var(--accent-primary)';
+
+                                const title = typeof area === 'object' ? (area.title || area.topic || '') : area;
+                                const analysis = typeof area === 'object' ? (area.analysis || area.description || '') : '';
+
+                                areaDiv.innerHTML = `
+                                    <div style="font-weight: 600; color: var(--text-primary); margin-bottom: 6px;">${title}</div>
+                                    <div style="color: var(--text-secondary); font-size: 13px; line-height: 1.5;">${analysis}</div>
+                                `;
+                                container.appendChild(areaDiv);
+                            });
+                            sectionDiv.appendChild(container);
+                        } else {
+                            // Use action-items-list for next_steps/action_items, key-points-list for others
+                            const isActionItems = ['next_steps', 'action_items'].includes(section.key);
+                            const ul = document.createElement('ul');
+                            ul.className = isActionItems ? 'action-items-list' : 'key-points-list';
+                            data.forEach(item => {
+                                const li = document.createElement('li');
+                                if (typeof item === 'object') {
+                                    // Format object items nicely
+                                    const parts = [];
+                                    for (const [k, v] of Object.entries(item)) {
+                                        if (v && v !== 'null' && v !== null) parts.push(`<strong>${k}:</strong> ${v}`);
+                                    }
+                                    li.innerHTML = parts.join(' | ');
+                                } else {
+                                    li.textContent = item;
+                                }
+                                ul.appendChild(li);
+                            });
+                            sectionDiv.appendChild(ul);
+                        }
+                    } else if (section.format === 'paragraph' || typeof data === 'string') {
+                        const content = document.createElement('div');
+                        content.className = 'section-content';
+                        content.textContent = data;
+                        sectionDiv.appendChild(content);
+                    }
+
+                    dynamicContainer.appendChild(sectionDiv);
                 });
             } else {
-                detailKeyPoints.innerHTML = '<li style="color: var(--text-muted);">No key points identified</li>';
-            }
-            
-            // Action items
-            detailActionItems.innerHTML = '';
-            if (selectedMeeting.action_items && selectedMeeting.action_items.length > 0) {
-                selectedMeeting.action_items.forEach(item => {
-                    const li = document.createElement('li');
-                    li.textContent = item;
-                    detailActionItems.appendChild(li);
-                });
-            } else {
-                detailActionItems.innerHTML = '<li style="color: var(--text-muted);">No action items identified</li>';
+                // Legacy rendering for meetings without template metadata
+                // Key topics
+                const detailDiscussionAreas = document.getElementById('detail-discussion-areas');
+                detailDiscussionAreas.innerHTML = '';
+                if (selectedMeeting.discussion_areas && selectedMeeting.discussion_areas.length > 0) {
+                    discussionAreasSection.style.display = 'block';
+                    selectedMeeting.discussion_areas.forEach(area => {
+                        const areaDiv = document.createElement('div');
+                        areaDiv.style.marginBottom = '15px';
+                        areaDiv.style.padding = '12px';
+                        areaDiv.style.background = 'var(--bg-elevated)';
+                        areaDiv.style.borderRadius = '6px';
+                        areaDiv.style.borderLeft = '3px solid var(--accent-primary)';
+
+                        const title = document.createElement('h4');
+                        title.textContent = area.title || 'Discussion Topic';
+                        title.style.margin = '0 0 8px 0';
+                        title.style.color = 'var(--accent-primary)';
+                        title.style.fontSize = '14px';
+                        title.style.fontWeight = '600';
+
+                        const analysis = document.createElement('p');
+                        analysis.textContent = area.analysis || '';
+                        analysis.style.margin = '0';
+                        analysis.style.color = 'var(--text-secondary)';
+                        analysis.style.lineHeight = '1.5';
+
+                        areaDiv.appendChild(title);
+                        areaDiv.appendChild(analysis);
+                        detailDiscussionAreas.appendChild(areaDiv);
+                    });
+                } else {
+                    discussionAreasSection.style.display = 'none';
+                }
+
+                // Key points
+                keyPointsSection.style.display = 'block';
+                detailKeyPoints.innerHTML = '';
+                if (selectedMeeting.key_points && selectedMeeting.key_points.length > 0) {
+                    selectedMeeting.key_points.forEach(point => {
+                        const li = document.createElement('li');
+                        li.textContent = point;
+                        detailKeyPoints.appendChild(li);
+                    });
+                } else {
+                    detailKeyPoints.innerHTML = '<li style="color: var(--text-muted);">No key points identified</li>';
+                }
+
+                // Action items
+                actionItemsSection.style.display = 'block';
+                detailActionItems.innerHTML = '';
+                if (selectedMeeting.action_items && selectedMeeting.action_items.length > 0) {
+                    selectedMeeting.action_items.forEach(item => {
+                        const li = document.createElement('li');
+                        li.textContent = item;
+                        detailActionItems.appendChild(li);
+                    });
+                } else {
+                    detailActionItems.innerHTML = '<li style="color: var(--text-muted);">No action items identified</li>';
+                }
             }
             
             // Transcript
@@ -3946,6 +4303,9 @@ Session started - waiting for activity...
                     ),
                     loadTelemetrySettings().catch(err =>
                         log(`Telemetry settings load failed: ${err.message}`)
+                    ),
+                    loadTemplates().catch(err =>
+                        log(`Template settings load failed: ${err.message}`)
                     )
                 ]);
                 
@@ -4235,48 +4595,84 @@ Session started - waiting for activity...
                 let notesText = `${meetingName}\n`;
                 notesText += `Date: ${date}\n`;
                 notesText += `Duration: ${duration}\n`;
+                if (selectedMeeting.session_info?.template_name) {
+                    notesText += `Template: ${selectedMeeting.session_info.template_name}\n`;
+                }
                 notesText += `\n`;
 
-                // Summary
-                if (selectedMeeting.summary) {
+                // Summary/Overview
+                const summaryText = selectedMeeting.summary || selectedMeeting.overview;
+                if (summaryText) {
                     notesText += `SUMMARY\n`;
-                    notesText += `${selectedMeeting.summary}\n\n`;
+                    notesText += `${summaryText}\n\n`;
                 }
 
-                // Participants
-                if (selectedMeeting.participants && selectedMeeting.participants.length > 0) {
+                // Participants/Attendees
+                const participants = selectedMeeting.participants || selectedMeeting.attendees || [];
+                if (participants.length > 0) {
                     notesText += `PARTICIPANTS\n`;
-                    selectedMeeting.participants.forEach(participant => {
+                    participants.forEach(participant => {
                         notesText += `- ${participant}\n`;
                     });
                     notesText += `\n`;
                 }
 
-                // Key Topics (Discussion Areas)
-                if (selectedMeeting.discussion_areas && selectedMeeting.discussion_areas.length > 0) {
-                    notesText += `KEY TOPICS\n`;
-                    selectedMeeting.discussion_areas.forEach(area => {
-                        notesText += `\n${area.title}\n`;
-                        notesText += `${area.analysis}\n`;
-                    });
-                    notesText += `\n`;
-                }
+                // Check if meeting has template sections
+                if (selectedMeeting._sections && selectedMeeting._sections.length > 0) {
+                    // Dynamic template sections
+                    selectedMeeting._sections.forEach(section => {
+                        // Skip sections we already handled
+                        if (['overview', 'summary', 'participants', 'attendees'].includes(section.key)) return;
 
-                // Key Points
-                if (selectedMeeting.key_points && selectedMeeting.key_points.length > 0) {
-                    notesText += `KEY POINTS\n`;
-                    selectedMeeting.key_points.forEach(point => {
-                        notesText += `- ${point}\n`;
-                    });
-                    notesText += `\n`;
-                }
+                        const data = selectedMeeting[section.key];
+                        if (!data || (Array.isArray(data) && data.length === 0)) return;
 
-                // Action Items
-                if (selectedMeeting.action_items && selectedMeeting.action_items.length > 0) {
-                    notesText += `ACTION ITEMS\n`;
-                    selectedMeeting.action_items.forEach(item => {
-                        notesText += `- ${item}\n`;
+                        notesText += `${section.title.toUpperCase()}\n`;
+                        if (Array.isArray(data)) {
+                            data.forEach(item => {
+                                if (typeof item === 'object') {
+                                    const parts = Object.entries(item)
+                                        .filter(([k, v]) => v && v !== 'null')
+                                        .map(([k, v]) => `${k}: ${v}`)
+                                        .join(' | ');
+                                    notesText += `- ${parts}\n`;
+                                } else {
+                                    notesText += `- ${item}\n`;
+                                }
+                            });
+                        } else {
+                            notesText += `${data}\n`;
+                        }
+                        notesText += `\n`;
                     });
+                } else {
+                    // Legacy format
+                    // Key Topics (Discussion Areas)
+                    if (selectedMeeting.discussion_areas && selectedMeeting.discussion_areas.length > 0) {
+                        notesText += `KEY TOPICS\n`;
+                        selectedMeeting.discussion_areas.forEach(area => {
+                            notesText += `\n${area.title}\n`;
+                            notesText += `${area.analysis}\n`;
+                        });
+                        notesText += `\n`;
+                    }
+
+                    // Key Points
+                    if (selectedMeeting.key_points && selectedMeeting.key_points.length > 0) {
+                        notesText += `KEY POINTS\n`;
+                        selectedMeeting.key_points.forEach(point => {
+                            notesText += `- ${point}\n`;
+                        });
+                        notesText += `\n`;
+                    }
+
+                    // Action Items
+                    if (selectedMeeting.action_items && selectedMeeting.action_items.length > 0) {
+                        notesText += `ACTION ITEMS\n`;
+                        selectedMeeting.action_items.forEach(item => {
+                            notesText += `- ${item}\n`;
+                        });
+                    }
                 }
 
                 await navigator.clipboard.writeText(notesText);
@@ -4806,11 +5202,11 @@ Session started - waiting for activity...
                     loadMeetings(true);
                 }
                 
-                // Show native notification
+                // Show native notification (click to open meeting)
                 showDesktopNotification('StenoAI - Meeting Notes Ready', {
                     body: `"${data.sessionName}" has been transcribed and summarized`,
                     requireInteraction: false
-                });
+                }, data.sessionName);
                 
                 setStatus('ready', 'Processing complete');
                 setTimeout(() => setStatus('ready', 'Ready'), 3000);
@@ -4829,6 +5225,12 @@ Session started - waiting for activity...
         
         // Unified settings panel functionality
         let settingsVisible = false;
+        const settingsBackdrop = document.getElementById('settings-backdrop');
+
+        // Close settings when clicking backdrop
+        settingsBackdrop.addEventListener('click', () => {
+            if (settingsVisible) toggleSettings();
+        });
 
         function toggleSettings() {
             const settingsPanel = document.getElementById('settings-panel');
@@ -4841,9 +5243,11 @@ Session started - waiting for activity...
                 // Force layout calc so tab state is committed before transition
                 settingsPanel.offsetHeight;
                 settingsPanel.classList.add('open');
+                settingsBackdrop.classList.add('open');
                 loadSettingsVersionInfo();
             } else {
                 settingsPanel.classList.remove('open');
+                settingsBackdrop.classList.remove('open');
             }
         }
 
@@ -5113,6 +5517,129 @@ Session started - waiting for activity...
             }, duration);
         }
 
+        // Template icons mapping (using actual emoji characters for dropdown)
+        const TEMPLATE_ICONS = {
+            'standard_meeting': '📋',
+            'daily_standup': '🧍',
+            'retrospective': '🔄',
+            'one_on_one': '👥',
+            'project_sync': '📊',
+            'sales_call': '💼',
+            'vet_consultation': '🐾'
+        };
+
+        // Templates to show in UI (others are hidden for now)
+        const VISIBLE_TEMPLATES = ['standard_meeting', 'sales_call', 'vet_consultation'];
+
+        // Store templates globally for quick access
+        let cachedTemplates = {};
+        let currentTemplateId = 'standard_meeting';
+
+        // Template Quick Selector functionality
+        const templateTrigger = document.getElementById('template-trigger');
+        const templateDropdown = document.getElementById('template-dropdown');
+        const templateOptions = document.getElementById('template-options');
+
+        // Toggle dropdown
+        templateTrigger.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const isOpen = templateDropdown.classList.contains('open');
+            if (isOpen) {
+                closeTemplateDropdown();
+            } else {
+                openTemplateDropdown();
+            }
+        });
+
+        function openTemplateDropdown() {
+            templateDropdown.classList.add('open');
+            templateTrigger.classList.add('active');
+        }
+
+        function closeTemplateDropdown() {
+            templateDropdown.classList.remove('open');
+            templateTrigger.classList.remove('active');
+        }
+
+        // Close dropdown when clicking outside
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('.template-selector')) {
+                closeTemplateDropdown();
+            }
+        });
+
+        // Close on escape key
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                closeTemplateDropdown();
+            }
+        });
+
+        async function loadTemplates() {
+            try {
+                const [listResult, currentResult] = await Promise.all([
+                    ipcRenderer.invoke('list-templates'),
+                    ipcRenderer.invoke('get-template')
+                ]);
+
+                if (listResult.success) {
+                    cachedTemplates = listResult.templates;
+                    currentTemplateId = currentResult.template || 'standard_meeting';
+
+                    // Update quick selector
+                    updateTemplateQuickSelector(listResult.templates, currentResult.template);
+
+                    // Update settings panel if it exists
+                    const settingsContainer = document.getElementById('template-list');
+                    if (settingsContainer) {
+                        displayTemplateList(listResult.templates, currentResult.template);
+                    }
+                }
+            } catch (error) {
+                console.error('Error loading templates:', error);
+            }
+        }
+
+        function updateTemplateQuickSelector(templates, currentTemplate) {
+            // Build dropdown options (only show visible templates)
+            templateOptions.innerHTML = '';
+
+            for (const [id, info] of Object.entries(templates)) {
+                // Skip templates not in visible list
+                if (!VISIBLE_TEMPLATES.includes(id)) continue;
+
+                const isSelected = id === currentTemplate;
+                const icon = TEMPLATE_ICONS[id] || '📄';
+
+                const option = document.createElement('div');
+                option.className = 'template-option' + (isSelected ? ' selected' : '');
+                option.innerHTML = `
+                    <div class="template-option-icon">${icon}</div>
+                    <div class="template-option-info">
+                        <div class="template-option-name">${info.name}</div>
+                        <div class="template-option-desc">${info.description}</div>
+                    </div>
+                    <svg class="template-option-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+                        <polyline points="20 6 9 17 4 12"></polyline>
+                    </svg>
+                `;
+                option.addEventListener('click', () => selectTemplateQuick(id));
+                templateOptions.appendChild(option);
+            }
+        }
+
+        async function selectTemplateQuick(templateId) {
+            // Optimistic update - update UI immediately for instant feedback
+            currentTemplateId = templateId;
+            updateTemplateQuickSelector(cachedTemplates, templateId);
+            closeTemplateDropdown();
+
+            // Save to backend in background (no await)
+            ipcRenderer.invoke('set-template', templateId).catch(error => {
+                console.error('Error saving template:', error);
+            });
+        }
+
         async function loadNotificationSettings() {
             try {
                 const result = await ipcRenderer.invoke('get-notifications');
@@ -5147,14 +5674,29 @@ Session started - waiting for activity...
             }
         }
 
-        async function showDesktopNotification(title, options) {
+        async function showDesktopNotification(title, options, sessionName = null) {
             // Check if desktop notifications are enabled in settings
             try {
                 const result = await ipcRenderer.invoke('get-notifications');
                 const notificationsEnabled = result.success ? result.notifications_enabled : true;
 
                 if (Notification.permission === 'granted' && notificationsEnabled) {
-                    new Notification(title, options);
+                    const notification = new Notification(title, options);
+
+                    // Handle click to open meeting notes
+                    if (sessionName) {
+                        notification.onclick = () => {
+                            // Find the meeting by session name and select it
+                            const meetingIndex = filteredMeetings.findIndex(m =>
+                                m.session_info?.name === sessionName
+                            );
+                            if (meetingIndex !== -1) {
+                                selectMeeting(meetingIndex);
+                                // Focus the window
+                                ipcRenderer.invoke('focus-window');
+                            }
+                        };
+                    }
                 }
             } catch (error) {
                 console.error('Error checking notification settings:', error);
