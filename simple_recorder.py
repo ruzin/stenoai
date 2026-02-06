@@ -19,6 +19,7 @@ import click
 import asyncio
 import logging
 import json
+import sys
 import time
 from datetime import datetime
 from pathlib import Path
@@ -417,7 +418,7 @@ def start(session_name):
             if signum == 15:  # SIGTERM - ignore it during processing
                 print("🔄 Ignoring SIGTERM during transcription/summarization")
                 return
-            exit(0)
+            sys.exit(0)
             
         if recording_started and recorder:
             processing_started = True
@@ -462,7 +463,7 @@ def start(session_name):
                 traceback.print_exc()
         
         print("🏁 Recording session ended")
-        exit(0)
+        sys.exit(0)
     
     # Register signal handlers for graceful shutdown
     signal.signal(signal.SIGTERM, signal_handler)
@@ -481,7 +482,7 @@ def start(session_name):
             
     except Exception as e:
         print(f"ERROR: {e}")
-        exit(1)
+        sys.exit(1)
 
 
 @cli.command()
@@ -541,7 +542,7 @@ def stop():
                 
     except Exception as e:
         print(f"ERROR: {e}")
-        exit(1)
+        sys.exit(1)
 
 
 @cli.command()
@@ -562,7 +563,7 @@ def process(audio_file, name):
             
         except Exception as e:
             print(f"ERROR: {e}")
-            exit(1)
+            sys.exit(1)
     
     asyncio.run(run_process())
 
@@ -697,7 +698,7 @@ def record(duration, session_name):
                 traceback.print_exc()
         
         print("🏁 Recording session ended - process complete")
-        exit(0)
+        sys.exit(0)
     
     # Register signal handlers
     signal.signal(signal.SIGTERM, signal_handler)
@@ -762,7 +763,7 @@ def record(duration, session_name):
         print(f"❌ Recording failed: {e}")
         import traceback
         traceback.print_exc()
-        exit(1)
+        sys.exit(1)
 
 
 @cli.command()
@@ -1353,6 +1354,45 @@ def download_whisper_model():
         print(f"ERROR: Failed to download Whisper model: {e}")
         import sys
         sys.exit(1)
+
+
+@cli.command()
+@click.argument('model_name')
+def check_model(model_name):
+    """Check if a model is installed in Ollama (uses HTTP API)."""
+    from src.ollama_manager import start_ollama_server
+    start_ollama_server()
+    try:
+        import ollama
+        response = ollama.list()
+        models = getattr(response, 'models', []) or []
+        model_names = [getattr(m, 'model', '') for m in models]
+        installed = model_name in model_names
+        print(json.dumps({"installed": installed, "model": model_name}))
+    except Exception as e:
+        print(json.dumps({"installed": False, "model": model_name, "error": str(e)}))
+
+
+@cli.command()
+@click.argument('model_name')
+def pull_model(model_name):
+    """Download an Ollama model (uses HTTP API)."""
+    from src.ollama_manager import start_ollama_server
+    start_ollama_server()
+    try:
+        import ollama
+        for progress in ollama.pull(model_name, stream=True):
+            status = getattr(progress, 'status', '') or ''
+            total = getattr(progress, 'total', 0) or 0
+            completed = getattr(progress, 'completed', 0) or 0
+            if total > 0:
+                pct = int(completed / total * 100)
+                print(f"{status} {pct}%", flush=True)
+            elif status:
+                print(status, flush=True)
+        print(json.dumps({"success": True, "model": model_name}))
+    except Exception as e:
+        print(json.dumps({"success": False, "error": str(e)}))
 
 
 if __name__ == '__main__':

@@ -85,6 +85,13 @@ StenoAI logo gradient (used in website logo SVG and app header):
 
 App UI accent: `--accent-primary: #818cf8` (lighter indigo, used for focus states, active tabs, toggles)
 
+## Production Readiness
+This app ships as a signed DMG to real users. Before considering any change complete:
+- **Packaged app test**: Dev mode (`npm start`) is not sufficient. Always rebuild the DMG (`npm run build`) and test the installed app from `/Applications`.
+- **Cold start test**: Kill all background processes (`pkill -f ollama`) and launch the app fresh. The full pipeline (record, transcribe, summarize) must work with no pre-existing services running.
+- **No shelling out to bundled binaries for operations that have an HTTP/library API**. macOS SIP + Electron hardened runtime strips `DYLD_LIBRARY_PATH` from child processes. Use the `ollama` Python package (HTTP API) for model operations, not `subprocess.run([ollama_path, ...])`. The only acceptable use of the Ollama binary is `ollama serve` (starting the server), which is covered by the `com.apple.security.cs.allow-dyld-environment-variables` entitlement.
+- **No bare `exit()` in Python code**. PyInstaller bundles don't have `exit` as a builtin. Always use `sys.exit()`.
+
 ## Code Style
 - Follow PEP 8 guidelines
 - Use type hints where appropriate

@@ -4058,6 +4058,9 @@ Session started - waiting for activity...
                     showDesktopNotification('StenoAI - Reprocessing Complete', {
                         body: `"${meetingBeingProcessed.session_info?.name || 'Meeting'}" has been reanalyzed`,
                         requireInteraction: false
+                    }, () => {
+                        const idx = filteredMeetings.findIndex(m => m.session_info?.summary_file === summaryFile);
+                        if (idx !== -1) selectMeeting(idx);
                     });
                     
                     // Reload meetings to show updated data
@@ -4539,6 +4542,14 @@ Session started - waiting for activity...
             if (progress) {
                 progress.style.width = `${percent}%`;
             }
+            // Also update the percentage text
+            const details = document.getElementById(`${stepName}-details`);
+            if (details) {
+                const percentEl = details.querySelector('.progress-percent');
+                if (percentEl) {
+                    percentEl.textContent = `${Math.round(percent)}%`;
+                }
+            }
         }
 
         // Toggle debug console
@@ -4613,7 +4624,7 @@ Session started - waiting for activity...
                     // Simulate progress during install
                     let progress = 10;
                     const progressInterval = setInterval(() => {
-                        progress = Math.min(progress + Math.random() * 15, 90);
+                        progress = Math.min(progress + Math.random() * 15, 85);
                         updateStepProgress(step.badge, progress);
                     }, 500);
 
@@ -4621,6 +4632,19 @@ Session started - waiting for activity...
                     clearInterval(progressInterval);
 
                     if (result.success) {
+                        // For the last visible step (ollama), run system checks before marking complete
+                        if (step.id === 'step-ollama') {
+                            updateStepBadge(step.badge, 'active', 'Verifying...');
+                            updateStepProgress(step.badge, 90);
+                            for (const bgStep of backgroundSteps.slice(2)) {
+                                try {
+                                    await ipcRenderer.invoke(bgStep.handler);
+                                } catch (error) {
+                                    debugLog(`Warning: ${bgStep.name} - ${error.message}`);
+                                }
+                            }
+                        }
+
                         element.classList.add('completed');
                         updateStepBadge(step.badge, 'completed', 'Done');
                         updateStepProgress(step.badge, 100);
@@ -4654,16 +4678,6 @@ Session started - waiting for activity...
                 }
 
                 await new Promise(resolve => setTimeout(resolve, 300));
-            }
-
-            // Run final background steps (ffmpeg, test)
-            debugLog('\nFinalizing...');
-            for (const step of backgroundSteps.slice(2)) {
-                try {
-                    await ipcRenderer.invoke(step.handler);
-                } catch (error) {
-                    debugLog(`Warning: ${step.name} - ${error.message}`);
-                }
             }
 
             // Complete
@@ -4853,6 +4867,9 @@ Session started - waiting for activity...
                 showDesktopNotification('StenoAI - Meeting Notes Ready', {
                     body: `"${data.sessionName}" has been transcribed and summarized`,
                     requireInteraction: false
+                }, () => {
+                    const idx = filteredMeetings.findIndex(m => m.session_info?.name === data.sessionName);
+                    if (idx !== -1) selectMeeting(idx);
                 });
                 
                 setStatus('ready', 'Processing complete');
@@ -5193,20 +5210,32 @@ Session started - waiting for activity...
             }
         }
 
-        async function showDesktopNotification(title, options) {
+        async function showDesktopNotification(title, options, onClick) {
             // Check if desktop notifications are enabled in settings
             try {
                 const result = await ipcRenderer.invoke('get-notifications');
                 const notificationsEnabled = result.success ? result.notifications_enabled : true;
 
                 if (Notification.permission === 'granted' && notificationsEnabled) {
-                    new Notification(title, options);
+                    const notification = new Notification(title, options);
+                    if (onClick) {
+                        notification.onclick = () => {
+                            ipcRenderer.send('focus-window');
+                            onClick();
+                        };
+                    }
                 }
             } catch (error) {
                 console.error('Error checking notification settings:', error);
                 // Default to showing if error
                 if (Notification.permission === 'granted') {
-                    new Notification(title, options);
+                    const notification = new Notification(title, options);
+                    if (onClick) {
+                        notification.onclick = () => {
+                            ipcRenderer.send('focus-window');
+                            onClick();
+                        };
+                    }
                 }
             }
         }

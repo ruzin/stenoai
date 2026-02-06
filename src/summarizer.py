@@ -181,46 +181,46 @@ class OllamaSummarizer:
         return fallback_summary
     
     def _ensure_model_available(self) -> bool:
-        """Ensure the required model is downloaded and available."""
+        """Ensure the required model is downloaded and available (uses HTTP API)."""
         try:
-            # Find the Ollama executable path
-            ollama_path = self._find_ollama_path()
-            if not ollama_path:
-                logger.error("Ollama executable not found")
-                return False
+            # Use the ollama Python client (HTTP API) instead of the binary
+            # This avoids SIP/DYLD issues on macOS when running from a packaged app
+            response = ollama.list()
+            models = getattr(response, 'models', []) or []
+            model_names = [getattr(m, 'model', '') for m in models]
 
-            # Get environment for bundled Ollama (includes library paths)
-            env = ollama_manager.get_ollama_env()
-
-            # Check if model is already available
-            result = subprocess.run([ollama_path, 'list'], capture_output=True, text=True, timeout=10, env=env)
-            if result.returncode == 0 and self.model_name in result.stdout:
+            if self.model_name in model_names:
                 logger.info(f"Model {self.model_name} is already available")
                 return True
 
             # Model not found, try to pull it
             logger.info(f"Downloading model {self.model_name}...")
-            result = subprocess.run([ollama_path, 'pull', self.model_name],
-                                  capture_output=True, text=True, timeout=300, env=env)  # 5 min timeout
-
-            if result.returncode == 0:
+            try:
+                ollama.pull(self.model_name)
                 logger.info(f"Successfully downloaded model {self.model_name}")
                 return True
-            else:
-                logger.error(f"Failed to download model {self.model_name}: {result.stderr}")
+            except Exception as e:
+                logger.error(f"Failed to download model {self.model_name}: {e}")
 
-                # Try fallback models from supported list
-                fallback_models = ["llama3.2:3b", "gemma3:4b", "qwen3:8b", "deepseek-r1:8b"]
-                for fallback in fallback_models:
-                    logger.info(f"Trying fallback model: {fallback}")
-                    result = subprocess.run([ollama_path, 'pull', fallback],
-                                          capture_output=True, text=True, timeout=300, env=env)
-                    if result.returncode == 0:
-                        logger.info(f"Successfully downloaded fallback model {fallback}")
-                        self.model_name = fallback
-                        return True
+            # Try fallback models from supported list
+            fallback_models = ["llama3.2:3b", "gemma3:4b", "qwen3:8b", "deepseek-r1:8b"]
+            for fallback in fallback_models:
+                if fallback in model_names:
+                    logger.info(f"Using already-installed fallback model: {fallback}")
+                    self.model_name = fallback
+                    return True
 
-                return False
+            for fallback in fallback_models:
+                logger.info(f"Trying fallback model: {fallback}")
+                try:
+                    ollama.pull(fallback)
+                    logger.info(f"Successfully downloaded fallback model {fallback}")
+                    self.model_name = fallback
+                    return True
+                except Exception:
+                    continue
+
+            return False
 
         except Exception as e:
             logger.error(f"Error ensuring model availability: {e}")

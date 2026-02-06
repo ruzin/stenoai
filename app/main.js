@@ -226,6 +226,15 @@ app.on('activate', () => {
   }
 });
 
+// Focus window handler (used by notification click to bring app to foreground)
+ipcMain.on('focus-window', () => {
+    if (mainWindow) {
+        if (mainWindow.isMinimized()) mainWindow.restore();
+        mainWindow.show();
+        mainWindow.focus();
+    }
+});
+
 // Microphone permission handlers
 ipcMain.handle('check-microphone-permission', async () => {
   try {
@@ -402,7 +411,7 @@ ipcMain.handle('select-audio-file', async () => {
 
 ipcMain.handle('list-meetings', async () => {
   try {
-    const result = await runPythonScript('simple_recorder.py', ['list-meetings']);
+    const result = await runPythonScript('simple_recorder.py', ['list-meetings'], true); // Silent mode
     return { success: true, meetings: JSON.parse(result) };
   } catch (error) {
     return { success: false, error: error.message };
@@ -657,7 +666,7 @@ async function processNextInQueue() {
     if (mainWindow) {
       try {
         // Get the specific processed meeting data
-        const meetingsResult = await runPythonScript('simple_recorder.py', ['list-meetings']);
+        const meetingsResult = await runPythonScript('simple_recorder.py', ['list-meetings'], true);
         const allMeetings = JSON.parse(meetingsResult);
         const processedMeeting = allMeetings.find(m => m.session_info?.name === currentProcessingJob.sessionName);
         
@@ -739,7 +748,7 @@ ipcMain.handle('start-recording-ui', async (_, sessionName) => {
         // Notify frontend that everything is done
         if (mainWindow) {
           // Get the processed meeting data to send to frontend
-          runPythonScript('simple_recorder.py', ['list-meetings'])
+          runPythonScript('simple_recorder.py', ['list-meetings'], true)
             .then(meetingsResult => {
               const allMeetings = JSON.parse(meetingsResult);
               const processedMeeting = allMeetings.find(m => m.session_info?.name === actualSessionName);
@@ -1487,9 +1496,15 @@ ipcMain.handle('setup-ollama-and-model', async () => {
         sendDebugLog('STDERR: ' + data.toString().trim());
       });
 
-      process.on('close', (code) => {
+      process.on('close', async (code) => {
         if (code === 0) {
           sendDebugLog('AI model download completed successfully');
+          // Reset config to default model so system test uses the same model
+          try {
+            await runPythonScript('simple_recorder.py', ['set-model', 'llama3.2:3b'], true);
+          } catch (e) {
+            // Non-fatal -- config reset is best-effort
+          }
           trackEvent('setup_completed', { step: 'ollama_and_model' });
           resolve({ success: true, message: 'Ollama and AI model ready' });
         } else {
@@ -1716,8 +1731,8 @@ async function ensureOllamaRunning() {
       return false;
     }
 
-    // Start Ollama service in background
-    spawn(ollamaPath, ['serve'], { detached: true, stdio: 'ignore' }).unref();
+    // Start Ollama service in background with proper env vars for dylibs
+    spawn(ollamaPath, ['serve'], { detached: true, stdio: 'ignore', env: getOllamaEnv() }).unref();
 
     // Wait for service to start
     await new Promise(resolve => setTimeout(resolve, 2000));
@@ -1744,30 +1759,18 @@ ipcMain.handle('check-ollama-installed', async () => {
 // Model management handlers
 ipcMain.handle('check-model-installed', async (event, modelName) => {
   try {
-    const ollamaPath = await findOllamaExecutable();
-    if (!ollamaPath) {
-      return { success: false, installed: false, error: 'Ollama not found. Please install Ollama first.' };
+    const result = await runPythonScript('simple_recorder.py', ['check-model', modelName]);
+    // Parse the last JSON line from output (skip any log lines)
+    const lines = result.trim().split('\n');
+    for (let i = lines.length - 1; i >= 0; i--) {
+      try {
+        const data = JSON.parse(lines[i]);
+        return { success: true, installed: data.installed };
+      } catch (e) {
+        continue;
+      }
     }
-
-    // Ensure Ollama service is running
-    const isRunning = await ensureOllamaRunning();
-    if (!isRunning) {
-      return { success: false, installed: false, error: 'Could not start Ollama service' };
-    }
-
-    return new Promise((resolve) => {
-      const { exec } = require('child_process');
-      exec(`${ollamaPath} list`, (error, stdout) => {
-        if (error) {
-          resolve({ success: false, installed: false, error: error.message });
-          return;
-        }
-
-        // Check if model name appears in the list
-        const installed = stdout.toLowerCase().includes(modelName.toLowerCase());
-        resolve({ success: true, installed: installed });
-      });
-    });
+    return { success: false, installed: false, error: 'Could not parse backend response' };
   } catch (error) {
     return { success: false, installed: false, error: error.message };
   }
@@ -1908,31 +1911,12 @@ ipcMain.handle('pull-model', async (event, modelName) => {
     sendDebugLog(`Pulling model: ${modelName}`);
     sendDebugLog('This may take several minutes...');
 
-    // Find Ollama path
-    const ollamaPath = await findOllamaExecutable();
-    if (!ollamaPath) {
-      return { success: false, error: 'Ollama not found. Please install Ollama first.' };
-    }
-
     return new Promise((resolve) => {
-      const { spawn } = require('child_process');
-      const process = spawn(ollamaPath, ['pull', modelName]);
-
-      process.stdout.on('data', (data) => {
-        const output = data.toString().trim();
-        sendDebugLog(output);
-
-        // Parse progress from ollama output (format: "pulling manifest... 45%")
-        // Send progress event to frontend
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.webContents.send('model-pull-progress', {
-            model: modelName,
-            progress: output
-          });
-        }
+      const proc = spawn(getBackendPath(), ['pull-model', modelName], {
+        cwd: getBackendCwd()
       });
 
-      process.stderr.on('data', (data) => {
+      proc.stdout.on('data', (data) => {
         const output = data.toString().trim();
         sendDebugLog(output);
 
@@ -1944,11 +1928,22 @@ ipcMain.handle('pull-model', async (event, modelName) => {
         }
       });
 
-      process.on('close', (code) => {
+      proc.stderr.on('data', (data) => {
+        const output = data.toString().trim();
+        sendDebugLog(output);
+
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('model-pull-progress', {
+            model: modelName,
+            progress: output
+          });
+        }
+      });
+
+      proc.on('close', (code) => {
         if (code === 0) {
           sendDebugLog(`Successfully pulled model: ${modelName}`);
 
-          // Send completion event
           if (mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.webContents.send('model-pull-complete', {
               model: modelName,
@@ -1960,7 +1955,6 @@ ipcMain.handle('pull-model', async (event, modelName) => {
         } else {
           sendDebugLog(`Failed to pull model: ${modelName}`);
 
-          // Send failure event
           if (mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.webContents.send('model-pull-complete', {
               model: modelName,
@@ -1973,7 +1967,7 @@ ipcMain.handle('pull-model', async (event, modelName) => {
         }
       });
 
-      process.on('error', (error) => {
+      proc.on('error', (error) => {
         sendDebugLog(`Error pulling model: ${error.message}`);
 
         if (mainWindow && !mainWindow.isDestroyed()) {
@@ -1993,35 +1987,35 @@ ipcMain.handle('pull-model', async (event, modelName) => {
   }
 });
 
+// Helper to build env vars for running the bundled Ollama binary directly
+function getOllamaEnv() {
+  let ollamaDir;
+  if (app.isPackaged) {
+    ollamaDir = path.join(process.resourcesPath, 'stenoai', '_internal', 'ollama');
+  } else {
+    ollamaDir = path.join(__dirname, '..', 'bin');
+  }
+  const env = { ...process.env };
+  const existing = env.DYLD_LIBRARY_PATH || '';
+  env.DYLD_LIBRARY_PATH = existing ? `${ollamaDir}:${existing}` : ollamaDir;
+  env.MLX_METAL_PATH = path.join(ollamaDir, 'mlx.metallib');
+  return env;
+}
+
 // Helper function to find Ollama executable (bundled only)
 async function findOllamaExecutable() {
-  const { exec } = require('child_process');
-  const fs = require('fs');
-
-  // Only use bundled Ollama
   let bundledOllamaPath;
   if (app.isPackaged) {
-    // Production: bundled with the app
-    bundledOllamaPath = path.join(process.resourcesPath, 'bin', 'ollama');
+    // Production: bundled inside PyInstaller _internal directory
+    bundledOllamaPath = path.join(process.resourcesPath, 'stenoai', '_internal', 'ollama', 'ollama');
   } else {
     // Development: in project bin/ directory
     bundledOllamaPath = path.join(__dirname, '..', 'bin', 'ollama');
   }
 
-  // Check if bundled Ollama exists and is executable
   if (fs.existsSync(bundledOllamaPath)) {
-    try {
-      await new Promise((resolve, reject) => {
-        exec(`"${bundledOllamaPath}" --version`, (error) => {
-          if (error) reject(error);
-          else resolve();
-        });
-      });
-      console.log(`Using bundled Ollama: ${bundledOllamaPath}`);
-      return bundledOllamaPath;
-    } catch (error) {
-      console.error(`Bundled Ollama found but failed to execute: ${error.message}`);
-    }
+    console.log(`Using bundled Ollama: ${bundledOllamaPath}`);
+    return bundledOllamaPath;
   }
 
   console.error(`Bundled Ollama not found at: ${bundledOllamaPath}`);
