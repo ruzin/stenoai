@@ -19,7 +19,7 @@ jobs:
     strategy:
       matrix:
         include:
-          - runner: macos-13
+          - runner: macos-14
             arch: x64
             build_cmd: build:intel
           - runner: macos-14
