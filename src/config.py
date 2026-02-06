@@ -17,6 +17,7 @@ class Config:
     """Manages application configuration with file persistence."""
 
     DEFAULT_MODEL = "llama3.2:3b"
+    DEFAULT_TEMPLATE = "standard_meeting"
 
     # Supported models with metadata (organized by parameter size, ascending)
     SUPPORTED_MODELS = {
@@ -107,6 +108,7 @@ class Config:
         """Get default configuration."""
         return {
             "model": self.DEFAULT_MODEL,
+            "template": self.DEFAULT_TEMPLATE,
             "notifications_enabled": True,
             "telemetry_enabled": True,
             "anonymous_id": str(uuid.uuid4()),
@@ -149,6 +151,23 @@ class Config:
     def list_supported_models(self) -> Dict[str, Dict[str, str]]:
         """Get all supported models with their metadata."""
         return self.SUPPORTED_MODELS.copy()
+
+    def get_template(self) -> str:
+        """Get the currently configured template."""
+        return self._config.get("template", self.DEFAULT_TEMPLATE)
+
+    def set_template(self, template_id: str) -> bool:
+        """
+        Set the summary template.
+
+        Args:
+            template_id: ID of the template (e.g., "standard_meeting")
+
+        Returns:
+            True if saved successfully, False otherwise
+        """
+        self._config["template"] = template_id
+        return self._save()
 
     def get_notifications_enabled(self) -> bool:
         """Get whether desktop notifications are enabled."""

@@ -77,6 +77,9 @@ datas = []
 # Include the src module
 datas += [('src', 'src')]
 
+# Include summary templates
+datas += [('templates', 'templates')]
+
 # Collect any data files from pywhispercpp
 try:
     datas += collect_data_files('pywhispercpp')

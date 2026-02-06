@@ -220,43 +220,37 @@ Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
         }
     
     async def summarize_transcript(self, transcript_text: str, session_name: str = "Recording", duration_minutes: int = 10) -> dict:
-        """Summarize transcript text."""
+        """Summarize transcript text using configured template."""
         print("🧠 Generating summary...")
-        
+
         # Initialize summarizer only when needed
         if self.summarizer is None:
             self.summarizer = OllamaSummarizer()
-        
-        # Create summary prompt
-        prompt = f"""
-Please analyze and summarize this audio transcript from a recording session.
 
-Session: {session_name}
+        # Use template-based summarization
+        template_result = self.summarizer.summarize_with_template(transcript_text)
 
-Please provide:
-1. Brief overview of the content
-2. Key points discussed
-3. Important decisions or conclusions
-4. Action items (if any)
-5. Notable quotes or insights
+        if template_result is not None:
+            # Template summarization succeeded - return template-specific data
+            print(f"📋 Using template: {template_result.get('_template_name', 'Unknown')}")
+            return template_result
 
-Transcript:
-{transcript_text}
-"""
-        
-        # Generate summary (using correct method name and parameters)
+        # Fallback to legacy summarization if template fails
+        print("⚠️ Template summarization failed, using legacy method...")
         summary_result = self.summarizer.summarize_transcript(transcript_text, duration_minutes)
-        
+
         if summary_result is None:
             return {
                 "summary": "Failed to generate summary",
                 "participants": [],
                 "discussion_areas": [],
                 "key_points": [],
-                "action_items": []
+                "action_items": [],
+                "_template_id": "standard_meeting",
+                "_template_name": "Standard Meeting"
             }
-        
-        # Defensive extraction from summary_result
+
+        # Defensive extraction from legacy summary_result
         try:
             return {
                 "summary": getattr(summary_result, 'overview', '') or '',
@@ -268,7 +262,9 @@ Transcript:
                     } for area in getattr(summary_result, 'discussion_areas', [])
                 ],
                 "key_points": [getattr(decision, 'decision', '') for decision in getattr(summary_result, 'key_points', [])],
-                "action_items": [getattr(action, 'description', '') for action in getattr(summary_result, 'next_steps', [])]
+                "action_items": [getattr(action, 'description', '') for action in getattr(summary_result, 'next_steps', [])],
+                "_template_id": "standard_meeting",
+                "_template_name": "Standard Meeting"
             }
         except Exception as e:
             print(f"⚠️ Error extracting summary data: {e}")
@@ -277,7 +273,9 @@ Transcript:
                 "participants": [],
                 "discussion_areas": [],
                 "key_points": [],
-                "action_items": []
+                "action_items": [],
+                "_template_id": "standard_meeting",
+                "_template_name": "Standard Meeting"
             }
     
     async def process_recording(self, audio_file: str, session_name: str = "Recording") -> dict:
@@ -339,7 +337,8 @@ Transcript:
         
         # Step 3: Save complete summary
         summary_path = self.output_dir / f"{audio_path.stem}_summary.json"
-        
+
+        # Build complete data with template info
         complete_data = {
             "session_info": {
                 "name": session_name,
@@ -348,15 +347,36 @@ Transcript:
                 "summary_file": str(summary_path),
                 "processed_at": datetime.now().isoformat(),
                 "duration_seconds": int(duration_seconds) if 'duration_seconds' in locals() else None,
-                "duration_minutes": duration_minutes
+                "duration_minutes": duration_minutes,
+                "template_id": summary_data.get("_template_id", "standard_meeting"),
+                "template_name": summary_data.get("_template_name", "Standard Meeting")
             },
-            "summary": summary_data.get("summary", "") or "",
-            "participants": summary_data.get("participants", []) or [],
-            "discussion_areas": summary_data.get("discussion_areas", []) or [],
-            "key_points": summary_data.get("key_points", []) or [],
-            "action_items": summary_data.get("action_items", []) or [],
             "transcript": transcript_data["transcript_text"]
         }
+
+        # Include template section metadata if available
+        if "_sections" in summary_data:
+            complete_data["_sections"] = summary_data["_sections"]
+
+        # Copy all template-specific data (exclude internal metadata keys)
+        for key, value in summary_data.items():
+            if not key.startswith("_"):
+                complete_data[key] = value
+
+        # Ensure backwards-compatible fields exist for standard meeting
+        if "summary" not in complete_data and "overview" in complete_data:
+            complete_data["summary"] = complete_data["overview"]
+        elif "summary" not in complete_data:
+            complete_data["summary"] = ""
+
+        if "participants" not in complete_data:
+            complete_data["participants"] = complete_data.get("attendees", [])
+        if "key_points" not in complete_data:
+            complete_data["key_points"] = []
+        if "action_items" not in complete_data:
+            complete_data["action_items"] = complete_data.get("next_steps", [])
+        if "discussion_areas" not in complete_data:
+            complete_data["discussion_areas"] = []
         
         with open(summary_path, 'w') as f:
             json.dump(complete_data, f, indent=2)
@@ -856,7 +876,7 @@ def list_meetings():
         try:
             with open(summary_file, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-                # Only include essential fields for faster loading
+                # Include essential fields plus template data
                 essential_meeting = {
                     "session_info": data.get("session_info", {}),
                     "summary": data.get("summary", ""),
@@ -866,6 +886,14 @@ def list_meetings():
                     "action_items": data.get("action_items", []),
                     "transcript": data.get("transcript", "")
                 }
+                # Include template metadata if present
+                if "_sections" in data:
+                    essential_meeting["_sections"] = data["_sections"]
+                    # Also include all template-specific data fields
+                    for section in data["_sections"]:
+                        key = section.get("key")
+                        if key and key in data:
+                            essential_meeting[key] = data[key]
                 meetings.append(essential_meeting)
         except Exception as e:
             # Log warning but continue processing other files
@@ -1353,6 +1381,56 @@ def download_whisper_model():
         print(f"ERROR: Failed to download Whisper model: {e}")
         import sys
         sys.exit(1)
+
+
+@cli.command()
+def list_templates():
+    """List all available summary templates"""
+    from src.templates import TemplateManager
+
+    tm = TemplateManager()
+    templates = tm.list_templates()
+    print(json.dumps(templates, indent=2))
+
+
+@cli.command()
+def get_template():
+    """Get the currently configured template"""
+    from src.config import get_config
+
+    config = get_config()
+    current_template = config.get_template()
+
+    result = {
+        "template": current_template
+    }
+
+    print(json.dumps(result, indent=2))
+
+
+@cli.command()
+@click.argument('template_id')
+def set_template(template_id):
+    """Set the summary template to use"""
+    from src.config import get_config
+    from src.templates import TemplateManager
+
+    config = get_config()
+    tm = TemplateManager()
+
+    # Validate template exists
+    if template_id not in tm.list_templates():
+        print(json.dumps({"success": False, "error": f"Unknown template: {template_id}"}))
+        return
+
+    success = config.set_template(template_id)
+
+    if success:
+        print(f"SUCCESS: Template set to {template_id}")
+        print(json.dumps({"success": True, "template": template_id}))
+    else:
+        print(f"ERROR: Failed to save template configuration")
+        print(json.dumps({"success": False, "error": "Failed to save config"}))
 
 
 if __name__ == '__main__':
