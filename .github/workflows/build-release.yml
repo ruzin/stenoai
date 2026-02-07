@@ -71,49 +71,55 @@ jobs:
       run: npm ci
 
     - name: Import code signing certificate
-      env:
-        CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE }}
-        CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-      run: |
-        # Create temporary keychain
-        KEYCHAIN_PATH=$RUNNER_TEMP/build.keychain
-        KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
-
-        # Decode certificate
-        echo "$CERTIFICATE_BASE64" | base64 --decode > $RUNNER_TEMP/certificate.p12
-
-        # Create keychain
-        security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
-        security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
-        security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
-
-        # Import certificate
-        security import $RUNNER_TEMP/certificate.p12 \
-          -k $KEYCHAIN_PATH \
-          -P "$CERTIFICATE_PASSWORD" \
-          -T /usr/bin/codesign \
-          -T /usr/bin/productsign
-
-        # Set key partition list
-        security set-key-partition-list \
-          -S apple-tool:,apple:,codesign: \
-          -s -k "$KEYCHAIN_PASSWORD" \
-          $KEYCHAIN_PATH
-
-        # Add keychain to search list
-        security list-keychains -d user -s $KEYCHAIN_PATH login.keychain
-
-        # Verify certificate is available
-        security find-identity -v -p codesigning
+      uses: apple-actions/import-codesign-certs@v2
+      with:
+        p12-file-base64: ${{ secrets.APPLE_CERTIFICATE }}
+        p12-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
 
     - name: Build DMG for ${{ matrix.arch }}
       working-directory: app
       run: npm run ${{ matrix.build_cmd }}
       env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Notarize DMG
+      env:
         APPLE_ID: ${{ secrets.APPLE_ID }}
         APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
         APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        DMG_PATH=$(find app/dist -name "*.dmg" | head -1)
+        echo "Submitting $DMG_PATH for notarization..."
+
+        # Submit without --wait to avoid hanging
+        SUBMIT_OUTPUT=$(xcrun notarytool submit "$DMG_PATH" \
+          --apple-id "$APPLE_ID" \
+          --password "$APPLE_APP_SPECIFIC_PASSWORD" \
+          --team-id "$APPLE_TEAM_ID" \
+          --output-format json)
+
+        echo "$SUBMIT_OUTPUT"
+        SUBMISSION_ID=$(echo "$SUBMIT_OUTPUT" | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")
+        echo "Submission ID: $SUBMISSION_ID"
+
+        # Poll for completion separately
+        echo "Waiting for notarization to complete..."
+        xcrun notarytool wait "$SUBMISSION_ID" \
+          --apple-id "$APPLE_ID" \
+          --password "$APPLE_APP_SPECIFIC_PASSWORD" \
+          --team-id "$APPLE_TEAM_ID" \
+          --timeout 30m
+
+        # Check result
+        xcrun notarytool info "$SUBMISSION_ID" \
+          --apple-id "$APPLE_ID" \
+          --password "$APPLE_APP_SPECIFIC_PASSWORD" \
+          --team-id "$APPLE_TEAM_ID"
+
+        # Staple the ticket to the DMG
+        echo "Stapling notarization ticket..."
+        xcrun stapler staple "$DMG_PATH"
+        echo "Notarization complete!"
 
     - name: Upload DMG artifact
       uses: actions/upload-artifact@v4
@@ -121,15 +127,6 @@ jobs:
         name: dmg-${{ matrix.arch }}
         path: app/dist/*.dmg
         retention-days: 1
-
-    - name: Cleanup keychain and certificate
-      if: always()
-      run: |
-        KEYCHAIN_PATH=$RUNNER_TEMP/build.keychain
-        if [ -f "$KEYCHAIN_PATH" ]; then
-          security delete-keychain $KEYCHAIN_PATH || true
-        fi
-        rm -f $RUNNER_TEMP/certificate.p12
 
   release:
     needs: build-macos
