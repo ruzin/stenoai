@@ -3,7 +3,7 @@
 
   # StenoAI
 
-  *Private AI conversation intelligence for every meeting*
+  *Your very own stenographer for every meeting*
 </div>
 
 <p align="center">
@@ -14,7 +14,7 @@
   <img src="https://img.shields.io/badge/Platform-macOS-000000?style=for-the-badge&logo=apple&logoColor=white" alt="macOS">
 </p>
 
-AI-powered conversation intelligence that runs entirely on your device. Record, transcribe, summarize, and query your meetings using local AI models. Privacy-first with zero cloud dependencies.
+AI-powered meeting intelligence that runs entirely on your device, your private data never leaves anywhere. Record, transcribe, summarize, and query your meetings using local AI models. Privacy-first with zero cloud dependencies.
 
 <div align="center">
   <img src="website/public/app-demo.png" alt="StenoAI Interface" width="600">
@@ -32,7 +32,7 @@ AI-powered conversation intelligence that runs entirely on your device. Record, 
 - **AI summarization** with Ollama models
 - **Ask Steno** - Query your meetings with natural language questions
 - **Multiple AI models** - Choose from 4 models optimized for different use cases
-- **Privacy-first** - no cloud dependencies
+- **Privacy-first** - 100% local processing, your data never leaves your device
 - **macOS desktop app** with intuitive interface
 
 Have questions or suggestions? [Join our Discord](https://discord.gg/EHxvAdKf) to chat with the community.
