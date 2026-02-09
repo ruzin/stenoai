@@ -16,16 +16,7 @@ permissions:
 
 jobs:
   build-macos:
-    strategy:
-      matrix:
-        include:
-          - runner: macos-14
-            arch: x64
-            build_cmd: build:intel
-          - runner: macos-14
-            arch: arm64
-            build_cmd: build:arm64
-    runs-on: ${{ matrix.runner }}
+    runs-on: macos-14
 
     steps:
     - name: Checkout code
@@ -76,19 +67,54 @@ jobs:
         p12-file-base64: ${{ secrets.APPLE_CERTIFICATE }}
         p12-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
 
-    - name: Build DMG for ${{ matrix.arch }}
+    - name: Build DMG for arm64
       working-directory: app
-      run: npm run ${{ matrix.build_cmd }}
+      run: npm run build:arm64
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Notarize DMG
       env:
         APPLE_ID: ${{ secrets.APPLE_ID }}
         APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
         APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        DMG_PATH=$(find app/dist -name "*.dmg" | head -1)
+        echo "Submitting $DMG_PATH for notarization..."
+
+        # Submit without --wait to avoid hanging
+        SUBMIT_OUTPUT=$(xcrun notarytool submit "$DMG_PATH" \
+          --apple-id "$APPLE_ID" \
+          --password "$APPLE_APP_SPECIFIC_PASSWORD" \
+          --team-id "$APPLE_TEAM_ID" \
+          --output-format json)
+
+        echo "$SUBMIT_OUTPUT"
+        SUBMISSION_ID=$(echo "$SUBMIT_OUTPUT" | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")
+        echo "Submission ID: $SUBMISSION_ID"
+
+        # Wait for completion (no timeout)
+        echo "Waiting for notarization to complete..."
+        xcrun notarytool wait "$SUBMISSION_ID" \
+          --apple-id "$APPLE_ID" \
+          --password "$APPLE_APP_SPECIFIC_PASSWORD" \
+          --team-id "$APPLE_TEAM_ID"
+
+        # Check result
+        xcrun notarytool info "$SUBMISSION_ID" \
+          --apple-id "$APPLE_ID" \
+          --password "$APPLE_APP_SPECIFIC_PASSWORD" \
+          --team-id "$APPLE_TEAM_ID"
+
+        # Staple the ticket to the DMG
+        echo "Stapling notarization ticket..."
+        xcrun stapler staple "$DMG_PATH"
+        echo "Notarization complete!"
 
     - name: Upload DMG artifact
       uses: actions/upload-artifact@v4
       with:
-        name: dmg-${{ matrix.arch }}
+        name: dmg-arm64
         path: app/dist/*.dmg
         retention-days: 1
 
