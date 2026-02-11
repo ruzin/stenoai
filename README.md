@@ -14,7 +14,9 @@
   <img src="https://img.shields.io/badge/Platform-macOS-000000?style=for-the-badge&logo=apple&logoColor=white" alt="macOS">
 </p>
 
-AI-powered meeting intelligence that runs entirely on your device, your private data never leaves anywhere. Record, transcribe, summarize, and query your meetings using local AI models. Privacy-first with zero cloud dependencies.
+<p align="center">AI-powered meeting intelligence that runs entirely on your device, your private data never leaves anywhere. Record, transcribe, summarize, and query your meetings using local AI models. Privacy-first with zero cloud dependencies.</p>
+
+<p align="center"><sub>Trusted by users in companies like <b>AWS</b>, <b>Deliveroo</b> & <b>Tesco</b>.</sub></p>
 
 <div align="center">
   <img src="website/public/app-demo.png" alt="StenoAI Interface" width="600">
