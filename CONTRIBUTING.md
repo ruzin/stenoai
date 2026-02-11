@@ -191,7 +191,7 @@ By contributing to StenoAI, you agree to our [Contributor License Agreement (CLA
 - Simply comment "I have read the CLA Document and I hereby sign the CLA" on the PR
 - This is a one-time process - future contributions are automatically covered
 
-The project itself is licensed under CC BY-NC 4.0. See [LICENSE](LICENSE) for details.
+The project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
 
 ## Recognition
 

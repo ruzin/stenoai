@@ -20,7 +20,7 @@ You hereby grant to the Project maintainer and recipients of software distribute
 - Sublicense the above rights to third parties
 - **Relicense Your Contributions under different terms**, including but not limited to commercial licenses
 
-This grant includes the right to distribute Your Contributions under licenses different from the Project's current license (CC BY-NC 4.0), including proprietary commercial licenses.
+This grant includes the right to distribute Your Contributions under licenses different from the Project's current license (MIT), including proprietary commercial licenses.
 
 ## 3. Grant of Patent License
 

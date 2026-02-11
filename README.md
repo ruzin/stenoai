@@ -9,8 +9,8 @@
 <p align="center">
   <a href="https://github.com/ruzin/stenoai/actions/workflows/build-release.yml"><img src="https://img.shields.io/github/actions/workflow/status/ruzin/stenoai/build-release.yml?branch=main&style=for-the-badge" alt="Build"></a>
   <a href="https://github.com/ruzin/stenoai/releases"><img src="https://img.shields.io/github/v/release/ruzin/stenoai?style=for-the-badge" alt="Release"></a>
-  <a href="https://discord.gg/EHxvAdKf"><img src="https://img.shields.io/badge/Discord-Join%20Server-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-CC%20BY--NC%204.0-blue?style=for-the-badge" alt="License"></a>
+  <a href="https://discord.gg/DZ6vcQnxxu"><img src="https://img.shields.io/badge/Discord-Join%20Server-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue?style=for-the-badge" alt="License"></a>
   <img src="https://img.shields.io/badge/Platform-macOS-000000?style=for-the-badge&logo=apple&logoColor=white" alt="macOS">
 </p>
 
@@ -35,7 +35,7 @@ AI-powered meeting intelligence that runs entirely on your device, your private 
 - **Privacy-first** - 100% local processing, your data never leaves your device
 - **macOS desktop app** with intuitive interface
 
-Have questions or suggestions? [Join our Discord](https://discord.gg/EHxvAdKf) to chat with the community.
+Have questions or suggestions? [Join our Discord](https://discord.gg/DZ6vcQnxxu) to chat with the community.
 
 ## Models & Performance
 
@@ -223,6 +223,4 @@ log stream --predicate 'eventMessage CONTAINS "ollama" OR process CONTAINS "Sten
 
 ## License
 
-**StenoAI is free for personal, non-commercial use.**
-
-CC BY-NC 4.0 (Creative Commons Attribution-NonCommercial 4.0 International)
+This project is licensed under the [MIT License](LICENSE).

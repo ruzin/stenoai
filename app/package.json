@@ -34,7 +34,7 @@
     "meetings"
   ],
   "author": "StenoAI Team",
-  "license": "CC-BY-NC-4.0",
+  "license": "MIT",
   "devDependencies": {
     "electron": "^28.0.0",
     "electron-builder": "^24.0.0"

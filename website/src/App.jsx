@@ -4,7 +4,7 @@ import { Mic, ShieldCheck, Zap, Sparkles, Cpu, FileText, Lock, Download, Github 
 
 // Update with actual GitHub repo URL
 const GITHUB_URL = "https://github.com/ruzin/stenoai";
-const DISCORD_URL = "https://discord.gg/EHxvAdKf";
+const DISCORD_URL = "https://discord.gg/DZ6vcQnxxu";
 
 // Discord icon component (Lucide doesn't include Discord)
 const DiscordIcon = ({ className }) => (
