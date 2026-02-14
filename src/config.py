@@ -110,8 +110,37 @@ class Config:
             "notifications_enabled": True,
             "telemetry_enabled": True,
             "anonymous_id": str(uuid.uuid4()),
+            "storage_path": "",
             "version": "1.0"
         }
+
+    def get_storage_path(self) -> str:
+        """Get the custom storage path. Empty string means use default."""
+        return self._config.get("storage_path", "")
+
+    def set_storage_path(self, storage_path: str) -> bool:
+        """
+        Set custom storage path for recordings/transcripts/output.
+
+        Args:
+            storage_path: Absolute path to storage directory, or empty string to reset to default.
+
+        Returns:
+            True if saved successfully, False otherwise.
+        """
+        storage_path = storage_path.strip()
+
+        if storage_path:
+            sp = Path(storage_path)
+            if not sp.is_absolute():
+                logger.error(f"Storage path must be absolute: {storage_path}")
+                return False
+            # Create subdirectories at the new location
+            for subdir in ("recordings", "transcripts", "output"):
+                (sp / subdir).mkdir(parents=True, exist_ok=True)
+
+        self._config["storage_path"] = storage_path
+        return self._save()
 
     def get_model(self) -> str:
         """Get the configured model name."""
@@ -213,3 +242,33 @@ def get_config() -> Config:
     if _config_instance is None:
         _config_instance = Config()
     return _config_instance
+
+
+def get_data_dirs() -> Dict[str, Path]:
+    """
+    Centralised path resolution for recordings, transcripts, and output.
+
+    Returns dict with keys: recordings, transcripts, output.
+    Uses custom storage_path from config if set, otherwise falls back to
+    production (~/Library/Application Support/stenoai/) or development paths.
+    """
+    config = get_config()
+    custom = config.get_storage_path()
+
+    if custom:
+        base = Path(custom)
+    elif "StenoAI.app" in str(Path(__file__)) or "Applications" in str(Path(__file__)):
+        base = Path.home() / "Library" / "Application Support" / "stenoai"
+    else:
+        base = Path(__file__).parent.parent  # project root in dev
+
+    dirs = {
+        "recordings": base / "recordings",
+        "transcripts": base / "transcripts",
+        "output": base / "output",
+    }
+
+    for d in dirs.values():
+        d.mkdir(parents=True, exist_ok=True)
+
+    return dirs
