@@ -139,7 +139,7 @@ jobs:
 
           ### Downloads
 
-          - **Apple Silicon (M1-M4)**: `stenoAI-macos-arm64.dmg`
+          - **Apple Silicon (M1-M5)**: `stenoAI-macos-arm64.dmg`
           - **Intel Macs**: `stenoAI-macos-x64.dmg`
 
           ### First Time Setup

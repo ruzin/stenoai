@@ -16,6 +16,9 @@ import {
   Globe,
   ChevronDown,
   ArrowRight,
+  Stethoscope,
+  Scale,
+  Landmark,
 } from "lucide-react";
 
 const GITHUB_URL = "https://github.com/ruzin/stenoai";
@@ -30,30 +33,21 @@ const DiscordIcon = ({ className }) => (
 const DOWNLOAD_URL_MAC_SILICON = "https://github.com/ruzin/stenoai/releases/latest/download/stenoAI-macos-arm64.dmg";
 const DOWNLOAD_URL_MAC_INTEL = "https://github.com/ruzin/stenoai/releases/latest/download/stenoAI-macos-x64.dmg";
 
-const features = [
+const industries = [
   {
-    icon: <Cpu className="w-6 h-6" aria-hidden="true" />,
-    title: "Local Transcription",
-    desc: "Blazing-fast speech-to-text powered by whisper.cpp, running entirely on your device. No uploads, no lag.",
-    pill: "Private by design",
+    icon: <Stethoscope className="w-5 h-5" aria-hidden="true" />,
+    title: "Healthcare",
+    desc: "Patient consultations and clinical meetings stay on your device. No cloud storage, no compliance risk.",
   },
   {
-    icon: <FileText className="w-6 h-6" aria-hidden="true" />,
-    title: "Smart Summaries",
-    desc: "Generate bullet points, action items, and structured outlines from any meeting or lecture -- all on-device.",
-    pill: "Offline mode",
+    icon: <Scale className="w-5 h-5" aria-hidden="true" />,
+    title: "Legal",
+    desc: "Client calls and case discussions remain privileged. Attorney-client confidentiality, enforced by architecture.",
   },
   {
-    icon: <Sparkles className="w-6 h-6" aria-hidden="true" />,
-    title: "Multiple AI Models",
-    desc: "Choose from Qwen, Llama, DeepSeek, and Gemma. Switch models anytime to find the best fit for your workflow.",
-    pill: "Multi-Model Support",
-  },
-  {
-    icon: <ShieldCheck className="w-6 h-6" aria-hidden="true" />,
-    title: "Privacy First",
-    desc: "All processing happens locally on your Mac. Your recordings and transcripts never leave your device. Ever.",
-    pill: "100% Privacy",
+    icon: <Landmark className="w-5 h-5" aria-hidden="true" />,
+    title: "Finance",
+    desc: "Earnings calls, board meetings, and deal discussions never leave your machine. Zero data leakage by design.",
   },
 ];
 
@@ -185,7 +179,6 @@ export default function App() {
             <div className="flex items-center gap-2"><Github className="w-4 h-4" aria-hidden="true" /> Open source on GitHub</div>
             <div className="flex items-center gap-2"><Cpu className="w-4 h-4" aria-hidden="true" /> 100% local processing</div>
             <div className="flex items-center gap-2"><Lock className="w-4 h-4" aria-hidden="true" /> No account required</div>
-            <div className="flex items-center gap-2"><ShieldCheck className="w-4 h-4" aria-hidden="true" /> Trusted by healthcare, legal & finance professionals for confidential meetings</div>
           </div>
         </div>
       </section>
@@ -218,14 +211,19 @@ export default function App() {
         </div>
       </section>
 
-      {/* Feature grid */}
+      {/* Features */}
       <section id="features" className="max-w-6xl mx-auto px-4 py-12 md:py-20">
         <div className="text-center max-w-3xl mx-auto">
           <h2 className="text-3xl md:text-4xl font-bold">Built for focus, engineered for privacy</h2>
           <p className="mt-4 text-slate-300">Record, transcribe, and summarise your meetings without sending your data anywhere. Choose from 4 powerful AI models for deeper meeting insights.</p>
         </div>
         <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-10">
-          {features.map((f, i) => (
+          {[
+            { icon: <Cpu className="w-6 h-6" aria-hidden="true" />, title: "Local Transcription", desc: "Blazing-fast speech-to-text powered by whisper.cpp, running entirely on your device. No uploads, no lag.", pill: "Private by design" },
+            { icon: <FileText className="w-6 h-6" aria-hidden="true" />, title: "Smart Summaries", desc: "Generate bullet points, action items, and structured outlines from any meeting or lecture -- all on-device.", pill: "Offline mode" },
+            { icon: <Sparkles className="w-6 h-6" aria-hidden="true" />, title: "Multiple AI Models", desc: "Choose from Qwen, Llama, DeepSeek, and Gemma. Switch models anytime to find the best fit for your workflow.", pill: "Multi-Model Support" },
+            { icon: <ShieldCheck className="w-6 h-6" aria-hidden="true" />, title: "Privacy First", desc: "All processing happens locally on your Mac. Your recordings and transcripts never leave your device. Ever.", pill: "100% Privacy" },
+          ].map((f, i) => (
             <motion.div key={f.title} initial={{ opacity: 0, y: 8 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ duration: 0.4, delay: i * 0.05 }} className="rounded-3xl border border-white/10 bg-slate-900/50 p-5">
               <div className="flex items-center gap-2 text-slate-200">
                 <div className="p-2 rounded-xl bg-slate-800 border border-white/10">{f.icon}</div>
@@ -235,6 +233,29 @@ export default function App() {
               <span className="inline-flex mt-4 text-xs rounded-full border border-white/10 px-2 py-1 text-slate-300">{f.pill}</span>
             </motion.div>
           ))}
+        </div>
+      </section>
+
+      {/* Industry trust */}
+      <section className="max-w-6xl mx-auto px-4 py-12 md:py-20">
+        <div className="grid md:grid-cols-[5fr_7fr] gap-10 items-center">
+          <motion.div initial={{ opacity: 0, y: 8 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ duration: 0.5 }}>
+            <h2 className="text-3xl md:text-4xl font-bold">Perfect for industries where privacy isn't optional</h2>
+            <p className="mt-4 text-slate-300 leading-relaxed">When your meetings contain sensitive data, you can't afford to send audio to the cloud. StenoAI processes everything locally -- no servers, no third parties, no exceptions.</p>
+          </motion.div>
+          <div className="space-y-4">
+            {industries.map((ind, i) => (
+              <motion.div key={ind.title} initial={{ opacity: 0, y: 8 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ duration: 0.4, delay: i * 0.1 }} className="rounded-3xl border border-white/10 bg-slate-900/50 p-5 flex gap-4 items-start">
+                <div className="p-2 rounded-xl bg-slate-800 border border-white/10 shrink-0">
+                  {ind.icon}
+                </div>
+                <div>
+                  <h3 className="font-semibold text-slate-100">{ind.title}</h3>
+                  <p className="mt-1 text-sm text-slate-300">{ind.desc}</p>
+                </div>
+              </motion.div>
+            ))}
+          </div>
         </div>
       </section>
 
@@ -299,7 +320,7 @@ export default function App() {
           <h2 className="text-3xl md:text-4xl font-bold">Start capturing brilliant notes today</h2>
           <p className="mt-4 text-slate-200">Download the free app for macOS. No account needed.</p>
           <div className="mt-6 flex flex-col sm:flex-row gap-3 justify-center">
-            <a href={DOWNLOAD_URL_MAC_SILICON} className="inline-flex items-center gap-2 rounded-2xl bg-white text-slate-900 px-5 py-3 font-semibold hover:bg-slate-100"><Download className="w-5 h-5" aria-hidden="true" /> Apple Silicon (M1-M4)</a>
+            <a href={DOWNLOAD_URL_MAC_SILICON} className="inline-flex items-center gap-2 rounded-2xl bg-white text-slate-900 px-5 py-3 font-semibold hover:bg-slate-100"><Download className="w-5 h-5" aria-hidden="true" /> Apple Silicon (M1-M5)</a>
             <a href={DOWNLOAD_URL_MAC_INTEL} className="inline-flex items-center gap-2 rounded-2xl border border-white/10 px-5 py-3 font-semibold hover:bg-white/5"><Download className="w-5 h-5" aria-hidden="true" /> Intel Macs</a>
           </div>
         </div>
