@@ -84,10 +84,6 @@ const faqs = [
     a: "Unlimited local transcription and local summarisation on your device, with no account required.",
   },
   {
-    q: "How do I install on macOS?",
-    a: "(1) Download and open the DMG file, (2) Drag the app to Applications, (3) When you first launch the app, macOS may show a security warning, (4) To fix this: Go to System Settings > Privacy & Security, scroll down and click 'Open Anyway'. Alternatively, run in Terminal: 'xattr -cr /Applications/StenoAI.app' (5) The app will work normally on subsequent launches.",
-  },
-  {
     q: "What AI models are available?",
     a: "Choose from 4 cutting-edge open-source models: Llama 3.2 3B (fastest, default), Gemma 3 4B (efficient), Qwen 3 8B (best for structured notes), and DeepSeek-R1 8B (superior reasoning). All models run 100% locally on your Mac.",
   },
@@ -189,6 +185,7 @@ export default function App() {
             <div className="flex items-center gap-2"><Github className="w-4 h-4" aria-hidden="true" /> Open source on GitHub</div>
             <div className="flex items-center gap-2"><Cpu className="w-4 h-4" aria-hidden="true" /> 100% local processing</div>
             <div className="flex items-center gap-2"><Lock className="w-4 h-4" aria-hidden="true" /> No account required</div>
+            <div className="flex items-center gap-2"><ShieldCheck className="w-4 h-4" aria-hidden="true" /> Trusted by healthcare, legal & finance professionals for confidential meetings</div>
           </div>
         </div>
       </section>
