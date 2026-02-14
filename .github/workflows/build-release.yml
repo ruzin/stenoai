@@ -19,13 +19,11 @@ jobs:
     strategy:
       matrix:
         include:
-          - runner: macos-14
-            arch: x64
+          - arch: x64
             build_cmd: build:intel
-          - runner: macos-14
-            arch: arm64
+          - arch: arm64
             build_cmd: build:arm64
-    runs-on: ${{ matrix.runner }}
+    runs-on: macos-14
 
     steps:
     - name: Checkout code
@@ -39,7 +37,7 @@ jobs:
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
-        node-version: '18'
+        node-version: '22'
         cache: 'npm'
         cache-dependency-path: app/package-lock.json
 
@@ -71,49 +69,19 @@ jobs:
       run: npm ci
 
     - name: Import code signing certificate
-      env:
-        CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE }}
-        CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-      run: |
-        # Create temporary keychain
-        KEYCHAIN_PATH=$RUNNER_TEMP/build.keychain
-        KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
+      uses: apple-actions/import-codesign-certs@v2
+      with:
+        p12-file-base64: ${{ secrets.APPLE_CERTIFICATE }}
+        p12-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
 
-        # Decode certificate
-        echo "$CERTIFICATE_BASE64" | base64 --decode > $RUNNER_TEMP/certificate.p12
-
-        # Create keychain
-        security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
-        security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
-        security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
-
-        # Import certificate
-        security import $RUNNER_TEMP/certificate.p12 \
-          -k $KEYCHAIN_PATH \
-          -P "$CERTIFICATE_PASSWORD" \
-          -T /usr/bin/codesign \
-          -T /usr/bin/productsign
-
-        # Set key partition list
-        security set-key-partition-list \
-          -S apple-tool:,apple:,codesign: \
-          -s -k "$KEYCHAIN_PASSWORD" \
-          $KEYCHAIN_PATH
-
-        # Add keychain to search list
-        security list-keychains -d user -s $KEYCHAIN_PATH login.keychain
-
-        # Verify certificate is available
-        security find-identity -v -p codesigning
-
-    - name: Build DMG for ${{ matrix.arch }}
+    - name: Build and notarize DMG for ${{ matrix.arch }}
       working-directory: app
       run: npm run ${{ matrix.build_cmd }}
       env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         APPLE_ID: ${{ secrets.APPLE_ID }}
         APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
         APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Upload DMG artifact
       uses: actions/upload-artifact@v4
@@ -122,16 +90,8 @@ jobs:
         path: app/dist/*.dmg
         retention-days: 1
 
-    - name: Cleanup keychain and certificate
-      if: always()
-      run: |
-        KEYCHAIN_PATH=$RUNNER_TEMP/build.keychain
-        if [ -f "$KEYCHAIN_PATH" ]; then
-          security delete-keychain $KEYCHAIN_PATH || true
-        fi
-        rm -f $RUNNER_TEMP/certificate.p12
-
   release:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     needs: build-macos
     runs-on: ubuntu-latest
 
