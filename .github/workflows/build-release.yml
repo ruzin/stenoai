@@ -16,6 +16,13 @@ permissions:
 
 jobs:
   build-macos:
+    strategy:
+      matrix:
+        include:
+          - arch: x64
+            build_cmd: build:intel
+          - arch: arm64
+            build_cmd: build:arm64
     runs-on: macos-14
 
     steps:
@@ -67,9 +74,9 @@ jobs:
         p12-file-base64: ${{ secrets.APPLE_CERTIFICATE }}
         p12-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
 
-    - name: Build and notarize DMG for arm64
+    - name: Build and notarize DMG for ${{ matrix.arch }}
       working-directory: app
-      run: npm run build:arm64
+      run: npm run ${{ matrix.build_cmd }}
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         APPLE_ID: ${{ secrets.APPLE_ID }}
@@ -79,7 +86,7 @@ jobs:
     - name: Upload DMG artifact
       uses: actions/upload-artifact@v4
       with:
-        name: dmg-arm64
+        name: dmg-${{ matrix.arch }}
         path: app/dist/*.dmg
         retention-days: 1
 
