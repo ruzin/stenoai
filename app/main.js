@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell, systemPreferences, globalShortcut, safeStorage, Tray, Menu, nativeImage } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, systemPreferences, globalShortcut, safeStorage, Tray, Menu, nativeImage, Notification } = require('electron');
 const path = require('path');
 const { spawn, exec } = require('child_process');
 const fs = require('fs');
@@ -17,6 +17,48 @@ let mainWindow;
 let pythonProcess;
 let tray = null;
 let isQuitting = false;
+let shortcutQueue = [];
+let pendingShortcutUrls = [];
+let rendererShortcutReady = false;
+let launchedByShortcut = false;
+
+const SHORTCUT_PROTOCOL = 'stenoai';
+const SHORTCUT_HOST = 'record';
+const SHORTCUT_SESSION_NAME_MAX_LENGTH = 120;
+
+function sanitizeShortcutSessionName(rawValue) {
+  if (typeof rawValue !== 'string') {
+    return null;
+  }
+
+  // Keep user-visible names readable while stripping unsafe/path-like characters.
+  // Preserve Unicode letters (including diacritics) and common punctuation.
+  const sanitized = rawValue
+    .replace(/[/\\:*?"<>|]/g, ' ')
+    .replace(/[^\p{L}\p{M}\p{N}_\s.,()@&'!+#-]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, SHORTCUT_SESSION_NAME_MAX_LENGTH);
+
+  return sanitized || null;
+}
+
+function registerShortcutProtocolClient() {
+  if (process.platform !== 'darwin') {
+    return false;
+  }
+
+  // In development (electron .), macOS protocol registration needs executable + app args.
+  if (!app.isPackaged) {
+    return app.setAsDefaultProtocolClient(
+      SHORTCUT_PROTOCOL,
+      process.execPath,
+      [path.resolve(process.argv[1])]
+    );
+  }
+
+  return app.setAsDefaultProtocolClient(SHORTCUT_PROTOCOL);
+}
 
 // Backend executable path - always use bundled stenoai
 function getBackendPath() {
@@ -35,6 +77,160 @@ function getBackendCwd() {
   } else {
     return path.join(__dirname, '..', 'dist', 'stenoai');
   }
+}
+
+function parseShortcutUrl(incomingUrl) {
+  try {
+    const parsed = new URL(incomingUrl);
+    if (parsed.protocol !== `${SHORTCUT_PROTOCOL}:`) {
+      return { type: 'invalid', reason: 'invalid-protocol' };
+    }
+
+    if (parsed.hostname !== SHORTCUT_HOST) {
+      return { type: 'invalid', reason: 'invalid-host' };
+    }
+
+    const cleanPath = (parsed.pathname || '').replace(/\/+$/, '');
+    if (cleanPath === '/start') {
+      const sessionName = sanitizeShortcutSessionName(parsed.searchParams.get('name') || '');
+      return {
+        type: 'start',
+        sessionName
+      };
+    }
+
+    if (cleanPath === '/stop') {
+      return { type: 'stop' };
+    }
+
+    return { type: 'invalid', reason: 'invalid-path' };
+  } catch (error) {
+    return { type: 'invalid', reason: 'parse-error' };
+  }
+}
+
+function ensureMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createWindow();
+  }
+}
+
+function dispatchShortcutAction(action) {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    return false;
+  }
+
+  if (action.type === 'start') {
+    mainWindow.webContents.send('shortcut-start-recording', {
+      sessionName: action.sessionName || null
+    });
+    return true;
+  }
+
+  if (action.type === 'stop') {
+    mainWindow.webContents.send('shortcut-stop-recording');
+    return true;
+  }
+
+  return false;
+}
+
+function flushShortcutQueue() {
+  if (!rendererShortcutReady || !mainWindow || mainWindow.isDestroyed()) {
+    return;
+  }
+
+  while (shortcutQueue.length > 0) {
+    const nextAction = shortcutQueue.shift();
+    const dispatched = dispatchShortcutAction(nextAction);
+    if (!dispatched) {
+      shortcutQueue.unshift(nextAction);
+      break;
+    }
+  }
+}
+
+function enqueueShortcutAction(action) {
+  shortcutQueue.push(action);
+  flushShortcutQueue();
+}
+
+async function shouldShowShortcutNotifications() {
+  try {
+    const settings = await handleGetNotifications();
+    if (!settings.success) {
+      return true;
+    }
+    return settings.notifications_enabled !== false;
+  } catch (error) {
+    return true;
+  }
+}
+
+async function showShortcutNotification(body) {
+  if (process.platform !== 'darwin') {
+    return;
+  }
+
+  try {
+    const enabled = await shouldShowShortcutNotifications();
+    if (!enabled || !Notification.isSupported()) {
+      return;
+    }
+
+    new Notification({
+      title: 'StenoAI Shortcuts',
+      body
+    }).show();
+  } catch (error) {
+    console.error('Failed to show shortcut notification:', error.message);
+  }
+}
+
+async function isBackendRecording() {
+  try {
+    const status = await handleGetStatus();
+    if (!status.success) {
+      return false;
+    }
+    return status.status.includes('STATUS: RECORDING');
+  } catch (error) {
+    console.error('Error checking recording status for shortcut action:', error.message);
+    return false;
+  }
+}
+
+async function handleShortcutUrl(incomingUrl) {
+  const parsedAction = parseShortcutUrl(incomingUrl);
+
+  if (parsedAction.type === 'invalid') {
+    console.warn(`Ignored invalid shortcut URL (${parsedAction.reason}): ${incomingUrl}`);
+    await showShortcutNotification('Invalid shortcut URL');
+    return;
+  }
+
+  const recording = await isBackendRecording();
+
+  if (parsedAction.type === 'start') {
+    if (recording) {
+      await showShortcutNotification('Recording already in progress');
+      return;
+    }
+
+    ensureMainWindow();
+    enqueueShortcutAction(parsedAction);
+    await showShortcutNotification('Start recording requested');
+    return;
+  }
+
+  if (!recording) {
+    await showShortcutNotification('Recording already stopped');
+    return;
+  }
+
+  ensureMainWindow();
+  enqueueShortcutAction(parsedAction);
+  await showShortcutNotification('Stop recording requested');
 }
 
 // Telemetry state
@@ -196,6 +392,7 @@ function validateSafeFilePath(filepath, allowedBaseDirs) {
 }
 
 function createWindow() {
+  rendererShortcutReady = false;
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
@@ -212,6 +409,9 @@ function createWindow() {
   mainWindow.loadFile('index.html');
   
   mainWindow.once('ready-to-show', () => {
+    if (launchedByShortcut) {
+      return;
+    }
     mainWindow.show();
   });
 
@@ -225,6 +425,7 @@ function createWindow() {
 
   mainWindow.on('closed', () => {
     mainWindow = null;
+    rendererShortcutReady = false;
     if (pythonProcess) {
       pythonProcess.kill();
     }
@@ -371,6 +572,23 @@ app.on('before-quit', async (event) => {
   }
 });
 
+app.on('open-url', (event, incomingUrl) => {
+  if (process.platform !== 'darwin') {
+    return;
+  }
+
+  event.preventDefault();
+  console.log(`Received shortcut URL via open-url: ${incomingUrl}`);
+  launchedByShortcut = true;
+
+  if (!app.isReady()) {
+    pendingShortcutUrls.push(incomingUrl);
+    return;
+  }
+
+  void handleShortcutUrl(incomingUrl);
+});
+
 app.whenReady().then(async () => {
   // Set application menu with Help > Learn More
   const appMenu = Menu.buildFromTemplate([
@@ -401,6 +619,8 @@ app.whenReady().then(async () => {
 
   createWindow();
   createTray();
+  const protocolRegistered = registerShortcutProtocolClient();
+  console.log(`Protocol handler registration (${SHORTCUT_PROTOCOL}): ${protocolRegistered}`);
 
   // Initialize telemetry and track app open
   await initTelemetry();
@@ -432,7 +652,25 @@ app.whenReady().then(async () => {
   } else {
     console.error(`Failed to register global hotkey: ${hotkeyModifier}`);
   }
+
+  if (pendingShortcutUrls.length > 0) {
+    const urlsToProcess = [...pendingShortcutUrls];
+    pendingShortcutUrls = [];
+
+    for (const shortcutUrl of urlsToProcess) {
+      await handleShortcutUrl(shortcutUrl);
+    }
+  }
 });
+
+// Fallback for launch contexts where deep-link may arrive via argv instead of open-url.
+if (process.platform === 'darwin') {
+  const argvShortcutUrl = process.argv.find(arg => typeof arg === 'string' && arg.startsWith(`${SHORTCUT_PROTOCOL}://`));
+  if (argvShortcutUrl) {
+    pendingShortcutUrls.push(argvShortcutUrl);
+    launchedByShortcut = true;
+  }
+}
 
 app.on('will-quit', async () => {
   globalShortcut.unregisterAll();
@@ -459,8 +697,12 @@ app.on('window-all-closed', () => {
 
 app.on('activate', () => {
   if (mainWindow) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
     mainWindow.show();
+    mainWindow.focus();
+    launchedByShortcut = false;
   } else {
+    launchedByShortcut = false;
     createWindow();
   }
 });
@@ -472,6 +714,11 @@ ipcMain.on('focus-window', () => {
         mainWindow.show();
         mainWindow.focus();
     }
+});
+
+ipcMain.on('shortcut-renderer-ready', () => {
+  rendererShortcutReady = true;
+  flushShortcutQueue();
 });
 
 // Microphone permission handlers
@@ -561,6 +808,34 @@ function runPythonScript(script, args = [], silent = false, extraEnv = {}) {
   });
 }
 
+async function getBackendStatusInternal(silent = true) {
+  const result = await runPythonScript('simple_recorder.py', ['status'], silent);
+  return { success: true, status: result };
+}
+
+async function handleGetStatus() {
+  try {
+    return await getBackendStatusInternal(true); // Silent mode
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+}
+
+async function handleGetNotifications() {
+  try {
+    const result = await runPythonScript('simple_recorder.py', ['get-notifications']);
+    const jsonData = JSON.parse(result);
+
+    return {
+      success: true,
+      ...jsonData
+    };
+  } catch (error) {
+    sendDebugLog(`Error getting notification settings: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+}
+
 // IPC Handlers - Separate start/stop with better error handling
 ipcMain.handle('start-recording', async (event, sessionName) => {
   try {
@@ -603,14 +878,7 @@ ipcMain.handle('stop-recording', async () => {
   }
 });
 
-ipcMain.handle('get-status', async () => {
-  try {
-    const result = await runPythonScript('simple_recorder.py', ['status'], true); // Silent mode
-    return { success: true, status: result };
-  } catch (error) {
-    return { success: false, error: error.message };
-  }
-});
+ipcMain.handle('get-status', handleGetStatus);
 
 ipcMain.handle('process-recording', async (event, audioFile, sessionName) => {
   try {
@@ -2108,20 +2376,7 @@ ipcMain.handle('set-model', async (event, modelName) => {
   }
 });
 
-ipcMain.handle('get-notifications', async () => {
-  try {
-    const result = await runPythonScript('simple_recorder.py', ['get-notifications']);
-    const jsonData = JSON.parse(result);
-
-    return {
-      success: true,
-      ...jsonData
-    };
-  } catch (error) {
-    sendDebugLog(`Error getting notification settings: ${error.message}`);
-    return { success: false, error: error.message };
-  }
-});
+ipcMain.handle('get-notifications', handleGetNotifications);
 
 ipcMain.handle('set-notifications', async (event, enabled) => {
   try {
@@ -2746,7 +3001,6 @@ ipcMain.handle('open-release-page', async (event, url) => {
     return { success: false, error: error.message };
   }
 });
-
 // ── Google Calendar: Token Storage ──────────────────────────────────────
 
 function getTokenFilePath() {
