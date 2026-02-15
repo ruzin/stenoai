@@ -131,6 +131,22 @@ async function shutdownTelemetry() {
 }
 
 /**
+ * Get the list of allowed base directories, including any custom storage path.
+ */
+let _cachedCustomStoragePath = null;
+function getAllowedBaseDirs() {
+  const projectRoot = path.join(__dirname, '..');
+  const dirs = [
+    projectRoot,
+    path.join(os.homedir(), 'Library', 'Application Support', 'stenoai')
+  ];
+  if (_cachedCustomStoragePath) {
+    dirs.push(_cachedCustomStoragePath);
+  }
+  return dirs;
+}
+
+/**
  * Validate that a file path is within allowed directories (security)
  * Prevents path traversal attacks by ensuring files are only accessed
  * within the app's designated data directories
@@ -191,6 +207,18 @@ app.whenReady().then(async () => {
   // Initialize telemetry and track app open
   await initTelemetry();
   trackEvent('app_opened');
+
+  // Load custom storage path for file validation
+  try {
+    const spResult = await runPythonScript('simple_recorder.py', ['get-storage-path'], true);
+    const spData = JSON.parse(spResult.trim());
+    if (spData.storage_path) {
+      _cachedCustomStoragePath = spData.storage_path;
+      console.log('Custom storage path loaded:', _cachedCustomStoragePath);
+    }
+  } catch (e) {
+    // Non-fatal - custom path just won't be cached
+  }
 
   // Register global hotkey for toggle recording (Cmd+Shift+R on macOS, Ctrl+Shift+R on Windows/Linux)
   const hotkeyModifier = process.platform === 'darwin' ? 'Command+Shift+R' : 'Ctrl+Shift+R';
@@ -489,11 +517,8 @@ ipcMain.handle('update-meeting', async (event, summaryFilePath, updates) => {
   try {
     const projectRoot = path.join(__dirname, '..');
 
-    // Define allowed base directories for file operations
-    const allowedBaseDirs = [
-      projectRoot,
-      path.join(os.homedir(), 'Library', 'Application Support', 'stenoai')
-    ];
+    // Define allowed base directories for file operations (includes custom storage)
+    const allowedBaseDirs = getAllowedBaseDirs();
 
     // Convert to absolute path if needed
     const absolutePath = path.isAbsolute(summaryFilePath)
@@ -566,11 +591,8 @@ ipcMain.handle('delete-meeting', async (event, meetingData) => {
     // Build correct file paths from the meeting data - convert to absolute paths
     const projectRoot = path.join(__dirname, '..');
 
-    // Define allowed base directories for file operations
-    const allowedBaseDirs = [
-      projectRoot,
-      path.join(os.homedir(), 'Library', 'Application Support', 'stenoai')
-    ];
+    // Define allowed base directories for file operations (includes custom storage)
+    const allowedBaseDirs = getAllowedBaseDirs();
 
     const summaryFile = meeting.session_info?.summary_file;
     const transcriptFile = meeting.session_info?.transcript_file;
@@ -1677,6 +1699,53 @@ ipcMain.handle('get-app-version', async () => {
       version: packageContent.version,
       name: packageContent.productName || packageContent.name
     };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+// Storage path handlers
+ipcMain.handle('get-storage-path', async () => {
+  try {
+    const result = await runPythonScript('simple_recorder.py', ['get-storage-path'], true);
+    const jsonData = JSON.parse(result.trim());
+    return { success: true, ...jsonData };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('set-storage-path', async (event, storagePath) => {
+  try {
+    const args = ['set-storage-path'];
+    if (storagePath) {
+      args.push(storagePath);
+    }
+    const result = await runPythonScript('simple_recorder.py', args);
+    // Update cached custom path for file validation
+    _cachedCustomStoragePath = storagePath || null;
+    const jsonMatch = result.match(/\{.*\}/s);
+    if (jsonMatch) {
+      return JSON.parse(jsonMatch[0]);
+    }
+    return { success: true, storage_path: storagePath };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('select-storage-folder', async () => {
+  try {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      properties: ['openDirectory', 'createDirectory'],
+      title: 'Choose storage location for StenoAI data',
+      buttonLabel: 'Select Folder'
+    });
+
+    if (!result.canceled && result.filePaths.length > 0) {
+      return { success: true, folderPath: result.filePaths[0] };
+    }
+    return { success: false, error: 'No folder selected' };
   } catch (error) {
     return { success: false, error: error.message };
   }

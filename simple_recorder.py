@@ -51,31 +51,17 @@ class SimpleRecorder:
     def __init__(self):
         # Only initialize if dependencies are available
         self.audio_recorder = AudioRecorder() if AudioRecorder else None
-        
+
         # Only initialize transcriber/summarizer when needed to save memory
         self.transcriber = None
         self.summarizer = None
-        
-        # Directories - use user data folder for DMG distribution
-        import os
-        
-        # Detect if running from app bundle (DMG install) or development
-        current_path = Path(__file__).parent
-        if "StenoAI.app" in str(current_path) or "Applications" in str(current_path):
-            # DMG/Production: Use Application Support folder
-            app_support = Path.home() / "Library" / "Application Support" / "stenoai"
-            self.recordings_dir = app_support / "recordings"
-            self.transcripts_dir = app_support / "transcripts" 
-            self.output_dir = app_support / "output"
-        else:
-            # Development: Use project relative paths
-            self.recordings_dir = Path("recordings")
-            self.transcripts_dir = Path("transcripts") 
-            self.output_dir = Path("output")
-        
-        # Create directories (including parent directories)
-        for dir_path in [self.recordings_dir, self.transcripts_dir, self.output_dir]:
-            dir_path.mkdir(parents=True, exist_ok=True)
+
+        # Directories - centralised via get_data_dirs()
+        from src.config import get_data_dirs
+        dirs = get_data_dirs()
+        self.recordings_dir = dirs["recordings"]
+        self.transcripts_dir = dirs["transcripts"]
+        self.output_dir = dirs["output"]
         
         # State file
         self.state_file = Path("recorder_state.json")
@@ -824,21 +810,34 @@ def test():
 @cli.command()
 def list_meetings():
     """List all processed meetings - optimized for fast loading"""
-    # Don't initialize SimpleRecorder to avoid Ollama checks - just get the output directory
-    current_path = Path(__file__).parent
-    if "StenoAI.app" in str(current_path) or "Applications" in str(current_path):
-        # DMG/Production: Use Application Support folder
-        app_support = Path.home() / "Library" / "Application Support" / "stenoai"
-        output_dir = app_support / "output"
-    else:
-        # Development: Use project relative paths
-        output_dir = Path("output")
-    
+    from src.config import get_data_dirs, get_config
+    dirs = get_data_dirs()
+    output_dir = dirs["output"]
+
     # Ensure output directory exists
     output_dir.mkdir(parents=True, exist_ok=True)
-    
-    # Get all summary files - use glob pattern for speed
-    summaries = list(output_dir.glob("*_summary.json"))
+
+    # Collect summary files from current output dir
+    seen_files = set()
+    summaries = []
+    for f in output_dir.glob("*_summary.json"):
+        summaries.append(f)
+        seen_files.add(f.resolve())
+
+    # Also scan the default location if a custom path is set,
+    # so meetings stored before the path change remain visible
+    custom = get_config().get_storage_path()
+    if custom:
+        if "StenoAI.app" in str(Path(__file__)) or "Applications" in str(Path(__file__)):
+            default_output = Path.home() / "Library" / "Application Support" / "stenoai" / "output"
+        else:
+            default_output = Path(__file__).parent / "output"
+        if default_output.exists():
+            for f in default_output.glob("*_summary.json"):
+                if f.resolve() not in seen_files:
+                    summaries.append(f)
+                    seen_files.add(f.resolve())
+
     meetings = []
     
     # Sort by actual meeting date, with fallback to modification time
@@ -996,18 +995,27 @@ def query(transcript_file, question):
 def list_failed():
     """List summary files that failed processing (have fallback summaries)"""
     import json
-    # Don't initialize SimpleRecorder to avoid Ollama checks - just get the output directory
-    current_path = Path(__file__).parent
-    if "StenoAI.app" in str(current_path) or "Applications" in str(current_path):
-        # DMG/Production: Use Application Support folder
-        app_support = Path.home() / "Library" / "Application Support" / "stenoai"
-        output_dir = app_support / "output"
-    else:
-        # Development: Use project relative paths
-        output_dir = Path("output")
-    
-    # Get all summary files
-    summaries = list(output_dir.glob("*_summary.json"))
+    from src.config import get_data_dirs, get_config
+    dirs = get_data_dirs()
+    output_dir = dirs["output"]
+
+    # Collect from current and default locations
+    seen_files = set()
+    summaries = []
+    for f in output_dir.glob("*_summary.json"):
+        summaries.append(f)
+        seen_files.add(f.resolve())
+    custom = get_config().get_storage_path()
+    if custom:
+        if "StenoAI.app" in str(Path(__file__)) or "Applications" in str(Path(__file__)):
+            default_output = Path.home() / "Library" / "Application Support" / "stenoai" / "output"
+        else:
+            default_output = Path(__file__).parent / "output"
+        if default_output.exists():
+            for f in default_output.glob("*_summary.json"):
+                if f.resolve() not in seen_files:
+                    summaries.append(f)
+
     failed_summaries = []
     
     for summary_file in summaries:
@@ -1078,23 +1086,9 @@ def setup_check():
     except Exception as e:
         checks.append(("❌ Python", f"Error: {e}"))
     
-    # Check required directories - use same logic as SimpleRecorder.__init__
-    current_path = Path(__file__).parent
-    if "StenoAI.app" in str(current_path) or "Applications" in str(current_path):
-        # DMG/Production: Use Application Support folder
-        app_support = Path.home() / "Library" / "Application Support" / "stenoai"
-        base_dirs = {
-            "recordings": app_support / "recordings",
-            "transcripts": app_support / "transcripts", 
-            "output": app_support / "output"
-        }
-    else:
-        # Development: Use project relative paths
-        base_dirs = {
-            "recordings": Path("recordings"),
-            "transcripts": Path("transcripts"), 
-            "output": Path("output")
-        }
+    # Check required directories - uses centralised get_data_dirs()
+    from src.config import get_data_dirs
+    base_dirs = get_data_dirs()
     
     for dir_name, dir_path in base_dirs.items():
         if dir_path.exists():
@@ -1335,6 +1329,28 @@ def set_telemetry(enabled):
     else:
         print(f"ERROR: Failed to save telemetry preference")
         print(json.dumps({"success": False, "error": "Failed to save config"}))
+
+
+@cli.command()
+def get_storage_path():
+    """Get the current custom storage path"""
+    from src.config import get_config
+    config = get_config()
+    storage_path = config.get_storage_path()
+    print(json.dumps({"storage_path": storage_path}))
+
+
+@cli.command()
+@click.argument('storage_path', default='')
+def set_storage_path(storage_path):
+    """Set custom storage path (empty to reset to default)"""
+    from src.config import get_config
+    config = get_config()
+    success = config.set_storage_path(storage_path)
+    if success:
+        print(json.dumps({"success": True, "storage_path": storage_path}))
+    else:
+        print(json.dumps({"success": False, "error": "Failed to set storage path"}))
 
 
 @cli.command()
