@@ -2612,9 +2612,12 @@ function refreshAccessToken(refreshToken) {
 
 function fetchCalendarEvents(accessToken, maxResults = 7) {
   return new Promise((resolve, reject) => {
-    const now = new Date().toISOString();
+    const now = new Date();
+    const weekAhead = new Date(now);
+    weekAhead.setDate(weekAhead.getDate() + 7);
     const params = new URLSearchParams({
-      timeMin: now,
+      timeMin: now.toISOString(),
+      timeMax: weekAhead.toISOString(),
       maxResults: String(maxResults),
       singleEvents: 'true',
       orderBy: 'startTime',

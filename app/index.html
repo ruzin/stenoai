@@ -939,6 +939,9 @@
         /* Folder list above meetings */
         .folder-list {
             padding: 4px 8px 0;
+            max-height: 180px;
+            overflow-y: auto;
+            flex-shrink: 0;
         }
 
         .folder-item {
@@ -1330,6 +1333,7 @@
             display: none;
             flex-direction: column;
             padding: 0 12px;
+            flex-shrink: 0;
         }
 
         .calendar-sidebar.show {
@@ -1340,10 +1344,8 @@
             display: flex;
             align-items: center;
             gap: 6px;
-            font-size: 11px;
+            font-size: 12px;
             font-weight: 600;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
             color: var(--text-muted);
             padding: 12px 8px 6px;
         }
@@ -1376,7 +1378,8 @@
 
         .calendar-sidebar-item .event-title {
             font-size: 13px;
-            color: var(--text-primary);
+            font-weight: 500;
+            color: var(--text-secondary);
             flex: 1;
             min-width: 0;
             overflow: hidden;
@@ -1384,10 +1387,19 @@
             white-space: nowrap;
         }
 
-        .calendar-sidebar-item .event-time {
-            font-size: 12px;
-            color: var(--text-muted);
+        .calendar-sidebar-item .event-meta {
+            display: flex;
+            align-items: center;
+            gap: 6px;
             flex-shrink: 0;
+        }
+
+        .calendar-sidebar-item .event-time {
+            font-size: 11px;
+            color: var(--text-muted);
+            white-space: nowrap;
+            min-width: 52px;
+            text-align: right;
         }
 
         .calendar-sidebar-separator {
@@ -2999,6 +3011,14 @@
             </div>
         </div>
 
+        <!-- Context menu for folders -->
+        <div class="context-menu" id="folder-context-menu" onclick="event.stopPropagation()">
+            <div class="context-menu-item danger" onclick="event.stopPropagation(); deleteContextFolder()">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                Delete folder
+            </div>
+        </div>
+
         <!-- Context menu for meetings -->
         <div class="context-menu" id="meeting-context-menu" onclick="event.stopPropagation()">
             <div class="context-menu-item" onclick="event.stopPropagation(); showFolderPicker(event)">
@@ -4014,13 +4034,8 @@ Session started - waiting for activity...
             try {
                 const d = new Date(dateString);
                 const now = new Date();
-                const isToday = d.toDateString() === now.toDateString();
-                const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1);
-                const isYesterday = d.toDateString() === yesterday.toDateString();
-                if (isToday) return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-                if (isYesterday) return 'Yesterday';
-                if (now.getFullYear() === d.getFullYear()) return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-                return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' });
+                if (now.getFullYear() === d.getFullYear()) return d.toLocaleDateString('en-US', { day: 'numeric', month: 'short' });
+                return d.toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: '2-digit' });
             } catch { return ''; }
         }
 
@@ -4047,7 +4062,7 @@ Session started - waiting for activity...
             </div>`;
             for (const f of folders) {
                 const count = meetings.filter(m => (m.folders || []).includes(f.id)).length;
-                html += `<div class="folder-item ${activeFolderId === f.id ? 'active' : ''}" onclick="setActiveFolder('${f.id}')" oncontextmenu="showFolderContextMenu(event, '${f.id}')"
+                html += `<div class="folder-item ${activeFolderId === f.id ? 'active' : ''}" onclick="setActiveFolder('${f.id}')" oncontextmenu="confirmDeleteFolder(event, '${f.id}')" ondblclick="event.stopPropagation(); renameFolderInline(event, '${f.id}')"
                     data-folder-id="${f.id}"
                     ondragover="event.preventDefault(); this.classList.add('drag-over')"
                     ondragleave="this.classList.remove('drag-over')"
@@ -4119,51 +4134,83 @@ Session started - waiting for activity...
             input.addEventListener('blur', commitFolder);
         }
 
-        async function showFolderContextMenu(event, folderId) {
+        async function renameFolderInline(event, folderId) {
             event.preventDefault();
             event.stopPropagation();
             const folder = folders.find(f => f.id === folderId);
             if (!folder) return;
 
-            // Replace the folder item with an editable input
-            const items = document.querySelectorAll('.folder-item');
-            for (const item of items) {
-                if (item.textContent.includes(folder.name)) {
-                    const origHtml = item.innerHTML;
-                    item.innerHTML = `
-                        ${folderIcon(folder.color)}
-                        <input type="text" id="rename-folder-input" value="${escapeHtml(folder.name)}" style="
-                            flex: 1; background: var(--bg-deep); border: 1px solid var(--accent-primary);
-                            border-radius: 4px; padding: 3px 6px; font-size: 12px; color: var(--text-primary);
-                            outline: none; font-family: inherit; min-width: 0;
-                        ">
-                        <button onclick="deleteFolder_('${folderId}')" style="background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 2px; font-size: 14px;" title="Delete folder">✕</button>
-                    `;
-                    const input = document.getElementById('rename-folder-input');
-                    input.focus();
-                    input.select();
+            const item = document.querySelector(`.folder-item[data-folder-id="${folderId}"]`);
+            if (!item) return;
 
-                    async function commitRename() {
-                        const newName = input.value.trim();
-                        if (newName && newName !== folder.name) {
-                            await ipcRenderer.invoke('rename-folder', folderId, newName);
-                        }
-                        await loadFolders();
-                    }
-                    input.addEventListener('keydown', (e) => {
-                        if (e.key === 'Enter') commitRename();
-                        if (e.key === 'Escape') loadFolders();
-                    });
-                    input.addEventListener('blur', commitRename);
-                    break;
+            item.innerHTML = `
+                ${folderIcon(folder.color)}
+                <input type="text" id="rename-folder-input" value="${escapeHtml(folder.name)}" style="
+                    flex: 1; background: var(--bg-deep); border: 1px solid var(--accent-primary);
+                    border-radius: 4px; padding: 3px 6px; font-size: 12px; color: var(--text-primary);
+                    outline: none; font-family: inherit; min-width: 0;
+                ">
+            `;
+            const input = document.getElementById('rename-folder-input');
+            input.focus();
+            input.select();
+
+            async function commitRename() {
+                const newName = input.value.trim();
+                if (newName && newName !== folder.name) {
+                    await ipcRenderer.invoke('rename-folder', folderId, newName);
                 }
+                await loadFolders();
             }
+            input.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') commitRename();
+                if (e.key === 'Escape') loadFolders();
+            });
+            input.addEventListener('blur', commitRename);
+        }
+
+        let contextFolderId = null;
+
+        function confirmDeleteFolder(event, folderId) {
+            event.preventDefault();
+            event.stopPropagation();
+            contextFolderId = folderId;
+            const menu = document.getElementById('folder-context-menu');
+            menu.style.left = event.clientX + 'px';
+            menu.style.top = event.clientY + 'px';
+            menu.classList.add('show');
+        }
+
+        function hideFolderContextMenu() {
+            document.getElementById('folder-context-menu').classList.remove('show');
+        }
+
+        async function deleteContextFolder() {
+            if (contextFolderId === null) return;
+            hideFolderContextMenu();
+            const folder = folders.find(f => f.id === contextFolderId);
+            const name = folder ? folder.name : 'this folder';
+            const count = meetings.filter(m => (m.folders || []).includes(contextFolderId)).length;
+            const msg = count > 0
+                ? `Delete folder "${name}"?\n\n${count} meeting${count === 1 ? '' : 's'} will be moved back to All Meetings. No recordings or transcripts will be deleted.`
+                : `Delete folder "${name}"?\n\nNo recordings or transcripts will be deleted.`;
+            if (!confirm(msg)) { contextFolderId = null; return; }
+            await deleteFolder_(contextFolderId);
+            contextFolderId = null;
         }
 
         async function deleteFolder_(folderId) {
+            // Remove folder references from all meetings that were in this folder
+            const affectedMeetings = meetings.filter(m => (m.folders || []).includes(folderId));
+            for (const m of affectedMeetings) {
+                const summaryFile = m.session_info?.summary_file;
+                if (summaryFile) {
+                    await ipcRenderer.invoke('remove-meeting-from-folder', summaryFile, folderId).catch(() => {});
+                }
+            }
             await ipcRenderer.invoke('delete-folder', folderId);
             if (activeFolderId === folderId) activeFolderId = null;
-            await loadFolders();
+            await loadMeetings(true); // Reload to get updated folder references
             filterMeetings();
         }
 
@@ -4185,6 +4232,7 @@ Session started - waiting for activity...
 
         document.addEventListener('click', () => {
             hideMeetingContextMenu();
+            hideFolderContextMenu();
             // Restore original menu items when clicking away
             if (typeof restoreContextMenu === 'function') restoreContextMenu();
         });
@@ -4828,11 +4876,11 @@ Session started - waiting for activity...
             const eventsToShow = calendarEvents.slice(0, 3);
             list.innerHTML = eventsToShow.map((event, i) => {
                 const title = event.summary || 'No title';
-                const time = formatCalendarTime(event);
+                const meta = formatCalendarMeta(event);
                 const activeClass = selectedCalendarEvent === i ? ' active' : '';
                 return `<div class="calendar-sidebar-item${activeClass}" data-cal-index="${i}">
                     <span class="event-title">${escapeHtml(title)}</span>
-                    <span class="event-time">${time}</span>
+                    <span class="event-meta"><span class="event-time">${meta}</span></span>
                 </div>`;
             }).join('');
 
@@ -4842,6 +4890,21 @@ Session started - waiting for activity...
                     showCalendarEventDetail(idx);
                 });
             });
+        }
+
+        function formatCalendarMeta(event) {
+            const time = formatCalendarTime(event);
+            const now = new Date();
+            const start = event.start?.dateTime ? new Date(event.start.dateTime) : (event.start?.date ? new Date(event.start.date + 'T00:00:00') : null);
+            if (!start) return time;
+
+            const isToday = start.toDateString() === now.toDateString();
+            const tomorrow = new Date(now); tomorrow.setDate(now.getDate() + 1);
+            const isTomorrow = start.toDateString() === tomorrow.toDateString();
+
+            if (isToday) return `Today, ${time}`;
+            const datePart = isTomorrow ? 'Tomorrow' : start.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+            return `${datePart}, ${time}`;
         }
 
         function formatCalendarTime(event) {
