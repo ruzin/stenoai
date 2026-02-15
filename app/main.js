@@ -1,9 +1,12 @@
-const { app, BrowserWindow, ipcMain, dialog, shell, systemPreferences, globalShortcut } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, systemPreferences, globalShortcut, safeStorage } = require('electron');
 const path = require('path');
 const { spawn, exec } = require('child_process');
 const fs = require('fs');
 const https = require('https');
+const http = require('http');
 const os = require('os');
+const { URL, URLSearchParams } = require('url');
+const crypto = require('crypto');
 const { PostHog } = require('posthog-node');
 
 let mainWindow;
@@ -35,6 +38,13 @@ let anonymousId = null;
 
 const POSTHOG_API_KEY = 'phc_U2cnTyIyKGNSVaK18FyBMltd8nmN7uHxhhm21fAHwqb';
 const POSTHOG_HOST = 'https://us.i.posthog.com';
+
+// Google Calendar OAuth2 configuration
+const GOOGLE_CLIENT_ID = '281073275073-20da4u5t9luk2366vd5ai0a2r55d5pf5.apps.googleusercontent.com';
+const GOOGLE_CLIENT_SECRET = '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';
+const GOOGLE_SCOPES = 'https://www.googleapis.com/auth/calendar.readonly';
+const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
+const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 
 /**
  * Return a privacy-safe duration bucket string.
@@ -2333,6 +2343,381 @@ ipcMain.handle('open-release-page', async (event, url) => {
     await shell.openExternal(url);
     return { success: true };
   } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+// ── Google Calendar: Token Storage ──────────────────────────────────────
+
+function getTokenFilePath() {
+  return path.join(os.homedir(), 'Library', 'Application Support', 'stenoai', '.google-tokens');
+}
+
+function saveGoogleTokens(tokens) {
+  try {
+    const tokenDir = path.dirname(getTokenFilePath());
+    if (!fs.existsSync(tokenDir)) {
+      fs.mkdirSync(tokenDir, { recursive: true });
+    }
+    const encrypted = safeStorage.encryptString(JSON.stringify(tokens));
+    fs.writeFileSync(getTokenFilePath(), encrypted);
+    console.log('Google tokens saved');
+  } catch (error) {
+    console.error('Failed to save Google tokens:', error.message);
+  }
+}
+
+function loadGoogleTokens() {
+  try {
+    const tokenPath = getTokenFilePath();
+    if (!fs.existsSync(tokenPath)) return null;
+    const encrypted = fs.readFileSync(tokenPath);
+    const decrypted = safeStorage.decryptString(encrypted);
+    return JSON.parse(decrypted);
+  } catch (error) {
+    console.error('Failed to load Google tokens:', error.message);
+    return null;
+  }
+}
+
+function deleteGoogleTokens() {
+  try {
+    const tokenPath = getTokenFilePath();
+    if (fs.existsSync(tokenPath)) {
+      fs.unlinkSync(tokenPath);
+      console.log('Google tokens deleted');
+    }
+  } catch (error) {
+    console.error('Failed to delete Google tokens:', error.message);
+  }
+}
+
+// ── Google Calendar: OAuth2 Flow with PKCE ──────────────────────────────
+
+function startGoogleAuth() {
+  return new Promise((resolve, reject) => {
+    // Generate PKCE code verifier and challenge
+    const codeVerifier = crypto.randomBytes(32).toString('base64url');
+    const codeChallenge = crypto.createHash('sha256').update(codeVerifier).digest('base64url');
+
+    // Start temporary HTTP server on loopback for OAuth redirect
+    const server = http.createServer(async (req, res) => {
+      try {
+        const reqUrl = new URL(req.url, `http://127.0.0.1`);
+        if (!reqUrl.pathname.startsWith('/callback')) {
+          res.writeHead(404);
+          res.end();
+          return;
+        }
+
+        const code = reqUrl.searchParams.get('code');
+        const error = reqUrl.searchParams.get('error');
+
+        if (error) {
+          res.writeHead(200, { 'Content-Type': 'text/html' });
+          res.end('<html><body><h2>Authorization denied</h2><p>You can close this tab.</p></body></html>');
+          server.close();
+          reject(new Error(`Auth denied: ${error}`));
+          return;
+        }
+
+        if (!code) {
+          res.writeHead(400, { 'Content-Type': 'text/html' });
+          res.end('<html><body><h2>Missing authorization code</h2></body></html>');
+          return;
+        }
+
+        // Exchange code for tokens
+        const port = server.address().port;
+        const tokens = await exchangeCodeForTokens(code, codeVerifier, port);
+        saveGoogleTokens(tokens);
+
+        res.writeHead(200, { 'Content-Type': 'text/html' });
+        res.end('<html><body style="font-family: -apple-system, sans-serif; text-align: center; padding: 60px;"><h2>Connected to Google Calendar</h2><p>You can close this tab and return to StenoAI.</p></body></html>');
+
+        server.close();
+
+        // Notify renderer
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('google-auth-changed');
+        }
+
+        resolve({ success: true });
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'text/html' });
+        res.end('<html><body><h2>Authentication failed</h2><p>Please try again.</p></body></html>');
+        server.close();
+        reject(err);
+      }
+    });
+
+    // Listen on loopback only (security: not 0.0.0.0)
+    server.listen(0, '127.0.0.1', () => {
+      const port = server.address().port;
+      const redirectUri = `http://127.0.0.1:${port}/callback`;
+
+      const authParams = new URLSearchParams({
+        client_id: GOOGLE_CLIENT_ID,
+        redirect_uri: redirectUri,
+        response_type: 'code',
+        scope: GOOGLE_SCOPES,
+        access_type: 'offline',
+        prompt: 'consent',
+        code_challenge: codeChallenge,
+        code_challenge_method: 'S256'
+      });
+
+      const authUrl = `${GOOGLE_AUTH_URL}?${authParams.toString()}`;
+      shell.openExternal(authUrl);
+    });
+
+    // 5-minute timeout on the temp server
+    setTimeout(() => {
+      if (server.listening) {
+        server.close();
+        reject(new Error('OAuth timeout: no response within 5 minutes'));
+      }
+    }, 5 * 60 * 1000);
+  });
+}
+
+function exchangeCodeForTokens(code, codeVerifier, port) {
+  return new Promise((resolve, reject) => {
+    const redirectUri = `http://127.0.0.1:${port}/callback`;
+    const postData = new URLSearchParams({
+      code,
+      client_id: GOOGLE_CLIENT_ID,
+      client_secret: GOOGLE_CLIENT_SECRET,
+      redirect_uri: redirectUri,
+      grant_type: 'authorization_code',
+      code_verifier: codeVerifier
+    }).toString();
+
+    const options = {
+      hostname: 'oauth2.googleapis.com',
+      path: '/token',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Content-Length': Buffer.byteLength(postData)
+      }
+    };
+
+    const req = https.request(options, (res) => {
+      let data = '';
+      res.on('data', (chunk) => { data += chunk; });
+      res.on('end', () => {
+        try {
+          const parsed = JSON.parse(data);
+          if (parsed.error) {
+            reject(new Error(`Token exchange failed: ${parsed.error_description || parsed.error}`));
+            return;
+          }
+          // Store expiry as absolute timestamp
+          parsed.expires_at = Date.now() + (parsed.expires_in * 1000);
+          resolve(parsed);
+        } catch (err) {
+          reject(new Error('Failed to parse token response'));
+        }
+      });
+    });
+
+    req.on('error', reject);
+    req.write(postData);
+    req.end();
+  });
+}
+
+// ── Google Calendar: Token Refresh ──────────────────────────────────────
+
+async function getValidAccessToken() {
+  const tokens = loadGoogleTokens();
+  if (!tokens) return null;
+
+  // Check if token is expired or about to expire (5-min buffer)
+  const bufferMs = 5 * 60 * 1000;
+  if (tokens.expires_at && Date.now() < tokens.expires_at - bufferMs) {
+    return tokens.access_token;
+  }
+
+  // Token expired, try to refresh
+  if (!tokens.refresh_token) {
+    deleteGoogleTokens();
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('google-auth-changed');
+    }
+    return null;
+  }
+
+  try {
+    const newTokens = await refreshAccessToken(tokens.refresh_token);
+    // Preserve the refresh token (Google may not return it again)
+    newTokens.refresh_token = newTokens.refresh_token || tokens.refresh_token;
+    newTokens.expires_at = Date.now() + (newTokens.expires_in * 1000);
+    saveGoogleTokens(newTokens);
+    return newTokens.access_token;
+  } catch (error) {
+    console.error('Token refresh failed:', error.message);
+    deleteGoogleTokens();
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('google-auth-changed');
+    }
+    return null;
+  }
+}
+
+function refreshAccessToken(refreshToken) {
+  return new Promise((resolve, reject) => {
+    const postData = new URLSearchParams({
+      client_id: GOOGLE_CLIENT_ID,
+      client_secret: GOOGLE_CLIENT_SECRET,
+      refresh_token: refreshToken,
+      grant_type: 'refresh_token'
+    }).toString();
+
+    const options = {
+      hostname: 'oauth2.googleapis.com',
+      path: '/token',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Content-Length': Buffer.byteLength(postData)
+      }
+    };
+
+    const req = https.request(options, (res) => {
+      let data = '';
+      res.on('data', (chunk) => { data += chunk; });
+      res.on('end', () => {
+        try {
+          const parsed = JSON.parse(data);
+          if (parsed.error) {
+            reject(new Error(`Refresh failed: ${parsed.error_description || parsed.error}`));
+            return;
+          }
+          resolve(parsed);
+        } catch (err) {
+          reject(new Error('Failed to parse refresh response'));
+        }
+      });
+    });
+
+    req.on('error', reject);
+    req.write(postData);
+    req.end();
+  });
+}
+
+// ── Google Calendar: Fetch Events ───────────────────────────────────────
+
+function fetchCalendarEvents(accessToken, maxResults = 7) {
+  return new Promise((resolve, reject) => {
+    const now = new Date().toISOString();
+    const params = new URLSearchParams({
+      timeMin: now,
+      maxResults: String(maxResults),
+      singleEvents: 'true',
+      orderBy: 'startTime',
+      fields: 'items(id,summary,description,start,end,attendees,htmlLink,conferenceData)'
+    });
+
+    const options = {
+      hostname: 'www.googleapis.com',
+      path: `/calendar/v3/calendars/primary/events?${params.toString()}`,
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`
+      }
+    };
+
+    const req = https.request(options, (res) => {
+      let data = '';
+      res.on('data', (chunk) => { data += chunk; });
+      res.on('end', () => {
+        try {
+          const parsed = JSON.parse(data);
+          if (parsed.error) {
+            reject(new Error(`Calendar API error: ${parsed.error.message || parsed.error}`));
+            return;
+          }
+          resolve(parsed.items || []);
+        } catch (err) {
+          reject(new Error('Failed to parse calendar response'));
+        }
+      });
+    });
+
+    req.on('error', reject);
+    req.end();
+  });
+}
+
+// ── Google Calendar: IPC Handlers ───────────────────────────────────────
+
+ipcMain.handle('google-auth-start', async () => {
+  try {
+    await startGoogleAuth();
+    return { success: true };
+  } catch (error) {
+    console.error('Google auth failed:', error.message);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('google-auth-status', async () => {
+  try {
+    const tokens = loadGoogleTokens();
+    return { success: true, connected: !!tokens };
+  } catch (error) {
+    return { success: false, connected: false };
+  }
+});
+
+ipcMain.handle('google-auth-disconnect', async () => {
+  try {
+    // Best-effort token revocation
+    const tokens = loadGoogleTokens();
+    if (tokens && tokens.access_token) {
+      try {
+        await new Promise((resolve) => {
+          const revokeParams = new URLSearchParams({ token: tokens.access_token });
+          const req = https.request({
+            hostname: 'oauth2.googleapis.com',
+            path: `/revoke?${revokeParams.toString()}`,
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+          }, () => resolve());
+          req.on('error', () => resolve()); // Best-effort
+          req.end();
+        });
+      } catch (e) {
+        // Best-effort revocation -- ignore errors
+      }
+    }
+
+    deleteGoogleTokens();
+
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('google-auth-changed');
+    }
+
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('get-calendar-events', async () => {
+  try {
+    const accessToken = await getValidAccessToken();
+    if (!accessToken) {
+      return { success: false, needsAuth: true };
+    }
+
+    const events = await fetchCalendarEvents(accessToken);
+    return { success: true, events };
+  } catch (error) {
+    console.error('Failed to fetch calendar events:', error.message);
     return { success: false, error: error.message };
   }
 });

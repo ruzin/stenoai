@@ -1325,6 +1325,209 @@
             color: var(--text-primary);
         }
         
+        /* Calendar sidebar section */
+        .calendar-sidebar {
+            display: none;
+            flex-direction: column;
+            padding: 0 12px;
+        }
+
+        .calendar-sidebar.show {
+            display: flex;
+        }
+
+        .calendar-sidebar-header {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+            padding: 12px 8px 6px;
+        }
+
+        .calendar-sidebar-header svg {
+            color: var(--text-muted);
+            flex-shrink: 0;
+        }
+
+        .calendar-sidebar-item {
+            display: flex;
+            align-items: center;
+            height: 32px;
+            padding: 0 8px;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: background 0.15s ease;
+            gap: 8px;
+        }
+
+        .calendar-sidebar-item:hover {
+            background: var(--bg-surface);
+        }
+
+        .calendar-sidebar-item.active {
+            background: var(--bg-surface);
+            border-left: 2px solid var(--accent-primary, #818cf8);
+            padding-left: 6px;
+        }
+
+        .calendar-sidebar-item .event-title {
+            font-size: 13px;
+            color: var(--text-primary);
+            flex: 1;
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .calendar-sidebar-item .event-time {
+            font-size: 12px;
+            color: var(--text-muted);
+            flex-shrink: 0;
+        }
+
+        .calendar-sidebar-separator {
+            height: 1px;
+            background: var(--border-subtle);
+            margin: 8px 8px 4px;
+        }
+
+        /* Sidebar collapse: hide calendar section too */
+        .sidebar > .calendar-sidebar {
+            opacity: 1;
+            transition: opacity 0.2s ease 0.1s;
+        }
+
+        .sidebar.collapsed .calendar-sidebar {
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.1s ease;
+        }
+
+        /* Calendar event detail view */
+        .calendar-event-detail {
+            padding: 40px 48px;
+            height: 100%;
+            overflow-y: auto;
+            display: none;
+            flex-direction: column;
+        }
+
+        .calendar-event-detail.show {
+            display: flex;
+        }
+
+        .calendar-detail-back {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            font-size: 13px;
+            cursor: pointer;
+            padding: 4px 0;
+            margin-bottom: 20px;
+            transition: color 0.15s ease;
+        }
+
+        .calendar-detail-back:hover {
+            color: var(--text-primary);
+        }
+
+        .calendar-detail-title {
+            font-size: 22px;
+            font-weight: 700;
+            color: var(--text-primary);
+            margin: 0 0 16px;
+        }
+
+        .calendar-detail-meta {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin-bottom: 28px;
+        }
+
+        .calendar-detail-meta-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+
+        .calendar-detail-meta-row svg {
+            color: var(--text-muted);
+            flex-shrink: 0;
+        }
+
+        .calendar-detail-section {
+            margin-bottom: 24px;
+        }
+
+        .calendar-detail-section h3 {
+            font-size: 13px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+            margin: 0 0 10px;
+        }
+
+        .calendar-detail-attendees {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+
+        .calendar-detail-attendee {
+            background: var(--bg-surface);
+            border: 1px solid var(--border-subtle);
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .calendar-detail-description {
+            font-size: 14px;
+            line-height: 1.6;
+            color: var(--text-secondary);
+            white-space: pre-wrap;
+        }
+
+        .calendar-record-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: var(--accent-primary, #818cf8);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: opacity 0.15s ease;
+            margin-top: 8px;
+        }
+
+        .calendar-record-btn:hover {
+            opacity: 0.9;
+        }
+
+        .calendar-record-btn .record-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #ef4444;
+        }
+
         /* Meeting detail view */
         .meeting-detail {
             padding: 32px;
@@ -1332,7 +1535,7 @@
             overflow-y: auto;
             display: none;
         }
-        
+
         .meeting-detail.show {
             display: block;
         }
@@ -2772,6 +2975,15 @@
                 </div>
             </div>
             
+            <div class="calendar-sidebar" id="calendar-sidebar">
+                <div class="calendar-sidebar-header">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+                    Coming up
+                </div>
+                <div id="calendar-sidebar-list"></div>
+                <div class="calendar-sidebar-separator"></div>
+            </div>
+
             <div class="folder-list" id="folder-list">
                 <!-- Folders rendered here -->
             </div>
@@ -2813,6 +3025,37 @@
                     <kbd class="kbd">R</kbd>
                     <span>anywhere</span>
                 </div>
+            </div>
+
+            <!-- Calendar event detail view -->
+            <div class="calendar-event-detail" id="calendar-event-detail">
+                <button class="calendar-detail-back" id="calendar-detail-back">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>
+                    Back
+                </button>
+                <h2 class="calendar-detail-title" id="calendar-detail-title"></h2>
+                <div class="calendar-detail-meta">
+                    <div class="calendar-detail-meta-row" id="calendar-detail-time">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                        <span></span>
+                    </div>
+                    <div class="calendar-detail-meta-row" id="calendar-detail-date">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+                        <span></span>
+                    </div>
+                </div>
+                <div class="calendar-detail-section" id="calendar-detail-attendees-section" style="display: none;">
+                    <h3>Attendees</h3>
+                    <div class="calendar-detail-attendees" id="calendar-detail-attendees"></div>
+                </div>
+                <div class="calendar-detail-section" id="calendar-detail-description-section" style="display: none;">
+                    <h3>Description</h3>
+                    <div class="calendar-detail-description" id="calendar-detail-description"></div>
+                </div>
+                <button class="calendar-record-btn" id="calendar-record-btn">
+                    <span class="record-dot"></span>
+                    Record this meeting
+                </button>
             </div>
 
             <!-- Meeting detail view -->
@@ -3234,6 +3477,14 @@ Commands and output will appear here...
                         </select>
                     </div>
 
+                    <div class="settings-row">
+                        <div class="settings-row-text">
+                            <span>Google Calendar</span>
+                            <small id="google-cal-status-text" style="color: var(--text-muted);">Checking...</small>
+                        </div>
+                        <button class="settings-action-btn" id="google-cal-btn" onclick="toggleGoogleCalendar()">Connect</button>
+                    </div>
+
                     <div class="settings-row" style="flex-wrap: wrap;">
                         <div class="settings-row-text" style="flex: 1; min-width: 0;">
                             <span>Storage location</span>
@@ -3369,9 +3620,12 @@ Session started - waiting for activity...
         // Brand click - return to home state
         document.querySelector('.brand').addEventListener('click', () => {
             selectedMeeting = null;
+            selectedCalendarEvent = null;
             document.getElementById('empty-state').style.display = 'flex';
             document.getElementById('meeting-detail').classList.remove('show');
+            document.getElementById('calendar-event-detail').classList.remove('show');
             document.querySelectorAll('.meeting-item').forEach(item => item.classList.remove('active'));
+            renderCalendarSidebar();
         });
 
         const startBtn = document.getElementById('start-btn');
@@ -3436,6 +3690,12 @@ Session started - waiting for activity...
         // Announcement system variables
         let currentAnnouncement = null;
         let announcementCheckInterval = null;
+
+        // Google Calendar state
+        let calendarConnected = false;
+        let calendarEvents = [];
+        let selectedCalendarEvent = null;
+        let calendarRefreshInterval = null;
         
         // Utility functions
         function log(message) {
@@ -4147,12 +4407,17 @@ Session started - waiting for activity...
         function selectMeeting(index) {
             selectedMeeting = filteredMeetings[index];
             if (!selectedMeeting) return;
-            
+
+            // Deselect calendar event
+            selectedCalendarEvent = null;
+            document.getElementById('calendar-event-detail').classList.remove('show');
+            renderCalendarSidebar();
+
             // Update active state
             document.querySelectorAll('.meeting-item').forEach((item, i) => {
                 item.classList.toggle('active', i === index);
             });
-            
+
             // Show meeting details
             emptyState.style.display = 'none';
             meetingDetail.classList.add('show');
@@ -4506,6 +4771,201 @@ Session started - waiting for activity...
             }
         }
 
+        // ── Google Calendar Functions ────────────────────────────────────────
+
+        async function checkGoogleCalendarStatus() {
+            try {
+                const result = await ipcRenderer.invoke('google-auth-status');
+                calendarConnected = result.success && result.connected;
+                updateCalendarSettingsUI();
+                if (calendarConnected) {
+                    await loadCalendarEvents();
+                    if (calendarRefreshInterval) clearInterval(calendarRefreshInterval);
+                    calendarRefreshInterval = setInterval(loadCalendarEvents, 5 * 60 * 1000);
+                } else {
+                    renderCalendarSidebar();
+                }
+            } catch (error) {
+                log(`Calendar status check failed: ${error.message}`);
+                calendarConnected = false;
+                updateCalendarSettingsUI();
+                renderCalendarSidebar();
+            }
+        }
+
+        async function loadCalendarEvents() {
+            try {
+                const result = await ipcRenderer.invoke('get-calendar-events');
+                if (result.needsAuth) {
+                    calendarConnected = false;
+                    calendarEvents = [];
+                    updateCalendarSettingsUI();
+                    renderCalendarSidebar();
+                    return;
+                }
+                if (result.success) {
+                    calendarEvents = result.events;
+                } else {
+                    calendarEvents = [];
+                }
+            } catch (error) {
+                log(`Failed to load calendar events: ${error.message}`);
+                calendarEvents = [];
+            }
+            renderCalendarSidebar();
+        }
+
+        function renderCalendarSidebar() {
+            const container = document.getElementById('calendar-sidebar');
+            const list = document.getElementById('calendar-sidebar-list');
+
+            if (!calendarConnected || calendarEvents.length === 0) {
+                container.classList.remove('show');
+                return;
+            }
+
+            container.classList.add('show');
+            const eventsToShow = calendarEvents.slice(0, 3);
+            list.innerHTML = eventsToShow.map((event, i) => {
+                const title = event.summary || 'No title';
+                const time = formatCalendarTime(event);
+                const activeClass = selectedCalendarEvent === i ? ' active' : '';
+                return `<div class="calendar-sidebar-item${activeClass}" data-cal-index="${i}">
+                    <span class="event-title">${escapeHtml(title)}</span>
+                    <span class="event-time">${time}</span>
+                </div>`;
+            }).join('');
+
+            list.querySelectorAll('.calendar-sidebar-item').forEach(item => {
+                item.addEventListener('click', () => {
+                    const idx = parseInt(item.dataset.calIndex);
+                    showCalendarEventDetail(idx);
+                });
+            });
+        }
+
+        function formatCalendarTime(event) {
+            if (event.start?.dateTime) {
+                return new Date(event.start.dateTime).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+            }
+            if (event.start?.date) return 'All day';
+            return '';
+        }
+
+        function formatCalendarDateFull(event) {
+            const dt = event.start?.dateTime ? new Date(event.start.dateTime) : (event.start?.date ? new Date(event.start.date + 'T00:00:00') : null);
+            if (!dt) return '';
+            return dt.toLocaleDateString([], { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+        }
+
+        function formatCalendarTimeRange(event) {
+            if (event.start?.dateTime && event.end?.dateTime) {
+                const fmt = { hour: 'numeric', minute: '2-digit' };
+                return `${new Date(event.start.dateTime).toLocaleTimeString([], fmt)} - ${new Date(event.end.dateTime).toLocaleTimeString([], fmt)}`;
+            }
+            return 'All day';
+        }
+
+        function showCalendarEventDetail(index) {
+            const event = calendarEvents[index];
+            if (!event) return;
+
+            selectedCalendarEvent = index;
+            selectedMeeting = null;
+            document.querySelectorAll('.meeting-item').forEach(item => item.classList.remove('active'));
+
+            document.getElementById('empty-state').style.display = 'none';
+            document.getElementById('meeting-detail').classList.remove('show');
+
+            document.getElementById('calendar-detail-title').textContent = event.summary || 'No title';
+            document.getElementById('calendar-detail-time').querySelector('span').textContent = formatCalendarTimeRange(event);
+            document.getElementById('calendar-detail-date').querySelector('span').textContent = formatCalendarDateFull(event);
+
+            const attendeesSection = document.getElementById('calendar-detail-attendees-section');
+            const attendeesContainer = document.getElementById('calendar-detail-attendees');
+            if (event.attendees && event.attendees.length > 0) {
+                attendeesSection.style.display = 'block';
+                attendeesContainer.innerHTML = event.attendees.map(a => {
+                    const name = a.displayName || a.email || 'Unknown';
+                    return `<span class="calendar-detail-attendee">${escapeHtml(name)}</span>`;
+                }).join('');
+            } else {
+                attendeesSection.style.display = 'none';
+            }
+
+            const descSection = document.getElementById('calendar-detail-description-section');
+            const descContainer = document.getElementById('calendar-detail-description');
+            if (event.description) {
+                descSection.style.display = 'block';
+                descContainer.textContent = event.description;
+            } else {
+                descSection.style.display = 'none';
+            }
+
+            document.getElementById('calendar-event-detail').classList.add('show');
+            renderCalendarSidebar();
+        }
+
+        function hideCalendarEventDetail() {
+            selectedCalendarEvent = null;
+            document.getElementById('calendar-event-detail').classList.remove('show');
+            document.getElementById('empty-state').style.display = 'flex';
+            renderCalendarSidebar();
+        }
+
+        function recordCalendarEvent() {
+            if (selectedCalendarEvent === null) return;
+            const event = calendarEvents[selectedCalendarEvent];
+            if (!event) return;
+            document.getElementById('session-name').value = event.summary || 'Meeting';
+            hideCalendarEventDetail();
+            document.getElementById('start-btn').click();
+        }
+
+        async function toggleGoogleCalendar() {
+            const btn = document.getElementById('google-cal-btn');
+            if (calendarConnected) {
+                btn.disabled = true;
+                btn.textContent = 'Disconnecting...';
+                await ipcRenderer.invoke('google-auth-disconnect');
+                calendarConnected = false;
+                calendarEvents = [];
+                selectedCalendarEvent = null;
+                if (calendarRefreshInterval) { clearInterval(calendarRefreshInterval); calendarRefreshInterval = null; }
+                document.getElementById('calendar-event-detail').classList.remove('show');
+                document.getElementById('empty-state').style.display = 'flex';
+                updateCalendarSettingsUI();
+                renderCalendarSidebar();
+            } else {
+                btn.disabled = true;
+                btn.textContent = 'Connecting...';
+                const result = await ipcRenderer.invoke('google-auth-start');
+                if (!result.success) log(`Google Calendar connect failed: ${result.error}`);
+                btn.disabled = false;
+                updateCalendarSettingsUI();
+            }
+        }
+
+        function updateCalendarSettingsUI() {
+            const statusText = document.getElementById('google-cal-status-text');
+            const btn = document.getElementById('google-cal-btn');
+            if (calendarConnected) {
+                statusText.textContent = 'Connected';
+                statusText.style.color = '#22c55e';
+                btn.textContent = 'Disconnect';
+                btn.disabled = false;
+            } else {
+                statusText.textContent = 'Not connected';
+                statusText.style.color = 'var(--text-muted)';
+                btn.textContent = 'Connect';
+                btn.disabled = false;
+            }
+        }
+
+        ipcRenderer.on('google-auth-changed', () => { checkGoogleCalendarStatus(); });
+        document.getElementById('calendar-detail-back').addEventListener('click', hideCalendarEventDetail);
+        document.getElementById('calendar-record-btn').addEventListener('click', recordCalendarEvent);
+
         // Auto-clear state on startup
         async function initializeApp() {
             // Clear debug logs for fresh start
@@ -4542,6 +5002,9 @@ Session started - waiting for activity...
                     ),
                     loadStoragePath().catch(err =>
                         log(`Storage path load failed: ${err.message}`)
+                    ),
+                    checkGoogleCalendarStatus().catch(err =>
+                        log(`Calendar status check failed: ${err.message}`)
                     )
                 ]);
                 
