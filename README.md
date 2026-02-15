@@ -28,12 +28,12 @@
 
 <p align="center"><sub><i>Disclaimer: This is an independent open-source project for meeting-notes productivity and is not affiliated with, endorsed by, or associated with any similarly named company.</i></sub></p>
 
-## What's New
+## 📢 What's New
 
-- **2025-02-15** — Folder organization — Organize meetings into folders with drag-and-drop, context menus, and compact line-item view
-- **2025-02-15** — Custom save location — Choose where StenoAI stores recordings, transcripts, and summaries
-- **2025-02-14** — Official Apple notarized app — Signed and notarized macOS builds, no more Gatekeeper warnings
-- Coming soon — Google Calendar integration — Auto-name recordings from calendar events
+- **2025-02-15** 📁 Folder organization — Organize meetings into folders with drag-and-drop, context menus, and compact line-item view
+- **2025-02-15** 💾 Custom save location — Choose where StenoAI stores recordings, transcripts, and summaries
+- **2025-02-14** 🍎 Official Apple notarized app — Signed and notarized macOS builds, no more Gatekeeper warnings
+- 🔜 Google Calendar integration — Auto-name recordings from calendar events
 
 ## Features
 
