@@ -3664,14 +3664,15 @@ Session started - waiting for activity...
         
         // Filter meetings based on search query
         function filterMeetings() {
+            const hasSearch = searchQuery.trim().length > 0;
             let source = [...meetings];
-            // Filter by active folder; "All Meetings" (null) = unfiled only
-            if (activeFolderId) {
-                source = source.filter(m => (m.folders || []).includes(activeFolderId));
-            } else {
-                source = source.filter(m => (m.folders || []).length === 0);
-            }
-            if (!searchQuery.trim()) {
+            // When searching, search across ALL meetings regardless of folder
+            if (!hasSearch) {
+                if (activeFolderId) {
+                    source = source.filter(m => (m.folders || []).includes(activeFolderId));
+                } else {
+                    source = source.filter(m => (m.folders || []).length === 0);
+                }
                 filteredMeetings = source;
             } else {
                 const query = searchQuery.toLowerCase();
