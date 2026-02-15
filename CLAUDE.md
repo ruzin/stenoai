@@ -104,6 +104,14 @@ This app ships as a signed DMG to real users. Before considering any change comp
 - Keep commit messages concise and focused on what changed
 - Use conventional commit format when appropriate (feat:, fix:, docs:, etc.)
 
+## README "What's New" Section
+The README has a "What's New" table that should be updated every ~2 weeks. When asked to update it (or when shipping a notable feature):
+1. Check recently merged PRs: `gh pr list --state merged --limit 10`
+2. For each notable PR, add a row to the table with the merge date and a one-sentence summary
+3. Keep "Coming soon" items for features that are planned but not yet shipped
+4. Remove entries older than ~2 months to keep the section fresh
+5. Most recent entries go at the top of the table
+
 ## Session Logging
 When the user says "log session" or similar (e.g., "update session log", "document this session"):
 1. Update SESSION_LOG.md in the root directory with the current session details
