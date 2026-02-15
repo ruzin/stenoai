@@ -30,10 +30,10 @@
 
 ## 📢 What's New
 
-- **2025-02-15** 📁 Folder organization — Organize meetings into folders with drag-and-drop, context menus, and compact line-item view
-- **2025-02-15** 💾 Custom save location — Choose where StenoAI stores recordings, transcripts, and summaries
-- **2025-02-14** 🍎 Official Apple notarized app — Signed and notarized macOS builds, no more Gatekeeper warnings
-- 🔜 Google Calendar integration — Auto-name recordings from calendar events
+- **2026-02-15** 📅 Google Calendar integration — Auto-name recordings from your upcoming meetings, view today's schedule in the sidebar
+- **2026-02-15** 🎨 Sidebar UX redesign — Collapsible sidebar with calendar panel and streamlined navigation
+- **2026-02-15** 💾 Custom save location — Choose where StenoAI stores recordings, transcripts, and summaries
+- **2026-02-15** 📁 Compact meeting list — Streamlined meeting line items with folder organization
 
 ## Features
 
