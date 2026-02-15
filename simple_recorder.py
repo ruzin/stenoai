@@ -810,15 +810,34 @@ def test():
 @cli.command()
 def list_meetings():
     """List all processed meetings - optimized for fast loading"""
-    from src.config import get_data_dirs
+    from src.config import get_data_dirs, get_config
     dirs = get_data_dirs()
     output_dir = dirs["output"]
-    
+
     # Ensure output directory exists
     output_dir.mkdir(parents=True, exist_ok=True)
-    
-    # Get all summary files - use glob pattern for speed
-    summaries = list(output_dir.glob("*_summary.json"))
+
+    # Collect summary files from current output dir
+    seen_files = set()
+    summaries = []
+    for f in output_dir.glob("*_summary.json"):
+        summaries.append(f)
+        seen_files.add(f.resolve())
+
+    # Also scan the default location if a custom path is set,
+    # so meetings stored before the path change remain visible
+    custom = get_config().get_storage_path()
+    if custom:
+        if "StenoAI.app" in str(Path(__file__)) or "Applications" in str(Path(__file__)):
+            default_output = Path.home() / "Library" / "Application Support" / "stenoai" / "output"
+        else:
+            default_output = Path(__file__).parent / "output"
+        if default_output.exists():
+            for f in default_output.glob("*_summary.json"):
+                if f.resolve() not in seen_files:
+                    summaries.append(f)
+                    seen_files.add(f.resolve())
+
     meetings = []
     
     # Sort by actual meeting date, with fallback to modification time
@@ -976,12 +995,27 @@ def query(transcript_file, question):
 def list_failed():
     """List summary files that failed processing (have fallback summaries)"""
     import json
-    from src.config import get_data_dirs
+    from src.config import get_data_dirs, get_config
     dirs = get_data_dirs()
     output_dir = dirs["output"]
-    
-    # Get all summary files
-    summaries = list(output_dir.glob("*_summary.json"))
+
+    # Collect from current and default locations
+    seen_files = set()
+    summaries = []
+    for f in output_dir.glob("*_summary.json"):
+        summaries.append(f)
+        seen_files.add(f.resolve())
+    custom = get_config().get_storage_path()
+    if custom:
+        if "StenoAI.app" in str(Path(__file__)) or "Applications" in str(Path(__file__)):
+            default_output = Path.home() / "Library" / "Application Support" / "stenoai" / "output"
+        else:
+            default_output = Path(__file__).parent / "output"
+        if default_output.exists():
+            for f in default_output.glob("*_summary.json"):
+                if f.resolve() not in seen_files:
+                    summaries.append(f)
+
     failed_summaries = []
     
     for summary_file in summaries:
