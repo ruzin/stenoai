@@ -16,6 +16,23 @@ let launchedByShortcut = false;
 const SHORTCUT_PROTOCOL = 'stenoai';
 const SHORTCUT_HOST = 'record';
 
+function registerShortcutProtocolClient() {
+  if (process.platform !== 'darwin') {
+    return false;
+  }
+
+  // In development (electron .), macOS protocol registration needs executable + app args.
+  if (!app.isPackaged) {
+    return app.setAsDefaultProtocolClient(
+      SHORTCUT_PROTOCOL,
+      process.execPath,
+      [path.resolve(process.argv[1])]
+    );
+  }
+
+  return app.setAsDefaultProtocolClient(SHORTCUT_PROTOCOL);
+}
+
 // Backend executable path - always use bundled stenoai
 function getBackendPath() {
   if (app.isPackaged) {
@@ -370,6 +387,7 @@ app.on('open-url', (event, incomingUrl) => {
   }
 
   event.preventDefault();
+  console.log(`Received shortcut URL via open-url: ${incomingUrl}`);
   launchedByShortcut = true;
 
   if (!app.isReady()) {
@@ -383,10 +401,8 @@ app.on('open-url', (event, incomingUrl) => {
 app.whenReady().then(async () => {
   createWindow();
 
-  if (process.platform === 'darwin') {
-    const protocolRegistered = app.setAsDefaultProtocolClient(SHORTCUT_PROTOCOL);
-    console.log(`Protocol handler registration (${SHORTCUT_PROTOCOL}): ${protocolRegistered}`);
-  }
+  const protocolRegistered = registerShortcutProtocolClient();
+  console.log(`Protocol handler registration (${SHORTCUT_PROTOCOL}): ${protocolRegistered}`);
 
   // Initialize telemetry and track app open
   await initTelemetry();
@@ -428,6 +444,15 @@ app.whenReady().then(async () => {
     }
   }
 });
+
+// Fallback for launch contexts where deep-link may arrive via argv instead of open-url.
+if (process.platform === 'darwin') {
+  const argvShortcutUrl = process.argv.find(arg => typeof arg === 'string' && arg.startsWith(`${SHORTCUT_PROTOCOL}://`));
+  if (argvShortcutUrl) {
+    pendingShortcutUrls.push(argvShortcutUrl);
+    launchedByShortcut = true;
+  }
+}
 
 app.on('will-quit', async () => {
   // Unregister all shortcuts when the app is about to quit

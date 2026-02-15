@@ -4528,9 +4528,21 @@ Session started - waiting for activity...
                 
                 // Do maintenance tasks in parallel
                 const maintenancePromise = Promise.all([
-                    ipcRenderer.invoke('clear-state').catch(err =>
-                        log(`State clear failed: ${err.message}`)
-                    ),
+                    (async () => {
+                        try {
+                            const queueStatus = await ipcRenderer.invoke('get-queue-status');
+                            if (queueStatus.success && queueStatus.hasRecording) {
+                                log('Skipping clear-state: recording is active');
+                                return;
+                            }
+                        } catch (err) {
+                            log(`Queue status check failed before clear-state: ${err.message}`);
+                        }
+
+                        return ipcRenderer.invoke('clear-state').catch(err =>
+                            log(`State clear failed: ${err.message}`)
+                        );
+                    })(),
                     checkInitialStatus().catch(err =>
                         log(`Status check failed: ${err.message}`)
                     ),
@@ -6288,7 +6300,13 @@ Session started - waiting for activity...
 
         // Initialize
         initializeApp().then(() => {
-            runStartupCheck().then(() => {
+            runStartupCheck().then(async () => {
+                // Final status sync after startup/setup checks to avoid stale READY UI
+                // when recording was started while window was hidden.
+                await checkInitialStatus().catch(err =>
+                    log(`Final status sync failed: ${err.message}`)
+                );
+
                 // Check for announcements and updates after app initialization
                 setTimeout(() => {
                     runAnnouncementChecks();
