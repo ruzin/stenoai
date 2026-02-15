@@ -44,6 +44,74 @@
 - **Privacy-first** - 100% local processing, your data never leaves your device
 - **macOS desktop app** with intuitive interface
 
+## macOS Shortcuts
+
+StenoAI supports Apple Shortcuts via deep links using the `stenoai://` URL scheme.
+
+- Start recording: `stenoai://record/start?name=Daily%20Standup`
+- Stop recording: `stenoai://record/stop`
+
+### How to set it up
+
+1. Open the **Shortcuts** app on macOS.
+2. Create a new shortcut (for example: "Start StenoAI Recording").
+3. Add the **Open URLs** action.
+4. Use one of the URLs above.
+5. (Optional) Add a keyboard shortcut from the shortcut settings.
+
+### Calendar event naming (optional)
+
+If you want calendar-based names, resolve the event title in your Shortcut workflow and pass it as the `name` query value in the start URL.
+
+Example:
+
+`stenoai://record/start?name=Weekly%20Product%20Sync`
+
+### Calendar event start automation (via Rules bridge)
+
+macOS Shortcuts **cannot natively trigger** exactly at Calendar event start.  
+To run this automatically on event timing, a third-party automation app is required.
+
+This addon uses:
+
+- **Apple Shortcuts**: builds the `stenoai://record/start?...` action.
+- **Rules – Calendar Automation**: watches Calendar events and triggers the shortcut.
+
+#### Architecture overview
+
+1. Rules App monitors upcoming Calendar events.
+2. Rules checks the event note/body for a marker keyword (for example `stenoai`).
+3. If matched, Rules runs a Shortcut.
+4. The Shortcut gets the next event title and opens:
+   - `stenoai://record/start?name={calendar_event_title}`
+5. StenoAI receives the URL and starts recording with that name.
+
+#### Step-by-step setup
+
+1. Install **Rules – Calendar Automation** on macOS.
+2. Create a Shortcut in Apple Shortcuts (example name: `StenoAI Start From Calendar Event`).
+3. In that Shortcut, add actions in this order:
+   - `Find Calendar Events` (limit to `1`, sorted by start date ascending, upcoming only)
+   - Extract the event title from the found event
+   - `URL Encode` the title
+   - `Open URLs` with:
+     - `stenoai://record/start?name=<encoded title>`
+4. Open Rules and create a calendar-trigger rule:
+   - Source: your target calendar(s)
+   - Trigger window: event start (or preferred offset)
+   - Condition: event note contains `stenoai`
+   - Action: run Shortcut `StenoAI Start From Calendar`
+5. In your Calendar event notes, add the word `stenoai` for meetings that should auto-start recording.
+6. Test with a near-future event:
+   - create event with `stenoai` in notes,
+   - wait for trigger,
+   - confirm StenoAI starts and uses the event title as session name.
+
+#### Notes
+
+- Without Rules (or another automation bridge), this cannot be fully event-driven from Calendar start time.
+- Keep using regular manual shortcuts (`Open URLs`) for non-automated scenarios.
+
 Have questions or suggestions? [Join our Discord](https://discord.gg/DZ6vcQnxxu) to chat with the community.
 
 ## Models & Performance

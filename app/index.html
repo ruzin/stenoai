@@ -4528,9 +4528,21 @@ Session started - waiting for activity...
                 
                 // Do maintenance tasks in parallel
                 const maintenancePromise = Promise.all([
-                    ipcRenderer.invoke('clear-state').catch(err =>
-                        log(`State clear failed: ${err.message}`)
-                    ),
+                    (async () => {
+                        try {
+                            const queueStatus = await ipcRenderer.invoke('get-queue-status');
+                            if (queueStatus.success && queueStatus.hasRecording) {
+                                log('Skipping clear-state: recording is active');
+                                return;
+                            }
+                        } catch (err) {
+                            log(`Queue status check failed before clear-state: ${err.message}`);
+                        }
+
+                        return ipcRenderer.invoke('clear-state').catch(err =>
+                            log(`State clear failed: ${err.message}`)
+                        );
+                    })(),
                     checkInitialStatus().catch(err =>
                         log(`Status check failed: ${err.message}`)
                     ),
@@ -5002,6 +5014,52 @@ Session started - waiting for activity...
         ipcRenderer.on('debug-log', (event, message) => {
             debugLog(message);
         });
+
+        // Listen for macOS shortcut start action
+        ipcRenderer.on('shortcut-start-recording', (event, payload = {}) => {
+            const shortcutName = typeof payload.sessionName === 'string'
+                ? payload.sessionName.trim()
+                : '';
+
+            log('Shortcut received: start recording');
+            if (uiState !== 'ready') {
+                log(`Shortcut start ignored in UI state: ${uiState}`);
+                return;
+            }
+
+            if (shortcutName) {
+                sessionNameInput.value = shortcutName;
+            }
+
+            startBtn.click();
+        });
+
+        // Listen for macOS shortcut stop action
+        ipcRenderer.on('shortcut-stop-recording', async () => {
+            log('Shortcut received: stop recording');
+
+            if (uiState === 'recording' || uiState === 'paused') {
+                stopBtn.click();
+                return;
+            }
+
+            // UI can still be in "ready" right after hidden-window startup while backend
+            // is already recording. In that case, allow stop based on backend truth.
+            try {
+                const statusResult = await ipcRenderer.invoke('get-status');
+                if (statusResult.success && statusResult.status.includes('RECORDING')) {
+                    log('Shortcut stop proceeding based on backend recording status');
+                    stopBtn.click();
+                } else {
+                    log(`Shortcut stop ignored in UI state: ${uiState}`);
+                }
+            } catch (error) {
+                log(`Shortcut stop status check failed: ${error.message}`);
+            }
+        });
+
+        // Signal to main process that shortcut listeners are attached
+        ipcRenderer.send('shortcut-renderer-ready');
 
         // Listen for global hotkey toggle recording
         ipcRenderer.on('toggle-recording-hotkey', () => {
@@ -6255,7 +6313,13 @@ Session started - waiting for activity...
 
         // Initialize
         initializeApp().then(() => {
-            runStartupCheck().then(() => {
+            runStartupCheck().then(async () => {
+                // Final status sync after startup/setup checks to avoid stale READY UI
+                // when recording was started while window was hidden.
+                await checkInitialStatus().catch(err =>
+                    log(`Final status sync failed: ${err.message}`)
+                );
+
                 // Check for announcements and updates after app initialization
                 setTimeout(() => {
                     runAnnouncementChecks();
