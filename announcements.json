@@ -4,7 +4,7 @@
       "id": "2026-02-new-features",
       "type": "release",
       "title": "New in StenoAI",
-      "message": "Folder organization, custom save location & Apple notarized builds are here. Google Calendar integration coming soon!",
+      "message": "Folder organization, custom save location & Apple notarized builds are coming soon in v0.2.4 release!",
       "action_url": "https://github.com/ruzin/stenoai/releases",
       "action_label": "Release Notes",
       "min_version": null,
