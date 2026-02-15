@@ -2789,18 +2789,14 @@
 
         <!-- Context menu for meetings -->
         <div class="context-menu" id="meeting-context-menu" onclick="event.stopPropagation()">
-            <div class="context-menu-item" id="ctx-move-folder" onclick="event.stopPropagation(); showFolderPicker(event)">
+            <div class="context-menu-item" onclick="event.stopPropagation(); showFolderPicker(event)">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
-                Move to folder
-            </div>
-            <div class="context-menu-item" id="ctx-remove-folder" onclick="event.stopPropagation(); removeFromCurrentFolder()" style="display:none;">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path><line x1="9" y1="14" x2="15" y2="14"></line></svg>
-                Remove from folder
+                Move to...
             </div>
             <div class="context-menu-separator"></div>
-            <div class="context-menu-item danger" id="ctx-delete" onclick="event.stopPropagation(); deleteContextMeeting()">
+            <div class="context-menu-item danger" onclick="event.stopPropagation(); deleteContextMeeting()">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
-                Delete meeting
+                Delete
             </div>
         </div>
 
@@ -3628,7 +3624,7 @@ Session started - waiting for activity...
         
         // Delete meeting function
         async function deleteMeeting(index, event) {
-            event.stopPropagation(); // Prevent selecting the meeting
+            if (event) event.stopPropagation(); // Prevent selecting the meeting
             
             const meeting = filteredMeetings[index];
             if (!meeting) return;
@@ -3914,10 +3910,9 @@ Session started - waiting for activity...
         function showMeetingContextMenu(event, index) {
             event.preventDefault();
             event.stopPropagation();
+            restoreContextMenu();
             contextMeetingIndex = index;
             const menu = document.getElementById('meeting-context-menu');
-            const removeItem = document.getElementById('ctx-remove-folder');
-            removeItem.style.display = activeFolderId ? '' : 'none';
             menu.style.left = event.clientX + 'px';
             menu.style.top = event.clientY + 'px';
             menu.classList.add('show');
@@ -3938,22 +3933,38 @@ Session started - waiting for activity...
             if (contextMeetingIndex === null) return;
             const meeting = filteredMeetings[contextMeetingIndex];
             if (!meeting) return;
-            if (folders.length === 0) {
-                hideMeetingContextMenu();
-                createNewFolder();
-                return;
-            }
-            // Replace context menu content with folder list
+            // Replace context menu content with folder list + "All Meetings"
             const menu = document.getElementById('meeting-context-menu');
-            let html = '<div style="padding: 4px 10px; font-size: 11px; color: var(--text-muted); font-weight: 500;">Move to folder</div>';
+            const meetingFolders = meeting.folders || [];
+            const isUnfiled = meetingFolders.length === 0;
+            let html = '<div style="padding: 4px 10px; font-size: 11px; color: var(--text-muted); font-weight: 500;">Move to...</div>';
+            html += `<div class="context-menu-item" onclick="event.stopPropagation(); moveToAllMeetings()">
+                ${folderIcon('#71717a')}
+                All Meetings ${isUnfiled ? '<span style="color: var(--text-muted); font-size: 11px;">(current)</span>' : ''}
+            </div>`;
             for (const f of folders) {
-                const inFolder = (meeting.folders || []).includes(f.id);
+                const inFolder = meetingFolders.includes(f.id);
                 html += `<div class="context-menu-item" onclick="event.stopPropagation(); assignToFolder('${f.id}')">
                     ${folderIcon(f.color)}
-                    ${escapeHtml(f.name)} ${inFolder ? '(current)' : ''}
+                    ${escapeHtml(f.name)} ${inFolder ? '<span style="color: var(--text-muted); font-size: 11px;">(current)</span>' : ''}
                 </div>`;
             }
             menu.innerHTML = html;
+        }
+
+        async function moveToAllMeetings() {
+            hideMeetingContextMenu();
+            if (contextMeetingIndex === null) return;
+            const meeting = filteredMeetings[contextMeetingIndex];
+            const summaryFile = meeting?.session_info?.summary_file;
+            if (!summaryFile) { restoreContextMenu(); return; }
+            const oldFolders = [...(meeting.folders || [])];
+            meeting.folders = [];
+            filterMeetings();
+            restoreContextMenu();
+            for (const fid of oldFolders) {
+                ipcRenderer.invoke('remove-meeting-from-folder', summaryFile, fid);
+            }
         }
 
         async function assignToFolder(folderId) {
@@ -3962,45 +3973,30 @@ Session started - waiting for activity...
             const meeting = filteredMeetings[contextMeetingIndex];
             const summaryFile = meeting?.session_info?.summary_file;
             if (!summaryFile) { restoreContextMenu(); return; }
-            // Optimistic: update local data and re-render immediately
-            if (!meeting.folders) meeting.folders = [];
-            if (!meeting.folders.includes(folderId)) meeting.folders.push(folderId);
+            // Optimistic: move to new folder (replace, not append)
+            const oldFolders = [...(meeting.folders || [])];
+            meeting.folders = [folderId];
             filterMeetings();
             restoreContextMenu();
-            // Persist in background
+            // Persist: remove old folders, add new one
+            for (const fid of oldFolders) {
+                if (fid !== folderId) ipcRenderer.invoke('remove-meeting-from-folder', summaryFile, fid);
+            }
             ipcRenderer.invoke('add-meeting-to-folder', summaryFile, folderId);
         }
 
         function restoreContextMenu() {
             document.getElementById('meeting-context-menu').innerHTML = `
-                <div class="context-menu-item" id="ctx-move-folder" onclick="event.stopPropagation(); showFolderPicker(event)">
+                <div class="context-menu-item" onclick="event.stopPropagation(); showFolderPicker(event)">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
-                    Move to folder
-                </div>
-                <div class="context-menu-item" id="ctx-remove-folder" onclick="event.stopPropagation(); removeFromCurrentFolder()" style="display:none;">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path><line x1="9" y1="14" x2="15" y2="14"></line></svg>
-                    Remove from folder
+                    Move to...
                 </div>
                 <div class="context-menu-separator"></div>
-                <div class="context-menu-item danger" id="ctx-delete" onclick="event.stopPropagation(); deleteContextMeeting()">
+                <div class="context-menu-item danger" onclick="event.stopPropagation(); deleteContextMeeting()">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
-                    Delete meeting
+                    Delete
                 </div>
             `;
-        }
-
-        async function removeFromCurrentFolder() {
-            hideMeetingContextMenu();
-            if (contextMeetingIndex === null || !activeFolderId) return;
-            const meeting = filteredMeetings[contextMeetingIndex];
-            const summaryFile = meeting?.session_info?.summary_file;
-            if (!summaryFile) return;
-            // Optimistic: update local data and re-render immediately
-            const fid = activeFolderId;
-            meeting.folders = (meeting.folders || []).filter(id => id !== fid);
-            filterMeetings();
-            // Persist in background
-            ipcRenderer.invoke('remove-meeting-from-folder', summaryFile, fid);
         }
 
         async function deleteContextMeeting() {
@@ -4026,12 +4022,15 @@ Session started - waiting for activity...
             const meeting = filteredMeetings[draggedMeetingIndex];
             const summaryFile = meeting?.session_info?.summary_file;
             if (!summaryFile) { draggedMeetingIndex = null; return; }
-            // Optimistic: update local data and re-render immediately
-            if (!meeting.folders) meeting.folders = [];
-            if (!meeting.folders.includes(folderId)) meeting.folders.push(folderId);
+            // Optimistic: move to folder (replace, not append)
+            const oldFolders = [...(meeting.folders || [])];
+            meeting.folders = [folderId];
             filterMeetings();
             draggedMeetingIndex = null;
-            // Persist in background
+            // Persist: remove old folders, add new one
+            for (const fid of oldFolders) {
+                if (fid !== folderId) ipcRenderer.invoke('remove-meeting-from-folder', summaryFile, fid);
+            }
             ipcRenderer.invoke('add-meeting-to-folder', summaryFile, folderId);
         }
 
