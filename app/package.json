@@ -48,6 +48,14 @@
   "build": {
     "appId": "com.stenoai.recorder",
     "productName": "StenoAI",
+    "protocols": [
+      {
+        "name": "StenoAI Shortcut Links",
+        "schemes": [
+          "stenoai"
+        ]
+      }
+    ],
     "directories": {
       "output": "dist",
       "buildResources": "build"

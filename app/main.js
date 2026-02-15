@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell, systemPreferences, globalShortcut } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, systemPreferences, globalShortcut, Notification } = require('electron');
 const path = require('path');
 const { spawn, exec } = require('child_process');
 const fs = require('fs');
@@ -8,6 +8,13 @@ const { PostHog } = require('posthog-node');
 
 let mainWindow;
 let pythonProcess;
+let shortcutQueue = [];
+let pendingShortcutUrls = [];
+let rendererShortcutReady = false;
+let launchedByShortcut = false;
+
+const SHORTCUT_PROTOCOL = 'stenoai';
+const SHORTCUT_HOST = 'record';
 
 // Backend executable path - always use bundled stenoai
 function getBackendPath() {
@@ -26,6 +33,157 @@ function getBackendCwd() {
   } else {
     return path.join(__dirname, '..', 'dist', 'stenoai');
   }
+}
+
+function parseShortcutUrl(incomingUrl) {
+  try {
+    const parsed = new URL(incomingUrl);
+    if (parsed.protocol !== `${SHORTCUT_PROTOCOL}:`) {
+      return { type: 'invalid', reason: 'invalid-protocol' };
+    }
+
+    if (parsed.hostname !== SHORTCUT_HOST) {
+      return { type: 'invalid', reason: 'invalid-host' };
+    }
+
+    const cleanPath = (parsed.pathname || '').replace(/\/+$/, '');
+    if (cleanPath === '/start') {
+      const sessionName = (parsed.searchParams.get('name') || '').trim();
+      return {
+        type: 'start',
+        sessionName: sessionName || null
+      };
+    }
+
+    if (cleanPath === '/stop') {
+      return { type: 'stop' };
+    }
+
+    return { type: 'invalid', reason: 'invalid-path' };
+  } catch (error) {
+    return { type: 'invalid', reason: 'parse-error' };
+  }
+}
+
+function ensureMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createWindow();
+  }
+}
+
+function dispatchShortcutAction(action) {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    return false;
+  }
+
+  if (action.type === 'start') {
+    mainWindow.webContents.send('shortcut-start-recording', {
+      sessionName: action.sessionName || null
+    });
+    return true;
+  }
+
+  if (action.type === 'stop') {
+    mainWindow.webContents.send('shortcut-stop-recording');
+    return true;
+  }
+
+  return false;
+}
+
+function flushShortcutQueue() {
+  if (!rendererShortcutReady || !mainWindow || mainWindow.isDestroyed()) {
+    return;
+  }
+
+  while (shortcutQueue.length > 0) {
+    const nextAction = shortcutQueue.shift();
+    const dispatched = dispatchShortcutAction(nextAction);
+    if (!dispatched) {
+      shortcutQueue.unshift(nextAction);
+      break;
+    }
+  }
+}
+
+function enqueueShortcutAction(action) {
+  shortcutQueue.push(action);
+  flushShortcutQueue();
+}
+
+async function shouldShowShortcutNotifications() {
+  try {
+    const result = await runPythonScript('simple_recorder.py', ['get-notifications'], true);
+    const trimmed = result.trim();
+    const jsonMatch = trimmed.match(/\{.*\}/s);
+    const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : trimmed);
+    return parsed.notifications_enabled !== false;
+  } catch (error) {
+    return true;
+  }
+}
+
+async function showShortcutNotification(body) {
+  if (process.platform !== 'darwin') {
+    return;
+  }
+
+  try {
+    const enabled = await shouldShowShortcutNotifications();
+    if (!enabled || !Notification.isSupported()) {
+      return;
+    }
+
+    new Notification({
+      title: 'StenoAI Shortcuts',
+      body
+    }).show();
+  } catch (error) {
+    console.error('Failed to show shortcut notification:', error.message);
+  }
+}
+
+async function isBackendRecording() {
+  try {
+    const result = await runPythonScript('simple_recorder.py', ['status'], true);
+    return result.includes('STATUS: RECORDING');
+  } catch (error) {
+    console.error('Error checking recording status for shortcut action:', error.message);
+    return false;
+  }
+}
+
+async function handleShortcutUrl(incomingUrl) {
+  const parsedAction = parseShortcutUrl(incomingUrl);
+
+  if (parsedAction.type === 'invalid') {
+    console.warn(`Ignored invalid shortcut URL (${parsedAction.reason}): ${incomingUrl}`);
+    await showShortcutNotification('Invalid shortcut URL');
+    return;
+  }
+
+  const recording = await isBackendRecording();
+
+  if (parsedAction.type === 'start') {
+    if (recording) {
+      await showShortcutNotification('Recording already in progress');
+      return;
+    }
+
+    ensureMainWindow();
+    enqueueShortcutAction(parsedAction);
+    await showShortcutNotification('Start recording requested');
+    return;
+  }
+
+  if (!recording) {
+    await showShortcutNotification('Recording already stopped');
+    return;
+  }
+
+  ensureMainWindow();
+  enqueueShortcutAction(parsedAction);
+  await showShortcutNotification('Stop recording requested');
 }
 
 // Telemetry state
@@ -174,6 +332,7 @@ function validateSafeFilePath(filepath, allowedBaseDirs) {
 }
 
 function createWindow() {
+  rendererShortcutReady = false;
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
@@ -190,19 +349,44 @@ function createWindow() {
   mainWindow.loadFile('index.html');
   
   mainWindow.once('ready-to-show', () => {
+    if (launchedByShortcut) {
+      return;
+    }
     mainWindow.show();
   });
 
   mainWindow.on('closed', () => {
     mainWindow = null;
+    rendererShortcutReady = false;
     if (pythonProcess) {
       pythonProcess.kill();
     }
   });
 }
 
+app.on('open-url', (event, incomingUrl) => {
+  if (process.platform !== 'darwin') {
+    return;
+  }
+
+  event.preventDefault();
+  launchedByShortcut = true;
+
+  if (!app.isReady()) {
+    pendingShortcutUrls.push(incomingUrl);
+    return;
+  }
+
+  void handleShortcutUrl(incomingUrl);
+});
+
 app.whenReady().then(async () => {
   createWindow();
+
+  if (process.platform === 'darwin') {
+    const protocolRegistered = app.setAsDefaultProtocolClient(SHORTCUT_PROTOCOL);
+    console.log(`Protocol handler registration (${SHORTCUT_PROTOCOL}): ${protocolRegistered}`);
+  }
 
   // Initialize telemetry and track app open
   await initTelemetry();
@@ -234,6 +418,15 @@ app.whenReady().then(async () => {
   } else {
     console.error(`Failed to register global hotkey: ${hotkeyModifier}`);
   }
+
+  if (pendingShortcutUrls.length > 0) {
+    const urlsToProcess = [...pendingShortcutUrls];
+    pendingShortcutUrls = [];
+
+    for (const shortcutUrl of urlsToProcess) {
+      await handleShortcutUrl(shortcutUrl);
+    }
+  }
 });
 
 app.on('will-quit', async () => {
@@ -250,7 +443,16 @@ app.on('window-all-closed', () => {
 
 app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) {
+    launchedByShortcut = false;
     createWindow();
+    return;
+  }
+
+  if (mainWindow) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+    launchedByShortcut = false;
   }
 });
 
@@ -261,6 +463,11 @@ ipcMain.on('focus-window', () => {
         mainWindow.show();
         mainWindow.focus();
     }
+});
+
+ipcMain.on('shortcut-renderer-ready', () => {
+  rendererShortcutReady = true;
+  flushShortcutQueue();
 });
 
 // Microphone permission handlers

@@ -5003,6 +5003,39 @@ Session started - waiting for activity...
             debugLog(message);
         });
 
+        // Listen for macOS shortcut start action
+        ipcRenderer.on('shortcut-start-recording', (event, payload = {}) => {
+            const shortcutName = typeof payload.sessionName === 'string'
+                ? payload.sessionName.trim()
+                : '';
+
+            log('Shortcut received: start recording');
+            if (uiState !== 'ready') {
+                log(`Shortcut start ignored in UI state: ${uiState}`);
+                return;
+            }
+
+            if (shortcutName) {
+                sessionNameInput.value = shortcutName;
+            }
+
+            startBtn.click();
+        });
+
+        // Listen for macOS shortcut stop action
+        ipcRenderer.on('shortcut-stop-recording', () => {
+            log('Shortcut received: stop recording');
+            if (uiState !== 'recording' && uiState !== 'paused') {
+                log(`Shortcut stop ignored in UI state: ${uiState}`);
+                return;
+            }
+
+            stopBtn.click();
+        });
+
+        // Signal to main process that shortcut listeners are attached
+        ipcRenderer.send('shortcut-renderer-ready');
+
         // Listen for global hotkey toggle recording
         ipcRenderer.on('toggle-recording-hotkey', () => {
             log('Global hotkey received: toggle recording');
