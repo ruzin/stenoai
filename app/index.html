@@ -919,33 +919,143 @@
         .meetings-list {
             flex: 1;
             overflow-y: auto;
-            padding: 8px;
+            padding: 4px 8px;
         }
-        
-        .meeting-item {
-            background: var(--bg-elevated);
-            border: 1px solid var(--border-subtle);
-            border-radius: 8px;
-            padding: 10px 12px;
-            margin-bottom: 6px;
+
+        /* Folder list above meetings */
+        .folder-list {
+            padding: 4px 8px 0;
+        }
+
+        .folder-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 5px 10px;
+            border-radius: 6px;
             cursor: pointer;
-            transition: all 0.2s ease;
+            font-size: 12.5px;
+            color: var(--text-secondary);
+            transition: background 0.15s, color 0.15s;
+            user-select: none;
+            letter-spacing: 0.01em;
+        }
+
+        .folder-item:hover {
+            background: var(--bg-elevated);
+            color: var(--text-primary);
+        }
+
+        .folder-item.active {
+            background: var(--bg-surface);
+            color: var(--text-primary);
+            font-weight: 500;
+        }
+
+        .folder-item.drag-over {
+            background: rgba(129, 140, 248, 0.12);
+            outline: 1px solid rgba(129, 140, 248, 0.35);
+            outline-offset: -1px;
+            color: var(--text-primary);
+        }
+
+        .meeting-item[draggable="true"] {
+            cursor: grab;
+        }
+
+        .meeting-item[draggable="true"]:active {
+            cursor: grabbing;
+            opacity: 0.6;
+        }
+
+        .folder-icon {
+            width: 15px;
+            height: 15px;
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+        }
+
+        .folder-icon svg {
+            width: 15px;
+            height: 15px;
+        }
+
+        .folder-count {
+            margin-left: auto;
+            font-size: 10px;
+            color: var(--text-muted);
+            font-weight: 500;
+            min-width: 18px;
+            text-align: center;
+            padding: 1px 5px;
+            border-radius: 9px;
+            background: var(--bg-elevated);
+            line-height: 1.4;
+        }
+
+        .folder-item.active .folder-count {
+            background: var(--bg-elevated);
+            color: var(--text-secondary);
+        }
+
+        .folder-actions {
+            display: none;
+        }
+
+        .folder-add-btn {
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            font-size: 12px;
+            cursor: pointer;
+            padding: 2px 6px;
+            border-radius: 4px;
+            transition: all 0.15s;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .folder-add-btn:hover {
+            color: var(--text-secondary);
+            background: var(--bg-elevated);
+        }
+
+        .folder-separator {
+            height: 1px;
+            background: var(--border-subtle);
+            margin: 4px 16px 4px;
+            opacity: 0.6;
+        }
+
+        /* Compact meeting line items */
+        .meeting-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 10px;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: background 0.15s;
             position: relative;
         }
 
         .meeting-delete {
             position: absolute;
-            top: 8px;
-            right: 8px;
+            top: 50%;
+            right: 6px;
+            transform: translateY(-50%);
             background: var(--bg-surface);
             border: none;
             color: var(--text-muted);
-            border-radius: 6px;
-            padding: 4px 8px;
-            font-size: 12px;
+            border-radius: 4px;
+            padding: 2px 5px;
+            font-size: 11px;
             cursor: pointer;
             opacity: 0;
-            transition: all 0.2s;
+            transition: all 0.15s;
+            line-height: 1;
         }
 
         .meeting-item:hover .meeting-delete {
@@ -958,32 +1068,27 @@
         }
 
         .meeting-item:hover {
-            background: var(--bg-surface);
-            border-color: var(--border-default);
-            transform: translateX(2px);
+            background: var(--bg-elevated);
         }
 
         .meeting-item.active {
             background: var(--bg-surface);
-            border-color: var(--accent-primary);
-            box-shadow: 0 0 0 1px var(--accent-primary), 0 0 20px var(--accent-glow);
+        }
+
+        .meeting-item.active .meeting-dot {
+            background: var(--accent-primary);
+            box-shadow: 0 0 6px var(--accent-glow);
         }
 
         /* Staggered fade-in animation for meeting items */
         .meeting-item {
-            animation: fadeSlideIn 0.3s ease-out forwards;
+            animation: fadeSlideIn 0.2s ease-out forwards;
             opacity: 0;
         }
 
         @keyframes fadeSlideIn {
-            from {
-                opacity: 0;
-                transform: translateY(10px);
-            }
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
+            from { opacity: 0; transform: translateY(4px); }
+            to { opacity: 1; transform: translateY(0); }
         }
 
         .meeting-item:nth-child(1) { animation-delay: 0.02s; }
@@ -997,38 +1102,110 @@
         .meeting-item:nth-child(9) { animation-delay: 0.18s; }
         .meeting-item:nth-child(10) { animation-delay: 0.20s; }
 
-        /* Action items badge on meeting cards */
-        .meeting-badges {
+        .meeting-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--text-muted);
+            flex-shrink: 0;
+            opacity: 0.5;
+        }
+
+        .meeting-item.active .meeting-line-title {
+            color: var(--text-primary);
+            font-weight: 600;
+        }
+
+        .meeting-line-body {
+            flex: 1;
+            min-width: 0;
             display: flex;
-            gap: 6px;
-            margin-top: 6px;
-        }
-
-        .meeting-badge {
-            display: inline-flex;
             align-items: center;
-            gap: 4px;
-            font-size: 11px;
-            font-weight: 500;
-            padding: 3px 8px;
-            border-radius: 4px;
-            background: var(--bg-deep);
-            color: var(--text-muted);
+            gap: 8px;
         }
 
-        .meeting-badge.actions {
+        .meeting-line-title {
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--text-secondary);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            flex: 1;
+            min-width: 0;
+        }
+
+        .meeting-line-meta {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            flex-shrink: 0;
+        }
+
+        .meeting-line-date {
+            font-size: 11px;
+            color: var(--text-muted);
+            white-space: nowrap;
+            min-width: 52px;
+            text-align: right;
+        }
+
+        .meeting-line-badge {
+            font-size: 10px;
+            font-weight: 600;
             background: rgba(99, 102, 241, 0.15);
             color: var(--accent-primary);
+            padding: 1px 5px;
+            border-radius: 3px;
+            line-height: 1.4;
         }
 
-        .meeting-badge.participants {
-            background: rgba(34, 197, 94, 0.15);
-            color: var(--success-green);
-        }
-        
-        .meeting-item.processing {
+        /* Context menu */
+        .context-menu {
+            position: fixed;
             background: var(--bg-elevated);
-            border-color: var(--warning-amber);
+            border: 1px solid var(--border-default);
+            border-radius: 8px;
+            padding: 4px;
+            min-width: 180px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+            z-index: 9999;
+            display: none;
+        }
+
+        .context-menu.show {
+            display: block;
+        }
+
+        .context-menu-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: background 0.1s;
+        }
+
+        .context-menu-item:hover {
+            background: var(--bg-surface);
+            color: var(--text-primary);
+        }
+
+        .context-menu-item.danger:hover {
+            background: rgba(239, 68, 68, 0.15);
+            color: var(--recording-red);
+        }
+
+        .context-menu-separator {
+            height: 1px;
+            background: var(--border-subtle);
+            margin: 4px 0;
+        }
+
+        .meeting-item.processing {
             opacity: 0.7;
             position: relative;
         }
@@ -1065,45 +1242,7 @@
             100% { transform: rotate(360deg); }
         }
         
-        .meeting-item h3 {
-            font-size: 13px;
-            font-weight: 600;
-            color: color-mix(in srgb, var(--text-primary) 40%, var(--text-secondary));
-            margin-bottom: 4px;
-            line-height: 1.3;
-        }
-
-        .meeting-meta {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 6px;
-        }
-
-        .meeting-date {
-            font-size: 12px;
-            color: var(--text-muted);
-        }
-
-        .meeting-duration {
-            font-size: 11px;
-            font-weight: 500;
-            color: var(--text-secondary);
-            background: var(--bg-deep);
-            padding: 3px 8px;
-            border-radius: 4px;
-            font-family: 'JetBrains Mono', monospace;
-        }
-
-        .meeting-preview {
-            font-size: 12px;
-            color: var(--text-secondary);
-            line-height: 1.4;
-            display: -webkit-box;
-            -webkit-line-clamp: 2;
-            -webkit-box-orient: vertical;
-            overflow: hidden;
-        }
+        /* Legacy styles kept for compatibility */
         
         /* Main content area */
         .content {
@@ -2619,8 +2758,35 @@
                 </div>
             </div>
             
+            <div class="folder-list" id="folder-list">
+                <!-- Folders rendered here -->
+            </div>
+            <div class="folder-actions">
+                <button class="folder-add-btn" id="add-folder-btn" onclick="createNewFolder()">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                    New folder
+                </button>
+            </div>
+            <div class="folder-separator"></div>
             <div class="meetings-list" id="meetings-list">
                 <!-- Meetings will be loaded here -->
+            </div>
+        </div>
+
+        <!-- Context menu for meetings -->
+        <div class="context-menu" id="meeting-context-menu" onclick="event.stopPropagation()">
+            <div class="context-menu-item" id="ctx-move-folder" onclick="event.stopPropagation(); showFolderPicker(event)">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+                Move to folder
+            </div>
+            <div class="context-menu-item" id="ctx-remove-folder" onclick="event.stopPropagation(); removeFromCurrentFolder()" style="display:none;">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path><line x1="9" y1="14" x2="15" y2="14"></line></svg>
+                Remove from folder
+            </div>
+            <div class="context-menu-separator"></div>
+            <div class="context-menu-item danger" id="ctx-delete" onclick="event.stopPropagation(); deleteContextMeeting()">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                Delete meeting
             </div>
         </div>
 
@@ -3488,22 +3654,30 @@ Session started - waiting for activity...
         
         // Filter meetings based on search query
         function filterMeetings() {
+            let source = [...meetings];
+            // Filter by active folder; "All Meetings" (null) = unfiled only
+            if (activeFolderId) {
+                source = source.filter(m => (m.folders || []).includes(activeFolderId));
+            } else {
+                source = source.filter(m => (m.folders || []).length === 0);
+            }
             if (!searchQuery.trim()) {
-                filteredMeetings = [...meetings];
+                filteredMeetings = source;
             } else {
                 const query = searchQuery.toLowerCase();
-                filteredMeetings = meetings.filter(meeting => {
+                filteredMeetings = source.filter(meeting => {
                     const name = (meeting.session_info?.name || '').toLowerCase();
                     const summary = (meeting.summary || '').toLowerCase();
                     const keyPoints = (meeting.key_points || []).join(' ').toLowerCase();
                     const actionItems = (meeting.action_items || []).join(' ').toLowerCase();
-                    
-                    return name.includes(query) || 
-                           summary.includes(query) || 
-                           keyPoints.includes(query) || 
+
+                    return name.includes(query) ||
+                           summary.includes(query) ||
+                           keyPoints.includes(query) ||
                            actionItems.includes(query);
                 });
             }
+            renderFolderList();
             renderMeetingsList();
         }
         
@@ -3533,7 +3707,8 @@ Session started - waiting for activity...
                 if (result.success) {
                     meetings = result.meetings || [];
                     meetingsLastLoaded = now;
-                    filterMeetings(); // Apply current search filter
+                    await loadFolders();
+                    filterMeetings(); // Apply current search filter and folder
                     log(`Loaded ${meetings.length} meetings`);
                 } else {
                     throw new Error(result.error || 'Unknown error');
@@ -3558,51 +3733,393 @@ Session started - waiting for activity...
         }
         
         // Render meetings list
+        // --- Folder state ---
+        let folders = [];
+        let activeFolderId = null; // null = "All Meetings"
+        let contextMeetingIndex = null;
+
+        function formatShortDate(dateString) {
+            if (!dateString) return '';
+            try {
+                const d = new Date(dateString);
+                const now = new Date();
+                const isToday = d.toDateString() === now.toDateString();
+                const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1);
+                const isYesterday = d.toDateString() === yesterday.toDateString();
+                if (isToday) return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+                if (isYesterday) return 'Yesterday';
+                if (now.getFullYear() === d.getFullYear()) return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' });
+            } catch { return ''; }
+        }
+
+        async function loadFolders() {
+            try {
+                const result = await ipcRenderer.invoke('list-folders');
+                if (result.success) {
+                    folders = result.folders || [];
+                    renderFolderList();
+                }
+            } catch (e) { console.error('Failed to load folders:', e); }
+        }
+
+        function renderFolderList() {
+            const container = document.getElementById('folder-list');
+            const allCount = meetings.filter(m => (m.folders || []).length === 0).length;
+            let html = `<div class="folder-item ${activeFolderId === null ? 'active' : ''}" onclick="setActiveFolder(null)"
+                ondragover="event.preventDefault(); this.classList.add('drag-over')"
+                ondragleave="this.classList.remove('drag-over')"
+                ondrop="handleAllMeetingsDrop(event)">
+                ${folderIcon('#71717a')}
+                All Meetings
+                <span class="folder-count">${allCount}</span>
+            </div>`;
+            for (const f of folders) {
+                const count = meetings.filter(m => (m.folders || []).includes(f.id)).length;
+                html += `<div class="folder-item ${activeFolderId === f.id ? 'active' : ''}" onclick="setActiveFolder('${f.id}')" oncontextmenu="showFolderContextMenu(event, '${f.id}')"
+                    data-folder-id="${f.id}"
+                    ondragover="event.preventDefault(); this.classList.add('drag-over')"
+                    ondragleave="this.classList.remove('drag-over')"
+                    ondrop="handleFolderDrop(event, '${f.id}')">
+                    ${folderIcon(f.color)}
+                    ${escapeHtml(f.name)}
+                    <span class="folder-count">${count}</span>
+                </div>`;
+            }
+            // Inline "New folder" as last item
+            html += `<div class="folder-item" onclick="createNewFolder()" style="color: var(--text-muted); font-size: 12px; gap: 6px; padding: 4px 10px;">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="opacity: 0.6;"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                New folder
+            </div>`;
+            container.innerHTML = html;
+        }
+
+        function folderIcon(color, size = 14) {
+            return `<span class="folder-icon"><svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="${color}" stroke="${color}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" opacity="0.25"></path><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" fill="none" stroke="${color}" stroke-width="1.5"></path></svg></span>`;
+        }
+
+        function escapeHtml(str) {
+            const div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
+        }
+
+        function setActiveFolder(folderId) {
+            activeFolderId = folderId;
+            renderFolderList();
+            filterMeetings();
+        }
+
+        async function createNewFolder() {
+            // Show inline input in folder list
+            const container = document.getElementById('folder-list');
+            const inputHtml = `<div class="folder-item" id="new-folder-input-row" style="gap: 6px;">
+                ${folderIcon('#6366f1')}
+                <input type="text" id="new-folder-input" placeholder="Folder name" style="
+                    flex: 1; background: var(--bg-deep); border: 1px solid var(--accent-primary);
+                    border-radius: 4px; padding: 3px 6px; font-size: 12px; color: var(--text-primary);
+                    outline: none; font-family: inherit; min-width: 0;
+                " autofocus>
+            </div>`;
+            container.insertAdjacentHTML('beforeend', inputHtml);
+            const input = document.getElementById('new-folder-input');
+            input.focus();
+
+            async function commitFolder() {
+                const name = input.value.trim();
+                const row = document.getElementById('new-folder-input-row');
+                if (row) row.remove();
+                if (!name) return;
+                const colors = ['#6366f1', '#0ea5e9', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
+                const color = colors[folders.length % colors.length];
+                const result = await ipcRenderer.invoke('create-folder', name, color);
+                if (result.success) {
+                    await loadFolders();
+                }
+            }
+
+            input.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') commitFolder();
+                if (e.key === 'Escape') {
+                    const row = document.getElementById('new-folder-input-row');
+                    if (row) row.remove();
+                }
+            });
+            input.addEventListener('blur', commitFolder);
+        }
+
+        async function showFolderContextMenu(event, folderId) {
+            event.preventDefault();
+            event.stopPropagation();
+            const folder = folders.find(f => f.id === folderId);
+            if (!folder) return;
+
+            // Replace the folder item with an editable input
+            const items = document.querySelectorAll('.folder-item');
+            for (const item of items) {
+                if (item.textContent.includes(folder.name)) {
+                    const origHtml = item.innerHTML;
+                    item.innerHTML = `
+                        ${folderIcon(folder.color)}
+                        <input type="text" id="rename-folder-input" value="${escapeHtml(folder.name)}" style="
+                            flex: 1; background: var(--bg-deep); border: 1px solid var(--accent-primary);
+                            border-radius: 4px; padding: 3px 6px; font-size: 12px; color: var(--text-primary);
+                            outline: none; font-family: inherit; min-width: 0;
+                        ">
+                        <button onclick="deleteFolder_('${folderId}')" style="background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 2px; font-size: 14px;" title="Delete folder">✕</button>
+                    `;
+                    const input = document.getElementById('rename-folder-input');
+                    input.focus();
+                    input.select();
+
+                    async function commitRename() {
+                        const newName = input.value.trim();
+                        if (newName && newName !== folder.name) {
+                            await ipcRenderer.invoke('rename-folder', folderId, newName);
+                        }
+                        await loadFolders();
+                    }
+                    input.addEventListener('keydown', (e) => {
+                        if (e.key === 'Enter') commitRename();
+                        if (e.key === 'Escape') loadFolders();
+                    });
+                    input.addEventListener('blur', commitRename);
+                    break;
+                }
+            }
+        }
+
+        async function deleteFolder_(folderId) {
+            await ipcRenderer.invoke('delete-folder', folderId);
+            if (activeFolderId === folderId) activeFolderId = null;
+            await loadFolders();
+            filterMeetings();
+        }
+
+        // Context menu for meetings
+        function showMeetingContextMenu(event, index) {
+            event.preventDefault();
+            event.stopPropagation();
+            contextMeetingIndex = index;
+            const menu = document.getElementById('meeting-context-menu');
+            const removeItem = document.getElementById('ctx-remove-folder');
+            removeItem.style.display = activeFolderId ? '' : 'none';
+            menu.style.left = event.clientX + 'px';
+            menu.style.top = event.clientY + 'px';
+            menu.classList.add('show');
+        }
+
+        function hideMeetingContextMenu() {
+            document.getElementById('meeting-context-menu').classList.remove('show');
+        }
+
+        document.addEventListener('click', () => {
+            hideMeetingContextMenu();
+            // Restore original menu items when clicking away
+            if (typeof restoreContextMenu === 'function') restoreContextMenu();
+        });
+
+        async function showFolderPicker(event) {
+            if (event) { event.stopPropagation(); }
+            if (contextMeetingIndex === null) return;
+            const meeting = filteredMeetings[contextMeetingIndex];
+            if (!meeting) return;
+            if (folders.length === 0) {
+                hideMeetingContextMenu();
+                createNewFolder();
+                return;
+            }
+            // Replace context menu content with folder list
+            const menu = document.getElementById('meeting-context-menu');
+            let html = '<div style="padding: 4px 10px; font-size: 11px; color: var(--text-muted); font-weight: 500;">Move to folder</div>';
+            for (const f of folders) {
+                const inFolder = (meeting.folders || []).includes(f.id);
+                html += `<div class="context-menu-item" onclick="event.stopPropagation(); assignToFolder('${f.id}')">
+                    ${folderIcon(f.color)}
+                    ${escapeHtml(f.name)} ${inFolder ? '(current)' : ''}
+                </div>`;
+            }
+            menu.innerHTML = html;
+        }
+
+        async function assignToFolder(folderId) {
+            hideMeetingContextMenu();
+            if (contextMeetingIndex === null) return;
+            const meeting = filteredMeetings[contextMeetingIndex];
+            const summaryFile = meeting?.session_info?.summary_file;
+            if (!summaryFile) { restoreContextMenu(); return; }
+            // Optimistic: update local data and re-render immediately
+            if (!meeting.folders) meeting.folders = [];
+            if (!meeting.folders.includes(folderId)) meeting.folders.push(folderId);
+            filterMeetings();
+            restoreContextMenu();
+            // Persist in background
+            ipcRenderer.invoke('add-meeting-to-folder', summaryFile, folderId);
+        }
+
+        function restoreContextMenu() {
+            document.getElementById('meeting-context-menu').innerHTML = `
+                <div class="context-menu-item" id="ctx-move-folder" onclick="event.stopPropagation(); showFolderPicker(event)">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+                    Move to folder
+                </div>
+                <div class="context-menu-item" id="ctx-remove-folder" onclick="event.stopPropagation(); removeFromCurrentFolder()" style="display:none;">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path><line x1="9" y1="14" x2="15" y2="14"></line></svg>
+                    Remove from folder
+                </div>
+                <div class="context-menu-separator"></div>
+                <div class="context-menu-item danger" id="ctx-delete" onclick="event.stopPropagation(); deleteContextMeeting()">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                    Delete meeting
+                </div>
+            `;
+        }
+
+        async function removeFromCurrentFolder() {
+            hideMeetingContextMenu();
+            if (contextMeetingIndex === null || !activeFolderId) return;
+            const meeting = filteredMeetings[contextMeetingIndex];
+            const summaryFile = meeting?.session_info?.summary_file;
+            if (!summaryFile) return;
+            // Optimistic: update local data and re-render immediately
+            const fid = activeFolderId;
+            meeting.folders = (meeting.folders || []).filter(id => id !== fid);
+            filterMeetings();
+            // Persist in background
+            ipcRenderer.invoke('remove-meeting-from-folder', summaryFile, fid);
+        }
+
+        async function deleteContextMeeting() {
+            hideMeetingContextMenu();
+            if (contextMeetingIndex === null) return;
+            deleteMeeting(contextMeetingIndex, null);
+        }
+
+        let draggedMeetingIndex = null;
+
+        function handleMeetingDragStart(event, index) {
+            draggedMeetingIndex = index;
+            event.dataTransfer.effectAllowed = 'move';
+            event.dataTransfer.setData('text/plain', index.toString());
+            event.target.style.opacity = '0.5';
+            setTimeout(() => { event.target.style.opacity = ''; }, 0);
+        }
+
+        async function handleFolderDrop(event, folderId) {
+            event.preventDefault();
+            event.currentTarget.classList.remove('drag-over');
+            if (draggedMeetingIndex === null) return;
+            const meeting = filteredMeetings[draggedMeetingIndex];
+            const summaryFile = meeting?.session_info?.summary_file;
+            if (!summaryFile) { draggedMeetingIndex = null; return; }
+            // Optimistic: update local data and re-render immediately
+            if (!meeting.folders) meeting.folders = [];
+            if (!meeting.folders.includes(folderId)) meeting.folders.push(folderId);
+            filterMeetings();
+            draggedMeetingIndex = null;
+            // Persist in background
+            ipcRenderer.invoke('add-meeting-to-folder', summaryFile, folderId);
+        }
+
+        async function handleAllMeetingsDrop(event) {
+            event.preventDefault();
+            event.currentTarget.classList.remove('drag-over');
+            if (draggedMeetingIndex === null) return;
+            const meeting = filteredMeetings[draggedMeetingIndex];
+            const summaryFile = meeting?.session_info?.summary_file;
+            if (!summaryFile) { draggedMeetingIndex = null; return; }
+            // Remove from all folders optimistically
+            const oldFolders = [...(meeting.folders || [])];
+            meeting.folders = [];
+            filterMeetings();
+            draggedMeetingIndex = null;
+            // Persist each removal in background
+            for (const fid of oldFolders) {
+                ipcRenderer.invoke('remove-meeting-from-folder', summaryFile, fid);
+            }
+        }
+
+        function renameMeeting(index, titleEl) {
+            const meeting = filteredMeetings[index];
+            if (!meeting) return;
+            const oldName = meeting.session_info?.name || 'Untitled Meeting';
+            const summaryFile = meeting.session_info?.summary_file;
+            if (!summaryFile) return;
+
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.value = oldName;
+            input.className = 'meeting-line-title';
+            input.style.cssText = 'background: var(--bg-deep); border: 1px solid var(--accent-primary); border-radius: 4px; padding: 1px 4px; outline: none; font-family: inherit; min-width: 0; width: 100%;';
+            titleEl.replaceWith(input);
+            input.focus();
+            input.select();
+
+            let committed = false;
+            async function commit() {
+                if (committed) return;
+                committed = true;
+                const newName = input.value.trim();
+                if (newName && newName !== oldName) {
+                    // Optimistic update
+                    meeting.session_info.name = newName;
+                    if (selectedMeeting === meeting) {
+                        document.getElementById('detail-title').textContent = newName;
+                    }
+                    renderMeetingsList();
+                    ipcRenderer.invoke('update-meeting', summaryFile, { name: newName });
+                } else {
+                    renderMeetingsList();
+                }
+            }
+
+            input.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') { e.preventDefault(); commit(); }
+                if (e.key === 'Escape') { committed = true; renderMeetingsList(); }
+            });
+            input.addEventListener('blur', commit);
+        }
+
         function renderMeetingsList() {
             if (filteredMeetings.length === 0 && searchQuery.trim()) {
                 meetingsList.innerHTML = `
                     <div style="padding: 20px; text-align: center; color: var(--text-muted);">
-                        <div style="font-size: 24px; margin-bottom: 8px;">🔍</div>
-                        <p>No meetings match "${searchQuery}"</p>
-                        <p style="font-size: 12px; margin-top: 4px;">Try a different search term</p>
+                        <p style="font-size: 13px;">No meetings match "${searchQuery}"</p>
                     </div>
                 `;
                 return;
             }
-            
+
             if (meetings.length === 0) {
                 meetingsList.innerHTML = `
                     <div style="padding: 20px; text-align: center; color: var(--text-muted);">
-                        <div style="font-size: 24px; margin-bottom: 8px;">🎙️</div>
-                        <p>No meetings recorded yet</p>
+                        <p style="font-size: 13px;">No meetings yet</p>
                         <p style="font-size: 12px; margin-top: 4px;">Start recording to see your meetings here</p>
                     </div>
                 `;
                 return;
             }
-            
+
             meetingsList.innerHTML = filteredMeetings.map((meeting, index) => {
                 const isProcessing = processingMeetings.has(meeting.session_info?.name);
                 const actionCount = (meeting.action_items || []).length;
-                const participantCount = (meeting.participants || []).length;
+                const title = meeting.session_info?.name || 'Untitled Meeting';
+                const date = formatShortDate(meeting.session_info?.processed_at);
                 return `
-                <div class="meeting-item ${isProcessing ? 'processing' : ''}" data-index="${index}">
-                    ${isProcessing ? '<div class="processing-overlay"><div class="processing-indicator"><div class="processing-spinner"></div>Processing...</div></div>' : ''}
+                <div class="meeting-item ${isProcessing ? 'processing' : ''}" data-index="${index}" draggable="true" oncontextmenu="showMeetingContextMenu(event, ${index})" ondragstart="handleMeetingDragStart(event, ${index})">
+                    <span class="meeting-dot"></span>
+                    <div class="meeting-line-body">
+                        <span class="meeting-line-title" ondblclick="event.stopPropagation(); renameMeeting(${index}, this)">${escapeHtml(title)}</span>
+                        <span class="meeting-line-meta">
+                            ${actionCount > 0 ? `<span class="meeting-line-badge">${actionCount}</span>` : ''}
+                            <span class="meeting-line-date">${date}</span>
+                        </span>
+                    </div>
                     <button class="meeting-delete" onclick="deleteMeeting(${index}, event)" title="Delete meeting">✕</button>
-                    <h3>${meeting.session_info?.name || 'Untitled Meeting'}</h3>
-                    <div class="meeting-meta">
-                        <span class="meeting-date">${formatDate(meeting.session_info?.processed_at)}</span>
-                    </div>
-                    <div class="meeting-preview">
-                        ${(meeting.summary || 'No summary available').substring(0, 100)}...
-                    </div>
-                    <div class="meeting-badges">
-                        ${actionCount > 0 ? `<span class="meeting-badge actions">✓ ${actionCount} action${actionCount > 1 ? 's' : ''}</span>` : ''}
-                    </div>
                 </div>
                 `;
             }).join('');
-            
+
             // Add click handlers
             document.querySelectorAll('.meeting-item').forEach(item => {
                 item.addEventListener('click', () => {
@@ -3898,21 +4415,25 @@ Session started - waiting for activity...
         });
         
         
-        // File drop handling
+        // File drop handling (ignore internal meeting drags)
         document.addEventListener('dragover', (e) => {
             e.preventDefault();
+            // Only show drop zone for external file drops, not internal meeting drags
+            if (draggedMeetingIndex !== null) return;
             dropZone.classList.add('active');
         });
-        
+
         document.addEventListener('dragleave', (e) => {
             if (!e.relatedTarget) {
                 dropZone.classList.remove('active');
             }
         });
-        
+
         document.addEventListener('drop', async (e) => {
             e.preventDefault();
             dropZone.classList.remove('active');
+            // Ignore internal meeting drags
+            if (draggedMeetingIndex !== null) { draggedMeetingIndex = null; return; }
             
             const files = e.dataTransfer.files;
             if (files.length > 0) {
