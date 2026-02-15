@@ -340,7 +340,11 @@ export default function App() {
                 <DiscordIcon className="w-4 h-4" /> Discord
               </a>
             </div>
-            <div>&copy; 2026 stenoAI</div>
+            <div className="flex items-center gap-4">
+              <a href="/privacy.html" className="hover:text-white">Privacy</a>
+              <a href="/terms.html" className="hover:text-white">Terms</a>
+              <span>&copy; 2026 stenoAI</span>
+            </div>
           </div>
           <div className="mt-6 text-center text-xs text-slate-500">
             <i>Disclaimer: This is an independent open-source project for meeting-notes productivity and is not affiliated with, endorsed by, or associated with any similarly named company.</i>
