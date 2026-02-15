@@ -1751,6 +1751,68 @@ ipcMain.handle('select-storage-folder', async () => {
   }
 });
 
+// Folder management handlers
+ipcMain.handle('list-folders', async () => {
+  try {
+    const result = await runPythonScript('simple_recorder.py', ['list-folders'], true);
+    return { success: true, ...JSON.parse(result.trim()) };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('create-folder', async (event, name, color) => {
+  try {
+    const args = ['create-folder', name];
+    if (color) args.push('--color', color);
+    const result = await runPythonScript('simple_recorder.py', args);
+    const jsonMatch = result.match(/\{.*\}/s);
+    return jsonMatch ? JSON.parse(jsonMatch[0]) : { success: true };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('rename-folder', async (event, folderId, name) => {
+  try {
+    const result = await runPythonScript('simple_recorder.py', ['rename-folder', folderId, name]);
+    const jsonMatch = result.match(/\{.*\}/s);
+    return jsonMatch ? JSON.parse(jsonMatch[0]) : { success: true };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('delete-folder', async (event, folderId) => {
+  try {
+    const result = await runPythonScript('simple_recorder.py', ['delete-folder', folderId]);
+    const jsonMatch = result.match(/\{.*\}/s);
+    return jsonMatch ? JSON.parse(jsonMatch[0]) : { success: true };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('add-meeting-to-folder', async (event, summaryFile, folderId) => {
+  try {
+    const result = await runPythonScript('simple_recorder.py', ['add-meeting-to-folder', summaryFile, folderId]);
+    const jsonMatch = result.match(/\{.*\}/s);
+    return jsonMatch ? JSON.parse(jsonMatch[0]) : { success: true };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('remove-meeting-from-folder', async (event, summaryFile, folderId) => {
+  try {
+    const result = await runPythonScript('simple_recorder.py', ['remove-meeting-from-folder', summaryFile, folderId]);
+    const jsonMatch = result.match(/\{.*\}/s);
+    return jsonMatch ? JSON.parse(jsonMatch[0]) : { success: true };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
 ipcMain.handle('get-ai-prompts', async () => {
   try {
     // Read the summarization prompt from the Python backend

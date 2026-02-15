@@ -864,7 +864,8 @@ def list_meetings():
                     "discussion_areas": data.get("discussion_areas", []),
                     "key_points": data.get("key_points", []),
                     "action_items": data.get("action_items", []),
-                    "transcript": data.get("transcript", "")
+                    "transcript": data.get("transcript", ""),
+                    "folders": data.get("folders", [])
                 }
                 meetings.append(essential_meeting)
         except Exception as e:
@@ -1351,6 +1352,71 @@ def set_storage_path(storage_path):
         print(json.dumps({"success": True, "storage_path": storage_path}))
     else:
         print(json.dumps({"success": False, "error": "Failed to set storage path"}))
+
+
+@cli.command()
+def list_folders():
+    """List all folders"""
+    from src.folders import get_folders_manager
+    mgr = get_folders_manager()
+    print(json.dumps({"folders": mgr.list_folders()}))
+
+
+@cli.command()
+@click.argument('name')
+@click.option('--color', default='#6366f1')
+def create_folder(name, color):
+    """Create a new folder"""
+    from src.folders import get_folders_manager
+    mgr = get_folders_manager()
+    folder = mgr.create_folder(name, color)
+    if folder:
+        print(json.dumps({"success": True, "folder": folder}))
+    else:
+        print(json.dumps({"success": False, "error": "Failed to create folder"}))
+
+
+@cli.command()
+@click.argument('folder_id')
+@click.argument('name')
+def rename_folder(folder_id, name):
+    """Rename a folder"""
+    from src.folders import get_folders_manager
+    mgr = get_folders_manager()
+    success = mgr.rename_folder(folder_id, name)
+    print(json.dumps({"success": success}))
+
+
+@cli.command()
+@click.argument('folder_id')
+def delete_folder(folder_id):
+    """Delete a folder"""
+    from src.folders import get_folders_manager
+    mgr = get_folders_manager()
+    success = mgr.delete_folder(folder_id)
+    print(json.dumps({"success": success}))
+
+
+@cli.command()
+@click.argument('summary_file')
+@click.argument('folder_id')
+def add_meeting_to_folder(summary_file, folder_id):
+    """Add a meeting to a folder"""
+    from src.folders import get_folders_manager
+    mgr = get_folders_manager()
+    success = mgr.add_meeting_to_folder(Path(summary_file), folder_id)
+    print(json.dumps({"success": success}))
+
+
+@cli.command()
+@click.argument('summary_file')
+@click.argument('folder_id')
+def remove_meeting_from_folder(summary_file, folder_id):
+    """Remove a meeting from a folder"""
+    from src.folders import get_folders_manager
+    mgr = get_folders_manager()
+    success = mgr.remove_meeting_from_folder(Path(summary_file), folder_id)
+    print(json.dumps({"success": success}))
 
 
 @cli.command()
