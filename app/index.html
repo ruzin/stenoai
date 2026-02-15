@@ -1219,7 +1219,6 @@
             display: flex;
             align-items: center;
             gap: 4px;
-            margin-left: 8px;
             flex-shrink: 0;
         }
 
@@ -2667,7 +2666,11 @@ Ask Steno
                                 </svg>
                             </button>
                             <button class="reprocess-btn" id="reprocess-btn" title="Reprocess meeting">
-                                🔄
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <polyline points="23 4 23 10 17 10"></polyline>
+                                    <polyline points="1 20 1 14 7 14"></polyline>
+                                    <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+                                </svg>
                             </button>
                         </div>
                     </div>
@@ -3055,15 +3058,15 @@ Commands and output will appear here...
                         </select>
                     </div>
 
-                    <div class="settings-row">
-                        <div class="settings-row-text">
+                    <div class="settings-row" style="flex-wrap: wrap;">
+                        <div class="settings-row-text" style="flex: 1; min-width: 0;">
                             <span>Storage location</span>
-                            <small id="storage-path-display">Default location</small>
                         </div>
-                        <div style="display: flex; align-items: center; gap: 6px; flex-shrink: 0;">
-                            <button class="settings-action-btn" id="choose-storage-btn" onclick="chooseStorageLocation()">Choose...</button>
-                            <button class="settings-action-btn" id="reset-storage-btn" onclick="resetStorageLocation()" style="display: none;">Reset</button>
+                        <div style="display: flex; align-items: center; gap: 4px; flex-shrink: 0;">
+                            <button class="settings-action-btn" id="choose-storage-btn" onclick="chooseStorageLocation()" style="margin-left: 0;">Choose...</button>
+                            <button class="settings-action-btn" id="reset-storage-btn" onclick="resetStorageLocation()" style="display: none; margin-left: 0;">Reset</button>
                         </div>
+                        <small id="storage-path-display" style="color: var(--text-muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; width: 100%; margin-top: 2px;">Default location</small>
                     </div>
 
                     <div class="settings-row">
@@ -3112,8 +3115,8 @@ Commands and output will appear here...
                         </label>
                     </div>
 
-                    <div class="settings-row">
-                        <div class="settings-row-text">
+                    <div class="settings-row" style="flex-wrap: wrap;">
+                        <div class="settings-row-text" style="flex: 1; min-width: 0;">
                             <span>Anonymous usage analytics</span>
                             <small>Help improve StenoAI -- no meeting content is ever sent</small>
                         </div>
@@ -3121,6 +3124,7 @@ Commands and output will appear here...
                             <input type="checkbox" id="telemetry-toggle">
                             <span class="toggle-slider"></span>
                         </label>
+                        <small id="anonymous-id-display" style="color: var(--text-muted); font-size: 11px; width: 100%; margin-top: 4px; cursor: pointer; opacity: 0.6;" title="Click to copy" onclick="navigator.clipboard.writeText(this.textContent.replace('ID: ','')).then(()=>{this.textContent='Copied!';setTimeout(()=>loadTelemetryId(),1500)})"></small>
                     </div>
 
                     <div class="settings-version">
@@ -3723,7 +3727,7 @@ Session started - waiting for activity...
                 // Normal state
                 reprocessBtn.disabled = false;
                 reprocessBtn.classList.remove('processing');
-                reprocessBtn.innerHTML = 'Reprocess';
+                reprocessBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>';
             }
             
             // TEMPORARY: Show reprocess button for all meetings (for testing)
@@ -4099,7 +4103,7 @@ Session started - waiting for activity...
                 if (selectedMeeting && selectedMeeting.session_info?.summary_file === summaryFile) {
                     reprocessBtn.disabled = false;
                     reprocessBtn.classList.remove('processing');
-                    reprocessBtn.innerHTML = 'Reprocess';
+                    reprocessBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>';
                 }
             }
         });
@@ -5214,6 +5218,7 @@ Session started - waiting for activity...
 
                 if (result.success) {
                     toggle.checked = result.telemetry_enabled;
+                    loadTelemetryId(result.anonymous_id);
                 } else {
                     console.error('Failed to load telemetry settings:', result.error);
                     toggle.checked = true; // Default to enabled
@@ -5221,6 +5226,13 @@ Session started - waiting for activity...
             } catch (error) {
                 console.error('Error loading telemetry settings:', error);
                 document.getElementById('telemetry-toggle').checked = true;
+            }
+        }
+
+        function loadTelemetryId(id) {
+            const el = document.getElementById('anonymous-id-display');
+            if (el && id) {
+                el.textContent = 'ID: ' + id;
             }
         }
 
@@ -5414,8 +5426,9 @@ Session started - waiting for activity...
                     display.title = result.storage_path;
                     resetBtn.style.display = '';
                 } else {
-                    display.textContent = 'Default location';
-                    display.title = '';
+                    const defaultPath = require('path').join(require('os').homedir(), 'Library', 'Application Support', 'stenoai');
+                    display.textContent = defaultPath;
+                    display.title = 'Default location';
                     resetBtn.style.display = 'none';
                 }
             } catch (error) {
