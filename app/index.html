@@ -802,6 +802,7 @@
             flex-direction: column;
             transition: width 0.3s ease;
             position: relative;
+            overflow: hidden;
         }
 
         .sidebar.collapsed {
@@ -809,10 +810,23 @@
             min-width: 0;
         }
 
+        .sidebar > .sidebar-header,
+        .sidebar > .folder-list,
+        .sidebar > .folder-actions,
+        .sidebar > .folder-separator,
+        .sidebar > .meetings-list {
+            opacity: 1;
+            transition: opacity 0.2s ease 0.1s;
+        }
+
         .sidebar.collapsed .sidebar-header,
+        .sidebar.collapsed .folder-list,
+        .sidebar.collapsed .folder-actions,
+        .sidebar.collapsed .folder-separator,
         .sidebar.collapsed .meetings-list {
             opacity: 0;
             pointer-events: none;
+            transition: opacity 0.1s ease;
         }
 
         .sidebar-toggle {
