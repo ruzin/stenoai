@@ -882,9 +882,11 @@
         .sidebar-header h2 {
             font-size: 13px;
             font-weight: 600;
-            color: var(--text-muted);
             text-transform: uppercase;
             letter-spacing: 0.05em;
+            background: linear-gradient(135deg, #6366f1, #818cf8);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
         }
         
         
@@ -939,6 +941,9 @@
         /* Folder list above meetings */
         .folder-list {
             padding: 4px 8px 0;
+            max-height: 180px;
+            overflow-y: auto;
+            flex-shrink: 0;
         }
 
         .folder-item {
@@ -971,6 +976,18 @@
             outline: 1px solid rgba(129, 140, 248, 0.35);
             outline-offset: -1px;
             color: var(--text-primary);
+        }
+
+        .folder-item.dragging {
+            opacity: 0.4;
+        }
+
+        .folder-item.drop-above {
+            border-top: 2px solid var(--accent-primary);
+        }
+
+        .folder-item.drop-below {
+            border-bottom: 2px solid var(--accent-primary);
         }
 
         .meeting-item[draggable="true"] {
@@ -1223,7 +1240,17 @@
             opacity: 0.7;
             position: relative;
         }
-        
+
+        .meeting-item-spinner {
+            width: 12px;
+            height: 12px;
+            border: 1.5px solid var(--border-subtle);
+            border-top-color: var(--accent-primary);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            flex-shrink: 0;
+        }
+
         .meeting-item.processing .processing-overlay {
             position: absolute;
             bottom: 8px;
@@ -1325,6 +1352,235 @@
             color: var(--text-primary);
         }
         
+        /* Calendar sidebar section */
+        .calendar-sidebar {
+            display: none;
+            flex-direction: column;
+            flex-shrink: 0;
+            padding-bottom: 8px;
+            margin-bottom: 10px;
+            border-bottom: 1px solid var(--border-subtle);
+        }
+
+        .calendar-sidebar.show {
+            display: flex;
+        }
+
+        .calendar-sidebar-header {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-muted);
+            padding: 0 0 4px;
+        }
+
+        .calendar-sidebar-header svg {
+            color: var(--text-muted);
+            flex-shrink: 0;
+        }
+
+        .calendar-refresh-btn {
+            margin-left: auto;
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            padding: 4px;
+            border-radius: 5px;
+            display: flex;
+            align-items: center;
+            transition: all 0.15s ease;
+        }
+
+        .calendar-refresh-btn:hover {
+            color: var(--text-primary);
+            background: var(--bg-surface);
+        }
+
+        .calendar-refresh-btn.spinning svg {
+            animation: spin 0.6s ease;
+        }
+
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        .calendar-sidebar-item {
+            display: flex;
+            align-items: center;
+            height: 32px;
+            padding: 0 8px;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: background 0.15s ease;
+            gap: 8px;
+        }
+
+        .calendar-sidebar-item:hover {
+            background: var(--bg-surface);
+        }
+
+        .calendar-sidebar-item.active {
+            background: var(--bg-surface);
+        }
+
+        .calendar-sidebar-item .event-title {
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--text-secondary);
+            flex: 1;
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .calendar-sidebar-item .event-meta {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            flex-shrink: 0;
+        }
+
+        .calendar-sidebar-item .event-time {
+            font-size: 11px;
+            color: var(--text-muted);
+            white-space: nowrap;
+            min-width: 52px;
+            text-align: right;
+        }
+
+        .calendar-sidebar-separator {
+            display: none;
+        }
+
+        /* Calendar event detail view */
+        .calendar-event-detail {
+            padding: 40px 48px;
+            height: 100%;
+            overflow-y: auto;
+            display: none;
+            flex-direction: column;
+        }
+
+        .calendar-event-detail.show {
+            display: flex;
+        }
+
+        .calendar-detail-back {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            font-size: 13px;
+            cursor: pointer;
+            padding: 4px 0;
+            margin-bottom: 20px;
+            transition: color 0.15s ease;
+        }
+
+        .calendar-detail-back:hover {
+            color: var(--text-primary);
+        }
+
+        .calendar-detail-title {
+            font-size: 22px;
+            font-weight: 700;
+            color: var(--text-primary);
+            margin: 0 0 16px;
+        }
+
+        .calendar-detail-meta {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin-bottom: 28px;
+        }
+
+        .calendar-detail-meta-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+
+        .calendar-detail-meta-row svg {
+            color: var(--text-muted);
+            flex-shrink: 0;
+        }
+
+        .calendar-detail-section {
+            margin-bottom: 24px;
+        }
+
+        .calendar-detail-section h3 {
+            font-size: 13px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+            margin: 0 0 10px;
+        }
+
+        .calendar-detail-attendees {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+
+        .calendar-detail-attendee {
+            background: var(--bg-surface);
+            border: 1px solid var(--border-subtle);
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .calendar-detail-description {
+            font-size: 14px;
+            line-height: 1.6;
+            color: var(--text-secondary);
+            white-space: pre-wrap;
+        }
+
+        .calendar-record-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: var(--bg-surface);
+            color: var(--text-primary);
+            border: 1px solid var(--border-default);
+            padding: 8px 16px;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            margin-top: 8px;
+            align-self: flex-start;
+        }
+
+        .calendar-record-btn:hover {
+            background: var(--bg-elevated);
+            border-color: var(--border-default);
+            transform: translateY(-1px);
+        }
+
+        .calendar-record-btn .record-dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: #ef4444;
+            box-shadow: 0 0 6px rgba(239, 68, 68, 0.4);
+        }
+
         /* Meeting detail view */
         .meeting-detail {
             padding: 32px;
@@ -1332,7 +1588,7 @@
             overflow-y: auto;
             display: none;
         }
-        
+
         .meeting-detail.show {
             display: block;
         }
@@ -2760,6 +3016,16 @@
         <!-- Sidebar with meetings -->
         <div class="sidebar" id="sidebar">
             <div class="sidebar-header">
+                <div class="calendar-sidebar" id="calendar-sidebar">
+                    <div class="calendar-sidebar-header">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+                        Coming Up
+                        <button class="calendar-refresh-btn" id="calendar-refresh-btn" onclick="refreshCalendarEvents()" title="Refresh">
+                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+                        </button>
+                    </div>
+                    <div id="calendar-sidebar-list"></div>
+                </div>
                 <div class="sidebar-title">
                     <h2>Meetings</h2>
                 </div>
@@ -2771,7 +3037,7 @@
                     <input type="text" class="search-input" id="search-input" placeholder="Search meetings...">
                 </div>
             </div>
-            
+
             <div class="folder-list" id="folder-list">
                 <!-- Folders rendered here -->
             </div>
@@ -2784,6 +3050,14 @@
             <div class="folder-separator"></div>
             <div class="meetings-list" id="meetings-list">
                 <!-- Meetings will be loaded here -->
+            </div>
+        </div>
+
+        <!-- Context menu for folders -->
+        <div class="context-menu" id="folder-context-menu" onclick="event.stopPropagation()">
+            <div class="context-menu-item danger" onclick="event.stopPropagation(); deleteContextFolder()">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                Delete folder
             </div>
         </div>
 
@@ -2813,6 +3087,37 @@
                     <kbd class="kbd">R</kbd>
                     <span>anywhere</span>
                 </div>
+            </div>
+
+            <!-- Calendar event detail view -->
+            <div class="calendar-event-detail" id="calendar-event-detail">
+                <button class="calendar-detail-back" id="calendar-detail-back">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>
+                    Back
+                </button>
+                <h2 class="calendar-detail-title" id="calendar-detail-title"></h2>
+                <div class="calendar-detail-meta">
+                    <div class="calendar-detail-meta-row" id="calendar-detail-time">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                        <span></span>
+                    </div>
+                    <div class="calendar-detail-meta-row" id="calendar-detail-date">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+                        <span></span>
+                    </div>
+                </div>
+                <div class="calendar-detail-section" id="calendar-detail-attendees-section" style="display: none;">
+                    <h3>Attendees</h3>
+                    <div class="calendar-detail-attendees" id="calendar-detail-attendees"></div>
+                </div>
+                <div class="calendar-detail-section" id="calendar-detail-description-section" style="display: none;">
+                    <h3>Description</h3>
+                    <div class="calendar-detail-description" id="calendar-detail-description"></div>
+                </div>
+                <button class="calendar-record-btn" id="calendar-record-btn">
+                    <span class="record-dot"></span>
+                    Record this meeting
+                </button>
             </div>
 
             <!-- Meeting detail view -->
@@ -3234,6 +3539,14 @@ Commands and output will appear here...
                         </select>
                     </div>
 
+                    <div class="settings-row">
+                        <div class="settings-row-text">
+                            <span>Google Calendar</span>
+                            <small id="google-cal-status-text" style="color: var(--text-muted);">Checking...</small>
+                        </div>
+                        <button class="settings-action-btn" id="google-cal-btn" onclick="toggleGoogleCalendar()">Connect</button>
+                    </div>
+
                     <div class="settings-row" style="flex-wrap: wrap;">
                         <div class="settings-row-text" style="flex: 1; min-width: 0;">
                             <span>Storage location</span>
@@ -3305,6 +3618,8 @@ Commands and output will appear here...
 
                     <div class="settings-version">
                         StenoAI <span id="app-version">Loading...</span>
+                        <span style="margin: 0 6px; opacity: 0.3;">·</span>
+                        <a href="#" onclick="require('electron').shell.openExternal('https://discord.com/invite/DZ6vcQnxxu'); return false;" style="color: var(--text-muted); text-decoration: none; transition: color 0.2s;" onmouseover="this.style.color='var(--accent-primary)'" onmouseout="this.style.color='var(--text-muted)'">Report a bug</a>
                     </div>
                 </div>
 
@@ -3369,9 +3684,12 @@ Session started - waiting for activity...
         // Brand click - return to home state
         document.querySelector('.brand').addEventListener('click', () => {
             selectedMeeting = null;
+            selectedCalendarEvent = null;
             document.getElementById('empty-state').style.display = 'flex';
             document.getElementById('meeting-detail').classList.remove('show');
+            document.getElementById('calendar-event-detail').classList.remove('show');
             document.querySelectorAll('.meeting-item').forEach(item => item.classList.remove('active'));
+            renderCalendarSidebar();
         });
 
         const startBtn = document.getElementById('start-btn');
@@ -3436,6 +3754,14 @@ Session started - waiting for activity...
         // Announcement system variables
         let currentAnnouncement = null;
         let announcementCheckInterval = null;
+
+        // Google Calendar state
+        let calendarConnected = false;
+        let calendarEvents = [];
+        let selectedCalendarEvent = null;
+        let calendarRefreshInterval = null;
+        let calendarNotificationTimers = [];
+        let notifiedEventIds = new Set();
         
         // Utility functions
         function log(message) {
@@ -3754,13 +4080,8 @@ Session started - waiting for activity...
             try {
                 const d = new Date(dateString);
                 const now = new Date();
-                const isToday = d.toDateString() === now.toDateString();
-                const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1);
-                const isYesterday = d.toDateString() === yesterday.toDateString();
-                if (isToday) return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-                if (isYesterday) return 'Yesterday';
-                if (now.getFullYear() === d.getFullYear()) return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-                return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' });
+                if (now.getFullYear() === d.getFullYear()) return d.toLocaleDateString('en-US', { day: 'numeric', month: 'short' });
+                return d.toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: '2-digit' });
             } catch { return ''; }
         }
 
@@ -3787,11 +4108,14 @@ Session started - waiting for activity...
             </div>`;
             for (const f of folders) {
                 const count = meetings.filter(m => (m.folders || []).includes(f.id)).length;
-                html += `<div class="folder-item ${activeFolderId === f.id ? 'active' : ''}" onclick="setActiveFolder('${f.id}')" oncontextmenu="showFolderContextMenu(event, '${f.id}')"
+                html += `<div class="folder-item ${activeFolderId === f.id ? 'active' : ''}" onclick="setActiveFolder('${f.id}')" oncontextmenu="confirmDeleteFolder(event, '${f.id}')" ondblclick="event.stopPropagation(); renameFolderInline(event, '${f.id}')"
                     data-folder-id="${f.id}"
-                    ondragover="event.preventDefault(); this.classList.add('drag-over')"
-                    ondragleave="this.classList.remove('drag-over')"
-                    ondrop="handleFolderDrop(event, '${f.id}')">
+                    draggable="true"
+                    ondragstart="handleFolderDragStart(event, '${f.id}')"
+                    ondragend="handleFolderDragEnd(event)"
+                    ondragover="handleFolderDragOver(event, '${f.id}')"
+                    ondragleave="handleFolderDragLeave(event)"
+                    ondrop="handleFolderOrMeetingDrop(event, '${f.id}')">
                     ${folderIcon(f.color)}
                     ${escapeHtml(f.name)}
                     <span class="folder-count">${count}</span>
@@ -3859,51 +4183,83 @@ Session started - waiting for activity...
             input.addEventListener('blur', commitFolder);
         }
 
-        async function showFolderContextMenu(event, folderId) {
+        async function renameFolderInline(event, folderId) {
             event.preventDefault();
             event.stopPropagation();
             const folder = folders.find(f => f.id === folderId);
             if (!folder) return;
 
-            // Replace the folder item with an editable input
-            const items = document.querySelectorAll('.folder-item');
-            for (const item of items) {
-                if (item.textContent.includes(folder.name)) {
-                    const origHtml = item.innerHTML;
-                    item.innerHTML = `
-                        ${folderIcon(folder.color)}
-                        <input type="text" id="rename-folder-input" value="${escapeHtml(folder.name)}" style="
-                            flex: 1; background: var(--bg-deep); border: 1px solid var(--accent-primary);
-                            border-radius: 4px; padding: 3px 6px; font-size: 12px; color: var(--text-primary);
-                            outline: none; font-family: inherit; min-width: 0;
-                        ">
-                        <button onclick="deleteFolder_('${folderId}')" style="background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 2px; font-size: 14px;" title="Delete folder">✕</button>
-                    `;
-                    const input = document.getElementById('rename-folder-input');
-                    input.focus();
-                    input.select();
+            const item = document.querySelector(`.folder-item[data-folder-id="${folderId}"]`);
+            if (!item) return;
 
-                    async function commitRename() {
-                        const newName = input.value.trim();
-                        if (newName && newName !== folder.name) {
-                            await ipcRenderer.invoke('rename-folder', folderId, newName);
-                        }
-                        await loadFolders();
-                    }
-                    input.addEventListener('keydown', (e) => {
-                        if (e.key === 'Enter') commitRename();
-                        if (e.key === 'Escape') loadFolders();
-                    });
-                    input.addEventListener('blur', commitRename);
-                    break;
+            item.innerHTML = `
+                ${folderIcon(folder.color)}
+                <input type="text" id="rename-folder-input" value="${escapeHtml(folder.name)}" style="
+                    flex: 1; background: var(--bg-deep); border: 1px solid var(--accent-primary);
+                    border-radius: 4px; padding: 3px 6px; font-size: 12px; color: var(--text-primary);
+                    outline: none; font-family: inherit; min-width: 0;
+                ">
+            `;
+            const input = document.getElementById('rename-folder-input');
+            input.focus();
+            input.select();
+
+            async function commitRename() {
+                const newName = input.value.trim();
+                if (newName && newName !== folder.name) {
+                    await ipcRenderer.invoke('rename-folder', folderId, newName);
                 }
+                await loadFolders();
             }
+            input.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') commitRename();
+                if (e.key === 'Escape') loadFolders();
+            });
+            input.addEventListener('blur', commitRename);
+        }
+
+        let contextFolderId = null;
+
+        function confirmDeleteFolder(event, folderId) {
+            event.preventDefault();
+            event.stopPropagation();
+            contextFolderId = folderId;
+            const menu = document.getElementById('folder-context-menu');
+            menu.style.left = event.clientX + 'px';
+            menu.style.top = event.clientY + 'px';
+            menu.classList.add('show');
+        }
+
+        function hideFolderContextMenu() {
+            document.getElementById('folder-context-menu').classList.remove('show');
+        }
+
+        async function deleteContextFolder() {
+            if (contextFolderId === null) return;
+            hideFolderContextMenu();
+            const folder = folders.find(f => f.id === contextFolderId);
+            const name = folder ? folder.name : 'this folder';
+            const count = meetings.filter(m => (m.folders || []).includes(contextFolderId)).length;
+            const msg = count > 0
+                ? `Delete folder "${name}"?\n\n${count} meeting${count === 1 ? '' : 's'} will be moved back to All Meetings. No recordings or transcripts will be deleted.`
+                : `Delete folder "${name}"?\n\nNo recordings or transcripts will be deleted.`;
+            if (!confirm(msg)) { contextFolderId = null; return; }
+            await deleteFolder_(contextFolderId);
+            contextFolderId = null;
         }
 
         async function deleteFolder_(folderId) {
+            // Remove folder references from all meetings that were in this folder
+            const affectedMeetings = meetings.filter(m => (m.folders || []).includes(folderId));
+            for (const m of affectedMeetings) {
+                const summaryFile = m.session_info?.summary_file;
+                if (summaryFile) {
+                    await ipcRenderer.invoke('remove-meeting-from-folder', summaryFile, folderId).catch(() => {});
+                }
+            }
             await ipcRenderer.invoke('delete-folder', folderId);
             if (activeFolderId === folderId) activeFolderId = null;
-            await loadFolders();
+            await loadMeetings(true); // Reload to get updated folder references
             filterMeetings();
         }
 
@@ -3923,10 +4279,20 @@ Session started - waiting for activity...
             document.getElementById('meeting-context-menu').classList.remove('show');
         }
 
-        document.addEventListener('click', () => {
+        let calendarDetailJustOpened = false;
+        document.addEventListener('click', (e) => {
             hideMeetingContextMenu();
+            hideFolderContextMenu();
             // Restore original menu items when clicking away
             if (typeof restoreContextMenu === 'function') restoreContextMenu();
+            // Close calendar event detail when clicking outside it
+            if (selectedCalendarEvent !== null) {
+                if (calendarDetailJustOpened) { calendarDetailJustOpened = false; return; }
+                const detail = document.getElementById('calendar-event-detail');
+                if (!detail.contains(e.target)) {
+                    hideCalendarEventDetail();
+                }
+            }
         });
 
         async function showFolderPicker(event) {
@@ -4007,13 +4373,91 @@ Session started - waiting for activity...
         }
 
         let draggedMeetingIndex = null;
+        let draggedFolderId = null;
 
         function handleMeetingDragStart(event, index) {
             draggedMeetingIndex = index;
+            draggedFolderId = null;
             event.dataTransfer.effectAllowed = 'move';
-            event.dataTransfer.setData('text/plain', index.toString());
+            event.dataTransfer.setData('text/meeting', index.toString());
             event.target.style.opacity = '0.5';
             setTimeout(() => { event.target.style.opacity = ''; }, 0);
+        }
+
+        function handleFolderDragStart(event, folderId) {
+            draggedFolderId = folderId;
+            draggedMeetingIndex = null;
+            event.dataTransfer.effectAllowed = 'move';
+            event.dataTransfer.setData('text/folder', folderId);
+            event.currentTarget.classList.add('dragging');
+        }
+
+        function handleFolderDragEnd(event) {
+            event.currentTarget.classList.remove('dragging');
+            draggedFolderId = null;
+            // Clear all drop indicators
+            document.querySelectorAll('.folder-item').forEach(el => {
+                el.classList.remove('drop-above', 'drop-below', 'drag-over');
+            });
+        }
+
+        function handleFolderDragOver(event, targetFolderId) {
+            event.preventDefault();
+            if (draggedFolderId && draggedFolderId !== targetFolderId) {
+                // Folder reorder: show above/below indicator
+                const rect = event.currentTarget.getBoundingClientRect();
+                const midY = rect.top + rect.height / 2;
+                event.currentTarget.classList.remove('drop-above', 'drop-below', 'drag-over');
+                if (event.clientY < midY) {
+                    event.currentTarget.classList.add('drop-above');
+                } else {
+                    event.currentTarget.classList.add('drop-below');
+                }
+            } else if (draggedMeetingIndex !== null) {
+                // Meeting drag onto folder
+                event.currentTarget.classList.add('drag-over');
+            }
+        }
+
+        function handleFolderDragLeave(event) {
+            event.currentTarget.classList.remove('drag-over', 'drop-above', 'drop-below');
+        }
+
+        async function handleFolderOrMeetingDrop(event, targetFolderId) {
+            event.preventDefault();
+            event.currentTarget.classList.remove('drag-over', 'drop-above', 'drop-below');
+
+            if (draggedFolderId && draggedFolderId !== targetFolderId) {
+                // Folder reorder
+                const rect = event.currentTarget.getBoundingClientRect();
+                const midY = rect.top + rect.height / 2;
+                const dropAbove = event.clientY < midY;
+
+                const dragIdx = folders.findIndex(f => f.id === draggedFolderId);
+                if (dragIdx === -1) { draggedFolderId = null; return; }
+
+                // Remove dragged folder from array
+                const [dragged] = folders.splice(dragIdx, 1);
+
+                // Find target index after removal
+                let targetIdx = folders.findIndex(f => f.id === targetFolderId);
+                if (targetIdx === -1) { folders.splice(dragIdx, 0, dragged); draggedFolderId = null; return; }
+
+                // Insert above or below target
+                if (!dropAbove) targetIdx++;
+                folders.splice(targetIdx, 0, dragged);
+
+                draggedFolderId = null;
+                renderFolderList();
+
+                // Persist new order
+                const folderIds = folders.map(f => f.id);
+                ipcRenderer.invoke('reorder-folders', folderIds);
+                return;
+            }
+
+            // Fall through to meeting-to-folder drop
+            handleFolderDrop(event, targetFolderId);
         }
 
         async function handleFolderDrop(event, folderId) {
@@ -4124,6 +4568,7 @@ Session started - waiting for activity...
                     <span class="meeting-dot"></span>
                     <div class="meeting-line-body">
                         <span class="meeting-line-title" ondblclick="event.stopPropagation(); renameMeeting(${index}, this)">${escapeHtml(title)}</span>
+                        ${isProcessing ? '<span class="meeting-item-spinner"></span>' : ''}
                         <span class="meeting-line-meta">
                             ${actionCount > 0 ? `<span class="meeting-line-badge">${actionCount}</span>` : ''}
                             <span class="meeting-line-date">${date}</span>
@@ -4147,12 +4592,17 @@ Session started - waiting for activity...
         function selectMeeting(index) {
             selectedMeeting = filteredMeetings[index];
             if (!selectedMeeting) return;
-            
+
+            // Deselect calendar event
+            selectedCalendarEvent = null;
+            document.getElementById('calendar-event-detail').classList.remove('show');
+            renderCalendarSidebar();
+
             // Update active state
             document.querySelectorAll('.meeting-item').forEach((item, i) => {
                 item.classList.toggle('active', i === index);
             });
-            
+
             // Show meeting details
             emptyState.style.display = 'none';
             meetingDetail.classList.add('show');
@@ -4429,11 +4879,11 @@ Session started - waiting for activity...
         });
         
         
-        // File drop handling (ignore internal meeting drags)
+        // File drop handling (ignore internal meeting/folder drags)
         document.addEventListener('dragover', (e) => {
             e.preventDefault();
-            // Only show drop zone for external file drops, not internal meeting drags
-            if (draggedMeetingIndex !== null) return;
+            // Only show drop zone for external file drops, not internal drags
+            if (draggedMeetingIndex !== null || draggedFolderId !== null) return;
             dropZone.classList.add('active');
         });
 
@@ -4446,8 +4896,9 @@ Session started - waiting for activity...
         document.addEventListener('drop', async (e) => {
             e.preventDefault();
             dropZone.classList.remove('active');
-            // Ignore internal meeting drags
+            // Ignore internal meeting/folder drags
             if (draggedMeetingIndex !== null) { draggedMeetingIndex = null; return; }
+            if (draggedFolderId !== null) { draggedFolderId = null; return; }
             
             const files = e.dataTransfer.files;
             if (files.length > 0) {
@@ -4506,6 +4957,274 @@ Session started - waiting for activity...
             }
         }
 
+        // ── Google Calendar Functions ────────────────────────────────────────
+
+        async function checkGoogleCalendarStatus() {
+            try {
+                const result = await ipcRenderer.invoke('google-auth-status');
+                calendarConnected = result.success && result.connected;
+                updateCalendarSettingsUI();
+                if (calendarConnected) {
+                    await loadCalendarEvents();
+                    if (calendarRefreshInterval) clearInterval(calendarRefreshInterval);
+                    calendarRefreshInterval = setInterval(loadCalendarEvents, 5 * 60 * 1000);
+                } else {
+                    renderCalendarSidebar();
+                }
+            } catch (error) {
+                log(`Calendar status check failed: ${error.message}`);
+                calendarConnected = false;
+                updateCalendarSettingsUI();
+                renderCalendarSidebar();
+            }
+        }
+
+        async function refreshCalendarEvents() {
+            const btn = document.getElementById('calendar-refresh-btn');
+            btn.classList.add('spinning');
+            await loadCalendarEvents();
+            setTimeout(() => btn.classList.remove('spinning'), 600);
+        }
+
+        async function loadCalendarEvents() {
+            try {
+                const result = await ipcRenderer.invoke('get-calendar-events');
+                if (result.needsAuth) {
+                    calendarConnected = false;
+                    calendarEvents = [];
+                    updateCalendarSettingsUI();
+                    renderCalendarSidebar();
+                    return;
+                }
+                if (result.success) {
+                    calendarEvents = result.events;
+                } else {
+                    calendarEvents = [];
+                }
+            } catch (error) {
+                log(`Failed to load calendar events: ${error.message}`);
+                calendarEvents = [];
+            }
+            renderCalendarSidebar();
+            scheduleCalendarNotifications();
+        }
+
+        function fireCalendarNotification(event) {
+            if (notifiedEventIds.has(event.id)) return;
+            notifiedEventIds.add(event.id);
+
+            const startStr = event.start?.dateTime || event.start?.date;
+            const title = event.summary || 'Upcoming meeting';
+            const timeStr = formatCalendarTime(startStr);
+            const eventId = event.id;
+            const notif = new Notification('Meeting in 5 minutes', {
+                body: `${title} at ${timeStr}`,
+                silent: false
+            });
+            notif.onclick = () => {
+                ipcRenderer.send('focus-window');
+                const idx = calendarEvents.findIndex(e => e.id === eventId);
+                if (idx !== -1) showCalendarEventDetail(idx);
+            };
+        }
+
+        function scheduleCalendarNotifications() {
+            // Clear existing timers
+            calendarNotificationTimers.forEach(t => clearTimeout(t));
+            calendarNotificationTimers = [];
+
+            const now = Date.now();
+            const LEAD_TIME = 5 * 60 * 1000; // 5 minutes before
+
+            for (const event of calendarEvents) {
+                const startStr = event.start?.dateTime || event.start?.date;
+                if (!startStr) continue;
+
+                const startTime = new Date(startStr).getTime();
+                const notifyAt = startTime - LEAD_TIME;
+                const delay = notifyAt - now;
+
+                // Skip if already past, or already notified
+                if (delay < -LEAD_TIME || notifiedEventIds.has(event.id)) continue;
+
+                if (delay <= 0) {
+                    // Already within the notification window — fire immediately
+                    fireCalendarNotification(event);
+                } else {
+                    const ev = event;
+                    const timer = setTimeout(() => fireCalendarNotification(ev), delay);
+                    calendarNotificationTimers.push(timer);
+                }
+            }
+        }
+
+        function renderCalendarSidebar() {
+            const container = document.getElementById('calendar-sidebar');
+            const list = document.getElementById('calendar-sidebar-list');
+
+            if (!calendarConnected || calendarEvents.length === 0) {
+                container.classList.remove('show');
+                return;
+            }
+
+            container.classList.add('show');
+            const eventsToShow = calendarEvents.slice(0, 3);
+            list.innerHTML = eventsToShow.map((event, i) => {
+                const title = event.summary || 'No title';
+                const meta = formatCalendarMeta(event);
+                const activeClass = selectedCalendarEvent === i ? ' active' : '';
+                return `<div class="calendar-sidebar-item${activeClass}" data-cal-index="${i}">
+                    <span class="event-title">${escapeHtml(title)}</span>
+                    <span class="event-meta"><span class="event-time">${meta}</span></span>
+                </div>`;
+            }).join('');
+
+            list.querySelectorAll('.calendar-sidebar-item').forEach(item => {
+                item.addEventListener('click', () => {
+                    const idx = parseInt(item.dataset.calIndex);
+                    showCalendarEventDetail(idx);
+                });
+            });
+        }
+
+        function formatCalendarMeta(event) {
+            const time = formatCalendarTime(event);
+            const now = new Date();
+            const start = event.start?.dateTime ? new Date(event.start.dateTime) : (event.start?.date ? new Date(event.start.date + 'T00:00:00') : null);
+            if (!start) return time;
+
+            const isToday = start.toDateString() === now.toDateString();
+            const tomorrow = new Date(now); tomorrow.setDate(now.getDate() + 1);
+            const isTomorrow = start.toDateString() === tomorrow.toDateString();
+
+            if (isToday) return `Today, ${time}`;
+            const datePart = isTomorrow ? 'Tomorrow' : start.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+            return `${datePart}, ${time}`;
+        }
+
+        function formatCalendarTime(event) {
+            if (event.start?.dateTime) {
+                return new Date(event.start.dateTime).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+            }
+            if (event.start?.date) return 'All day';
+            return '';
+        }
+
+        function formatCalendarDateFull(event) {
+            const dt = event.start?.dateTime ? new Date(event.start.dateTime) : (event.start?.date ? new Date(event.start.date + 'T00:00:00') : null);
+            if (!dt) return '';
+            return dt.toLocaleDateString([], { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+        }
+
+        function formatCalendarTimeRange(event) {
+            if (event.start?.dateTime && event.end?.dateTime) {
+                const fmt = { hour: 'numeric', minute: '2-digit' };
+                return `${new Date(event.start.dateTime).toLocaleTimeString([], fmt)} - ${new Date(event.end.dateTime).toLocaleTimeString([], fmt)}`;
+            }
+            return 'All day';
+        }
+
+        function showCalendarEventDetail(index) {
+            calendarDetailJustOpened = true;
+            const event = calendarEvents[index];
+            if (!event) return;
+
+            selectedCalendarEvent = index;
+            selectedMeeting = null;
+            document.querySelectorAll('.meeting-item').forEach(item => item.classList.remove('active'));
+
+            document.getElementById('empty-state').style.display = 'none';
+            document.getElementById('meeting-detail').classList.remove('show');
+
+            document.getElementById('calendar-detail-title').textContent = event.summary || 'No title';
+            document.getElementById('calendar-detail-time').querySelector('span').textContent = formatCalendarTimeRange(event);
+            document.getElementById('calendar-detail-date').querySelector('span').textContent = formatCalendarDateFull(event);
+
+            const attendeesSection = document.getElementById('calendar-detail-attendees-section');
+            const attendeesContainer = document.getElementById('calendar-detail-attendees');
+            if (event.attendees && event.attendees.length > 0) {
+                attendeesSection.style.display = 'block';
+                attendeesContainer.innerHTML = event.attendees.map(a => {
+                    const name = a.displayName || a.email || 'Unknown';
+                    return `<span class="calendar-detail-attendee">${escapeHtml(name)}</span>`;
+                }).join('');
+            } else {
+                attendeesSection.style.display = 'none';
+            }
+
+            const descSection = document.getElementById('calendar-detail-description-section');
+            const descContainer = document.getElementById('calendar-detail-description');
+            if (event.description) {
+                descSection.style.display = 'block';
+                descContainer.textContent = event.description;
+            } else {
+                descSection.style.display = 'none';
+            }
+
+            document.getElementById('calendar-event-detail').classList.add('show');
+            renderCalendarSidebar();
+        }
+
+        function hideCalendarEventDetail() {
+            selectedCalendarEvent = null;
+            document.getElementById('calendar-event-detail').classList.remove('show');
+            document.getElementById('empty-state').style.display = 'flex';
+            renderCalendarSidebar();
+        }
+
+        function recordCalendarEvent() {
+            if (selectedCalendarEvent === null) return;
+            const event = calendarEvents[selectedCalendarEvent];
+            if (!event) return;
+            document.getElementById('session-name').value = event.summary || 'Meeting';
+            hideCalendarEventDetail();
+            document.getElementById('start-btn').click();
+        }
+
+        async function toggleGoogleCalendar() {
+            const btn = document.getElementById('google-cal-btn');
+            if (calendarConnected) {
+                btn.disabled = true;
+                btn.textContent = 'Disconnecting...';
+                await ipcRenderer.invoke('google-auth-disconnect');
+                calendarConnected = false;
+                calendarEvents = [];
+                selectedCalendarEvent = null;
+                if (calendarRefreshInterval) { clearInterval(calendarRefreshInterval); calendarRefreshInterval = null; }
+                document.getElementById('calendar-event-detail').classList.remove('show');
+                document.getElementById('empty-state').style.display = 'flex';
+                updateCalendarSettingsUI();
+                renderCalendarSidebar();
+            } else {
+                btn.disabled = true;
+                btn.textContent = 'Connecting...';
+                const result = await ipcRenderer.invoke('google-auth-start');
+                if (!result.success) log(`Google Calendar connect failed: ${result.error}`);
+                btn.disabled = false;
+                updateCalendarSettingsUI();
+            }
+        }
+
+        function updateCalendarSettingsUI() {
+            const statusText = document.getElementById('google-cal-status-text');
+            const btn = document.getElementById('google-cal-btn');
+            if (calendarConnected) {
+                statusText.textContent = 'Connected';
+                statusText.style.color = '#22c55e';
+                btn.textContent = 'Disconnect';
+                btn.disabled = false;
+            } else {
+                statusText.textContent = 'Not connected';
+                statusText.style.color = 'var(--text-muted)';
+                btn.textContent = 'Connect';
+                btn.disabled = false;
+            }
+        }
+
+        ipcRenderer.on('google-auth-changed', () => { checkGoogleCalendarStatus(); });
+        document.getElementById('calendar-detail-back').addEventListener('click', hideCalendarEventDetail);
+        document.getElementById('calendar-record-btn').addEventListener('click', recordCalendarEvent);
+
         // Auto-clear state on startup
         async function initializeApp() {
             // Clear debug logs for fresh start
@@ -4542,6 +5261,9 @@ Session started - waiting for activity...
                     ),
                     loadStoragePath().catch(err =>
                         log(`Storage path load failed: ${err.message}`)
+                    ),
+                    checkGoogleCalendarStatus().catch(err =>
+                        log(`Calendar status check failed: ${err.message}`)
                     )
                 ]);
                 
@@ -4591,12 +5313,17 @@ Session started - waiting for activity...
             
             // Track which meeting is being processed
             processingMeeting = selectedMeeting;
-            
+            const meetingName = selectedMeeting.session_info?.name;
+            if (meetingName) {
+                processingMeetings.add(meetingName);
+                renderMeetingsList();
+            }
+
             // Show processing state
             reprocessBtn.disabled = true;
             reprocessBtn.classList.add('processing');
             reprocessBtn.innerHTML = '<div class="reprocess-spinner"></div>Processing...';
-            
+
             const meetingBeingProcessed = selectedMeeting; // Capture the meeting being processed
             log(`🔄 Reprocessing meeting: ${meetingBeingProcessed.session_info?.name}`);
             
@@ -4633,6 +5360,10 @@ Session started - waiting for activity...
             } finally {
                 // Clear processing tracker
                 processingMeeting = null;
+                if (meetingName) {
+                    processingMeetings.delete(meetingName);
+                    renderMeetingsList();
+                }
                 
                 // Reset button state only if we're still viewing the same meeting
                 if (selectedMeeting && selectedMeeting.session_info?.summary_file === summaryFile) {

@@ -1388,6 +1388,16 @@ def rename_folder(folder_id, name):
 
 
 @cli.command()
+@click.argument('folder_ids', nargs=-1, required=True)
+def reorder_folders(folder_ids):
+    """Reorder folders by providing folder IDs in desired order"""
+    from src.folders import get_folders_manager
+    mgr = get_folders_manager()
+    success = mgr.reorder_folders(list(folder_ids))
+    print(json.dumps({"success": success}))
+
+
+@cli.command()
 @click.argument('folder_id')
 def delete_folder(folder_id):
     """Delete a folder"""
