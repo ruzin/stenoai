@@ -882,9 +882,11 @@
         .sidebar-header h2 {
             font-size: 13px;
             font-weight: 600;
-            color: var(--text-muted);
             text-transform: uppercase;
             letter-spacing: 0.05em;
+            background: linear-gradient(135deg, #6366f1, #818cf8);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
         }
         
         
@@ -1333,7 +1335,9 @@
             display: none;
             flex-direction: column;
             flex-shrink: 0;
-            margin-bottom: 12px;
+            padding-bottom: 8px;
+            margin-bottom: 10px;
+            border-bottom: 1px solid var(--border-subtle);
         }
 
         .calendar-sidebar.show {
@@ -1353,6 +1357,33 @@
         .calendar-sidebar-header svg {
             color: var(--text-muted);
             flex-shrink: 0;
+        }
+
+        .calendar-refresh-btn {
+            margin-left: auto;
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            padding: 4px;
+            border-radius: 5px;
+            display: flex;
+            align-items: center;
+            transition: all 0.15s ease;
+        }
+
+        .calendar-refresh-btn:hover {
+            color: var(--text-primary);
+            background: var(--bg-surface);
+        }
+
+        .calendar-refresh-btn.spinning svg {
+            animation: spin 0.6s ease;
+        }
+
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
         }
 
         .calendar-sidebar-item {
@@ -2967,6 +2998,9 @@
                     <div class="calendar-sidebar-header">
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
                         Coming Up
+                        <button class="calendar-refresh-btn" id="calendar-refresh-btn" onclick="refreshCalendarEvents()" title="Refresh">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+                        </button>
                     </div>
                     <div id="calendar-sidebar-list"></div>
                 </div>
@@ -4838,6 +4872,13 @@ Session started - waiting for activity...
             }
         }
 
+        async function refreshCalendarEvents() {
+            const btn = document.getElementById('calendar-refresh-btn');
+            btn.classList.add('spinning');
+            await loadCalendarEvents();
+            setTimeout(() => btn.classList.remove('spinning'), 600);
+        }
+
         async function loadCalendarEvents() {
             try {
                 const result = await ipcRenderer.invoke('get-calendar-events');
@@ -4861,6 +4902,25 @@ Session started - waiting for activity...
             scheduleCalendarNotifications();
         }
 
+        function fireCalendarNotification(event) {
+            if (notifiedEventIds.has(event.id)) return;
+            notifiedEventIds.add(event.id);
+
+            const startStr = event.start?.dateTime || event.start?.date;
+            const title = event.summary || 'Upcoming meeting';
+            const timeStr = formatCalendarTime(startStr);
+            const eventId = event.id;
+            const notif = new Notification('Meeting in 5 minutes', {
+                body: `${title} at ${timeStr}`,
+                silent: false
+            });
+            notif.onclick = () => {
+                ipcRenderer.send('focus-window');
+                const idx = calendarEvents.findIndex(e => e.id === eventId);
+                if (idx !== -1) showCalendarEventDetail(idx);
+            };
+        }
+
         function scheduleCalendarNotifications() {
             // Clear existing timers
             calendarNotificationTimers.forEach(t => clearTimeout(t));
@@ -4880,22 +4940,14 @@ Session started - waiting for activity...
                 // Skip if already past, or already notified
                 if (delay < -LEAD_TIME || notifiedEventIds.has(event.id)) continue;
 
-                // If we're within the notification window but haven't notified yet, fire now
-                const actualDelay = Math.max(delay, 0);
-
-                const timer = setTimeout(() => {
-                    if (notifiedEventIds.has(event.id)) return;
-                    notifiedEventIds.add(event.id);
-
-                    const title = event.summary || 'Upcoming meeting';
-                    const timeStr = formatCalendarTime(startStr);
-                    new Notification('Meeting in 5 minutes', {
-                        body: `${title} at ${timeStr}`,
-                        silent: false
-                    });
-                }, actualDelay);
-
-                calendarNotificationTimers.push(timer);
+                if (delay <= 0) {
+                    // Already within the notification window — fire immediately
+                    fireCalendarNotification(event);
+                } else {
+                    const ev = event;
+                    const timer = setTimeout(() => fireCalendarNotification(ev), delay);
+                    calendarNotificationTimers.push(timer);
+                }
             }
         }
 
