@@ -5035,14 +5035,27 @@ Session started - waiting for activity...
         });
 
         // Listen for macOS shortcut stop action
-        ipcRenderer.on('shortcut-stop-recording', () => {
+        ipcRenderer.on('shortcut-stop-recording', async () => {
             log('Shortcut received: stop recording');
-            if (uiState !== 'recording' && uiState !== 'paused') {
-                log(`Shortcut stop ignored in UI state: ${uiState}`);
+
+            if (uiState === 'recording' || uiState === 'paused') {
+                stopBtn.click();
                 return;
             }
 
-            stopBtn.click();
+            // UI can still be in "ready" right after hidden-window startup while backend
+            // is already recording. In that case, allow stop based on backend truth.
+            try {
+                const statusResult = await ipcRenderer.invoke('get-status');
+                if (statusResult.success && statusResult.status.includes('RECORDING')) {
+                    log('Shortcut stop proceeding based on backend recording status');
+                    stopBtn.click();
+                } else {
+                    log(`Shortcut stop ignored in UI state: ${uiState}`);
+                }
+            } catch (error) {
+                log(`Shortcut stop status check failed: ${error.message}`);
+            }
         });
 
         // Signal to main process that shortcut listeners are attached
