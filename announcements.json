@@ -1,7 +1,7 @@
 {
   "announcements": [
     {
-      "id": "2026-02-new-features",
+      "id": "2026-02-v024-preview",
       "type": "release",
       "title": "New in StenoAI",
       "message": "Folder organization, custom save location & Google Calendar integration are coming soon in v0.2.4 release!",
