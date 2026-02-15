@@ -19,7 +19,7 @@
 <p align="center"><sub>Trusted by users at <b>AWS</b>, <b>Deliveroo</b> & <b>Tesco</b>.</sub></p>
 
 <div align="center">
-  <img src="website/public/app-demo.gif" alt="StenoAI Interface" width="600">
+  <img src="website/public/app-demo-3.png" alt="StenoAI Interface" width="600">
 
   <br>
 
