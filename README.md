@@ -71,6 +71,10 @@ Have questions or suggestions? [Join our Discord](https://discord.gg/DZ6vcQnxxu)
 - Custom summarization templates
 - Speaker Diarisation
 
+### StenoAI Med
+- HIPAA compliance for healthcare workflows
+- EHR integration for medical notes
+
 ## Installation
 
 Download the latest release for your Mac:
