@@ -1803,6 +1803,17 @@ ipcMain.handle('delete-folder', async (event, folderId) => {
   }
 });
 
+ipcMain.handle('reorder-folders', async (event, folderIds) => {
+  try {
+    const args = ['reorder-folders', ...folderIds];
+    const result = await runPythonScript('simple_recorder.py', args);
+    const jsonMatch = result.match(/\{.*\}/s);
+    return jsonMatch ? JSON.parse(jsonMatch[0]) : { success: true };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
 ipcMain.handle('add-meeting-to-folder', async (event, summaryFile, folderId) => {
   try {
     const result = await runPythonScript('simple_recorder.py', ['add-meeting-to-folder', summaryFile, folderId]);

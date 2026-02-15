@@ -70,6 +70,22 @@ class FoldersManager:
         ]
         return self._save()
 
+    def reorder_folders(self, folder_ids: List[str]) -> bool:
+        """Reorder folders to match the given ID order, updating each folder's order field."""
+        existing = {f["id"]: f for f in self._data["folders"]}
+        reordered = []
+        for i, fid in enumerate(folder_ids):
+            if fid in existing:
+                folder = existing.pop(fid)
+                folder["order"] = i
+                reordered.append(folder)
+        # Append any folders not in the provided list (shouldn't happen, but safe)
+        for folder in existing.values():
+            folder["order"] = len(reordered)
+            reordered.append(folder)
+        self._data["folders"] = reordered
+        return self._save()
+
     def add_meeting_to_folder(self, summary_path: Path, folder_id: str) -> bool:
         """Add a folder reference to a meeting's summary JSON."""
         try:
