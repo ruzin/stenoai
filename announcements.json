@@ -11,18 +11,6 @@
       "max_version": null,
       "created_at": "2026-02-15T00:00:00Z",
       "expires_at": "2026-02-17T00:00:00Z"
-    },
-    {
-      "id": "2026-01-welcome",
-      "type": "info",
-      "title": "Welcome to StenoAI",
-      "message": "Privacy first AI meeting intelligence powered by local models. Star us on GitHub!",
-      "action_url": "https://github.com/ruzin/stenoai",
-      "action_label": "GitHub",
-      "min_version": null,
-      "max_version": null,
-      "created_at": "2026-01-27T00:00:00Z",
-      "expires_at": "2026-03-01T00:00:00Z"
     }
   ]
 }
