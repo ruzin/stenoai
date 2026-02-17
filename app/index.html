@@ -5746,7 +5746,18 @@ Session started - waiting for activity...
             }
             // Ignore if in 'processing' state
         });
-        
+
+        // Listen for tray menu actions
+        ipcRenderer.on('tray-start-recording', () => {
+            if (uiState === 'ready') startBtn.click();
+        });
+        ipcRenderer.on('tray-stop-recording', () => {
+            if (uiState === 'recording' || uiState === 'paused') stopBtn.click();
+        });
+        ipcRenderer.on('tray-open-settings', () => {
+            if (!settingsVisible) toggleSettings();
+        });
+
         // Setup wizard state
         let currentSetupStep = 1;
         let ollamaInstalled = false;

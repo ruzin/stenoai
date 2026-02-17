@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell, systemPreferences, globalShortcut, safeStorage } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, systemPreferences, globalShortcut, safeStorage, Tray, Menu, nativeImage } = require('electron');
 const path = require('path');
 const { spawn, exec } = require('child_process');
 const fs = require('fs');
@@ -11,6 +11,8 @@ const { PostHog } = require('posthog-node');
 
 let mainWindow;
 let pythonProcess;
+let tray = null;
+let isQuitting = false;
 
 // Backend executable path - always use bundled stenoai
 function getBackendPath() {
@@ -203,6 +205,14 @@ function createWindow() {
     mainWindow.show();
   });
 
+  // On macOS, hide to tray instead of destroying (like Slack, Spotify)
+  mainWindow.on('close', (event) => {
+    if (process.platform === 'darwin' && !isQuitting) {
+      event.preventDefault();
+      mainWindow.hide();
+    }
+  });
+
   mainWindow.on('closed', () => {
     mainWindow = null;
     if (pythonProcess) {
@@ -211,8 +221,124 @@ function createWindow() {
   });
 }
 
+function getTrayIconPath(recording) {
+  const iconName = recording ? 'trayIconRecordingTemplate' : 'trayIconTemplate';
+  if (app.isPackaged) {
+    return path.join(process.resourcesPath, 'build', `${iconName}.png`);
+  }
+  return path.join(__dirname, 'build', `${iconName}.png`);
+}
+
+function createTray() {
+  const icon = nativeImage.createFromPath(getTrayIconPath(false));
+  icon.setTemplateImage(true);
+  tray = new Tray(icon);
+  tray.setToolTip('StenoAI');
+
+  updateTrayMenu();
+}
+
+function updateTrayIcon(recording) {
+  if (!tray) return;
+  const icon = nativeImage.createFromPath(getTrayIconPath(recording));
+  icon.setTemplateImage(true);
+  tray.setImage(icon);
+  tray.setToolTip(recording ? 'StenoAI - Recording' : 'StenoAI');
+  updateTrayMenu();
+}
+
+function showAndFocusWindow() {
+  if (mainWindow) {
+    mainWindow.show();
+    mainWindow.focus();
+  }
+}
+
+function updateTrayMenu() {
+  if (!tray) return;
+  const isRecording = currentRecordingProcess !== null;
+
+  const appVersion = require('./package.json').version;
+
+  const contextMenu = Menu.buildFromTemplate([
+    {
+      label: 'Open StenoAI',
+      click: showAndFocusWindow
+    },
+    {
+      label: isRecording ? 'Stop Recording' : 'Start Recording',
+      click: () => {
+        if (mainWindow) {
+          mainWindow.webContents.send(isRecording ? 'tray-stop-recording' : 'tray-start-recording');
+        }
+      }
+    },
+    {
+      label: 'Settings',
+      click: () => {
+        showAndFocusWindow();
+        if (mainWindow) {
+          mainWindow.webContents.send('tray-open-settings');
+        }
+      }
+    },
+    {
+      label: 'Hide StenoAI',
+      click: () => {
+        if (mainWindow) mainWindow.hide();
+      }
+    },
+    {
+      label: `StenoAI v${appVersion}`,
+      enabled: false
+    },
+    {
+      label: 'Report a Bug',
+      click: () => {
+        shell.openExternal('https://discord.gg/DZ6vcQnxxu');
+      }
+    },
+    { type: 'separator' },
+    {
+      label: 'Quit StenoAI',
+      click: () => {
+        app.quit();
+      }
+    }
+  ]);
+
+  tray.setContextMenu(contextMenu);
+}
+
+app.on('before-quit', async (event) => {
+  if (isQuitting) return;
+
+  if (currentRecordingProcess) {
+    event.preventDefault();
+    const { response } = await dialog.showMessageBox(mainWindow || null, {
+      type: 'warning',
+      buttons: ['Cancel', 'Stop & Quit'],
+      defaultId: 0,
+      cancelId: 0,
+      title: 'Recording in Progress',
+      message: 'A recording is still in progress. Quitting will stop the recording and process it in the background.',
+    });
+    if (response === 1) {
+      // Stop recording gracefully then quit
+      currentRecordingProcess.kill('SIGTERM');
+      currentRecordingProcess = null;
+      updateTrayIcon(false);
+      isQuitting = true;
+      app.quit();
+    }
+  } else {
+    isQuitting = true;
+  }
+});
+
 app.whenReady().then(async () => {
   createWindow();
+  createTray();
 
   // Initialize telemetry and track app open
   await initTelemetry();
@@ -247,8 +373,11 @@ app.whenReady().then(async () => {
 });
 
 app.on('will-quit', async () => {
-  // Unregister all shortcuts when the app is about to quit
   globalShortcut.unregisterAll();
+  if (tray) {
+    tray.destroy();
+    tray = null;
+  }
   await shutdownTelemetry();
 });
 
@@ -259,7 +388,9 @@ app.on('window-all-closed', () => {
 });
 
 app.on('activate', () => {
-  if (BrowserWindow.getAllWindows().length === 0) {
+  if (mainWindow) {
+    mainWindow.show();
+  } else {
     createWindow();
   }
 });
@@ -825,6 +956,7 @@ ipcMain.handle('start-recording-ui', async (_, sessionName) => {
       console.log(`Recording process closed with code ${code}`);
       sendDebugLog(`Recording process completed with exit code: ${code}`);
       currentRecordingProcess = null;
+      updateTrayIcon(false);
     });
 
     // Give it time to start
@@ -832,6 +964,7 @@ ipcMain.handle('start-recording-ui', async (_, sessionName) => {
     
     if (currentRecordingProcess) {
       trackEvent('recording_started');
+      updateTrayIcon(true);
       return { success: true, message: 'Recording started successfully' };
     } else {
       return { success: false, error: 'Failed to start recording process' };
@@ -839,6 +972,7 @@ ipcMain.handle('start-recording-ui', async (_, sessionName) => {
   } catch (error) {
     console.error('Start recording UI error:', error.message);
     currentRecordingProcess = null;
+    updateTrayIcon(false);
     trackEvent('error_occurred', { error_type: 'start_recording_ui' });
     return { success: false, error: error.message };
   }
@@ -908,6 +1042,7 @@ ipcMain.handle('stop-recording-ui', async () => {
     // Don't wait - let the process complete independently
     // The process will handle: stop recording → transcribe → summarize → exit
     currentRecordingProcess = null;
+    updateTrayIcon(false);
 
     trackEvent('recording_stopped');
     return {
@@ -917,6 +1052,7 @@ ipcMain.handle('stop-recording-ui', async () => {
   } catch (error) {
     console.error('Stop recording UI error:', error.message);
     currentRecordingProcess = null;
+    updateTrayIcon(false);
     trackEvent('error_occurred', { error_type: 'stop_recording_ui' });
     return { success: false, error: error.message };
   }
