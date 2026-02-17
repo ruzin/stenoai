@@ -337,6 +337,33 @@ app.on('before-quit', async (event) => {
 });
 
 app.whenReady().then(async () => {
+  // Set application menu with Help > Learn More
+  const appMenu = Menu.buildFromTemplate([
+    { role: 'appMenu' },
+    { role: 'fileMenu' },
+    { role: 'editMenu' },
+    { role: 'viewMenu' },
+    { role: 'windowMenu' },
+    {
+      role: 'help',
+      submenu: [
+        {
+          label: 'Learn More',
+          click: () => {
+            shell.openExternal('https://github.com/ruzin/stenoai');
+          }
+        },
+        {
+          label: 'Report a Bug',
+          click: () => {
+            shell.openExternal('https://discord.gg/DZ6vcQnxxu');
+          }
+        }
+      ]
+    }
+  ]);
+  Menu.setApplicationMenu(appMenu);
+
   createWindow();
   createTray();
 
