@@ -13,7 +13,6 @@ build/
 app/build/*
 !app/build/entitlements.mac.plist
 !app/build/icon.icns
-!app/build/trayIcon*.png
 develop-eggs/
 dist/
 downloads/

@@ -68,8 +68,8 @@
         ]
       },
       {
-        "from": "build",
-        "to": "build",
+        "from": "assets",
+        "to": "assets",
         "filter": [
           "trayIcon*.png"
         ]

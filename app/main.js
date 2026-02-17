@@ -224,9 +224,9 @@ function createWindow() {
 function getTrayIconPath(recording) {
   const iconName = recording ? 'trayIconRecordingTemplate' : 'trayIconTemplate';
   if (app.isPackaged) {
-    return path.join(process.resourcesPath, 'build', `${iconName}.png`);
+    return path.join(process.resourcesPath, 'assets', `${iconName}.png`);
   }
-  return path.join(__dirname, 'build', `${iconName}.png`);
+  return path.join(__dirname, 'assets', `${iconName}.png`);
 }
 
 function createTray() {
