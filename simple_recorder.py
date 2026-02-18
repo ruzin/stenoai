@@ -1112,27 +1112,39 @@ def setup_check():
     except Exception as e:
         checks.append(("❌ Ollama", f"Error: {e}"))
     
-    # Check ffmpeg
+    # Check ffmpeg (bundled locations first, then system)
     try:
         ffmpeg_found = False
-        possible_ffmpeg_paths = [
-            'ffmpeg',  # Try PATH first
-            '/opt/homebrew/bin/ffmpeg',  # Homebrew on Apple Silicon
-            '/usr/local/bin/ffmpeg',     # Homebrew on Intel
-            '/usr/bin/ffmpeg',           # System installation
-        ]
-        
-        for path in possible_ffmpeg_paths:
+        possible_ffmpeg_paths = []
+
+        # Check bundled ffmpeg (PyInstaller bundle)
+        if getattr(sys, 'frozen', False):
+            exe_dir = Path(sys.executable).parent
+            for candidate in [
+                exe_dir / 'ffmpeg',                    # bundle root (stenoai.spec places it at '.')
+                exe_dir / '_internal' / 'ffmpeg',      # _internal subdirectory
+            ]:
+                if candidate.exists():
+                    possible_ffmpeg_paths.append(('bundled', str(candidate)))
+
+        possible_ffmpeg_paths.extend([
+            (None, 'ffmpeg'),                          # PATH
+            (None, '/opt/homebrew/bin/ffmpeg'),         # Homebrew Apple Silicon
+            (None, '/usr/local/bin/ffmpeg'),            # Homebrew Intel
+            (None, '/usr/bin/ffmpeg'),                  # System
+        ])
+
+        for label, path in possible_ffmpeg_paths:
             try:
-                result = subprocess.run([path, '-version'], 
+                result = subprocess.run([path, '-version'],
                                       capture_output=True, timeout=5)
                 if result.returncode == 0:
-                    checks.append(("✅ ffmpeg", f"found at {path}"))
+                    checks.append(("✅ ffmpeg", label or f"found at {path}"))
                     ffmpeg_found = True
                     break
             except (subprocess.TimeoutExpired, FileNotFoundError):
                 continue
-        
+
         if not ffmpeg_found:
             checks.append(("❌ ffmpeg", "not found - run: brew install ffmpeg"))
     except Exception as e:

@@ -76,12 +76,18 @@ class WhisperTranscriber:
         # Check bundled ffmpeg first (PyInstaller bundle)
         if getattr(sys, 'frozen', False):
             # Running from PyInstaller bundle
-            bundle_dir = Path(sys._MEIPASS) if hasattr(sys, '_MEIPASS') else Path(sys.executable).parent
-            bundled_ffmpeg = bundle_dir / 'ffmpeg'
-            if bundled_ffmpeg.exists():
-                possible_ffmpeg_paths.append(str(bundled_ffmpeg))
-            # Also check _internal directory
-            internal_ffmpeg = Path(sys.executable).parent / '_internal' / 'ffmpeg'
+            # stenoai.spec places ffmpeg at '.' (bundle root, next to executable)
+            exe_dir = Path(sys.executable).parent
+            root_ffmpeg = exe_dir / 'ffmpeg'
+            if root_ffmpeg.exists():
+                possible_ffmpeg_paths.append(str(root_ffmpeg))
+            # Also check _MEIPASS (_internal) in case layout changes
+            if hasattr(sys, '_MEIPASS'):
+                meipass_ffmpeg = Path(sys._MEIPASS) / 'ffmpeg'
+                if meipass_ffmpeg.exists():
+                    possible_ffmpeg_paths.append(str(meipass_ffmpeg))
+            # Also check _internal subdirectory
+            internal_ffmpeg = exe_dir / '_internal' / 'ffmpeg'
             if internal_ffmpeg.exists():
                 possible_ffmpeg_paths.append(str(internal_ffmpeg))
         else:
