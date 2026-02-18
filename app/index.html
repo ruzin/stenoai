@@ -5213,7 +5213,7 @@ Session started - waiting for activity...
             const descSection = document.getElementById('calendar-detail-description-section');
             const descContainer = document.getElementById('calendar-detail-description');
             const descToggle = document.getElementById('calendar-desc-toggle');
-            const desc = (event.description || '').trim();
+            const desc = (event.description || '').replace(/(\s*\n){3,}/g, '\n\n').trim();
             if (desc) {
                 descSection.style.display = 'block';
                 descContainer.textContent = desc;

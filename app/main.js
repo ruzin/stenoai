@@ -3177,14 +3177,16 @@ function normalizeOutlookEvent(event) {
     if (!html) return '';
     return html
       .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<\/(?:div|p|tr|li|h[1-6])>/gi, '\n')
       .replace(/<[^>]*>/g, '')
       .replace(/&nbsp;/g, ' ')
       .replace(/&amp;/g, '&')
       .replace(/&lt;/g, '<')
       .replace(/&gt;/g, '>')
       .replace(/&quot;/g, '"')
+      .replace(/\r\n/g, '\n')
       .replace(/[ \t]+/g, ' ')
-      .replace(/\n{3,}/g, '\n\n')
+      .replace(/(\s*\n){3,}/g, '\n\n')
       .trim();
   };
 
