@@ -1504,6 +1504,9 @@
             margin: 0;
             flex: 1;
             min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
         }
 
         .calendar-detail-meta {
@@ -3149,7 +3152,7 @@
                 <div class="calendar-detail-section" id="calendar-detail-description-section" style="display: none;">
                     <div style="display: flex; align-items: center; justify-content: space-between;">
                         <h3>Description</h3>
-                        <button class="calendar-desc-toggle" id="calendar-desc-toggle" style="display: none;">Show more</button>
+                        <button class="calendar-desc-toggle" id="calendar-desc-toggle" style="display: none;" aria-expanded="false" aria-controls="calendar-detail-description">Show more</button>
                     </div>
                     <div class="calendar-detail-description collapsed" id="calendar-detail-description"></div>
                 </div>
@@ -5332,9 +5335,11 @@ Session started - waiting for activity...
             if (desc.classList.contains('collapsed')) {
                 desc.classList.remove('collapsed');
                 toggle.textContent = 'Show less';
+                toggle.setAttribute('aria-expanded', 'true');
             } else {
                 desc.classList.add('collapsed');
                 toggle.textContent = 'Show more';
+                toggle.setAttribute('aria-expanded', 'false');
             }
         });
 

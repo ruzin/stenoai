@@ -101,6 +101,11 @@ This app ships as a signed DMG to real users. Before considering any change comp
 ## Git Workflow
 - Always create a branch for changes unless explicitly told otherwise
 - Never commit directly to `main`
+- Before creating a PR, run a self-review of the full branch diff (`git diff main...HEAD`):
+  - Review backend code for security issues, error handling gaps, edge cases, and best practices
+  - Review frontend code for layout bugs, CSS consistency, accessibility, and polish
+  - Use the frontend-design skill for UI-related changes
+  - Categorize findings by severity (critical/medium/low) and fix critical issues before merging
 
 ## Git Commit Guidelines
 - Do NOT include "🤖 Generated with Claude Code" attribution in commit messages

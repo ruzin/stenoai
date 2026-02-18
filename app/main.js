@@ -2624,6 +2624,8 @@ function startGoogleAuth() {
     // Generate PKCE code verifier and challenge
     const codeVerifier = crypto.randomBytes(32).toString('base64url');
     const codeChallenge = crypto.createHash('sha256').update(codeVerifier).digest('base64url');
+    const state = crypto.randomBytes(16).toString('hex');
+    let timeoutId = null;
 
     // Start temporary HTTP server on loopback for OAuth redirect
     const server = http.createServer(async (req, res) => {
@@ -2637,11 +2639,19 @@ function startGoogleAuth() {
 
         const code = reqUrl.searchParams.get('code');
         const error = reqUrl.searchParams.get('error');
+        const returnedState = reqUrl.searchParams.get('state');
+
+        if (returnedState !== state) {
+          res.writeHead(400, { 'Content-Type': 'text/html' });
+          res.end('<html><body><h2>Invalid state parameter</h2><p>Possible CSRF attack. Please try again.</p></body></html>');
+          return;
+        }
 
         if (error) {
           res.writeHead(200, { 'Content-Type': 'text/html' });
           res.end('<html><body><h2>Authorization denied</h2><p>You can close this tab.</p></body></html>');
           server.close();
+          if (timeoutId) clearTimeout(timeoutId);
           reject(new Error(`Auth denied: ${error}`));
           return;
         }
@@ -2661,6 +2671,7 @@ function startGoogleAuth() {
         res.end('<html><body style="font-family: -apple-system, sans-serif; text-align: center; padding: 60px;"><h2>Connected to Google Calendar</h2><p>You can close this tab and return to StenoAI.</p></body></html>');
 
         server.close();
+        if (timeoutId) clearTimeout(timeoutId);
 
         // Notify renderer and bring app to foreground
         if (mainWindow && !mainWindow.isDestroyed()) {
@@ -2674,6 +2685,7 @@ function startGoogleAuth() {
         res.writeHead(500, { 'Content-Type': 'text/html' });
         res.end('<html><body><h2>Authentication failed</h2><p>Please try again.</p></body></html>');
         server.close();
+        if (timeoutId) clearTimeout(timeoutId);
         reject(err);
       }
     });
@@ -2690,6 +2702,7 @@ function startGoogleAuth() {
         scope: GOOGLE_SCOPES,
         access_type: 'offline',
         prompt: 'consent',
+        state: state,
         code_challenge: codeChallenge,
         code_challenge_method: 'S256'
       });
@@ -2698,8 +2711,7 @@ function startGoogleAuth() {
       shell.openExternal(authUrl);
     });
 
-    // 5-minute timeout on the temp server
-    setTimeout(() => {
+    timeoutId = setTimeout(() => {
       if (server.listening) {
         server.close();
         reject(new Error('OAuth timeout: no response within 5 minutes'));
@@ -2785,9 +2797,11 @@ async function getValidAccessToken() {
     return newTokens.access_token;
   } catch (error) {
     console.error('Token refresh failed:', error.message);
-    deleteGoogleTokens();
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('google-auth-changed');
+    if (error.message && (error.message.includes('invalid_grant') || error.message.includes('Token has been expired or revoked'))) {
+      deleteGoogleTokens();
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('google-auth-changed');
+      }
     }
     return null;
   }
@@ -2888,6 +2902,8 @@ function startOutlookAuth() {
   return new Promise((resolve, reject) => {
     const codeVerifier = crypto.randomBytes(32).toString('base64url');
     const codeChallenge = crypto.createHash('sha256').update(codeVerifier).digest('base64url');
+    const state = crypto.randomBytes(16).toString('hex');
+    let timeoutId = null;
 
     const server = http.createServer(async (req, res) => {
       try {
@@ -2901,11 +2917,19 @@ function startOutlookAuth() {
 
         const code = reqUrl.searchParams.get('code');
         const error = reqUrl.searchParams.get('error');
+        const returnedState = reqUrl.searchParams.get('state');
+
+        if (returnedState !== state) {
+          res.writeHead(400, { 'Content-Type': 'text/html' });
+          res.end('<html><body><h2>Invalid state parameter</h2><p>Possible CSRF attack. Please try again.</p></body></html>');
+          return;
+        }
 
         if (error) {
           res.writeHead(200, { 'Content-Type': 'text/html' });
           res.end('<html><body><h2>Authorization denied</h2><p>You can close this tab.</p></body></html>');
           server.close();
+          if (timeoutId) clearTimeout(timeoutId);
           reject(new Error(`Auth denied: ${error}`));
           return;
         }
@@ -2924,6 +2948,7 @@ function startOutlookAuth() {
         res.end('<html><body style="font-family: -apple-system, sans-serif; text-align: center; padding: 60px;"><h2>Connected to Outlook Calendar</h2><p>You can close this tab and return to StenoAI.</p></body></html>');
 
         server.close();
+        if (timeoutId) clearTimeout(timeoutId);
 
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send('outlook-auth-changed');
@@ -2936,6 +2961,7 @@ function startOutlookAuth() {
         res.writeHead(500, { 'Content-Type': 'text/html' });
         res.end('<html><body><h2>Authentication failed</h2><p>Please try again.</p></body></html>');
         server.close();
+        if (timeoutId) clearTimeout(timeoutId);
         reject(err);
       }
     });
@@ -2950,6 +2976,7 @@ function startOutlookAuth() {
         response_type: 'code',
         scope: OUTLOOK_SCOPES,
         response_mode: 'query',
+        state: state,
         code_challenge: codeChallenge,
         code_challenge_method: 'S256'
       });
@@ -2958,7 +2985,7 @@ function startOutlookAuth() {
       shell.openExternal(authUrl);
     });
 
-    setTimeout(() => {
+    timeoutId = setTimeout(() => {
       if (server.listening) {
         server.close();
         reject(new Error('OAuth timeout: no response within 5 minutes'));
@@ -3040,9 +3067,13 @@ async function getValidOutlookAccessToken() {
     return newTokens.access_token;
   } catch (error) {
     console.error('Outlook token refresh failed:', error.message);
-    deleteOutlookTokens();
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('outlook-auth-changed');
+    // Only delete tokens for irrecoverable errors (revoked/expired grant)
+    // Transient network errors should not force re-authentication
+    if (error.message && (error.message.includes('invalid_grant') || error.message.includes('interaction_required'))) {
+      deleteOutlookTokens();
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('outlook-auth-changed');
+      }
     }
     return null;
   }
@@ -3147,22 +3178,27 @@ function normalizeOutlookEvent(event) {
     return html.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim();
   };
 
+  const ensureUtcSuffix = (dt) => {
+    if (!dt) return undefined;
+    return dt.endsWith('Z') ? dt : dt + 'Z';
+  };
+
   return {
     id: event.id,
     summary: event.subject || 'No title',
     description: stripHtml(event.body?.content),
     start: {
-      dateTime: event.start?.dateTime ? event.start.dateTime + 'Z' : undefined,
+      dateTime: ensureUtcSuffix(event.start?.dateTime),
       timeZone: 'UTC'
     },
     end: {
-      dateTime: event.end?.dateTime ? event.end.dateTime + 'Z' : undefined,
+      dateTime: ensureUtcSuffix(event.end?.dateTime),
       timeZone: 'UTC'
     },
     attendees: (event.attendees || []).map(a => ({
-      email: a.emailAddress?.address,
-      displayName: a.emailAddress?.name,
-      responseStatus: a.status?.response
+      email: a.emailAddress?.address || '',
+      displayName: a.emailAddress?.name || '',
+      responseStatus: a.status?.response || ''
     })),
     htmlLink: event.webLink,
     conferenceData: event.isOnlineMeeting && event.onlineMeeting ? {
@@ -3175,9 +3211,9 @@ function normalizeOutlookEvent(event) {
 
 ipcMain.handle('google-auth-start', async () => {
   try {
-    // Disconnect Outlook first (only one provider at a time)
-    deleteOutlookTokens();
     await startGoogleAuth();
+    // Only disconnect Outlook after Google auth succeeds
+    deleteOutlookTokens();
     return { success: true };
   } catch (error) {
     console.error('Google auth failed:', error.message);
@@ -3254,9 +3290,9 @@ ipcMain.handle('get-calendar-events', async () => {
 
 ipcMain.handle('outlook-auth-start', async () => {
   try {
-    // Disconnect Google first (only one provider at a time)
-    deleteGoogleTokens();
     await startOutlookAuth();
+    // Only disconnect Google after Outlook auth succeeds
+    deleteGoogleTokens();
     return { success: true };
   } catch (error) {
     console.error('Outlook auth failed:', error.message);
