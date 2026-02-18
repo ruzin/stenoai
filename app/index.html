@@ -5181,15 +5181,6 @@ Session started - waiting for activity...
             return 'All day';
         }
 
-        function cleanCalendarDescription(desc) {
-            if (!desc) return '';
-            let text = desc.replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]*>/g, '');
-            const textarea = document.createElement('textarea');
-            textarea.innerHTML = text;
-            text = textarea.value;
-            text = text.replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
-            return text;
-        }
 
         function showCalendarEventDetail(index) {
             calendarDetailJustOpened = true;
@@ -5222,10 +5213,10 @@ Session started - waiting for activity...
             const descSection = document.getElementById('calendar-detail-description-section');
             const descContainer = document.getElementById('calendar-detail-description');
             const descToggle = document.getElementById('calendar-desc-toggle');
-            const cleanDesc = cleanCalendarDescription(event.description || '');
-            if (cleanDesc) {
+            const desc = (event.description || '').trim();
+            if (desc) {
                 descSection.style.display = 'block';
-                descContainer.textContent = cleanDesc;
+                descContainer.textContent = desc;
                 descContainer.classList.add('collapsed');
                 descToggle.textContent = 'Show more';
                 requestAnimationFrame(() => {
