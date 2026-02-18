@@ -1462,6 +1462,7 @@
             padding: 40px 48px;
             height: 100%;
             overflow-y: auto;
+            scrollbar-gutter: stable;
             display: none;
             flex-direction: column;
         }
@@ -1488,11 +1489,21 @@
             color: var(--text-primary);
         }
 
+        .calendar-detail-header {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 16px;
+            margin-bottom: 16px;
+        }
+
         .calendar-detail-title {
             font-size: 22px;
             font-weight: 700;
             color: var(--text-primary);
-            margin: 0 0 16px;
+            margin: 0;
+            flex: 1;
+            min-width: 0;
         }
 
         .calendar-detail-meta {
@@ -1534,6 +1545,25 @@
             gap: 6px;
         }
 
+        .calendar-detail-description.collapsed {
+            max-height: calc(1.6em * 4);
+            overflow: hidden;
+        }
+
+        .calendar-desc-toggle {
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            font-size: 12px;
+            cursor: pointer;
+            padding: 0;
+            transition: color 0.15s ease;
+        }
+
+        .calendar-desc-toggle:hover {
+            color: var(--text-primary);
+        }
+
         .calendar-detail-attendee {
             background: var(--bg-surface);
             border: 1px solid var(--border-subtle);
@@ -1563,8 +1593,8 @@
             font-weight: 500;
             cursor: pointer;
             transition: all 0.2s ease;
-            margin-top: 8px;
-            align-self: flex-start;
+            white-space: nowrap;
+            flex-shrink: 0;
         }
 
         .calendar-record-btn:hover {
@@ -3095,7 +3125,13 @@
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>
                     Back
                 </button>
-                <h2 class="calendar-detail-title" id="calendar-detail-title"></h2>
+                <div class="calendar-detail-header">
+                    <h2 class="calendar-detail-title" id="calendar-detail-title"></h2>
+                    <button class="calendar-record-btn" id="calendar-record-btn">
+                        <span class="record-dot"></span>
+                        Record this meeting
+                    </button>
+                </div>
                 <div class="calendar-detail-meta">
                     <div class="calendar-detail-meta-row" id="calendar-detail-time">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
@@ -3111,13 +3147,12 @@
                     <div class="calendar-detail-attendees" id="calendar-detail-attendees"></div>
                 </div>
                 <div class="calendar-detail-section" id="calendar-detail-description-section" style="display: none;">
-                    <h3>Description</h3>
-                    <div class="calendar-detail-description" id="calendar-detail-description"></div>
+                    <div style="display: flex; align-items: center; justify-content: space-between;">
+                        <h3>Description</h3>
+                        <button class="calendar-desc-toggle" id="calendar-desc-toggle" style="display: none;">Show more</button>
+                    </div>
+                    <div class="calendar-detail-description collapsed" id="calendar-detail-description"></div>
                 </div>
-                <button class="calendar-record-btn" id="calendar-record-btn">
-                    <span class="record-dot"></span>
-                    Record this meeting
-                </button>
             </div>
 
             <!-- Meeting detail view -->
@@ -5143,6 +5178,16 @@ Session started - waiting for activity...
             return 'All day';
         }
 
+        function cleanCalendarDescription(desc) {
+            if (!desc) return '';
+            let text = desc.replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]*>/g, '');
+            const textarea = document.createElement('textarea');
+            textarea.innerHTML = text;
+            text = textarea.value;
+            text = text.replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
+            return text;
+        }
+
         function showCalendarEventDetail(index) {
             calendarDetailJustOpened = true;
             const event = calendarEvents[index];
@@ -5173,11 +5218,23 @@ Session started - waiting for activity...
 
             const descSection = document.getElementById('calendar-detail-description-section');
             const descContainer = document.getElementById('calendar-detail-description');
-            if (event.description) {
+            const descToggle = document.getElementById('calendar-desc-toggle');
+            const cleanDesc = cleanCalendarDescription(event.description || '');
+            if (cleanDesc) {
                 descSection.style.display = 'block';
-                descContainer.textContent = event.description;
+                descContainer.textContent = cleanDesc;
+                descContainer.classList.add('collapsed');
+                descToggle.textContent = 'Show more';
+                requestAnimationFrame(() => {
+                    if (descContainer.scrollHeight > descContainer.clientHeight) {
+                        descToggle.style.display = 'block';
+                    } else {
+                        descToggle.style.display = 'none';
+                    }
+                });
             } else {
                 descSection.style.display = 'none';
+                descToggle.style.display = 'none';
             }
 
             document.getElementById('calendar-event-detail').classList.add('show');
@@ -5269,6 +5326,17 @@ Session started - waiting for activity...
         ipcRenderer.on('outlook-auth-changed', () => { checkCalendarStatus(); });
         document.getElementById('calendar-detail-back').addEventListener('click', hideCalendarEventDetail);
         document.getElementById('calendar-record-btn').addEventListener('click', recordCalendarEvent);
+        document.getElementById('calendar-desc-toggle').addEventListener('click', () => {
+            const desc = document.getElementById('calendar-detail-description');
+            const toggle = document.getElementById('calendar-desc-toggle');
+            if (desc.classList.contains('collapsed')) {
+                desc.classList.remove('collapsed');
+                toggle.textContent = 'Show less';
+            } else {
+                desc.classList.add('collapsed');
+                toggle.textContent = 'Show more';
+            }
+        });
 
         // Auto-clear state on startup
         async function initializeApp() {
