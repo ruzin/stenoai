@@ -6177,8 +6177,13 @@ Session started - waiting for activity...
 
                 setStatus('ready', 'Processing failed');
                 setTimeout(() => setStatus('ready', 'Ready'), 5000);
-                log(`Processing failed: ${data.error}`);
+                log(`Processing failed: ${data.message || data.error || 'Unknown error'}`);
                 filterMeetings();
+
+                showDesktopNotification('StenoAI - Processing Failed', {
+                    body: data.message || data.error || 'Summarization failed. Check that Ollama and a model are available.',
+                    requireInteraction: false
+                });
             }
         });
         

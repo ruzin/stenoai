@@ -922,18 +922,20 @@ ipcMain.handle('start-recording-ui', async (_, sessionName) => {
     });
 
     let hasStarted = false;
-    
+    let processingSucceeded = false;
+
     currentRecordingProcess.stdout.on('data', (data) => {
       const output = data.toString();
       console.log('Recording stdout:', output);
-      
+
       // Send real-time output to debug panel (same as runPythonScript)
       output.split('\n').forEach(line => {
         if (line.trim()) sendDebugLog(line.trim());
       });
-      
+
       // Background recording process handles complete pipeline - just notify when done
       if (output.includes('✅ Complete processing finished!')) {
+        processingSucceeded = true;
         console.log(`🎉 Recording and processing completed for: ${actualSessionName}`);
         // Notify frontend that everything is done
         if (mainWindow) {
@@ -942,9 +944,9 @@ ipcMain.handle('start-recording-ui', async (_, sessionName) => {
             .then(meetingsResult => {
               const allMeetings = JSON.parse(meetingsResult);
               const processedMeeting = allMeetings.find(m => m.session_info?.name === actualSessionName);
-              
-              mainWindow.webContents.send('processing-complete', { 
-                success: true, 
+
+              mainWindow.webContents.send('processing-complete', {
+                success: true,
                 sessionName: actualSessionName,
                 message: 'Recording and processing completed successfully',
                 meetingData: processedMeeting
@@ -953,17 +955,30 @@ ipcMain.handle('start-recording-ui', async (_, sessionName) => {
             .catch(error => {
               console.error('Error getting processed meeting data:', error);
               // Fallback - send without meetingData, frontend will refresh
-              mainWindow.webContents.send('processing-complete', { 
-                success: true, 
+              mainWindow.webContents.send('processing-complete', {
+                success: true,
                 sessionName: actualSessionName,
                 message: 'Recording and processing completed successfully'
               });
             });
         }
       }
-      
+
+      // Detect explicit processing failure from backend
+      if (output.includes('❌ Processing pipeline failed')) {
+        processingSucceeded = true; // Prevent duplicate notification from close handler
+        console.error(`Processing failed for: ${actualSessionName}`);
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('processing-complete', {
+            success: false,
+            sessionName: actualSessionName,
+            message: 'Processing failed: summarization error (check that Ollama and a model are available)'
+          });
+        }
+      }
+
       // Don't queue background recordings for additional processing - they handle it themselves!
-      
+
       if (output.includes('Recording to:') && !hasStarted) {
         hasStarted = true;
       }
@@ -972,7 +987,7 @@ ipcMain.handle('start-recording-ui', async (_, sessionName) => {
     currentRecordingProcess.stderr.on('data', (data) => {
       const output = data.toString();
       console.log('Recording stderr:', output);
-      
+
       // Send real-time stderr to debug panel (same as runPythonScript)
       output.split('\n').forEach(line => {
         if (line.trim()) sendDebugLog('STDERR: ' + line.trim());
@@ -984,6 +999,16 @@ ipcMain.handle('start-recording-ui', async (_, sessionName) => {
       sendDebugLog(`Recording process completed with exit code: ${code}`);
       currentRecordingProcess = null;
       updateTrayIcon(false);
+
+      // If process exited without a success or failure message, notify the user
+      if (!processingSucceeded && hasStarted && mainWindow && !mainWindow.isDestroyed()) {
+        console.error(`Recording process exited (code ${code}) without completing processing`);
+        mainWindow.webContents.send('processing-complete', {
+          success: false,
+          sessionName: actualSessionName,
+          message: `Processing failed unexpectedly (exit code ${code})`
+        });
+      }
     });
 
     // Give it time to start

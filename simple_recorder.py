@@ -430,13 +430,13 @@ def start(session_name):
                             print("📝 Transcribing...")
                             result = loop.run_until_complete(recorder.process_recording(final_path, session_name))
                             
-                            print("✅ Complete processing finished!")
-                            print(f"📄 Transcript: {result['session_info']['transcript_file']}")  
+                            print("✅ Complete processing finished!", flush=True)
+                            print(f"📄 Transcript: {result['session_info']['transcript_file']}")
                             print(f"📋 Summary: {result['session_info']['summary_file']}")
                             print(f"📊 Meeting: {result['session_info']['name']}")
-                            
+
                         except Exception as e:
-                            print(f"❌ Processing pipeline failed: {e}")
+                            print(f"❌ Processing pipeline failed: {e}", flush=True)
                             import traceback
                             traceback.print_exc()
                     else:
@@ -447,10 +447,10 @@ def start(session_name):
                 print(f"❌ Error during signal handling: {e}")
                 import traceback
                 traceback.print_exc()
-        
+
         print("🏁 Recording session ended")
         sys.exit(0)
-    
+
     # Register signal handlers for graceful shutdown
     signal.signal(signal.SIGTERM, signal_handler)
     signal.signal(signal.SIGINT, signal_handler)
@@ -665,13 +665,13 @@ def record(duration, session_name):
                             print("📝 Starting transcription...")
                             result = loop.run_until_complete(recorder.process_recording(final_path, session_name))
                             
-                            print("✅ Complete processing finished!")
-                            print(f"📄 Transcript: {result['session_info']['transcript_file']}")  
+                            print("✅ Complete processing finished!", flush=True)
+                            print(f"📄 Transcript: {result['session_info']['transcript_file']}")
                             print(f"📋 Summary: {result['session_info']['summary_file']}")
                             print(f"📊 Meeting: {result['session_info']['name']}")
-                            
+
                         except Exception as e:
-                            print(f"❌ Processing pipeline failed: {e}")
+                            print(f"❌ Processing pipeline failed: {e}", flush=True)
                             import traceback
                             traceback.print_exc()
                     else:
