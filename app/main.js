@@ -48,6 +48,12 @@ const GOOGLE_SCOPES = 'https://www.googleapis.com/auth/calendar.readonly';
 const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 
+// Outlook Calendar OAuth2 configuration (PKCE public client — no client secret)
+const OUTLOOK_CLIENT_ID = '53a8ba1f-3a2e-4fc9-afb1-b9b8ff13de19';
+const OUTLOOK_SCOPES = 'Calendars.Read offline_access';
+const OUTLOOK_AUTH_URL = 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize';
+const OUTLOOK_TOKEN_URL = 'https://login.microsoftonline.com/common/oauth2/v2.0/token';
+
 /**
  * Return a privacy-safe duration bucket string.
  */
@@ -2566,6 +2572,51 @@ function deleteGoogleTokens() {
   }
 }
 
+// ── Outlook Calendar: Token Storage ─────────────────────────────────────
+
+function getOutlookTokenFilePath() {
+  return path.join(os.homedir(), 'Library', 'Application Support', 'stenoai', '.outlook-tokens');
+}
+
+function saveOutlookTokens(tokens) {
+  try {
+    const tokenDir = path.dirname(getOutlookTokenFilePath());
+    if (!fs.existsSync(tokenDir)) {
+      fs.mkdirSync(tokenDir, { recursive: true });
+    }
+    const encrypted = safeStorage.encryptString(JSON.stringify(tokens));
+    fs.writeFileSync(getOutlookTokenFilePath(), encrypted);
+    console.log('Outlook tokens saved');
+  } catch (error) {
+    console.error('Failed to save Outlook tokens:', error.message);
+  }
+}
+
+function loadOutlookTokens() {
+  try {
+    const tokenPath = getOutlookTokenFilePath();
+    if (!fs.existsSync(tokenPath)) return null;
+    const encrypted = fs.readFileSync(tokenPath);
+    const decrypted = safeStorage.decryptString(encrypted);
+    return JSON.parse(decrypted);
+  } catch (error) {
+    console.error('Failed to load Outlook tokens:', error.message);
+    return null;
+  }
+}
+
+function deleteOutlookTokens() {
+  try {
+    const tokenPath = getOutlookTokenFilePath();
+    if (fs.existsSync(tokenPath)) {
+      fs.unlinkSync(tokenPath);
+      console.log('Outlook tokens deleted');
+    }
+  } catch (error) {
+    console.error('Failed to delete Outlook tokens:', error.message);
+  }
+}
+
 // ── Google Calendar: OAuth2 Flow with PKCE ──────────────────────────────
 
 function startGoogleAuth() {
@@ -2611,9 +2662,11 @@ function startGoogleAuth() {
 
         server.close();
 
-        // Notify renderer
+        // Notify renderer and bring app to foreground
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send('google-auth-changed');
+          mainWindow.show();
+          mainWindow.focus();
         }
 
         resolve({ success: true });
@@ -2829,10 +2882,301 @@ function fetchCalendarEvents(accessToken, maxResults = 7) {
   });
 }
 
+// ── Outlook Calendar: OAuth2 Flow with PKCE ─────────────────────────────
+
+function startOutlookAuth() {
+  return new Promise((resolve, reject) => {
+    const codeVerifier = crypto.randomBytes(32).toString('base64url');
+    const codeChallenge = crypto.createHash('sha256').update(codeVerifier).digest('base64url');
+
+    const server = http.createServer(async (req, res) => {
+      try {
+        const reqUrl = new URL(req.url, `http://localhost`);
+        // Ignore favicon and other noise — only handle the root path
+        if (reqUrl.pathname !== '/') {
+          res.writeHead(404);
+          res.end();
+          return;
+        }
+
+        const code = reqUrl.searchParams.get('code');
+        const error = reqUrl.searchParams.get('error');
+
+        if (error) {
+          res.writeHead(200, { 'Content-Type': 'text/html' });
+          res.end('<html><body><h2>Authorization denied</h2><p>You can close this tab.</p></body></html>');
+          server.close();
+          reject(new Error(`Auth denied: ${error}`));
+          return;
+        }
+
+        if (!code) {
+          res.writeHead(400, { 'Content-Type': 'text/html' });
+          res.end('<html><body><h2>Missing authorization code</h2></body></html>');
+          return;
+        }
+
+        const port = server.address().port;
+        const tokens = await exchangeOutlookCodeForTokens(code, codeVerifier, port);
+        saveOutlookTokens(tokens);
+
+        res.writeHead(200, { 'Content-Type': 'text/html' });
+        res.end('<html><body style="font-family: -apple-system, sans-serif; text-align: center; padding: 60px;"><h2>Connected to Outlook Calendar</h2><p>You can close this tab and return to StenoAI.</p></body></html>');
+
+        server.close();
+
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('outlook-auth-changed');
+          mainWindow.show();
+          mainWindow.focus();
+        }
+
+        resolve({ success: true });
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'text/html' });
+        res.end('<html><body><h2>Authentication failed</h2><p>Please try again.</p></body></html>');
+        server.close();
+        reject(err);
+      }
+    });
+
+    server.listen(0, '127.0.0.1', () => {
+      const port = server.address().port;
+      const redirectUri = `http://localhost:${port}`;
+
+      const authParams = new URLSearchParams({
+        client_id: OUTLOOK_CLIENT_ID,
+        redirect_uri: redirectUri,
+        response_type: 'code',
+        scope: OUTLOOK_SCOPES,
+        response_mode: 'query',
+        code_challenge: codeChallenge,
+        code_challenge_method: 'S256'
+      });
+
+      const authUrl = `${OUTLOOK_AUTH_URL}?${authParams.toString()}`;
+      shell.openExternal(authUrl);
+    });
+
+    setTimeout(() => {
+      if (server.listening) {
+        server.close();
+        reject(new Error('OAuth timeout: no response within 5 minutes'));
+      }
+    }, 5 * 60 * 1000);
+  });
+}
+
+function exchangeOutlookCodeForTokens(code, codeVerifier, port) {
+  return new Promise((resolve, reject) => {
+    const redirectUri = `http://localhost:${port}`;
+    const postData = new URLSearchParams({
+      code,
+      client_id: OUTLOOK_CLIENT_ID,
+      redirect_uri: redirectUri,
+      grant_type: 'authorization_code',
+      code_verifier: codeVerifier
+    }).toString();
+
+    const tokenUrl = new URL(OUTLOOK_TOKEN_URL);
+    const options = {
+      hostname: tokenUrl.hostname,
+      path: tokenUrl.pathname,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Content-Length': Buffer.byteLength(postData)
+      }
+    };
+
+    const req = https.request(options, (res) => {
+      let data = '';
+      res.on('data', (chunk) => { data += chunk; });
+      res.on('end', () => {
+        try {
+          const parsed = JSON.parse(data);
+          if (parsed.error) {
+            reject(new Error(`Token exchange failed: ${parsed.error_description || parsed.error}`));
+            return;
+          }
+          parsed.expires_at = Date.now() + (parsed.expires_in * 1000);
+          resolve(parsed);
+        } catch (err) {
+          reject(new Error('Failed to parse token response'));
+        }
+      });
+    });
+
+    req.on('error', reject);
+    req.write(postData);
+    req.end();
+  });
+}
+
+// ── Outlook Calendar: Token Refresh ─────────────────────────────────────
+
+async function getValidOutlookAccessToken() {
+  const tokens = loadOutlookTokens();
+  if (!tokens) return null;
+
+  const bufferMs = 5 * 60 * 1000;
+  if (tokens.expires_at && Date.now() < tokens.expires_at - bufferMs) {
+    return tokens.access_token;
+  }
+
+  if (!tokens.refresh_token) {
+    deleteOutlookTokens();
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('outlook-auth-changed');
+    }
+    return null;
+  }
+
+  try {
+    const newTokens = await refreshOutlookAccessToken(tokens.refresh_token);
+    newTokens.refresh_token = newTokens.refresh_token || tokens.refresh_token;
+    newTokens.expires_at = Date.now() + (newTokens.expires_in * 1000);
+    saveOutlookTokens(newTokens);
+    return newTokens.access_token;
+  } catch (error) {
+    console.error('Outlook token refresh failed:', error.message);
+    deleteOutlookTokens();
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('outlook-auth-changed');
+    }
+    return null;
+  }
+}
+
+function refreshOutlookAccessToken(refreshToken) {
+  return new Promise((resolve, reject) => {
+    const postData = new URLSearchParams({
+      client_id: OUTLOOK_CLIENT_ID,
+      refresh_token: refreshToken,
+      grant_type: 'refresh_token',
+      scope: OUTLOOK_SCOPES
+    }).toString();
+
+    const tokenUrl = new URL(OUTLOOK_TOKEN_URL);
+    const options = {
+      hostname: tokenUrl.hostname,
+      path: tokenUrl.pathname,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Content-Length': Buffer.byteLength(postData)
+      }
+    };
+
+    const req = https.request(options, (res) => {
+      let data = '';
+      res.on('data', (chunk) => { data += chunk; });
+      res.on('end', () => {
+        try {
+          const parsed = JSON.parse(data);
+          if (parsed.error) {
+            reject(new Error(`Refresh failed: ${parsed.error_description || parsed.error}`));
+            return;
+          }
+          resolve(parsed);
+        } catch (err) {
+          reject(new Error('Failed to parse refresh response'));
+        }
+      });
+    });
+
+    req.on('error', reject);
+    req.write(postData);
+    req.end();
+  });
+}
+
+// ── Outlook Calendar: Fetch Events ──────────────────────────────────────
+
+function fetchOutlookCalendarEvents(accessToken, maxResults = 7) {
+  return new Promise((resolve, reject) => {
+    const now = new Date();
+    const weekAhead = new Date(now);
+    weekAhead.setDate(weekAhead.getDate() + 7);
+
+    const params = new URLSearchParams({
+      startDateTime: now.toISOString(),
+      endDateTime: weekAhead.toISOString(),
+      $top: String(maxResults),
+      $orderby: 'start/dateTime',
+      $select: 'id,subject,body,start,end,attendees,webLink,onlineMeeting,isOnlineMeeting'
+    });
+
+    const options = {
+      hostname: 'graph.microsoft.com',
+      path: `/v1.0/me/calendarView?${params.toString()}`,
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Prefer': 'outlook.timezone="UTC"'
+      }
+    };
+
+    const req = https.request(options, (res) => {
+      let data = '';
+      res.on('data', (chunk) => { data += chunk; });
+      res.on('end', () => {
+        try {
+          const parsed = JSON.parse(data);
+          if (parsed.error) {
+            reject(new Error(`Outlook Calendar API error: ${parsed.error.message || parsed.error}`));
+            return;
+          }
+          const events = (parsed.value || []).map(normalizeOutlookEvent);
+          resolve(events);
+        } catch (err) {
+          reject(new Error('Failed to parse Outlook calendar response'));
+        }
+      });
+    });
+
+    req.on('error', reject);
+    req.end();
+  });
+}
+
+function normalizeOutlookEvent(event) {
+  // Map Microsoft Graph event shape to Google Calendar shape for renderer compatibility
+  const stripHtml = (html) => {
+    if (!html) return '';
+    return html.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim();
+  };
+
+  return {
+    id: event.id,
+    summary: event.subject || 'No title',
+    description: stripHtml(event.body?.content),
+    start: {
+      dateTime: event.start?.dateTime ? event.start.dateTime + 'Z' : undefined,
+      timeZone: 'UTC'
+    },
+    end: {
+      dateTime: event.end?.dateTime ? event.end.dateTime + 'Z' : undefined,
+      timeZone: 'UTC'
+    },
+    attendees: (event.attendees || []).map(a => ({
+      email: a.emailAddress?.address,
+      displayName: a.emailAddress?.name,
+      responseStatus: a.status?.response
+    })),
+    htmlLink: event.webLink,
+    conferenceData: event.isOnlineMeeting && event.onlineMeeting ? {
+      entryPoints: [{ uri: event.onlineMeeting.joinUrl, entryPointType: 'video' }]
+    } : undefined
+  };
+}
+
 // ── Google Calendar: IPC Handlers ───────────────────────────────────────
 
 ipcMain.handle('google-auth-start', async () => {
   try {
+    // Disconnect Outlook first (only one provider at a time)
+    deleteOutlookTokens();
     await startGoogleAuth();
     return { success: true };
   } catch (error) {
@@ -2886,15 +3230,59 @@ ipcMain.handle('google-auth-disconnect', async () => {
 
 ipcMain.handle('get-calendar-events', async () => {
   try {
-    const accessToken = await getValidAccessToken();
-    if (!accessToken) {
-      return { success: false, needsAuth: true };
+    // Check which provider is connected (only one at a time)
+    const googleToken = await getValidAccessToken();
+    if (googleToken) {
+      const events = await fetchCalendarEvents(googleToken);
+      return { success: true, events };
     }
 
-    const events = await fetchCalendarEvents(accessToken);
-    return { success: true, events };
+    const outlookToken = await getValidOutlookAccessToken();
+    if (outlookToken) {
+      const events = await fetchOutlookCalendarEvents(outlookToken);
+      return { success: true, events };
+    }
+
+    return { success: false, needsAuth: true };
   } catch (error) {
     console.error('Failed to fetch calendar events:', error.message);
+    return { success: false, error: error.message };
+  }
+});
+
+// ── Outlook Calendar: IPC Handlers ──────────────────────────────────────
+
+ipcMain.handle('outlook-auth-start', async () => {
+  try {
+    // Disconnect Google first (only one provider at a time)
+    deleteGoogleTokens();
+    await startOutlookAuth();
+    return { success: true };
+  } catch (error) {
+    console.error('Outlook auth failed:', error.message);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('outlook-auth-status', async () => {
+  try {
+    const tokens = loadOutlookTokens();
+    return { success: true, connected: !!tokens };
+  } catch (error) {
+    return { success: false, connected: false };
+  }
+});
+
+ipcMain.handle('outlook-auth-disconnect', async () => {
+  try {
+    deleteOutlookTokens();
+
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('outlook-auth-changed');
+    }
+
+    return { success: true };
+  } catch (error) {
     return { success: false, error: error.message };
   }
 });

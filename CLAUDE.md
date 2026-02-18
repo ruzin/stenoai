@@ -98,6 +98,10 @@ This app ships as a signed DMG to real users. Before considering any change comp
 - Write docstrings for functions and classes
 - Use logging for debugging and monitoring
 
+## Git Workflow
+- Always create a branch for changes unless explicitly told otherwise
+- Never commit directly to `main`
+
 ## Git Commit Guidelines
 - Do NOT include "🤖 Generated with Claude Code" attribution in commit messages
 - Do NOT include "Co-Authored-By: Claude <noreply@anthropic.com>" in commit messages

@@ -3539,12 +3539,16 @@ Commands and output will appear here...
                         </select>
                     </div>
 
-                    <div class="settings-row">
-                        <div class="settings-row-text">
-                            <span>Google Calendar</span>
-                            <small id="google-cal-status-text" style="color: var(--text-muted);">Checking...</small>
+                    <div class="settings-row" id="calendar-settings-row" style="flex-wrap: wrap;">
+                        <div class="settings-row-text" style="flex: 1; min-width: 0;">
+                            <span>Calendar</span>
+                            <small id="calendar-status-text" style="color: var(--text-muted);">Checking...</small>
                         </div>
-                        <button class="settings-action-btn" id="google-cal-btn" onclick="toggleGoogleCalendar()">Connect</button>
+                        <div id="calendar-picker" style="display: none; gap: 6px;">
+                            <button class="settings-action-btn" onclick="connectCalendar('google')">Google</button>
+                            <button class="settings-action-btn" onclick="connectCalendar('outlook')">Outlook</button>
+                        </div>
+                        <button class="settings-action-btn" id="calendar-disconnect-btn" style="display: none;" onclick="disconnectCalendar()">Disconnect</button>
                     </div>
 
                     <div class="settings-row" style="flex-wrap: wrap;">
@@ -3755,8 +3759,9 @@ Session started - waiting for activity...
         let currentAnnouncement = null;
         let announcementCheckInterval = null;
 
-        // Google Calendar state
+        // Calendar state
         let calendarConnected = false;
+        let calendarProvider = null; // 'google' | 'outlook' | null
         let calendarEvents = [];
         let selectedCalendarEvent = null;
         let calendarRefreshInterval = null;
@@ -4957,12 +4962,25 @@ Session started - waiting for activity...
             }
         }
 
-        // ── Google Calendar Functions ────────────────────────────────────────
+        // ── Calendar Functions ─────────────────────────────────────────────
 
-        async function checkGoogleCalendarStatus() {
+        async function checkCalendarStatus() {
             try {
-                const result = await ipcRenderer.invoke('google-auth-status');
-                calendarConnected = result.success && result.connected;
+                // Check Google first, then Outlook (only one can be connected)
+                const googleResult = await ipcRenderer.invoke('google-auth-status');
+                if (googleResult.success && googleResult.connected) {
+                    calendarConnected = true;
+                    calendarProvider = 'google';
+                } else {
+                    const outlookResult = await ipcRenderer.invoke('outlook-auth-status');
+                    if (outlookResult.success && outlookResult.connected) {
+                        calendarConnected = true;
+                        calendarProvider = 'outlook';
+                    } else {
+                        calendarConnected = false;
+                        calendarProvider = null;
+                    }
+                }
                 updateCalendarSettingsUI();
                 if (calendarConnected) {
                     await loadCalendarEvents();
@@ -4974,6 +4992,7 @@ Session started - waiting for activity...
             } catch (error) {
                 log(`Calendar status check failed: ${error.message}`);
                 calendarConnected = false;
+                calendarProvider = null;
                 updateCalendarSettingsUI();
                 renderCalendarSidebar();
             }
@@ -5181,47 +5200,73 @@ Session started - waiting for activity...
             document.getElementById('start-btn').click();
         }
 
-        async function toggleGoogleCalendar() {
-            const btn = document.getElementById('google-cal-btn');
-            if (calendarConnected) {
-                btn.disabled = true;
-                btn.textContent = 'Disconnecting...';
-                await ipcRenderer.invoke('google-auth-disconnect');
-                calendarConnected = false;
-                calendarEvents = [];
-                selectedCalendarEvent = null;
-                if (calendarRefreshInterval) { clearInterval(calendarRefreshInterval); calendarRefreshInterval = null; }
-                document.getElementById('calendar-event-detail').classList.remove('show');
-                document.getElementById('empty-state').style.display = 'flex';
-                updateCalendarSettingsUI();
-                renderCalendarSidebar();
-            } else {
-                btn.disabled = true;
-                btn.textContent = 'Connecting...';
-                const result = await ipcRenderer.invoke('google-auth-start');
-                if (!result.success) log(`Google Calendar connect failed: ${result.error}`);
-                btn.disabled = false;
-                updateCalendarSettingsUI();
+        async function connectCalendar(provider) {
+            const picker = document.getElementById('calendar-picker');
+            const statusText = document.getElementById('calendar-status-text');
+            // Disable picker buttons while connecting
+            picker.querySelectorAll('button').forEach(b => { b.disabled = true; });
+            statusText.textContent = `Connecting to ${provider === 'google' ? 'Google' : 'Outlook'}...`;
+
+            try {
+                const ipcChannel = provider === 'google' ? 'google-auth-start' : 'outlook-auth-start';
+                const result = await ipcRenderer.invoke(ipcChannel);
+                if (!result.success) log(`${provider} Calendar connect failed: ${result.error}`);
+            } catch (error) {
+                log(`Calendar connect error: ${error.message}`);
             }
+            picker.querySelectorAll('button').forEach(b => { b.disabled = false; });
+            updateCalendarSettingsUI();
+        }
+
+        async function disconnectCalendar() {
+            const btn = document.getElementById('calendar-disconnect-btn');
+            btn.disabled = true;
+            btn.textContent = 'Disconnecting...';
+
+            try {
+                if (calendarProvider === 'google') {
+                    await ipcRenderer.invoke('google-auth-disconnect');
+                } else if (calendarProvider === 'outlook') {
+                    await ipcRenderer.invoke('outlook-auth-disconnect');
+                }
+            } catch (error) {
+                log(`Calendar disconnect error: ${error.message}`);
+            }
+
+            calendarConnected = false;
+            calendarProvider = null;
+            calendarEvents = [];
+            selectedCalendarEvent = null;
+            if (calendarRefreshInterval) { clearInterval(calendarRefreshInterval); calendarRefreshInterval = null; }
+            document.getElementById('calendar-event-detail').classList.remove('show');
+            document.getElementById('empty-state').style.display = 'flex';
+            updateCalendarSettingsUI();
+            renderCalendarSidebar();
         }
 
         function updateCalendarSettingsUI() {
-            const statusText = document.getElementById('google-cal-status-text');
-            const btn = document.getElementById('google-cal-btn');
-            if (calendarConnected) {
-                statusText.textContent = 'Connected';
+            const statusText = document.getElementById('calendar-status-text');
+            const picker = document.getElementById('calendar-picker');
+            const disconnectBtn = document.getElementById('calendar-disconnect-btn');
+
+            if (calendarConnected && calendarProvider) {
+                const providerName = calendarProvider === 'google' ? 'Google' : 'Outlook';
+                statusText.textContent = `Connected to ${providerName}`;
                 statusText.style.color = '#22c55e';
-                btn.textContent = 'Disconnect';
-                btn.disabled = false;
+                picker.style.display = 'none';
+                disconnectBtn.style.display = '';
+                disconnectBtn.textContent = 'Disconnect';
+                disconnectBtn.disabled = false;
             } else {
                 statusText.textContent = 'Not connected';
                 statusText.style.color = 'var(--text-muted)';
-                btn.textContent = 'Connect';
-                btn.disabled = false;
+                picker.style.display = 'flex';
+                disconnectBtn.style.display = 'none';
             }
         }
 
-        ipcRenderer.on('google-auth-changed', () => { checkGoogleCalendarStatus(); });
+        ipcRenderer.on('google-auth-changed', () => { checkCalendarStatus(); });
+        ipcRenderer.on('outlook-auth-changed', () => { checkCalendarStatus(); });
         document.getElementById('calendar-detail-back').addEventListener('click', hideCalendarEventDetail);
         document.getElementById('calendar-record-btn').addEventListener('click', recordCalendarEvent);
 
@@ -5262,7 +5307,7 @@ Session started - waiting for activity...
                     loadStoragePath().catch(err =>
                         log(`Storage path load failed: ${err.message}`)
                     ),
-                    checkGoogleCalendarStatus().catch(err =>
+                    checkCalendarStatus().catch(err =>
                         log(`Calendar status check failed: ${err.message}`)
                     )
                 ]);
