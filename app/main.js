@@ -411,6 +411,14 @@ app.on('will-quit', async () => {
     tray.destroy();
     tray = null;
   }
+  // Kill Ollama if we started it
+  if (ollamaStartedByUs && ollamaProcess) {
+    try {
+      ollamaProcess.kill();
+    } catch (e) {
+      // Process may have already exited
+    }
+  }
   await shutdownTelemetry();
 });
 
@@ -840,6 +848,8 @@ let currentRecordingProcess = null;
 let processingQueue = [];
 let isProcessing = false;
 let currentProcessingJob = null;
+let ollamaProcess = null;  // Track spawned Ollama process for cleanup on quit
+let ollamaStartedByUs = false;
 
 // Processing queue management
 async function processNextInQueue() {
@@ -1225,73 +1235,6 @@ ipcMain.handle('setup-system-check', async () => {
   }
 });
 
-ipcMain.handle('setup-ollama', async () => {
-  try {
-    // Check if Ollama is already installed - try multiple common paths
-    const ollamaPaths = ['ollama', '/opt/homebrew/bin/ollama', '/usr/local/bin/ollama'];
-    let ollamaFound = false;
-
-    for (const ollamaPath of ollamaPaths) {
-      try {
-        const checkResult = await new Promise((resolve) => {
-          const proc = spawn(ollamaPath, ['--version'], { timeout: 5000 });
-          proc.on('error', () => resolve(false));
-          proc.on('close', (code) => resolve(code === 0));
-        });
-
-        if (checkResult) {
-          ollamaFound = true;
-          break;
-        }
-      } catch (error) {
-        // Try next path
-        continue;
-      }
-    }
-
-    if (ollamaFound) {
-      // Start Ollama service if not running (use spawn instead of exec)
-      spawn('ollama', ['serve'], { detached: true, stdio: 'ignore' }).unref();
-      return { success: true, message: 'Ollama ready and service started' };
-    }
-
-    // Install Ollama using Homebrew - try common brew paths
-    const brewPaths = ['brew', '/opt/homebrew/bin/brew', '/usr/local/bin/brew'];
-
-    for (const brewPath of brewPaths) {
-      try {
-        const result = await new Promise((resolve) => {
-          const proc = spawn(brewPath, ['install', 'ollama'], { timeout: 300000 });
-
-          proc.on('error', (error) => {
-            resolve({ success: false, error: `Failed with ${brewPath}: ${error.message}` });
-          });
-
-          proc.on('close', (code) => {
-            if (code === 0) {
-              // Start Ollama service after installation
-              spawn('ollama', ['serve'], { detached: true, stdio: 'ignore' }).unref();
-              resolve({ success: true, message: 'Ollama installed and started' });
-            } else {
-              resolve({ success: false, error: `Failed with ${brewPath}: exit code ${code}` });
-            }
-          });
-        });
-
-        if (result.success) {
-          return result;
-        }
-      } catch (error) {
-        console.log(`Failed to install with ${brewPath}: ${error.message}`);
-      }
-    }
-
-    return { success: false, error: 'Failed to install Ollama. Please install Homebrew and try again.' };
-  } catch (error) {
-    return { success: false, error: error.message };
-  }
-});
-
 ipcMain.handle('setup-ffmpeg', async () => {
   try {
     sendDebugLog('$ Checking for existing ffmpeg installation...');
@@ -1542,143 +1485,20 @@ function sendDebugLog(message) {
 
 ipcMain.handle('setup-ollama-and-model', async () => {
   try {
-    sendDebugLog('$ Checking for existing Ollama installation...');
-    sendDebugLog('$ which ollama || /opt/homebrew/bin/ollama --version || /usr/local/bin/ollama --version');
-    
-    // Check if Ollama is already installed and get its path
-    const ollamaPath = await new Promise((resolve) => {
-      exec('which ollama', { timeout: 5000 }, (error, stdout, stderr) => {
-        if (!error && stdout.trim()) {
-          const path = stdout.trim();
-          sendDebugLog(`Found Ollama at: ${path}`);
-          resolve(path);
-        } else {
-          // Try common Homebrew locations
-          exec('/opt/homebrew/bin/ollama --version', { timeout: 5000 }, (error2, stdout2) => {
-            if (!error2) {
-              sendDebugLog('Found Ollama at: /opt/homebrew/bin/ollama');
-              resolve('/opt/homebrew/bin/ollama');
-            } else {
-              exec('/usr/local/bin/ollama --version', { timeout: 5000 }, (error3, stdout3) => {
-                if (!error3) {
-                  sendDebugLog('Found Ollama at: /usr/local/bin/ollama');
-                  resolve('/usr/local/bin/ollama');
-                } else {
-                  sendDebugLog('Ollama not found in any common locations');
-                  resolve(null);
-                }
-              });
-            }
-          });
-        }
-      });
-    });
-    
-    // Install Ollama if not present
-    if (!ollamaPath) {
-      sendDebugLog('Ollama not found, checking for Homebrew...');
-      sendDebugLog('$ which brew || /opt/homebrew/bin/brew --version || /usr/local/bin/brew --version');
-      
-      // First check if Homebrew is installed and get its path
-      const brewPath = await new Promise((resolve) => {
-        exec('which brew', { timeout: 5000 }, (error, stdout, stderr) => {
-          if (!error && stdout.trim()) {
-            const path = stdout.trim();
-            sendDebugLog(`Found Homebrew at: ${path}`);
-            resolve(path);
-          } else {
-            // Try common Homebrew locations
-            exec('/opt/homebrew/bin/brew --version', { timeout: 5000 }, (error2, stdout2) => {
-              if (!error2) {
-                sendDebugLog('Found Homebrew at: /opt/homebrew/bin/brew');
-                resolve('/opt/homebrew/bin/brew');
-              } else {
-                exec('/usr/local/bin/brew --version', { timeout: 5000 }, (error3, stdout3) => {
-                  if (!error3) {
-                    sendDebugLog('Found Homebrew at: /usr/local/bin/brew');
-                    resolve('/usr/local/bin/brew');
-                  } else {
-                    sendDebugLog('Homebrew not found in any common locations');
-                    resolve(null);
-                  }
-                });
-              }
-            });
-          }
-        });
-      });
-      
-      // Install Homebrew if missing
-      if (!brewPath) {
-        sendDebugLog('Homebrew not found, installing...');
-        sendDebugLog('$ /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"');
-        await new Promise((resolve, reject) => {
-          const process = exec('/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"', 
-               { timeout: 600000 });
-          
-          process.stdout.on('data', (data) => {
-            sendDebugLog(data.toString().trim());
-          });
-          
-          process.stderr.on('data', (data) => {
-            sendDebugLog('STDERR: ' + data.toString().trim());
-          });
-          
-          process.on('close', (code) => {
-            if (code === 0) {
-              sendDebugLog('Homebrew installation completed successfully');
-              resolve();
-            } else {
-              sendDebugLog(`Homebrew installation failed with exit code: ${code}`);
-              reject(new Error('Failed to install Homebrew automatically'));
-            }
-          });
-        });
-      } else {
-        sendDebugLog('Homebrew found, proceeding with Ollama installation...');
-      }
-      
-      // Determine final brew path (either found or newly installed)
-      const finalBrewPath = brewPath || '/opt/homebrew/bin/brew';
-      
-      // Now install Ollama via Homebrew
-      sendDebugLog(`$ ${finalBrewPath} install ollama`);
-      await new Promise((resolve, reject) => {
-        const process = exec(`${finalBrewPath} install ollama`, { timeout: 300000 });
-        
-        process.stdout.on('data', (data) => {
-          sendDebugLog(data.toString().trim());
-        });
-        
-        process.stderr.on('data', (data) => {
-          sendDebugLog('STDERR: ' + data.toString().trim());
-        });
-        
-        process.on('close', (code) => {
-          if (code === 0) {
-            sendDebugLog('Ollama installation completed successfully');
-            resolve();
-          } else {
-            sendDebugLog(`Ollama installation failed with exit code: ${code}`);
-            reject(new Error('Failed to install Ollama via Homebrew'));
-          }
-        });
-      });
-    } else {
-      sendDebugLog('Ollama already installed, skipping installation step');
-    }
-    
-    // Use bundled Ollama path
-    const finalOllamaPath = ollamaPath;
+    sendDebugLog('Locating bundled Ollama...');
+    const finalOllamaPath = await findOllamaExecutable();
     if (!finalOllamaPath) {
       sendDebugLog('Error: Bundled Ollama not found');
-      return { success: false, error: 'Bundled Ollama not found' };
+      return { success: false, error: 'Bundled Ollama not found. Please reinstall StenoAI.' };
     }
+    sendDebugLog(`Found bundled Ollama at: ${finalOllamaPath}`);
 
-    // Start Ollama service
+    // Start Ollama service with proper env vars for bundled dylibs
     sendDebugLog('Starting Ollama service...');
-    sendDebugLog(`$ ${finalOllamaPath} serve &`);
-    exec(`"${finalOllamaPath}" serve`, { detached: true });
+    sendDebugLog(`$ ${finalOllamaPath} serve`);
+    ollamaProcess = spawn(finalOllamaPath, ['serve'], { detached: true, stdio: 'ignore', env: getOllamaEnv() });
+    ollamaProcess.unref();
+    ollamaStartedByUs = true;
 
     // Wait for Ollama to be ready (poll instead of fixed wait)
     sendDebugLog('Waiting for Ollama service to be ready...');
@@ -1709,49 +1529,81 @@ ipcMain.handle('setup-ollama-and-model', async () => {
     }
     
     sendDebugLog('Downloading AI model (this may take several minutes)...');
-    sendDebugLog(`$ ${finalOllamaPath} pull llama3.2:3b`);
+    sendDebugLog('POST http://127.0.0.1:11434/api/pull {name: "llama3.2:3b"}');
 
+    const http = require('http');
     return new Promise((resolve) => {
-      const process = exec(`"${finalOllamaPath}" pull llama3.2:3b`, { timeout: 600000 });
-
-      process.stdout.on('data', (data) => {
-        sendDebugLog(data.toString().trim());
-      });
-
-      process.stderr.on('data', (data) => {
-        sendDebugLog('STDERR: ' + data.toString().trim());
-      });
-
-      process.on('close', async (code) => {
-        if (code === 0) {
-          sendDebugLog('AI model download completed successfully');
-          // Reset config to default model so system test uses the same model
-          try {
-            await runPythonScript('simple_recorder.py', ['set-model', 'llama3.2:3b'], true);
-          } catch (e) {
-            // Non-fatal -- config reset is best-effort
+      const postData = JSON.stringify({ name: 'llama3.2:3b' });
+      const req = http.request({
+        hostname: '127.0.0.1',
+        port: 11434,
+        path: '/api/pull',
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        timeout: 600000
+      }, (res) => {
+        let lastStatus = '';
+        res.on('data', (chunk) => {
+          // Ollama streams newline-delimited JSON
+          const lines = chunk.toString().split('\n').filter(Boolean);
+          for (const line of lines) {
+            try {
+              const json = JSON.parse(line);
+              if (json.error) {
+                sendDebugLog(`Pull error: ${json.error}`);
+                return;
+              }
+              // Log progress without spamming duplicate status
+              const status = json.status || '';
+              if (json.total && json.completed) {
+                const pct = Math.round((json.completed / json.total) * 100);
+                const msg = `${status} ${pct}%`;
+                if (msg !== lastStatus) {
+                  sendDebugLog(msg);
+                  lastStatus = msg;
+                }
+              } else if (status !== lastStatus) {
+                sendDebugLog(status);
+                lastStatus = status;
+              }
+            } catch (e) {
+              // Non-JSON line, log as-is
+              sendDebugLog(chunk.toString().trim());
+            }
           }
-          trackEvent('setup_completed', { step: 'ollama_and_model' });
-          resolve({ success: true, message: 'Ollama and AI model ready' });
-        } else {
-          sendDebugLog(`AI model download failed with exit code: ${code}`);
-          trackEvent('setup_failed', { step: 'ollama_and_model' });
-          resolve({
-            success: false,
-            error: 'Failed to download AI model',
-            details: `Exit code: ${code}`
-          });
-        }
-      });
+        });
 
-      process.on('error', (error) => {
-        sendDebugLog(`Process error: ${error.message}`);
-        resolve({
-          success: false,
-          error: 'Failed to download AI model',
-          details: error.message
+        res.on('end', async () => {
+          if (res.statusCode === 200) {
+            sendDebugLog('AI model download completed successfully');
+            try {
+              await runPythonScript('simple_recorder.py', ['set-model', 'llama3.2:3b'], true);
+            } catch (e) {
+              // Non-fatal -- config reset is best-effort
+            }
+            trackEvent('setup_completed', { step: 'ollama_and_model' });
+            resolve({ success: true, message: 'Ollama and AI model ready' });
+          } else {
+            sendDebugLog(`AI model download failed with status: ${res.statusCode}`);
+            trackEvent('setup_failed', { step: 'ollama_and_model' });
+            resolve({ success: false, error: 'Failed to download AI model', details: `HTTP ${res.statusCode}` });
+          }
         });
       });
+
+      req.on('error', (error) => {
+        sendDebugLog(`Pull request error: ${error.message}`);
+        resolve({ success: false, error: 'Failed to download AI model', details: error.message });
+      });
+
+      req.on('timeout', () => {
+        req.destroy();
+        sendDebugLog('Model pull timed out after 10 minutes');
+        resolve({ success: false, error: 'Model download timed out' });
+      });
+
+      req.write(postData);
+      req.end();
     });
   } catch (error) {
     return { success: false, error: error.message };
@@ -2060,11 +1912,13 @@ ipcMain.handle('get-ai-prompts', async () => {
 async function ensureOllamaRunning() {
   try {
     // Check if Ollama service is responding
-    const { exec } = require('child_process');
+    const http = require('http');
     const response = await new Promise((resolve) => {
-      exec('curl -s http://localhost:11434/api/version', (error, stdout) => {
-        resolve(!error && stdout);
+      const req = http.get('http://127.0.0.1:11434/api/version', { timeout: 3000 }, (res) => {
+        resolve(res.statusCode === 200);
       });
+      req.on('error', () => resolve(false));
+      req.on('timeout', () => { req.destroy(); resolve(false); });
     });
 
     if (response) {
@@ -2078,7 +1932,9 @@ async function ensureOllamaRunning() {
     }
 
     // Start Ollama service in background with proper env vars for dylibs
-    spawn(ollamaPath, ['serve'], { detached: true, stdio: 'ignore', env: getOllamaEnv() }).unref();
+    ollamaProcess = spawn(ollamaPath, ['serve'], { detached: true, stdio: 'ignore', env: getOllamaEnv() });
+    ollamaProcess.unref();
+    ollamaStartedByUs = true;
 
     // Wait for service to start
     await new Promise(resolve => setTimeout(resolve, 2000));
