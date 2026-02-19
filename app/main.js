@@ -351,6 +351,21 @@ app.on('before-quit', async (event) => {
       isQuitting = true;
       app.quit();
     }
+  } else if (isProcessing || processingQueue.length > 0) {
+    event.preventDefault();
+    const jobCount = processingQueue.length + (isProcessing ? 1 : 0);
+    const { response } = await dialog.showMessageBox(mainWindow || null, {
+      type: 'warning',
+      buttons: ['Cancel', 'Quit Anyway'],
+      defaultId: 0,
+      cancelId: 0,
+      title: 'Processing in Progress',
+      message: `${jobCount} recording${jobCount > 1 ? 's are' : ' is'} still being processed. Quitting now will cancel processing. The audio file${jobCount > 1 ? 's are' : ' is'} saved and can be reprocessed later.`,
+    });
+    if (response === 1) {
+      isQuitting = true;
+      app.quit();
+    }
   } else {
     isQuitting = true;
   }
