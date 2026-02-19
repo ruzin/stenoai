@@ -360,7 +360,7 @@ app.on('before-quit', async (event) => {
       defaultId: 0,
       cancelId: 0,
       title: 'Processing in Progress',
-      message: `${jobCount} recording${jobCount > 1 ? 's are' : ' is'} still being processed. Quitting now will cancel processing. The audio file${jobCount > 1 ? 's are' : ' is'} saved and can be reprocessed later.`,
+      message: `${jobCount} recording${jobCount > 1 ? 's are' : ' is'} still being processed. Quitting will cancel processing.`,
     });
     if (response === 1) {
       isQuitting = true;
