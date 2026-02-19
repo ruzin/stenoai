@@ -313,15 +313,18 @@
         }
 
         .btn-primary {
-            background: var(--bg-surface);
-            color: var(--text-primary);
-            border-color: var(--border-default);
+            background: linear-gradient(135deg, rgba(99, 102, 241, 0.15) 0%, rgba(129, 140, 248, 0.15) 100%);
+            color: var(--accent-primary);
+            border: 1px solid rgba(129, 140, 248, 0.3);
             font-weight: 600;
+            box-shadow: 0 0 0 rgba(99, 102, 241, 0);
+            transition: all 0.25s ease;
         }
 
         .btn-primary:hover {
-            background: var(--bg-surface);
-            border-color: var(--border-default);
+            background: linear-gradient(135deg, rgba(99, 102, 241, 0.28) 0%, rgba(129, 140, 248, 0.28) 100%);
+            border-color: var(--accent-primary);
+            box-shadow: 0 0 16px rgba(99, 102, 241, 0.25);
         }
 
         .btn-danger {
@@ -2605,16 +2608,18 @@
             padding: 14px 24px;
             font-size: 15px;
             font-weight: 600;
-            background: var(--bg-surface);
-            color: var(--text-primary);
-            border: 1px solid var(--border-default);
+            background: linear-gradient(135deg, rgba(99, 102, 241, 0.15) 0%, rgba(129, 140, 248, 0.15) 100%);
+            color: var(--accent-primary);
+            border: 1px solid rgba(129, 140, 248, 0.3);
             border-radius: 10px;
             cursor: pointer;
-            transition: all 0.2s ease;
+            transition: all 0.25s ease;
         }
 
         .setup-actions .btn-primary:hover:not(:disabled) {
-            background: var(--bg-elevated);
+            background: linear-gradient(135deg, rgba(99, 102, 241, 0.28) 0%, rgba(129, 140, 248, 0.28) 100%);
+            border-color: var(--accent-primary);
+            box-shadow: 0 0 16px rgba(99, 102, 241, 0.25);
             transform: translateY(-1px);
         }
 
