@@ -8,6 +8,10 @@ const os = require('os');
 const { URL, URLSearchParams } = require('url');
 const crypto = require('crypto');
 const { PostHog } = require('posthog-node');
+const { initMain } = require('electron-audio-loopback');
+
+// Initialize electron-audio-loopback before app is ready
+initMain();
 
 let mainWindow;
 let pythonProcess;
@@ -262,7 +266,7 @@ function showAndFocusWindow() {
 
 function updateTrayMenu() {
   if (!tray) return;
-  const isRecording = currentRecordingProcess !== null;
+  const isRecording = currentRecordingProcess !== null || systemAudioRecordingActive;
 
   const appVersion = require('./package.json').version;
 
@@ -319,7 +323,8 @@ function updateTrayMenu() {
 app.on('before-quit', async (event) => {
   if (isQuitting) return;
 
-  if (currentRecordingProcess) {
+  // Use synchronous flag -- systemAudioRecordingActive is updated via IPC on each state change
+  if (currentRecordingProcess || systemAudioRecordingActive) {
     event.preventDefault();
     const { response } = await dialog.showMessageBox(mainWindow || null, {
       type: 'warning',
@@ -330,9 +335,18 @@ app.on('before-quit', async (event) => {
       message: 'A recording is still in progress. Quitting will stop the recording and process it in the background.',
     });
     if (response === 1) {
-      // Stop recording gracefully then quit
-      currentRecordingProcess.kill('SIGTERM');
-      currentRecordingProcess = null;
+      if (currentRecordingProcess) {
+        currentRecordingProcess.kill('SIGTERM');
+        currentRecordingProcess = null;
+      }
+      if (systemAudioRecordingActive && mainWindow && !mainWindow.isDestroyed()) {
+        try {
+          await mainWindow.webContents.executeJavaScript('stopSystemAudioRecording("quit")');
+        } catch (e) {
+          // Best effort -- file is saved even if processing doesn't start
+        }
+      }
+      systemAudioRecordingActive = false;
       updateTrayIcon(false);
       isQuitting = true;
       app.quit();
@@ -608,7 +622,7 @@ ipcMain.handle('select-audio-file', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
     properties: ['openFile'],
     filters: [
-      { name: 'Audio Files', extensions: ['wav', 'mp3', 'm4a', 'aac'] }
+      { name: 'Audio Files', extensions: ['wav', 'mp3', 'm4a', 'aac', 'webm'] }
     ]
   });
   
@@ -839,11 +853,12 @@ ipcMain.handle('get-queue-status', async () => {
     isProcessing,
     queueSize: processingQueue.length,
     currentJob: currentProcessingJob?.sessionName || null,
-    hasRecording: currentRecordingProcess !== null
+    hasRecording: currentRecordingProcess !== null || systemAudioRecordingActive
   };
 });
 
 // Global recording state management
+let systemAudioRecordingActive = false;  // Track system audio recording for tray/quit
 let currentRecordingProcess = null;
 let processingQueue = [];
 let isProcessing = false;
@@ -2106,6 +2121,95 @@ ipcMain.handle('set-telemetry', async (event, enabled) => {
     sendDebugLog(`Error setting telemetry: ${error.message}`);
     return { success: false, error: error.message };
   }
+});
+
+// System audio capture IPC handlers
+ipcMain.handle('get-system-audio', async () => {
+  try {
+    const result = await runPythonScript('simple_recorder.py', ['get-system-audio'], true);
+    const jsonData = JSON.parse(result);
+    return { success: true, ...jsonData };
+  } catch (error) {
+    sendDebugLog(`Error getting system audio setting: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('set-system-audio', async (event, enabled) => {
+  try {
+    sendDebugLog(`Setting system audio to: ${enabled}`);
+    const result = await runPythonScript('simple_recorder.py', ['set-system-audio', enabled ? 'True' : 'False']);
+    const jsonMatch = result.match(/\{.*\}/s);
+    if (jsonMatch) {
+      return JSON.parse(jsonMatch[0]);
+    }
+    return { success: true, system_audio_enabled: enabled };
+  } catch (error) {
+    sendDebugLog(`Error setting system audio: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('get-recordings-dir', async () => {
+  try {
+    // Get recordings directory from Python config
+    const result = await runPythonScript('simple_recorder.py', ['get-storage-path'], true);
+    const jsonData = JSON.parse(result.trim());
+
+    let recordingsDir;
+    if (jsonData.storage_path) {
+      recordingsDir = path.join(jsonData.storage_path, 'recordings');
+    } else if (app.isPackaged) {
+      recordingsDir = path.join(os.homedir(), 'Library', 'Application Support', 'stenoai', 'recordings');
+    } else {
+      recordingsDir = path.join(__dirname, '..', 'recordings');
+    }
+
+    // Ensure directory exists
+    if (!fs.existsSync(recordingsDir)) {
+      fs.mkdirSync(recordingsDir, { recursive: true });
+    }
+
+    return { success: true, path: recordingsDir };
+  } catch (error) {
+    sendDebugLog(`Error getting recordings dir: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('process-system-audio-recording', async (event, audioFilePath, sessionName) => {
+  try {
+    sendDebugLog(`Queuing system audio recording for processing: ${audioFilePath}`);
+
+    // Validate file path
+    const allowedBaseDirs = getAllowedBaseDirs();
+    if (!validateSafeFilePath(audioFilePath, allowedBaseDirs)) {
+      return { success: false, error: 'Invalid file path' };
+    }
+
+    if (!fs.existsSync(audioFilePath)) {
+      return { success: false, error: 'Audio file not found' };
+    }
+
+    const actualSessionName = sessionName || 'Meeting';
+
+    // Use the existing processing queue to avoid concurrent Ollama/Whisper runs
+    addToProcessingQueue(audioFilePath, actualSessionName);
+
+    trackEvent('recording_stopped', { recording_mode: 'system_audio' });
+    return { success: true, message: 'Added to processing queue' };
+  } catch (error) {
+    sendDebugLog(`Error queuing system audio: ${error.message}`);
+    trackEvent('error_occurred', { error_type: 'process_system_audio' });
+    return { success: false, error: error.message };
+  }
+});
+
+// Track system audio recording state for tray icon
+ipcMain.on('system-audio-recording-state', (event, isRecording) => {
+  systemAudioRecordingActive = isRecording;
+  updateTrayIcon(isRecording);
+  updateTrayMenu();
 });
 
 ipcMain.handle('pull-model', async (event, modelName) => {

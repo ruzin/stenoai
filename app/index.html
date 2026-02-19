@@ -3660,6 +3660,17 @@ Commands and output will appear here...
 
                     <div class="settings-row">
                         <div class="settings-row-text">
+                            <span>Record system audio</span>
+                            <small>Capture audio from virtual meetings (requires macOS 12.3+)</small>
+                        </div>
+                        <label class="settings-toggle">
+                            <input type="checkbox" id="system-audio-toggle">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+
+                    <div class="settings-row">
+                        <div class="settings-row-text">
                             <span>Check for updates</span>
                             <small>Updates and announcements</small>
                         </div>
@@ -4840,62 +4851,216 @@ Session started - waiting for activity...
         }
         
         
+        // ── System Audio Recording Module ──
+        // Uses electron-audio-loopback to capture system audio + mic,
+        // mixes them via Web Audio API, records as WebM/Opus.
+        let _systemAudioRecording = false;  // Global flag checked by main process quit handler
+        let _systemAudioMediaRecorder = null;
+        let _systemAudioChunks = [];
+        let _systemAudioStreams = [];  // Track streams for cleanup
+        let _systemAudioContext = null;
+
+        async function startSystemAudioRecording() {
+            const { getLoopbackAudioMediaStream } = require('electron-audio-loopback');
+
+            let loopbackStream = null;
+            let micStream = null;
+
+            try {
+                // Get loopback (system audio) stream
+                loopbackStream = await getLoopbackAudioMediaStream();
+
+                // Get microphone stream
+                micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+                _systemAudioStreams = [loopbackStream, micStream];
+
+                // Mix both streams via Web Audio API
+                _systemAudioContext = new AudioContext();
+                const dest = _systemAudioContext.createMediaStreamDestination();
+
+                const loopbackSource = _systemAudioContext.createMediaStreamSource(loopbackStream);
+                loopbackSource.connect(dest);
+
+                const micSource = _systemAudioContext.createMediaStreamSource(micStream);
+                micSource.connect(dest);
+
+                // Start recording the mixed stream
+                _systemAudioChunks = [];
+                _systemAudioMediaRecorder = new MediaRecorder(dest.stream, {
+                    mimeType: 'audio/webm;codecs=opus'
+                });
+
+                _systemAudioMediaRecorder.ondataavailable = (e) => {
+                    if (e.data.size > 0) {
+                        _systemAudioChunks.push(e.data);
+                    }
+                };
+
+                _systemAudioMediaRecorder.start(1000); // Collect data every second
+                _systemAudioRecording = true;
+                ipcRenderer.send('system-audio-recording-state', true);
+                log('System audio recording started (mic + system audio)');
+            } catch (error) {
+                // Clean up any acquired streams on failure
+                if (loopbackStream) {
+                    loopbackStream.getTracks().forEach(t => t.stop());
+                }
+                if (micStream) {
+                    micStream.getTracks().forEach(t => t.stop());
+                }
+                _systemAudioStreams = [];
+                if (_systemAudioContext) {
+                    _systemAudioContext.close().catch(() => {});
+                    _systemAudioContext = null;
+                }
+                throw error;
+            }
+        }
+
+        async function stopSystemAudioRecording(sessionName) {
+            if (!_systemAudioMediaRecorder || _systemAudioMediaRecorder.state === 'inactive') {
+                _systemAudioRecording = false;
+                ipcRenderer.send('system-audio-recording-state', false);
+                return null;
+            }
+
+            return new Promise(async (resolve) => {
+                _systemAudioMediaRecorder.onstop = async () => {
+                    // Build blob from chunks
+                    const blob = new Blob(_systemAudioChunks, { type: 'audio/webm' });
+                    _systemAudioChunks = [];
+
+                    // Save to recordings directory
+                    const dirResult = await ipcRenderer.invoke('get-recordings-dir');
+                    if (!dirResult.success) {
+                        log(`Failed to get recordings dir: ${dirResult.error}`);
+                        resolve(null);
+                        return;
+                    }
+
+                    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+                    // Sanitize session name: allowlist alphanumeric, hyphens, underscores, spaces
+                    const safeName = (sessionName || 'Meeting').replace(/[^a-zA-Z0-9 _-]/g, '_').substring(0, 100) || 'Meeting';
+                    const fileName = `${safeName}_${timestamp}.webm`;
+                    const filePath = require('path').join(dirResult.path, fileName);
+
+                    // Write blob to file
+                    const buffer = Buffer.from(await blob.arrayBuffer());
+                    require('fs').writeFileSync(filePath, buffer);
+                    log(`System audio saved: ${filePath}`);
+
+                    // Clean up streams
+                    _systemAudioStreams.forEach(stream => {
+                        stream.getTracks().forEach(track => track.stop());
+                    });
+                    _systemAudioStreams = [];
+
+                    if (_systemAudioContext) {
+                        _systemAudioContext.close().catch(() => {});
+                        _systemAudioContext = null;
+                    }
+
+                    _systemAudioRecording = false;
+                    _systemAudioMediaRecorder = null;
+                    ipcRenderer.send('system-audio-recording-state', false);
+
+                    resolve(filePath);
+                };
+
+                _systemAudioMediaRecorder.stop();
+            });
+        }
+
+        function pauseSystemAudioRecording() {
+            if (_systemAudioMediaRecorder && _systemAudioMediaRecorder.state === 'recording') {
+                _systemAudioMediaRecorder.pause();
+                log('System audio recording paused');
+            }
+        }
+
+        function resumeSystemAudioRecording() {
+            if (_systemAudioMediaRecorder && _systemAudioMediaRecorder.state === 'paused') {
+                _systemAudioMediaRecorder.resume();
+                log('System audio recording resumed');
+            }
+        }
+
         // Manual start/stop recording functions
         startBtn.addEventListener('click', async () => {
             // Check microphone permission before allowing recording
             try {
                 const micResult = await ipcRenderer.invoke('check-microphone-permission');
                 if (!micResult.success || micResult.status !== 'granted') {
-                    log('🚫 Cannot start recording - microphone permission denied');
-                    
+                    log('Cannot start recording - microphone permission denied');
+
                     // Show clear error message
                     const micStatus = micResult.status || 'unknown';
-                    alert(`❌ Recording blocked: Microphone permission is ${micStatus}.\n\nStenoAI requires microphone access to record meetings. Please grant permission and try again.`);
-                    
+                    alert(`Recording blocked: Microphone permission is ${micStatus}.\n\nStenoAI requires microphone access to record meetings. Please grant permission and try again.`);
+
                     // Force show setup wizard to fix the issue
                     showSetupOverlay([]);
                     return;
                 }
             } catch (error) {
-                log(`🚫 Failed to check microphone permission: ${error.message}`);
-                alert('❌ Cannot verify microphone permission. Please ensure the app has proper access.');
+                log(`Failed to check microphone permission: ${error.message}`);
+                alert('Cannot verify microphone permission. Please ensure the app has proper access.');
                 return;
             }
-            
+
             // Generate session name if empty or use Meeting-HASH format
             let sessionName = sessionNameInput.value.trim();
             if (!sessionName || sessionName === 'Meeting') {
                 sessionName = `Meeting-${generateMeetingHash()}`;
                 sessionNameInput.value = sessionName;
             }
-            
-            log(`🎙️ Starting recording: ${sessionName}`);
-            setUIState('recording');
-            
+
+            // Check if system audio mode is enabled
+            let useSystemAudio = false;
             try {
-                const result = await ipcRenderer.invoke('start-recording-ui', sessionName);
-                if (result.success) {
-                    log(`Recording started: ${result.message}`);
-                    startStatusMonitoring();
-                } else {
-                    log(`Failed to start: ${result.error}`);
+                const saResult = await ipcRenderer.invoke('get-system-audio');
+                useSystemAudio = saResult.success && saResult.system_audio_enabled;
+            } catch (e) {
+                // Fall back to mic-only
+            }
+
+            if (useSystemAudio) {
+                log(`Starting recording (mic + system audio): ${sessionName}`);
+                setUIState('recording');
+                try {
+                    await startSystemAudioRecording();
+                } catch (error) {
+                    log(`System audio start error: ${error.message}`);
                     setUIState('ready');
                 }
-            } catch (error) {
-                log(`🚫 Start error: ${error.message}`);
-                setUIState('ready');
+            } else {
+                log(`Starting recording: ${sessionName}`);
+                setUIState('recording');
+                try {
+                    const result = await ipcRenderer.invoke('start-recording-ui', sessionName);
+                    if (result.success) {
+                        log(`Recording started: ${result.message}`);
+                        startStatusMonitoring();
+                    } else {
+                        log(`Failed to start: ${result.error}`);
+                        setUIState('ready');
+                    }
+                } catch (error) {
+                    log(`Start error: ${error.message}`);
+                    setUIState('ready');
+                }
             }
         });
         
         stopBtn.addEventListener('click', async () => {
-            log('⏹️ Stopping recording...');
+            log('Stopping recording...');
             setUIState('processing');
             stopStatusMonitoring();
-            
+
             // Add current session to processing list immediately
             const currentSessionName = sessionNameInput.value.trim() || 'Meeting';
             processingMeetings.add(currentSessionName);
-            
+
             // Add a temporary meeting entry to show processing
             const tempMeeting = {
                 session_info: {
@@ -4908,64 +5073,102 @@ Session started - waiting for activity...
                 action_items: [],
                 transcript: ''
             };
-            
+
             // Add to beginning of meetings array temporarily
             meetings.unshift(tempMeeting);
             filterMeetings(); // Update UI to show processing state
-            
-            try {
-                const result = await ipcRenderer.invoke('stop-recording-ui');
-                if (result.success) {
-                    log(`Recording stopped: ${result.message}`);
-                    log('🔄 Processing audio - transcription and summarization running in background');
-                    log('💡 Meeting list will refresh automatically when processing completes');
-                    
-                    // Return to ready state quickly so user can start another recording if needed
+
+            if (_systemAudioRecording) {
+                // System audio mode: stop recorder, save file, hand off to Python pipeline
+                try {
+                    const filePath = await stopSystemAudioRecording(currentSessionName);
+                    if (filePath) {
+                        log(`System audio saved, starting processing: ${filePath}`);
+                        const result = await ipcRenderer.invoke('process-system-audio-recording', filePath, currentSessionName);
+                        if (result.success) {
+                            log('Processing started in background');
+                        } else {
+                            log(`Processing failed: ${result.error}`);
+                        }
+                    } else {
+                        log('No audio file produced');
+                        processingMeetings.delete(currentSessionName);
+                    }
                     setTimeout(() => {
                         setUIState('ready');
                         sessionNameInput.value = '';
-                    }, 5000); // 5 seconds
-                    
-                } else {
-                    log(`Failed to stop: ${result.error}`);
+                    }, 3000);
+                } catch (error) {
+                    log(`System audio stop error: ${error.message}`);
                     setUIState('ready');
                     processingMeetings.delete(currentSessionName);
                     renderMeetingsList();
                 }
-            } catch (error) {
-                log(`🚫 Stop error: ${error.message}`);
-                setUIState('ready');
-                processingMeetings.delete(currentSessionName);
-                renderMeetingsList();
+            } else {
+                // Standard mic-only mode
+                try {
+                    const result = await ipcRenderer.invoke('stop-recording-ui');
+                    if (result.success) {
+                        log(`Recording stopped: ${result.message}`);
+                        log('Processing audio - transcription and summarization running in background');
+
+                        // Return to ready state quickly so user can start another recording if needed
+                        setTimeout(() => {
+                            setUIState('ready');
+                            sessionNameInput.value = '';
+                        }, 5000);
+
+                    } else {
+                        log(`Failed to stop: ${result.error}`);
+                        setUIState('ready');
+                        processingMeetings.delete(currentSessionName);
+                        renderMeetingsList();
+                    }
+                } catch (error) {
+                    log(`Stop error: ${error.message}`);
+                    setUIState('ready');
+                    processingMeetings.delete(currentSessionName);
+                    renderMeetingsList();
+                }
             }
         });
 
         pauseBtn.addEventListener('click', async () => {
             if (uiState === 'recording') {
                 // Pause recording
-                log('⏸️ Pausing recording...');
-                try {
-                    const result = await ipcRenderer.invoke('pause-recording-ui');
-                    if (result.success) {
-                        setUIState('paused');
-                    } else {
-                        log(`Failed to pause: ${result.error}`);
+                log('Pausing recording...');
+                if (_systemAudioRecording) {
+                    pauseSystemAudioRecording();
+                    setUIState('paused');
+                } else {
+                    try {
+                        const result = await ipcRenderer.invoke('pause-recording-ui');
+                        if (result.success) {
+                            setUIState('paused');
+                        } else {
+                            log(`Failed to pause: ${result.error}`);
+                        }
+                    } catch (error) {
+                        log(`Pause error: ${error.message}`);
                     }
-                } catch (error) {
-                    log(`🚫 Pause error: ${error.message}`);
                 }
             } else if (uiState === 'paused') {
                 // Resume recording
-                log('▶️ Resuming recording...');
-                try {
-                    const result = await ipcRenderer.invoke('resume-recording-ui');
-                    if (result.success) {
-                        setUIState('recording');
-                    } else {
-                        log(`Failed to resume: ${result.error}`);
+                log('Resuming recording...');
+                if (_systemAudioMediaRecorder && _systemAudioMediaRecorder.state === 'paused') {
+                    resumeSystemAudioRecording();
+                    setUIState('recording');
+                } else {
+                    try {
+                        const result = await ipcRenderer.invoke('resume-recording-ui');
+                        if (result.success) {
+                            setUIState('recording');
+                        } else {
+                            log(`Failed to resume: ${result.error}`);
+                        }
+                    } catch (error) {
+                        log(`Resume error: ${error.message}`);
                     }
-                } catch (error) {
-                    log(`🚫 Resume error: ${error.message}`);
                 }
             }
         });
@@ -5002,7 +5205,7 @@ Session started - waiting for activity...
             const files = e.dataTransfer.files;
             if (files.length > 0) {
                 const file = files[0];
-                if (file.type.startsWith('audio/') || file.name.match(/\.(wav|mp3|m4a|aac)$/i)) {
+                if (file.type.startsWith('audio/') || file.name.match(/\.(wav|mp3|m4a|aac|webm)$/i)) {
                     log(`Processing dropped file: ${file.name}`);
                     setStatus('processing', 'Processing file...');
                     
@@ -5420,6 +5623,9 @@ Session started - waiting for activity...
                     ),
                     loadNotificationSettings().catch(err =>
                         log(`Notification settings load failed: ${err.message}`)
+                    ),
+                    loadSystemAudioSettings().catch(err =>
+                        log(`System audio settings load failed: ${err.message}`)
                     ),
                     loadTelemetrySettings().catch(err =>
                         log(`Telemetry settings load failed: ${err.message}`)
@@ -6683,6 +6889,38 @@ Session started - waiting for activity...
             }
         }
 
+        async function loadSystemAudioSettings() {
+            const toggle = document.getElementById('system-audio-toggle');
+            const row = toggle?.closest('.settings-row');
+
+            // Requires macOS 12.3+ (ScreenCaptureKit)
+            const os = require('os');
+            const [major, minor] = os.release().split('.').map(Number);
+            // Darwin 21.4 = macOS 12.3
+            if (major < 21 || (major === 21 && minor < 4)) {
+                if (row) {
+                    toggle.disabled = true;
+                    const small = row.querySelector('small');
+                    if (small) small.textContent = 'Not available (requires macOS 12.3 or later)';
+                }
+                return;
+            }
+
+            try {
+                const result = await ipcRenderer.invoke('get-system-audio');
+
+                if (result.success) {
+                    toggle.checked = result.system_audio_enabled;
+                } else {
+                    console.error('Failed to load system audio setting:', result.error);
+                    toggle.checked = false;
+                }
+            } catch (error) {
+                console.error('Error loading system audio setting:', error);
+                toggle.checked = false;
+            }
+        }
+
         async function loadTelemetrySettings() {
             try {
                 const result = await ipcRenderer.invoke('get-telemetry');
@@ -6760,6 +6998,31 @@ Session started - waiting for activity...
                         }
                     } catch (error) {
                         console.error('Error saving notification setting:', error);
+                        showModelNotification('Failed to save setting', 'error');
+                        e.target.checked = !e.target.checked;
+                    }
+                });
+            }
+
+            const systemAudioToggle = document.getElementById('system-audio-toggle');
+            if (systemAudioToggle) {
+                systemAudioToggle.addEventListener('change', async (e) => {
+                    try {
+                        const enabled = e.target.checked;
+                        const result = await ipcRenderer.invoke('set-system-audio', enabled);
+
+                        if (result.success) {
+                            showModelNotification(
+                                `System audio capture ${enabled ? 'enabled' : 'disabled'}`,
+                                'success'
+                            );
+                        } else {
+                            console.error('Failed to save system audio setting:', result.error);
+                            showModelNotification('Failed to save setting', 'error');
+                            e.target.checked = !enabled;
+                        }
+                    } catch (error) {
+                        console.error('Error saving system audio setting:', error);
                         showModelNotification('Failed to save setting', 'error');
                         e.target.checked = !e.target.checked;
                     }

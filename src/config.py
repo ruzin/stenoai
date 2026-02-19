@@ -109,6 +109,7 @@ class Config:
             "model": self.DEFAULT_MODEL,
             "notifications_enabled": True,
             "telemetry_enabled": True,
+            "system_audio_enabled": False,
             "anonymous_id": str(uuid.uuid4()),
             "storage_path": "",
             "version": "1.0"
@@ -211,6 +212,23 @@ class Config:
             True if saved successfully, False otherwise
         """
         self._config["telemetry_enabled"] = enabled
+        return self._save()
+
+    def get_system_audio_enabled(self) -> bool:
+        """Get whether system audio capture is enabled."""
+        return self._config.get("system_audio_enabled", False)
+
+    def set_system_audio_enabled(self, enabled: bool) -> bool:
+        """
+        Set whether system audio capture is enabled.
+
+        Args:
+            enabled: True to enable system audio capture, False to disable
+
+        Returns:
+            True if saved successfully, False otherwise
+        """
+        self._config["system_audio_enabled"] = enabled
         return self._save()
 
     def get_anonymous_id(self) -> str:

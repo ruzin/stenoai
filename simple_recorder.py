@@ -298,21 +298,44 @@ Transcript:
                     duration_display = f"{duration_minutes}m"
                 print(f"📏 Audio duration: {duration_seconds:.1f} seconds ({duration_display})")
         except Exception as e:
-            print(f"⚠️ Could not determine audio duration: {e}")
-            # Try to get duration from state file timestamps
+            print(f"⚠️ Could not determine audio duration via wave: {e}")
+            # Try ffprobe for non-WAV files (WebM, etc.)
             try:
-                state = self.get_state()
-                start_time = state.get("start_time")
-                stop_time = state.get("stop_time")
-                if start_time and stop_time:
-                    from dateutil.parser import parse
-                    start_dt = parse(start_time)
-                    stop_dt = parse(stop_time)
-                    duration_seconds = (stop_dt - start_dt).total_seconds()
-                    duration_minutes = max(1, int(duration_seconds / 60))
-                    print(f"📏 Duration from timestamps: {duration_seconds:.1f} seconds ({duration_minutes} minutes)")
-            except Exception:
-                pass
+                import subprocess
+                import shutil
+                ffprobe_path = shutil.which("ffprobe")
+                if ffprobe_path:
+                    probe_result = subprocess.run(
+                        [ffprobe_path, "-v", "quiet", "-show_entries",
+                         "format=duration", "-of", "csv=p=0", str(audio_path)],
+                        capture_output=True, text=True, timeout=10
+                    )
+                    if probe_result.returncode == 0 and probe_result.stdout.strip():
+                        duration_seconds = float(probe_result.stdout.strip())
+                        if duration_seconds < 60:
+                            duration_display = f"{int(duration_seconds)}s"
+                            duration_minutes = 0
+                        else:
+                            duration_minutes = int(duration_seconds / 60)
+                            duration_display = f"{duration_minutes}m"
+                        print(f"📏 Audio duration (ffprobe): {duration_seconds:.1f} seconds ({duration_display})")
+            except Exception as e2:
+                print(f"⚠️ ffprobe fallback failed: {e2}")
+            # Last resort: try to get duration from state file timestamps
+            if 'duration_seconds' not in locals():
+                try:
+                    state = self.get_state()
+                    start_time = state.get("start_time")
+                    stop_time = state.get("stop_time")
+                    if start_time and stop_time:
+                        from dateutil.parser import parse
+                        start_dt = parse(start_time)
+                        stop_dt = parse(stop_time)
+                        duration_seconds = (stop_dt - start_dt).total_seconds()
+                        duration_minutes = max(1, int(duration_seconds / 60))
+                        print(f"📏 Duration from timestamps: {duration_seconds:.1f} seconds ({duration_minutes} minutes)")
+                except Exception:
+                    pass
         
         # Step 1: Transcribe
         transcript_data = await self.transcribe_audio(audio_file, session_name)
@@ -1341,6 +1364,34 @@ def set_telemetry(enabled):
         print(json.dumps({"success": True, "telemetry_enabled": enabled}))
     else:
         print(f"ERROR: Failed to save telemetry preference")
+        print(json.dumps({"success": False, "error": "Failed to save config"}))
+
+
+@cli.command()
+def get_system_audio():
+    """Get the current system audio capture preference"""
+    from src.config import get_config
+
+    config = get_config()
+    enabled = config.get_system_audio_enabled()
+
+    print(json.dumps({"system_audio_enabled": enabled}))
+
+
+@cli.command()
+@click.argument('enabled', callback=lambda ctx, param, v: v.lower() == 'true')
+def set_system_audio(enabled):
+    """Set system audio capture preference (True/False)"""
+    from src.config import get_config
+
+    config = get_config()
+    success = config.set_system_audio_enabled(enabled)
+
+    if success:
+        print(f"SUCCESS: System audio capture {'enabled' if enabled else 'disabled'}")
+        print(json.dumps({"success": True, "system_audio_enabled": enabled}))
+    else:
+        print(f"ERROR: Failed to save system audio preference")
         print(json.dumps({"success": False, "error": "Failed to save config"}))
 
 
