@@ -1590,9 +1590,9 @@
             background: var(--bg-surface);
             color: var(--text-primary);
             border: 1px solid var(--border-default);
-            padding: 8px 16px;
-            border-radius: 8px;
-            font-size: 13px;
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 12px;
             font-weight: 500;
             cursor: pointer;
             transition: all 0.2s ease;
@@ -1602,7 +1602,7 @@
 
         .calendar-record-btn:hover {
             background: var(--bg-elevated);
-            border-color: var(--border-default);
+            border-color: var(--text-muted);
             transform: translateY(-1px);
         }
 
@@ -1708,7 +1708,7 @@
             color: var(--text-primary);
             border: 1px solid var(--border-default);
             border-radius: 4px;
-            padding: 6px;
+            padding: 5px;
             cursor: pointer;
             transition: all 0.2s;
             opacity: 0.7;
@@ -2551,6 +2551,45 @@
 
         .debug-console.show {
             display: block;
+        }
+
+        .debug-console-wrapper {
+            position: relative;
+        }
+
+        .copy-log-btn {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            background: var(--bg-surface);
+            color: var(--text-primary);
+            border: 1px solid var(--border-default);
+            border-radius: 4px;
+            padding: 5px;
+            cursor: pointer;
+            transition: all 0.2s;
+            opacity: 0;
+            z-index: 10;
+        }
+
+        .debug-console-wrapper:hover .copy-log-btn {
+            opacity: 0.7;
+        }
+
+        .copy-log-btn:hover {
+            background: var(--bg-elevated);
+            opacity: 1 !important;
+            transform: translateY(-1px);
+        }
+
+        .copy-log-btn:active {
+            transform: translateY(0);
+        }
+
+        .copy-log-btn.copied {
+            background: var(--success-green);
+            border-color: var(--success-green);
+            opacity: 1 !important;
         }
 
         /* Setup Actions */
@@ -3502,10 +3541,18 @@ Ask Steno
                         <polyline points="6 9 12 15 18 9"></polyline>
                     </svg>
                 </div>
-                <div class="debug-console" id="debug-console">StenoAI Setup
+                <div class="debug-console-wrapper">
+                    <div class="debug-console" id="debug-console">StenoAI Setup
 Commands and output will appear here...
 
 </div>
+                    <button class="copy-log-btn" id="copy-setup-log-btn" title="Copy log to clipboard" aria-label="Copy log to clipboard">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                        </svg>
+                    </button>
+                </div>
             </div>
 
             <!-- Actions -->
@@ -3689,10 +3736,18 @@ Commands and output will appear here...
                     </div>
                     <div class="settings-section" style="margin-bottom: 0;">
                         <p>Real-time log output from the backend processes.</p>
-                        <div class="debug-console show" id="debug-console-panel">StenoAI Debug Console
+                        <div class="debug-console-wrapper" style="flex: 1; display: flex; flex-direction: column; min-height: 0;">
+                            <div class="debug-console show" id="debug-console-panel">StenoAI Debug Console
 Session started - waiting for activity...
 
 </div>
+                            <button class="copy-log-btn" id="copy-debug-log-btn" title="Copy log to clipboard" aria-label="Copy log to clipboard">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                                </svg>
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -4332,7 +4387,8 @@ Session started - waiting for activity...
             if (selectedCalendarEvent !== null) {
                 if (calendarDetailJustOpened) { calendarDetailJustOpened = false; return; }
                 const detail = document.getElementById('calendar-event-detail');
-                if (!detail.contains(e.target)) {
+                const sidebarToggleEl = document.getElementById('sidebar-toggle');
+                if (!detail.contains(e.target) && !sidebarToggleEl.contains(e.target)) {
                     hideCalendarEventDetail();
                 }
             }
@@ -5741,6 +5797,31 @@ Session started - waiting for activity...
                 log(`❌ Failed to copy notes: ${error.message}`);
             }
         });
+
+        // Copy log helper (shared by setup and debug consoles)
+        function setupCopyLogBtn(btnId, consoleId) {
+            const btn = document.getElementById(btnId);
+            if (!btn) return;
+            const copyIcon = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>`;
+            const checkIcon = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20,6 9,17 4,12"></polyline></svg>`;
+            btn.addEventListener('click', async () => {
+                const logEl = document.getElementById(consoleId);
+                if (!logEl) return;
+                try {
+                    await navigator.clipboard.writeText(logEl.textContent);
+                    btn.classList.add('copied');
+                    btn.innerHTML = checkIcon;
+                    setTimeout(() => {
+                        btn.classList.remove('copied');
+                        btn.innerHTML = copyIcon;
+                    }, 2000);
+                } catch (e) {
+                    log(`Failed to copy log: ${e.message}`);
+                }
+            });
+        }
+        setupCopyLogBtn('copy-setup-log-btn', 'debug-console');
+        setupCopyLogBtn('copy-debug-log-btn', 'debug-console-panel');
 
         // Edit meeting title - define as a reusable function
         function startEditingTitle() {
