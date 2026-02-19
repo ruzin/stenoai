@@ -327,7 +327,7 @@ app.on('before-quit', async (event) => {
       defaultId: 0,
       cancelId: 0,
       title: 'Recording in Progress',
-      message: 'A recording is still in progress. Quitting will stop the recording and process it in the background.',
+      message: 'A recording is still in progress. Quitting will stop and save the recording.',
     });
     if (response === 1) {
       // Stop recording gracefully then quit
