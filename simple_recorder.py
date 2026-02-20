@@ -162,18 +162,22 @@ class SimpleRecorder:
     async def transcribe_audio(self, audio_file: str, session_name: str = "Recording") -> dict:
         """Transcribe audio file."""
         audio_path = Path(audio_file)
-        
+
         if not audio_path.exists():
             raise FileNotFoundError(f"Audio file not found: {audio_file}")
-        
+
         print(f"📝 Transcribing: {audio_path.name}")
-        
+
         # Initialize transcriber only when needed
         if self.transcriber is None:
             self.transcriber = WhisperTranscriber()
-        
+
+        # Get configured language
+        from src.config import get_config
+        language = get_config().get_language()
+
         # Transcribe (pass Path object, not string)
-        transcript_result = self.transcriber.transcribe_audio(audio_path)
+        transcript_result = self.transcriber.transcribe_audio(audio_path, language=language)
         
         # Handle different return types
         if hasattr(transcript_result, 'text'):
@@ -231,8 +235,12 @@ Transcript:
 {transcript_text}
 """
         
+        # Get configured language
+        from src.config import get_config
+        language = get_config().get_language()
+
         # Generate summary (using correct method name and parameters)
-        summary_result = self.summarizer.summarize_transcript(transcript_text, duration_minutes)
+        summary_result = self.summarizer.summarize_transcript(transcript_text, duration_minutes, language=language)
         
         if summary_result is None:
             return {
@@ -1029,8 +1037,10 @@ def query(transcript_file, question):
 
     # Always use llama3.2:3b for queries (fastest response times)
     try:
+        from src.config import get_config
+        language = get_config().get_language()
         summarizer = OllamaSummarizer(model_name="llama3.2:3b")
-        answer = summarizer.query_transcript(transcript_text, question)
+        answer = summarizer.query_transcript(transcript_text, question, language=language)
 
         if answer:
             print(json.dumps({"success": True, "answer": answer}))
@@ -1418,6 +1428,45 @@ def set_system_audio(enabled):
     else:
         print(f"ERROR: Failed to save system audio preference")
         print(json.dumps({"success": False, "error": "Failed to save config"}))
+
+
+@cli.command()
+def get_language():
+    """Get the current language setting"""
+    from src.config import get_config
+
+    config = get_config()
+    language = config.get_language()
+    language_name = config.get_language_name(language)
+
+    print(json.dumps({"language": language, "language_name": language_name}))
+
+
+@cli.command()
+@click.argument('language_code')
+def set_language(language_code):
+    """Set the language for transcription and summarization"""
+    from src.config import get_config
+
+    config = get_config()
+
+    if language_code not in config.SUPPORTED_LANGUAGES:
+        print(json.dumps({
+            "success": False,
+            "error": f"Unsupported language: {language_code}. Supported: {', '.join(config.SUPPORTED_LANGUAGES.keys())}"
+        }))
+        return
+
+    success = config.set_language(language_code)
+
+    if success:
+        print(json.dumps({
+            "success": True,
+            "language": language_code,
+            "language_name": config.get_language_name(language_code)
+        }))
+    else:
+        print(json.dumps({"success": False, "error": "Failed to save language setting"}))
 
 
 @cli.command()

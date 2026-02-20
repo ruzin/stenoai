@@ -164,12 +164,13 @@ class WhisperTranscriber:
         self.backend = "openai-whisper"
         logger.info("openai-whisper model loaded successfully")
 
-    def transcribe_audio(self, audio_filepath: Path) -> Optional[str]:
+    def transcribe_audio(self, audio_filepath: Path, language: str = "en") -> Optional[str]:
         """
         Transcribe audio file to text.
 
         Args:
             audio_filepath: Path to the audio file
+            language: Language code (e.g., "en", "de", "auto")
 
         Returns:
             Transcribed text or None if transcription failed
@@ -195,9 +196,9 @@ class WhisperTranscriber:
 
             # Use appropriate backend
             if self.backend == "whisper.cpp":
-                transcript = self._transcribe_whisper_cpp(audio_filepath)
+                transcript = self._transcribe_whisper_cpp(audio_filepath, language)
             else:
-                transcript = self._transcribe_openai_whisper(audio_filepath)
+                transcript = self._transcribe_openai_whisper(audio_filepath, language)
 
             logger.info(f"Transcription completed. Length: {len(transcript) if transcript else 0} characters")
 
@@ -247,7 +248,7 @@ class WhisperTranscriber:
             logger.error(f"Audio conversion error: {e}")
             return audio_filepath
 
-    def _transcribe_whisper_cpp(self, audio_filepath: Path) -> Optional[str]:
+    def _transcribe_whisper_cpp(self, audio_filepath: Path, language: str = "en") -> Optional[str]:
         """Transcribe using whisper.cpp backend."""
         # whisper.cpp requires 16kHz audio - convert if needed
         converted_path = self._convert_to_16khz(audio_filepath)
@@ -255,11 +256,10 @@ class WhisperTranscriber:
 
         try:
             # pywhispercpp returns a list of segments
-            # Set language='en' for English transcription
-            segments = self.model.transcribe(
-                str(converted_path),
-                language='en'
-            )
+            transcribe_kwargs = {"media": str(converted_path)}
+            if language:
+                transcribe_kwargs["language"] = language
+            segments = self.model.transcribe(**transcribe_kwargs)
 
             if not segments:
                 return None
@@ -276,13 +276,16 @@ class WhisperTranscriber:
                 except Exception:
                     pass
 
-    def _transcribe_openai_whisper(self, audio_filepath: Path) -> Optional[str]:
+    def _transcribe_openai_whisper(self, audio_filepath: Path, language: str = "en") -> Optional[str]:
         """Transcribe using openai-whisper backend."""
-        result = self.model.transcribe(
-            str(audio_filepath),
-            verbose=False,
-            fp16=False  # Disable FP16 to avoid warnings on CPU
-        )
+        transcribe_kwargs = {
+            "audio": str(audio_filepath),
+            "verbose": False,
+            "fp16": False,  # Disable FP16 to avoid warnings on CPU
+        }
+        if language:
+            transcribe_kwargs["language"] = language
+        result = self.model.transcribe(**transcribe_kwargs)
 
         if not result or "text" not in result:
             return None

@@ -54,6 +54,20 @@ class Config:
         }
     }
 
+    # Supported languages for transcription and summarization
+    SUPPORTED_LANGUAGES = {
+        "en": "English",
+        "es": "Spanish",
+        "fr": "French",
+        "de": "German",
+        "pt": "Portuguese",
+        "ja": "Japanese",
+        "zh": "Chinese",
+        "ko": "Korean",
+        "hi": "Hindi",
+        "ar": "Arabic",
+    }
+
     def __init__(self, config_path: Optional[Path] = None):
         """
         Initialize configuration manager.
@@ -110,6 +124,7 @@ class Config:
             "notifications_enabled": True,
             "telemetry_enabled": True,
             "system_audio_enabled": False,
+            "language": "en",
             "anonymous_id": str(uuid.uuid4()),
             "storage_path": "",
             "version": "1.0"
@@ -230,6 +245,33 @@ class Config:
         """
         self._config["system_audio_enabled"] = enabled
         return self._save()
+
+    def get_language(self) -> str:
+        """Get the configured language code for transcription and summarization."""
+        return self._config.get("language", "en")
+
+    def set_language(self, language_code: str) -> bool:
+        """
+        Set the language for transcription and summarization.
+
+        Args:
+            language_code: Language code (e.g., "en", "de", "auto")
+
+        Returns:
+            True if saved successfully, False otherwise
+        """
+        if language_code not in self.SUPPORTED_LANGUAGES:
+            logger.error(f"Unsupported language code: {language_code}")
+            return False
+
+        self._config["language"] = language_code
+        return self._save()
+
+    def get_language_name(self, language_code: Optional[str] = None) -> str:
+        """Get the display name for a language code."""
+        if language_code is None:
+            language_code = self.get_language()
+        return self.SUPPORTED_LANGUAGES.get(language_code, "Unknown")
 
     def get_anonymous_id(self) -> str:
         """Get the anonymous telemetry ID, generating one if missing."""

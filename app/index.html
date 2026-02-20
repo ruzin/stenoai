@@ -3606,6 +3606,20 @@ Commands and output will appear here...
                     </svg>
                     AI
                 </button>
+                <button class="settings-nav-item" data-tab="advanced">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <line x1="4" y1="21" x2="4" y2="14"></line>
+                        <line x1="4" y1="10" x2="4" y2="3"></line>
+                        <line x1="12" y1="21" x2="12" y2="12"></line>
+                        <line x1="12" y1="8" x2="12" y2="3"></line>
+                        <line x1="20" y1="21" x2="20" y2="16"></line>
+                        <line x1="20" y1="12" x2="20" y2="3"></line>
+                        <line x1="1" y1="14" x2="7" y2="14"></line>
+                        <line x1="9" y1="8" x2="15" y2="8"></line>
+                        <line x1="17" y1="16" x2="23" y2="16"></line>
+                    </svg>
+                    Advanced
+                </button>
                 <button class="settings-nav-item" data-tab="developer" id="developer-nav-item" style="display: none;">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <polyline points="16 18 22 12 16 6"></polyline>
@@ -3629,6 +3643,25 @@ Commands and output will appear here...
                         </select>
                     </div>
 
+                    <div class="settings-row">
+                        <div class="settings-row-text">
+                            <span>Language</span>
+                            <small>Language for transcription and summaries</small>
+                        </div>
+                        <select class="theme-select" id="language-select">
+                            <option value="en" selected>English</option>
+                            <option value="es">Spanish</option>
+                            <option value="fr">French</option>
+                            <option value="de">German</option>
+                            <option value="pt">Portuguese</option>
+                            <option value="ja">Japanese</option>
+                            <option value="zh">Chinese</option>
+                            <option value="ko">Korean</option>
+                            <option value="hi">Hindi</option>
+                            <option value="ar">Arabic</option>
+                        </select>
+                    </div>
+
                     <div class="settings-row" id="calendar-settings-row" style="flex-wrap: wrap;">
                         <div class="settings-row-text" style="flex: 1; min-width: 0;">
                             <span>Calendar</span>
@@ -3639,17 +3672,6 @@ Commands and output will appear here...
                             <button class="settings-action-btn" onclick="connectCalendar('outlook')">Outlook</button>
                         </div>
                         <button class="settings-action-btn" id="calendar-disconnect-btn" style="display: none;" onclick="disconnectCalendar()">Disconnect</button>
-                    </div>
-
-                    <div class="settings-row" style="flex-wrap: wrap;">
-                        <div class="settings-row-text" style="flex: 1; min-width: 0;">
-                            <span>Storage location</span>
-                        </div>
-                        <div style="display: flex; align-items: center; gap: 4px; flex-shrink: 0;">
-                            <button class="settings-action-btn" id="choose-storage-btn" onclick="chooseStorageLocation()" style="margin-left: 0;">Choose...</button>
-                            <button class="settings-action-btn" id="reset-storage-btn" onclick="resetStorageLocation()" style="display: none; margin-left: 0;">Reset</button>
-                        </div>
-                        <small id="storage-path-display" style="color: var(--text-muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; width: 100%; margin-top: 2px;">Default location</small>
                     </div>
 
                     <div class="settings-row">
@@ -3680,22 +3702,6 @@ Commands and output will appear here...
                             <small>Updates and announcements</small>
                         </div>
                         <button class="settings-action-btn" id="test-update-btn" onclick="testUpdateCheck()">Check</button>
-                    </div>
-
-                    <div class="settings-row">
-                        <div class="settings-row-text">
-                            <span>Setup wizard</span>
-                            <small>Reinstall dependencies or fix configuration</small>
-                        </div>
-                        <button class="settings-action-btn" id="run-setup-btn" onclick="runSetupFromSettings()">Run</button>
-                    </div>
-
-                    <div class="settings-row">
-                        <div class="settings-row-text">
-                            <span>Clear recording state</span>
-                            <small>Fix stuck recordings or processing</small>
-                        </div>
-                        <button class="settings-action-btn" id="clear-state-btn" onclick="clearSystemState()">Clear</button>
                     </div>
 
                     <div class="settings-row">
@@ -3737,6 +3743,36 @@ Commands and output will appear here...
                         </div>
                     </div>
 
+                </div>
+
+                <!-- Advanced Tab -->
+                <div class="settings-tab" id="tab-advanced">
+                    <div class="settings-row" style="flex-wrap: wrap;">
+                        <div class="settings-row-text" style="flex: 1; min-width: 0;">
+                            <span>Storage location</span>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 4px; flex-shrink: 0;">
+                            <button class="settings-action-btn" id="choose-storage-btn" onclick="chooseStorageLocation()" style="margin-left: 0;">Choose...</button>
+                            <button class="settings-action-btn" id="reset-storage-btn" onclick="resetStorageLocation()" style="display: none; margin-left: 0;">Reset</button>
+                        </div>
+                        <small id="storage-path-display" style="color: var(--text-muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; width: 100%; margin-top: 2px;">Default location</small>
+                    </div>
+
+                    <div class="settings-row">
+                        <div class="settings-row-text">
+                            <span>Setup wizard</span>
+                            <small>Reinstall dependencies or fix configuration</small>
+                        </div>
+                        <button class="settings-action-btn" id="run-setup-btn" onclick="runSetupFromSettings()">Run</button>
+                    </div>
+
+                    <div class="settings-row">
+                        <div class="settings-row-text">
+                            <span>Clear recording state</span>
+                            <small>Fix stuck recordings or processing</small>
+                        </div>
+                        <button class="settings-action-btn" id="clear-state-btn" onclick="clearSystemState()">Clear</button>
+                    </div>
                 </div>
 
                 <!-- Developer Tab -->
@@ -5632,6 +5668,9 @@ Session started - waiting for activity...
                     loadSystemAudioSettings().catch(err =>
                         log(`System audio settings load failed: ${err.message}`)
                     ),
+                    loadLanguageSettings().catch(err =>
+                        log(`Language settings load failed: ${err.message}`)
+                    ),
                     loadTelemetrySettings().catch(err =>
                         log(`Telemetry settings load failed: ${err.message}`)
                     ),
@@ -6926,6 +6965,21 @@ Session started - waiting for activity...
             }
         }
 
+        async function loadLanguageSettings() {
+            try {
+                const result = await ipcRenderer.invoke('get-language');
+                const select = document.getElementById('language-select');
+
+                if (result.success && select) {
+                    select.value = result.language;
+                } else if (!result.success) {
+                    console.error('Failed to load language setting:', result.error);
+                }
+            } catch (error) {
+                console.error('Error loading language setting:', error);
+            }
+        }
+
         async function loadTelemetrySettings() {
             try {
                 const result = await ipcRenderer.invoke('get-telemetry');
@@ -7030,6 +7084,33 @@ Session started - waiting for activity...
                         console.error('Error saving system audio setting:', error);
                         showModelNotification('Failed to save setting', 'error');
                         e.target.checked = !e.target.checked;
+                    }
+                });
+            }
+
+            const languageSelect = document.getElementById('language-select');
+            if (languageSelect) {
+                languageSelect.addEventListener('change', async (e) => {
+                    const previousValue = languageSelect.dataset.previousValue || 'en';
+                    const newValue = e.target.value;
+                    try {
+                        const result = await ipcRenderer.invoke('set-language', newValue);
+
+                        if (result.success) {
+                            languageSelect.dataset.previousValue = newValue;
+                            showModelNotification(
+                                `Language set to ${result.language_name || newValue}`,
+                                'success'
+                            );
+                        } else {
+                            console.error('Failed to save language setting:', result.error);
+                            showModelNotification('Failed to save language setting', 'error');
+                            e.target.value = previousValue;
+                        }
+                    } catch (error) {
+                        console.error('Error saving language setting:', error);
+                        showModelNotification('Failed to save language setting', 'error');
+                        e.target.value = previousValue;
                     }
                 });
             }

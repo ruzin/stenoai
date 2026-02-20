@@ -2165,6 +2165,33 @@ ipcMain.handle('set-system-audio', async (event, enabled) => {
   }
 });
 
+// Language IPC handlers
+ipcMain.handle('get-language', async () => {
+  try {
+    const result = await runPythonScript('simple_recorder.py', ['get-language'], true);
+    const jsonData = JSON.parse(result);
+    return { success: true, ...jsonData };
+  } catch (error) {
+    sendDebugLog(`Error getting language setting: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('set-language', async (event, languageCode) => {
+  try {
+    sendDebugLog(`Setting language to: ${languageCode}`);
+    const result = await runPythonScript('simple_recorder.py', ['set-language', languageCode]);
+    const jsonMatch = result.match(/\{.*\}/s);
+    if (jsonMatch) {
+      return JSON.parse(jsonMatch[0]);
+    }
+    return { success: true, language: languageCode };
+  } catch (error) {
+    sendDebugLog(`Error setting language: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+});
+
 ipcMain.handle('get-recordings-dir', async () => {
   try {
     // Get recordings directory from Python config

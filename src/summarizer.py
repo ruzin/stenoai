@@ -244,11 +244,19 @@ class OllamaSummarizer:
         logger.info(f"Ollama ready with model {self.model_name}")
         return True
         
-    def _create_permissive_prompt(self, transcript: str) -> str:
+    def _create_permissive_prompt(self, transcript: str, language: str = "en") -> str:
         """
         Create an enhanced prompt with discussion_areas and improved extraction.
         Uses more examples in schema to permit more detailed summaries.
         """
+        # Build language instruction
+        if language and language != "en":
+            from .config import get_config
+            language_name = get_config().get_language_name(language)
+            language_instruction = f"\n\nCRITICAL: Respond in {language_name}. All text values in the JSON below MUST be written in {language_name}."
+        else:
+            language_instruction = ""
+
         return f"""You are a helpful meeting assistant. Summarise this meeting transcript into participants, discussion areas, key points and any next steps mentioned. Only base your summary on what was explicitly discussed in the transcript.
 
 IMPORTANT: Do not infer or assume information that wasn't directly mentioned.
@@ -283,7 +291,7 @@ INCORRECT FORMAT (DO NOT DO THIS):
 
 TRANSCRIPT:
 {transcript}
-
+{language_instruction}
 Return ONLY the response in this exact JSON format:
 {{
   "overview": "Brief overview of what happened in the meeting",
@@ -333,14 +341,15 @@ Return ONLY the response in this exact JSON format:
   ]
 }}"""
 
-    def summarize_transcript(self, transcript: str, duration_minutes: int) -> Optional[MeetingTranscript]:
+    def summarize_transcript(self, transcript: str, duration_minutes: int, language: str = "en") -> Optional[MeetingTranscript]:
         """
         Summarize a meeting transcript using Ollama.
-        
+
         Args:
             transcript: The meeting transcript text
             duration_minutes: Duration of the meeting in minutes
-            
+            language: Language code for the summary output
+
         Returns:
             MeetingTranscript object or None if summarization failed
         """
@@ -356,7 +365,7 @@ Return ONLY the response in this exact JSON format:
                     duration_minutes=duration_minutes
                 )
             
-            prompt = self._create_permissive_prompt(transcript)
+            prompt = self._create_permissive_prompt(transcript, language)
             logger.info(f"Sending transcript to Ollama model: {self.model_name}")
             logger.info(f"Transcript length: {len(transcript)} characters")
 
@@ -596,13 +605,14 @@ Return ONLY the response in this exact JSON format:
         """Cleanup when object is destroyed."""
         self.cleanup()
 
-    def query_transcript(self, transcript: str, question: str) -> Optional[str]:
+    def query_transcript(self, transcript: str, question: str, language: str = "en") -> Optional[str]:
         """
         Query a transcript with a question using Ollama.
 
         Args:
             transcript: The meeting transcript text
             question: The question to ask about the transcript
+            language: Language code for the response
 
         Returns:
             Answer string or None if query failed
@@ -614,9 +624,17 @@ Return ONLY the response in this exact JSON format:
             if not question or question.strip() == "":
                 return "Please provide a question."
 
+            # Build language instruction for query responses
+            if language and language != "en":
+                from .config import get_config
+                language_name = get_config().get_language_name(language)
+                query_lang_instruction = f"\nRespond in {language_name}."
+            else:
+                query_lang_instruction = ""
+
             prompt = f"""Answer the following question based ONLY on the meeting transcript below.
 If the information is not in the transcript, say "This isn't mentioned in the transcript."
-Be concise and direct.
+Be concise and direct.{query_lang_instruction}
 
 QUESTION: {question}
 
