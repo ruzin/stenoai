@@ -299,28 +299,53 @@ Transcript:
                 print(f"📏 Audio duration: {duration_seconds:.1f} seconds ({duration_display})")
         except Exception as e:
             print(f"⚠️ Could not determine audio duration via wave: {e}")
-            # Try ffprobe for non-WAV files (WebM, etc.)
+            # Try ffmpeg for non-WAV files (M4A, WebM, etc.)
+            # ffmpeg is bundled; ffprobe is not, so we parse ffmpeg -i stderr
             try:
                 import subprocess
+                import re
                 import shutil
-                ffprobe_path = shutil.which("ffprobe")
-                if ffprobe_path:
-                    probe_result = subprocess.run(
-                        [ffprobe_path, "-v", "quiet", "-show_entries",
-                         "format=duration", "-of", "csv=p=0", str(audio_path)],
-                        capture_output=True, text=True, timeout=10
-                    )
-                    if probe_result.returncode == 0 and probe_result.stdout.strip():
-                        duration_seconds = float(probe_result.stdout.strip())
-                        if duration_seconds < 60:
-                            duration_display = f"{int(duration_seconds)}s"
-                            duration_minutes = 0
-                        else:
-                            duration_minutes = int(duration_seconds / 60)
-                            duration_display = f"{duration_minutes}m"
-                        print(f"📏 Audio duration (ffprobe): {duration_seconds:.1f} seconds ({duration_display})")
+
+                # Find ffmpeg: bundled locations first, then PATH
+                ffmpeg_cmd = None
+                if getattr(sys, 'frozen', False):
+                    exe_dir = Path(sys.executable).parent
+                    for candidate in [
+                        exe_dir / 'ffmpeg',
+                        exe_dir / '_internal' / 'ffmpeg',
+                    ]:
+                        if candidate.exists():
+                            ffmpeg_cmd = str(candidate)
+                            break
+                    if ffmpeg_cmd is None and hasattr(sys, '_MEIPASS'):
+                        meipass = Path(sys._MEIPASS) / 'ffmpeg'
+                        if meipass.exists():
+                            ffmpeg_cmd = str(meipass)
+                if ffmpeg_cmd is None:
+                    ffmpeg_cmd = shutil.which("ffmpeg") or "ffmpeg"
+
+                # Just read metadata (no decoding) -- exits immediately with code 1
+                # but still prints "Duration: HH:MM:SS.xx" to stderr
+                probe_result = subprocess.run(
+                    [ffmpeg_cmd, "-i", str(audio_path)],
+                    capture_output=True, text=True, timeout=10
+                )
+                duration_match = re.search(
+                    r"Duration:\s*(\d+):(\d+):(\d+)\.(\d+)",
+                    probe_result.stderr
+                )
+                if duration_match:
+                    h, m, s, _ = duration_match.groups()
+                    duration_seconds = int(h) * 3600 + int(m) * 60 + int(s)
+                    if duration_seconds < 60:
+                        duration_display = f"{int(duration_seconds)}s"
+                        duration_minutes = 0
+                    else:
+                        duration_minutes = int(duration_seconds / 60)
+                        duration_display = f"{duration_minutes}m"
+                    print(f"📏 Audio duration (ffmpeg): {duration_seconds:.1f} seconds ({duration_display})")
             except Exception as e2:
-                print(f"⚠️ ffprobe fallback failed: {e2}")
+                print(f"⚠️ ffmpeg duration fallback failed: {e2}")
             # Last resort: try to get duration from state file timestamps
             if 'duration_seconds' not in locals():
                 try:
