@@ -6972,6 +6972,7 @@ Session started - waiting for activity...
 
                 if (result.success && select) {
                     select.value = result.language;
+                    select.dataset.previousValue = result.language;
                 } else if (!result.success) {
                     console.error('Failed to load language setting:', result.error);
                 }
