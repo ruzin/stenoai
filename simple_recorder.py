@@ -1035,11 +1035,13 @@ def query(transcript_file, question):
         print(json.dumps({"success": False, "error": "Transcript is empty"}))
         return
 
-    # Always use llama3.2:3b for queries (fastest response times)
+    # Use llama3.2:3b for local/remote queries (fastest), cloud uses its own model
     try:
         from src.config import get_config
-        language = get_config().get_language()
-        summarizer = OllamaSummarizer(model_name="llama3.2:3b")
+        config = get_config()
+        language = config.get_language()
+        query_model = None if config.get_ai_provider() == "cloud" else "llama3.2:3b"
+        summarizer = OllamaSummarizer(model_name=query_model)
         answer = summarizer.query_transcript(transcript_text, question, language=language)
 
         if answer:
@@ -1564,6 +1566,164 @@ def remove_meeting_from_folder(summary_file, folder_id):
     mgr = get_folders_manager()
     success = mgr.remove_meeting_from_folder(Path(summary_file), folder_id)
     print(json.dumps({"success": success}))
+
+
+@cli.command()
+def get_ai_provider():
+    """Get all AI provider configuration"""
+    from src.config import get_config
+    config = get_config()
+
+    result = {
+        "ai_provider": config.get_ai_provider(),
+        "remote_ollama_url": config.get_remote_ollama_url(),
+        "cloud_api_url": config.get_cloud_api_url(),
+        "cloud_api_key_set": bool(config.get_cloud_api_key()),
+        "cloud_provider": config.get_cloud_provider(),
+        "cloud_model": config.get_cloud_model(),
+    }
+    print(json.dumps(result))
+
+
+@cli.command()
+@click.argument('provider')
+def set_ai_provider(provider):
+    """Set the AI provider (local, remote, or cloud)"""
+    from src.config import get_config
+    config = get_config()
+
+    if provider not in config.VALID_AI_PROVIDERS:
+        print(json.dumps({
+            "success": False,
+            "error": f"Invalid provider: {provider}. Must be one of: {', '.join(config.VALID_AI_PROVIDERS)}"
+        }))
+        return
+
+    success = config.set_ai_provider(provider)
+    if success:
+        print(json.dumps({"success": True, "ai_provider": provider}))
+    else:
+        print(json.dumps({"success": False, "error": "Failed to save AI provider setting"}))
+
+
+@cli.command()
+@click.argument('url')
+def set_remote_ollama_url(url):
+    """Set the remote Ollama server URL"""
+    from src.config import get_config
+    config = get_config()
+    success = config.set_remote_ollama_url(url)
+    if success:
+        print(json.dumps({"success": True, "remote_ollama_url": url}))
+    else:
+        print(json.dumps({"success": False, "error": "Failed to save remote Ollama URL"}))
+
+
+@cli.command()
+@click.argument('url')
+def set_cloud_api_url(url):
+    """Set the cloud API URL"""
+    from src.config import get_config
+    config = get_config()
+    success = config.set_cloud_api_url(url)
+    if success:
+        print(json.dumps({"success": True, "cloud_api_url": url}))
+    else:
+        print(json.dumps({"success": False, "error": "Failed to save cloud API URL"}))
+
+
+@cli.command()
+@click.argument('key')
+def set_cloud_api_key(key):
+    """Set the cloud API key"""
+    from src.config import get_config
+    config = get_config()
+    success = config.set_cloud_api_key(key)
+    if success:
+        print(json.dumps({"success": True, "cloud_api_key_set": True}))
+    else:
+        print(json.dumps({"success": False, "error": "Failed to save cloud API key"}))
+
+
+@cli.command()
+@click.argument('provider')
+def set_cloud_provider(provider):
+    """Set the cloud provider type (openai or custom)"""
+    from src.config import get_config
+    config = get_config()
+
+    if provider not in config.VALID_CLOUD_PROVIDERS:
+        print(json.dumps({
+            "success": False,
+            "error": f"Invalid cloud provider: {provider}. Must be one of: {', '.join(config.VALID_CLOUD_PROVIDERS)}"
+        }))
+        return
+
+    success = config.set_cloud_provider(provider)
+    if success:
+        print(json.dumps({"success": True, "cloud_provider": provider}))
+    else:
+        print(json.dumps({"success": False, "error": "Failed to save cloud provider"}))
+
+
+@cli.command()
+@click.argument('model')
+def set_cloud_model(model):
+    """Set the cloud model name"""
+    from src.config import get_config
+    config = get_config()
+    success = config.set_cloud_model(model)
+    if success:
+        print(json.dumps({"success": True, "cloud_model": model}))
+    else:
+        print(json.dumps({"success": False, "error": "Failed to save cloud model"}))
+
+
+@cli.command()
+@click.argument('url')
+def test_remote_ollama(url):
+    """Test connection to a remote Ollama server"""
+    try:
+        import ollama as ollama_pkg
+        client = ollama_pkg.Client(host=url)
+        response = client.list()
+        models = [getattr(m, 'model', '') for m in getattr(response, 'models', [])]
+        print(json.dumps({"success": True, "models": models}))
+    except Exception as e:
+        print(json.dumps({"success": False, "error": str(e)}))
+
+
+@cli.command()
+def test_cloud_api():
+    """Test connection to the cloud API"""
+    from src.config import get_config
+    config = get_config()
+
+    cloud_api_key = config.get_cloud_api_key()
+    cloud_provider = config.get_cloud_provider()
+    cloud_api_url = config.get_cloud_api_url()
+
+    if not cloud_api_key:
+        print(json.dumps({"success": False, "error": "No API key configured"}))
+        return
+
+    try:
+        if cloud_provider == "anthropic":
+            from anthropic import Anthropic
+            client = Anthropic(api_key=cloud_api_key)
+            # Lightweight test: list models
+            models_page = client.models.list(limit=10)
+            model_ids = [m.id for m in models_page.data]
+            print(json.dumps({"success": True, "models": model_ids}))
+        else:
+            from openai import OpenAI
+            base_url = cloud_api_url if cloud_provider == "custom" and cloud_api_url else None
+            client = OpenAI(api_key=cloud_api_key, base_url=base_url)
+            models = client.models.list()
+            model_ids = [m.id for m in models.data[:10]]
+            print(json.dumps({"success": True, "models": model_ids}))
+    except Exception as e:
+        print(json.dumps({"success": False, "error": str(e)}))
 
 
 @cli.command()

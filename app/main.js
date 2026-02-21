@@ -506,10 +506,14 @@ function runPythonScript(script, args = [], silent = false) {
     const backendPath = getBackendPath();
     const command = `${backendPath} ${args.join(' ')}`;
 
-    // Log the command being executed (unless silent)
-    console.log('Running:', command);
+    // Log the command being executed (unless silent), masking sensitive args
+    const safeArgs = args.map((a, i) => {
+      if (i > 0 && (args[i - 1] === 'set-cloud-api-key')) return '***';
+      return a;
+    });
+    console.log('Running:', `${backendPath} ${safeArgs.join(' ')}`);
     if (!silent) {
-      sendDebugLog(`$ stenoai ${args.join(' ')}`);
+      sendDebugLog(`$ stenoai ${safeArgs.join(' ')}`);
     }
 
     const process = spawn(backendPath, args, {
@@ -1515,6 +1519,18 @@ function sendDebugLog(message) {
 
 ipcMain.handle('setup-ollama-and-model', async () => {
   try {
+    // Check AI provider -- skip local Ollama setup for remote/cloud
+    try {
+      const providerResult = await runPythonScript('simple_recorder.py', ['get-ai-provider'], true);
+      const providerConfig = JSON.parse(providerResult.trim());
+      if (providerConfig.ai_provider === 'remote' || providerConfig.ai_provider === 'cloud') {
+        sendDebugLog(`AI provider is "${providerConfig.ai_provider}" -- skipping local Ollama setup`);
+        return { success: true, skipped: true };
+      }
+    } catch (e) {
+      sendDebugLog(`Could not read AI provider, proceeding with local setup: ${e.message}`);
+    }
+
     sendDebugLog('Locating bundled Ollama...');
     const finalOllamaPath = await findOllamaExecutable();
     if (!finalOllamaPath) {
@@ -2188,6 +2204,112 @@ ipcMain.handle('set-language', async (event, languageCode) => {
     return { success: true, language: languageCode };
   } catch (error) {
     sendDebugLog(`Error setting language: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+});
+
+// AI Provider IPC handlers
+ipcMain.handle('get-ai-provider', async () => {
+  try {
+    const result = await runPythonScript('simple_recorder.py', ['get-ai-provider'], true);
+    const jsonData = JSON.parse(result.trim());
+    return { success: true, ...jsonData };
+  } catch (error) {
+    sendDebugLog(`Error getting AI provider: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('set-ai-provider', async (event, provider) => {
+  try {
+    sendDebugLog(`Setting AI provider to: ${provider}`);
+    const result = await runPythonScript('simple_recorder.py', ['set-ai-provider', provider]);
+    const jsonMatch = result.match(/\{.*\}/s);
+    if (jsonMatch) return JSON.parse(jsonMatch[0]);
+    return { success: true, ai_provider: provider };
+  } catch (error) {
+    sendDebugLog(`Error setting AI provider: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('set-remote-ollama-url', async (event, url) => {
+  try {
+    const result = await runPythonScript('simple_recorder.py', ['set-remote-ollama-url', url]);
+    const jsonMatch = result.match(/\{.*\}/s);
+    if (jsonMatch) return JSON.parse(jsonMatch[0]);
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('set-cloud-api-url', async (event, url) => {
+  try {
+    const result = await runPythonScript('simple_recorder.py', ['set-cloud-api-url', url]);
+    const jsonMatch = result.match(/\{.*\}/s);
+    if (jsonMatch) return JSON.parse(jsonMatch[0]);
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('set-cloud-api-key', async (event, key) => {
+  try {
+    const result = await runPythonScript('simple_recorder.py', ['set-cloud-api-key', key]);
+    const jsonMatch = result.match(/\{.*\}/s);
+    if (jsonMatch) return JSON.parse(jsonMatch[0]);
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('set-cloud-provider', async (event, provider) => {
+  try {
+    const result = await runPythonScript('simple_recorder.py', ['set-cloud-provider', provider]);
+    const jsonMatch = result.match(/\{.*\}/s);
+    if (jsonMatch) return JSON.parse(jsonMatch[0]);
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('set-cloud-model', async (event, model) => {
+  try {
+    const result = await runPythonScript('simple_recorder.py', ['set-cloud-model', model]);
+    const jsonMatch = result.match(/\{.*\}/s);
+    if (jsonMatch) return JSON.parse(jsonMatch[0]);
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('test-remote-ollama', async (event, url) => {
+  try {
+    sendDebugLog(`Testing remote Ollama at: ${url}`);
+    const result = await runPythonScript('simple_recorder.py', ['test-remote-ollama', url]);
+    const jsonMatch = result.match(/\{.*\}/s);
+    if (jsonMatch) return JSON.parse(jsonMatch[0]);
+    return { success: false, error: 'No response' };
+  } catch (error) {
+    sendDebugLog(`Remote Ollama test failed: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('test-cloud-api', async () => {
+  try {
+    sendDebugLog('Testing cloud API connection...');
+    const result = await runPythonScript('simple_recorder.py', ['test-cloud-api']);
+    const jsonMatch = result.match(/\{.*\}/s);
+    if (jsonMatch) return JSON.parse(jsonMatch[0]);
+    return { success: false, error: 'No response' };
+  } catch (error) {
+    sendDebugLog(`Cloud API test failed: ${error.message}`);
     return { success: false, error: error.message };
   }
 });

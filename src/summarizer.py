@@ -19,32 +19,81 @@ logger = logging.getLogger(__name__)
 class OllamaSummarizer:
     def __init__(self, model_name: Optional[str] = None):
         """
-        Initialize the Ollama summarizer with automatic service management.
+        Initialize the summarizer with automatic service management.
+        Supports local Ollama, remote Ollama, and cloud API providers.
 
         Args:
-            model_name: Name of the Ollama model to use. If None, loads from config.
+            model_name: Name of the model to use. If None, loads from config.
         """
-        if not OLLAMA_AVAILABLE:
-            raise ImportError("Ollama is not installed. Please install ollama-python.")
+        from .config import get_config
+        config = get_config()
 
-        # Load model from config if not specified
-        if model_name is None:
-            try:
-                from .config import get_config
-                config = get_config()
+        self.ai_provider = config.get_ai_provider()
+        self.client = None
+        self.cloud_client = None
+        self.anthropic_client = None
+        self.cloud_provider = None
+        self.ollama_process = None
+        self.remote_url = config.get_remote_ollama_url()
+
+        if self.ai_provider == "cloud":
+            # Cloud mode: use OpenAI-compatible or Anthropic API
+            cloud_api_key = config.get_cloud_api_key()
+            self.cloud_provider = config.get_cloud_provider()
+            cloud_api_url = config.get_cloud_api_url()
+            self.model_name = model_name or config.get_cloud_model()
+
+            if not cloud_api_key:
+                raise ValueError("Cloud API key is not configured. Set it in Settings > AI.")
+
+            if self.cloud_provider == "anthropic":
+                try:
+                    from anthropic import Anthropic
+                except ImportError:
+                    raise ImportError("anthropic package is required for Anthropic cloud mode. pip install anthropic")
+                self.anthropic_client = Anthropic(api_key=cloud_api_key)
+                logger.info(f"Anthropic provider initialized: model={self.model_name}")
+            else:
+                try:
+                    from openai import OpenAI
+                except ImportError:
+                    raise ImportError("openai package is required for cloud mode. pip install openai")
+                base_url = cloud_api_url if self.cloud_provider == "custom" and cloud_api_url else None
+                self.cloud_client = OpenAI(api_key=cloud_api_key, base_url=base_url)
+                logger.info(f"Cloud provider initialized: model={self.model_name}")
+
+        elif self.ai_provider == "remote":
+            # Remote mode: connect to user's Ollama on LAN
+            if not OLLAMA_AVAILABLE:
+                raise ImportError("Ollama is not installed. Please install ollama-python.")
+
+            if model_name is None:
                 model_name = config.get_model()
                 logger.info(f"Using configured model: {model_name}")
-            except Exception as e:
-                logger.warning(f"Failed to load model from config: {e}, using default")
-                model_name = "llama3.2:3b"  # Default model
+            self.model_name = model_name
 
-        self.model_name = model_name
-        self.client = None
-        self.ollama_process = None
+            if not self.remote_url:
+                raise ValueError("Remote Ollama URL is not configured. Set it in Settings > AI.")
 
-        # Ensure Ollama is ready before initializing client
-        self._ensure_ollama_ready()
-        self.client = ollama.Client()
+            self.client = ollama.Client(host=self.remote_url)
+            logger.info(f"Remote Ollama initialized: host={self.remote_url}, model={self.model_name}")
+
+        else:
+            # Local mode: existing behavior
+            if not OLLAMA_AVAILABLE:
+                raise ImportError("Ollama is not installed. Please install ollama-python.")
+
+            if model_name is None:
+                try:
+                    model_name = config.get_model()
+                    logger.info(f"Using configured model: {model_name}")
+                except Exception as e:
+                    logger.warning(f"Failed to load model from config: {e}, using default")
+                    model_name = "llama3.2:3b"
+
+            self.model_name = model_name
+            self._ensure_ollama_ready()
+            self.client = ollama.Client()
     
     def _is_ollama_running(self) -> bool:
         """Check if Ollama service is running."""
@@ -244,6 +293,67 @@ class OllamaSummarizer:
         logger.info(f"Ollama ready with model {self.model_name}")
         return True
         
+    def _cloud_chat(self, prompt: str, timeout_seconds: int = 300) -> str:
+        """
+        Send a chat request via the configured cloud API (OpenAI or Anthropic).
+
+        Args:
+            prompt: The user prompt to send
+            timeout_seconds: Request timeout in seconds
+
+        Returns:
+            The assistant's response text
+        """
+        if getattr(self, 'cloud_provider', 'openai') == "anthropic":
+            return self._anthropic_chat(prompt, timeout_seconds)
+        return self._openai_chat(prompt, timeout_seconds)
+
+    def _openai_chat(self, prompt: str, timeout_seconds: int = 300) -> str:
+        """Send a chat request via the OpenAI-compatible cloud API."""
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                if attempt > 0:
+                    logger.info(f"Cloud API retry attempt {attempt + 1}/{max_retries}")
+                    time.sleep(5)
+
+                response = self.cloud_client.chat.completions.create(
+                    model=self.model_name,
+                    messages=[{"role": "user", "content": prompt}],
+                    timeout=timeout_seconds,
+                )
+                return response.choices[0].message.content.strip()
+
+            except Exception as e:
+                logger.error(f"Cloud API attempt {attempt + 1} failed: {e}")
+                if attempt == max_retries - 1:
+                    raise
+        raise RuntimeError("OpenAI chat failed after all retries")
+
+    def _anthropic_chat(self, prompt: str, timeout_seconds: int = 300) -> str:
+        """Send a chat request via the Anthropic Messages API."""
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                if attempt > 0:
+                    logger.info(f"Anthropic API retry attempt {attempt + 1}/{max_retries}")
+                    time.sleep(5)
+
+                response = self.anthropic_client.messages.create(
+                    model=self.model_name,
+                    max_tokens=4096,
+                    messages=[{"role": "user", "content": prompt}],
+                    timeout=timeout_seconds,
+                )
+                # Anthropic returns content blocks; extract text
+                return response.content[0].text.strip()
+
+            except Exception as e:
+                logger.error(f"Anthropic API attempt {attempt + 1} failed: {e}")
+                if attempt == max_retries - 1:
+                    raise
+        raise RuntimeError("Anthropic chat failed after all retries")
+
     def _create_permissive_prompt(self, transcript: str, language: str = "en") -> str:
         """
         Create an enhanced prompt with discussion_areas and improved extraction.
@@ -366,7 +476,7 @@ Return ONLY the response in this exact JSON format:
                 )
             
             prompt = self._create_permissive_prompt(transcript, language)
-            logger.info(f"Sending transcript to Ollama model: {self.model_name}")
+            logger.info(f"Sending transcript to {self.ai_provider} model: {self.model_name}")
             logger.info(f"Transcript length: {len(transcript)} characters")
 
             # Calculate dynamic timeout based on transcript length
@@ -375,42 +485,47 @@ Return ONLY the response in this exact JSON format:
             extra_timeout = (len(transcript) // 10000) * 600  # 10 min per 10k chars
             timeout_seconds = min(base_timeout + extra_timeout, 7200)  # Cap at 2 hours
             logger.info(f"Using timeout: {timeout_seconds} seconds ({timeout_seconds // 60} minutes)")
-            
-            # Retry logic for Ollama API calls
-            max_retries = 3
-            for attempt in range(max_retries):
-                try:
-                    if attempt > 0:
-                        logger.info(f"Retry attempt {attempt + 1}/{max_retries}")
-                        # Ensure Ollama is still ready on retries
-                        self._ensure_ollama_ready()
-                        # Recreate client connection
-                        self.client = ollama.Client()
-                        
-                    ollama_response = self.client.chat(
-                        model=self.model_name,
-                        messages=[
-                            {
-                                'role': 'user',
-                                'content': prompt
+
+            if self.ai_provider == "cloud":
+                response_text = self._cloud_chat(prompt, timeout_seconds)
+            else:
+                # Retry logic for Ollama API calls (local or remote)
+                max_retries = 3
+                for attempt in range(max_retries):
+                    try:
+                        if attempt > 0:
+                            logger.info(f"Retry attempt {attempt + 1}/{max_retries}")
+                            if self.ai_provider == "remote":
+                                self.client = ollama.Client(host=self.remote_url)
+                            else:
+                                self._ensure_ollama_ready()
+                                self.client = ollama.Client()
+
+                        ollama_response = self.client.chat(
+                            model=self.model_name,
+                            messages=[
+                                {
+                                    'role': 'user',
+                                    'content': prompt
+                                }
+                            ],
+                            options={
+                                'timeout': timeout_seconds
                             }
-                        ],
-                        options={
-                            'timeout': timeout_seconds  # Dynamic timeout based on transcript length
-                        }
-                    )
-                    break  # Success, exit retry loop
-                    
-                except Exception as e:
-                    logger.error(f"Ollama API attempt {attempt + 1} failed: {e}")
-                    if attempt == max_retries - 1:
-                        raise  # Last attempt, re-raise the exception
-                    else:
-                        logger.info("Waiting 5 seconds before retry...")
-                        time.sleep(5)
-            
-            response_text = ollama_response['message']['content'].strip()
-            logger.info("Received response from Ollama")
+                        )
+                        break  # Success, exit retry loop
+
+                    except Exception as e:
+                        logger.error(f"Ollama API attempt {attempt + 1} failed: {e}")
+                        if attempt == max_retries - 1:
+                            raise
+                        else:
+                            logger.info("Waiting 5 seconds before retry...")
+                            time.sleep(5)
+
+                response_text = ollama_response['message']['content'].strip()
+
+            logger.info(f"Received response from {self.ai_provider}")
             logger.info(f"Response length: {len(response_text)} characters")
             logger.info(f"Response preview: {response_text[:200]}...")
             
@@ -645,38 +760,44 @@ ANSWER:"""
 
             logger.info(f"Querying transcript with question: {question[:50]}...")
 
-            # Retry logic for Ollama API calls
-            max_retries = 2
-            for attempt in range(max_retries):
-                try:
-                    if attempt > 0:
-                        logger.info(f"Retry attempt {attempt + 1}/{max_retries}")
-                        self._ensure_ollama_ready()
-                        self.client = ollama.Client()
+            if self.ai_provider == "cloud":
+                response_text = self._cloud_chat(prompt, 120)
+            else:
+                # Retry logic for Ollama API calls (local or remote)
+                max_retries = 2
+                for attempt in range(max_retries):
+                    try:
+                        if attempt > 0:
+                            logger.info(f"Retry attempt {attempt + 1}/{max_retries}")
+                            if self.ai_provider == "remote":
+                                self.client = ollama.Client(host=self.remote_url)
+                            else:
+                                self._ensure_ollama_ready()
+                                self.client = ollama.Client()
 
-                    ollama_response = self.client.chat(
-                        model=self.model_name,
-                        messages=[
-                            {
-                                'role': 'user',
-                                'content': prompt
+                        ollama_response = self.client.chat(
+                            model=self.model_name,
+                            messages=[
+                                {
+                                    'role': 'user',
+                                    'content': prompt
+                                }
+                            ],
+                            options={
+                                'timeout': 120
                             }
-                        ],
-                        options={
-                            'timeout': 120  # 2 minute timeout for queries
-                        }
-                    )
-                    break
+                        )
+                        break
 
-                except Exception as e:
-                    logger.error(f"Ollama API attempt {attempt + 1} failed: {e}")
-                    if attempt == max_retries - 1:
-                        raise
-                    else:
-                        logger.info("Waiting 2 seconds before retry...")
-                        time.sleep(2)
+                    except Exception as e:
+                        logger.error(f"Ollama API attempt {attempt + 1} failed: {e}")
+                        if attempt == max_retries - 1:
+                            raise
+                        else:
+                            logger.info("Waiting 2 seconds before retry...")
+                            time.sleep(2)
 
-            response_text = ollama_response['message']['content'].strip()
+                response_text = ollama_response['message']['content'].strip()
             logger.info(f"Query response received: {len(response_text)} characters")
 
             return response_text

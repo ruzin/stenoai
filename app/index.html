@@ -789,6 +789,128 @@
             background: var(--text-muted);
         }
 
+        /* Privacy ghost indicator */
+        .privacy-ghost {
+            background: transparent;
+            border: 1px solid var(--border-subtle);
+            padding: 7px 8px;
+            border-radius: 8px;
+            cursor: pointer;
+            margin-right: 4px;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            -webkit-app-region: no-drag;
+            line-height: 1;
+        }
+
+        .privacy-ghost:hover {
+            background: var(--bg-surface);
+            border-color: var(--border-default);
+        }
+
+        .privacy-ghost.local svg .ghost-body { fill: #818cf8; }
+        .privacy-ghost.local svg .ghost-eyes { fill: var(--bg-primary); }
+        .privacy-ghost.local {
+            border-color: rgba(129, 140, 248, 0.25);
+            animation: ghost-glow 3s ease-in-out infinite;
+        }
+
+        .privacy-ghost.remote svg .ghost-body { fill: #06b6d4; }
+        .privacy-ghost.remote svg .ghost-eyes { fill: var(--bg-primary); }
+        .privacy-ghost.remote {
+            border-color: rgba(6, 182, 212, 0.25);
+        }
+
+        .privacy-ghost.cloud svg .ghost-body { fill: none; stroke: var(--text-muted); stroke-width: 1.5; }
+        .privacy-ghost.cloud svg .ghost-eyes { fill: var(--text-muted); }
+        .privacy-ghost.cloud { opacity: 0.5; }
+
+        @keyframes ghost-glow {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(129, 140, 248, 0); }
+            50% { box-shadow: 0 0 8px 0 rgba(129, 140, 248, 0.15); }
+        }
+
+        /* Provider config sections in AI tab */
+        .provider-config {
+            display: none;
+            padding-top: 4px;
+        }
+
+        .provider-config.visible {
+            display: block;
+        }
+
+        .provider-config-field {
+            padding: 10px 0;
+            border-bottom: 1px solid var(--border-subtle);
+        }
+
+        .provider-config-field:last-child {
+            border-bottom: none;
+        }
+
+        .provider-config-field label {
+            display: block;
+            font-size: 12px;
+            font-weight: 500;
+            color: var(--text-secondary);
+            margin-bottom: 5px;
+        }
+
+        .settings-input {
+            width: 100%;
+            background: var(--bg-surface);
+            border: 1px solid var(--border-default);
+            border-radius: 6px;
+            padding: 5px 10px;
+            font-size: 13px;
+            font-family: 'JetBrains Mono', Monaco, monospace;
+            color: var(--text-primary);
+            outline: none;
+            transition: all 0.2s ease;
+        }
+
+        .settings-input:hover {
+            border-color: var(--accent-primary);
+        }
+
+        .settings-input:focus {
+            border-color: var(--accent-primary);
+            box-shadow: 0 0 0 3px var(--accent-glow);
+        }
+
+        .settings-input::placeholder {
+            color: var(--text-muted);
+            font-family: 'Plus Jakarta Sans', sans-serif;
+        }
+
+        .connection-test-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 0;
+        }
+
+        .connection-status {
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        .connection-status.success { color: var(--success-green); }
+        .connection-status.error { color: var(--recording-red); }
+
+        .privacy-warning {
+            background: rgba(239, 68, 68, 0.06);
+            border: 1px solid rgba(239, 68, 68, 0.15);
+            border-radius: 6px;
+            padding: 10px 12px;
+            margin-top: 4px;
+            font-size: 12px;
+            color: var(--recording-red);
+            line-height: 1.4;
+        }
+
         /* Main content area */
         .main {
             flex: 1;
@@ -3074,6 +3196,15 @@
         </div>
         
         <div class="header-actions">
+            <button class="privacy-ghost local" id="privacy-ghost" title="Privacy: All data stays on your device">
+                <svg width="16" height="18" viewBox="0 0 16 20" fill="none">
+                    <!-- Ghost body: rounded top, wavy bottom -->
+                    <path class="ghost-body" d="M8 1C4.134 1 1 4.134 1 8v8.5c0 .5.4.7.8.4l1.2-1 1.2 1c.4.3.8.3 1.2 0l1.2-1 1.2 1c.4.3.8.3 1.2 0l1.2-1 1.2 1c.4.3.8.3 1.2 0l1.2-1 1.2 1c.4.3.8-.1.8-.4V8c0-3.866-3.134-7-7-7z"/>
+                    <!-- Eyes -->
+                    <circle class="ghost-eyes" cx="5.5" cy="9.5" r="1.5"/>
+                    <circle class="ghost-eyes" cx="10.5" cy="9.5" r="1.5"/>
+                </svg>
+            </button>
             <button class="settings-btn" id="settings-btn" title="Settings (Cmd+,)">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <circle cx="12" cy="12" r="3"></circle>
@@ -3736,7 +3867,62 @@ Commands and output will appear here...
 
                 <!-- AI Tab -->
                 <div class="settings-tab" id="tab-ai">
-                    <div class="settings-section">
+                    <div class="settings-row">
+                        <div class="settings-row-text">
+                            <span>AI Provider</span>
+                            <small id="provider-description">Everything runs on your device</small>
+                        </div>
+                        <select class="theme-select" id="ai-provider-select" onchange="selectProvider(this.value)">
+                            <option value="local">Local (on-device)</option>
+                            <option value="remote">Private Server</option>
+                            <option value="cloud">Cloud API</option>
+                        </select>
+                    </div>
+
+                    <!-- Remote Ollama config -->
+                    <div class="provider-config" id="remote-config">
+                        <div class="provider-config-field">
+                            <label>Ollama Server URL</label>
+                            <input type="text" class="settings-input" id="remote-ollama-url" placeholder="http://192.168.1.100:11434">
+                        </div>
+                        <div class="connection-test-row">
+                            <button class="settings-action-btn" onclick="testRemoteConnection()" style="margin-left: 0;">Test Connection</button>
+                            <span class="connection-status" id="remote-connection-status"></span>
+                        </div>
+                    </div>
+
+                    <!-- Cloud API config -->
+                    <div class="provider-config" id="cloud-config">
+                        <div class="provider-config-field">
+                            <label>Service</label>
+                            <select class="theme-select" id="cloud-provider-select" onchange="onCloudProviderChange()" style="width: 100%;">
+                                <option value="openai">OpenAI</option>
+                                <option value="anthropic">Anthropic (Claude)</option>
+                                <option value="custom">Custom (OpenAI-compatible)</option>
+                            </select>
+                        </div>
+                        <div class="provider-config-field" id="cloud-url-field" style="display: none;">
+                            <label>API Base URL</label>
+                            <input type="text" class="settings-input" id="cloud-api-url" placeholder="https://api.example.com/v1">
+                        </div>
+                        <div class="provider-config-field">
+                            <label>API Key</label>
+                            <input type="password" class="settings-input" id="cloud-api-key" placeholder="sk-...">
+                        </div>
+                        <div class="provider-config-field">
+                            <label>Model</label>
+                            <input type="text" class="settings-input" id="cloud-model-input" placeholder="gpt-4o-mini" value="gpt-4o-mini">
+                        </div>
+                        <div class="connection-test-row">
+                            <button class="settings-action-btn" onclick="testCloudConnection()" style="margin-left: 0;">Test Connection</button>
+                            <span class="connection-status" id="cloud-connection-status"></span>
+                        </div>
+                        <div class="privacy-warning">
+                            Transcripts will be sent to a third-party cloud service. No audio files leave your device.
+                        </div>
+                    </div>
+
+                    <div class="settings-section" id="model-section" style="margin-top: 8px;">
                         <h3>Model</h3>
                         <div id="model-list" class="model-list">
                             <div class="model-list-loading">Loading models...</div>
@@ -5679,6 +5865,9 @@ Session started - waiting for activity...
                     ),
                     checkCalendarStatus().catch(err =>
                         log(`Calendar status check failed: ${err.message}`)
+                    ),
+                    loadAIProviderSettings().catch(err =>
+                        log(`AI provider settings load failed: ${err.message}`)
                     )
                 ]);
                 
@@ -6668,7 +6857,10 @@ Session started - waiting for activity...
             }
             // Load tab-specific data
             if (tabName === 'ai') {
-                loadModels();
+                loadAIProviderSettings();
+                if (currentAIProvider !== 'cloud') {
+                    loadModels();
+                }
             }
         }
 
@@ -6723,6 +6915,188 @@ Session started - waiting for activity...
             }
         }
         
+
+        // --- AI Provider management ---
+
+        let currentAIProvider = 'local';
+
+        const providerDescriptions = {
+            local: 'Everything runs on your device',
+            remote: 'Your own Ollama server on another machine',
+            cloud: 'Transcripts sent to a third-party API'
+        };
+
+        function updateGhostIndicator(provider) {
+            const ghost = document.getElementById('privacy-ghost');
+            if (!ghost) return;
+            ghost.classList.remove('local', 'remote', 'cloud');
+            ghost.classList.add(provider);
+            const titles = {
+                local: 'Privacy: All data stays on your device',
+                remote: 'Privacy: Data sent to your private server',
+                cloud: 'Warning: Transcripts sent to cloud API'
+            };
+            ghost.title = titles[provider] || titles.local;
+        }
+
+        function applyProviderUI(provider) {
+            currentAIProvider = provider;
+            updateGhostIndicator(provider);
+
+            // Update dropdown
+            const select = document.getElementById('ai-provider-select');
+            if (select) select.value = provider;
+
+            // Update description
+            const desc = document.getElementById('provider-description');
+            if (desc) desc.textContent = providerDescriptions[provider] || '';
+
+            // Show/hide config sections
+            document.getElementById('remote-config').classList.toggle('visible', provider === 'remote');
+            document.getElementById('cloud-config').classList.toggle('visible', provider === 'cloud');
+
+            // Show/hide model list (cloud uses its own model input)
+            document.getElementById('model-section').style.display = provider === 'cloud' ? 'none' : '';
+        }
+
+        async function selectProvider(provider) {
+            try {
+                const result = await ipcRenderer.invoke('set-ai-provider', provider);
+                if (!result.success) {
+                    console.error('Failed to set provider:', result.error);
+                    return;
+                }
+
+                applyProviderUI(provider);
+
+                // Load models for local/remote
+                if (provider === 'remote') {
+                    const url = document.getElementById('remote-ollama-url').value.trim();
+                    if (url) loadModels();
+                } else if (provider === 'local') {
+                    loadModels();
+                }
+            } catch (error) {
+                console.error('Error selecting provider:', error);
+            }
+        }
+
+        async function loadAIProviderSettings() {
+            try {
+                const result = await ipcRenderer.invoke('get-ai-provider');
+                if (!result.success) return;
+
+                applyProviderUI(result.ai_provider || 'local');
+
+                // Populate fields
+                if (result.remote_ollama_url) {
+                    document.getElementById('remote-ollama-url').value = result.remote_ollama_url;
+                }
+                if (result.cloud_api_url) {
+                    document.getElementById('cloud-api-url').value = result.cloud_api_url;
+                }
+                if (result.cloud_provider) {
+                    document.getElementById('cloud-provider-select').value = result.cloud_provider;
+                    onCloudProviderChange();
+                }
+                if (result.cloud_model) {
+                    document.getElementById('cloud-model-input').value = result.cloud_model;
+                }
+                if (result.cloud_api_key_set) {
+                    document.getElementById('cloud-api-key').placeholder = 'Key saved (enter new to change)';
+                }
+            } catch (error) {
+                console.error('Error loading AI provider settings:', error);
+            }
+        }
+
+        function onCloudProviderChange() {
+            const provider = document.getElementById('cloud-provider-select').value;
+            document.getElementById('cloud-url-field').style.display = provider === 'custom' ? '' : 'none';
+            const modelInput = document.getElementById('cloud-model-input');
+            if (provider === 'anthropic') {
+                modelInput.placeholder = 'claude-sonnet-4-20250514';
+            } else {
+                modelInput.placeholder = 'gpt-4o-mini';
+            }
+            const keyInput = document.getElementById('cloud-api-key');
+            if (provider === 'anthropic') {
+                keyInput.placeholder = 'sk-ant-...';
+            } else {
+                keyInput.placeholder = 'sk-...';
+            }
+        }
+
+        async function testRemoteConnection() {
+            const url = document.getElementById('remote-ollama-url').value.trim();
+            const statusEl = document.getElementById('remote-connection-status');
+            if (!url) {
+                statusEl.textContent = 'Enter a URL first';
+                statusEl.className = 'connection-status error';
+                return;
+            }
+
+            await ipcRenderer.invoke('set-remote-ollama-url', url);
+
+            statusEl.textContent = 'Testing...';
+            statusEl.className = 'connection-status';
+
+            try {
+                const result = await ipcRenderer.invoke('test-remote-ollama', url);
+                if (result.success) {
+                    const count = result.models ? result.models.length : 0;
+                    statusEl.textContent = `Connected (${count} model${count !== 1 ? 's' : ''} available)`;
+                    statusEl.className = 'connection-status success';
+                    loadModels();
+                } else {
+                    statusEl.textContent = result.error || 'Connection failed';
+                    statusEl.className = 'connection-status error';
+                }
+            } catch (error) {
+                statusEl.textContent = error.message || 'Connection failed';
+                statusEl.className = 'connection-status error';
+            }
+        }
+
+        async function testCloudConnection() {
+            const statusEl = document.getElementById('cloud-connection-status');
+            const provider = document.getElementById('cloud-provider-select').value;
+            const apiUrl = document.getElementById('cloud-api-url').value.trim();
+            const apiKey = document.getElementById('cloud-api-key').value.trim();
+            const model = document.getElementById('cloud-model-input').value.trim();
+
+            statusEl.textContent = 'Testing...';
+            statusEl.className = 'connection-status';
+
+            try {
+                await ipcRenderer.invoke('set-cloud-provider', provider);
+                if (apiUrl) await ipcRenderer.invoke('set-cloud-api-url', apiUrl);
+                if (apiKey) await ipcRenderer.invoke('set-cloud-api-key', apiKey);
+                if (model) await ipcRenderer.invoke('set-cloud-model', model);
+
+                const result = await ipcRenderer.invoke('test-cloud-api');
+                if (result.success) {
+                    statusEl.textContent = 'Connected successfully';
+                    statusEl.className = 'connection-status success';
+                    document.getElementById('cloud-api-key').placeholder = 'Key saved (enter new to change)';
+                    document.getElementById('cloud-api-key').value = '';
+                } else {
+                    statusEl.textContent = result.error || 'Connection failed';
+                    statusEl.className = 'connection-status error';
+                }
+            } catch (error) {
+                statusEl.textContent = error.message || 'Connection failed';
+                statusEl.className = 'connection-status error';
+            }
+        }
+
+        // Ghost click -> open Settings AI tab
+        document.getElementById('privacy-ghost').addEventListener('click', () => {
+            if (!settingsVisible) {
+                toggleSettings();
+            }
+            switchSettingsTab('ai');
+        });
 
         // Model management functions
         async function loadModels() {

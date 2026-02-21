@@ -142,6 +142,26 @@ def is_ollama_running() -> bool:
         return False
 
 
+def is_remote_ollama_running(url: str) -> bool:
+    """
+    Check if a remote Ollama server is reachable.
+
+    Args:
+        url: Base URL of the remote Ollama server (e.g. "http://192.168.1.100:11434")
+
+    Returns:
+        True if the remote server is responding, False otherwise
+    """
+    try:
+        import httpx
+        # Normalize URL: strip trailing slash, append /api/tags
+        clean_url = url.rstrip('/')
+        response = httpx.get(f'{clean_url}/api/tags', timeout=5)
+        return response.status_code == 200
+    except Exception:
+        return False
+
+
 def start_ollama_server(wait: bool = True, timeout: int = 30) -> bool:
     """
     Start the Ollama server if not already running.

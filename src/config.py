@@ -125,6 +125,12 @@ class Config:
             "telemetry_enabled": True,
             "system_audio_enabled": False,
             "language": "en",
+            "ai_provider": "local",
+            "remote_ollama_url": "",
+            "cloud_api_url": "",
+            "cloud_api_key": "",
+            "cloud_provider": "openai",
+            "cloud_model": "gpt-4o-mini",
             "anonymous_id": str(uuid.uuid4()),
             "storage_path": "",
             "version": "1.0"
@@ -272,6 +278,73 @@ class Config:
         if language_code is None:
             language_code = self.get_language()
         return self.SUPPORTED_LANGUAGES.get(language_code, "Unknown")
+
+    # --- AI provider settings ---
+
+    VALID_AI_PROVIDERS = ("local", "remote", "cloud")
+    VALID_CLOUD_PROVIDERS = ("openai", "anthropic", "custom")
+
+    def get_ai_provider(self) -> str:
+        """Get the configured AI provider ('local', 'remote', or 'cloud')."""
+        value = self._config.get("ai_provider", "local")
+        return value if value in self.VALID_AI_PROVIDERS else "local"
+
+    def set_ai_provider(self, provider: str) -> bool:
+        """Set the AI provider mode."""
+        if provider not in self.VALID_AI_PROVIDERS:
+            logger.error(f"Invalid AI provider: {provider}. Must be one of {self.VALID_AI_PROVIDERS}")
+            return False
+        self._config["ai_provider"] = provider
+        return self._save()
+
+    def get_remote_ollama_url(self) -> str:
+        """Get the remote Ollama server URL."""
+        return self._config.get("remote_ollama_url", "")
+
+    def set_remote_ollama_url(self, url: str) -> bool:
+        """Set the remote Ollama server URL."""
+        self._config["remote_ollama_url"] = url.strip()
+        return self._save()
+
+    def get_cloud_api_url(self) -> str:
+        """Get the cloud API URL."""
+        return self._config.get("cloud_api_url", "")
+
+    def set_cloud_api_url(self, url: str) -> bool:
+        """Set the cloud API URL."""
+        self._config["cloud_api_url"] = url.strip()
+        return self._save()
+
+    def get_cloud_api_key(self) -> str:
+        """Get the cloud API key."""
+        return self._config.get("cloud_api_key", "")
+
+    def set_cloud_api_key(self, key: str) -> bool:
+        """Set the cloud API key. Never log the key value."""
+        self._config["cloud_api_key"] = key.strip()
+        return self._save()
+
+    def get_cloud_provider(self) -> str:
+        """Get the cloud provider type ('openai' or 'custom')."""
+        value = self._config.get("cloud_provider", "openai")
+        return value if value in self.VALID_CLOUD_PROVIDERS else "openai"
+
+    def set_cloud_provider(self, provider: str) -> bool:
+        """Set the cloud provider type."""
+        if provider not in self.VALID_CLOUD_PROVIDERS:
+            logger.error(f"Invalid cloud provider: {provider}. Must be one of {self.VALID_CLOUD_PROVIDERS}")
+            return False
+        self._config["cloud_provider"] = provider
+        return self._save()
+
+    def get_cloud_model(self) -> str:
+        """Get the cloud model name."""
+        return self._config.get("cloud_model", "gpt-4o-mini")
+
+    def set_cloud_model(self, model: str) -> bool:
+        """Set the cloud model name."""
+        self._config["cloud_model"] = model.strip()
+        return self._save()
 
     def get_anonymous_id(self) -> str:
         """Get the anonymous telemetry ID, generating one if missing."""
