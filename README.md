@@ -63,11 +63,25 @@ Have questions or suggestions? [Join our Discord](https://discord.gg/DZ6vcQnxxu)
 - `qwen3:8b` (4.7GB): Excellent at structured output and action items
 - `deepseek-r1:8b` (4.7GB): Strong reasoning and analysis capabilities
 
-**Switching Models:**
-- Click the 🧠 AI Settings icon in the app
-- Select your preferred model
-- Models download automatically when selected
-- ⚠️ Note: Downloads will pause any active summarization
+### David vs Goliath: StenoAI Local Models Closing the Gap with Claude Sonnet 4.6
+
+#### YouTube Video Summary Challenge (11m 36s): [High-Speed Rail Systems Around the World](https://www.youtube.com/watch?v=9wJCltuawSs)
+
+**Scoring Criteria**
+- **Overall (10):** Holistic quality score
+- **Content Accuracy (10):** Numerical and factual correctness
+- **Completeness (10):** Coverage of major video points
+- **No Hallucination (10):** No fabricated participants, action items, or invented details
+
+| Rank | Model              | Overall (10) | Content Accuracy (10) | Completeness (10) | No Hallucination (10) | Notes |
+|------|-------------------|--------------|------------------------|-------------------|-----------------------|-------|
+| 1    | Claude Sonnet 4.6 | 9.8          | 9.8                    | 9.5               | 10.0                  | Most precise; strongest quantitative retention; perfect framing |
+| 2    | Claude Haiku      | 9.5          | 9.5                    | 9.0               | 10.0                  | Very strong; slightly less detailed than Sonnet |
+| 3    | DeepSeek R1:8B    | 8.8          | 9.0                    | 8.0               | 8.5                   | Broad coverage; fewer numerical details |
+| 4    | Qwen:8B           | 8.5          | 9.0                    | 7.5               | 8.5                   | Accurate but more compressed |
+| 5    | GPT-4.1           | 8.3          | 9.0                    | 8.0               | 6.5                   | Accurate but meeting framing invented |
+| 6    | GPT-4o Mini       | 8.0          | 8.5                    | 7.5               | 6.0                   | Invented meeting framing and participants |
+| 7    | Gemma 4B          | 7.0          | 8.5                    | 7.0               | 3.5                   | Fabricated participants and action items |
 
 ## Future Roadmap
 
