@@ -470,6 +470,7 @@
 
         .settings-tab {
             display: none;
+            padding-bottom: 8px;
         }
 
         .settings-tab.active {
@@ -508,11 +509,6 @@
             justify-content: space-between;
             padding: 12px 0;
             border-bottom: 1px solid var(--border-subtle);
-        }
-
-        .settings-row:last-of-type,
-        .settings-row:last-child {
-            border-bottom: none;
         }
 
         .settings-row-text {
@@ -3853,6 +3849,17 @@ Commands and output will appear here...
                         <button class="settings-action-btn" id="test-update-btn" onclick="testUpdateCheck()">Check</button>
                     </div>
 
+                    <div class="settings-row">
+                        <div class="settings-row-text">
+                            <span>Developer mode</span>
+                            <small>Show debug logs and developer tools</small>
+                        </div>
+                        <label class="settings-toggle">
+                            <input type="checkbox" id="developer-mode-toggle">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+
                     <div class="settings-version">
                         StenoAI <span id="app-version">Loading...</span>
                         <span style="margin: 0 6px; opacity: 0.3;">·</span>
@@ -3943,6 +3950,22 @@ Commands and output will appear here...
 
                     <div class="settings-row">
                         <div class="settings-row-text">
+                            <span>Setup wizard</span>
+                            <small>Reinstall dependencies or fix configuration</small>
+                        </div>
+                        <button class="settings-action-btn" id="run-setup-btn" onclick="runSetupFromSettings()">Run</button>
+                    </div>
+
+                    <div class="settings-row">
+                        <div class="settings-row-text">
+                            <span>Clear recording state</span>
+                            <small>Fix stuck recordings or processing</small>
+                        </div>
+                        <button class="settings-action-btn" id="clear-state-btn" onclick="clearSystemState()">Clear</button>
+                    </div>
+
+                    <div class="settings-row">
+                        <div class="settings-row-text">
                             <span>External AI provider</span>
                             <small>Use a remote Ollama server or cloud API</small>
                         </div>
@@ -3964,32 +3987,6 @@ Commands and output will appear here...
                         <small id="anonymous-id-display" style="color: var(--text-muted); font-size: 11px; width: 100%; margin-top: 4px; cursor: pointer; opacity: 0.6;" title="Click to copy" onclick="navigator.clipboard.writeText(this.textContent.replace('ID: ','')).then(()=>{this.textContent='Copied!';setTimeout(()=>loadTelemetryId(),1500)})"></small>
                     </div>
 
-                    <div class="settings-row">
-                        <div class="settings-row-text">
-                            <span>Developer mode</span>
-                            <small>Show debug logs and developer tools</small>
-                        </div>
-                        <label class="settings-toggle">
-                            <input type="checkbox" id="developer-mode-toggle">
-                            <span class="toggle-slider"></span>
-                        </label>
-                    </div>
-
-                    <div class="settings-row">
-                        <div class="settings-row-text">
-                            <span>Setup wizard</span>
-                            <small>Reinstall dependencies or fix configuration</small>
-                        </div>
-                        <button class="settings-action-btn" id="run-setup-btn" onclick="runSetupFromSettings()">Run</button>
-                    </div>
-
-                    <div class="settings-row">
-                        <div class="settings-row-text">
-                            <span>Clear recording state</span>
-                            <small>Fix stuck recordings or processing</small>
-                        </div>
-                        <button class="settings-action-btn" id="clear-state-btn" onclick="clearSystemState()">Clear</button>
-                    </div>
                 </div>
 
                 <!-- Developer Tab -->
