@@ -316,7 +316,11 @@ class Config:
         return self._save()
 
     def get_cloud_api_key(self) -> str:
-        """Get the cloud API key."""
+        """Get the cloud API key. Prefers env var (set by Electron via safeStorage)."""
+        import os
+        env_key = os.environ.get("STENOAI_CLOUD_API_KEY", "")
+        if env_key:
+            return env_key
         return self._config.get("cloud_api_key", "")
 
     def set_cloud_api_key(self, key: str) -> bool:

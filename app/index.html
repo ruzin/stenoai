@@ -809,23 +809,23 @@
             border-color: var(--border-default);
         }
 
-        .privacy-ghost.local svg .ghost-body { fill: #818cf8; }
+        .privacy-ghost.local svg .ghost-body { fill: var(--accent-primary); }
         .privacy-ghost.local svg .ghost-eyes { fill: var(--bg-primary); }
         .privacy-ghost.local {
-            border-color: rgba(129, 140, 248, 0.25);
+            border-color: color-mix(in srgb, var(--accent-primary) 25%, transparent);
             animation: ghost-glow 3s ease-in-out infinite;
         }
 
         .privacy-ghost.remote svg .ghost-body { fill: #06b6d4; }
         .privacy-ghost.remote svg .ghost-eyes { fill: var(--bg-primary); }
         .privacy-ghost.remote {
-            border-color: rgba(6, 182, 212, 0.25);
+            border-color: color-mix(in srgb, #06b6d4 25%, transparent);
         }
 
         .privacy-ghost.cloud svg .ghost-body { fill: var(--recording-red); }
         .privacy-ghost.cloud svg .ghost-eyes { fill: var(--bg-primary); }
         .privacy-ghost.cloud {
-            border-color: rgba(239, 68, 68, 0.25);
+            border-color: color-mix(in srgb, var(--recording-red) 25%, transparent);
             animation: ghost-glow-red 3s ease-in-out infinite;
         }
 
@@ -900,11 +900,11 @@
         .connection-status {
             display: none;
             font-size: 11px;
-            font-family: 'SF Mono', 'Menlo', 'Monaco', monospace;
+            font-family: 'JetBrains Mono', Monaco, monospace;
             color: var(--text-muted);
             background: var(--bg-primary);
             border: 1px solid var(--border-subtle);
-            border-radius: 4px;
+            border-radius: 6px;
             padding: 6px 8px;
             margin-top: 6px;
             word-break: break-word;
@@ -917,8 +917,8 @@
         .connection-status.error { color: var(--recording-red); border-color: color-mix(in srgb, var(--recording-red) 25%, transparent); }
 
         .privacy-warning {
-            background: rgba(239, 68, 68, 0.06);
-            border: 1px solid rgba(239, 68, 68, 0.15);
+            background: color-mix(in srgb, var(--recording-red) 6%, transparent);
+            border: 1px solid color-mix(in srgb, var(--recording-red) 15%, transparent);
             border-radius: 6px;
             padding: 10px 12px;
             margin-top: 4px;
@@ -3212,7 +3212,7 @@
         </div>
         
         <div class="header-actions">
-            <button class="privacy-ghost local" id="privacy-ghost" style="display: none;" title="Privacy: All data stays on your device">
+            <button class="privacy-ghost local" id="privacy-ghost" style="display: none;" title="Privacy: All data stays on your device" aria-label="Privacy: All data stays on your device">
                 <svg width="16" height="18" viewBox="0 0 16 20" fill="none">
                     <!-- Ghost body: rounded top, wavy bottom -->
                     <path class="ghost-body" d="M8 1C4.134 1 1 4.134 1 8v8.5c0 .5.4.7.8.4l1.2-1 1.2 1c.4.3.8.3 1.2 0l1.2-1 1.2 1c.4.3.8.3 1.2 0l1.2-1 1.2 1c.4.3.8.3 1.2 0l1.2-1 1.2 1c.4.3.8-.1.8-.4V8c0-3.866-3.134-7-7-7z"/>
@@ -3940,7 +3940,7 @@ Commands and output will appear here...
                         </div>
                     </div>
 
-                    <div class="settings-section" id="model-section" style="margin-top: 8px;">
+                    <div class="settings-section" id="model-section" style="margin-top: 16px;">
                         <h3>Model</h3>
                         <div id="model-list" class="model-list">
                             <div class="model-list-loading">Loading models...</div>
@@ -5901,9 +5901,15 @@ Session started - waiting for activity...
                         : Promise.resolve()
                 ]);
 
-                // Restore ghost visibility on app start (before settings are ever opened)
+                // Restore ghost visibility and provider state on app start
                 if (localStorage.getItem('externalAIEnabled') === 'true') {
-                    document.getElementById('privacy-ghost').style.display = '';
+                    const ghost = document.getElementById('privacy-ghost');
+                    ghost.style.display = '';
+                    const cachedProvider = localStorage.getItem('ghostProvider');
+                    if (cachedProvider) {
+                        ghost.classList.remove('local', 'remote', 'cloud');
+                        ghost.classList.add(cachedProvider);
+                    }
                 }
 
                 // Wait for meetings to load (priority), maintenance can finish in background
@@ -6981,12 +6987,26 @@ Session started - waiting for activity...
         // --- AI Provider management ---
 
         let currentAIProvider = 'local';
+        let cloudKeySavedForProvider = null;
+
+        const cloudDefaults = {
+            openai: { model: 'gpt-4o-mini', placeholder: 'gpt-4o-mini', key: 'sk-...' },
+            anthropic: { model: 'claude-haiku-4-5-20251001', placeholder: 'claude-haiku-4-5-20251001', key: 'sk-ant-...' },
+            custom: { model: '', placeholder: 'model-name', key: 'sk-...' }
+        };
 
         const providerDescriptions = {
             local: 'Everything runs on your device',
             remote: 'Your own Ollama server on another machine',
             cloud: 'Transcripts sent to a third-party API'
         };
+
+        function isValidUrl(str) {
+            try {
+                const url = new URL(str);
+                return url.protocol === 'http:' || url.protocol === 'https:';
+            } catch { return false; }
+        }
 
         function updateGhostIndicator(provider) {
             const ghost = document.getElementById('privacy-ghost');
@@ -6999,6 +7019,8 @@ Session started - waiting for activity...
                 cloud: 'Warning: Transcripts sent to cloud API'
             };
             ghost.title = titles[provider] || titles.local;
+            ghost.setAttribute('aria-label', ghost.title);
+            localStorage.setItem('ghostProvider', provider);
         }
 
         function applyProviderUI(provider) {
@@ -7100,15 +7122,6 @@ Session started - waiting for activity...
             }
         }
 
-        const cloudDefaults = {
-            openai: { model: 'gpt-4o-mini', placeholder: 'gpt-4o-mini', key: 'sk-...' },
-            anthropic: { model: 'claude-haiku-4-5-20251001', placeholder: 'claude-haiku-4-5-20251001', key: 'sk-ant-...' },
-            custom: { model: '', placeholder: 'model-name', key: 'sk-...' }
-        };
-
-        // Track which cloud provider has a saved key in the backend
-        let cloudKeySavedForProvider = null;
-
         function applyCloudProviderUI(provider) {
             const defaults = cloudDefaults[provider] || cloudDefaults.openai;
             document.getElementById('cloud-url-field').style.display = provider === 'custom' ? '' : 'none';
@@ -7150,8 +7163,11 @@ Session started - waiting for activity...
                 statusEl.className = 'connection-status visible error';
                 return;
             }
-
-            await ipcRenderer.invoke('set-remote-ollama-url', url);
+            if (!isValidUrl(url)) {
+                statusEl.textContent = 'Invalid URL. Must start with http:// or https://';
+                statusEl.className = 'connection-status visible error';
+                return;
+            }
 
             statusEl.textContent = 'Testing...';
             statusEl.className = 'connection-status visible';
@@ -7159,6 +7175,7 @@ Session started - waiting for activity...
             try {
                 const result = await ipcRenderer.invoke('test-remote-ollama', url);
                 if (result.success) {
+                    await ipcRenderer.invoke('set-remote-ollama-url', url);
                     const count = result.models ? result.models.length : 0;
                     statusEl.textContent = `Saved. Connected (${count} model${count !== 1 ? 's' : ''} available)`;
                     statusEl.className = 'connection-status visible success';
@@ -7179,6 +7196,12 @@ Session started - waiting for activity...
             const apiUrl = document.getElementById('cloud-api-url').value.trim();
             const apiKey = document.getElementById('cloud-api-key').value.trim();
             const model = document.getElementById('cloud-model-input').value.trim();
+
+            if (provider === 'custom' && apiUrl && !isValidUrl(apiUrl)) {
+                statusEl.textContent = 'Invalid API URL. Must start with http:// or https://';
+                statusEl.className = 'connection-status visible error';
+                return;
+            }
 
             statusEl.textContent = 'Testing...';
             statusEl.className = 'connection-status visible';

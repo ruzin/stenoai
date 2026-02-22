@@ -501,23 +501,20 @@ ipcMain.handle('request-microphone-permission', async () => {
 // Debug functionality handled by side panel now
 
 // Backend communication - always uses bundled stenoai executable
-function runPythonScript(script, args = [], silent = false) {
+function runPythonScript(script, args = [], silent = false, extraEnv = {}) {
   return new Promise((resolve, reject) => {
     const backendPath = getBackendPath();
     const command = `${backendPath} ${args.join(' ')}`;
 
-    // Log the command being executed (unless silent), masking sensitive args
-    const safeArgs = args.map((a, i) => {
-      if (i > 0 && (args[i - 1] === 'set-cloud-api-key')) return '***';
-      return a;
-    });
-    console.log('Running:', `${backendPath} ${safeArgs.join(' ')}`);
+    // Log the command being executed (unless silent)
+    console.log('Running:', `${backendPath} ${args.join(' ')}`);
     if (!silent) {
-      sendDebugLog(`$ stenoai ${safeArgs.join(' ')}`);
+      sendDebugLog(`$ stenoai ${args.join(' ')}`);
     }
 
     const process = spawn(backendPath, args, {
-      cwd: getBackendCwd()
+      cwd: getBackendCwd(),
+      env: Object.keys(extraEnv).length > 0 ? { ...require('process').env, ...extraEnv } : undefined
     });
 
     let stdout = '';
@@ -967,8 +964,14 @@ ipcMain.handle('start-recording-ui', async (_, sessionName) => {
     const actualSessionName = sessionName || 'Meeting';
 
     // Start background recording with 2-hour limit
+    // Pass cloud API key via env var for cloud summarization
+    const recordEnv = {};
+    const cloudKey = loadCloudApiKey();
+    if (cloudKey) recordEnv.STENOAI_CLOUD_API_KEY = cloudKey;
+
     currentRecordingProcess = spawn(getBackendPath(), ['record', '7200', actualSessionName], {
-      cwd: getBackendCwd()
+      cwd: getBackendCwd(),
+      env: Object.keys(recordEnv).length > 0 ? { ...require('process').env, ...recordEnv } : undefined
     });
 
     let hasStarted = false;
@@ -2209,10 +2212,48 @@ ipcMain.handle('set-language', async (event, languageCode) => {
 });
 
 // AI Provider IPC handlers
+
+function getCloudKeyPath() {
+  return path.join(os.homedir(), 'Library', 'Application Support', 'stenoai', '.cloud-api-key');
+}
+
+function saveCloudApiKey(key) {
+  try {
+    const keyDir = path.dirname(getCloudKeyPath());
+    if (!fs.existsSync(keyDir)) {
+      fs.mkdirSync(keyDir, { recursive: true });
+    }
+    const encrypted = safeStorage.encryptString(key);
+    fs.writeFileSync(getCloudKeyPath(), encrypted);
+    return true;
+  } catch (error) {
+    console.error('Failed to save cloud API key:', error.message);
+    return false;
+  }
+}
+
+function loadCloudApiKey() {
+  try {
+    const keyPath = getCloudKeyPath();
+    if (!fs.existsSync(keyPath)) return null;
+    const encrypted = fs.readFileSync(keyPath);
+    return safeStorage.decryptString(encrypted);
+  } catch (error) {
+    console.error('Failed to load cloud API key:', error.message);
+    return null;
+  }
+}
+
+function hasCloudApiKey() {
+  return fs.existsSync(getCloudKeyPath());
+}
+
 ipcMain.handle('get-ai-provider', async () => {
   try {
     const result = await runPythonScript('simple_recorder.py', ['get-ai-provider'], true);
     const jsonData = JSON.parse(result.trim());
+    // Override cloud_api_key_set with safeStorage check
+    jsonData.cloud_api_key_set = hasCloudApiKey();
     return { success: true, ...jsonData };
   } catch (error) {
     sendDebugLog(`Error getting AI provider: ${error.message}`);
@@ -2257,10 +2298,8 @@ ipcMain.handle('set-cloud-api-url', async (event, url) => {
 
 ipcMain.handle('set-cloud-api-key', async (event, key) => {
   try {
-    const result = await runPythonScript('simple_recorder.py', ['set-cloud-api-key', key]);
-    const jsonMatch = result.match(/\{.*\}/s);
-    if (jsonMatch) return JSON.parse(jsonMatch[0]);
-    return { success: true };
+    const saved = saveCloudApiKey(key);
+    return { success: saved, cloud_api_key_set: saved };
   } catch (error) {
     return { success: false, error: error.message };
   }
@@ -2304,7 +2343,9 @@ ipcMain.handle('test-remote-ollama', async (event, url) => {
 ipcMain.handle('test-cloud-api', async () => {
   try {
     sendDebugLog('Testing cloud API connection...');
-    const result = await runPythonScript('simple_recorder.py', ['test-cloud-api']);
+    const apiKey = loadCloudApiKey();
+    const env = apiKey ? { STENOAI_CLOUD_API_KEY: apiKey } : {};
+    const result = await runPythonScript('simple_recorder.py', ['test-cloud-api'], false, env);
     const jsonMatch = result.match(/\{.*\}/s);
     if (jsonMatch) return JSON.parse(jsonMatch[0]);
     return { success: false, error: 'No response' };
