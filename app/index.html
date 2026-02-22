@@ -912,6 +912,7 @@
         }
 
         .connection-status.visible { display: block; }
+        .connection-status.info { color: var(--accent-primary); border-color: color-mix(in srgb, var(--accent-primary) 25%, transparent); }
         .connection-status.success { color: var(--success-green); border-color: color-mix(in srgb, var(--success-green) 25%, transparent); }
         .connection-status.error { color: var(--recording-red); border-color: color-mix(in srgb, var(--recording-red) 25%, transparent); }
 
@@ -7044,6 +7045,21 @@ Session started - waiting for activity...
         }
 
         async function loadAIProviderSettings() {
+            // Apply cached state immediately to avoid flash
+            if (cloudKeySavedForProvider) {
+                document.getElementById('cloud-provider-select').value = cloudKeySavedForProvider;
+                applyCloudProviderUI(cloudKeySavedForProvider);
+                const defaults = cloudDefaults[cloudKeySavedForProvider] || cloudDefaults.openai;
+                const modelInput = document.getElementById('cloud-model-input');
+                if (!modelInput.value || Object.values(cloudDefaults).some(d => d.model === modelInput.value.trim())) {
+                    modelInput.value = defaults.model;
+                }
+                document.getElementById('cloud-api-key').placeholder = 'Key saved (enter new to change)';
+                const statusEl = document.getElementById('cloud-connection-status');
+                statusEl.textContent = 'Configured';
+                statusEl.className = 'connection-status visible info';
+            }
+
             try {
                 const result = await ipcRenderer.invoke('get-ai-provider');
                 if (!result.success) return;
@@ -7069,7 +7085,15 @@ Session started - waiting for activity...
                     modelInput.value = (cloudDefaults[result.cloud_provider] || cloudDefaults.openai).model;
                 }
                 if (result.cloud_api_key_set) {
+                    cloudKeySavedForProvider = result.cloud_provider || null;
                     document.getElementById('cloud-api-key').placeholder = 'Key saved (enter new to change)';
+                    const statusEl = document.getElementById('cloud-connection-status');
+                    statusEl.textContent = 'Configured';
+                    statusEl.className = 'connection-status visible info';
+                } else {
+                    const statusEl = document.getElementById('cloud-connection-status');
+                    statusEl.textContent = '';
+                    statusEl.className = 'connection-status';
                 }
             } catch (error) {
                 console.error('Error loading AI provider settings:', error);
@@ -7082,11 +7106,19 @@ Session started - waiting for activity...
             custom: { model: '', placeholder: 'model-name', key: 'sk-...' }
         };
 
+        // Track which cloud provider has a saved key in the backend
+        let cloudKeySavedForProvider = null;
+
         function applyCloudProviderUI(provider) {
             const defaults = cloudDefaults[provider] || cloudDefaults.openai;
             document.getElementById('cloud-url-field').style.display = provider === 'custom' ? '' : 'none';
             document.getElementById('cloud-model-input').placeholder = defaults.placeholder;
-            document.getElementById('cloud-api-key').placeholder = defaults.key;
+            const keyInput = document.getElementById('cloud-api-key');
+            if (cloudKeySavedForProvider === provider && !keyInput.value) {
+                keyInput.placeholder = 'Key saved (enter new to change)';
+            } else {
+                keyInput.placeholder = defaults.key;
+            }
         }
 
         function onCloudProviderChange() {
@@ -7098,6 +7130,15 @@ Session started - waiting for activity...
             const isDefault = Object.values(cloudDefaults).some(d => d.model === currentVal) || !currentVal;
             if (isDefault) {
                 modelInput.value = (cloudDefaults[provider] || cloudDefaults.openai).model;
+            }
+            // Show status based on whether this provider is configured
+            const statusEl = document.getElementById('cloud-connection-status');
+            if (cloudKeySavedForProvider === provider) {
+                statusEl.textContent = 'Configured';
+                statusEl.className = 'connection-status visible info';
+            } else {
+                statusEl.textContent = '';
+                statusEl.className = 'connection-status';
             }
         }
 
@@ -7152,6 +7193,7 @@ Session started - waiting for activity...
                 if (result.success) {
                     statusEl.textContent = 'Saved. Connected successfully';
                     statusEl.className = 'connection-status visible success';
+                    cloudKeySavedForProvider = provider;
                     document.getElementById('cloud-api-key').placeholder = 'Key saved (enter new to change)';
                     document.getElementById('cloud-api-key').value = '';
                 } else {
