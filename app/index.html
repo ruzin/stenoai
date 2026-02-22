@@ -3853,29 +3853,6 @@ Commands and output will appear here...
                         <button class="settings-action-btn" id="test-update-btn" onclick="testUpdateCheck()">Check</button>
                     </div>
 
-                    <div class="settings-row">
-                        <div class="settings-row-text">
-                            <span>Developer mode</span>
-                            <small>Show debug logs and developer tools</small>
-                        </div>
-                        <label class="settings-toggle">
-                            <input type="checkbox" id="developer-mode-toggle">
-                            <span class="toggle-slider"></span>
-                        </label>
-                    </div>
-
-                    <div class="settings-row" style="flex-wrap: wrap;">
-                        <div class="settings-row-text" style="flex: 1; min-width: 0;">
-                            <span>Anonymous usage analytics</span>
-                            <small>Help improve StenoAI -- no meeting content is ever sent</small>
-                        </div>
-                        <label class="settings-toggle">
-                            <input type="checkbox" id="telemetry-toggle">
-                            <span class="toggle-slider"></span>
-                        </label>
-                        <small id="anonymous-id-display" style="color: var(--text-muted); font-size: 11px; width: 100%; margin-top: 4px; cursor: pointer; opacity: 0.6;" title="Click to copy" onclick="navigator.clipboard.writeText(this.textContent.replace('ID: ','')).then(()=>{this.textContent='Copied!';setTimeout(()=>loadTelemetryId(),1500)})"></small>
-                    </div>
-
                     <div class="settings-version">
                         StenoAI <span id="app-version">Loading...</span>
                         <span style="margin: 0 6px; opacity: 0.3;">·</span>
@@ -3971,6 +3948,29 @@ Commands and output will appear here...
                         </div>
                         <label class="settings-toggle">
                             <input type="checkbox" id="external-ai-toggle">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+
+                    <div class="settings-row" style="flex-wrap: wrap;">
+                        <div class="settings-row-text" style="flex: 1; min-width: 0;">
+                            <span>Anonymous usage analytics</span>
+                            <small>Help improve StenoAI -- no meeting content is ever sent</small>
+                        </div>
+                        <label class="settings-toggle">
+                            <input type="checkbox" id="telemetry-toggle">
+                            <span class="toggle-slider"></span>
+                        </label>
+                        <small id="anonymous-id-display" style="color: var(--text-muted); font-size: 11px; width: 100%; margin-top: 4px; cursor: pointer; opacity: 0.6;" title="Click to copy" onclick="navigator.clipboard.writeText(this.textContent.replace('ID: ','')).then(()=>{this.textContent='Copied!';setTimeout(()=>loadTelemetryId(),1500)})"></small>
+                    </div>
+
+                    <div class="settings-row">
+                        <div class="settings-row-text">
+                            <span>Developer mode</span>
+                            <small>Show debug logs and developer tools</small>
+                        </div>
+                        <label class="settings-toggle">
+                            <input type="checkbox" id="developer-mode-toggle">
                             <span class="toggle-slider"></span>
                         </label>
                     </div>
@@ -7634,6 +7634,21 @@ Session started - waiting for activity...
                                 `Language set to ${result.language_name || newValue}`,
                                 'success'
                             );
+
+                            // Suggest better multilingual model if switching away from English on Llama
+                            if (newValue !== 'en') {
+                                const activeModel = document.querySelector('.model-item.active');
+                                const currentModel = activeModel ? activeModel.getAttribute('data-model-name') : '';
+                                if (currentModel === 'llama3.2:3b') {
+                                    const langName = result.language_name || newValue;
+                                    const switchTo = confirm(
+                                        `Llama 3.2 is optimised for English. For ${langName}, we recommend switching to Gemma 3 4B or Qwen 3 8B which have stronger multilingual support.\n\nSwitch to Gemma 3 4B now?`
+                                    );
+                                    if (switchTo) {
+                                        selectModel('gemma3:4b');
+                                    }
+                                }
+                            }
                         } else {
                             console.error('Failed to save language setting:', result.error);
                             showModelNotification('Failed to save language setting', 'error');
