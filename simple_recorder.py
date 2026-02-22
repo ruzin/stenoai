@@ -1632,18 +1632,6 @@ def set_cloud_api_url(url):
         print(json.dumps({"success": False, "error": "Failed to save cloud API URL"}))
 
 
-@cli.command()
-@click.argument('key')
-def set_cloud_api_key(key):
-    """Set the cloud API key"""
-    from src.config import get_config
-    config = get_config()
-    success = config.set_cloud_api_key(key)
-    if success:
-        print(json.dumps({"success": True, "cloud_api_key_set": True}))
-    else:
-        print(json.dumps({"success": False, "error": "Failed to save cloud API key"}))
-
 
 @cli.command()
 @click.argument('provider')

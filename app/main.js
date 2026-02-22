@@ -504,7 +504,6 @@ ipcMain.handle('request-microphone-permission', async () => {
 function runPythonScript(script, args = [], silent = false, extraEnv = {}) {
   return new Promise((resolve, reject) => {
     const backendPath = getBackendPath();
-    const command = `${backendPath} ${args.join(' ')}`;
 
     // Log the command being executed (unless silent)
     console.log('Running:', `${backendPath} ${args.join(' ')}`);

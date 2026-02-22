@@ -304,7 +304,7 @@ class OllamaSummarizer:
         Returns:
             The assistant's response text
         """
-        if getattr(self, 'cloud_provider', 'openai') == "anthropic":
+        if self.cloud_provider == "anthropic":
             return self._anthropic_chat(prompt, timeout_seconds)
         return self._openai_chat(prompt, timeout_seconds)
 
@@ -346,6 +346,8 @@ class OllamaSummarizer:
                     timeout=timeout_seconds,
                 )
                 # Anthropic returns content blocks; extract text
+                if not response.content:
+                    raise RuntimeError("Anthropic returned empty response")
                 return response.content[0].text.strip()
 
             except Exception as e:
@@ -491,6 +493,7 @@ Return ONLY the response in this exact JSON format:
             else:
                 # Retry logic for Ollama API calls (local or remote)
                 max_retries = 3
+                ollama_response = None
                 for attempt in range(max_retries):
                     try:
                         if attempt > 0:

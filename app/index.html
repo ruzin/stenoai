@@ -34,6 +34,7 @@
             --recording-glow: rgba(239, 68, 68, 0.2);
             --success-green: #22c55e;
             --warning-amber: #f59e0b;
+            --remote-cyan: #06b6d4;
         }
 
         [data-theme="light"] {
@@ -52,6 +53,7 @@
             --recording-glow: rgba(220, 53, 69, 0.15);
             --success-green: #198754;
             --warning-amber: #d97706;
+            --remote-cyan: #0891b2;
         }
 
         * {
@@ -816,10 +818,10 @@
             animation: ghost-glow 3s ease-in-out infinite;
         }
 
-        .privacy-ghost.remote svg .ghost-body { fill: #06b6d4; }
+        .privacy-ghost.remote svg .ghost-body { fill: var(--remote-cyan); }
         .privacy-ghost.remote svg .ghost-eyes { fill: var(--bg-primary); }
         .privacy-ghost.remote {
-            border-color: color-mix(in srgb, #06b6d4 25%, transparent);
+            border-color: color-mix(in srgb, var(--remote-cyan) 25%, transparent);
         }
 
         .privacy-ghost.cloud svg .ghost-body { fill: var(--recording-red); }
@@ -3899,11 +3901,11 @@ Commands and output will appear here...
                         <!-- Remote Ollama config -->
                         <div class="provider-config" id="remote-config">
                             <div class="provider-config-field">
-                                <label>Ollama Server URL</label>
+                                <label for="remote-ollama-url">Ollama Server URL</label>
                                 <input type="text" class="settings-input" id="remote-ollama-url" placeholder="http://192.168.1.100:11434">
                             </div>
                             <div class="connection-test-row">
-                                <button class="settings-action-btn" onclick="testRemoteConnection()" style="margin-left: 0;">Test Connection</button>
+                                <button class="settings-action-btn" id="test-remote-btn" onclick="testRemoteConnection()" style="margin-left: 0;">Test Connection</button>
                                 <span class="connection-status" id="remote-connection-status"></span>
                             </div>
                         </div>
@@ -3911,7 +3913,7 @@ Commands and output will appear here...
                         <!-- Cloud API config -->
                         <div class="provider-config" id="cloud-config">
                             <div class="provider-config-field">
-                                <label>Service</label>
+                                <label for="cloud-provider-select">Service</label>
                                 <select class="theme-select" id="cloud-provider-select" onchange="onCloudProviderChange()" style="width: 100%;">
                                     <option value="openai">OpenAI</option>
                                     <option value="anthropic">Anthropic (Claude)</option>
@@ -3919,19 +3921,19 @@ Commands and output will appear here...
                                 </select>
                             </div>
                             <div class="provider-config-field" id="cloud-url-field" style="display: none;">
-                                <label>API Base URL</label>
+                                <label for="cloud-api-url">API Base URL</label>
                                 <input type="text" class="settings-input" id="cloud-api-url" placeholder="https://api.example.com/v1">
                             </div>
                             <div class="provider-config-field">
-                                <label>API Key</label>
-                                <input type="password" class="settings-input" id="cloud-api-key" placeholder="sk-...">
+                                <label for="cloud-api-key">API Key</label>
+                                <input type="password" class="settings-input" id="cloud-api-key" placeholder="sk-..." autocomplete="off">
                             </div>
                             <div class="provider-config-field">
-                                <label>Model</label>
+                                <label for="cloud-model-input">Model</label>
                                 <input type="text" class="settings-input" id="cloud-model-input" placeholder="gpt-4o-mini" value="gpt-4o-mini">
                             </div>
                             <div class="connection-test-row">
-                                <button class="settings-action-btn" onclick="testCloudConnection()" style="margin-left: 0;">Test Connection</button>
+                                <button class="settings-action-btn" id="test-cloud-btn" onclick="testCloudConnection()" style="margin-left: 0;">Test Connection</button>
                                 <span class="connection-status" id="cloud-connection-status"></span>
                             </div>
                             <div class="privacy-warning">
@@ -7044,6 +7046,7 @@ Session started - waiting for activity...
         }
 
         async function selectProvider(provider) {
+            const previousProvider = currentAIProvider;
             // Apply UI immediately for responsiveness
             applyProviderUI(provider);
 
@@ -7051,6 +7054,8 @@ Session started - waiting for activity...
                 const result = await ipcRenderer.invoke('set-ai-provider', provider);
                 if (!result.success) {
                     console.error('Failed to set provider:', result.error);
+                    applyProviderUI(previousProvider);
+                    document.getElementById('ai-provider-select').value = previousProvider;
                     return;
                 }
 
@@ -7063,6 +7068,8 @@ Session started - waiting for activity...
                 }
             } catch (error) {
                 console.error('Error selecting provider:', error);
+                applyProviderUI(previousProvider);
+                document.getElementById('ai-provider-select').value = previousProvider;
             }
         }
 
@@ -7156,6 +7163,7 @@ Session started - waiting for activity...
         }
 
         async function testRemoteConnection() {
+            const btn = document.getElementById('test-remote-btn');
             const url = document.getElementById('remote-ollama-url').value.trim();
             const statusEl = document.getElementById('remote-connection-status');
             if (!url) {
@@ -7169,6 +7177,7 @@ Session started - waiting for activity...
                 return;
             }
 
+            btn.disabled = true;
             statusEl.textContent = 'Testing...';
             statusEl.className = 'connection-status visible';
 
@@ -7187,10 +7196,13 @@ Session started - waiting for activity...
             } catch (error) {
                 statusEl.textContent = error.message || 'Connection failed';
                 statusEl.className = 'connection-status visible error';
+            } finally {
+                btn.disabled = false;
             }
         }
 
         async function testCloudConnection() {
+            const btn = document.getElementById('test-cloud-btn');
             const statusEl = document.getElementById('cloud-connection-status');
             const provider = document.getElementById('cloud-provider-select').value;
             const apiUrl = document.getElementById('cloud-api-url').value.trim();
@@ -7203,17 +7215,21 @@ Session started - waiting for activity...
                 return;
             }
 
+            btn.disabled = true;
             statusEl.textContent = 'Testing...';
             statusEl.className = 'connection-status visible';
 
             try {
+                // Save provider, URL, and key before test (test depends on these)
                 await ipcRenderer.invoke('set-cloud-provider', provider);
                 if (apiUrl) await ipcRenderer.invoke('set-cloud-api-url', apiUrl);
                 if (apiKey) await ipcRenderer.invoke('set-cloud-api-key', apiKey);
-                if (model) await ipcRenderer.invoke('set-cloud-model', model);
 
                 const result = await ipcRenderer.invoke('test-cloud-api');
                 if (result.success) {
+                    // Save model only after successful connection
+                    if (model) await ipcRenderer.invoke('set-cloud-model', model);
+
                     statusEl.textContent = 'Saved. Connected successfully';
                     statusEl.className = 'connection-status visible success';
                     cloudKeySavedForProvider = provider;
@@ -7226,6 +7242,8 @@ Session started - waiting for activity...
             } catch (error) {
                 statusEl.textContent = error.message || 'Connection failed';
                 statusEl.className = 'connection-status visible error';
+            } finally {
+                btn.disabled = false;
             }
         }
 
