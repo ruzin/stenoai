@@ -21,7 +21,7 @@ jobs:
         include:
           - arch: x64
             build_cmd: build:intel
-            runner: macos-15-large
+            runner: macos-15-intel
           - arch: arm64
             build_cmd: build:arm64
             runner: macos-14
