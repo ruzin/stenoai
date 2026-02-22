@@ -3989,6 +3989,36 @@ Commands and output will appear here...
 
                 </div>
 
+                <!-- Advanced Tab -->
+                <div class="settings-tab" id="tab-advanced">
+                    <div class="settings-row" style="flex-wrap: wrap;">
+                        <div class="settings-row-text" style="flex: 1; min-width: 0;">
+                            <span>Storage location</span>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 4px; flex-shrink: 0;">
+                            <button class="settings-action-btn" id="choose-storage-btn" onclick="chooseStorageLocation()" style="margin-left: 0;">Choose...</button>
+                            <button class="settings-action-btn" id="reset-storage-btn" onclick="resetStorageLocation()" style="display: none; margin-left: 0;">Reset</button>
+                        </div>
+                        <small id="storage-path-display" style="color: var(--text-muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; width: 100%; margin-top: 2px;">Default location</small>
+                    </div>
+
+                    <div class="settings-row">
+                        <div class="settings-row-text">
+                            <span>Setup wizard</span>
+                            <small>Reinstall dependencies or fix configuration</small>
+                        </div>
+                        <button class="settings-action-btn" id="run-setup-btn" onclick="runSetupFromSettings()">Run</button>
+                    </div>
+
+                    <div class="settings-row">
+                        <div class="settings-row-text">
+                            <span>Clear recording state</span>
+                            <small>Fix stuck recordings or processing</small>
+                        </div>
+                        <button class="settings-action-btn" id="clear-state-btn" onclick="clearSystemState()">Clear</button>
+                    </div>
+                </div>
+
                 <!-- Developer Tab -->
                 <div class="settings-tab" id="tab-developer">
                     <div class="dev-tab-header">
