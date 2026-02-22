@@ -21,9 +21,11 @@ jobs:
         include:
           - arch: x64
             build_cmd: build:intel
+            runner: macos-13
           - arch: arm64
             build_cmd: build:arm64
-    runs-on: macos-14
+            runner: macos-14
+    runs-on: ${{ matrix.runner }}
 
     steps:
     - name: Checkout code
@@ -60,8 +62,10 @@ jobs:
     - name: Build Python backend with PyInstaller
       run: |
         pyinstaller stenoai.spec --noconfirm
-        # Verify build
+        # Verify build and architecture
         ls -la dist/stenoai/
+        file dist/stenoai/stenoai
+        echo "Expected arch: ${{ matrix.arch }}"
         echo "Backend built successfully"
 
     - name: Install Electron dependencies
