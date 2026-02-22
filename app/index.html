@@ -3873,7 +3873,7 @@ Commands and output will appear here...
                         <div class="settings-row">
                             <div class="settings-row-text">
                                 <span>AI Provider</span>
-                                <small id="provider-description">Everything runs on your device</small>
+                                <small id="provider-description">Everything runs on your device <span style="color: var(--accent-primary);">(Recommended)</span></small>
                             </div>
                             <select class="theme-select" id="ai-provider-select" onchange="selectProvider(this.value)">
                                 <option value="local">Local (on-device)</option>
@@ -7025,7 +7025,7 @@ Session started - waiting for activity...
         };
 
         const providerDescriptions = {
-            local: 'Everything runs on your device',
+            local: 'Everything runs on your device <span style="color: var(--accent-primary);">(Recommended)</span>',
             remote: 'Your own Ollama server on another machine',
             cloud: 'Transcripts sent to a third-party API'
         };
@@ -7062,7 +7062,7 @@ Session started - waiting for activity...
 
             // Update description
             const desc = document.getElementById('provider-description');
-            if (desc) desc.textContent = providerDescriptions[provider] || '';
+            if (desc) desc.innerHTML = providerDescriptions[provider] || '';
 
             // Show/hide config sections
             document.getElementById('remote-config').classList.toggle('visible', provider === 'remote');
