@@ -614,7 +614,9 @@ ipcMain.handle('get-status', async () => {
 
 ipcMain.handle('process-recording', async (event, audioFile, sessionName) => {
   try {
-    const result = await runPythonScript('simple_recorder.py', ['process', audioFile, '--name', sessionName]);
+    const cloudKey = loadCloudApiKey();
+    const env = cloudKey ? { STENOAI_CLOUD_API_KEY: cloudKey } : {};
+    const result = await runPythonScript('simple_recorder.py', ['process', audioFile, '--name', sessionName], false, env);
     trackEvent('transcription_completed', { success: true });
     trackEvent('summarization_completed', { success: true });
     return { success: true, result: result };
@@ -671,7 +673,9 @@ ipcMain.handle('reprocess-meeting', async (event, summaryFile) => {
     sendDebugLog(`🔄 Reprocessing meeting: ${summaryFile}`);
     sendDebugLog(`$ python simple_recorder.py reprocess "${summaryFile}"`);
 
-    const result = await runPythonScript('simple_recorder.py', ['reprocess', summaryFile]);
+    const cloudKey = loadCloudApiKey();
+    const env = cloudKey ? { STENOAI_CLOUD_API_KEY: cloudKey } : {};
+    const result = await runPythonScript('simple_recorder.py', ['reprocess', summaryFile], false, env);
 
     sendDebugLog('✅ Meeting reprocessed successfully');
     return { success: true, message: result };
@@ -685,8 +689,10 @@ ipcMain.handle('query-transcript', async (event, summaryFile, question) => {
   try {
     sendDebugLog(`🤖 Querying transcript: ${question.substring(0, 50)}...`);
 
-    // Run the query command
-    const result = await runPythonScript('simple_recorder.py', ['query', summaryFile, '-q', question]);
+    // Run the query command (pass cloud key for cloud provider)
+    const cloudKey = loadCloudApiKey();
+    const env = cloudKey ? { STENOAI_CLOUD_API_KEY: cloudKey } : {};
+    const result = await runPythonScript('simple_recorder.py', ['query', summaryFile, '-q', question], false, env);
 
     // Parse the JSON response
     try {
@@ -893,7 +899,9 @@ async function processNextInQueue() {
   console.log(`🔄 Processing queued job: ${currentProcessingJob.sessionName}`);
   
   try {
-    const result = await runPythonScript('simple_recorder.py', ['process', currentProcessingJob.audioFile, '--name', currentProcessingJob.sessionName]);
+    const queueCloudKey = loadCloudApiKey();
+    const queueEnv = queueCloudKey ? { STENOAI_CLOUD_API_KEY: queueCloudKey } : {};
+    const result = await runPythonScript('simple_recorder.py', ['process', currentProcessingJob.audioFile, '--name', currentProcessingJob.sessionName], false, queueEnv);
     console.log(`✅ Completed processing: ${currentProcessingJob.sessionName}`);
     trackEvent('transcription_completed', { success: true });
     trackEvent('summarization_completed', { success: true });

@@ -1035,13 +1035,12 @@ def query(transcript_file, question):
         print(json.dumps({"success": False, "error": "Transcript is empty"}))
         return
 
-    # Use llama3.2:3b for local/remote queries (fastest), cloud uses its own model
+    # Use the user's configured model for all providers
     try:
         from src.config import get_config
         config = get_config()
         language = config.get_language()
-        query_model = None if config.get_ai_provider() == "cloud" else "llama3.2:3b"
-        summarizer = OllamaSummarizer(model_name=query_model)
+        summarizer = OllamaSummarizer()
         answer = summarizer.query_transcript(transcript_text, question, language=language)
 
         if answer:
