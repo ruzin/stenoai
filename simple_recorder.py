@@ -1772,4 +1772,6 @@ def pull_model(model_name):
 
 
 if __name__ == '__main__':
+    import multiprocessing
+    multiprocessing.freeze_support()
     cli()

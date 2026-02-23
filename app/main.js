@@ -1282,10 +1282,13 @@ ipcMain.handle('setup-system-check', async () => {
 ipcMain.handle('setup-ffmpeg', async () => {
   try {
     sendDebugLog('$ Checking for existing ffmpeg installation...');
-    sendDebugLog('$ Checking: ffmpeg -version, /opt/homebrew/bin/ffmpeg, /usr/local/bin/ffmpeg');
 
-    // Check if ffmpeg is already installed - try multiple common paths
-    const ffmpegPaths = ['ffmpeg', '/opt/homebrew/bin/ffmpeg', '/usr/local/bin/ffmpeg'];
+    // Check bundled ffmpeg first (shipped with the app), then system paths
+    const bundledFfmpeg = app.isPackaged
+      ? path.join(process.resourcesPath, 'stenoai', 'ffmpeg')
+      : path.join(__dirname, '..', 'dist', 'stenoai', 'ffmpeg');
+    const ffmpegPaths = [bundledFfmpeg, 'ffmpeg', '/opt/homebrew/bin/ffmpeg', '/usr/local/bin/ffmpeg'];
+    sendDebugLog(`$ Checking: ${ffmpegPaths.join(', ')}`);
     let ffmpegPath = null;
 
     for (const testPath of ffmpegPaths) {
