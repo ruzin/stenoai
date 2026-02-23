@@ -1552,19 +1552,36 @@ ipcMain.handle('setup-ollama-and-model', async () => {
     }
     sendDebugLog(`Found bundled Ollama at: ${finalOllamaPath}`);
 
-    // Start Ollama service with proper env vars for bundled dylibs
+    // Start Ollama service with stderr capture for diagnostics
     sendDebugLog('Starting Ollama service...');
     sendDebugLog(`$ ${finalOllamaPath} serve`);
-    ollamaProcess = spawn(finalOllamaPath, ['serve'], { detached: true, stdio: 'ignore', env: getOllamaEnv() });
+    let ollamaExited = false;
+    let ollamaExitCode = null;
+    ollamaProcess = spawn(finalOllamaPath, ['serve'], { detached: true, stdio: ['ignore', 'ignore', 'pipe'], env: getOllamaEnv() });
+    ollamaProcess.stderr.on('data', (data) => {
+      const msg = data.toString().trim();
+      if (msg) sendDebugLog(`Ollama: ${msg}`);
+    });
+    ollamaProcess.on('exit', (code) => {
+      ollamaExited = true;
+      ollamaExitCode = code;
+      if (code !== 0 && code !== null) {
+        sendDebugLog(`Ollama process exited with code ${code}`);
+      }
+    });
     ollamaProcess.unref();
     ollamaStartedByUs = true;
 
-    // Wait for Ollama to be ready (poll instead of fixed wait)
+    // Wait for Ollama to be ready (poll with early exit detection)
     sendDebugLog('Waiting for Ollama service to be ready...');
-    const maxAttempts = 15;
+    const maxAttempts = 30;
     let ready = false;
     for (let i = 0; i < maxAttempts; i++) {
       await new Promise(resolve => setTimeout(resolve, 1000));
+      if (ollamaExited) {
+        sendDebugLog(`Ollama process died during startup (exit code: ${ollamaExitCode})`);
+        break;
+      }
       try {
         const http = require('http');
         ready = await new Promise((resolve) => {
@@ -1584,6 +1601,9 @@ ipcMain.handle('setup-ollama-and-model', async () => {
     }
 
     if (!ready) {
+      if (ollamaExited) {
+        return { success: false, error: `Ollama failed to start (exit code: ${ollamaExitCode}). Check debug logs for details.` };
+      }
       sendDebugLog('Warning: Ollama may not be fully ready, attempting pull anyway...');
     }
     

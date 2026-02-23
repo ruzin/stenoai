@@ -21,9 +21,11 @@ jobs:
         include:
           - arch: x64
             build_cmd: build:intel
+            runner: macos-15-intel
           - arch: arm64
             build_cmd: build:arm64
-    runs-on: macos-14
+            runner: macos-14
+    runs-on: ${{ matrix.runner }}
 
     steps:
     - name: Checkout code
@@ -57,11 +59,22 @@ jobs:
         chmod +x scripts/download-ollama.sh
         ./scripts/download-ollama.sh
 
+    - name: Strip ad-hoc code signatures from dylibs (fixes install_name_tool on Intel)
+      if: matrix.arch == 'x64'
+      run: |
+        # pywhispercpp ships pre-signed dylibs that install_name_tool can't modify
+        # Strip signatures so PyInstaller can rewrite library paths
+        find "$(python -c 'import site; print(site.getsitepackages()[0])')/pywhispercpp" \
+          -name "*.dylib" -exec codesign --remove-signature {} \; 2>/dev/null || true
+        echo "Stripped ad-hoc signatures from pywhispercpp dylibs"
+
     - name: Build Python backend with PyInstaller
       run: |
         pyinstaller stenoai.spec --noconfirm
-        # Verify build
+        # Verify build and architecture
         ls -la dist/stenoai/
+        file dist/stenoai/stenoai
+        echo "Expected arch: ${{ matrix.arch }}"
         echo "Backend built successfully"
 
     - name: Install Electron dependencies
