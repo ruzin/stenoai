@@ -274,18 +274,8 @@
             width: 3px;
             background: var(--recording-red);
             border-radius: 2px;
-            animation: waveform 0.8s ease-in-out infinite;
-        }
-
-        .waveform-bar:nth-child(1) { animation-delay: 0s; height: 8px; }
-        .waveform-bar:nth-child(2) { animation-delay: 0.1s; height: 12px; }
-        .waveform-bar:nth-child(3) { animation-delay: 0.2s; height: 16px; }
-        .waveform-bar:nth-child(4) { animation-delay: 0.3s; height: 10px; }
-        .waveform-bar:nth-child(5) { animation-delay: 0.4s; height: 6px; }
-
-        @keyframes waveform {
-            0%, 100% { transform: scaleY(0.5); }
-            50% { transform: scaleY(1); }
+            height: 4px;
+            transition: height 0.05s ease;
         }
         
         .btn {
@@ -3191,6 +3181,9 @@
                     <div class="waveform-bar"></div>
                     <div class="waveform-bar"></div>
                     <div class="waveform-bar"></div>
+                    <div class="waveform-bar"></div>
+                    <div class="waveform-bar"></div>
+                    <div class="waveform-bar"></div>
                 </div>
             </div>
             
@@ -4050,6 +4043,7 @@ Session started - waiting for activity...
         </div>
     </div>
 
+    <script src="audio-visualizer.js"></script>
     <script>
         const { ipcRenderer } = require('electron');
         
@@ -4156,7 +4150,7 @@ Session started - waiting for activity...
         let calendarRefreshInterval = null;
         let calendarNotificationTimers = [];
         let notifiedEventIds = new Set();
-        
+
         // Utility functions
         function log(message) {
             console.log(`[${new Date().toLocaleTimeString()}] ${message}`);
@@ -4188,6 +4182,11 @@ Session started - waiting for activity...
                 recordingStartTime = Date.now();
                 pausedElapsedTime = 0;
             }
+            // Update status immediately so the waveform appears without a 1s delay
+            const elapsed0 = Math.floor((Date.now() - recordingStartTime) / 1000);
+            const min0 = Math.floor(elapsed0 / 60);
+            const sec0 = elapsed0 % 60;
+            setStatus('recording', `Recording... ${min0}:${sec0.toString().padStart(2, '0')}`);
             recordingTimer = setInterval(() => {
                 const elapsed = Math.floor((Date.now() - recordingStartTime) / 1000);
                 const minutes = Math.floor(elapsed / 60);
@@ -4231,6 +4230,7 @@ Session started - waiting for activity...
                     sessionNameInput.disabled = false;
                     stopRecordingTimer();
                     setStatus('ready', 'Ready');
+                    AudioVisualizer.stop();
                     break;
 
                 case 'recording':
@@ -4271,6 +4271,7 @@ Session started - waiting for activity...
                     sessionNameInput.disabled = true;
                     stopRecordingTimer();
                     setStatus('processing', 'Processing...');
+                    AudioVisualizer.stop();
                     break;
             }
         }
@@ -5170,6 +5171,12 @@ Session started - waiting for activity...
                 const micSource = _systemAudioContext.createMediaStreamSource(micStream);
                 micSource.connect(dest);
 
+                // Attach analyser for waveform visualization
+                const vizAnalyser = _systemAudioContext.createAnalyser();
+                vizAnalyser.fftSize = 256;
+                loopbackSource.connect(vizAnalyser);
+                micSource.connect(vizAnalyser);
+
                 // Start recording the mixed stream
                 _systemAudioChunks = [];
                 _systemAudioMediaRecorder = new MediaRecorder(dest.stream, {
@@ -5185,6 +5192,11 @@ Session started - waiting for activity...
                 _systemAudioMediaRecorder.start(1000); // Collect data every second
                 _systemAudioRecording = true;
                 ipcRenderer.send('system-audio-recording-state', true);
+
+                // Start waveform visualization from the mixed analyser
+                const vizBars = Array.from(document.querySelectorAll('#waveform .waveform-bar'));
+                AudioVisualizer.startFromAnalyser(vizBars, vizAnalyser);
+
                 log('System audio recording started (mic + system audio)');
             } catch (error) {
                 // Clean up any acquired streams on failure
@@ -5234,6 +5246,9 @@ Session started - waiting for activity...
                     const buffer = Buffer.from(await blob.arrayBuffer());
                     require('fs').writeFileSync(filePath, buffer);
                     log(`System audio saved: ${filePath}`);
+
+                    // Stop waveform visualization
+                    AudioVisualizer.stop();
 
                     // Clean up streams
                     _systemAudioStreams.forEach(stream => {
@@ -5321,6 +5336,10 @@ Session started - waiting for activity...
             } else {
                 log(`Starting recording: ${sessionName}`);
                 setUIState('recording');
+                // Start visualizer immediately (within user-gesture frame, before IPC await)
+                // so bars appear instantly and AudioContext is never suspended.
+                const vizBars = Array.from(document.querySelectorAll('#waveform .waveform-bar'));
+                AudioVisualizer.start(vizBars);
                 try {
                     const result = await ipcRenderer.invoke('start-recording-ui', sessionName);
                     if (result.success) {
@@ -5328,10 +5347,12 @@ Session started - waiting for activity...
                         startStatusMonitoring();
                     } else {
                         log(`Failed to start: ${result.error}`);
+                        AudioVisualizer.stop();
                         setUIState('ready');
                     }
                 } catch (error) {
                     log(`Start error: ${error.message}`);
+                    AudioVisualizer.stop();
                     setUIState('ready');
                 }
             }
@@ -5380,8 +5401,10 @@ Session started - waiting for activity...
                         processingMeetings.delete(currentSessionName);
                     }
                     setTimeout(() => {
-                        setUIState('ready');
-                        sessionNameInput.value = '';
+                        if (uiState === 'processing') {
+                            setUIState('ready');
+                            sessionNameInput.value = '';
+                        }
                     }, 3000);
                 } catch (error) {
                     log(`System audio stop error: ${error.message}`);
@@ -5399,8 +5422,10 @@ Session started - waiting for activity...
 
                         // Return to ready state quickly so user can start another recording if needed
                         setTimeout(() => {
-                            setUIState('ready');
-                            sessionNameInput.value = '';
+                            if (uiState === 'processing') {
+                                setUIState('ready');
+                                sessionNameInput.value = '';
+                            }
                         }, 5000);
 
                     } else {
