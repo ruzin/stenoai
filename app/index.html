@@ -5401,10 +5401,8 @@ Session started - waiting for activity...
                         processingMeetings.delete(currentSessionName);
                     }
                     setTimeout(() => {
-                        if (uiState === 'processing') {
-                            setUIState('ready');
-                            sessionNameInput.value = '';
-                        }
+                        setUIState('ready');
+                        sessionNameInput.value = '';
                     }, 3000);
                 } catch (error) {
                     log(`System audio stop error: ${error.message}`);
@@ -5422,10 +5420,8 @@ Session started - waiting for activity...
 
                         // Return to ready state quickly so user can start another recording if needed
                         setTimeout(() => {
-                            if (uiState === 'processing') {
-                                setUIState('ready');
-                                sessionNameInput.value = '';
-                            }
+                            setUIState('ready');
+                            sessionNameInput.value = '';
                         }, 5000);
 
                     } else {
