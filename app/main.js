@@ -1261,7 +1261,15 @@ async function processNextInQueue() {
         // Get the specific processed meeting data
         const meetingsResult = await runPythonScript('simple_recorder.py', ['list-meetings'], true);
         const allMeetings = JSON.parse(meetingsResult);
-        const processedMeeting = allMeetings.find(m => m.session_info?.name === currentProcessingJob.sessionName);
+        // Try matching by name first, then by audio file path (name may have been
+        // auto-generated from the transcript, so the original hash may no longer match)
+        let processedMeeting = allMeetings.find(m => m.session_info?.name === currentProcessingJob.sessionName);
+        if (!processedMeeting && currentProcessingJob.audioFile) {
+          const audioBasename = require('path').basename(currentProcessingJob.audioFile);
+          processedMeeting = allMeetings.find(m => 
+            m.session_info?.audio_file && require('path').basename(m.session_info.audio_file) === audioBasename
+          );
+        }
         
         mainWindow.webContents.send('processing-complete', { 
           success: true, 
@@ -1352,7 +1360,13 @@ ipcMain.handle('start-recording-ui', async (_, sessionName) => {
           runPythonScript('simple_recorder.py', ['list-meetings'], true)
             .then(meetingsResult => {
               const allMeetings = JSON.parse(meetingsResult);
-              const processedMeeting = allMeetings.find(m => m.session_info?.name === actualSessionName);
+              // Try matching by name first, then by audio file (name may have been
+              // auto-generated from the transcript)
+              let processedMeeting = allMeetings.find(m => m.session_info?.name === actualSessionName);
+              if (!processedMeeting) {
+                // Find the most recently processed meeting as fallback
+                processedMeeting = allMeetings[0];
+              }
 
               mainWindow.webContents.send('processing-complete', {
                 success: true,

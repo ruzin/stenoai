@@ -19,6 +19,7 @@ import click
 import asyncio
 import logging
 import json
+import re
 import sys
 import time
 from datetime import datetime
@@ -379,6 +380,22 @@ Transcript:
             session_name,
             duration_minutes
         )
+        
+        # Step 2b: Auto-generate title for auto-named meetings
+        if re.match(r'^Meeting-[A-Z0-9]{6}$', session_name):
+            try:
+                from src.config import get_config
+                language = get_config().get_language()
+                generated_title = self.summarizer.generate_title(
+                    summary_data.get("summary", ""),
+                    transcript_data["transcript_text"],
+                    language=language
+                )
+                if generated_title:
+                    print(f"Auto-generated title: {generated_title}")
+                    session_name = generated_title
+            except Exception as e:
+                print(f"Title generation skipped: {e}")
         
         # Step 3: Save complete summary
         summary_path = self.output_dir / f"{audio_path.stem}_summary.json"

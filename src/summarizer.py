@@ -723,6 +723,80 @@ Return ONLY the response in this exact JSON format:
         """Cleanup when object is destroyed."""
         self.cleanup()
 
+    def generate_title(self, summary: str, transcript: str, language: str = "en") -> Optional[str]:
+        """
+        Generate a short, descriptive meeting title from the summary and transcript.
+
+        Args:
+            summary: The meeting overview/summary text
+            transcript: The raw transcript text (used as fallback context)
+            language: Language code for the title
+
+        Returns:
+            A short title string, or None if generation failed
+        """
+        try:
+            # Use summary if available, otherwise fall back to first part of transcript
+            context = summary if summary else transcript[:2000]
+            if not context or context.strip() == "":
+                return None
+
+            # Build language instruction
+            if language and language != "en":
+                from .config import get_config
+                language_name = get_config().get_language_name(language)
+                lang_instruction = f" The title MUST be in {language_name}."
+            else:
+                lang_instruction = ""
+
+            prompt = f"""Generate a short, descriptive title for this meeting based on the summary below.
+
+RULES:
+1. Maximum 6 words
+2. No quotes, no punctuation, no prefixes like "Meeting:" or "Title:"
+3. Just the title text, nothing else
+4. Capture the main topic or purpose of the meeting{lang_instruction}
+
+SUMMARY:
+{context}
+
+TITLE:"""
+
+            logger.info("Generating meeting title from summary")
+
+            if self.ai_provider == "cloud":
+                response_text = self._cloud_chat(prompt, 30)
+            else:
+                ollama_response = self.client.chat(
+                    model=self.model_name,
+                    messages=[{'role': 'user', 'content': prompt}],
+                    options={'timeout': 30}
+                )
+                response_text = ollama_response['message']['content'].strip()
+
+            # Clean up the response
+            title = response_text.strip().strip('"').strip("'").strip()
+            # Remove common prefixes the model might add
+            for prefix in ["Title:", "Meeting:", "Meeting Title:", "title:", "meeting:"]:
+                if title.lower().startswith(prefix.lower()):
+                    title = title[len(prefix):].strip()
+
+            # Enforce max length (6 words, ~60 chars)
+            words = title.split()
+            if len(words) > 6:
+                title = " ".join(words[:6])
+
+            # Only return if we got something meaningful
+            if title and len(title) > 2:
+                logger.info(f"Generated meeting title: {title}")
+                return title
+
+            return None
+
+        except Exception as e:
+            logger.warning(f"Failed to generate meeting title: {e}")
+            return None
+
     def query_transcript(self, transcript: str, question: str, language: str = "en") -> Optional[str]:
         """
         Query a transcript with a question using Ollama.
