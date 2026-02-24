@@ -4182,11 +4182,6 @@ Session started - waiting for activity...
                 recordingStartTime = Date.now();
                 pausedElapsedTime = 0;
             }
-            // Update status immediately so the waveform appears without a 1s delay
-            const elapsed0 = Math.floor((Date.now() - recordingStartTime) / 1000);
-            const min0 = Math.floor(elapsed0 / 60);
-            const sec0 = elapsed0 % 60;
-            setStatus('recording', `Recording... ${min0}:${sec0.toString().padStart(2, '0')}`);
             recordingTimer = setInterval(() => {
                 const elapsed = Math.floor((Date.now() - recordingStartTime) / 1000);
                 const minutes = Math.floor(elapsed / 60);
