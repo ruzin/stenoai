@@ -25,16 +25,29 @@ let launchedByShortcut = false;
 const SHORTCUT_PROTOCOL = 'stenoai';
 const SHORTCUT_HOST = 'record';
 const SHORTCUT_SESSION_NAME_MAX_LENGTH = 120;
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+
+function extractShortcutUrlFromArgv(argv = []) {
+  return argv.find(arg => typeof arg === 'string' && arg.startsWith(`${SHORTCUT_PROTOCOL}://`));
+}
+
+function sanitizeShortcutUrlForLogs(incomingUrl) {
+  try {
+    const parsed = new URL(incomingUrl);
+    return `${parsed.protocol}//${parsed.hostname}${parsed.pathname}`;
+  } catch (error) {
+    return '[invalid-shortcut-url]';
+  }
+}
 
 function sanitizeShortcutSessionName(rawValue) {
   if (typeof rawValue !== 'string') {
     return null;
   }
 
-  // Keep user-visible names readable while stripping unsafe/path-like characters.
+  // Keep user-visible names readable while stripping unsupported characters.
   // Preserve Unicode letters (including diacritics) and common punctuation.
   const sanitized = rawValue
-    .replace(/[/\\:*?"<>|]/g, ' ')
     .replace(/[^\p{L}\p{M}\p{N}_\s.,()@&'!+#-]/gu, ' ')
     .replace(/\s+/g, ' ')
     .trim()
@@ -110,9 +123,16 @@ function parseShortcutUrl(incomingUrl) {
 }
 
 function ensureMainWindow() {
+  if (!app.isReady()) {
+    sendDebugLog('Shortcut action received before app ready; deferring window creation');
+    return false;
+  }
+
   if (!mainWindow || mainWindow.isDestroyed()) {
     createWindow();
   }
+
+  return true;
 }
 
 function dispatchShortcutAction(action) {
@@ -124,11 +144,13 @@ function dispatchShortcutAction(action) {
     mainWindow.webContents.send('shortcut-start-recording', {
       sessionName: action.sessionName || null
     });
+    launchedByShortcut = false;
     return true;
   }
 
   if (action.type === 'stop') {
     mainWindow.webContents.send('shortcut-stop-recording');
+    launchedByShortcut = false;
     return true;
   }
 
@@ -151,6 +173,10 @@ function flushShortcutQueue() {
 }
 
 function enqueueShortcutAction(action) {
+  if (shortcutQueue.length >= 5) {
+    sendDebugLog('Shortcut queue overflow, dropping oldest action');
+    shortcutQueue.shift();
+  }
   shortcutQueue.push(action);
   flushShortcutQueue();
 }
@@ -187,25 +213,43 @@ async function showShortcutNotification(body) {
   }
 }
 
+const BACKEND_STATUS_RETRY_ATTEMPTS = 3;
+const BACKEND_STATUS_RETRY_DELAY_MS = 250;
+
+function wait(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 async function isBackendRecording() {
-  try {
-    const status = await handleGetStatus();
-    if (!status.success) {
-      return false;
+  for (let attempt = 1; attempt <= BACKEND_STATUS_RETRY_ATTEMPTS; attempt += 1) {
+    try {
+      const status = await handleGetStatus();
+      if (status.success) {
+        return status.status.includes('STATUS: RECORDING');
+      }
+    } catch (error) {
+      if (attempt === BACKEND_STATUS_RETRY_ATTEMPTS) {
+        console.error('Error checking recording status for shortcut action:', error.message);
+      }
     }
-    return status.status.includes('STATUS: RECORDING');
-  } catch (error) {
-    console.error('Error checking recording status for shortcut action:', error.message);
-    return false;
+
+    if (attempt < BACKEND_STATUS_RETRY_ATTEMPTS) {
+      await wait(BACKEND_STATUS_RETRY_DELAY_MS);
+    }
   }
+
+  console.warn('Backend status unavailable after retries; assuming not recording for shortcut action');
+  return false;
 }
 
 async function handleShortcutUrl(incomingUrl) {
   const parsedAction = parseShortcutUrl(incomingUrl);
+  const safeShortcutUrl = sanitizeShortcutUrlForLogs(incomingUrl);
 
   if (parsedAction.type === 'invalid') {
-    console.warn(`Ignored invalid shortcut URL (${parsedAction.reason}): ${incomingUrl}`);
+    sendDebugLog(`Ignored invalid shortcut URL (${parsedAction.reason}): ${safeShortcutUrl}`);
     await showShortcutNotification('Invalid shortcut URL');
+    launchedByShortcut = false;
     return;
   }
 
@@ -214,10 +258,15 @@ async function handleShortcutUrl(incomingUrl) {
   if (parsedAction.type === 'start') {
     if (recording) {
       await showShortcutNotification('Recording already in progress');
+      launchedByShortcut = false;
       return;
     }
 
-    ensureMainWindow();
+    if (!ensureMainWindow()) {
+      launchedByShortcut = true;
+      pendingShortcutUrls.push(incomingUrl);
+      return;
+    }
     enqueueShortcutAction(parsedAction);
     await showShortcutNotification('Start recording requested');
     return;
@@ -225,10 +274,15 @@ async function handleShortcutUrl(incomingUrl) {
 
   if (!recording) {
     await showShortcutNotification('Recording already stopped');
+    launchedByShortcut = false;
     return;
   }
 
-  ensureMainWindow();
+  if (!ensureMainWindow()) {
+    launchedByShortcut = true;
+    pendingShortcutUrls.push(incomingUrl);
+    return;
+  }
   enqueueShortcutAction(parsedAction);
   await showShortcutNotification('Stop recording requested');
 }
@@ -521,191 +575,217 @@ function updateTrayMenu() {
   tray.setContextMenu(contextMenu);
 }
 
-app.on('before-quit', async (event) => {
-  if (isQuitting) return;
-
-  // Use synchronous flag -- systemAudioRecordingActive is updated via IPC on each state change
-  if (currentRecordingProcess || systemAudioRecordingActive) {
-    event.preventDefault();
-    const { response } = await dialog.showMessageBox(mainWindow || null, {
-      type: 'warning',
-      buttons: ['Cancel', 'Stop & Quit'],
-      defaultId: 0,
-      cancelId: 0,
-      title: 'Recording in Progress',
-      message: 'A recording is still in progress. Quitting will stop and save the recording.',
-    });
-    if (response === 1) {
-      if (currentRecordingProcess) {
-        currentRecordingProcess.kill('SIGTERM');
-        currentRecordingProcess = null;
+if (!gotSingleInstanceLock) {
+  app.quit();
+} else {
+  app.on('second-instance', (event, argv) => {
+    const shortcutUrl = extractShortcutUrlFromArgv(argv);
+    if (shortcutUrl) {
+      if (app.isReady()) {
+        handleShortcutUrl(shortcutUrl).catch(err => {
+          sendDebugLog(`Error handling shortcut URL: ${err.message}`);
+        });
+      } else {
+        launchedByShortcut = true;
+        pendingShortcutUrls.push(shortcutUrl);
       }
-      if (systemAudioRecordingActive && mainWindow && !mainWindow.isDestroyed()) {
-        try {
-          await mainWindow.webContents.executeJavaScript('stopSystemAudioRecording("quit")');
-        } catch (e) {
-          // Best effort -- file is saved even if processing doesn't start
-        }
-      }
-      systemAudioRecordingActive = false;
-      updateTrayIcon(false);
-      isQuitting = true;
-      app.quit();
     }
-  } else if (isProcessing || processingQueue.length > 0) {
-    event.preventDefault();
-    const jobCount = processingQueue.length + (isProcessing ? 1 : 0);
-    const { response } = await dialog.showMessageBox(mainWindow || null, {
-      type: 'warning',
-      buttons: ['Cancel', 'Quit Anyway'],
-      defaultId: 0,
-      cancelId: 0,
-      title: 'Processing in Progress',
-      message: `${jobCount} recording${jobCount > 1 ? 's are' : ' is'} still being processed. Quitting will cancel processing.`,
-    });
-    if (response === 1) {
-      isQuitting = true;
-      app.quit();
-    }
-  } else {
-    isQuitting = true;
-  }
-});
 
-app.on('open-url', (event, incomingUrl) => {
-  if (process.platform !== 'darwin') {
-    return;
-  }
-
-  event.preventDefault();
-  console.log(`Received shortcut URL via open-url: ${incomingUrl}`);
-  launchedByShortcut = true;
-
-  if (!app.isReady()) {
-    pendingShortcutUrls.push(incomingUrl);
-    return;
-  }
-
-  void handleShortcutUrl(incomingUrl);
-});
-
-app.whenReady().then(async () => {
-  // Set application menu with Help > Learn More
-  const appMenu = Menu.buildFromTemplate([
-    { role: 'appMenu' },
-    { role: 'fileMenu' },
-    { role: 'editMenu' },
-    { role: 'viewMenu' },
-    { role: 'windowMenu' },
-    {
-      role: 'help',
-      submenu: [
-        {
-          label: 'Learn More',
-          click: () => {
-            shell.openExternal('https://github.com/ruzin/stenoai');
-          }
-        },
-        {
-          label: 'Report a Bug',
-          click: () => {
-            shell.openExternal('https://discord.gg/DZ6vcQnxxu');
-          }
-        }
-      ]
-    }
-  ]);
-  Menu.setApplicationMenu(appMenu);
-
-  createWindow();
-  createTray();
-  const protocolRegistered = registerShortcutProtocolClient();
-  console.log(`Protocol handler registration (${SHORTCUT_PROTOCOL}): ${protocolRegistered}`);
-
-  // Initialize telemetry and track app open
-  await initTelemetry();
-  trackEvent('app_opened');
-
-  // Load custom storage path for file validation
-  try {
-    const spResult = await runPythonScript('simple_recorder.py', ['get-storage-path'], true);
-    const spData = JSON.parse(spResult.trim());
-    if (spData.storage_path) {
-      _cachedCustomStoragePath = spData.storage_path;
-      console.log('Custom storage path loaded:', _cachedCustomStoragePath);
-    }
-  } catch (e) {
-    // Non-fatal - custom path just won't be cached
-  }
-
-  // Register global hotkey for toggle recording (Cmd+Shift+R on macOS, Ctrl+Shift+R on Windows/Linux)
-  const hotkeyModifier = process.platform === 'darwin' ? 'Command+Shift+R' : 'Ctrl+Shift+R';
-  const registered = globalShortcut.register(hotkeyModifier, () => {
-    console.log('Global hotkey triggered: toggle recording');
-    if (mainWindow) {
-      mainWindow.webContents.send('toggle-recording-hotkey');
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
     }
   });
 
-  if (registered) {
-    console.log(`Global hotkey registered: ${hotkeyModifier}`);
-  } else {
-    console.error(`Failed to register global hotkey: ${hotkeyModifier}`);
-  }
+  app.on('before-quit', async (event) => {
+    if (isQuitting) return;
 
-  if (pendingShortcutUrls.length > 0) {
-    const urlsToProcess = [...pendingShortcutUrls];
-    pendingShortcutUrls = [];
-
-    for (const shortcutUrl of urlsToProcess) {
-      await handleShortcutUrl(shortcutUrl);
+    // Use synchronous flag -- systemAudioRecordingActive is updated via IPC on each state change
+    if (currentRecordingProcess || systemAudioRecordingActive) {
+      event.preventDefault();
+      const { response } = await dialog.showMessageBox(mainWindow || null, {
+        type: 'warning',
+        buttons: ['Cancel', 'Stop & Quit'],
+        defaultId: 0,
+        cancelId: 0,
+        title: 'Recording in Progress',
+        message: 'A recording is still in progress. Quitting will stop and save the recording.',
+      });
+      if (response === 1) {
+        if (currentRecordingProcess) {
+          currentRecordingProcess.kill('SIGTERM');
+          currentRecordingProcess = null;
+        }
+        if (systemAudioRecordingActive && mainWindow && !mainWindow.isDestroyed()) {
+          try {
+            await mainWindow.webContents.executeJavaScript('stopSystemAudioRecording("quit")');
+          } catch (e) {
+            // Best effort -- file is saved even if processing doesn't start
+          }
+        }
+        systemAudioRecordingActive = false;
+        updateTrayIcon(false);
+        isQuitting = true;
+        app.quit();
+      }
+    } else if (isProcessing || processingQueue.length > 0) {
+      event.preventDefault();
+      const jobCount = processingQueue.length + (isProcessing ? 1 : 0);
+      const { response } = await dialog.showMessageBox(mainWindow || null, {
+        type: 'warning',
+        buttons: ['Cancel', 'Quit Anyway'],
+        defaultId: 0,
+        cancelId: 0,
+        title: 'Processing in Progress',
+        message: `${jobCount} recording${jobCount > 1 ? 's are' : ' is'} still being processed. Quitting will cancel processing.`,
+      });
+      if (response === 1) {
+        isQuitting = true;
+        app.quit();
+      }
+    } else {
+      isQuitting = true;
     }
-  }
-});
+  });
 
-// Fallback for launch contexts where deep-link may arrive via argv instead of open-url.
-if (process.platform === 'darwin') {
-  const argvShortcutUrl = process.argv.find(arg => typeof arg === 'string' && arg.startsWith(`${SHORTCUT_PROTOCOL}://`));
-  if (argvShortcutUrl) {
-    pendingShortcutUrls.push(argvShortcutUrl);
-    launchedByShortcut = true;
-  }
-}
-
-app.on('will-quit', async () => {
-  globalShortcut.unregisterAll();
-  if (tray) {
-    tray.destroy();
-    tray = null;
-  }
-  // Kill Ollama if we started it
-  if (ollamaStartedByUs && ollamaProcess) {
-    try {
-      ollamaProcess.kill();
-    } catch (e) {
-      // Process may have already exited
+  app.on('open-url', (event, incomingUrl) => {
+    if (process.platform !== 'darwin') {
+      return;
     }
-  }
-  await shutdownTelemetry();
-});
 
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    app.quit();
-  }
-});
+    event.preventDefault();
+    sendDebugLog(`Received shortcut URL via open-url: ${sanitizeShortcutUrlForLogs(incomingUrl)}`);
 
-app.on('activate', () => {
-  if (mainWindow) {
-    if (mainWindow.isMinimized()) mainWindow.restore();
-    mainWindow.show();
-    mainWindow.focus();
-    launchedByShortcut = false;
-  } else {
-    launchedByShortcut = false;
+    if (!app.isReady()) {
+      launchedByShortcut = true;
+      pendingShortcutUrls.push(incomingUrl);
+      return;
+    }
+
+    handleShortcutUrl(incomingUrl).catch(err => {
+      sendDebugLog(`Error handling shortcut URL: ${err.message}`);
+    });
+  });
+
+  app.whenReady().then(async () => {
+    // Set application menu with Help > Learn More
+    const appMenu = Menu.buildFromTemplate([
+      { role: 'appMenu' },
+      { role: 'fileMenu' },
+      { role: 'editMenu' },
+      { role: 'viewMenu' },
+      { role: 'windowMenu' },
+      {
+        role: 'help',
+        submenu: [
+          {
+            label: 'Learn More',
+            click: () => {
+              shell.openExternal('https://github.com/ruzin/stenoai');
+            }
+          },
+          {
+            label: 'Report a Bug',
+            click: () => {
+              shell.openExternal('https://discord.gg/DZ6vcQnxxu');
+            }
+          }
+        ]
+      }
+    ]);
+    Menu.setApplicationMenu(appMenu);
+
     createWindow();
+    createTray();
+    const protocolRegistered = registerShortcutProtocolClient();
+    sendDebugLog(`Protocol handler registration (${SHORTCUT_PROTOCOL}): ${protocolRegistered}`);
+
+    // Initialize telemetry and track app open
+    await initTelemetry();
+    trackEvent('app_opened');
+
+    // Load custom storage path for file validation
+    try {
+      const spResult = await runPythonScript('simple_recorder.py', ['get-storage-path'], true);
+      const spData = JSON.parse(spResult.trim());
+      if (spData.storage_path) {
+        _cachedCustomStoragePath = spData.storage_path;
+        console.log('Custom storage path loaded:', _cachedCustomStoragePath);
+      }
+    } catch (e) {
+      // Non-fatal - custom path just won't be cached
+    }
+
+    // Register global hotkey for toggle recording (Cmd+Shift+R on macOS, Ctrl+Shift+R on Windows/Linux)
+    const hotkeyModifier = process.platform === 'darwin' ? 'Command+Shift+R' : 'Ctrl+Shift+R';
+    const registered = globalShortcut.register(hotkeyModifier, () => {
+      console.log('Global hotkey triggered: toggle recording');
+      if (mainWindow) {
+        mainWindow.webContents.send('toggle-recording-hotkey');
+      }
+    });
+
+    if (registered) {
+      console.log(`Global hotkey registered: ${hotkeyModifier}`);
+    } else {
+      console.error(`Failed to register global hotkey: ${hotkeyModifier}`);
+    }
+
+    if (pendingShortcutUrls.length > 0) {
+      const urlsToProcess = [...pendingShortcutUrls];
+      pendingShortcutUrls = [];
+
+      for (const shortcutUrl of urlsToProcess) {
+        await handleShortcutUrl(shortcutUrl);
+      }
+    }
+  });
+
+  // Fallback for launch contexts where deep-link may arrive via argv instead of open-url.
+  if (process.platform === 'darwin') {
+    const argvShortcutUrl = extractShortcutUrlFromArgv(process.argv);
+    if (argvShortcutUrl) {
+      pendingShortcutUrls.push(argvShortcutUrl);
+      launchedByShortcut = true;
+    }
   }
-});
+
+  app.on('will-quit', async () => {
+    globalShortcut.unregisterAll();
+    if (tray) {
+      tray.destroy();
+      tray = null;
+    }
+    // Kill Ollama if we started it
+    if (ollamaStartedByUs && ollamaProcess) {
+      try {
+        ollamaProcess.kill();
+      } catch (e) {
+        // Process may have already exited
+      }
+    }
+    await shutdownTelemetry();
+  });
+
+  app.on('window-all-closed', () => {
+    if (process.platform !== 'darwin') {
+      app.quit();
+    }
+  });
+
+  app.on('activate', () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+      launchedByShortcut = false;
+    } else {
+      launchedByShortcut = false;
+      createWindow();
+    }
+  });
+}
 
 // Focus window handler (used by notification click to bring app to foreground)
 ipcMain.on('focus-window', () => {
