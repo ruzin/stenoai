@@ -209,7 +209,8 @@ async function handleShortcutUrl(incomingUrl) {
     return;
   }
 
-  const recording = await isBackendRecording();
+  const backendRecording = await isBackendRecording();
+  const recording = backendRecording || systemAudioRecordingActive;
 
   if (parsedAction.type === 'start') {
     if (recording) {
