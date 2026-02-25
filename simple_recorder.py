@@ -312,7 +312,6 @@ Transcript:
             # ffmpeg is bundled; ffprobe is not, so we parse ffmpeg -i stderr
             try:
                 import subprocess
-                import re
                 import shutil
 
                 # Find ffmpeg: bundled locations first, then PATH
