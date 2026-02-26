@@ -1285,13 +1285,78 @@ def list_models():
     from src.config import get_config
 
     config = get_config()
-    models = config.list_supported_models()
+    provider = config.get_ai_provider()
     current_model = config.get_model()
 
-    result = {
-        "current_model": current_model,
-        "supported_models": models
-    }
+    if provider == "remote":
+        remote_url = config.get_remote_ollama_url()
+        if not remote_url:
+            result = {
+                "current_model": current_model,
+                "supported_models": {},
+                "provider": "remote",
+                "error": "No remote Ollama URL configured"
+            }
+            print(json.dumps(result, indent=2))
+            return
+
+        try:
+            import ollama as ollama_pkg
+            client = ollama_pkg.Client(host=remote_url)
+            response = client.list()
+            raw_models = getattr(response, 'models', []) or []
+            models = {}
+            for m in raw_models:
+                name = getattr(m, 'model', '')
+                if not name:
+                    continue
+                # Extract human-readable size
+                size_bytes = getattr(m, 'size', 0) or 0
+                if size_bytes >= 1_000_000_000:
+                    size_str = f"{size_bytes / 1_000_000_000:.1f}GB"
+                elif size_bytes >= 1_000_000:
+                    size_str = f"{size_bytes / 1_000_000:.0f}MB"
+                else:
+                    size_str = f"{size_bytes}B"
+
+                # Extract details string
+                details = getattr(m, 'details', None)
+                detail_parts = []
+                if details:
+                    family = getattr(details, 'family', '') or ''
+                    param_size = getattr(details, 'parameter_size', '') or ''
+                    quant = getattr(details, 'quantization_level', '') or ''
+                    if family:
+                        detail_parts.append(family)
+                    if param_size:
+                        detail_parts.append(param_size)
+                    if quant:
+                        detail_parts.append(quant)
+
+                models[name] = {
+                    "size": size_str,
+                    "description": " / ".join(detail_parts) if detail_parts else ""
+                }
+
+            result = {
+                "current_model": current_model,
+                "supported_models": models,
+                "provider": "remote"
+            }
+        except Exception as e:
+            result = {
+                "current_model": current_model,
+                "supported_models": {},
+                "provider": "remote",
+                "error": str(e)
+            }
+    else:
+        models = config.list_supported_models()
+        result = {
+            "current_model": current_model,
+            "supported_models": models,
+            "provider": "local"
+        }
 
     print(json.dumps(result, indent=2))
 
@@ -1736,17 +1801,37 @@ def download_whisper_model():
 @click.argument('model_name')
 def check_model(model_name):
     """Check if a model is installed in Ollama (uses HTTP API)."""
-    from src.ollama_manager import start_ollama_server
-    start_ollama_server()
-    try:
-        import ollama
-        response = ollama.list()
-        models = getattr(response, 'models', []) or []
-        model_names = [getattr(m, 'model', '') for m in models]
-        installed = model_name in model_names
-        print(json.dumps({"installed": installed, "model": model_name}))
-    except Exception as e:
-        print(json.dumps({"installed": False, "model": model_name, "error": str(e)}))
+    from src.config import get_config
+    config = get_config()
+    provider = config.get_ai_provider()
+
+    if provider == "remote":
+        remote_url = config.get_remote_ollama_url()
+        if not remote_url:
+            print(json.dumps({"installed": False, "model": model_name, "error": "No remote URL configured"}))
+            return
+        try:
+            import ollama as ollama_pkg
+            client = ollama_pkg.Client(host=remote_url)
+            response = client.list()
+            models = getattr(response, 'models', []) or []
+            model_names = [getattr(m, 'model', '') for m in models]
+            installed = model_name in model_names
+            print(json.dumps({"installed": installed, "model": model_name}))
+        except Exception as e:
+            print(json.dumps({"installed": False, "model": model_name, "error": str(e)}))
+    else:
+        from src.ollama_manager import start_ollama_server
+        start_ollama_server()
+        try:
+            import ollama
+            response = ollama.list()
+            models = getattr(response, 'models', []) or []
+            model_names = [getattr(m, 'model', '') for m in models]
+            installed = model_name in model_names
+            print(json.dumps({"installed": installed, "model": model_name}))
+        except Exception as e:
+            print(json.dumps({"installed": False, "model": model_name, "error": str(e)}))
 
 
 @cli.command()
