@@ -7345,8 +7345,19 @@ Session started - waiting for activity...
             try {
                 const result = await ipcRenderer.invoke('list-models');
 
+                if (result.error) {
+                    const errorDiv = document.createElement('div');
+                    errorDiv.className = 'model-list-loading';
+                    errorDiv.style.color = 'var(--recording-red)';
+                    errorDiv.textContent = result.error;
+                    const modelList = document.getElementById('model-list');
+                    modelList.innerHTML = '';
+                    modelList.appendChild(errorDiv);
+                    return;
+                }
+
                 if (result.success) {
-                    displayModelList(result.supported_models, result.current_model);
+                    displayModelList(result.supported_models, result.current_model, result.provider);
                 } else {
                     document.getElementById('model-list').innerHTML = '<div class="model-list-loading" style="color: var(--recording-red);">Failed to load models</div>';
                 }
@@ -7360,11 +7371,17 @@ Session started - waiting for activity...
             // No longer a separate display - handled inline in model list
         }
 
-        function displayModelList(models, currentModel) {
+        function displayModelList(models, currentModel, provider) {
             const modelListDiv = document.getElementById('model-list');
             modelListDiv.innerHTML = '';
 
-            for (const [modelName, modelInfo] of Object.entries(models)) {
+            const entries = Object.entries(models);
+            if (entries.length === 0 && provider === 'remote') {
+                modelListDiv.innerHTML = '<div class="model-list-loading">No models found on remote server</div>';
+                return;
+            }
+
+            for (const [modelName, modelInfo] of entries) {
                 const isCurrentModel = modelName === currentModel;
 
                 const modelItem = document.createElement('div');
@@ -7372,16 +7389,25 @@ Session started - waiting for activity...
                 modelItem.setAttribute('data-model-name', modelName);
                 modelItem.setAttribute('data-model-size', modelInfo.size);
 
-                const tagMatch = modelInfo.description.match(/\((default|recommended)\)/i);
-                const tagHtml = tagMatch ? `<span class="model-tag">${tagMatch[1]}</span>` : '';
                 const activeHtml = isCurrentModel ? '<span class="model-active-badge">Active</span>' : '';
+
+                let metaHtml;
+                let tagHtml = '';
+                if (provider === 'remote') {
+                    const parts = [modelInfo.size, modelInfo.description].filter(Boolean);
+                    metaHtml = parts.join(' &middot; ');
+                } else {
+                    const tagMatch = modelInfo.description.match(/\((default|recommended)\)/i);
+                    tagHtml = tagMatch ? `<span class="model-tag">${tagMatch[1]}</span>` : '';
+                    metaHtml = `${modelInfo.size} &middot; ${modelInfo.speed} speed &middot; ${modelInfo.quality} quality`;
+                }
 
                 modelItem.innerHTML = `
                     <div class="model-item-info">
                         <div class="model-item-name">
                             ${modelName}${tagHtml}${activeHtml}
                         </div>
-                        <div class="model-item-meta">${modelInfo.size} &middot; ${modelInfo.speed} speed &middot; ${modelInfo.quality} quality</div>
+                        <div class="model-item-meta">${metaHtml}</div>
                         <div class="model-progress">
                             <div class="progress-text">Downloading...</div>
                         </div>
@@ -7404,7 +7430,24 @@ Session started - waiting for activity...
 
         async function selectModel(modelName) {
             try {
-                // Check if model is already installed
+                // Remote models already exist on the server - skip install check and download
+                if (currentAIProvider === 'remote') {
+                    if (!confirm(`Switch to model: ${modelName}?\n\nThis model is available on your remote server.`)) {
+                        return;
+                    }
+
+                    const result = await ipcRenderer.invoke('set-model', modelName);
+                    if (!result.success) {
+                        alert(`Failed to set model: ${result.error}`);
+                        return;
+                    }
+
+                    showModelNotification(`Switched to ${modelName}!`, 'success');
+                    loadModels();
+                    return;
+                }
+
+                // Local flow: check if model is already installed
                 const checkResult = await ipcRenderer.invoke('check-model-installed', modelName);
 
                 if (!checkResult.success) {
@@ -7720,8 +7763,8 @@ Session started - waiting for activity...
                                 'success'
                             );
 
-                            // Suggest better multilingual model if switching away from English on Llama
-                            if (newValue !== 'en') {
+                            // Suggest better multilingual model if switching away from English on Llama (local only)
+                            if (newValue !== 'en' && currentAIProvider === 'local') {
                                 const activeModel = document.querySelector('.model-item.active');
                                 const currentModel = activeModel ? activeModel.getAttribute('data-model-name') : '';
                                 if (currentModel === 'llama3.2:3b') {
