@@ -7390,22 +7390,23 @@ Session started - waiting for activity...
                 modelItem.setAttribute('data-model-size', modelInfo.size);
 
                 const activeHtml = isCurrentModel ? '<span class="model-active-badge">Active</span>' : '';
+                const safeName = escapeHtml(modelName);
 
                 let metaHtml;
                 let tagHtml = '';
                 if (provider === 'remote') {
-                    const parts = [modelInfo.size, modelInfo.description].filter(Boolean);
+                    const parts = [escapeHtml(modelInfo.size), escapeHtml(modelInfo.description)].filter(Boolean);
                     metaHtml = parts.join(' &middot; ');
                 } else {
                     const tagMatch = modelInfo.description.match(/\((default|recommended)\)/i);
                     tagHtml = tagMatch ? `<span class="model-tag">${tagMatch[1]}</span>` : '';
-                    metaHtml = `${modelInfo.size} &middot; ${modelInfo.speed} speed &middot; ${modelInfo.quality} quality`;
+                    metaHtml = `${escapeHtml(modelInfo.size)} &middot; ${escapeHtml(modelInfo.speed)} speed &middot; ${escapeHtml(modelInfo.quality)} quality`;
                 }
 
                 modelItem.innerHTML = `
                     <div class="model-item-info">
                         <div class="model-item-name">
-                            ${modelName}${tagHtml}${activeHtml}
+                            ${safeName}${tagHtml}${activeHtml}
                         </div>
                         <div class="model-item-meta">${metaHtml}</div>
                         <div class="model-progress">
@@ -7415,7 +7416,7 @@ Session started - waiting for activity...
                     <div class="model-item-action">
                         ${isCurrentModel
                             ? ''
-                            : '<button class="settings-action-btn" onclick="event.stopPropagation(); selectModel(\'' + modelName + '\')">Select</button>'
+                            : '<button class="settings-action-btn" onclick="event.stopPropagation(); selectModel(\'' + safeName + '\')">Select</button>'
                         }
                     </div>
                 `;
