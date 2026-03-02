@@ -1,4 +1,8 @@
 const { app, BrowserWindow, ipcMain, dialog, shell, systemPreferences, globalShortcut, safeStorage, Tray, Menu, nativeImage, Notification } = require('electron');
+
+// Prevent EPIPE crashes when stdout/stderr pipe is broken (e.g. launching terminal closed)
+process.stdout?.on('error', () => {});
+process.stderr?.on('error', () => {});
 const path = require('path');
 const { spawn, exec } = require('child_process');
 const fs = require('fs');
@@ -1017,14 +1021,17 @@ ipcMain.handle('clear-state', async () => {
   }
 });
 
-ipcMain.handle('reprocess-meeting', async (event, summaryFile) => {
+ipcMain.handle('reprocess-meeting', async (event, summaryFile, regenerateTitle) => {
   try {
+    const args = ['reprocess', summaryFile];
+    if (regenerateTitle) args.push('--regenerate-title');
+
     sendDebugLog(`🔄 Reprocessing meeting: ${summaryFile}`);
-    sendDebugLog(`$ python simple_recorder.py reprocess "${summaryFile}"`);
+    sendDebugLog(`$ stenoai ${args.join(' ')}`);
 
     const cloudKey = loadCloudApiKey();
     const env = cloudKey ? { STENOAI_CLOUD_API_KEY: cloudKey } : {};
-    const result = await runPythonScript('simple_recorder.py', ['reprocess', summaryFile], false, env);
+    const result = await runPythonScript('simple_recorder.py', args, false, env);
 
     sendDebugLog('✅ Meeting reprocessed successfully');
     return { success: true, message: result };
@@ -1340,9 +1347,16 @@ ipcMain.handle('start-recording-ui', async (_, sessionName) => {
 
     let hasStarted = false;
     let processingSucceeded = false;
+    let recordedAudioFile = null;
 
     currentRecordingProcess.stdout.on('data', (data) => {
       const output = data.toString();
+
+      // Capture the audio file path when the recording is saved
+      const audioMatch = output.match(/Recording saved:\s*(.+\.wav)/);
+      if (audioMatch) {
+        recordedAudioFile = audioMatch[1].trim();
+      }
       console.log('Recording stdout:', output);
 
       // Send real-time output to debug panel (same as runPythonScript)
@@ -1363,9 +1377,12 @@ ipcMain.handle('start-recording-ui', async (_, sessionName) => {
               // Try matching by name first, then by audio file (name may have been
               // auto-generated from the transcript)
               let processedMeeting = allMeetings.find(m => m.session_info?.name === actualSessionName);
-              if (!processedMeeting) {
-                // Find the most recently processed meeting as fallback
-                processedMeeting = allMeetings[0];
+              if (!processedMeeting && recordedAudioFile) {
+                // Name may have been auto-generated from transcript; match by audio file basename
+                const audioBasename = require('path').basename(recordedAudioFile);
+                processedMeeting = allMeetings.find(m =>
+                  m.session_info?.audio_file && require('path').basename(m.session_info.audio_file) === audioBasename
+                );
               }
 
               mainWindow.webContents.send('processing-complete', {

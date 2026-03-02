@@ -951,39 +951,40 @@ def list_meetings():
 
 @cli.command()
 @click.argument('summary_file', required=True)
-def reprocess(summary_file):
+@click.option('--regenerate-title', is_flag=True, default=False, help='Also regenerate the meeting title')
+def reprocess(summary_file, regenerate_title):
     """Reprocess a failed summary by re-running Ollama analysis on existing transcript"""
     import json
     from pathlib import Path
-    
+
     async def run_reprocess():
         recorder = SimpleRecorder()
         summary_path = Path(summary_file)
-        
+
         if not summary_path.exists():
             print(f"ERROR: Summary file not found: {summary_file}")
             return
-        
+
         try:
             # Load existing summary file
             with open(summary_path, 'r') as f:
                 existing_data = json.load(f)
-            
+
             # Get transcript from the data
             transcript = existing_data.get('transcript', '')
             if not transcript:
                 print("ERROR: No transcript found in summary file")
                 return
-            
+
             session_name = existing_data.get('session_info', {}).get('name', 'Reprocessed')
             duration_minutes = existing_data.get('session_info', {}).get('duration_minutes', 10)
-            
+
             print(f"🔄 Reprocessing summary for: {session_name}")
             print(f"📝 Transcript length: {len(transcript)} characters")
-            
+
             # Re-run summarization
             summary_data = await recorder.summarize_transcript(transcript, session_name)
-            
+
             # Update the existing data with new summary
             existing_data.update({
                 "summary": summary_data.get("summary", "") or "",
@@ -992,20 +993,36 @@ def reprocess(summary_file):
                 "key_points": summary_data.get("key_points", []) or [],
                 "action_items": summary_data.get("action_items", []) or [],
             })
-            
+
+            # Regenerate title if requested
+            if regenerate_title:
+                try:
+                    from src.config import get_config
+                    language = get_config().get_language()
+                    generated_title = recorder.summarizer.generate_title(
+                        summary_data.get("summary", ""),
+                        transcript,
+                        language=language
+                    )
+                    if generated_title:
+                        existing_data["session_info"]["name"] = generated_title
+                        print(f"Auto-generated title: {generated_title}")
+                except Exception as e:
+                    print(f"Title regeneration skipped: {e}")
+
             # Add reprocess timestamp
             existing_data["session_info"]["reprocessed_at"] = datetime.now().isoformat()
-            
+
             # Save updated summary
             with open(summary_path, 'w') as f:
                 json.dump(existing_data, f, indent=2)
-            
+
             print(f"✅ Summary reprocessed successfully: {summary_path}")
             print(f"📋 New summary: {existing_data['summary'][:100]}...")
-            
+
         except Exception as e:
             print(f"ERROR: Failed to reprocess summary: {e}")
-    
+
     asyncio.run(run_reprocess())
 
 

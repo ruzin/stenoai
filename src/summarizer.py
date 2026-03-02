@@ -767,10 +767,14 @@ TITLE:"""
             if self.ai_provider == "cloud":
                 response_text = self._cloud_chat(prompt, 30)
             else:
-                ollama_response = self.client.chat(
+                # Use a short HTTP-level timeout for title generation (lightweight call)
+                title_client = ollama.Client(
+                    host=self.remote_url if self.ai_provider == "remote" else None,
+                    timeout=30
+                )
+                ollama_response = title_client.chat(
                     model=self.model_name,
                     messages=[{'role': 'user', 'content': prompt}],
-                    options={'timeout': 30}
                 )
                 response_text = ollama_response['message']['content'].strip()
 

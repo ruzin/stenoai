@@ -5996,7 +5996,9 @@ Session started - waiting for activity...
                 log('❌ No summary file found for reprocessing');
                 return;
             }
-            
+
+            const regenerateTitle = confirm('Also regenerate the meeting title?');
+
             // Track which meeting is being processed
             processingMeeting = selectedMeeting;
             const meetingName = selectedMeeting.session_info?.name;
@@ -6015,7 +6017,7 @@ Session started - waiting for activity...
             
             try {
                 // Call main process to reprocess the meeting
-                const result = await ipcRenderer.invoke('reprocess-meeting', summaryFile);
+                const result = await ipcRenderer.invoke('reprocess-meeting', summaryFile, regenerateTitle);
                 
                 if (result.success) {
                     log('✅ Meeting reprocessed successfully');
