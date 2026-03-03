@@ -179,15 +179,19 @@ class SimpleRecorder:
 
         # Transcribe (pass Path object, not string)
         transcript_result = self.transcriber.transcribe_audio(audio_path, language=language)
-        
+
         # Handle different return types
-        if hasattr(transcript_result, 'text'):
+        duration_seconds = None
+        if isinstance(transcript_result, dict):
+            transcript_text = transcript_result.get("text") or ""
+            duration_seconds = transcript_result.get("duration_seconds")
+        elif hasattr(transcript_result, 'text'):
             transcript_text = transcript_result.text
         elif isinstance(transcript_result, str):
             transcript_text = transcript_result
         else:
             transcript_text = str(transcript_result)
-        
+
         # Save transcript
         transcript_path = self.transcripts_dir / f"{audio_path.stem}_transcript.txt"
         transcript_content = f"""Session: {session_name}
@@ -198,17 +202,18 @@ Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 
 {transcript_text}
 """
-        
+
         with open(transcript_path, 'w') as f:
             f.write(transcript_content)
-        
+
         print(f"📄 Transcript saved: {transcript_path}")
-        
+
         return {
             "audio_file": str(audio_path),
-            "transcript_file": str(transcript_path), 
+            "transcript_file": str(transcript_path),
             "transcript_text": transcript_text,
-            "session_name": session_name
+            "session_name": session_name,
+            "duration_seconds": duration_seconds
         }
     
     async def summarize_transcript(self, transcript_text: str, session_name: str = "Recording", duration_minutes: int = 10) -> dict:
@@ -291,95 +296,29 @@ Transcript:
         audio_file = str(audio_file)  # Convert to string if it's a Path object
         audio_path = Path(audio_file)
         
-        # Calculate actual recording duration from file
-        duration_minutes = 10  # Default fallback
-        try:
-            import wave
-            with wave.open(str(audio_path), 'rb') as wav_file:
-                frame_rate = wav_file.getframerate()
-                num_frames = wav_file.getnframes()
-                duration_seconds = num_frames / frame_rate
-                if duration_seconds < 60:
-                    duration_display = f"{int(duration_seconds)}s"
-                    duration_minutes = 0  # Store as 0 for sub-minute recordings
-                else:
-                    duration_minutes = int(duration_seconds / 60)
-                    duration_display = f"{duration_minutes}m"
-                print(f"📏 Audio duration: {duration_seconds:.1f} seconds ({duration_display})")
-        except Exception as e:
-            print(f"⚠️ Could not determine audio duration via wave: {e}")
-            # Try ffmpeg for non-WAV files (M4A, WebM, etc.)
-            # ffmpeg is bundled; ffprobe is not, so we parse ffmpeg -i stderr
-            try:
-                import subprocess
-                import shutil
-
-                # Find ffmpeg: bundled locations first, then PATH
-                ffmpeg_cmd = None
-                if getattr(sys, 'frozen', False):
-                    exe_dir = Path(sys.executable).parent
-                    for candidate in [
-                        exe_dir / 'ffmpeg',
-                        exe_dir / '_internal' / 'ffmpeg',
-                    ]:
-                        if candidate.exists():
-                            ffmpeg_cmd = str(candidate)
-                            break
-                    if ffmpeg_cmd is None and hasattr(sys, '_MEIPASS'):
-                        meipass = Path(sys._MEIPASS) / 'ffmpeg'
-                        if meipass.exists():
-                            ffmpeg_cmd = str(meipass)
-                if ffmpeg_cmd is None:
-                    ffmpeg_cmd = shutil.which("ffmpeg") or "ffmpeg"
-
-                # Just read metadata (no decoding) -- exits immediately with code 1
-                # but still prints "Duration: HH:MM:SS.xx" to stderr
-                probe_result = subprocess.run(
-                    [ffmpeg_cmd, "-i", str(audio_path)],
-                    capture_output=True, text=True, timeout=10
-                )
-                duration_match = re.search(
-                    r"Duration:\s*(\d+):(\d+):(\d+)\.(\d+)",
-                    probe_result.stderr
-                )
-                if duration_match:
-                    h, m, s, _ = duration_match.groups()
-                    duration_seconds = int(h) * 3600 + int(m) * 60 + int(s)
-                    if duration_seconds < 60:
-                        duration_display = f"{int(duration_seconds)}s"
-                        duration_minutes = 0
-                    else:
-                        duration_minutes = int(duration_seconds / 60)
-                        duration_display = f"{duration_minutes}m"
-                    print(f"📏 Audio duration (ffmpeg): {duration_seconds:.1f} seconds ({duration_display})")
-            except Exception as e2:
-                print(f"⚠️ ffmpeg duration fallback failed: {e2}")
-            # Last resort: try to get duration from state file timestamps
-            if 'duration_seconds' not in locals():
-                try:
-                    state = self.get_state()
-                    start_time = state.get("start_time")
-                    stop_time = state.get("stop_time")
-                    if start_time and stop_time:
-                        from dateutil.parser import parse
-                        start_dt = parse(start_time)
-                        stop_dt = parse(stop_time)
-                        duration_seconds = (stop_dt - start_dt).total_seconds()
-                        duration_minutes = max(1, int(duration_seconds / 60))
-                        print(f"📏 Duration from timestamps: {duration_seconds:.1f} seconds ({duration_minutes} minutes)")
-                except Exception:
-                    pass
-        
-        # Step 1: Transcribe
+        # Step 1: Transcribe (also returns duration from the converted WAV)
         transcript_data = await self.transcribe_audio(audio_file, session_name)
-        
+
+        # Determine duration: use transcriber's value (works for all formats)
+        duration_seconds = transcript_data.get("duration_seconds")
+        if duration_seconds is not None:
+            if duration_seconds < 60:
+                duration_minutes = 0
+                print(f"📏 Audio duration: {duration_seconds:.1f} seconds ({int(duration_seconds)}s)")
+            else:
+                duration_minutes = int(duration_seconds / 60)
+                print(f"📏 Audio duration: {duration_seconds:.1f} seconds ({duration_minutes}m)")
+        else:
+            duration_minutes = 0
+            print("⚠️ Could not determine audio duration")
+
         # Step 2: Summarize with actual duration
         summary_data = await self.summarize_transcript(
             transcript_data["transcript_text"],
             session_name,
             duration_minutes
         )
-        
+
         # Step 2b: Auto-generate title for auto-named meetings
         if re.match(r'^Meeting-[A-Z0-9]{6}$', session_name):
             try:
@@ -395,10 +334,10 @@ Transcript:
                     session_name = generated_title
             except Exception as e:
                 print(f"Title generation skipped: {e}")
-        
+
         # Step 3: Save complete summary
         summary_path = self.output_dir / f"{audio_path.stem}_summary.json"
-        
+
         complete_data = {
             "session_info": {
                 "name": session_name,
@@ -406,7 +345,7 @@ Transcript:
                 "transcript_file": transcript_data["transcript_file"],
                 "summary_file": str(summary_path),
                 "processed_at": datetime.now().isoformat(),
-                "duration_seconds": int(duration_seconds) if 'duration_seconds' in locals() else None,
+                "duration_seconds": int(duration_seconds) if duration_seconds is not None else None,
                 "duration_minutes": duration_minutes
             },
             "summary": summary_data.get("summary", "") or "",
