@@ -7418,13 +7418,20 @@ Session started - waiting for activity...
                     <div class="model-item-action">
                         ${isCurrentModel
                             ? ''
-                            : '<button class="settings-action-btn" onclick="event.stopPropagation(); selectModel(\'' + safeName + '\')">Select</button>'
+                            : '<button class="settings-action-btn model-select-btn">Select</button>'
                         }
                     </div>
                 `;
 
                 if (!isCurrentModel) {
                     modelItem.addEventListener('click', () => selectModel(modelName));
+                    const selectBtn = modelItem.querySelector('.model-select-btn');
+                    if (selectBtn) {
+                        selectBtn.addEventListener('click', (e) => {
+                            e.stopPropagation();
+                            selectModel(modelName);
+                        });
+                    }
                 }
 
                 modelListDiv.appendChild(modelItem);

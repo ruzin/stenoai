@@ -1272,9 +1272,9 @@ async function processNextInQueue() {
         // auto-generated from the transcript, so the original hash may no longer match)
         let processedMeeting = allMeetings.find(m => m.session_info?.name === currentProcessingJob.sessionName);
         if (!processedMeeting && currentProcessingJob.audioFile) {
-          const audioBasename = require('path').basename(currentProcessingJob.audioFile);
+          const audioBasename = path.basename(currentProcessingJob.audioFile);
           processedMeeting = allMeetings.find(m => 
-            m.session_info?.audio_file && require('path').basename(m.session_info.audio_file) === audioBasename
+            m.session_info?.audio_file && path.basename(m.session_info.audio_file) === audioBasename
           );
         }
         
@@ -1379,9 +1379,9 @@ ipcMain.handle('start-recording-ui', async (_, sessionName) => {
               let processedMeeting = allMeetings.find(m => m.session_info?.name === actualSessionName);
               if (!processedMeeting && recordedAudioFile) {
                 // Name may have been auto-generated from transcript; match by audio file basename
-                const audioBasename = require('path').basename(recordedAudioFile);
+                const audioBasename = path.basename(recordedAudioFile);
                 processedMeeting = allMeetings.find(m =>
-                  m.session_info?.audio_file && require('path').basename(m.session_info.audio_file) === audioBasename
+                  m.session_info?.audio_file && path.basename(m.session_info.audio_file) === audioBasename
                 );
               }
 

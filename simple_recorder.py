@@ -1316,11 +1316,16 @@ def list_models():
                 "provider": "remote"
             }
         except Exception as e:
+            error_msg = "Could not connect to remote Ollama server"
+            if "Connection refused" in str(e) or "ConnectError" in str(e):
+                error_msg = "Remote Ollama server is not reachable"
+            elif "timed out" in str(e).lower() or "Timeout" in str(e):
+                error_msg = "Remote Ollama server timed out"
             result = {
                 "current_model": current_model,
                 "supported_models": {},
                 "provider": "remote",
-                "error": str(e)
+                "error": error_msg
             }
     else:
         models = config.list_supported_models()
