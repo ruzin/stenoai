@@ -234,6 +234,23 @@ class Config:
         self._config["telemetry_enabled"] = enabled
         return self._save()
 
+    def get_hide_dock_icon(self) -> bool:
+        """Get whether the dock icon should be hidden (menu bar only mode)."""
+        return self._config.get("hide_dock_icon", False)
+
+    def set_hide_dock_icon(self, enabled: bool) -> bool:
+        """
+        Set whether the dock icon should be hidden.
+
+        Args:
+            enabled: True to hide dock icon (menu bar only), False to show
+
+        Returns:
+            True if saved successfully, False otherwise
+        """
+        self._config["hide_dock_icon"] = enabled
+        return self._save()
+
     def get_system_audio_enabled(self) -> bool:
         """Get whether system audio capture is enabled."""
         return self._config.get("system_audio_enabled", False)

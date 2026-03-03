@@ -706,6 +706,32 @@ if (!gotSingleInstanceLock) {
     const protocolRegistered = registerShortcutProtocolClient();
     sendDebugLog(`Protocol handler registration (${SHORTCUT_PROTOCOL}): ${protocolRegistered}`);
 
+    // Load hide-dock-icon preference and apply
+    if (process.platform === 'darwin' && app.dock) {
+      try {
+        const dockResult = await new Promise((resolve, reject) => {
+          const proc = spawn(getBackendPath(), ['get-dock-icon'], {
+            cwd: getBackendCwd()
+          });
+          let stdout = '';
+          proc.stdout.on('data', (data) => { stdout += data.toString(); });
+          proc.on('close', (code) => {
+            if (code === 0) resolve(stdout);
+            else reject(new Error(`get-dock-icon exited with code ${code}`));
+          });
+          proc.on('error', reject);
+        });
+
+        const dockConfig = JSON.parse(dockResult.trim());
+        if (dockConfig.hide_dock_icon) {
+          app.dock.hide();
+          console.log('Dock icon hidden (menu bar only mode)');
+        }
+      } catch (e) {
+        console.error('Failed to load dock icon preference:', e.message);
+      }
+    }
+
     // Initialize telemetry and track app open
     await initTelemetry();
     trackEvent('app_opened');
@@ -2550,6 +2576,50 @@ ipcMain.handle('set-telemetry', async (event, enabled) => {
     return { success: true, telemetry_enabled: enabled };
   } catch (error) {
     sendDebugLog(`Error setting telemetry: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+});
+
+// Hide dock icon IPC handlers
+ipcMain.handle('get-dock-icon', async () => {
+  try {
+    const result = await runPythonScript('simple_recorder.py', ['get-dock-icon']);
+    const jsonData = JSON.parse(result);
+
+    return {
+      success: true,
+      ...jsonData
+    };
+  } catch (error) {
+    sendDebugLog(`Error getting dock icon settings: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('set-dock-icon', async (event, hidden) => {
+  try {
+    sendDebugLog(`Setting hide dock icon to: ${hidden}`);
+    const result = await runPythonScript('simple_recorder.py', ['set-dock-icon', hidden ? 'True' : 'False']);
+
+    // Apply immediately
+    if (process.platform === 'darwin' && app.dock) {
+      if (hidden) {
+        app.dock.hide();
+      } else {
+        app.dock.show();
+      }
+    }
+
+    // Extract JSON from output
+    const jsonMatch = result.match(/\{.*\}/s);
+    if (jsonMatch) {
+      const jsonData = JSON.parse(jsonMatch[0]);
+      return jsonData;
+    }
+
+    return { success: true, hide_dock_icon: hidden };
+  } catch (error) {
+    sendDebugLog(`Error setting dock icon: ${error.message}`);
     return { success: false, error: error.message };
   }
 });

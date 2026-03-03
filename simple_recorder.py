@@ -1412,6 +1412,34 @@ def set_notifications(enabled):
 
 
 @cli.command()
+def get_dock_icon():
+    """Get the current hide-dock-icon preference"""
+    from src.config import get_config
+
+    config = get_config()
+    enabled = config.get_hide_dock_icon()
+
+    print(json.dumps({"hide_dock_icon": enabled}))
+
+
+@cli.command()
+@click.argument('enabled', type=bool)
+def set_dock_icon(enabled):
+    """Set hide-dock-icon preference (True/False)"""
+    from src.config import get_config
+
+    config = get_config()
+    success = config.set_hide_dock_icon(enabled)
+
+    if success:
+        print(f"SUCCESS: Hide dock icon {'enabled' if enabled else 'disabled'}")
+        print(json.dumps({"success": True, "hide_dock_icon": enabled}))
+    else:
+        print(f"ERROR: Failed to save hide dock icon preference")
+        print(json.dumps({"success": False, "error": "Failed to save config"}))
+
+
+@cli.command()
 def get_telemetry():
     """Get the current telemetry preference and anonymous ID"""
     from src.config import get_config

@@ -3849,6 +3849,17 @@ Commands and output will appear here...
                         <button class="settings-action-btn" id="test-update-btn" onclick="testUpdateCheck()">Check</button>
                     </div>
 
+                    <div class="settings-row" id="hide-dock-icon-row">
+                        <div class="settings-row-text">
+                            <span>Hide dock icon</span>
+                            <small>Run as menu bar app only</small>
+                        </div>
+                        <label class="settings-toggle">
+                            <input type="checkbox" id="hide-dock-icon-toggle">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+
                     <div class="settings-row">
                         <div class="settings-row-text">
                             <span>Developer mode</span>
@@ -5921,6 +5932,9 @@ Session started - waiting for activity...
                     loadNotificationSettings().catch(err =>
                         log(`Notification settings load failed: ${err.message}`)
                     ),
+                    loadDockIconSettings().catch(err =>
+                        log(`Dock icon settings load failed: ${err.message}`)
+                    ),
                     loadSystemAudioSettings().catch(err =>
                         log(`System audio settings load failed: ${err.message}`)
                     ),
@@ -7602,6 +7616,31 @@ Session started - waiting for activity...
             }
         }
 
+        async function loadDockIconSettings() {
+            const toggle = document.getElementById('hide-dock-icon-toggle');
+            const row = document.getElementById('hide-dock-icon-row');
+
+            // macOS only
+            if (require('os').platform() !== 'darwin') {
+                if (row) row.style.display = 'none';
+                return;
+            }
+
+            try {
+                const result = await ipcRenderer.invoke('get-dock-icon');
+
+                if (result.success) {
+                    toggle.checked = result.hide_dock_icon;
+                } else {
+                    console.error('Failed to load dock icon setting:', result.error);
+                    toggle.checked = false;
+                }
+            } catch (error) {
+                console.error('Error loading dock icon setting:', error);
+                toggle.checked = false;
+            }
+        }
+
         async function loadSystemAudioSettings() {
             const toggle = document.getElementById('system-audio-toggle');
             const row = toggle?.closest('.settings-row');
@@ -7752,6 +7791,31 @@ Session started - waiting for activity...
                         }
                     } catch (error) {
                         console.error('Error saving system audio setting:', error);
+                        showModelNotification('Failed to save setting', 'error');
+                        e.target.checked = !e.target.checked;
+                    }
+                });
+            }
+
+            const dockIconToggle = document.getElementById('hide-dock-icon-toggle');
+            if (dockIconToggle) {
+                dockIconToggle.addEventListener('change', async (e) => {
+                    try {
+                        const hidden = e.target.checked;
+                        const result = await ipcRenderer.invoke('set-dock-icon', hidden);
+
+                        if (result.success) {
+                            showModelNotification(
+                                hidden ? 'Dock icon hidden (menu bar only)' : 'Dock icon visible',
+                                'success'
+                            );
+                        } else {
+                            console.error('Failed to save dock icon setting:', result.error);
+                            showModelNotification('Failed to save setting', 'error');
+                            e.target.checked = !hidden;
+                        }
+                    } catch (error) {
+                        console.error('Error saving dock icon setting:', error);
                         showModelNotification('Failed to save setting', 'error');
                         e.target.checked = !e.target.checked;
                     }
