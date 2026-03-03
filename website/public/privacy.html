@@ -21,7 +21,7 @@
 
   <main class="max-w-4xl mx-auto px-4 py-12 md:py-20">
     <h1 class="text-3xl md:text-4xl font-bold mb-2">Privacy Policy</h1>
-    <p class="text-sm text-slate-400 mb-10">Last updated: February 15, 2026</p>
+    <p class="text-sm text-slate-400 mb-10">Last updated: March 3, 2026</p>
 
     <div class="space-y-8 text-sm text-slate-300 leading-relaxed">
       <section>
@@ -49,6 +49,47 @@
           <li>Calendar data is held in memory only and is never written to disk or sent to any third-party server</li>
           <li>OAuth tokens are encrypted using macOS Keychain (via Electron safeStorage) and stored locally</li>
           <li>You can disconnect Google Calendar at any time from Settings, which revokes access and deletes stored tokens</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2 class="text-lg font-semibold text-slate-100 mb-3">Google user data: collection, use, and protection</h2>
+        <p class="mb-4">This section describes how StenoAI handles data received from Google APIs, in compliance with the <a href="https://developers.google.com/terms/api-services-user-data-policy" class="text-indigo-400 hover:text-indigo-300 underline">Google API Services User Data Policy</a>.</p>
+
+        <h3 class="text-base font-medium text-slate-200 mb-2">Data accessed</h3>
+        <p class="mb-3">When you connect Google Calendar, StenoAI accesses the following Google user data via the <code class="text-xs bg-slate-800 px-1.5 py-0.5 rounded">calendar.readonly</code> scope:</p>
+        <ul class="list-disc pl-6 space-y-2 mb-5">
+          <li>Calendar event titles and descriptions</li>
+          <li>Event start and end times</li>
+          <li>Attendee names and email addresses</li>
+          <li>Event metadata (location, recurrence, status)</li>
+        </ul>
+
+        <h3 class="text-base font-medium text-slate-200 mb-2">Data usage</h3>
+        <p class="mb-3">Google Calendar data is used solely to:</p>
+        <ul class="list-disc pl-6 space-y-2 mb-5">
+          <li>Display your upcoming meetings within the StenoAI interface so you can quickly start recording a session</li>
+          <li>Auto-populate meeting names and attendee lists for your transcription sessions</li>
+        </ul>
+        <p class="mb-5">Google user data is never used for advertising, profiling, or any purpose unrelated to the app's core meeting-transcription functionality.</p>
+
+        <h3 class="text-base font-medium text-slate-200 mb-2">Data sharing</h3>
+        <p class="mb-5">StenoAI does <strong class="text-slate-100">not</strong> share, sell, or transfer Google user data to any third party. Calendar data stays entirely on your device and is never sent to StenoAI servers, analytics services, or any other external service.</p>
+
+        <h3 class="text-base font-medium text-slate-200 mb-2">Data storage and protection</h3>
+        <ul class="list-disc pl-6 space-y-2 mb-5">
+          <li>Calendar event data is held <strong class="text-slate-100">in memory only</strong> while the app is running. It is never persisted to disk.</li>
+          <li>OAuth refresh and access tokens are encrypted at rest using <strong class="text-slate-100">macOS Keychain</strong> via Electron's safeStorage API, which provides OS-level encryption tied to your user account.</li>
+          <li>All communication with Google APIs occurs over HTTPS/TLS.</li>
+        </ul>
+
+        <h3 class="text-base font-medium text-slate-200 mb-2">Data retention and deletion</h3>
+        <ul class="list-disc pl-6 space-y-2 mb-5">
+          <li>Calendar event data is not retained -- it exists only in application memory and is discarded when the app is closed or when you navigate away from the calendar view.</li>
+          <li>OAuth tokens are retained locally until you disconnect Google Calendar.</li>
+          <li><strong class="text-slate-100">To delete all Google data:</strong> Open StenoAI Settings and click "Disconnect Google Calendar." This immediately revokes the OAuth token with Google and deletes all stored credentials from your device.</li>
+          <li>Uninstalling StenoAI also removes all locally stored tokens and data.</li>
+          <li>You can also revoke access at any time from your <a href="https://myaccount.google.com/permissions" class="text-indigo-400 hover:text-indigo-300 underline">Google Account permissions page</a>.</li>
         </ul>
       </section>
 
