@@ -30,21 +30,21 @@
 
 ## 📢 What's New
 
+- **2026-03-04** 🏷️ Auto-generated meeting titles — AI creates short titles from your transcripts
+- **2026-03-04** ⌨️ macOS Shortcuts support — Start/stop recordings via Apple Shortcuts deep links
+- **2026-03-04** 🤖 Updated model lineup — Qwen 3.5 9B, DeepSeek-R1 14B, GPT-OSS 20B; Ollama v0.17.5
+- **2026-03-04** 🙈 Hide dock icon — Run StenoAI in menu-bar-only mode
 - **2026-02-22** 🌍 Multi-language support — Transcribe and summarize in 10 languages
 - **2026-02-22** 🖥️ Remote Ollama server — Run AI models on another machine on your network
-- **2026-02-22** ☁️ Cloud APIs — OpenAI compatible APIs & Anthropic 🚩 (Not recommended - data leaves your device)
-- **2026-02-22** 🍎 Apple M5 support — Bundled Ollama v0.16.3 with M5 Metal support
 - **2026-02-19** 🎧 System audio capture — Record both sides of virtual meetings, even with headphones on
-- **2026-02-19** 📅 Outlook Calendar integration — Connect Outlook as an alternative to Google Calendar
-- **2026-02-19** 🖥️ macOS system tray — Menu bar icon with quick actions; window hides to tray on close
-- **2026-02-15** 📅 Google Calendar integration — Auto-name recordings from your upcoming meetings
+- **2026-02-19** 📅 Google & Outlook Calendar integration — Auto-name recordings from your meetings
 
 ## Features
 
 - **Local transcription** using whisper.cpp
 - **AI summarization** with Ollama models
 - **Privacy-first** - 100% local processing, your data never leaves your device
-- **Multiple AI models** - Choose from 4 models optimized for different use cases
+- **Multiple AI models** - Choose from 5 models optimized for different use cases
 - **Ask Steno** - Query your meetings with natural language questions
 - **Multi-language support** - Transcribe and summarize in 10 languages
 - **Remote Ollama server** - Run AI models on another machine on your network
