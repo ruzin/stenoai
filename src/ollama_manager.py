@@ -143,6 +143,29 @@ def is_ollama_running() -> bool:
 
 
 
+def _get_pid_file() -> Path:
+    """Get the path to the Ollama PID file."""
+    if getattr(sys, 'frozen', False):
+        return Path(sys._MEIPASS) / 'ollama.pid'
+    return Path(__file__).parent.parent / 'ollama.pid'
+
+
+def _write_pid(pid: int) -> None:
+    """Write Ollama's PID to a file so Electron can kill it on quit."""
+    try:
+        _get_pid_file().write_text(str(pid))
+    except Exception as e:
+        logger.debug(f"Could not write Ollama PID file: {e}")
+
+
+def _clear_pid() -> None:
+    """Remove the PID file."""
+    try:
+        _get_pid_file().unlink(missing_ok=True)
+    except Exception:
+        pass
+
+
 def start_ollama_server(wait: bool = True, timeout: int = 30) -> bool:
     """
     Start the Ollama server if not already running.
@@ -168,13 +191,14 @@ def start_ollama_server(wait: bool = True, timeout: int = 30) -> bool:
 
         # Start Ollama server in background
         logger.info(f"Starting Ollama server: {ollama_binary}")
-        subprocess.Popen(
+        proc = subprocess.Popen(
             [str(ollama_binary), 'serve'],
             env=env,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             start_new_session=True  # Detach from parent process
         )
+        _write_pid(proc.pid)
 
         if not wait:
             return True

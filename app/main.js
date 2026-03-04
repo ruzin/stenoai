@@ -788,11 +788,25 @@ if (!gotSingleInstanceLock) {
       tray.destroy();
       tray = null;
     }
-    // Kill any Ollama process spawned from our bundled binary (may have been
-    // started by either Electron or the Python backend via setup-check)
-    const ollamaDir = path.join(getBackendCwd(), '_internal', 'ollama');
-    try { require('child_process').execSync(`pkill -f "${ollamaDir}/ollama" 2>/dev/null`, { timeout: 3000 }); } catch (_) {}
-    ollamaPid = null;
+    // Kill Ollama on quit. The process may have been started by Electron or
+    // the Python backend — both write the PID to ollama.pid in _internal/.
+    const pidFile = path.join(getBackendCwd(), '_internal', 'ollama.pid');
+    try {
+      const pid = parseInt(require('fs').readFileSync(pidFile, 'utf8').trim(), 10);
+      if (pid) {
+        process.kill(pid, 'SIGTERM');
+        // Give it a moment to shut down, then force-kill if still alive
+        setTimeout(() => {
+          try { process.kill(pid, 'SIGKILL'); } catch (_) {}
+        }, 1000);
+      }
+      require('fs').unlinkSync(pidFile);
+    } catch (_) {}
+    // Also kill if Electron spawned it directly
+    if (ollamaPid) {
+      try { process.kill(ollamaPid, 'SIGTERM'); } catch (_) {}
+      ollamaPid = null;
+    }
     await shutdownTelemetry();
   });
 
@@ -1963,6 +1977,8 @@ ipcMain.handle('setup-ollama-and-model', async () => {
     let ollamaExitCode = null;
     ollamaProcess = spawn(finalOllamaPath, ['serve'], { detached: true, stdio: ['ignore', 'ignore', 'pipe'], env: getOllamaEnv() });
     ollamaPid = ollamaProcess.pid;
+    // Write PID file so quit handler can find the process
+    try { require('fs').writeFileSync(path.join(getBackendCwd(), '_internal', 'ollama.pid'), String(ollamaPid)); } catch (_) {}
     ollamaProcess.stderr.on('data', (data) => {
       const msg = data.toString().trim();
       if (msg) sendDebugLog(`Ollama: ${msg}`);
@@ -2419,6 +2435,7 @@ async function ensureOllamaRunning() {
     // Start Ollama service in background with proper env vars for dylibs
     ollamaProcess = spawn(ollamaPath, ['serve'], { detached: true, stdio: 'ignore', env: getOllamaEnv() });
     ollamaPid = ollamaProcess.pid;
+    try { require('fs').writeFileSync(path.join(getBackendCwd(), '_internal', 'ollama.pid'), String(ollamaPid)); } catch (_) {}
     ollamaProcess.on('exit', () => { ollamaPid = null; });
     ollamaProcess.unref();
     ollamaStartedByUs = true;
