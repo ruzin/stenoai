@@ -740,6 +740,15 @@
             border-radius: 3px;
         }
 
+        .model-item.deprecated {
+            opacity: 0.55;
+        }
+
+        .model-item-name .model-tag.deprecated {
+            color: var(--text-muted);
+            background: var(--bg-deep);
+        }
+
         .model-item-name .model-active-badge {
             font-size: 10px;
             font-weight: 600;
@@ -7397,11 +7406,15 @@ Session started - waiting for activity...
                 return;
             }
 
+            // Sort deprecated models to the bottom
+            entries.sort((a, b) => (a[1].deprecated ? 1 : 0) - (b[1].deprecated ? 1 : 0));
+
             for (const [modelName, modelInfo] of entries) {
                 const isCurrentModel = modelName === currentModel;
+                const isDeprecated = modelInfo.deprecated === true;
 
                 const modelItem = document.createElement('div');
-                modelItem.className = 'model-item' + (isCurrentModel ? ' active' : '');
+                modelItem.className = 'model-item' + (isCurrentModel ? ' active' : '') + (isDeprecated ? ' deprecated' : '');
                 modelItem.setAttribute('data-model-name', modelName);
                 modelItem.setAttribute('data-model-size', modelInfo.size);
 
@@ -7416,6 +7429,9 @@ Session started - waiting for activity...
                 } else {
                     const tagMatch = modelInfo.description.match(/\((default|recommended)\)/i);
                     tagHtml = tagMatch ? `<span class="model-tag">${tagMatch[1]}</span>` : '';
+                    if (isDeprecated) {
+                        tagHtml = '<span class="model-tag deprecated">Deprecated</span>';
+                    }
                     metaHtml = `${escapeHtml(modelInfo.size)} &middot; ${escapeHtml(modelInfo.speed)} speed &middot; ${escapeHtml(modelInfo.quality)} quality`;
                 }
 

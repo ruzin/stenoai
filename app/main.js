@@ -788,14 +788,11 @@ if (!gotSingleInstanceLock) {
       tray.destroy();
       tray = null;
     }
-    // Kill Ollama if we started it
-    if (ollamaStartedByUs && ollamaProcess) {
-      try {
-        ollamaProcess.kill();
-      } catch (e) {
-        // Process may have already exited
-      }
-    }
+    // Kill any Ollama process spawned from our bundled binary (may have been
+    // started by either Electron or the Python backend via setup-check)
+    const ollamaDir = path.join(getBackendCwd(), '_internal', 'ollama');
+    try { require('child_process').execSync(`pkill -f "${ollamaDir}/ollama" 2>/dev/null`, { timeout: 3000 }); } catch (_) {}
+    ollamaPid = null;
     await shutdownTelemetry();
   });
 
@@ -1267,6 +1264,7 @@ let processingQueue = [];
 let isProcessing = false;
 let currentProcessingJob = null;
 let ollamaProcess = null;  // Track spawned Ollama process for cleanup on quit
+let ollamaPid = null;      // Store PID separately since unref() disconnects the process
 let ollamaStartedByUs = false;
 
 // Processing queue management
@@ -1964,6 +1962,7 @@ ipcMain.handle('setup-ollama-and-model', async () => {
     let ollamaExited = false;
     let ollamaExitCode = null;
     ollamaProcess = spawn(finalOllamaPath, ['serve'], { detached: true, stdio: ['ignore', 'ignore', 'pipe'], env: getOllamaEnv() });
+    ollamaPid = ollamaProcess.pid;
     ollamaProcess.stderr.on('data', (data) => {
       const msg = data.toString().trim();
       if (msg) sendDebugLog(`Ollama: ${msg}`);
@@ -1971,6 +1970,7 @@ ipcMain.handle('setup-ollama-and-model', async () => {
     ollamaProcess.on('exit', (code) => {
       ollamaExited = true;
       ollamaExitCode = code;
+      ollamaPid = null;
       if (code !== 0 && code !== null) {
         sendDebugLog(`Ollama process exited with code ${code}`);
       }
@@ -2418,6 +2418,8 @@ async function ensureOllamaRunning() {
 
     // Start Ollama service in background with proper env vars for dylibs
     ollamaProcess = spawn(ollamaPath, ['serve'], { detached: true, stdio: 'ignore', env: getOllamaEnv() });
+    ollamaPid = ollamaProcess.pid;
+    ollamaProcess.on('exit', () => { ollamaPid = null; });
     ollamaProcess.unref();
     ollamaStartedByUs = true;
 
@@ -2894,9 +2896,12 @@ ipcMain.handle('pull-model', async (event, modelName) => {
         cwd: getBackendCwd()
       });
 
+      let lastStdoutLine = '';
+
       proc.stdout.on('data', (data) => {
         const output = data.toString().trim();
         sendDebugLog(output);
+        if (output) lastStdoutLine = output;
 
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send('model-pull-progress', {
@@ -2919,7 +2924,15 @@ ipcMain.handle('pull-model', async (event, modelName) => {
       });
 
       proc.on('close', (code) => {
-        if (code === 0) {
+        // The backend prints a JSON result as the last stdout line.
+        // Check it even on exit code 0, since the Python CLI may
+        // catch errors and still exit cleanly.
+        let pullResult = null;
+        try { pullResult = JSON.parse(lastStdoutLine); } catch (_) {}
+
+        const succeeded = code === 0 && (!pullResult || pullResult.success !== false);
+
+        if (succeeded) {
           sendDebugLog(`Successfully pulled model: ${modelName}`);
 
           if (mainWindow && !mainWindow.isDestroyed()) {
@@ -2931,17 +2944,18 @@ ipcMain.handle('pull-model', async (event, modelName) => {
 
           resolve({ success: true, model: modelName });
         } else {
-          sendDebugLog(`Failed to pull model: ${modelName}`);
+          const errorMsg = (pullResult && pullResult.error) || `Process exited with code ${code}`;
+          sendDebugLog(`Failed to pull model: ${modelName} - ${errorMsg}`);
 
           if (mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.webContents.send('model-pull-complete', {
               model: modelName,
               success: false,
-              error: `Process exited with code ${code}`
+              error: errorMsg
             });
           }
 
-          resolve({ success: false, error: `Process exited with code ${code}` });
+          resolve({ success: false, error: errorMsg });
         }
       });
 

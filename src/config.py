@@ -36,21 +36,47 @@ class Config:
             "speed": "fast",
             "quality": "good"
         },
+        "qwen3.5:9b": {
+            "name": "Qwen 3.5 9B",
+            "size": "6.6GB",
+            "params": "9B",
+            "description": "Excellent at structured output and action items",
+            "speed": "fast",
+            "quality": "excellent"
+        },
+        "deepseek-r1:14b": {
+            "name": "DeepSeek R1 14B",
+            "size": "9.0GB",
+            "params": "14B",
+            "description": "Strong reasoning and analysis capabilities",
+            "speed": "medium",
+            "quality": "excellent"
+        },
+        "gpt-oss:20b": {
+            "name": "GPT-OSS 20B",
+            "size": "14GB",
+            "params": "20B",
+            "description": "OpenAI open-weight model with reasoning capabilities",
+            "speed": "medium",
+            "quality": "excellent"
+        },
         "qwen3:8b": {
             "name": "Qwen 3 8B",
             "size": "4.7GB",
             "params": "8B",
-            "description": "Excellent at structured output and action items",
+            "description": "Replaced by Qwen 3.5 9B",
             "speed": "fast",
-            "quality": "excellent"
+            "quality": "excellent",
+            "deprecated": True
         },
         "deepseek-r1:8b": {
             "name": "DeepSeek R1 8B",
             "size": "4.7GB",
             "params": "8B",
-            "description": "Strong reasoning and analysis capabilities",
+            "description": "Replaced by DeepSeek R1 14B",
             "speed": "medium",
-            "quality": "excellent"
+            "quality": "excellent",
+            "deprecated": True
         }
     }
 
