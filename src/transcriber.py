@@ -192,21 +192,23 @@ class WhisperTranscriber:
 
             if file_size < 1000:  # Less than 1KB
                 logger.warning("Audio file appears to be too small for transcription")
-                return "Audio file too small or empty"
+                return {"text": "Audio file too small or empty", "duration_seconds": None}
 
             # Use appropriate backend
             if self.backend == "whisper.cpp":
-                transcript = self._transcribe_whisper_cpp(audio_filepath, language)
+                result = self._transcribe_whisper_cpp(audio_filepath, language)
             else:
                 transcript = self._transcribe_openai_whisper(audio_filepath, language)
+                result = {"text": transcript, "duration_seconds": None}
 
+            transcript = result.get("text")
             logger.info(f"Transcription completed. Length: {len(transcript) if transcript else 0} characters")
 
             if not transcript:
                 logger.warning("Transcription returned empty text")
-                return "No speech detected in audio"
+                result["text"] = "No speech detected in audio"
 
-            return transcript
+            return result
 
         except Exception as e:
             logger.error(f"Error during transcription: {e}")
@@ -214,9 +216,16 @@ class WhisperTranscriber:
             logger.error(f"Traceback: {traceback.format_exc()}")
             return None
 
-    def _convert_to_16khz(self, audio_filepath: Path) -> Path:
-        """Convert audio to 16kHz mono WAV for whisper.cpp compatibility."""
+    def _convert_to_16khz(self, audio_filepath: Path) -> tuple:
+        """Convert audio to 16kHz mono WAV for whisper.cpp compatibility.
+
+        Returns:
+            (converted_path, duration_seconds) where duration_seconds is the
+            audio length read from the converted WAV header, or None if it
+            could not be determined.
+        """
         import tempfile
+        import wave
 
         # Create temp file for converted audio
         temp_dir = tempfile.gettempdir()
@@ -239,19 +248,33 @@ class WhisperTranscriber:
 
             if result.returncode == 0 and converted_path.exists():
                 logger.info(f"Converted audio to 16kHz: {converted_path}")
-                return converted_path
+
+                # Read duration from converted WAV header
+                duration_seconds = None
+                try:
+                    with wave.open(str(converted_path), 'rb') as wf:
+                        duration_seconds = wf.getnframes() / wf.getframerate()
+                        logger.info(f"Audio duration from converted WAV: {duration_seconds:.1f}s")
+                except Exception as e:
+                    logger.warning(f"Could not read duration from converted WAV: {e}")
+
+                return converted_path, duration_seconds
             else:
                 logger.error(f"ffmpeg conversion failed: {result.stderr.decode()}")
-                return audio_filepath
+                return audio_filepath, None
 
         except Exception as e:
             logger.error(f"Audio conversion error: {e}")
-            return audio_filepath
+            return audio_filepath, None
 
-    def _transcribe_whisper_cpp(self, audio_filepath: Path, language: str = "en") -> Optional[str]:
-        """Transcribe using whisper.cpp backend."""
+    def _transcribe_whisper_cpp(self, audio_filepath: Path, language: str = "en") -> dict:
+        """Transcribe using whisper.cpp backend.
+
+        Returns:
+            dict with 'text' (str or None) and 'duration_seconds' (float or None)
+        """
         # whisper.cpp requires 16kHz audio - convert if needed
-        converted_path = self._convert_to_16khz(audio_filepath)
+        converted_path, duration_seconds = self._convert_to_16khz(audio_filepath)
         cleanup_converted = converted_path != audio_filepath
 
         try:
@@ -262,11 +285,11 @@ class WhisperTranscriber:
             segments = self.model.transcribe(**transcribe_kwargs)
 
             if not segments:
-                return None
+                return {"text": None, "duration_seconds": duration_seconds}
 
             # Combine all segment texts
             transcript = " ".join(segment.text.strip() for segment in segments)
-            return transcript.strip()
+            return {"text": transcript.strip(), "duration_seconds": duration_seconds}
         finally:
             # Clean up temp file
             if cleanup_converted and converted_path.exists():

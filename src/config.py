@@ -24,7 +24,7 @@ class Config:
             "name": "Llama 3.2 3B",
             "size": "2GB",
             "params": "3B",
-            "description": "Fastest option for quick meetings (default)",
+            "description": "Fast and lightweight for quick meetings (default)",
             "speed": "very fast",
             "quality": "good"
         },
@@ -36,21 +36,47 @@ class Config:
             "speed": "fast",
             "quality": "good"
         },
+        "qwen3.5:9b": {
+            "name": "Qwen 3.5 9B",
+            "size": "6.6GB",
+            "params": "9B",
+            "description": "Excellent at structured output and action items",
+            "speed": "medium",
+            "quality": "excellent"
+        },
+        "deepseek-r1:14b": {
+            "name": "DeepSeek R1 14B",
+            "size": "9.0GB",
+            "params": "14B",
+            "description": "Strong reasoning and analysis capabilities",
+            "speed": "fast",
+            "quality": "excellent"
+        },
+        "gpt-oss:20b": {
+            "name": "GPT-OSS 20B",
+            "size": "14GB",
+            "params": "20B",
+            "description": "OpenAI open-weight model with reasoning capabilities",
+            "speed": "medium",
+            "quality": "excellent"
+        },
         "qwen3:8b": {
             "name": "Qwen 3 8B",
             "size": "4.7GB",
             "params": "8B",
-            "description": "Excellent at structured output and action items",
+            "description": "Replaced by Qwen 3.5 9B",
             "speed": "fast",
-            "quality": "excellent"
+            "quality": "excellent",
+            "deprecated": True
         },
         "deepseek-r1:8b": {
             "name": "DeepSeek R1 8B",
             "size": "4.7GB",
             "params": "8B",
-            "description": "Strong reasoning and analysis capabilities",
+            "description": "Replaced by DeepSeek R1 14B",
             "speed": "medium",
-            "quality": "excellent"
+            "quality": "excellent",
+            "deprecated": True
         }
     }
 
@@ -232,6 +258,23 @@ class Config:
             True if saved successfully, False otherwise
         """
         self._config["telemetry_enabled"] = enabled
+        return self._save()
+
+    def get_hide_dock_icon(self) -> bool:
+        """Get whether the dock icon should be hidden (menu bar only mode)."""
+        return self._config.get("hide_dock_icon", False)
+
+    def set_hide_dock_icon(self, enabled: bool) -> bool:
+        """
+        Set whether the dock icon should be hidden.
+
+        Args:
+            enabled: True to hide dock icon (menu bar only), False to show
+
+        Returns:
+            True if saved successfully, False otherwise
+        """
+        self._config["hide_dock_icon"] = enabled
         return self._save()
 
     def get_system_audio_enabled(self) -> bool:

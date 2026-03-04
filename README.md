@@ -133,10 +133,11 @@ Have questions or suggestions? [Join our Discord](https://discord.gg/DZ6vcQnxxu)
 - `medium`: High accuracy for important meetings (slower)
 
 **Summarization Models** (Ollama):
-- `llama3.2:3b` (2GB): Fastest option for quick meetings **(default)**
+- `llama3.2:3b` (2GB): Fast and lightweight for quick meetings **(default)**
 - `gemma3:4b` (2.5GB): Lightweight and efficient
-- `qwen3:8b` (4.7GB): Excellent at structured output and action items
-- `deepseek-r1:8b` (4.7GB): Strong reasoning and analysis capabilities
+- `qwen3.5:9b` (6.6GB): Excellent at structured output and action items
+- `deepseek-r1:14b` (9.0GB): Strong reasoning and analysis capabilities
+- `gpt-oss:20b` (14GB): OpenAI open-weight model with reasoning capabilities
 
 ### StenoAI Local Model Performance vs Claude Sonnet 4.6: Closing the Gap! 🚀
 

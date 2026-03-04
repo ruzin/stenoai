@@ -79,7 +79,7 @@ const faqs = [
   },
   {
     q: "What AI models are available?",
-    a: "Choose from 4 cutting-edge open-source models: Llama 3.2 3B (fastest, default), Gemma 3 4B (efficient), Qwen 3 8B (best for structured notes), and DeepSeek-R1 8B (superior reasoning). All models run 100% locally on your Mac.",
+    a: "Choose from 5 open-source models: Llama 3.2 3B (fastest, default), Gemma 3 4B (efficient), Qwen 3.5 9B (best for structured notes), DeepSeek-R1 14B (superior reasoning), and GPT-OSS 20B (OpenAI open-weight). All models run 100% locally on your Mac.",
   },
   {
     q: "Is my data private and secure?",

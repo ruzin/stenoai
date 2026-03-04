@@ -740,6 +740,15 @@
             border-radius: 3px;
         }
 
+        .model-item.deprecated {
+            opacity: 0.55;
+        }
+
+        .model-item-name .model-tag.deprecated {
+            color: var(--text-muted);
+            background: var(--bg-deep);
+        }
+
         .model-item-name .model-active-badge {
             font-size: 10px;
             font-weight: 600;
@@ -3849,6 +3858,17 @@ Commands and output will appear here...
                         <button class="settings-action-btn" id="test-update-btn" onclick="testUpdateCheck()">Check</button>
                     </div>
 
+                    <div class="settings-row" id="hide-dock-icon-row">
+                        <div class="settings-row-text">
+                            <span>Hide dock icon</span>
+                            <small>Run as menu bar app only</small>
+                        </div>
+                        <label class="settings-toggle">
+                            <input type="checkbox" id="hide-dock-icon-toggle">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+
                     <div class="settings-row">
                         <div class="settings-row-text">
                             <span>Developer mode</span>
@@ -5921,6 +5941,9 @@ Session started - waiting for activity...
                     loadNotificationSettings().catch(err =>
                         log(`Notification settings load failed: ${err.message}`)
                     ),
+                    loadDockIconSettings().catch(err =>
+                        log(`Dock icon settings load failed: ${err.message}`)
+                    ),
                     loadSystemAudioSettings().catch(err =>
                         log(`System audio settings load failed: ${err.message}`)
                     ),
@@ -7383,11 +7406,15 @@ Session started - waiting for activity...
                 return;
             }
 
+            // Sort deprecated models to the bottom
+            entries.sort((a, b) => (a[1].deprecated ? 1 : 0) - (b[1].deprecated ? 1 : 0));
+
             for (const [modelName, modelInfo] of entries) {
                 const isCurrentModel = modelName === currentModel;
+                const isDeprecated = modelInfo.deprecated === true;
 
                 const modelItem = document.createElement('div');
-                modelItem.className = 'model-item' + (isCurrentModel ? ' active' : '');
+                modelItem.className = 'model-item' + (isCurrentModel ? ' active' : '') + (isDeprecated ? ' deprecated' : '');
                 modelItem.setAttribute('data-model-name', modelName);
                 modelItem.setAttribute('data-model-size', modelInfo.size);
 
@@ -7402,6 +7429,9 @@ Session started - waiting for activity...
                 } else {
                     const tagMatch = modelInfo.description.match(/\((default|recommended)\)/i);
                     tagHtml = tagMatch ? `<span class="model-tag">${tagMatch[1]}</span>` : '';
+                    if (isDeprecated) {
+                        tagHtml = '<span class="model-tag deprecated">Deprecated</span>';
+                    }
                     metaHtml = `${escapeHtml(modelInfo.size)} &middot; ${escapeHtml(modelInfo.speed)} speed &middot; ${escapeHtml(modelInfo.quality)} quality`;
                 }
 
@@ -7418,13 +7448,20 @@ Session started - waiting for activity...
                     <div class="model-item-action">
                         ${isCurrentModel
                             ? ''
-                            : '<button class="settings-action-btn" onclick="event.stopPropagation(); selectModel(\'' + safeName + '\')">Select</button>'
+                            : '<button class="settings-action-btn model-select-btn">Select</button>'
                         }
                     </div>
                 `;
 
                 if (!isCurrentModel) {
                     modelItem.addEventListener('click', () => selectModel(modelName));
+                    const selectBtn = modelItem.querySelector('.model-select-btn');
+                    if (selectBtn) {
+                        selectBtn.addEventListener('click', (e) => {
+                            e.stopPropagation();
+                            selectModel(modelName);
+                        });
+                    }
                 }
 
                 modelListDiv.appendChild(modelItem);
@@ -7595,6 +7632,31 @@ Session started - waiting for activity...
             }
         }
 
+        async function loadDockIconSettings() {
+            const toggle = document.getElementById('hide-dock-icon-toggle');
+            const row = document.getElementById('hide-dock-icon-row');
+
+            // macOS only
+            if (require('os').platform() !== 'darwin') {
+                if (row) row.style.display = 'none';
+                return;
+            }
+
+            try {
+                const result = await ipcRenderer.invoke('get-dock-icon');
+
+                if (result.success) {
+                    toggle.checked = result.hide_dock_icon;
+                } else {
+                    console.error('Failed to load dock icon setting:', result.error);
+                    toggle.checked = false;
+                }
+            } catch (error) {
+                console.error('Error loading dock icon setting:', error);
+                toggle.checked = false;
+            }
+        }
+
         async function loadSystemAudioSettings() {
             const toggle = document.getElementById('system-audio-toggle');
             const row = toggle?.closest('.settings-row');
@@ -7751,6 +7813,31 @@ Session started - waiting for activity...
                 });
             }
 
+            const dockIconToggle = document.getElementById('hide-dock-icon-toggle');
+            if (dockIconToggle) {
+                dockIconToggle.addEventListener('change', async (e) => {
+                    try {
+                        const hidden = e.target.checked;
+                        const result = await ipcRenderer.invoke('set-dock-icon', hidden);
+
+                        if (result.success) {
+                            showModelNotification(
+                                hidden ? 'Dock icon hidden (menu bar only)' : 'Dock icon visible',
+                                'success'
+                            );
+                        } else {
+                            console.error('Failed to save dock icon setting:', result.error);
+                            showModelNotification('Failed to save setting', 'error');
+                            e.target.checked = !hidden;
+                        }
+                    } catch (error) {
+                        console.error('Error saving dock icon setting:', error);
+                        showModelNotification('Failed to save setting', 'error');
+                        e.target.checked = !e.target.checked;
+                    }
+                });
+            }
+
             const languageSelect = document.getElementById('language-select');
             if (languageSelect) {
                 languageSelect.addEventListener('change', async (e) => {
@@ -7773,7 +7860,7 @@ Session started - waiting for activity...
                                 if (currentModel === 'llama3.2:3b') {
                                     const langName = result.language_name || newValue;
                                     const switchTo = confirm(
-                                        `Llama 3.2 is optimised for English. For ${langName}, we recommend switching to Gemma 3 4B or Qwen 3 8B which have stronger multilingual support.\n\nSwitch to Gemma 3 4B now?`
+                                        `Llama 3.2 is optimised for English. For ${langName}, we recommend switching to Gemma 3 4B or Qwen 3.5 9B which have stronger multilingual support.\n\nSwitch to Gemma 3 4B now?`
                                     );
                                     if (switchTo) {
                                         selectModel('gemma3:4b');

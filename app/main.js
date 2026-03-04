@@ -706,6 +706,32 @@ if (!gotSingleInstanceLock) {
     const protocolRegistered = registerShortcutProtocolClient();
     sendDebugLog(`Protocol handler registration (${SHORTCUT_PROTOCOL}): ${protocolRegistered}`);
 
+    // Load hide-dock-icon preference and apply
+    if (process.platform === 'darwin' && app.dock) {
+      try {
+        const dockResult = await new Promise((resolve, reject) => {
+          const proc = spawn(getBackendPath(), ['get-dock-icon'], {
+            cwd: getBackendCwd()
+          });
+          let stdout = '';
+          proc.stdout.on('data', (data) => { stdout += data.toString(); });
+          proc.on('close', (code) => {
+            if (code === 0) resolve(stdout);
+            else reject(new Error(`get-dock-icon exited with code ${code}`));
+          });
+          proc.on('error', reject);
+        });
+
+        const dockConfig = JSON.parse(dockResult.trim());
+        if (dockConfig.hide_dock_icon) {
+          app.dock.hide();
+          console.log('Dock icon hidden (menu bar only mode)');
+        }
+      } catch (e) {
+        console.error('Failed to load dock icon preference:', e.message);
+      }
+    }
+
     // Initialize telemetry and track app open
     await initTelemetry();
     trackEvent('app_opened');
@@ -762,13 +788,24 @@ if (!gotSingleInstanceLock) {
       tray.destroy();
       tray = null;
     }
-    // Kill Ollama if we started it
-    if (ollamaStartedByUs && ollamaProcess) {
-      try {
-        ollamaProcess.kill();
-      } catch (e) {
-        // Process may have already exited
+    // Kill Ollama on quit. The process may have been started by Electron or
+    // the Python backend — both write the PID to ollama.pid in _internal/.
+    const pidFile = path.join(getBackendCwd(), '_internal', 'ollama.pid');
+    try {
+      const pid = parseInt(require('fs').readFileSync(pidFile, 'utf8').trim(), 10);
+      if (pid) {
+        process.kill(pid, 'SIGTERM');
+        // Give it a moment to shut down, then force-kill if still alive
+        setTimeout(() => {
+          try { process.kill(pid, 'SIGKILL'); } catch (_) {}
+        }, 1000);
       }
+      require('fs').unlinkSync(pidFile);
+    } catch (_) {}
+    // Also kill if Electron spawned it directly
+    if (ollamaPid) {
+      try { process.kill(ollamaPid, 'SIGTERM'); } catch (_) {}
+      ollamaPid = null;
     }
     await shutdownTelemetry();
   });
@@ -1241,6 +1278,7 @@ let processingQueue = [];
 let isProcessing = false;
 let currentProcessingJob = null;
 let ollamaProcess = null;  // Track spawned Ollama process for cleanup on quit
+let ollamaPid = null;      // Store PID separately since unref() disconnects the process
 let ollamaStartedByUs = false;
 
 // Processing queue management
@@ -1272,9 +1310,9 @@ async function processNextInQueue() {
         // auto-generated from the transcript, so the original hash may no longer match)
         let processedMeeting = allMeetings.find(m => m.session_info?.name === currentProcessingJob.sessionName);
         if (!processedMeeting && currentProcessingJob.audioFile) {
-          const audioBasename = require('path').basename(currentProcessingJob.audioFile);
+          const audioBasename = path.basename(currentProcessingJob.audioFile);
           processedMeeting = allMeetings.find(m => 
-            m.session_info?.audio_file && require('path').basename(m.session_info.audio_file) === audioBasename
+            m.session_info?.audio_file && path.basename(m.session_info.audio_file) === audioBasename
           );
         }
         
@@ -1379,9 +1417,9 @@ ipcMain.handle('start-recording-ui', async (_, sessionName) => {
               let processedMeeting = allMeetings.find(m => m.session_info?.name === actualSessionName);
               if (!processedMeeting && recordedAudioFile) {
                 // Name may have been auto-generated from transcript; match by audio file basename
-                const audioBasename = require('path').basename(recordedAudioFile);
+                const audioBasename = path.basename(recordedAudioFile);
                 processedMeeting = allMeetings.find(m =>
-                  m.session_info?.audio_file && require('path').basename(m.session_info.audio_file) === audioBasename
+                  m.session_info?.audio_file && path.basename(m.session_info.audio_file) === audioBasename
                 );
               }
 
@@ -1938,6 +1976,9 @@ ipcMain.handle('setup-ollama-and-model', async () => {
     let ollamaExited = false;
     let ollamaExitCode = null;
     ollamaProcess = spawn(finalOllamaPath, ['serve'], { detached: true, stdio: ['ignore', 'ignore', 'pipe'], env: getOllamaEnv() });
+    ollamaPid = ollamaProcess.pid;
+    // Write PID file so quit handler can find the process
+    try { require('fs').writeFileSync(path.join(getBackendCwd(), '_internal', 'ollama.pid'), String(ollamaPid)); } catch (_) {}
     ollamaProcess.stderr.on('data', (data) => {
       const msg = data.toString().trim();
       if (msg) sendDebugLog(`Ollama: ${msg}`);
@@ -1945,6 +1986,7 @@ ipcMain.handle('setup-ollama-and-model', async () => {
     ollamaProcess.on('exit', (code) => {
       ollamaExited = true;
       ollamaExitCode = code;
+      ollamaPid = null;
       if (code !== 0 && code !== null) {
         sendDebugLog(`Ollama process exited with code ${code}`);
       }
@@ -2392,6 +2434,9 @@ async function ensureOllamaRunning() {
 
     // Start Ollama service in background with proper env vars for dylibs
     ollamaProcess = spawn(ollamaPath, ['serve'], { detached: true, stdio: 'ignore', env: getOllamaEnv() });
+    ollamaPid = ollamaProcess.pid;
+    try { require('fs').writeFileSync(path.join(getBackendCwd(), '_internal', 'ollama.pid'), String(ollamaPid)); } catch (_) {}
+    ollamaProcess.on('exit', () => { ollamaPid = null; });
     ollamaProcess.unref();
     ollamaStartedByUs = true;
 
@@ -2550,6 +2595,50 @@ ipcMain.handle('set-telemetry', async (event, enabled) => {
     return { success: true, telemetry_enabled: enabled };
   } catch (error) {
     sendDebugLog(`Error setting telemetry: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+});
+
+// Hide dock icon IPC handlers
+ipcMain.handle('get-dock-icon', async () => {
+  try {
+    const result = await runPythonScript('simple_recorder.py', ['get-dock-icon']);
+    const jsonData = JSON.parse(result);
+
+    return {
+      success: true,
+      ...jsonData
+    };
+  } catch (error) {
+    sendDebugLog(`Error getting dock icon settings: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('set-dock-icon', async (event, hidden) => {
+  try {
+    sendDebugLog(`Setting hide dock icon to: ${hidden}`);
+    const result = await runPythonScript('simple_recorder.py', ['set-dock-icon', hidden ? 'True' : 'False']);
+
+    // Apply immediately
+    if (process.platform === 'darwin' && app.dock) {
+      if (hidden) {
+        app.dock.hide();
+      } else {
+        app.dock.show();
+      }
+    }
+
+    // Extract JSON from output
+    const jsonMatch = result.match(/\{.*\}/s);
+    if (jsonMatch) {
+      const jsonData = JSON.parse(jsonMatch[0]);
+      return jsonData;
+    }
+
+    return { success: true, hide_dock_icon: hidden };
+  } catch (error) {
+    sendDebugLog(`Error setting dock icon: ${error.message}`);
     return { success: false, error: error.message };
   }
 });
@@ -2824,9 +2913,12 @@ ipcMain.handle('pull-model', async (event, modelName) => {
         cwd: getBackendCwd()
       });
 
+      let lastStdoutLine = '';
+
       proc.stdout.on('data', (data) => {
         const output = data.toString().trim();
         sendDebugLog(output);
+        if (output) lastStdoutLine = output;
 
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send('model-pull-progress', {
@@ -2849,7 +2941,15 @@ ipcMain.handle('pull-model', async (event, modelName) => {
       });
 
       proc.on('close', (code) => {
-        if (code === 0) {
+        // The backend prints a JSON result as the last stdout line.
+        // Check it even on exit code 0, since the Python CLI may
+        // catch errors and still exit cleanly.
+        let pullResult = null;
+        try { pullResult = JSON.parse(lastStdoutLine); } catch (_) {}
+
+        const succeeded = code === 0 && (!pullResult || pullResult.success !== false);
+
+        if (succeeded) {
           sendDebugLog(`Successfully pulled model: ${modelName}`);
 
           if (mainWindow && !mainWindow.isDestroyed()) {
@@ -2861,17 +2961,18 @@ ipcMain.handle('pull-model', async (event, modelName) => {
 
           resolve({ success: true, model: modelName });
         } else {
-          sendDebugLog(`Failed to pull model: ${modelName}`);
+          const errorMsg = (pullResult && pullResult.error) || `Process exited with code ${code}`;
+          sendDebugLog(`Failed to pull model: ${modelName} - ${errorMsg}`);
 
           if (mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.webContents.send('model-pull-complete', {
               model: modelName,
               success: false,
-              error: `Process exited with code ${code}`
+              error: errorMsg
             });
           }
 
-          resolve({ success: false, error: `Process exited with code ${code}` });
+          resolve({ success: false, error: errorMsg });
         }
       });
 
