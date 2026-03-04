@@ -252,7 +252,7 @@ class OllamaSummarizer:
                 logger.error(f"Failed to download model {self.model_name}: {e}")
 
             # Try fallback models from supported list
-            fallback_models = ["llama3.2:3b", "gemma3:4b", "qwen3:8b", "deepseek-r1:8b"]
+            fallback_models = ["llama3.2:3b", "gemma3:4b", "qwen3.5:9b", "deepseek-r1:14b"]
             for fallback in fallback_models:
                 if fallback in model_names:
                     logger.info(f"Using already-installed fallback model: {fallback}")
@@ -512,9 +512,6 @@ Return ONLY the response in this exact JSON format:
                                     'content': prompt
                                 }
                             ],
-                            options={
-                                'timeout': timeout_seconds
-                            }
                         )
                         break  # Success, exit retry loop
 
@@ -767,10 +764,10 @@ TITLE:"""
             if self.ai_provider == "cloud":
                 response_text = self._cloud_chat(prompt, 30)
             else:
-                # Use a short HTTP-level timeout for title generation (lightweight call)
+                # HTTP-level timeout must account for model cold-start (~10s Metal init)
                 title_client = ollama.Client(
                     host=self.remote_url if self.ai_provider == "remote" else None,
-                    timeout=30
+                    timeout=90
                 )
                 ollama_response = title_client.chat(
                     model=self.model_name,
@@ -864,9 +861,6 @@ ANSWER:"""
                                     'content': prompt
                                 }
                             ],
-                            options={
-                                'timeout': 120
-                            }
                         )
                         break
 

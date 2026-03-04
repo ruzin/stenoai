@@ -7860,7 +7860,7 @@ Session started - waiting for activity...
                                 if (currentModel === 'llama3.2:3b') {
                                     const langName = result.language_name || newValue;
                                     const switchTo = confirm(
-                                        `Llama 3.2 is optimised for English. For ${langName}, we recommend switching to Gemma 3 4B or Qwen 3 8B which have stronger multilingual support.\n\nSwitch to Gemma 3 4B now?`
+                                        `Llama 3.2 is optimised for English. For ${langName}, we recommend switching to Gemma 3 4B or Qwen 3.5 9B which have stronger multilingual support.\n\nSwitch to Gemma 3 4B now?`
                                     );
                                     if (switchTo) {
                                         selectModel('gemma3:4b');

@@ -24,7 +24,7 @@ class Config:
             "name": "Llama 3.2 3B",
             "size": "2GB",
             "params": "3B",
-            "description": "Fastest option for quick meetings (default)",
+            "description": "Fast and lightweight for quick meetings (default)",
             "speed": "very fast",
             "quality": "good"
         },
@@ -41,7 +41,7 @@ class Config:
             "size": "6.6GB",
             "params": "9B",
             "description": "Excellent at structured output and action items",
-            "speed": "fast",
+            "speed": "medium",
             "quality": "excellent"
         },
         "deepseek-r1:14b": {
@@ -49,7 +49,7 @@ class Config:
             "size": "9.0GB",
             "params": "14B",
             "description": "Strong reasoning and analysis capabilities",
-            "speed": "medium",
+            "speed": "fast",
             "quality": "excellent"
         },
         "gpt-oss:20b": {

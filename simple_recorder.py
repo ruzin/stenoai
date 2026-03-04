@@ -902,7 +902,7 @@ def reprocess(summary_file, regenerate_title):
 
         if not summary_path.exists():
             print(f"ERROR: Summary file not found: {summary_file}")
-            return
+            sys.exit(1)
 
         try:
             # Load existing summary file
@@ -913,7 +913,7 @@ def reprocess(summary_file, regenerate_title):
             transcript = existing_data.get('transcript', '')
             if not transcript:
                 print("ERROR: No transcript found in summary file")
-                return
+                sys.exit(1)
 
             session_name = existing_data.get('session_info', {}).get('name', 'Reprocessed')
             duration_minutes = existing_data.get('session_info', {}).get('duration_minutes', 10)
@@ -961,6 +961,7 @@ def reprocess(summary_file, regenerate_title):
 
         except Exception as e:
             print(f"ERROR: Failed to reprocess summary: {e}")
+            sys.exit(1)
 
     asyncio.run(run_reprocess())
 
