@@ -175,6 +175,8 @@ class Config:
         Returns:
             True if saved successfully, False otherwise.
         """
+        if storage_path is None:
+            storage_path = ""
         storage_path = storage_path.strip()
 
         if storage_path:
@@ -182,9 +184,14 @@ class Config:
             if not sp.is_absolute():
                 logger.error(f"Storage path must be absolute: {storage_path}")
                 return False
-            # Create subdirectories at the new location
-            for subdir in ("recordings", "transcripts", "output"):
-                (sp / subdir).mkdir(parents=True, exist_ok=True)
+            # Create subdirectories at the new location. If this fails
+            # (for example due to permissions), keep existing config unchanged.
+            try:
+                for subdir in ("recordings", "transcripts", "output"):
+                    (sp / subdir).mkdir(parents=True, exist_ok=True)
+            except Exception as e:
+                logger.error(f"Failed to initialize storage path {storage_path}: {e}")
+                return False
 
         self._config["storage_path"] = storage_path
         return self._save()
