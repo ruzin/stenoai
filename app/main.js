@@ -1962,6 +1962,16 @@ ipcMain.handle('setup-ollama-and-model', async () => {
       sendDebugLog(`Could not read AI provider, proceeding with local setup: ${e.message}`);
     }
 
+    // Check macOS version — bundled Ollama requires macOS 14 (Sonoma) or later
+    const macosRelease = os.release(); // e.g. "23.1.0" for macOS 14.1
+    const darwinMajor = parseInt(macosRelease.split('.')[0], 10);
+    // Darwin 23 = macOS 14 (Sonoma), Darwin 22 = macOS 13 (Ventura), etc.
+    if (darwinMajor < 23) {
+      const macosVersion = darwinMajor >= 22 ? '13 (Ventura)' : darwinMajor >= 21 ? '12 (Monterey)' : `(Darwin ${darwinMajor})`;
+      sendDebugLog(`macOS ${macosVersion} detected — Ollama requires macOS 14 (Sonoma) or later`);
+      return { success: false, error: 'StenoAI requires macOS 14 (Sonoma) or later for local AI summarization. Please update your macOS or use a remote Ollama server in Settings.' };
+    }
+
     sendDebugLog('Locating bundled Ollama...');
     const finalOllamaPath = await findOllamaExecutable();
     if (!finalOllamaPath) {
@@ -1975,6 +1985,7 @@ ipcMain.handle('setup-ollama-and-model', async () => {
     sendDebugLog(`$ ${finalOllamaPath} serve`);
     let ollamaExited = false;
     let ollamaExitCode = null;
+    let ollamaDyldError = false;
     ollamaProcess = spawn(finalOllamaPath, ['serve'], { detached: true, stdio: ['ignore', 'ignore', 'pipe'], env: getOllamaEnv() });
     ollamaPid = ollamaProcess.pid;
     // Write PID file so quit handler can find the process
@@ -1982,6 +1993,7 @@ ipcMain.handle('setup-ollama-and-model', async () => {
     ollamaProcess.stderr.on('data', (data) => {
       const msg = data.toString().trim();
       if (msg) sendDebugLog(`Ollama: ${msg}`);
+      if (msg.includes('Symbol not found') || msg.includes('dyld')) ollamaDyldError = true;
     });
     ollamaProcess.on('exit', (code) => {
       ollamaExited = true;
@@ -2024,6 +2036,9 @@ ipcMain.handle('setup-ollama-and-model', async () => {
 
     if (!ready) {
       if (ollamaExited) {
+        if (ollamaDyldError) {
+          return { success: false, error: 'Ollama crashed due to incompatible macOS version. StenoAI requires macOS 14 (Sonoma) or later for local AI. Please update macOS or use a remote Ollama server in Settings.' };
+        }
         return { success: false, error: `Ollama failed to start (exit code: ${ollamaExitCode}). Check debug logs for details.` };
       }
       sendDebugLog('Warning: Ollama may not be fully ready, attempting pull anyway...');
@@ -2427,6 +2442,13 @@ async function ensureOllamaRunning() {
     }
 
     // Service not running, try to start it
+    // Check macOS version — bundled Ollama requires macOS 14 (Sonoma) or later
+    const macRelease = os.release();
+    if (parseInt(macRelease.split('.')[0], 10) < 23) {
+      sendDebugLog('macOS version too old for bundled Ollama — requires macOS 14 (Sonoma) or later');
+      return false;
+    }
+
     const ollamaPath = await findOllamaExecutable();
     if (!ollamaPath) {
       return false;
