@@ -6,6 +6,7 @@
 window.AudioVisualizer = {
     _animFrame: null,
     _stream: null,
+    _ctx: null,
     _lastFrame: 0,
     _abort: null,
 
@@ -22,11 +23,11 @@ window.AudioVisualizer = {
                 return;
             }
             this._stream = stream;
-            const ctx = new AudioContext();
-            await ctx.resume();
-            const analyser = ctx.createAnalyser();
+            this._ctx = new AudioContext();
+            await this._ctx.resume();
+            const analyser = this._ctx.createAnalyser();
             analyser.fftSize = 256;
-            ctx.createMediaStreamSource(this._stream).connect(analyser);
+            this._ctx.createMediaStreamSource(this._stream).connect(analyser);
             const dataArray = new Uint8Array(analyser.frequencyBinCount);
             this._loop(bars, analyser, dataArray);
         } catch (e) {
@@ -47,6 +48,10 @@ window.AudioVisualizer = {
         if (this._animFrame) {
             cancelAnimationFrame(this._animFrame);
             this._animFrame = null;
+        }
+        if (this._ctx) {
+            this._ctx.close();
+            this._ctx = null;
         }
         if (this._stream) {
             this._stream.getTracks().forEach(t => t.stop());
