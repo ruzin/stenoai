@@ -9,7 +9,7 @@ import logging
 import subprocess
 import time
 import os
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Union
 from .models import MeetingTranscript, ActionItem, Decision
 from . import ollama_manager
 
@@ -453,7 +453,7 @@ Return ONLY the response in this exact JSON format:
   ]
 }}"""
 
-    def summarize_transcript(self, transcript: str, duration_minutes: int, language: str = "en") -> Optional[MeetingTranscript]:
+    def summarize_transcript(self, transcript: str, duration_minutes: int, language: str = "en") -> Optional[Union[MeetingTranscript, dict]]:
         """
         Summarize a meeting transcript using Ollama.
 
@@ -463,7 +463,8 @@ Return ONLY the response in this exact JSON format:
             language: Language code for the summary output
 
         Returns:
-            MeetingTranscript object or None if summarization failed
+            MeetingTranscript (standard mode) or dict (scribe/template mode),
+            or None if summarization failed
         """
         try:
             # Handle empty or None transcripts
@@ -476,9 +477,27 @@ Return ONLY the response in this exact JSON format:
                     decisions=[],
                     duration_minutes=duration_minutes
                 )
-            
-            prompt = self._create_permissive_prompt(transcript, language)
-            logger.info(f"Sending transcript to {self.ai_provider} model: {self.model_name}")
+
+            from .config import get_config
+            config = get_config()
+            scribe_mode = config.get_scribe_mode()
+
+            if scribe_mode:
+                template_id = config.get_scribe_template()
+                from .templates import TemplateManager
+                tm = TemplateManager()
+                template = tm.get_template(template_id)
+                if not template:
+                    logger.error(f"Template '{template_id}' not found, falling back to standard mode")
+                    scribe_mode = False
+                else:
+                    prompt = tm.generate_prompt(template, transcript, language)
+                    logger.info(f"Using scribe template: {template_id}")
+
+            if not scribe_mode:
+                prompt = self._create_permissive_prompt(transcript, language)
+
+            logger.info(f"Sending transcript to {self.ai_provider} model: {self.model_name} (scribe_mode={scribe_mode})")
             logger.info(f"Transcript length: {len(transcript)} characters")
 
             # Calculate dynamic timeout based on transcript length
@@ -576,7 +595,18 @@ Return ONLY the response in this exact JSON format:
                     logger.info("Created fallback summary")
                     return fallback_summary
             
-            # Create MeetingTranscript object
+            # Scribe mode: return dict with template fields
+            if scribe_mode:
+                try:
+                    structured_data["duration"] = f"{duration_minutes} minutes"
+                    structured_data["transcript"] = transcript
+                    logger.info("Successfully created scribe template dict")
+                    return structured_data
+                except Exception as e:
+                    logger.error(f"Error creating scribe template dict: {e}")
+                    return None
+
+            # Create MeetingTranscript object (standard mode)
             try:
                 # Parse next steps (formerly key_actions)
                 actions = []
@@ -586,7 +616,7 @@ Return ONLY the response in this exact JSON format:
                         assignee=action_data.get('assignee', '') or '',
                         deadline=action_data.get('deadline')
                     ))
-                
+
                 # Parse key points as decisions (keeping the same data structure for compatibility)
                 decisions = []
                 for point in structured_data.get('key_points', []):
@@ -624,10 +654,10 @@ Return ONLY the response in this exact JSON format:
                     key_points=decisions,
                     transcript=transcript
                 )
-                
+
                 logger.info("Successfully created MeetingTranscript object")
                 return meeting_summary
-                
+
             except Exception as e:
                 logger.error(f"Error creating MeetingTranscript object: {e}")
                 return None
@@ -746,7 +776,30 @@ Return ONLY the response in this exact JSON format:
             else:
                 lang_instruction = ""
 
-            prompt = f"""Generate a short, descriptive title for this meeting based on the summary below.
+            from .config import get_config
+            config = get_config()
+            scribe_mode = config.get_scribe_mode()
+
+            if scribe_mode:
+                # Use template-specific title instruction
+                template_id = config.get_scribe_template()
+                from .templates import TemplateManager
+                tm = TemplateManager()
+                template = tm.get_template(template_id)
+                title_instruction = template.title_instruction if template else "Summarize this clinical encounter in max 6 words"
+
+                prompt = f"""Generate a short, descriptive title for this clinical encounter based on the note below.
+
+RULES:
+1. {title_instruction}
+2. No quotes, no punctuation, no prefixes like "Note:" or "Title:"
+3. Just the title text, nothing else
+4. Capture the main clinical concern or visit type{lang_instruction}
+
+NOTE:
+{context}"""
+            else:
+                prompt = f"""Generate a short, descriptive title for this meeting based on the summary below.
 
 RULES:
 1. Maximum 6 words

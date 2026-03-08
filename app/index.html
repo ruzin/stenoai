@@ -3157,6 +3157,172 @@
             border-color: var(--accent-primary);
             box-shadow: 0 0 0 3px var(--accent-glow);
         }
+
+        /* Template selector */
+        .template-selector {
+            position: relative;
+            display: none;
+        }
+        .template-selector.visible {
+            display: block;
+        }
+        .template-trigger {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            padding: 4px 10px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            background: var(--bg-primary);
+            color: var(--text-secondary);
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            white-space: nowrap;
+        }
+        .template-trigger:hover {
+            border-color: var(--accent-primary);
+            color: var(--text-primary);
+        }
+        .template-trigger.active {
+            border-color: var(--accent-primary);
+            background: rgba(129, 140, 248, 0.08);
+        }
+        .template-bolt {
+            font-size: 13px;
+        }
+        .template-dropdown {
+            position: absolute;
+            top: calc(100% + 6px);
+            right: 0;
+            min-width: 260px;
+            background: var(--bg-primary);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.25);
+            z-index: 100;
+            opacity: 0;
+            transform: scale(0.95) translateY(-4px);
+            transform-origin: top right;
+            pointer-events: none;
+            transition: opacity 0.15s ease, transform 0.15s ease;
+            overflow: hidden;
+        }
+        .template-dropdown.open {
+            opacity: 1;
+            transform: scale(1) translateY(0);
+            pointer-events: auto;
+        }
+        .template-dropdown-header {
+            padding: 10px 14px 6px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-muted);
+        }
+        .template-option {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 14px;
+            cursor: pointer;
+            transition: background 0.1s ease;
+            border-left: 3px solid transparent;
+        }
+        .template-option:hover {
+            background: var(--bg-hover);
+        }
+        .template-option.selected {
+            background: rgba(129, 140, 248, 0.08);
+            border-left-color: var(--accent-primary);
+        }
+        .template-option-icon {
+            font-size: 18px;
+            flex-shrink: 0;
+        }
+        .template-option-info {
+            flex: 1;
+            min-width: 0;
+        }
+        .template-option-name {
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--text-primary);
+        }
+        .template-option-desc {
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-top: 1px;
+        }
+        .template-option-check {
+            color: var(--accent-primary);
+            font-size: 14px;
+            flex-shrink: 0;
+            opacity: 0;
+        }
+        .template-option.selected .template-option-check {
+            opacity: 1;
+        }
+        [data-theme="light"] .template-dropdown {
+            box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+        }
+
+        /* Template badge in sidebar */
+        .template-badge {
+            display: inline-block;
+            font-size: 9px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+            padding: 1px 5px;
+            border-radius: 3px;
+            background: rgba(129, 140, 248, 0.12);
+            color: var(--accent-primary);
+            margin-left: 4px;
+            vertical-align: middle;
+        }
+
+        /* Template note detail sections */
+        .template-note-section {
+            margin-bottom: 18px;
+        }
+        .template-note-section h2 {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin: 0 0 8px 0;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+        }
+        .template-note-section p {
+            margin: 0;
+            color: var(--text-secondary);
+            line-height: 1.6;
+            font-size: 13px;
+        }
+        .template-note-section ul {
+            margin: 0;
+            padding-left: 18px;
+        }
+        .template-note-section li {
+            color: var(--text-secondary);
+            line-height: 1.6;
+            font-size: 13px;
+            margin-bottom: 2px;
+        }
+        .template-note-draft-banner {
+            display: inline-block;
+            padding: 3px 8px;
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            border-radius: 4px;
+            background: rgba(245, 158, 11, 0.12);
+            color: #f59e0b;
+            margin-bottom: 14px;
+        }
     </style>
 </head>
 <body>
@@ -3218,6 +3384,19 @@
             </button>
         </div>
         
+        <!-- Template Selector (visible only in scribe mode) -->
+        <div class="template-selector" id="template-selector">
+            <button class="template-trigger" id="template-trigger">
+                <span class="template-bolt" id="template-trigger-icon"></span>
+                <span id="template-trigger-label">SOAP Note</span>
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </button>
+            <div class="template-dropdown" id="template-dropdown">
+                <div class="template-dropdown-header">Clinical Template</div>
+                <div id="template-options"></div>
+            </div>
+        </div>
+
         <div class="header-actions">
             <button class="privacy-ghost local" id="privacy-ghost" style="display: none;" title="Privacy: All data stays on your device" aria-label="Privacy: All data stays on your device">
                 <svg width="16" height="18" viewBox="0 0 16 20" fill="none">
@@ -3995,6 +4174,17 @@ Commands and output will appear here...
                         </label>
                     </div>
 
+                    <div class="settings-row">
+                        <div class="settings-row-text">
+                            <span>Scribe mode</span>
+                            <small>Generate clinical documentation instead of meeting summaries</small>
+                        </div>
+                        <label class="settings-toggle">
+                            <input type="checkbox" id="scribe-mode-toggle">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+
                     <div class="settings-row" style="flex-wrap: wrap;">
                         <div class="settings-row-text" style="flex: 1; min-width: 0;">
                             <span>Anonymous usage analytics</span>
@@ -4176,7 +4366,24 @@ Session started - waiting for activity...
         let calendarRefreshInterval = null;
         let calendarNotificationTimers = [];
         let notifiedEventIds = new Set();
-        
+
+        // Scribe / template state
+        let scribeMode = false;
+        let scribeTemplate = 'soap_note';
+        let availableTemplates = {};
+
+        const TEMPLATE_ICONS = {
+            'soap_note': '\uD83E\uDE7A',
+            'history_physical': '\uD83D\uDCCB',
+            'vet_consultation': '\uD83D\uDC3E'
+        };
+
+        const TEMPLATE_SHORT_NAMES = {
+            'soap_note': 'SOAP',
+            'history_physical': 'H&P',
+            'vet_consultation': 'Vet'
+        };
+
         // Utility functions
         function log(message) {
             console.log(`[${new Date().toLocaleTimeString()}] ${message}`);
@@ -4978,11 +5185,13 @@ Session started - waiting for activity...
                 const actionCount = (meeting.action_items || []).length;
                 const title = meeting.session_info?.name || 'Untitled Meeting';
                 const date = formatShortDate(meeting.session_info?.processed_at);
+                const noteType = meeting.note_type ? normalizeNoteType(meeting.note_type) : null;
+                const templateBadge = noteType ? `<span class="template-badge">${escapeHtml(TEMPLATE_SHORT_NAMES[noteType] || noteType)}</span>` : '';
                 return `
                 <div class="meeting-item ${isProcessing ? 'processing' : ''}" data-index="${index}" draggable="true" oncontextmenu="showMeetingContextMenu(event, ${index})" ondragstart="handleMeetingDragStart(event, ${index})">
                     <span class="meeting-dot"></span>
                     <div class="meeting-line-body">
-                        <span class="meeting-line-title" ondblclick="event.stopPropagation(); renameMeeting(${index}, this)">${escapeHtml(title)}</span>
+                        <span class="meeting-line-title" ondblclick="event.stopPropagation(); renameMeeting(${index}, this)">${escapeHtml(title)}${templateBadge}</span>
                         ${isProcessing ? '<span class="meeting-item-spinner"></span>' : ''}
                         <span class="meeting-line-meta">
                             ${actionCount > 0 ? `<span class="meeting-line-badge">${actionCount}</span>` : ''}
@@ -5040,74 +5249,82 @@ Session started - waiting for activity...
                     `Meeting Duration: ${selectedMeeting.session_info.duration_minutes} minutes` : 'Processed');
             detailDuration.textContent = durationText;
             
-            detailSummary.textContent = selectedMeeting.summary || 'No summary available';
-            
-            // Participants
-            if (selectedMeeting.participants && selectedMeeting.participants.length > 0) {
-                detailParticipants.textContent = selectedMeeting.participants.join(', ');
+            // Branch: template note vs standard meeting
+            if (selectedMeeting.note_type) {
+                clearTemplateNoteDetail();
+                renderTemplateNoteDetail(selectedMeeting);
             } else {
-                detailParticipants.innerHTML = '<span style="color: var(--text-muted);">No participants identified</span>';
+                clearTemplateNoteDetail();
+
+                detailSummary.textContent = selectedMeeting.summary || 'No summary available';
+
+                // Participants
+                if (selectedMeeting.participants && selectedMeeting.participants.length > 0) {
+                    detailParticipants.textContent = selectedMeeting.participants.join(', ');
+                } else {
+                    detailParticipants.innerHTML = '<span style="color: var(--text-muted);">No participants identified</span>';
+                }
+
+                // Key topics
+                const detailDiscussionAreas = document.getElementById('detail-discussion-areas');
+                const discussionAreasSection = document.getElementById('discussion-areas-section');
+                detailDiscussionAreas.innerHTML = '';
+                if (selectedMeeting.discussion_areas && selectedMeeting.discussion_areas.length > 0) {
+                    discussionAreasSection.style.display = 'block';
+                    selectedMeeting.discussion_areas.forEach(area => {
+                        const areaDiv = document.createElement('div');
+                        areaDiv.style.marginBottom = '15px';
+                        areaDiv.style.padding = '12px';
+                        areaDiv.style.background = 'var(--bg-elevated)';
+                        areaDiv.style.borderRadius = '6px';
+                        areaDiv.style.borderLeft = '3px solid var(--accent-primary)';
+
+                        const title = document.createElement('h4');
+                        title.textContent = area.title || 'Discussion Topic';
+                        title.style.margin = '0 0 8px 0';
+                        title.style.color = 'var(--accent-primary)';
+                        title.style.fontSize = '14px';
+                        title.style.fontWeight = '600';
+
+                        const analysis = document.createElement('p');
+                        analysis.textContent = area.analysis || '';
+                        analysis.style.margin = '0';
+                        analysis.style.color = 'var(--text-secondary)';
+                        analysis.style.lineHeight = '1.5';
+
+                        areaDiv.appendChild(title);
+                        areaDiv.appendChild(analysis);
+                        detailDiscussionAreas.appendChild(areaDiv);
+                    });
+                } else {
+                    discussionAreasSection.style.display = 'none';
+                }
+
+                // Key points
+                detailKeyPoints.innerHTML = '';
+                if (selectedMeeting.key_points && selectedMeeting.key_points.length > 0) {
+                    selectedMeeting.key_points.forEach(point => {
+                        const li = document.createElement('li');
+                        li.textContent = point;
+                        detailKeyPoints.appendChild(li);
+                    });
+                } else {
+                    detailKeyPoints.innerHTML = '<li style="color: var(--text-muted);">No key points identified</li>';
+                }
+
+                // Action items
+                detailActionItems.innerHTML = '';
+                if (selectedMeeting.action_items && selectedMeeting.action_items.length > 0) {
+                    selectedMeeting.action_items.forEach(item => {
+                        const li = document.createElement('li');
+                        li.textContent = item;
+                        detailActionItems.appendChild(li);
+                    });
+                } else {
+                    detailActionItems.innerHTML = '<li style="color: var(--text-muted);">No action items identified</li>';
+                }
             }
 
-            // Key topics
-            const detailDiscussionAreas = document.getElementById('detail-discussion-areas');
-            const discussionAreasSection = document.getElementById('discussion-areas-section');
-            detailDiscussionAreas.innerHTML = '';
-            if (selectedMeeting.discussion_areas && selectedMeeting.discussion_areas.length > 0) {
-                discussionAreasSection.style.display = 'block';
-                selectedMeeting.discussion_areas.forEach(area => {
-                    const areaDiv = document.createElement('div');
-                    areaDiv.style.marginBottom = '15px';
-                    areaDiv.style.padding = '12px';
-                    areaDiv.style.background = 'var(--bg-elevated)';
-                    areaDiv.style.borderRadius = '6px';
-                    areaDiv.style.borderLeft = '3px solid var(--accent-primary)';
-
-                    const title = document.createElement('h4');
-                    title.textContent = area.title || 'Discussion Topic';
-                    title.style.margin = '0 0 8px 0';
-                    title.style.color = 'var(--accent-primary)';
-                    title.style.fontSize = '14px';
-                    title.style.fontWeight = '600';
-
-                    const analysis = document.createElement('p');
-                    analysis.textContent = area.analysis || '';
-                    analysis.style.margin = '0';
-                    analysis.style.color = 'var(--text-secondary)';
-                    analysis.style.lineHeight = '1.5';
-
-                    areaDiv.appendChild(title);
-                    areaDiv.appendChild(analysis);
-                    detailDiscussionAreas.appendChild(areaDiv);
-                });
-            } else {
-                discussionAreasSection.style.display = 'none';
-            }
-
-            // Key points
-            detailKeyPoints.innerHTML = '';
-            if (selectedMeeting.key_points && selectedMeeting.key_points.length > 0) {
-                selectedMeeting.key_points.forEach(point => {
-                    const li = document.createElement('li');
-                    li.textContent = point;
-                    detailKeyPoints.appendChild(li);
-                });
-            } else {
-                detailKeyPoints.innerHTML = '<li style="color: var(--text-muted);">No key points identified</li>';
-            }
-            
-            // Action items
-            detailActionItems.innerHTML = '';
-            if (selectedMeeting.action_items && selectedMeeting.action_items.length > 0) {
-                selectedMeeting.action_items.forEach(item => {
-                    const li = document.createElement('li');
-                    li.textContent = item;
-                    detailActionItems.appendChild(li);
-                });
-            } else {
-                detailActionItems.innerHTML = '<li style="color: var(--text-muted);">No action items identified</li>';
-            }
-            
             // Transcript
             detailTranscript.textContent = selectedMeeting.transcript || 'No transcript available';
             
@@ -5898,6 +6115,278 @@ Session started - waiting for activity...
             }
         });
 
+        // ── Scribe / Template System ──
+
+        async function loadScribeSettings() {
+            try {
+                const [modeResult, templateResult, templatesResult] = await Promise.all([
+                    ipcRenderer.invoke('get-scribe-mode'),
+                    ipcRenderer.invoke('get-scribe-template'),
+                    ipcRenderer.invoke('list-templates')
+                ]);
+
+                if (modeResult.success) {
+                    scribeMode = modeResult.scribe_mode;
+                    document.getElementById('scribe-mode-toggle').checked = scribeMode;
+                }
+                if (templateResult.success) {
+                    scribeTemplate = templateResult.scribe_template;
+                }
+                if (templatesResult.success) {
+                    availableTemplates = templatesResult.templates;
+                }
+
+                renderTemplateOptions();
+                applyScribeTerminology(scribeMode);
+                log(`Scribe mode: ${scribeMode}, template: ${scribeTemplate}`);
+            } catch (err) {
+                log(`Failed to load scribe settings: ${err.message}`);
+            }
+        }
+
+        function renderTemplateOptions() {
+            const optionsContainer = document.getElementById('template-options');
+            if (!optionsContainer) return;
+
+            optionsContainer.innerHTML = Object.entries(availableTemplates).map(([id, t]) => `
+                <div class="template-option ${id === scribeTemplate ? 'selected' : ''}" data-template-id="${escapeHtml(id)}">
+                    <span class="template-option-icon">${TEMPLATE_ICONS[id] || '\uD83D\uDCC4'}</span>
+                    <div class="template-option-info">
+                        <div class="template-option-name">${escapeHtml(t.name)}</div>
+                        <div class="template-option-desc">${escapeHtml(t.description)}</div>
+                    </div>
+                    <span class="template-option-check">\u2713</span>
+                </div>
+            `).join('');
+
+            // Click handlers
+            optionsContainer.querySelectorAll('.template-option').forEach(opt => {
+                opt.addEventListener('click', () => {
+                    const templateId = opt.dataset.templateId;
+                    selectTemplate(templateId);
+                });
+            });
+
+            updateTemplateTrigger();
+        }
+
+        function updateTemplateTrigger() {
+            const triggerIcon = document.getElementById('template-trigger-icon');
+            const triggerLabel = document.getElementById('template-trigger-label');
+            if (triggerIcon) triggerIcon.textContent = TEMPLATE_ICONS[scribeTemplate] || '\uD83D\uDCC4';
+            if (triggerLabel) {
+                const t = availableTemplates[scribeTemplate];
+                triggerLabel.textContent = t ? t.name : 'Template';
+            }
+        }
+
+        function selectTemplate(templateId) {
+            scribeTemplate = templateId;
+            // Optimistic UI update
+            renderTemplateOptions();
+            closeTemplateDropdown();
+            // Persist to backend
+            ipcRenderer.invoke('set-scribe-template', templateId).catch(err => {
+                log(`Failed to save template: ${err.message}`);
+            });
+        }
+
+        function toggleTemplateDropdown() {
+            const dropdown = document.getElementById('template-dropdown');
+            const trigger = document.getElementById('template-trigger');
+            if (dropdown.classList.contains('open')) {
+                closeTemplateDropdown();
+            } else {
+                dropdown.classList.add('open');
+                trigger.classList.add('active');
+            }
+        }
+
+        function closeTemplateDropdown() {
+            const dropdown = document.getElementById('template-dropdown');
+            const trigger = document.getElementById('template-trigger');
+            if (dropdown) dropdown.classList.remove('open');
+            if (trigger) trigger.classList.remove('active');
+        }
+
+        // Close dropdown on outside click or Escape
+        document.addEventListener('click', (e) => {
+            const selector = document.getElementById('template-selector');
+            if (selector && !selector.contains(e.target)) {
+                closeTemplateDropdown();
+            }
+        });
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') closeTemplateDropdown();
+        });
+
+        // Template trigger click
+        document.getElementById('template-trigger')?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            toggleTemplateDropdown();
+        });
+
+        function applyScribeTerminology(enabled) {
+            const selector = document.getElementById('template-selector');
+            const appTitle = document.querySelector('.app-logo h1');
+            const sidebarHeading = document.querySelector('.sidebar h2, .meetings-heading');
+            const searchInput = document.getElementById('search-input');
+            const emptyStateText = document.querySelector('.empty-state p');
+
+            if (selector) selector.classList.toggle('visible', enabled);
+
+            if (appTitle) appTitle.textContent = enabled ? 'StenoAI Scribe' : 'StenoAI';
+            if (sidebarHeading) sidebarHeading.textContent = enabled ? 'Consults' : 'Meetings';
+            if (searchInput) searchInput.placeholder = enabled ? 'Search consults...' : 'Search meetings...';
+            if (emptyStateText) emptyStateText.textContent = enabled
+                ? 'Start recording to see your consults here'
+                : 'Start recording to see your meetings here';
+        }
+
+        // Scribe toggle handler
+        document.getElementById('scribe-mode-toggle')?.addEventListener('change', async (e) => {
+            const enabled = e.target.checked;
+            scribeMode = enabled;
+            applyScribeTerminology(enabled);
+
+            try {
+                await ipcRenderer.invoke('set-scribe-mode', enabled);
+            } catch (err) {
+                log(`Failed to save scribe mode: ${err.message}`);
+            }
+        });
+
+        // Listen for scribe mode changes from main process
+        ipcRenderer.on('scribe-mode-changed', (event, enabled) => {
+            scribeMode = enabled;
+            const toggle = document.getElementById('scribe-mode-toggle');
+            if (toggle) toggle.checked = enabled;
+            applyScribeTerminology(enabled);
+        });
+
+        function renderTemplateNoteDetail(meeting) {
+            const templateId = normalizeNoteType(meeting.note_type);
+            const template = availableTemplates[templateId];
+            if (!template) return;
+
+            // Hide standard meeting sections
+            const standardSections = ['detail-summary', 'detail-participants', 'detail-key-points',
+                                      'detail-action-items', 'discussion-areas-section'];
+            standardSections.forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.style.display = 'none';
+                // Also hide parent section containers
+                const parent = el?.closest('.detail-section');
+                if (parent) parent.style.display = 'none';
+            });
+            // Hide labels for standard sections
+            document.querySelectorAll('.detail-content h2').forEach(h2 => {
+                const text = h2.textContent.toLowerCase();
+                if (['summary', 'participants', 'key points', 'action items', 'key topics'].includes(text)) {
+                    h2.style.display = 'none';
+                }
+            });
+
+            // Create or reuse template note container
+            let container = document.getElementById('template-note-container');
+            if (!container) {
+                container = document.createElement('div');
+                container.id = 'template-note-container';
+                // Insert after the participants section area
+                const detailContent = document.querySelector('.detail-content');
+                if (detailContent) {
+                    // Insert before transcript section
+                    const transcriptSection = document.getElementById('detail-transcript')?.closest('.detail-section') || document.getElementById('detail-transcript');
+                    if (transcriptSection) {
+                        detailContent.insertBefore(container, transcriptSection);
+                    } else {
+                        detailContent.appendChild(container);
+                    }
+                }
+            }
+
+            container.style.display = 'block';
+
+            let html = '<div class="template-note-draft-banner">Draft -- Requires Review</div>';
+
+            template.sections.forEach(section => {
+                const value = meeting[section.key];
+                // Skip empty sections
+                if (!value || (Array.isArray(value) && value.length === 0) || value === '') return;
+
+                html += '<div class="template-note-section">';
+                html += `<h2>${escapeHtml(section.title)}</h2>`;
+
+                if (section.format === 'list' && Array.isArray(value)) {
+                    html += '<ul>';
+                    value.forEach(item => {
+                        html += `<li>${escapeHtml(String(item))}</li>`;
+                    });
+                    html += '</ul>';
+                } else if (section.format === 'string') {
+                    html += `<p>${escapeHtml(String(value))}</p>`;
+                } else {
+                    html += `<p>${escapeHtml(String(value))}</p>`;
+                }
+
+                html += '</div>';
+            });
+
+            container.innerHTML = html;
+        }
+
+        function clearTemplateNoteDetail() {
+            const container = document.getElementById('template-note-container');
+            if (container) {
+                container.style.display = 'none';
+                container.innerHTML = '';
+            }
+
+            // Restore standard meeting sections
+            document.querySelectorAll('.detail-content h2').forEach(h2 => {
+                h2.style.display = '';
+            });
+
+            const standardSections = ['detail-summary', 'detail-participants', 'detail-key-points',
+                                      'detail-action-items', 'discussion-areas-section'];
+            standardSections.forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.style.display = '';
+                const parent = el?.closest('.detail-section');
+                if (parent) parent.style.display = '';
+            });
+        }
+
+        function normalizeNoteType(noteType) {
+            // Backward compat: map old "soap" to "soap_note"
+            if (noteType === 'soap') return 'soap_note';
+            return noteType;
+        }
+
+        function copyTemplateNotes(meeting) {
+            const templateId = normalizeNoteType(meeting.note_type);
+            const template = availableTemplates[templateId];
+            if (!template) return '';
+
+            let text = '';
+            template.sections.forEach(section => {
+                const value = meeting[section.key];
+                if (!value || (Array.isArray(value) && value.length === 0) || value === '') return;
+
+                text += `${section.title.toUpperCase()}\n`;
+                if (section.format === 'list' && Array.isArray(value)) {
+                    value.forEach(item => {
+                        text += `- ${item}\n`;
+                    });
+                } else {
+                    text += `${value}\n`;
+                }
+                text += '\n';
+            });
+
+            return text;
+        }
+
         // Auto-clear state on startup
         async function initializeApp() {
             // Clear debug logs for fresh start
@@ -5962,7 +6451,10 @@ Session started - waiting for activity...
                     localStorage.getItem('externalAIEnabled') === 'true'
                         ? loadAIProviderSettings().catch(err =>
                             log(`AI provider settings load failed: ${err.message}`))
-                        : Promise.resolve()
+                        : Promise.resolve(),
+                    loadScribeSettings().catch(err =>
+                        log(`Scribe settings load failed: ${err.message}`)
+                    )
                 ]);
 
                 // Restore ghost visibility and provider state on app start
@@ -6278,46 +6770,47 @@ Session started - waiting for activity...
                 notesText += `Duration: ${duration}\n`;
                 notesText += `\n`;
 
-                // Summary
-                if (selectedMeeting.summary) {
-                    notesText += `SUMMARY\n`;
-                    notesText += `${selectedMeeting.summary}\n\n`;
-                }
+                if (selectedMeeting.note_type) {
+                    // Template note: iterate sections in order
+                    notesText += copyTemplateNotes(selectedMeeting);
+                } else {
+                    // Standard meeting note
+                    if (selectedMeeting.summary) {
+                        notesText += `SUMMARY\n`;
+                        notesText += `${selectedMeeting.summary}\n\n`;
+                    }
 
-                // Participants
-                if (selectedMeeting.participants && selectedMeeting.participants.length > 0) {
-                    notesText += `PARTICIPANTS\n`;
-                    selectedMeeting.participants.forEach(participant => {
-                        notesText += `- ${participant}\n`;
-                    });
-                    notesText += `\n`;
-                }
+                    if (selectedMeeting.participants && selectedMeeting.participants.length > 0) {
+                        notesText += `PARTICIPANTS\n`;
+                        selectedMeeting.participants.forEach(participant => {
+                            notesText += `- ${participant}\n`;
+                        });
+                        notesText += `\n`;
+                    }
 
-                // Key Topics (Discussion Areas)
-                if (selectedMeeting.discussion_areas && selectedMeeting.discussion_areas.length > 0) {
-                    notesText += `KEY TOPICS\n`;
-                    selectedMeeting.discussion_areas.forEach(area => {
-                        notesText += `\n${area.title}\n`;
-                        notesText += `${area.analysis}\n`;
-                    });
-                    notesText += `\n`;
-                }
+                    if (selectedMeeting.discussion_areas && selectedMeeting.discussion_areas.length > 0) {
+                        notesText += `KEY TOPICS\n`;
+                        selectedMeeting.discussion_areas.forEach(area => {
+                            notesText += `\n${area.title}\n`;
+                            notesText += `${area.analysis}\n`;
+                        });
+                        notesText += `\n`;
+                    }
 
-                // Key Points
-                if (selectedMeeting.key_points && selectedMeeting.key_points.length > 0) {
-                    notesText += `KEY POINTS\n`;
-                    selectedMeeting.key_points.forEach(point => {
-                        notesText += `- ${point}\n`;
-                    });
-                    notesText += `\n`;
-                }
+                    if (selectedMeeting.key_points && selectedMeeting.key_points.length > 0) {
+                        notesText += `KEY POINTS\n`;
+                        selectedMeeting.key_points.forEach(point => {
+                            notesText += `- ${point}\n`;
+                        });
+                        notesText += `\n`;
+                    }
 
-                // Action Items
-                if (selectedMeeting.action_items && selectedMeeting.action_items.length > 0) {
-                    notesText += `ACTION ITEMS\n`;
-                    selectedMeeting.action_items.forEach(item => {
-                        notesText += `- ${item}\n`;
-                    });
+                    if (selectedMeeting.action_items && selectedMeeting.action_items.length > 0) {
+                        notesText += `ACTION ITEMS\n`;
+                        selectedMeeting.action_items.forEach(item => {
+                            notesText += `- ${item}\n`;
+                        });
+                    }
                 }
 
                 await navigator.clipboard.writeText(notesText);

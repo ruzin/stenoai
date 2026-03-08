@@ -158,6 +158,8 @@ class Config:
             "cloud_model": "gpt-4o-mini",
             "anonymous_id": str(uuid.uuid4()),
             "storage_path": "",
+            "scribe_mode": False,
+            "scribe_template": "soap_note",
             "version": "1.0"
         }
 
@@ -275,6 +277,24 @@ class Config:
             True if saved successfully, False otherwise
         """
         self._config["hide_dock_icon"] = enabled
+        return self._save()
+
+    def get_scribe_mode(self) -> bool:
+        """Get whether scribe (clinical documentation) mode is enabled."""
+        return self._config.get("scribe_mode", False)
+
+    def set_scribe_mode(self, enabled: bool) -> bool:
+        """Set whether scribe (clinical documentation) mode is enabled."""
+        self._config["scribe_mode"] = enabled
+        return self._save()
+
+    def get_scribe_template(self) -> str:
+        """Get the selected scribe template ID."""
+        return self._config.get("scribe_template", "soap_note")
+
+    def set_scribe_template(self, template_id: str) -> bool:
+        """Set the selected scribe template ID."""
+        self._config["scribe_template"] = template_id
         return self._save()
 
     def get_system_audio_enabled(self) -> bool:

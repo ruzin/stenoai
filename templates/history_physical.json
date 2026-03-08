@@ -1,0 +1,65 @@
+{
+  "id": "history_physical",
+  "name": "History & Physical",
+  "description": "Comprehensive patient evaluation",
+  "category": "clinical",
+  "title_instruction": "Summarize this patient evaluation in max 6 words",
+  "sections": [
+    {
+      "key": "chief_complaint",
+      "title": "Chief Complaint",
+      "instruction": "Patient's primary concern in their own words",
+      "format": "string",
+      "required": true
+    },
+    {
+      "key": "history_present_illness",
+      "title": "History of Present Illness",
+      "instruction": "Detailed narrative of the current illness including onset, duration, severity, aggravating/alleviating factors",
+      "format": "paragraph"
+    },
+    {
+      "key": "past_medical_history",
+      "title": "Past Medical History",
+      "instruction": "Relevant prior diagnoses, surgeries, hospitalizations mentioned",
+      "format": "list"
+    },
+    {
+      "key": "review_of_systems",
+      "title": "Review of Systems",
+      "instruction": "Systems reviewed and relevant positives/negatives mentioned",
+      "format": "paragraph"
+    },
+    {
+      "key": "physical_examination",
+      "title": "Physical Examination",
+      "instruction": "Examination findings, vitals, and clinical observations",
+      "format": "paragraph"
+    },
+    {
+      "key": "assessment",
+      "title": "Assessment",
+      "instruction": "Clinical impression, differential diagnoses, or working diagnosis",
+      "format": "paragraph"
+    },
+    {
+      "key": "plan",
+      "title": "Plan",
+      "instruction": "Treatment plan, orders, investigations, or referrals",
+      "format": "list"
+    },
+    {
+      "key": "medications",
+      "title": "Medications",
+      "instruction": "Medications prescribed or discussed with dosage and frequency if available",
+      "format": "list",
+      "item_format": "\"Medication name — dosage — frequency\""
+    },
+    {
+      "key": "follow_up",
+      "title": "Follow-Up",
+      "instruction": "Follow-up instructions, return visit timeline, or referrals",
+      "format": "paragraph"
+    }
+  ]
+}

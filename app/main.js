@@ -2643,6 +2643,63 @@ ipcMain.handle('set-dock-icon', async (event, hidden) => {
   }
 });
 
+// Scribe mode IPC handlers
+ipcMain.handle('get-scribe-mode', async () => {
+  try {
+    const result = await runPythonScript('simple_recorder.py', ['get-scribe-mode'], true);
+    const jsonData = JSON.parse(result);
+    return { success: true, ...jsonData };
+  } catch (error) {
+    sendDebugLog(`Error getting scribe mode: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('set-scribe-mode', async (event, enabled) => {
+  try {
+    sendDebugLog(`Setting scribe mode to: ${enabled}`);
+    await runPythonScript('simple_recorder.py', ['set-scribe-mode', enabled ? 'True' : 'False']);
+    mainWindow?.webContents.send('scribe-mode-changed', enabled);
+    return { success: true, scribe_mode: enabled };
+  } catch (error) {
+    sendDebugLog(`Error setting scribe mode: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('list-templates', async () => {
+  try {
+    const result = await runPythonScript('simple_recorder.py', ['list-templates'], true);
+    const templates = JSON.parse(result.trim());
+    return { success: true, templates };
+  } catch (error) {
+    sendDebugLog(`Error listing templates: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('get-scribe-template', async () => {
+  try {
+    const result = await runPythonScript('simple_recorder.py', ['get-scribe-template'], true);
+    const jsonData = JSON.parse(result.trim());
+    return { success: true, ...jsonData };
+  } catch (error) {
+    sendDebugLog(`Error getting scribe template: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('set-scribe-template', async (event, templateId) => {
+  try {
+    sendDebugLog(`Setting scribe template to: ${templateId}`);
+    await runPythonScript('simple_recorder.py', ['set-scribe-template', templateId]);
+    return { success: true, scribe_template: templateId };
+  } catch (error) {
+    sendDebugLog(`Error setting scribe template: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+});
+
 // System audio capture IPC handlers
 ipcMain.handle('get-system-audio', async () => {
   try {

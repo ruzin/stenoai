@@ -256,9 +256,16 @@ Transcript:
                 "key_points": [],
                 "action_items": []
             }
-        
+
         # Defensive extraction from summary_result
         try:
+            # Scribe mode returns a dict directly from the template engine
+            if isinstance(summary_result, dict):
+                from src.config import get_config
+                template_id = get_config().get_scribe_template()
+                summary_result["note_type"] = template_id
+                return summary_result
+
             return {
                 "summary": getattr(summary_result, 'overview', '') or '',
                 "participants": getattr(summary_result, 'participants', []) or [],
@@ -324,8 +331,10 @@ Transcript:
             try:
                 from src.config import get_config
                 language = get_config().get_language()
+                # For template notes, pick the first paragraph-style section as context
+                title_context = summary_data.get("summary", "") or summary_data.get("chief_complaint", "") or summary_data.get("overview", "")
                 generated_title = self.summarizer.generate_title(
-                    summary_data.get("summary", ""),
+                    title_context,
                     transcript_data["transcript_text"],
                     language=language
                 )
@@ -338,23 +347,36 @@ Transcript:
         # Step 3: Save complete summary
         summary_path = self.output_dir / f"{audio_path.stem}_summary.json"
 
-        complete_data = {
-            "session_info": {
-                "name": session_name,
-                "audio_file": str(audio_path),
-                "transcript_file": transcript_data["transcript_file"],
-                "summary_file": str(summary_path),
-                "processed_at": datetime.now().isoformat(),
-                "duration_seconds": int(duration_seconds) if duration_seconds is not None else None,
-                "duration_minutes": duration_minutes
-            },
-            "summary": summary_data.get("summary", "") or "",
-            "participants": summary_data.get("participants", []) or [],
-            "discussion_areas": summary_data.get("discussion_areas", []) or [],
-            "key_points": summary_data.get("key_points", []) or [],
-            "action_items": summary_data.get("action_items", []) or [],
-            "transcript": transcript_data["transcript_text"]
+        session_info = {
+            "name": session_name,
+            "audio_file": str(audio_path),
+            "transcript_file": transcript_data["transcript_file"],
+            "summary_file": str(summary_path),
+            "processed_at": datetime.now().isoformat(),
+            "duration_seconds": int(duration_seconds) if duration_seconds is not None else None,
+            "duration_minutes": duration_minutes
         }
+
+        note_type = summary_data.get("note_type")
+        if note_type:
+            # Template-based scribe note: store all fields generically
+            complete_data = {"session_info": session_info, "note_type": note_type}
+            # Standard fields we manage ourselves (skip from template output)
+            skip_keys = {"note_type", "duration", "transcript", "session_info"}
+            for key, value in summary_data.items():
+                if key not in skip_keys:
+                    complete_data[key] = value
+            complete_data["transcript"] = transcript_data["transcript_text"]
+        else:
+            complete_data = {
+                "session_info": session_info,
+                "summary": summary_data.get("summary", "") or "",
+                "participants": summary_data.get("participants", []) or [],
+                "discussion_areas": summary_data.get("discussion_areas", []) or [],
+                "key_points": summary_data.get("key_points", []) or [],
+                "action_items": summary_data.get("action_items", []) or [],
+                "transcript": transcript_data["transcript_text"]
+            }
         
         with open(summary_path, 'w') as f:
             json.dump(complete_data, f, indent=2)
@@ -878,6 +900,15 @@ def list_meetings():
                     "transcript": data.get("transcript", ""),
                     "folders": data.get("folders", [])
                 }
+                # Include template note fields if present
+                if data.get("note_type"):
+                    essential_meeting["note_type"] = data["note_type"]
+                    standard_keys = {"session_info", "summary", "participants",
+                                     "discussion_areas", "key_points", "action_items",
+                                     "transcript", "folders", "note_type"}
+                    for key, value in data.items():
+                        if key not in standard_keys:
+                            essential_meeting[key] = value
                 meetings.append(essential_meeting)
         except Exception as e:
             # Log warning but continue processing other files
@@ -924,22 +955,44 @@ def reprocess(summary_file, regenerate_title):
             # Re-run summarization
             summary_data = await recorder.summarize_transcript(transcript, session_name)
 
-            # Update the existing data with new summary
-            existing_data.update({
-                "summary": summary_data.get("summary", "") or "",
-                "participants": summary_data.get("participants", []) or [],
-                "discussion_areas": summary_data.get("discussion_areas", []) or [],
-                "key_points": summary_data.get("key_points", []) or [],
-                "action_items": summary_data.get("action_items", []) or [],
-            })
+            note_type = summary_data.get("note_type")
+            if note_type:
+                # Template-based scribe reprocessing
+                existing_data["note_type"] = note_type
+                skip_keys = {"note_type", "duration", "transcript", "session_info"}
+                for key, value in summary_data.items():
+                    if key not in skip_keys:
+                        existing_data[key] = value
+                # Remove old standard-meeting fields and stale template fields
+                new_keys = set(summary_data.keys()) - skip_keys
+                preserve_keys = {"session_info", "note_type", "transcript", "folders"}
+                for old_key in list(existing_data.keys()):
+                    if old_key not in preserve_keys and old_key not in new_keys:
+                        del existing_data[old_key]
+            else:
+                # Standard meeting reprocessing
+                existing_data.update({
+                    "summary": summary_data.get("summary", "") or "",
+                    "participants": summary_data.get("participants", []) or [],
+                    "discussion_areas": summary_data.get("discussion_areas", []) or [],
+                    "key_points": summary_data.get("key_points", []) or [],
+                    "action_items": summary_data.get("action_items", []) or [],
+                })
+                # Remove old template fields if switching from scribe to standard
+                standard_keys = {"session_info", "summary", "participants", "discussion_areas",
+                                 "key_points", "action_items", "transcript", "folders"}
+                for old_key in list(existing_data.keys()):
+                    if old_key not in standard_keys:
+                        del existing_data[old_key]
 
             # Regenerate title if requested
             if regenerate_title:
                 try:
                     from src.config import get_config
                     language = get_config().get_language()
+                    title_context = summary_data.get("summary", "") or summary_data.get("chief_complaint", "") or summary_data.get("overview", "")
                     generated_title = recorder.summarizer.generate_title(
-                        summary_data.get("summary", ""),
+                        title_context,
                         transcript,
                         language=language
                     )
@@ -957,7 +1010,9 @@ def reprocess(summary_file, regenerate_title):
                 json.dump(existing_data, f, indent=2)
 
             print(f"✅ Summary reprocessed successfully: {summary_path}")
-            print(f"📋 New summary: {existing_data['summary'][:100]}...")
+            preview = existing_data.get('summary', existing_data.get('chief_complaint', ''))
+            if preview:
+                print(f"📋 Preview: {str(preview)[:100]}...")
 
         except Exception as e:
             print(f"ERROR: Failed to reprocess summary: {e}")
@@ -1438,6 +1493,57 @@ def set_dock_icon(enabled):
     else:
         print(f"ERROR: Failed to save hide dock icon preference")
         print(json.dumps({"success": False, "error": "Failed to save config"}))
+
+
+@cli.command()
+def get_scribe_mode():
+    """Get the current scribe mode preference"""
+    from src.config import get_config
+    config = get_config()
+    print(json.dumps({"scribe_mode": config.get_scribe_mode()}))
+
+
+@cli.command()
+@click.argument('enabled', type=bool)
+def set_scribe_mode(enabled):
+    """Set scribe mode preference (True/False)"""
+    from src.config import get_config
+    config = get_config()
+    success = config.set_scribe_mode(enabled)
+    if success:
+        print(json.dumps({"success": True, "scribe_mode": enabled}))
+    else:
+        print(json.dumps({"success": False, "error": "Failed to save config"}))
+
+
+@cli.command()
+def get_scribe_template():
+    """Get the currently selected scribe template"""
+    from src.config import get_config
+    config = get_config()
+    print(json.dumps({"scribe_template": config.get_scribe_template()}))
+
+
+@cli.command()
+@click.argument('template_id')
+def set_scribe_template(template_id):
+    """Set the scribe template"""
+    from src.config import get_config
+    config = get_config()
+    success = config.set_scribe_template(template_id)
+    if success:
+        print(json.dumps({"success": True, "scribe_template": template_id}))
+    else:
+        print(json.dumps({"success": False, "error": "Failed to save config"}))
+
+
+@cli.command()
+def list_templates():
+    """List available scribe templates"""
+    from src.templates import TemplateManager
+    tm = TemplateManager()
+    templates = tm.list_templates()
+    print(json.dumps(templates))
 
 
 @cli.command()

@@ -1,0 +1,76 @@
+{
+  "id": "vet_consultation",
+  "name": "Veterinary Consultation",
+  "description": "Animal patient consultation notes",
+  "category": "clinical",
+  "title_instruction": "Summarize this veterinary consultation in max 6 words",
+  "sections": [
+    {
+      "key": "overview",
+      "title": "Overview",
+      "instruction": "Brief summary of the consultation",
+      "format": "paragraph"
+    },
+    {
+      "key": "patient",
+      "title": "Patient",
+      "instruction": "Animal name, species, breed, age, sex, and weight if mentioned",
+      "format": "string"
+    },
+    {
+      "key": "owner",
+      "title": "Owner",
+      "instruction": "Owner name",
+      "format": "string"
+    },
+    {
+      "key": "presenting_complaint",
+      "title": "Presenting Complaint",
+      "instruction": "Owner's description of the problem and reason for visit",
+      "format": "paragraph"
+    },
+    {
+      "key": "history",
+      "title": "History",
+      "instruction": "Relevant medical history, vaccination status, diet, lifestyle",
+      "format": "paragraph"
+    },
+    {
+      "key": "examination",
+      "title": "Examination Findings",
+      "instruction": "Physical examination findings, vitals, and clinical observations",
+      "format": "list"
+    },
+    {
+      "key": "diagnosis",
+      "title": "Diagnosis",
+      "instruction": "Diagnosis or differential diagnoses discussed",
+      "format": "list"
+    },
+    {
+      "key": "treatment",
+      "title": "Treatment",
+      "instruction": "Treatment steps performed or recommended",
+      "format": "list"
+    },
+    {
+      "key": "medications",
+      "title": "Medications",
+      "instruction": "Medications prescribed with dosage and administration instructions",
+      "format": "list",
+      "item_format": "\"Medication name — dosage — route — frequency\""
+    },
+    {
+      "key": "follow_up",
+      "title": "Follow-Up",
+      "instruction": "Follow-up instructions and return visit timeline",
+      "format": "paragraph"
+    },
+    {
+      "key": "owner_advice",
+      "title": "Owner Advice",
+      "instruction": "Home care instructions and advice given to the owner",
+      "format": "list"
+    }
+  ]
+}

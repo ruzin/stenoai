@@ -1,0 +1,59 @@
+{
+  "id": "soap_note",
+  "name": "SOAP Note",
+  "description": "Standard clinical documentation format",
+  "category": "clinical",
+  "title_instruction": "Summarize this clinical encounter in max 6 words",
+  "sections": [
+    {
+      "key": "chief_complaint",
+      "title": "Chief Complaint",
+      "instruction": "Patient's primary concern in their own words",
+      "format": "string",
+      "required": true
+    },
+    {
+      "key": "subjective",
+      "title": "Subjective",
+      "instruction": "History of present illness narrative including symptoms, onset, duration, and relevant history",
+      "format": "paragraph"
+    },
+    {
+      "key": "objective",
+      "title": "Objective",
+      "instruction": "Clinical examination findings if mentioned, vitals, observations",
+      "format": "paragraph"
+    },
+    {
+      "key": "assessment",
+      "title": "Assessment",
+      "instruction": "Diagnosis or clinical impression discussed",
+      "format": "paragraph"
+    },
+    {
+      "key": "plan",
+      "title": "Plan",
+      "instruction": "Treatment steps, interventions, or action items discussed",
+      "format": "list"
+    },
+    {
+      "key": "medications",
+      "title": "Medications",
+      "instruction": "Medications mentioned with dosage and frequency if available",
+      "format": "list",
+      "item_format": "\"Medication name — dosage — frequency\""
+    },
+    {
+      "key": "follow_up",
+      "title": "Follow-Up",
+      "instruction": "Follow-up instructions, return visit timeline, or referrals",
+      "format": "paragraph"
+    },
+    {
+      "key": "participants",
+      "title": "Participants",
+      "instruction": "Names and roles of people present (e.g. Dr. Smith, Patient Jane Doe)",
+      "format": "list"
+    }
+  ]
+}
