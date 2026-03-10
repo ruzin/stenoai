@@ -3162,84 +3162,111 @@
         .template-selector {
             position: relative;
             display: none;
+            align-items: center;
         }
         .template-selector.visible {
-            display: block;
+            display: flex;
         }
         .template-trigger {
             display: flex;
             align-items: center;
-            gap: 5px;
-            padding: 4px 10px;
-            border: 1px solid var(--border);
+            justify-content: center;
+            width: 32px;
+            height: 32px;
+            padding: 0;
+            background: var(--bg-surface);
+            border: 1px solid var(--border-subtle);
             border-radius: 6px;
-            background: var(--bg-primary);
-            color: var(--text-secondary);
-            font-size: 12px;
             cursor: pointer;
             transition: all 0.15s ease;
-            white-space: nowrap;
+            color: var(--text-secondary);
+            font-family: inherit;
         }
         .template-trigger:hover {
+            background: var(--bg-elevated);
+            border-color: var(--border-default);
+            color: var(--text-primary);
+        }
+        .template-trigger:hover .template-bolt {
+            color: var(--accent-primary);
+            filter: drop-shadow(0 0 4px rgba(129, 140, 248, 0.5));
+        }
+        .template-trigger.active {
+            background: var(--bg-elevated);
             border-color: var(--accent-primary);
             color: var(--text-primary);
         }
-        .template-trigger.active {
-            border-color: var(--accent-primary);
-            background: rgba(129, 140, 248, 0.08);
+        .template-trigger.active .template-bolt {
+            color: var(--accent-primary);
+            filter: drop-shadow(0 0 6px rgba(129, 140, 248, 0.6));
         }
         .template-bolt {
-            font-size: 13px;
+            width: 16px;
+            height: 16px;
+            color: var(--text-muted);
+            transition: all 0.15s ease;
         }
         .template-dropdown {
             position: absolute;
             top: calc(100% + 6px);
-            right: 0;
-            min-width: 260px;
-            background: var(--bg-primary);
-            border: 1px solid var(--border);
-            border-radius: 10px;
-            box-shadow: 0 8px 24px rgba(0,0,0,0.25);
-            z-index: 100;
+            left: 0;
+            min-width: 220px;
+            background: var(--bg-elevated);
+            border: 1px solid var(--border-default);
+            border-radius: 8px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 2px 8px rgba(0, 0, 0, 0.2);
             opacity: 0;
-            transform: scale(0.95) translateY(-4px);
-            transform-origin: top right;
-            pointer-events: none;
-            transition: opacity 0.15s ease, transform 0.15s ease;
+            visibility: hidden;
+            transform: translateY(-8px) scale(0.96);
+            transform-origin: top left;
+            transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+            z-index: 1000;
             overflow: hidden;
         }
         .template-dropdown.open {
             opacity: 1;
-            transform: scale(1) translateY(0);
-            pointer-events: auto;
+            visibility: visible;
+            transform: translateY(0) scale(1);
         }
         .template-dropdown-header {
-            padding: 10px 14px 6px;
-            font-size: 11px;
+            padding: 10px 12px 8px;
+            font-size: 10px;
             font-weight: 600;
             text-transform: uppercase;
-            letter-spacing: 0.5px;
+            letter-spacing: 0.05em;
             color: var(--text-muted);
+            border-bottom: 1px solid var(--border-subtle);
         }
         .template-option {
             display: flex;
             align-items: center;
             gap: 10px;
-            padding: 10px 14px;
+            padding: 10px 12px;
             cursor: pointer;
-            transition: background 0.1s ease;
-            border-left: 3px solid transparent;
+            transition: all 0.12s ease;
+            border-left: 2px solid transparent;
         }
         .template-option:hover {
-            background: var(--bg-hover);
+            background: var(--bg-surface);
         }
         .template-option.selected {
             background: rgba(129, 140, 248, 0.08);
             border-left-color: var(--accent-primary);
         }
+        .template-option.selected .template-option-icon {
+            box-shadow: 0 0 12px rgba(129, 140, 248, 0.3);
+        }
         .template-option-icon {
-            font-size: 18px;
+            width: 28px;
+            height: 28px;
+            border-radius: 6px;
+            background: var(--bg-primary);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 13px;
             flex-shrink: 0;
+            transition: all 0.15s ease;
         }
         .template-option-info {
             flex: 1;
@@ -3249,23 +3276,38 @@
             font-size: 13px;
             font-weight: 500;
             color: var(--text-primary);
+            display: flex;
+            align-items: center;
+            gap: 6px;
         }
         .template-option-desc {
             font-size: 11px;
             color: var(--text-muted);
             margin-top: 1px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
         .template-option-check {
+            width: 16px;
+            height: 16px;
             color: var(--accent-primary);
-            font-size: 14px;
-            flex-shrink: 0;
             opacity: 0;
+            transform: scale(0.8);
+            transition: all 0.15s ease;
         }
         .template-option.selected .template-option-check {
             opacity: 1;
+            transform: scale(1);
         }
         [data-theme="light"] .template-dropdown {
-            box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15), 0 2px 8px rgba(0, 0, 0, 0.08);
+        }
+        [data-theme="light"] .template-trigger:hover .template-bolt {
+            filter: drop-shadow(0 0 3px rgba(91, 95, 199, 0.4));
+        }
+        [data-theme="light"] .template-option.selected .template-option-icon {
+            box-shadow: 0 0 10px rgba(91, 95, 199, 0.25);
         }
 
         /* Template badge in sidebar */
@@ -3382,21 +3424,21 @@
             <button class="btn" id="pause-btn" style="display: none;">
                 <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor"><rect x="1.5" y="1" width="3" height="10" rx="1"/><rect x="7.5" y="1" width="3" height="10" rx="1"/></svg> Pause
             </button>
-        </div>
-        
-        <!-- Template Selector (visible only in scribe mode) -->
-        <div class="template-selector" id="template-selector">
-            <button class="template-trigger" id="template-trigger">
-                <span class="template-bolt" id="template-trigger-icon"></span>
-                <span id="template-trigger-label">SOAP Note</span>
-                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"></polyline></svg>
-            </button>
-            <div class="template-dropdown" id="template-dropdown">
-                <div class="template-dropdown-header">Clinical Template</div>
-                <div id="template-options"></div>
+
+            <!-- Template Quick Selector (visible only in scribe mode) -->
+            <div class="template-selector" id="template-selector">
+                <button class="template-trigger" id="template-trigger" title="Select template">
+                    <svg class="template-bolt" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+                    </svg>
+                </button>
+                <div class="template-dropdown" id="template-dropdown">
+                    <div class="template-dropdown-header">Clinical Template</div>
+                    <div id="template-options"></div>
+                </div>
             </div>
         </div>
-
+        
         <div class="header-actions">
             <button class="privacy-ghost local" id="privacy-ghost" style="display: none;" title="Privacy: All data stays on your device" aria-label="Privacy: All data stays on your device">
                 <svg width="16" height="18" viewBox="0 0 16 20" fill="none">
@@ -4724,7 +4766,7 @@ Session started - waiting for activity...
                 ondragleave="this.classList.remove('drag-over')"
                 ondrop="handleAllMeetingsDrop(event)">
                 ${folderIcon('#71717a')}
-                All Meetings
+                ${scribeMode ? 'All Consults' : 'All Meetings'}
                 <span class="folder-count">${allCount}</span>
             </div>`;
             for (const f of folders) {
@@ -4862,7 +4904,7 @@ Session started - waiting for activity...
             const name = folder ? folder.name : 'this folder';
             const count = meetings.filter(m => (m.folders || []).includes(contextFolderId)).length;
             const msg = count > 0
-                ? `Delete folder "${name}"?\n\n${count} meeting${count === 1 ? '' : 's'} will be moved back to All Meetings. No recordings or transcripts will be deleted.`
+                ? `Delete folder "${name}"?\n\n${count} ${scribeMode ? 'consult' : 'meeting'}${count === 1 ? '' : 's'} will be moved back to ${scribeMode ? 'All Consults' : 'All Meetings'}. No recordings or transcripts will be deleted.`
                 : `Delete folder "${name}"?\n\nNo recordings or transcripts will be deleted.`;
             if (!confirm(msg)) { contextFolderId = null; return; }
             await deleteFolder_(contextFolderId);
@@ -4929,7 +4971,7 @@ Session started - waiting for activity...
             let html = '<div style="padding: 4px 10px; font-size: 11px; color: var(--text-muted); font-weight: 500;">Move to...</div>';
             html += `<div class="context-menu-item" onclick="event.stopPropagation(); moveToAllMeetings()">
                 ${folderIcon('#71717a')}
-                All Meetings ${isUnfiled ? '<span style="color: var(--text-muted); font-size: 11px;">(current)</span>' : ''}
+                ${scribeMode ? 'All Consults' : 'All Meetings'} ${isUnfiled ? '<span style="color: var(--text-muted); font-size: 11px;">(current)</span>' : ''}
             </div>`;
             for (const f of folders) {
                 const inFolder = meetingFolders.includes(f.id);
@@ -6148,35 +6190,24 @@ Session started - waiting for activity...
             const optionsContainer = document.getElementById('template-options');
             if (!optionsContainer) return;
 
-            optionsContainer.innerHTML = Object.entries(availableTemplates).map(([id, t]) => `
-                <div class="template-option ${id === scribeTemplate ? 'selected' : ''}" data-template-id="${escapeHtml(id)}">
-                    <span class="template-option-icon">${TEMPLATE_ICONS[id] || '\uD83D\uDCC4'}</span>
+            optionsContainer.innerHTML = '';
+            for (const [id, t] of Object.entries(availableTemplates)) {
+                const isSelected = id === scribeTemplate;
+                const icon = TEMPLATE_ICONS[id] || '\uD83D\uDCC4';
+                const option = document.createElement('div');
+                option.className = 'template-option' + (isSelected ? ' selected' : '');
+                option.innerHTML = `
+                    <div class="template-option-icon">${icon}</div>
                     <div class="template-option-info">
                         <div class="template-option-name">${escapeHtml(t.name)}</div>
                         <div class="template-option-desc">${escapeHtml(t.description)}</div>
                     </div>
-                    <span class="template-option-check">\u2713</span>
-                </div>
-            `).join('');
-
-            // Click handlers
-            optionsContainer.querySelectorAll('.template-option').forEach(opt => {
-                opt.addEventListener('click', () => {
-                    const templateId = opt.dataset.templateId;
-                    selectTemplate(templateId);
-                });
-            });
-
-            updateTemplateTrigger();
-        }
-
-        function updateTemplateTrigger() {
-            const triggerIcon = document.getElementById('template-trigger-icon');
-            const triggerLabel = document.getElementById('template-trigger-label');
-            if (triggerIcon) triggerIcon.textContent = TEMPLATE_ICONS[scribeTemplate] || '\uD83D\uDCC4';
-            if (triggerLabel) {
-                const t = availableTemplates[scribeTemplate];
-                triggerLabel.textContent = t ? t.name : 'Template';
+                    <svg class="template-option-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+                        <polyline points="20 6 9 17 4 12"></polyline>
+                    </svg>
+                `;
+                option.addEventListener('click', () => selectTemplate(id));
+                optionsContainer.appendChild(option);
             }
         }
 
@@ -6228,19 +6259,34 @@ Session started - waiting for activity...
 
         function applyScribeTerminology(enabled) {
             const selector = document.getElementById('template-selector');
-            const appTitle = document.querySelector('.app-logo h1');
+            const appTitle = document.querySelector('.brand h1');
             const sidebarHeading = document.querySelector('.sidebar h2, .meetings-heading');
             const searchInput = document.getElementById('search-input');
-            const emptyStateText = document.querySelector('.empty-state p');
+
+            // Empty state in sidebar
+            const sidebarEmptyText = document.querySelector('.empty-state p');
+            // Content empty state (detail pane)
+            const contentEmptyHeading = document.querySelector('.content-empty h3');
+            const contentEmptyText = document.querySelector('.content-empty p');
+            // "All Meetings" folder tab
+            const allMeetingsTab = document.querySelector('.folder-tab[data-folder="all"]');
 
             if (selector) selector.classList.toggle('visible', enabled);
 
             if (appTitle) appTitle.textContent = enabled ? 'StenoAI Scribe' : 'StenoAI';
             if (sidebarHeading) sidebarHeading.textContent = enabled ? 'Consults' : 'Meetings';
             if (searchInput) searchInput.placeholder = enabled ? 'Search consults...' : 'Search meetings...';
-            if (emptyStateText) emptyStateText.textContent = enabled
+            if (sidebarEmptyText) sidebarEmptyText.textContent = enabled
                 ? 'Start recording to see your consults here'
                 : 'Start recording to see your meetings here';
+            if (contentEmptyHeading) contentEmptyHeading.textContent = enabled
+                ? 'Ready to record a consult'
+                : 'Ready to capture your meeting';
+            if (contentEmptyText) contentEmptyText.textContent = enabled
+                ? 'Select a consult from the sidebar or start recording'
+                : 'Select a meeting from the sidebar or start recording';
+            // Re-render folder list to update "All Meetings" / "All Consults"
+            if (typeof renderFolderList === 'function') renderFolderList();
         }
 
         // Scribe toggle handler
