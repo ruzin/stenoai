@@ -86,6 +86,7 @@ class Config:
         "es": "Spanish",
         "fr": "French",
         "de": "German",
+        "nl": "Dutch",
         "pt": "Portuguese",
         "ja": "Japanese",
         "zh": "Chinese",
