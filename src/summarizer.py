@@ -362,10 +362,13 @@ class OllamaSummarizer:
         Uses more examples in schema to permit more detailed summaries.
         """
         # Build language instruction
-        if language and language != "en":
+        if language and language not in ("en", "auto"):
             from .config import get_config
             language_name = get_config().get_language_name(language)
-            language_instruction = f"\n\nCRITICAL: Respond in {language_name}. All text values in the JSON below MUST be written in {language_name}."
+            if language_name != "Unknown":
+                language_instruction = f"\n\nCRITICAL: Respond in {language_name}. All text values in the JSON below MUST be written in {language_name}."
+            else:
+                language_instruction = ""
         else:
             language_instruction = ""
 
@@ -739,10 +742,13 @@ Return ONLY the response in this exact JSON format:
                 return None
 
             # Build language instruction
-            if language and language != "en":
+            if language and language not in ("en", "auto"):
                 from .config import get_config
                 language_name = get_config().get_language_name(language)
-                lang_instruction = f" The title MUST be in {language_name}."
+                if language_name != "Unknown":
+                    lang_instruction = f" The title MUST be in {language_name}."
+                else:
+                    lang_instruction = ""
             else:
                 lang_instruction = ""
 
@@ -818,10 +824,13 @@ TITLE:"""
                 return "Please provide a question."
 
             # Build language instruction for query responses
-            if language and language != "en":
+            if language and language not in ("en", "auto"):
                 from .config import get_config
                 language_name = get_config().get_language_name(language)
-                query_lang_instruction = f"\nRespond in {language_name}."
+                if language_name != "Unknown":
+                    query_lang_instruction = f"\nRespond in {language_name}."
+                else:
+                    query_lang_instruction = ""
             else:
                 query_lang_instruction = ""
 

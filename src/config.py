@@ -82,6 +82,7 @@ class Config:
 
     # Supported languages for transcription and summarization
     SUPPORTED_LANGUAGES = {
+        "auto": "Auto (detect)",
         "en": "English",
         "es": "Spanish",
         "fr": "French",

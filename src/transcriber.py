@@ -164,7 +164,7 @@ class WhisperTranscriber:
         self.backend = "openai-whisper"
         logger.info("openai-whisper model loaded successfully")
 
-    def transcribe_audio(self, audio_filepath: Path, language: str = "en") -> Optional[str]:
+    def transcribe_audio(self, audio_filepath: Path, language: str = "en") -> Optional[dict]:
         """
         Transcribe audio file to text.
 
@@ -192,14 +192,19 @@ class WhisperTranscriber:
 
             if file_size < 1000:  # Less than 1KB
                 logger.warning("Audio file appears to be too small for transcription")
-                return {"text": "Audio file too small or empty", "duration_seconds": None}
+                return {
+                    "text": "Audio file too small or empty",
+                    "duration_seconds": None,
+                    "detected_language": None,
+                    "detected_language_probability": None,
+                }
 
             # Use appropriate backend
             if self.backend == "whisper.cpp":
                 result = self._transcribe_whisper_cpp(audio_filepath, language)
             else:
-                transcript = self._transcribe_openai_whisper(audio_filepath, language)
-                result = {"text": transcript, "duration_seconds": None}
+                result = self._transcribe_openai_whisper(audio_filepath, language)
+                result["duration_seconds"] = None
 
             transcript = result.get("text")
             logger.info(f"Transcription completed. Length: {len(transcript) if transcript else 0} characters")
@@ -208,6 +213,8 @@ class WhisperTranscriber:
                 logger.warning("Transcription returned empty text")
                 result["text"] = "No speech detected in audio"
 
+            result.setdefault("detected_language", None)
+            result.setdefault("detected_language_probability", None)
             return result
 
         except Exception as e:
@@ -271,25 +278,55 @@ class WhisperTranscriber:
         """Transcribe using whisper.cpp backend.
 
         Returns:
-            dict with 'text' (str or None) and 'duration_seconds' (float or None)
+            dict with text/duration and optional detected language metadata
         """
         # whisper.cpp requires 16kHz audio - convert if needed
         converted_path, duration_seconds = self._convert_to_16khz(audio_filepath)
         cleanup_converted = converted_path != audio_filepath
 
         try:
+            resolved_language = language
+            detected_language = None
+            detected_language_probability = None
+
+            if language == "auto":
+                try:
+                    detection_result, _ = self.model.auto_detect_language(media=str(converted_path))
+                    if detection_result and len(detection_result) >= 1:
+                        detected_language = detection_result[0]
+                        resolved_language = detected_language
+                        if len(detection_result) >= 2:
+                            detected_language_probability = float(detection_result[1])
+                    logger.info(
+                        f"Auto-detected language: {detected_language} "
+                        f"(p={detected_language_probability})"
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to auto-detect language; using whisper default detection: {e}")
+                    resolved_language = None
+
             # pywhispercpp returns a list of segments
             transcribe_kwargs = {"media": str(converted_path)}
-            if language:
-                transcribe_kwargs["language"] = language
+            if resolved_language and resolved_language != "auto":
+                transcribe_kwargs["language"] = resolved_language
             segments = self.model.transcribe(**transcribe_kwargs)
 
             if not segments:
-                return {"text": None, "duration_seconds": duration_seconds}
+                return {
+                    "text": None,
+                    "duration_seconds": duration_seconds,
+                    "detected_language": detected_language,
+                    "detected_language_probability": detected_language_probability,
+                }
 
             # Combine all segment texts
             transcript = " ".join(segment.text.strip() for segment in segments)
-            return {"text": transcript.strip(), "duration_seconds": duration_seconds}
+            return {
+                "text": transcript.strip(),
+                "duration_seconds": duration_seconds,
+                "detected_language": detected_language,
+                "detected_language_probability": detected_language_probability,
+            }
         finally:
             # Clean up temp file
             if cleanup_converted and converted_path.exists():
@@ -299,21 +336,29 @@ class WhisperTranscriber:
                 except Exception:
                     pass
 
-    def _transcribe_openai_whisper(self, audio_filepath: Path, language: str = "en") -> Optional[str]:
+    def _transcribe_openai_whisper(self, audio_filepath: Path, language: str = "en") -> dict:
         """Transcribe using openai-whisper backend."""
         transcribe_kwargs = {
             "audio": str(audio_filepath),
             "verbose": False,
             "fp16": False,  # Disable FP16 to avoid warnings on CPU
         }
-        if language:
+        if language and language != "auto":
             transcribe_kwargs["language"] = language
         result = self.model.transcribe(**transcribe_kwargs)
 
         if not result or "text" not in result:
-            return None
+            return {
+                "text": None,
+                "detected_language": None,
+                "detected_language_probability": None,
+            }
 
-        return result["text"].strip()
+        return {
+            "text": result["text"].strip(),
+            "detected_language": result.get("language"),
+            "detected_language_probability": None,
+        }
 
     def transcribe_with_timestamps(self, audio_filepath: Path) -> Optional[dict]:
         """

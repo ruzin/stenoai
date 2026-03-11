@@ -84,6 +84,18 @@ class SimpleRecorder:
         """Save recorder state."""
         with open(self.state_file, 'w') as f:
             json.dump(state, f, indent=2)
+
+    def _resolve_output_language(self, configured_language: str, detected_language: Optional[str] = None) -> str:
+        """Resolve which language should be used for summary/title/query output."""
+        from src.config import get_config
+
+        if configured_language != "auto":
+            return configured_language
+
+        if detected_language and detected_language in get_config().SUPPORTED_LANGUAGES:
+            return detected_language
+
+        return "en"
     
     def start_recording(self, session_name: str = "Recording") -> str:
         """Start recording audio."""
@@ -175,16 +187,19 @@ class SimpleRecorder:
 
         # Get configured language
         from src.config import get_config
-        language = get_config().get_language()
+        config = get_config()
+        configured_language = config.get_language()
 
         # Transcribe (pass Path object, not string)
-        transcript_result = self.transcriber.transcribe_audio(audio_path, language=language)
+        transcript_result = self.transcriber.transcribe_audio(audio_path, language=configured_language)
 
         # Handle different return types
         duration_seconds = None
+        detected_language = None
         if isinstance(transcript_result, dict):
             transcript_text = transcript_result.get("text") or ""
             duration_seconds = transcript_result.get("duration_seconds")
+            detected_language = transcript_result.get("detected_language")
         elif hasattr(transcript_result, 'text'):
             transcript_text = transcript_result.text
         elif isinstance(transcript_result, str):
@@ -192,11 +207,20 @@ class SimpleRecorder:
         else:
             transcript_text = str(transcript_result)
 
+        output_language = self._resolve_output_language(configured_language, detected_language)
+        detected_language_name = (
+            config.get_language_name(detected_language)
+            if detected_language in config.SUPPORTED_LANGUAGES else (detected_language or "Unknown")
+        )
+
         # Save transcript
         transcript_path = self.transcripts_dir / f"{audio_path.stem}_transcript.txt"
         transcript_content = f"""Session: {session_name}
 File: {audio_path.name}
 Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+Language setting: {config.get_language_name(configured_language)}
+Detected language: {detected_language_name}
+Summary output language: {config.get_language_name(output_language)}
 
 {'='*60}
 
@@ -213,10 +237,19 @@ Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
             "transcript_file": str(transcript_path),
             "transcript_text": transcript_text,
             "session_name": session_name,
-            "duration_seconds": duration_seconds
+            "duration_seconds": duration_seconds,
+            "configured_language": configured_language,
+            "detected_language": detected_language,
+            "output_language": output_language,
         }
-    
-    async def summarize_transcript(self, transcript_text: str, session_name: str = "Recording", duration_minutes: int = 10) -> dict:
+
+    async def summarize_transcript(
+        self,
+        transcript_text: str,
+        session_name: str = "Recording",
+        duration_minutes: int = 10,
+        language: Optional[str] = None
+    ) -> dict:
         """Summarize transcript text."""
         print("🧠 Generating summary...")
         
@@ -241,9 +274,11 @@ Transcript:
 {transcript_text}
 """
         
-        # Get configured language
+        # Resolve output language
         from src.config import get_config
-        language = get_config().get_language()
+        if language is None:
+            configured_language = get_config().get_language()
+            language = self._resolve_output_language(configured_language)
 
         # Generate summary (using correct method name and parameters)
         summary_result = self.summarizer.summarize_transcript(transcript_text, duration_minutes, language=language)
@@ -316,14 +351,14 @@ Transcript:
         summary_data = await self.summarize_transcript(
             transcript_data["transcript_text"],
             session_name,
-            duration_minutes
+            duration_minutes,
+            language=transcript_data.get("output_language")
         )
 
         # Step 2b: Auto-generate title for auto-named meetings
         if re.match(r'^Meeting-[A-Z0-9]{6}$', session_name):
             try:
-                from src.config import get_config
-                language = get_config().get_language()
+                language = transcript_data.get("output_language")
                 generated_title = self.summarizer.generate_title(
                     summary_data.get("summary", ""),
                     transcript_data["transcript_text"],
@@ -346,7 +381,10 @@ Transcript:
                 "summary_file": str(summary_path),
                 "processed_at": datetime.now().isoformat(),
                 "duration_seconds": int(duration_seconds) if duration_seconds is not None else None,
-                "duration_minutes": duration_minutes
+                "duration_minutes": duration_minutes,
+                "configured_language": transcript_data.get("configured_language"),
+                "detected_language": transcript_data.get("detected_language"),
+                "output_language": transcript_data.get("output_language"),
             },
             "summary": summary_data.get("summary", "") or "",
             "participants": summary_data.get("participants", []) or [],
@@ -922,7 +960,24 @@ def reprocess(summary_file, regenerate_title):
             print(f"📝 Transcript length: {len(transcript)} characters")
 
             # Re-run summarization
-            summary_data = await recorder.summarize_transcript(transcript, session_name)
+            existing_session_info = existing_data.get("session_info", {})
+            output_language = existing_session_info.get("output_language")
+            if not output_language:
+                configured_language = existing_session_info.get("configured_language")
+                if not configured_language:
+                    from src.config import get_config
+                    configured_language = get_config().get_language()
+                output_language = recorder._resolve_output_language(
+                    configured_language,
+                    existing_session_info.get("detected_language")
+                )
+
+            summary_data = await recorder.summarize_transcript(
+                transcript,
+                session_name,
+                duration_minutes,
+                language=output_language
+            )
 
             # Update the existing data with new summary
             existing_data.update({
@@ -936,12 +991,10 @@ def reprocess(summary_file, regenerate_title):
             # Regenerate title if requested
             if regenerate_title:
                 try:
-                    from src.config import get_config
-                    language = get_config().get_language()
                     generated_title = recorder.summarizer.generate_title(
                         summary_data.get("summary", ""),
                         transcript,
-                        language=language
+                        language=output_language
                     )
                     if generated_title:
                         existing_data["session_info"]["name"] = generated_title
@@ -974,6 +1027,7 @@ def query(transcript_file, question):
     from pathlib import Path
 
     transcript_path = Path(transcript_file)
+    language = None
 
     # Handle summary JSON files (extract transcript from them)
     if transcript_file.endswith('.json'):
@@ -988,6 +1042,8 @@ def query(transcript_file, question):
                 if not transcript_text:
                     print(json.dumps({"success": False, "error": "No transcript found in summary file"}))
                     return
+                session_info = data.get("session_info", {})
+                language = session_info.get("output_language")
         except Exception as e:
             print(json.dumps({"success": False, "error": f"Failed to read summary file: {e}"}))
             return
@@ -1012,7 +1068,13 @@ def query(transcript_file, question):
     try:
         from src.config import get_config
         config = get_config()
-        language = config.get_language()
+        if transcript_file.endswith('.json'):
+            if not language:
+                language = config.get_language()
+        else:
+            language = config.get_language()
+        if language == "auto":
+            language = "en"
         summarizer = OllamaSummarizer()
         answer = summarizer.query_transcript(transcript_text, question, language=language)
 
