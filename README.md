@@ -29,7 +29,7 @@
 <p align="center"><sub><i>Disclaimer: This is an independent open-source project for meeting-notes productivity and is not affiliated with, endorsed by, or associated with any similarly named company.</i></sub></p>
 
 ## 📢 What's New
-- **2026-03-11** 🌍 More language support — Transcribe and summarize in 11 languages
+- **2026-03-11** 🌍 Automatic language detection — Automatically detect you language
 - **2026-03-04** 🏷️ Auto-generated meeting titles — AI creates short titles from your transcripts
 - **2026-03-04** ⌨️ macOS Shortcuts support — Start/stop recordings via Apple Shortcuts deep links
 - **2026-03-04** 🤖 Updated model lineup — Qwen 3.5 9B, DeepSeek-R1 14B, GPT-OSS 20B; Ollama v0.17.5
