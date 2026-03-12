@@ -7899,7 +7899,7 @@ Session started - waiting for activity...
                             );
 
                             // Suggest better multilingual model if switching away from English on Llama (local only)
-                            if (newValue !== 'en' && newValue !== 'auto' && currentAIProvider === 'local') {
+                            if (newValue !== 'en' && currentAIProvider === 'local') {
                                 const activeModel = document.querySelector('.model-item.active');
                                 const currentModel = activeModel ? activeModel.getAttribute('data-model-name') : '';
                                 if (currentModel === 'llama3.2:3b') {
