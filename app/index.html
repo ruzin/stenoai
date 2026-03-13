@@ -4200,6 +4200,11 @@ Session started - waiting for activity...
         }
         
         function startRecordingTimer(resume = false) {
+            // Clear any existing timer to prevent leaked intervals
+            if (recordingTimer) {
+                clearInterval(recordingTimer);
+                recordingTimer = null;
+            }
             // If resuming, adjust start time to account for already elapsed time
             if (resume && pausedElapsedTime > 0) {
                 recordingStartTime = Date.now() - (pausedElapsedTime * 1000);
@@ -5583,6 +5588,12 @@ Session started - waiting for activity...
         // Check initial recording status once
         async function checkInitialStatus() {
             try {
+                // Don't override processing state — backend may still briefly
+                // report RECORDING while the pipeline is winding down
+                if (uiState === 'processing') {
+                    log('Skipping status check — currently processing');
+                    return;
+                }
                 const result = await ipcRenderer.invoke('get-status');
                 if (result.success && result.status.includes('RECORDING')) {
                     log('Found active recording session - syncing UI state');
