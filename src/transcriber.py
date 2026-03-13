@@ -293,6 +293,7 @@ class WhisperTranscriber:
                 try:
                     detection_result, _ = self.model.auto_detect_language(media=str(converted_path))
                     if detection_result and len(detection_result) >= 1:
+                        # pywhispercpp returns (language_code, probability) on auto_detect_language.
                         detected_language = detection_result[0]
                         resolved_language = detected_language
                         if len(detection_result) >= 2:
