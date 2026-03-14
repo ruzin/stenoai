@@ -11,8 +11,9 @@ whisper.cpp is preferred as it's 10x smaller and 2-4x faster.
 import logging
 import os
 import subprocess
+import tempfile
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -360,6 +361,183 @@ class WhisperTranscriber:
             "detected_language": result.get("language"),
             "detected_language_probability": None,
         }
+
+    def _split_stereo_to_channels(self, audio_filepath: Path) -> Tuple[Optional[Path], Optional[Path], Optional[float]]:
+        """Detect if audio is stereo and split into separate channel files.
+
+        Returns:
+            (mic_path, system_path, duration_seconds) if stereo,
+            (None, None, None) if mono or detection fails.
+        """
+        # Detect channel count via ffprobe
+        try:
+            probe = subprocess.run(
+                ['ffprobe', '-v', 'error', '-select_streams', 'a:0',
+                 '-show_entries', 'stream=channels,duration',
+                 '-of', 'csv=p=0', str(audio_filepath)],
+                capture_output=True, timeout=15, text=True
+            )
+            if probe.returncode != 0:
+                logger.warning(f"ffprobe failed: {probe.stderr}")
+                return None, None, None
+
+            parts = probe.stdout.strip().split(',')
+            channels = int(parts[0])
+            # Duration may be 'N/A' for container formats like WebM
+            duration = None
+            if len(parts) > 1 and parts[1] and parts[1].strip() != 'N/A':
+                try:
+                    duration = float(parts[1])
+                except ValueError:
+                    pass
+
+            if channels < 2:
+                logger.info("Audio is mono, skipping stereo split")
+                return None, None, None
+
+            logger.info(f"Stereo audio detected ({channels} channels), splitting")
+        except Exception as e:
+            logger.warning(f"Channel detection failed: {e}")
+            return None, None, None
+
+        # Split channels into temp files
+        temp_dir = tempfile.gettempdir()
+        mic_path = Path(temp_dir) / f"stenoai_ch0_{audio_filepath.stem}.wav"
+        system_path = Path(temp_dir) / f"stenoai_ch1_{audio_filepath.stem}.wav"
+
+        try:
+            for ch_idx, out_path in [(0, mic_path), (1, system_path)]:
+                result = subprocess.run(
+                    ['ffmpeg', '-y', '-i', str(audio_filepath),
+                     '-af', f'pan=mono|c0=c{ch_idx}',
+                     '-ar', '16000', '-ac', '1', '-c:a', 'pcm_s16le',
+                     str(out_path)],
+                    capture_output=True, timeout=120
+                )
+                if result.returncode != 0:
+                    logger.error(f"Channel {ch_idx} extraction failed: {result.stderr.decode()}")
+                    return None, None, None
+
+            logger.info("Stereo channels split successfully")
+            return mic_path, system_path, duration
+        except Exception as e:
+            logger.error(f"Channel splitting error: {e}")
+            return None, None, None
+
+    def _check_rms_energy(self, audio_path: Path, threshold: float = 0.005) -> bool:
+        """Check if an audio file has enough energy to contain speech.
+
+        Args:
+            audio_path: Path to 16kHz mono WAV file
+            threshold: RMS energy threshold below which the channel is silent
+
+        Returns:
+            True if the audio has speech-level energy
+        """
+        try:
+            import wave
+            import struct
+            import math
+
+            with wave.open(str(audio_path), 'rb') as wf:
+                n_frames = wf.getnframes()
+                if n_frames == 0:
+                    return False
+                # Read up to 5 seconds of audio for the check
+                sample_frames = min(n_frames, 16000 * 5)
+                raw = wf.readframes(sample_frames)
+
+            samples = struct.unpack(f'<{sample_frames}h', raw)
+            # Normalise int16 to [-1, 1]
+            float_samples = [s / 32768.0 for s in samples]
+            rms = math.sqrt(sum(s * s for s in float_samples) / len(float_samples))
+            logger.info(f"RMS energy for {audio_path.name}: {rms:.6f} (threshold {threshold})")
+            return rms >= threshold
+        except Exception as e:
+            logger.warning(f"RMS check failed for {audio_path}: {e}")
+            # If we can't check, assume it has audio
+            return True
+
+    def transcribe_diarised(self, audio_filepath: Path, language: str = "en") -> Optional[dict]:
+        """Transcribe audio with stereo channel diarisation.
+
+        If the audio is stereo (left=mic, right=system), each channel is
+        transcribed separately and labelled as [You] and [Others].
+
+        Falls back to normal transcription for mono audio.
+
+        Args:
+            audio_filepath: Path to the audio file
+            language: Language code
+
+        Returns:
+            Dict with text, diarised_text, is_diarised, plus standard fields
+        """
+        # Try stereo split
+        mic_path, system_path, duration = self._split_stereo_to_channels(audio_filepath)
+
+        if mic_path is None:
+            # Mono audio — use standard transcription
+            result = self.transcribe_audio(audio_filepath, language)
+            if result:
+                result['is_diarised'] = False
+                result['diarised_text'] = None
+            return result
+
+        try:
+            mic_has_audio = self._check_rms_energy(mic_path)
+            system_has_audio = self._check_rms_energy(system_path)
+
+            mic_text = ""
+            system_text = ""
+
+            if mic_has_audio:
+                logger.info("Transcribing mic channel (You)...")
+                mic_result = self.transcribe_audio(mic_path, language)
+                if mic_result and mic_result.get("text"):
+                    mic_text = mic_result["text"]
+            else:
+                logger.info("Mic channel is silent, skipping")
+
+            if system_has_audio:
+                logger.info("Transcribing system channel (Others)...")
+                sys_result = self.transcribe_audio(system_path, language)
+                if sys_result and sys_result.get("text"):
+                    system_text = sys_result["text"]
+            else:
+                logger.info("System channel is silent, skipping")
+
+            # Build combined plain text and labelled text
+            plain_parts = []
+            labelled_parts = []
+
+            if mic_text:
+                plain_parts.append(mic_text)
+                labelled_parts.append(f"[You] {mic_text}")
+            if system_text:
+                plain_parts.append(system_text)
+                labelled_parts.append(f"[Others] {system_text}")
+
+            plain_text = "\n\n".join(plain_parts) if plain_parts else "No speech detected in audio"
+            diarised_text = "\n\n".join(labelled_parts) if labelled_parts else None
+            is_diarised = bool(diarised_text)
+
+            return {
+                "text": plain_text,
+                "diarised_text": diarised_text,
+                "is_diarised": is_diarised,
+                "duration_seconds": duration,
+                "detected_language": None,
+                "detected_language_probability": None,
+            }
+        finally:
+            # Clean up temp channel files
+            for p in (mic_path, system_path):
+                if p and p.exists():
+                    try:
+                        p.unlink()
+                    except Exception:
+                        pass
 
     def transcribe_with_timestamps(self, audio_filepath: Path) -> Optional[dict]:
         """
