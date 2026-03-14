@@ -92,7 +92,7 @@ class SimpleRecorder:
         if configured_language != "auto":
             return configured_language
 
-        if detected_language and detected_language in get_config().SUPPORTED_LANGUAGES:
+        if detected_language:
             return detected_language
 
         return "en"
@@ -208,10 +208,7 @@ class SimpleRecorder:
             transcript_text = str(transcript_result)
 
         output_language = self._resolve_output_language(configured_language, detected_language)
-        detected_language_name = (
-            config.get_language_name(detected_language)
-            if detected_language in config.SUPPORTED_LANGUAGES else (detected_language or "Unknown")
-        )
+        detected_language_name = config.get_language_name(detected_language) if detected_language else "Unknown"
 
         # Save transcript
         transcript_path = self.transcripts_dir / f"{audio_path.stem}_transcript.txt"
