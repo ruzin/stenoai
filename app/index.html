@@ -5125,8 +5125,48 @@ Session started - waiting for activity...
                 detailActionItems.innerHTML = '<li style="color: var(--text-muted);">No action items identified</li>';
             }
             
-            // Transcript
-            detailTranscript.textContent = selectedMeeting.transcript || 'No transcript available';
+            // Transcript — render diarised view if available
+            if (selectedMeeting.is_diarised && selectedMeeting.diarised_text) {
+                detailTranscript.innerHTML = '';
+                // Override pre-wrap on container so block elements render properly
+                detailTranscript.style.whiteSpace = 'normal';
+                const blocks = selectedMeeting.diarised_text.split(/(?=\[You\]|\[Others\])/);
+                blocks.forEach(block => {
+                    const trimmed = block.trim();
+                    if (!trimmed) return;
+                    const div = document.createElement('div');
+                    div.style.cssText = 'margin-bottom:12px;padding:8px 12px;border-radius:6px;white-space:normal;';
+                    if (trimmed.startsWith('[You]')) {
+                        div.style.borderLeft = '3px solid var(--accent-primary, #818cf8)';
+                        div.style.background = 'rgba(129, 140, 248, 0.06)';
+                        const label = document.createElement('div');
+                        label.textContent = 'You';
+                        label.style.cssText = 'display:inline-block;font-size:11px;font-weight:600;color:var(--accent-primary,#818cf8);background:rgba(129,140,248,0.12);padding:1px 6px;border-radius:3px;margin-bottom:6px;';
+                        div.appendChild(label);
+                        const text = document.createElement('div');
+                        text.style.cssText = 'margin:0;line-height:1.7;';
+                        text.textContent = trimmed.replace('[You]', '').trim();
+                        div.appendChild(text);
+                    } else if (trimmed.startsWith('[Others]')) {
+                        div.style.borderLeft = '3px solid var(--text-muted, #888)';
+                        div.style.background = 'rgba(136, 136, 136, 0.06)';
+                        const label = document.createElement('div');
+                        label.textContent = 'Others';
+                        label.style.cssText = 'display:inline-block;font-size:11px;font-weight:600;color:var(--text-muted,#888);background:rgba(136,136,136,0.12);padding:1px 6px;border-radius:3px;margin-bottom:6px;';
+                        div.appendChild(label);
+                        const text = document.createElement('div');
+                        text.style.cssText = 'margin:0;line-height:1.7;';
+                        text.textContent = trimmed.replace('[Others]', '').trim();
+                        div.appendChild(text);
+                    } else {
+                        div.textContent = trimmed;
+                    }
+                    detailTranscript.appendChild(div);
+                });
+            } else {
+                detailTranscript.style.whiteSpace = 'pre-wrap';
+                detailTranscript.textContent = selectedMeeting.transcript || 'No transcript available';
+            }
             
             // Set reprocess button state based on whether this meeting is currently processing
             const isCurrentlyProcessing = processingMeeting && processingMeeting.session_info?.summary_file === selectedMeeting.session_info?.summary_file;
@@ -5198,15 +5238,18 @@ Session started - waiting for activity...
 
                 _systemAudioStreams = [loopbackStream, micStream];
 
-                // Mix both streams via Web Audio API
+                // Route mic and system audio to separate stereo channels
+                // Left channel = mic (You), Right channel = system audio (Others)
                 _systemAudioContext = new AudioContext();
                 const dest = _systemAudioContext.createMediaStreamDestination();
 
                 const loopbackSource = _systemAudioContext.createMediaStreamSource(loopbackStream);
-                loopbackSource.connect(dest);
-
                 const micSource = _systemAudioContext.createMediaStreamSource(micStream);
-                micSource.connect(dest);
+
+                const merger = _systemAudioContext.createChannelMerger(2);
+                micSource.connect(merger, 0, 0);        // mic → left channel
+                loopbackSource.connect(merger, 0, 1);   // system → right channel
+                merger.connect(dest);
 
                 // Attach analyser for waveform visualization
                 _systemAudioAnalyser = _systemAudioContext.createAnalyser();
@@ -6270,12 +6313,18 @@ Session started - waiting for activity...
         // Copy transcript to clipboard
         copyTranscriptBtn.addEventListener('click', async () => {
             try {
-                const transcriptText = detailTranscript.textContent || '';
+                // Prefer diarised text for copy if available
+                let transcriptText;
+                if (selectedMeeting && selectedMeeting.is_diarised && selectedMeeting.diarised_text) {
+                    transcriptText = selectedMeeting.diarised_text;
+                } else {
+                    transcriptText = detailTranscript.textContent || '';
+                }
                 if (!transcriptText || transcriptText === 'No transcript available') {
                     log('❌ No transcript available to copy');
                     return;
                 }
-                
+
                 await navigator.clipboard.writeText(transcriptText);
                 
                 // Visual feedback

@@ -190,8 +190,8 @@ class SimpleRecorder:
         config = get_config()
         configured_language = config.get_language()
 
-        # Transcribe (pass Path object, not string)
-        transcript_result = self.transcriber.transcribe_audio(audio_path, language=configured_language)
+        # Transcribe with diarisation support (stereo → [You]/[Others])
+        transcript_result = self.transcriber.transcribe_diarised(audio_path, language=configured_language)
 
         # Handle different return types
         duration_seconds = None
@@ -207,11 +207,19 @@ class SimpleRecorder:
         else:
             transcript_text = str(transcript_result)
 
+        # Extract diarisation fields
+        is_diarised = False
+        diarised_text = None
+        if isinstance(transcript_result, dict):
+            is_diarised = transcript_result.get("is_diarised", False)
+            diarised_text = transcript_result.get("diarised_text")
+
         output_language = self._resolve_output_language(configured_language, detected_language)
         detected_language_name = config.get_language_name(detected_language) if detected_language else "Unknown"
 
-        # Save transcript
+        # Save transcript (use diarised text if available for the saved file)
         transcript_path = self.transcripts_dir / f"{audio_path.stem}_transcript.txt"
+        saved_transcript = diarised_text if diarised_text else transcript_text
         transcript_content = f"""Session: {session_name}
 File: {audio_path.name}
 Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
@@ -221,7 +229,7 @@ Summary output language: {config.get_language_name(output_language)}
 
 {'='*60}
 
-{transcript_text}
+{saved_transcript}
 """
 
         with open(transcript_path, 'w') as f:
@@ -237,6 +245,8 @@ Summary output language: {config.get_language_name(output_language)}
             "duration_seconds": duration_seconds,
             "configured_language": configured_language,
             "detected_language": detected_language,
+            "is_diarised": is_diarised,
+            "diarised_text": diarised_text,
             "output_language": output_language,
         }
 
@@ -344,9 +354,10 @@ Transcript:
             duration_minutes = 0
             print("⚠️ Could not determine audio duration")
 
-        # Step 2: Summarize with actual duration
+        # Step 2: Summarize — prefer diarised text so LLM sees speaker labels
+        text_for_summary = transcript_data.get("diarised_text") or transcript_data["transcript_text"]
         summary_data = await self.summarize_transcript(
-            transcript_data["transcript_text"],
+            text_for_summary,
             session_name,
             duration_minutes,
             language=transcript_data.get("output_language")
@@ -388,7 +399,9 @@ Transcript:
             "discussion_areas": summary_data.get("discussion_areas", []) or [],
             "key_points": summary_data.get("key_points", []) or [],
             "action_items": summary_data.get("action_items", []) or [],
-            "transcript": transcript_data["transcript_text"]
+            "transcript": transcript_data["transcript_text"],
+            "is_diarised": transcript_data.get("is_diarised", False),
+            "diarised_text": transcript_data.get("diarised_text"),
         }
         
         with open(summary_path, 'w') as f:
@@ -911,6 +924,8 @@ def list_meetings():
                     "key_points": data.get("key_points", []),
                     "action_items": data.get("action_items", []),
                     "transcript": data.get("transcript", ""),
+                    "is_diarised": data.get("is_diarised", False),
+                    "diarised_text": data.get("diarised_text"),
                     "folders": data.get("folders", [])
                 }
                 meetings.append(essential_meeting)

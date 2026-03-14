@@ -372,7 +372,16 @@ class OllamaSummarizer:
         else:
             language_instruction = ""
 
-        return f"""You are a helpful meeting assistant. Summarise this meeting transcript into participants, discussion areas, key points and any next steps mentioned. Only base your summary on what was explicitly discussed in the transcript.
+        # Add speaker label context when diarised transcript is provided
+        diarisation_note = ""
+        if "[You]" in transcript and "[Others]" in transcript:
+            diarisation_note = """NOTE: This transcript has speaker labels. [You] is the person who recorded
+the meeting. [Others] are remote participants heard through system audio.
+Attribute statements to speakers in your summary where relevant.
+
+"""
+
+        return f"""{diarisation_note}You are a helpful meeting assistant. Summarise this meeting transcript into participants, discussion areas, key points and any next steps mentioned. Only base your summary on what was explicitly discussed in the transcript.
 
 IMPORTANT: Do not infer or assume information that wasn't directly mentioned.
 
