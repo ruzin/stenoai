@@ -26,5 +26,23 @@ class ConfigStoragePathTests(unittest.TestCase):
             self.assertEqual(config.get_storage_path(), "")
 
 
+class ConfigLanguageTests(unittest.TestCase):
+    def test_set_language_accepts_supported_dutch_code(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config = Config(config_path=Path(tmp_dir) / "config.json")
+            success = config.set_language("nl")
+            self.assertTrue(success)
+            self.assertEqual(config.get_language(), "nl")
+            self.assertEqual(config.get_language_name("nl"), "Dutch")
+
+    def test_set_language_accepts_auto_detection_mode(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config = Config(config_path=Path(tmp_dir) / "config.json")
+            success = config.set_language("auto")
+            self.assertTrue(success)
+            self.assertEqual(config.get_language(), "auto")
+            self.assertEqual(config.get_language_name("auto"), "Auto (detect)")
+
+
 if __name__ == "__main__":
     unittest.main()
