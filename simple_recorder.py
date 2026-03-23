@@ -898,24 +898,13 @@ def list_meetings():
                     seen_files.add(f.resolve())
 
     meetings = []
-    
-    # Sort by actual meeting date, with fallback to modification time
-    def get_meeting_date(summary_file):
-        try:
-            with open(summary_file, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                return data.get('session_info', {}).get('processed_at', '')
-        except:
-            # Fallback to file modification time if JSON read fails
-            return summary_file.stat().st_mtime
-    
-    summaries.sort(key=get_meeting_date, reverse=True)
-    
+
+    # Single-pass: read each file once, extract sort key and data together
     for summary_file in summaries:
         try:
             with open(summary_file, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-                # Only include essential fields for faster loading
+                sort_key = data.get('session_info', {}).get('processed_at', '')
                 essential_meeting = {
                     "session_info": data.get("session_info", {}),
                     "summary": data.get("summary", ""),
@@ -928,11 +917,13 @@ def list_meetings():
                     "diarised_text": data.get("diarised_text"),
                     "folders": data.get("folders", [])
                 }
-                meetings.append(essential_meeting)
+                meetings.append((sort_key, essential_meeting))
         except Exception as e:
-            # Log warning but continue processing other files
             logger.warning(f"Failed to load {summary_file}: {e}")
             continue
+
+    meetings.sort(key=lambda x: x[0], reverse=True)
+    meetings = [m for _, m in meetings]
     
     # Output as compact JSON for Electron (no indentation for speed)
     print(json.dumps(meetings, separators=(',', ':')))

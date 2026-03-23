@@ -305,6 +305,8 @@ class WhisperTranscriber:
                     )
                 except Exception as e:
                     logger.warning(f"Failed to auto-detect language; using whisper default detection: {e}")
+                    # Setting to None omits the language kwarg, letting whisper.cpp
+                    # use its own internal language detection as a fallback.
                     resolved_language = None
 
             # pywhispercpp returns a list of segments
@@ -490,12 +492,18 @@ class WhisperTranscriber:
 
             mic_text = ""
             system_text = ""
+            detected_language = None
+            detected_language_probability = None
 
             if mic_has_audio:
                 logger.info("Transcribing mic channel (You)...")
                 mic_result = self.transcribe_audio(mic_path, language)
                 if mic_result and mic_result.get("text"):
                     mic_text = mic_result["text"]
+                    # Propagate detected language from the first channel with speech
+                    if not detected_language and mic_result.get("detected_language"):
+                        detected_language = mic_result["detected_language"]
+                        detected_language_probability = mic_result.get("detected_language_probability")
             else:
                 logger.info("Mic channel is silent, skipping")
 
@@ -504,6 +512,9 @@ class WhisperTranscriber:
                 sys_result = self.transcribe_audio(system_path, language)
                 if sys_result and sys_result.get("text"):
                     system_text = sys_result["text"]
+                    if not detected_language and sys_result.get("detected_language"):
+                        detected_language = sys_result["detected_language"]
+                        detected_language_probability = sys_result.get("detected_language_probability")
             else:
                 logger.info("System channel is silent, skipping")
 
@@ -527,8 +538,8 @@ class WhisperTranscriber:
                 "diarised_text": diarised_text,
                 "is_diarised": is_diarised,
                 "duration_seconds": duration,
-                "detected_language": None,
-                "detected_language_probability": None,
+                "detected_language": detected_language,
+                "detected_language_probability": detected_language_probability,
             }
         finally:
             # Clean up temp channel files
