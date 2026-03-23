@@ -29,15 +29,15 @@
 <p align="center"><sub><i>Disclaimer: This is an independent open-source project for meeting-notes productivity and is not affiliated with, endorsed by, or associated with any similarly named company.</i></sub></p>
 
 ## 📢 What's New
+- **2026-03-23** 🗣️ Speaker diarisation — [You] vs [Others] labels for system audio recordings
+- **2026-03-23** 🌍 Auto-detect language — 99 languages supported out of the box
 - **2026-03-11** 🌍 Automatic language detection — Automatically detect your language
 - **2026-03-04** 🏷️ Auto-generated meeting titles — AI creates short titles from your transcripts
 - **2026-03-04** ⌨️ macOS Shortcuts support — Start/stop recordings via Apple Shortcuts deep links
 - **2026-03-04** 🤖 Updated model lineup — Qwen 3.5 9B, DeepSeek-R1 14B, GPT-OSS 20B; Ollama v0.17.5
 - **2026-03-04** 🙈 Hide dock icon — Run StenoAI in menu-bar-only mode
 - **2026-02-22** 🌍 Multi-language support — Transcribe and summarize in 10 languages
-- **2026-02-22** 🖥️ Remote Ollama server — Run AI models on another machine on your network
 - **2026-02-19** 🎧 System audio capture — Record both sides of virtual meetings, even with headphones on
-- **2026-02-19** 📅 Google & Outlook Calendar integration — Auto-name recordings from your meetings
 
 ## Features
 
