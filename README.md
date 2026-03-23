@@ -31,7 +31,6 @@
 ## 📢 What's New
 - **2026-03-23** 🗣️ Speaker diarisation — [You] vs [Others] labels for system audio recordings
 - **2026-03-23** 🌍 Auto-detect language — 99 languages supported out of the box
-- **2026-03-11** 🌍 Automatic language detection — Automatically detect your language
 - **2026-03-04** 🏷️ Auto-generated meeting titles — AI creates short titles from your transcripts
 - **2026-03-04** ⌨️ macOS Shortcuts support — Start/stop recordings via Apple Shortcuts deep links
 - **2026-03-04** 🤖 Updated model lineup — Qwen 3.5 9B, DeepSeek-R1 14B, GPT-OSS 20B; Ollama v0.17.5
