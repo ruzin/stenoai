@@ -4452,15 +4452,27 @@ Session started - waiting for activity...
         // Load meetings from backend with caching
         async function loadMeetings(forceRefresh = false) {
             const now = Date.now();
-            
-            // Use cache if data is less than 30 seconds old and not forced refresh
+
+            // Use in-memory cache if data is less than 30 seconds old and not forced refresh
             if (!forceRefresh && meetings.length > 0 && (now - meetingsLastLoaded) < 30000) {
                 log('Using cached meetings data');
                 filterMeetings();
                 return;
             }
-            
-            // Show loading state only if we don't have cached data
+
+            // On first load, try to render instantly from localStorage cache
+            if (meetings.length === 0) {
+                try {
+                    const cached = localStorage.getItem('stenoai_meetings_cache');
+                    if (cached) {
+                        meetings = JSON.parse(cached);
+                        filterMeetings();
+                        log(`Rendered ${meetings.length} meetings from cache`);
+                    }
+                } catch (e) { /* ignore corrupt cache */ }
+            }
+
+            // Show loading spinner only if we have nothing to show
             if (meetings.length === 0) {
                 meetingsList.innerHTML = `
                     <div style="padding: 20px; text-align: center; color: var(--text-muted);">
@@ -4469,21 +4481,24 @@ Session started - waiting for activity...
                     </div>
                 `;
             }
-            
+
             try {
                 const result = await ipcRenderer.invoke('list-meetings');
                 if (result.success) {
                     meetings = result.meetings || [];
                     meetingsLastLoaded = now;
+                    // Persist to localStorage for instant rendering on next launch
+                    try {
+                        localStorage.setItem('stenoai_meetings_cache', JSON.stringify(meetings));
+                    } catch (e) { /* storage full or unavailable */ }
                     await loadFolders();
-                    filterMeetings(); // Apply current search filter and folder
+                    filterMeetings();
                     log(`Loaded ${meetings.length} meetings`);
                 } else {
                     throw new Error(result.error || 'Unknown error');
                 }
             } catch (error) {
                 log(`Failed to load meetings: ${error.message}`);
-                // Only show error if we don't have cached data
                 if (meetings.length === 0) {
                     meetingsList.innerHTML = `
                         <div style="padding: 20px; text-align: center; color: var(--text-muted);">
@@ -4493,7 +4508,6 @@ Session started - waiting for activity...
                         </div>
                     `;
                 } else {
-                    // We have cached data, just log the error
                     log('Using cached meetings data due to load failure');
                     filterMeetings();
                 }
