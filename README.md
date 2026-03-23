@@ -46,7 +46,8 @@
 - **Privacy-first** - 100% local processing, your data never leaves your device
 - **Multiple AI models** - Choose from 5 models optimized for different use cases
 - **Ask Steno** - Query your meetings with natural language questions
-- **Multi-language support** - Transcribe and summarize in 11 languages
+- **Multi-language support** - Auto-detect and transcribe 99 languages
+- **Speaker diarisation** - [You] vs [Others] labels for system audio recordings
 - **Remote Ollama server** - Run AI models on another machine on your network
 - **System audio capture** - Record mic + system audio simultaneously for virtual meetings with headphones
 - **macOS desktop app** with intuitive interface
