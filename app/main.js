@@ -1123,6 +1123,20 @@ ipcMain.handle('query-transcript', async (event, summaryFile, question) => {
   }
 });
 
+ipcMain.handle('save-meeting-notes', async (event, sessionName, notes) => {
+  try {
+    const outputDir = path.join(getBackendCwd(), 'output');
+    if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
+    const safeName = sessionName.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const notesFile = path.join(outputDir, `${safeName}_notes.txt`);
+    fs.writeFileSync(notesFile, notes, 'utf-8');
+    return { success: true, path: notesFile };
+  } catch (error) {
+    console.error('Failed to save meeting notes:', error);
+    return { success: false, error: error.message };
+  }
+});
+
 ipcMain.handle('update-meeting', async (event, summaryFilePath, updates) => {
   try {
     const projectRoot = path.join(__dirname, '..');
@@ -1295,7 +1309,11 @@ async function processNextInQueue() {
   try {
     const queueCloudKey = loadCloudApiKey();
     const queueEnv = queueCloudKey ? { STENOAI_CLOUD_API_KEY: queueCloudKey } : {};
-    const result = await runPythonScript('simple_recorder.py', ['process', currentProcessingJob.audioFile, '--name', currentProcessingJob.sessionName], false, queueEnv);
+    const processArgs = ['process', currentProcessingJob.audioFile, '--name', currentProcessingJob.sessionName];
+    if (currentProcessingJob.notesFile && fs.existsSync(currentProcessingJob.notesFile)) {
+      processArgs.push('--notes', currentProcessingJob.notesFile);
+    }
+    const result = await runPythonScript('simple_recorder.py', processArgs, false, queueEnv);
     console.log(`✅ Completed processing: ${currentProcessingJob.sessionName}`);
     trackEvent('transcription_completed', { success: true });
     trackEvent('summarization_completed', { success: true });
@@ -1352,8 +1370,8 @@ async function processNextInQueue() {
   }
 }
 
-function addToProcessingQueue(audioFile, sessionName) {
-  processingQueue.push({ audioFile, sessionName });
+function addToProcessingQueue(audioFile, sessionName, notesFile) {
+  processingQueue.push({ audioFile, sessionName, notesFile });
   console.log(`📋 Added to processing queue: ${sessionName} (Queue size: ${processingQueue.length})`);
   processNextInQueue();
 }
@@ -2906,8 +2924,13 @@ ipcMain.handle('process-system-audio-recording', async (event, audioFilePath, se
 
     const actualSessionName = sessionName || 'Meeting';
 
+    // Check for user notes file
+    const safeName = actualSessionName.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const notesFile = path.join(getBackendCwd(), 'output', `${safeName}_notes.txt`);
+    const notesPath = fs.existsSync(notesFile) ? notesFile : undefined;
+
     // Use the existing processing queue to avoid concurrent Ollama/Whisper runs
-    addToProcessingQueue(audioFilePath, actualSessionName);
+    addToProcessingQueue(audioFilePath, actualSessionName, notesPath);
 
     trackEvent('recording_stopped', { recording_mode: 'system_audio' });
     return { success: true, message: 'Added to processing queue' };

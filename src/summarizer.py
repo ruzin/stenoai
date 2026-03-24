@@ -356,7 +356,7 @@ class OllamaSummarizer:
                     raise
         raise RuntimeError("Anthropic chat failed after all retries")
 
-    def _create_permissive_prompt(self, transcript: str, language: str = "en") -> str:
+    def _create_permissive_prompt(self, transcript: str, language: str = "en", notes: str = None) -> str:
         """
         Create an enhanced prompt with discussion_areas and improved extraction.
         Uses more examples in schema to permit more detailed summaries.
@@ -381,7 +381,18 @@ Attribute statements to speakers in your summary where relevant.
 
 """
 
-        return f"""{diarisation_note}You are a helpful meeting assistant. Summarise this meeting transcript into participants, discussion areas, key points and any next steps mentioned. Only base your summary on what was explicitly discussed in the transcript.
+        # Add user notes context if provided
+        notes_context = ""
+        if notes and notes.strip():
+            notes_context = f"""USER NOTES (written by the meeting participant during the recording):
+{notes.strip()}
+
+Use these notes as additional context to improve your summary. They may contain
+names, jargon, or context that helps interpret the transcript more accurately.
+
+"""
+
+        return f"""{diarisation_note}{notes_context}You are a helpful meeting assistant. Summarise this meeting transcript into participants, discussion areas, key points and any next steps mentioned. Only base your summary on what was explicitly discussed in the transcript.
 
 IMPORTANT: Do not infer or assume information that wasn't directly mentioned.
 
@@ -465,7 +476,7 @@ Return ONLY the response in this exact JSON format:
   ]
 }}"""
 
-    def summarize_transcript(self, transcript: str, duration_minutes: int, language: str = "en") -> Optional[MeetingTranscript]:
+    def summarize_transcript(self, transcript: str, duration_minutes: int, language: str = "en", notes: str = None) -> Optional[MeetingTranscript]:
         """
         Summarize a meeting transcript using Ollama.
 
@@ -489,7 +500,7 @@ Return ONLY the response in this exact JSON format:
                     duration_minutes=duration_minutes
                 )
             
-            prompt = self._create_permissive_prompt(transcript, language)
+            prompt = self._create_permissive_prompt(transcript, language, notes=notes)
             logger.info(f"Sending transcript to {self.ai_provider} model: {self.model_name}")
             logger.info(f"Transcript length: {len(transcript)} characters")
 

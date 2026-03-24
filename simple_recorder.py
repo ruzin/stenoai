@@ -255,7 +255,8 @@ Summary output language: {config.get_language_name(output_language)}
         transcript_text: str,
         session_name: str = "Recording",
         duration_minutes: int = 10,
-        language: Optional[str] = None
+        language: Optional[str] = None,
+        notes_text: Optional[str] = None
     ) -> dict:
         """Summarize transcript text."""
         print("🧠 Generating summary...")
@@ -288,7 +289,7 @@ Transcript:
             language = self._resolve_output_language(configured_language)
 
         # Generate summary (using correct method name and parameters)
-        summary_result = self.summarizer.summarize_transcript(transcript_text, duration_minutes, language=language)
+        summary_result = self.summarizer.summarize_transcript(transcript_text, duration_minutes, language=language, notes=notes_text)
         
         if summary_result is None:
             return {
@@ -323,7 +324,7 @@ Transcript:
                 "action_items": []
             }
     
-    async def process_recording(self, audio_file: str, session_name: str = "Recording") -> dict:
+    async def process_recording(self, audio_file: str, session_name: str = "Recording", notes_text: Optional[str] = None) -> dict:
         """Complete processing: transcribe + summarize."""
         print(f"🔄 Processing recording: {audio_file}")
         
@@ -360,7 +361,8 @@ Transcript:
             text_for_summary,
             session_name,
             duration_minutes,
-            language=transcript_data.get("output_language")
+            language=transcript_data.get("output_language"),
+            notes_text=notes_text
         )
 
         # Step 2b: Auto-generate title for auto-named meetings
@@ -402,6 +404,7 @@ Transcript:
             "transcript": transcript_data["transcript_text"],
             "is_diarised": transcript_data.get("is_diarised", False),
             "diarised_text": transcript_data.get("diarised_text"),
+            "user_notes": notes_text,
         }
         
         with open(summary_path, 'w') as f:
@@ -593,14 +596,25 @@ def stop():
 @cli.command()
 @click.argument('audio_file', default='')
 @click.option('--name', '-n', default='Recording', help='Session name for the recording')
-def process(audio_file, name):
+@click.option('--notes', default=None, help='Path to user notes file')
+def process(audio_file, name, notes):
     """Process audio file: transcribe + summarize"""
-    
+
     async def run_process():
         recorder = SimpleRecorder()
-        
+
+        # Read user notes if provided
+        notes_text = None
+        if notes:
+            try:
+                notes_text = Path(notes).read_text(encoding='utf-8').strip()
+                if notes_text:
+                    logger.info(f"Loaded user notes ({len(notes_text)} chars)")
+            except Exception as e:
+                logger.warning(f"Failed to read notes file: {e}")
+
         try:
-            result = await recorder.process_recording(audio_file, name)
+            result = await recorder.process_recording(audio_file, name, notes_text=notes_text)
             
             print("SUCCESS: Processing complete!")
             print(f"Transcript: {result['session_info']['transcript_file']}")

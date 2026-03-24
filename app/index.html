@@ -1772,7 +1772,30 @@
             width: 100%;
             padding: 40px 32px 80px;
         }
-        
+
+        .notes-editor {
+            min-height: 300px;
+            margin-bottom: 24px;
+            position: relative;
+        }
+
+        .notes-content {
+            outline: none;
+            font-size: 15px;
+            line-height: 1.8;
+            color: var(--text-primary);
+            min-height: 300px;
+            caret-color: var(--accent-primary);
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+
+        .notes-content[data-placeholder]:empty:before {
+            content: attr(data-placeholder);
+            color: var(--text-muted);
+            pointer-events: none;
+        }
+
         .meeting-header {
             margin-bottom: 32px;
         }
@@ -3405,6 +3428,12 @@ Ask Steno
                         <span id="detail-date">Date</span>
                         <span id="detail-duration">Duration</span>
                     </div>
+                </div>
+
+                <!-- Notes editor (shown during recording) -->
+                <div class="notes-editor" id="notes-editor" style="display: none;">
+                    <div class="notes-content" id="notes-content" contenteditable="true" spellcheck="true"
+                         data-placeholder="Type your notes here..."></div>
                 </div>
 
                 <div class="meeting-section">
@@ -5224,8 +5253,83 @@ Session started - waiting for activity...
             }
             */
         }
-        
-        
+
+
+        // ── Notes Editor ──
+        let notesAutoSaveInterval = null;
+        let currentNotesText = '';
+        let currentNotesSessionName = '';
+
+        function showNotesEditor(sessionName) {
+            currentNotesSessionName = sessionName;
+            currentNotesText = '';
+
+            // Show meeting detail with notes editor
+            emptyState.style.display = 'none';
+            meetingDetail.classList.add('show');
+            detailTitle.textContent = sessionName;
+            detailDate.textContent = formatDate(new Date().toISOString());
+            detailDuration.textContent = '';
+
+            // Hide summary sections, show notes editor
+            document.querySelectorAll('#meeting-detail .meeting-section').forEach(s => s.style.display = 'none');
+            document.getElementById('notes-editor').style.display = 'block';
+            const notesContent = document.getElementById('notes-content');
+            notesContent.innerHTML = '';
+            notesContent.focus();
+
+            // Hide action buttons not relevant during recording
+            document.getElementById('ask-ai-btn').style.display = 'none';
+            document.getElementById('copy-notes-btn').style.display = 'none';
+            document.getElementById('reprocess-btn').style.display = 'none';
+
+            // Auto-save notes every 10 seconds
+            notesAutoSaveInterval = setInterval(() => {
+                const notes = document.getElementById('notes-content').innerText.trim();
+                if (notes && notes !== currentNotesText) {
+                    currentNotesText = notes;
+                    ipcRenderer.invoke('save-meeting-notes', currentNotesSessionName, notes);
+                }
+            }, 10000);
+        }
+
+        function hideNotesEditor() {
+            if (notesAutoSaveInterval) {
+                clearInterval(notesAutoSaveInterval);
+                notesAutoSaveInterval = null;
+            }
+            // Capture final notes
+            const notesContent = document.getElementById('notes-content');
+            currentNotesText = notesContent ? notesContent.innerText.trim() : '';
+
+            // Final save
+            if (currentNotesText && currentNotesSessionName) {
+                ipcRenderer.invoke('save-meeting-notes', currentNotesSessionName, currentNotesText);
+            }
+
+            // Hide notes editor, restore sections
+            document.getElementById('notes-editor').style.display = 'none';
+            document.querySelectorAll('#meeting-detail .meeting-section').forEach(s => s.style.display = '');
+
+            // Restore action buttons
+            document.getElementById('ask-ai-btn').style.display = '';
+            document.getElementById('copy-notes-btn').style.display = '';
+            document.getElementById('reprocess-btn').style.display = '';
+        }
+
+        // Force plain text paste in notes editor
+        document.addEventListener('DOMContentLoaded', () => {
+            const notesContent = document.getElementById('notes-content');
+            if (notesContent) {
+                notesContent.addEventListener('paste', (e) => {
+                    e.preventDefault();
+                    const text = e.clipboardData.getData('text/plain');
+                    document.execCommand('insertText', false, text);
+                });
+            }
+        });
+
+
         // ── System Audio Recording Module ──
         // Uses electron-audio-loopback to capture system audio + mic,
         // mixes them via Web Audio API, records as WebM/Opus.
@@ -5421,15 +5525,18 @@ Session started - waiting for activity...
             if (useSystemAudio) {
                 log(`Starting recording (mic + system audio): ${sessionName}`);
                 setUIState('recording');
+                showNotesEditor(sessionName);
                 try {
                     await startSystemAudioRecording();
                 } catch (error) {
                     log(`System audio start error: ${error.message}`);
+                    hideNotesEditor();
                     setUIState('ready');
                 }
             } else {
                 log(`Starting recording: ${sessionName}`);
                 setUIState('recording');
+                showNotesEditor(sessionName);
                 // Start visualizer immediately (within user-gesture frame, before IPC await)
                 // so bars appear instantly and AudioContext is never suspended.
                 const vizBars = Array.from(document.querySelectorAll('#waveform .waveform-bar'));
@@ -5442,11 +5549,13 @@ Session started - waiting for activity...
                     } else {
                         log(`Failed to start: ${result.error}`);
                         AudioVisualizer.stop();
+                        hideNotesEditor();
                         setUIState('ready');
                     }
                 } catch (error) {
                     log(`Start error: ${error.message}`);
                     AudioVisualizer.stop();
+                    hideNotesEditor();
                     setUIState('ready');
                 }
             }
@@ -5454,6 +5563,7 @@ Session started - waiting for activity...
         
         stopBtn.addEventListener('click', async () => {
             log('Stopping recording...');
+            hideNotesEditor();
             setUIState('processing');
             stopStatusMonitoring();
 
