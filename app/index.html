@@ -5293,7 +5293,7 @@ Session started - waiting for activity...
             }, 10000);
         }
 
-        function hideNotesEditor() {
+        async function hideNotesEditor() {
             if (notesAutoSaveInterval) {
                 clearInterval(notesAutoSaveInterval);
                 notesAutoSaveInterval = null;
@@ -5302,9 +5302,14 @@ Session started - waiting for activity...
             const notesContent = document.getElementById('notes-content');
             currentNotesText = notesContent ? notesContent.innerText.trim() : '';
 
-            // Final save
+            // Final save — await to ensure notes are on disk before processing starts
             if (currentNotesText && currentNotesSessionName) {
-                ipcRenderer.invoke('save-meeting-notes', currentNotesSessionName, currentNotesText);
+                try {
+                    await ipcRenderer.invoke('save-meeting-notes', currentNotesSessionName, currentNotesText);
+                    log(`Notes saved (${currentNotesText.length} chars)`);
+                } catch (e) {
+                    log(`Failed to save notes: ${e.message}`);
+                }
             }
 
             // Hide notes editor, restore sections
@@ -5563,7 +5568,7 @@ Session started - waiting for activity...
         
         stopBtn.addEventListener('click', async () => {
             log('Stopping recording...');
-            hideNotesEditor();
+            await hideNotesEditor();
             setUIState('processing');
             stopStatusMonitoring();
 
