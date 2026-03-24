@@ -1327,7 +1327,8 @@ async function processNextInQueue() {
         // Parse protocol lines
         text.split('\n').forEach(line => {
           if (line.startsWith('CHUNK:')) {
-            const chunk = line.slice(6);
+            const encoded = line.slice(6);
+            const chunk = Buffer.from(encoded, 'base64').toString('utf-8');
             if (mainWindow && !mainWindow.isDestroyed()) {
               mainWindow.webContents.send('summary-chunk', { chunk, sessionName: currentProcessingJob.sessionName });
             }

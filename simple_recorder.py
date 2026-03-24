@@ -690,15 +690,18 @@ def process_streaming(audio_file, name, notes):
             configured_language, transcript_data.get("detected_language")
         )
 
+        import base64
         streamed_md = ""
         for chunk in recorder.summarizer.summarize_transcript_streaming(
             text_for_summary, duration_minutes, output_language, notes_text
         ):
-            sys.stdout.write(f"CHUNK:{chunk}")
+            # Base64-encode to avoid newlines breaking the line protocol
+            encoded = base64.b64encode(chunk.encode('utf-8')).decode('ascii')
+            sys.stdout.write(f"CHUNK:{encoded}\n")
             sys.stdout.flush()
             streamed_md += chunk
 
-        print("\nSTREAM_COMPLETE", flush=True)
+        print("STREAM_COMPLETE", flush=True)
 
         # Step 3: Generate title
         session_name = name
@@ -1220,13 +1223,18 @@ def list_meetings():
     # Ensure output directory exists
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Collect summary files from current output dir (JSON and MD)
+    # Collect summary files from current output dir (JSON preferred over MD)
     seen_files = set()
+    seen_stems = set()
     summaries = []
+    # JSON first — if both .json and .md exist, JSON wins (it has structured data)
     for pattern in ("*_summary.json", "*_summary.md"):
         for f in output_dir.glob(pattern):
-            summaries.append(f)
-            seen_files.add(f.resolve())
+            stem = f.stem.replace('_summary', '')
+            if stem not in seen_stems:
+                summaries.append(f)
+                seen_files.add(f.resolve())
+                seen_stems.add(stem)
 
     # Also scan the default location if a custom path is set,
     # so meetings stored before the path change remain visible
@@ -1239,9 +1247,11 @@ def list_meetings():
         if default_output.exists():
             for pattern in ("*_summary.json", "*_summary.md"):
                 for f in default_output.glob(pattern):
-                    if f.resolve() not in seen_files:
+                    stem = f.stem.replace('_summary', '')
+                    if f.resolve() not in seen_files and stem not in seen_stems:
                         summaries.append(f)
                         seen_files.add(f.resolve())
+                        seen_stems.add(stem)
 
     meetings = []
 
