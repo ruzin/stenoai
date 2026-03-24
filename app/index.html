@@ -7134,6 +7134,87 @@ Session started - waiting for activity...
         });
 
         // Listen for processing completion events
+        // ── Streaming Summary Rendering ──
+        let streamedMarkdown = '';
+        let streamingActive = false;
+
+        function renderStreamingMarkdown(md) {
+            const container = document.getElementById('notes-editor');
+            if (!container) return;
+            container.style.display = 'block';
+
+            // Hide the contenteditable, use the container for rendered output
+            const notesContent = document.getElementById('notes-content');
+            if (notesContent) notesContent.style.display = 'none';
+
+            // Lightweight markdown to HTML
+            let html = '';
+            const lines = md.split('\n');
+            let inList = false;
+
+            for (const line of lines) {
+                if (line.startsWith('## ')) {
+                    if (inList) { html += '</ul>'; inList = false; }
+                    html += `<h2 class="section-title" style="margin-top:28px;">${line.slice(3)}</h2>`;
+                } else if (line.startsWith('### ')) {
+                    if (inList) { html += '</ul>'; inList = false; }
+                    html += `<h3 style="font-size:15px;font-weight:600;color:var(--text-primary);margin:16px 0 4px;">${line.slice(4)}</h3>`;
+                } else if (line.startsWith('- ')) {
+                    if (!inList) { html += '<ul style="list-style:none;padding:0;">'; inList = true; }
+                    const text = line.slice(2).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+                    html += `<li style="padding:4px 0 4px 20px;position:relative;color:var(--text-secondary);line-height:1.6;"><span style="position:absolute;left:0;top:11px;width:5px;height:5px;background:var(--text-muted);border-radius:50%;"></span>${text}</li>`;
+                } else if (line.trim() === '') {
+                    if (inList) { html += '</ul>'; inList = false; }
+                } else {
+                    if (inList) { html += '</ul>'; inList = false; }
+                    const text = line.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+                    html += `<p style="color:var(--text-secondary);line-height:1.7;font-size:15px;margin:4px 0;">${text}</p>`;
+                }
+            }
+            if (inList) html += '</ul>';
+
+            container.innerHTML = html + '<p style="color:var(--accent-primary);font-size:13px;margin-top:16px;opacity:0.7;">Generating summary...</p>';
+        }
+
+        function stopStreamingRenderer() {
+            streamingActive = false;
+            const container = document.getElementById('notes-editor');
+            if (container) {
+                // Remove the "Generating..." indicator
+                const indicator = container.querySelector('p:last-child');
+                if (indicator && indicator.textContent.includes('Generating')) {
+                    indicator.remove();
+                }
+            }
+        }
+
+        ipcRenderer.on('summary-chunk', (event, data) => {
+            if (!streamingActive) {
+                streamingActive = true;
+                streamedMarkdown = '';
+                // Ensure notes editor is visible for streaming
+                document.querySelectorAll('#meeting-detail .meeting-section').forEach(s => s.style.display = 'none');
+                const editor = document.getElementById('notes-editor');
+                if (editor) editor.style.display = 'block';
+            }
+            streamedMarkdown += data.chunk;
+            renderStreamingMarkdown(streamedMarkdown);
+        });
+
+        ipcRenderer.on('summary-title', (event, data) => {
+            if (data.title) {
+                detailTitle.textContent = data.title;
+                log(`Auto-generated title: ${data.title}`);
+            }
+        });
+
+        ipcRenderer.on('summary-complete', (event, data) => {
+            log(`Summary streaming complete for: ${data.sessionName}`);
+            stopStreamingRenderer();
+            // Reload meetings to get the saved data
+            loadMeetings(true);
+        });
+
         ipcRenderer.on('processing-complete', (event, data) => {
             log(`Processing complete for: ${data.sessionName}`);
             processingMeetings.delete(data.sessionName);

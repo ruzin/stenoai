@@ -664,6 +664,115 @@ Return ONLY the response in this exact JSON format:
                 logger.error(f"HTTP response: {e.response}")
             return None
     
+    def _create_markdown_prompt(self, transcript: str, language: str = "en", notes: str = None) -> str:
+        """Create a prompt that asks the LLM to output markdown directly."""
+        # Language instruction
+        if language and language not in ("en", "auto"):
+            from .config import get_config
+            language_name = get_config().get_language_name(language)
+            if language_name != "Unknown":
+                language_instruction = f"\n\nCRITICAL: Write the entire output in {language_name}."
+            else:
+                language_instruction = ""
+        else:
+            language_instruction = ""
+
+        # Diarisation context
+        diarisation_note = ""
+        if "[You]" in transcript and "[Others]" in transcript:
+            diarisation_note = "NOTE: [You] is the recorder, [Others] are remote participants.\n\n"
+
+        # User notes context
+        notes_context = ""
+        if notes and notes.strip():
+            notes_context = f"USER NOTES (written during the meeting):\n{notes.strip()}\n\n"
+
+        return f"""{diarisation_note}{notes_context}Summarise this meeting transcript as markdown with exactly these sections:
+
+## Summary
+A 1-3 sentence overview of what was discussed.
+
+## Participants
+Comma-separated list of participant names.
+
+## Key Topics
+### [Topic title]
+Brief analysis of what was discussed about this topic.
+
+(Repeat for each major topic)
+
+## Key Points
+- [Key point 1]
+- [Key point 2]
+
+## Action Items
+- [Action item 1]
+- [Action item 2]
+
+Only include information explicitly discussed. Do not infer or assume.{language_instruction}
+
+TRANSCRIPT:
+{transcript}"""
+
+    def summarize_transcript_streaming(self, transcript: str, duration_minutes: int = 0, language: str = "en", notes: str = None):
+        """Generator that yields markdown chunks from the LLM.
+
+        Args:
+            transcript: Meeting transcript text
+            duration_minutes: Duration of the meeting
+            language: Language code for output
+            notes: Optional user notes for context
+
+        Yields:
+            str: Text chunks as they arrive from the LLM
+        """
+        prompt = self._create_markdown_prompt(transcript, language, notes)
+        logger.info(f"Starting streaming summary with {self.ai_provider} model: {self.model_name}")
+
+        if self.ai_provider == "cloud":
+            if self.cloud_provider == "anthropic":
+                try:
+                    with self.anthropic_client.messages.stream(
+                        model=self.model_name,
+                        max_tokens=4096,
+                        messages=[{"role": "user", "content": prompt}],
+                    ) as stream:
+                        for text in stream.text_stream:
+                            yield text
+                except Exception as e:
+                    logger.error(f"Anthropic streaming failed: {e}")
+                    return
+            else:
+                try:
+                    response = self.cloud_client.chat.completions.create(
+                        model=self.model_name,
+                        messages=[{"role": "user", "content": prompt}],
+                        stream=True,
+                    )
+                    for chunk in response:
+                        content = chunk.choices[0].delta.content if chunk.choices[0].delta.content else ""
+                        if content:
+                            yield content
+                except Exception as e:
+                    logger.error(f"OpenAI streaming failed: {e}")
+                    return
+        else:
+            # Ollama (local or remote)
+            try:
+                self._ensure_ollama_ready()
+                response = self.client.chat(
+                    model=self.model_name,
+                    messages=[{'role': 'user', 'content': prompt}],
+                    stream=True,
+                )
+                for chunk in response:
+                    content = chunk.get('message', {}).get('content', '')
+                    if content:
+                        yield content
+            except Exception as e:
+                logger.error(f"Ollama streaming failed: {e}")
+                return
+
     def test_connection(self) -> bool:
         """
         Test connection to Ollama.

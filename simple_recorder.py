@@ -643,6 +643,166 @@ def process(audio_file, name, notes):
     asyncio.run(run_process())
 
 
+@cli.command(name='process-streaming')
+@click.argument('audio_file', default='')
+@click.option('--name', '-n', default='Recording', help='Session name')
+@click.option('--notes', default=None, help='Path to user notes file')
+def process_streaming(audio_file, name, notes):
+    """Process audio with streaming summary output.
+
+    Transcribes audio, then streams the summary as CHUNK: prefixed lines
+    to stdout for Electron to relay to the renderer in real time.
+    """
+    import sys
+
+    async def run():
+        recorder = SimpleRecorder()
+
+        # Read user notes
+        notes_text = None
+        if notes:
+            try:
+                notes_text = Path(notes).read_text(encoding='utf-8').strip()
+                if notes_text:
+                    logger.info(f"Loaded user notes ({len(notes_text)} chars)")
+            except Exception as e:
+                logger.warning(f"Failed to read notes file: {e}")
+
+        # Step 1: Transcribe
+        transcript_data = await recorder.transcribe_audio(audio_file, name)
+        transcript_text = transcript_data.get("transcript_text", "")
+        diarised_text = transcript_data.get("diarised_text")
+        text_for_summary = diarised_text or transcript_text
+
+        duration_seconds = transcript_data.get("duration_seconds")
+        duration_minutes = int(duration_seconds / 60) if duration_seconds else 0
+
+        print(f"TRANSCRIPTION_COMPLETE:{len(transcript_text)}", flush=True)
+
+        # Step 2: Stream summary
+        if recorder.summarizer is None:
+            recorder.summarizer = OllamaSummarizer()
+
+        from src.config import get_config
+        config = get_config()
+        configured_language = config.get_language()
+        output_language = recorder._resolve_output_language(
+            configured_language, transcript_data.get("detected_language")
+        )
+
+        streamed_md = ""
+        for chunk in recorder.summarizer.summarize_transcript_streaming(
+            text_for_summary, duration_minutes, output_language, notes_text
+        ):
+            sys.stdout.write(f"CHUNK:{chunk}")
+            sys.stdout.flush()
+            streamed_md += chunk
+
+        print("\nSTREAM_COMPLETE", flush=True)
+
+        # Step 3: Generate title
+        session_name = name
+        if re.match(r'^Meeting-[A-Z0-9]{6}$', name):
+            try:
+                generated_title = recorder.summarizer.generate_title(
+                    streamed_md, transcript_text, language=output_language
+                )
+                if generated_title:
+                    session_name = generated_title
+                    print(f"TITLE:{session_name}", flush=True)
+            except Exception as e:
+                logger.warning(f"Title generation failed: {e}")
+
+        # Step 4: Save summary JSON (backward compatible)
+        audio_path = Path(audio_file)
+        summary_path = recorder.output_dir / f"{audio_path.stem}_summary.json"
+
+        # Parse the streamed markdown into structured fields for JSON compat
+        summary_text = ""
+        participants = []
+        discussion_areas = []
+        key_points = []
+        action_items = []
+
+        current_section = None
+        current_topic_title = None
+        current_topic_lines = []
+
+        for line in streamed_md.split('\n'):
+            stripped = line.strip()
+            if stripped.startswith('## Summary'):
+                current_section = 'summary'
+            elif stripped.startswith('## Participants'):
+                current_section = 'participants'
+            elif stripped.startswith('## Key Topics'):
+                current_section = 'topics'
+            elif stripped.startswith('## Key Points'):
+                current_section = 'keypoints'
+            elif stripped.startswith('## Action Items'):
+                current_section = 'actions'
+            elif stripped.startswith('### ') and current_section == 'topics':
+                if current_topic_title:
+                    discussion_areas.append({
+                        "title": current_topic_title,
+                        "analysis": '\n'.join(current_topic_lines).strip()
+                    })
+                current_topic_title = stripped[4:]
+                current_topic_lines = []
+            elif current_section == 'summary' and stripped:
+                summary_text += stripped + " "
+            elif current_section == 'participants' and stripped:
+                participants = [p.strip() for p in stripped.split(',') if p.strip()]
+            elif current_section == 'topics' and current_topic_title:
+                current_topic_lines.append(stripped)
+            elif current_section == 'keypoints' and stripped.startswith('- '):
+                key_points.append(stripped[2:])
+            elif current_section == 'actions' and stripped.startswith('- '):
+                action_items.append(stripped[2:].replace('[ ] ', '').replace('[x] ', ''))
+
+        if current_topic_title:
+            discussion_areas.append({
+                "title": current_topic_title,
+                "analysis": '\n'.join(current_topic_lines).strip()
+            })
+
+        complete_data = {
+            "session_info": {
+                "name": session_name,
+                "audio_file": str(audio_path),
+                "transcript_file": str(transcript_data.get("transcript_file", "")),
+                "summary_file": str(summary_path),
+                "processed_at": datetime.now().isoformat(),
+                "duration_seconds": int(duration_seconds) if duration_seconds else None,
+                "duration_minutes": duration_minutes,
+                "configured_language": configured_language,
+                "detected_language": transcript_data.get("detected_language"),
+                "output_language": output_language,
+            },
+            "summary": summary_text.strip(),
+            "participants": participants,
+            "discussion_areas": discussion_areas,
+            "key_points": key_points,
+            "action_items": action_items,
+            "transcript": transcript_text,
+            "is_diarised": transcript_data.get("is_diarised", False),
+            "diarised_text": diarised_text,
+            "user_notes": notes_text,
+        }
+
+        with open(summary_path, 'w') as f:
+            json.dump(complete_data, f, indent=2)
+
+        # Clean up audio
+        try:
+            audio_path.unlink()
+        except Exception:
+            pass
+
+        print(f"SAVED:{summary_path}", flush=True)
+
+    asyncio.run(run())
+
+
 @cli.command()
 def status():
     """Show recorder status"""

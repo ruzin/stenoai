@@ -1308,56 +1308,85 @@ async function processNextInQueue() {
   
   try {
     const queueCloudKey = loadCloudApiKey();
-    const queueEnv = queueCloudKey ? { STENOAI_CLOUD_API_KEY: queueCloudKey } : {};
-    const processArgs = ['process', currentProcessingJob.audioFile, '--name', currentProcessingJob.sessionName];
+    const queueEnv = queueCloudKey ? { ...require('process').env, STENOAI_CLOUD_API_KEY: queueCloudKey } : undefined;
+    const processArgs = ['process-streaming', currentProcessingJob.audioFile, '--name', currentProcessingJob.sessionName];
     if (currentProcessingJob.notesFile && fs.existsSync(currentProcessingJob.notesFile)) {
       processArgs.push('--notes', currentProcessingJob.notesFile);
     }
-    const result = await runPythonScript('simple_recorder.py', processArgs, false, queueEnv);
-    console.log(`✅ Completed processing: ${currentProcessingJob.sessionName}`);
-    trackEvent('transcription_completed', { success: true });
-    trackEvent('summarization_completed', { success: true });
-    
-    // Notify frontend about completion with processed meeting data
-    if (mainWindow) {
-      try {
-        // Get the specific processed meeting data
-        const meetingsResult = await runPythonScript('simple_recorder.py', ['list-meetings'], true);
-        const allMeetings = JSON.parse(meetingsResult);
-        // Try matching by name first, then by audio file path (name may have been
-        // auto-generated from the transcript, so the original hash may no longer match)
-        let processedMeeting = allMeetings.find(m => m.session_info?.name === currentProcessingJob.sessionName);
-        if (!processedMeeting && currentProcessingJob.audioFile) {
-          const audioBasename = path.basename(currentProcessingJob.audioFile);
-          processedMeeting = allMeetings.find(m => 
-            m.session_info?.audio_file && path.basename(m.session_info.audio_file) === audioBasename
-          );
+
+    await new Promise((resolve, reject) => {
+      const proc = spawn(getBackendPath(), processArgs, {
+        cwd: getBackendCwd(),
+        env: queueEnv
+      });
+
+      let stderrBuf = '';
+
+      proc.stdout.on('data', (data) => {
+        const text = data.toString();
+        // Parse protocol lines
+        text.split('\n').forEach(line => {
+          if (line.startsWith('CHUNK:')) {
+            const chunk = line.slice(6);
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('summary-chunk', { chunk, sessionName: currentProcessingJob.sessionName });
+            }
+          } else if (line.startsWith('TRANSCRIPTION_COMPLETE:')) {
+            sendDebugLog(`Transcription complete (${line.split(':')[1]} chars)`);
+            trackEvent('transcription_completed', { success: true });
+          } else if (line.startsWith('TITLE:')) {
+            const title = line.slice(6);
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('summary-title', { title, sessionName: currentProcessingJob.sessionName });
+            }
+          } else if (line === 'STREAM_COMPLETE') {
+            trackEvent('summarization_completed', { success: true });
+          } else if (line.startsWith('SAVED:')) {
+            sendDebugLog(`Summary saved: ${line.slice(6)}`);
+          } else if (line.trim()) {
+            sendDebugLog(line.trim());
+          }
+        });
+      });
+
+      proc.stderr.on('data', (data) => {
+        const msg = data.toString().trim();
+        if (msg) {
+          stderrBuf += msg + '\n';
+          sendDebugLog(`STDERR: ${msg}`);
         }
-        
-        mainWindow.webContents.send('processing-complete', { 
-          success: true, 
-          sessionName: currentProcessingJob.sessionName,
-          message: 'Processing completed successfully',
-          meetingData: processedMeeting
-        });
-      } catch (error) {
-        console.error('Error getting processed meeting data:', error);
-        mainWindow.webContents.send('processing-complete', { 
-          success: true, 
-          sessionName: currentProcessingJob.sessionName,
-          message: 'Processing completed successfully'
-        });
-      }
-    }
-    
+      });
+
+      proc.on('close', (code) => {
+        if (code === 0) {
+          console.log(`✅ Completed streaming processing: ${currentProcessingJob.sessionName}`);
+          // Notify frontend that streaming is done and meeting is saved
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('summary-complete', {
+              success: true,
+              sessionName: currentProcessingJob.sessionName
+            });
+            // Also send processing-complete for backward compat (reloads meeting list)
+            mainWindow.webContents.send('processing-complete', {
+              success: true,
+              sessionName: currentProcessingJob.sessionName,
+              message: 'Processing completed successfully'
+            });
+          }
+          resolve();
+        } else {
+          reject(new Error(`process-streaming exited with code ${code}: ${stderrBuf.slice(-500)}`));
+        }
+      });
+    });
+
   } catch (error) {
     console.error(`❌ Processing failed for ${currentProcessingJob.sessionName}:`, error);
     trackEvent('error_occurred', { error_type: 'processing_queue' });
 
-    // Notify frontend about failure
     if (mainWindow) {
-      mainWindow.webContents.send('processing-complete', { 
-        success: false, 
+      mainWindow.webContents.send('processing-complete', {
+        success: false,
         sessionName: currentProcessingJob.sessionName,
         error: error.message
       });
