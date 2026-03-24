@@ -1757,20 +1757,24 @@
 
         /* Meeting detail view */
         .meeting-detail {
-            padding: 32px;
             height: 100%;
             overflow-y: auto;
             display: none;
         }
 
         .meeting-detail.show {
-            display: block;
+            display: flex;
+            justify-content: center;
+        }
+
+        .document-body {
+            max-width: 900px;
+            width: 100%;
+            padding: 40px 32px 80px;
         }
         
         .meeting-header {
-            margin-bottom: 36px;
-            padding-bottom: 28px;
-            border-bottom: 1px solid var(--border-subtle);
+            margin-bottom: 32px;
         }
         
         .meeting-header-top {
@@ -1781,13 +1785,13 @@
         }
         
         .meeting-title {
-            font-size: 26px;
+            font-size: 32px;
             font-weight: 700;
-            color: color-mix(in srgb, var(--text-primary) 40%, var(--text-secondary));
+            color: var(--text-primary);
             margin: 0;
             flex: 1;
-            letter-spacing: -0.02em;
-            line-height: 1.3;
+            letter-spacing: -0.03em;
+            line-height: 1.2;
         }
         
         .reprocess-btn {
@@ -1911,7 +1915,7 @@
 
         .meeting-title {
             margin: 0;
-            color: color-mix(in srgb, var(--text-primary) 40%, var(--text-secondary));
+            color: var(--text-primary);
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
@@ -2005,26 +2009,32 @@
         
         .meeting-info {
             display: flex;
-            gap: 24px;
+            gap: 8px;
             align-items: center;
             color: var(--text-muted);
             font-size: 12px;
-            margin-top: 10px;
+            margin-top: 12px;
+        }
+
+        .meeting-info span {
+            display: inline-block;
+            background: var(--bg-surface);
+            border: 1px solid var(--border-subtle);
+            border-radius: 12px;
+            padding: 3px 10px;
         }
         
         .meeting-section {
-            margin-bottom: 36px;
+            margin-bottom: 24px;
         }
 
         .section-title {
-            font-size: 12px;
+            font-size: 16px;
             font-weight: 600;
-            color: var(--text-secondary);
+            color: var(--text-primary);
             letter-spacing: -0.01em;
-            margin-bottom: 12px;
-            display: flex;
-            align-items: center;
-            gap: 8px;
+            margin-bottom: 8px;
+            margin-top: 32px;
         }
 
         .section-content {
@@ -2053,7 +2063,7 @@
             top: 14px;
             width: 5px;
             height: 5px;
-            background: var(--accent-primary);
+            background: var(--text-muted);
             border-radius: 50%;
         }
 
@@ -2063,20 +2073,22 @@
         }
 
         .action-items-list li {
-            background: var(--bg-elevated);
-            border: 1px solid var(--border-subtle);
-            border-left: 3px solid var(--accent-primary);
-            border-radius: 0 8px 8px 0;
-            padding: 14px 16px;
-            margin-bottom: 10px;
+            padding: 6px 0;
+            padding-left: 20px;
+            position: relative;
             color: var(--text-secondary);
             line-height: 1.6;
-            transition: all 0.2s ease;
         }
 
-        .action-items-list li:hover {
-            background: var(--bg-surface);
-            border-left-color: var(--success-green);
+        .action-items-list li:before {
+            content: "";
+            position: absolute;
+            left: 0;
+            top: 14px;
+            width: 5px;
+            height: 5px;
+            background: var(--text-muted);
+            border-radius: 50%;
         }
         
         /* Transcript section */
@@ -3355,6 +3367,7 @@
 
             <!-- Meeting detail view -->
             <div class="meeting-detail" id="meeting-detail">
+              <div class="document-body">
                 <div class="meeting-header">
                     <div class="meeting-header-top">
                         <div class="meeting-title-container">
@@ -3395,54 +3408,42 @@ Ask Steno
                 </div>
 
                 <div class="meeting-section">
-                    <h2 class="section-title">
-                        <span>📋</span> Summary
-                    </h2>
+                    <h2 class="section-title">Summary</h2>
                     <div class="section-content" id="detail-summary">
                         Meeting summary will appear here...
                     </div>
                 </div>
 
                 <div class="meeting-section">
-                    <h2 class="section-title">
-                        <span>👥</span> Participants
-                    </h2>
+                    <h2 class="section-title">Participants</h2>
                     <div class="section-content" id="detail-participants">
                         <!-- Participants will be loaded here -->
                     </div>
                 </div>
 
                 <div class="meeting-section" id="discussion-areas-section">
-                    <h2 class="section-title">
-                        <span>💬</span> Key Topics
-                    </h2>
+                    <h2 class="section-title">Key Topics</h2>
                     <div class="discussion-areas-container" id="detail-discussion-areas">
                         <!-- Key topics will be loaded here -->
                     </div>
                 </div>
 
                 <div class="meeting-section">
-                    <h2 class="section-title">
-                        <span>🔑</span> Key Points
-                    </h2>
+                    <h2 class="section-title">Key Points</h2>
                     <ul class="key-points-list" id="detail-key-points">
                         <!-- Key points will be loaded here -->
                     </ul>
                 </div>
 
                 <div class="meeting-section">
-                    <h2 class="section-title">
-                        <span>✅</span> Action Items
-                    </h2>
+                    <h2 class="section-title">Action Items</h2>
                     <ul class="action-items-list" id="detail-action-items">
                         <!-- Action items will be loaded here -->
                     </ul>
                 </div>
 
                 <div class="meeting-section">
-                    <h2 class="section-title">
-                        <span>📄</span> Full Transcript
-                    </h2>
+                    <h2 class="section-title">Full Transcript</h2>
                     <div class="transcript-container">
                         <div class="transcript-content" id="detail-transcript">
                             Full transcript will appear here...
@@ -3455,6 +3456,7 @@ Ask Steno
                         </button>
                     </div>
                 </div>
+              </div>
             </div>
         </div>
     </div>
@@ -5088,24 +5090,21 @@ Session started - waiting for activity...
                 discussionAreasSection.style.display = 'block';
                 selectedMeeting.discussion_areas.forEach(area => {
                     const areaDiv = document.createElement('div');
-                    areaDiv.style.marginBottom = '15px';
-                    areaDiv.style.padding = '12px';
-                    areaDiv.style.background = 'var(--bg-elevated)';
-                    areaDiv.style.borderRadius = '6px';
-                    areaDiv.style.borderLeft = '3px solid var(--accent-primary)';
+                    areaDiv.style.marginBottom = '16px';
 
                     const title = document.createElement('h4');
                     title.textContent = area.title || 'Discussion Topic';
-                    title.style.margin = '0 0 8px 0';
-                    title.style.color = 'var(--accent-primary)';
-                    title.style.fontSize = '14px';
+                    title.style.margin = '0 0 4px 0';
+                    title.style.color = 'var(--text-primary)';
+                    title.style.fontSize = '15px';
                     title.style.fontWeight = '600';
 
                     const analysis = document.createElement('p');
                     analysis.textContent = area.analysis || '';
                     analysis.style.margin = '0';
                     analysis.style.color = 'var(--text-secondary)';
-                    analysis.style.lineHeight = '1.5';
+                    analysis.style.lineHeight = '1.7';
+                    analysis.style.fontSize = '15px';
 
                     areaDiv.appendChild(title);
                     areaDiv.appendChild(analysis);
