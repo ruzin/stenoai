@@ -489,9 +489,25 @@ def start(session_name):
                             loop = asyncio.new_event_loop()
                             asyncio.set_event_loop(loop)
                             
+                            # Load user notes if saved by Electron
+                            _notes_text = None
+                            _safe_name = re.sub(r'[^a-zA-Z0-9_-]', '_', session_name)
+                            for _notes_candidate in [
+                                recorder.output_dir / f"{_safe_name}_notes.txt",
+                                recorder.output_dir / f"{session_name}_notes.txt",
+                            ]:
+                                if _notes_candidate.exists():
+                                    try:
+                                        _notes_text = _notes_candidate.read_text(encoding='utf-8').strip()
+                                        if _notes_text:
+                                            logger.info(f"Loaded user notes ({len(_notes_text)} chars)")
+                                    except Exception:
+                                        pass
+                                    break
+
                             print("📝 Transcribing...")
-                            result = loop.run_until_complete(recorder.process_recording(final_path, session_name))
-                            
+                            result = loop.run_until_complete(recorder.process_recording(final_path, session_name, notes_text=_notes_text))
+
                             print("✅ Complete processing finished!", flush=True)
                             print(f"📄 Transcript: {result['session_info']['transcript_file']}")
                             print(f"📋 Summary: {result['session_info']['summary_file']}")
@@ -735,9 +751,25 @@ def record(duration, session_name):
                                 loop = asyncio.new_event_loop()
                                 asyncio.set_event_loop(loop)
                             
+                            # Load user notes if saved by Electron
+                            _notes_text2 = None
+                            _safe_name2 = re.sub(r'[^a-zA-Z0-9_-]', '_', session_name)
+                            for _nc2 in [
+                                recorder.output_dir / f"{_safe_name2}_notes.txt",
+                                recorder.output_dir / f"{session_name}_notes.txt",
+                            ]:
+                                if _nc2.exists():
+                                    try:
+                                        _notes_text2 = _nc2.read_text(encoding='utf-8').strip()
+                                        if _notes_text2:
+                                            logger.info(f"Loaded user notes ({len(_notes_text2)} chars)")
+                                    except Exception:
+                                        pass
+                                    break
+
                             print("📝 Starting transcription...")
-                            result = loop.run_until_complete(recorder.process_recording(final_path, session_name))
-                            
+                            result = loop.run_until_complete(recorder.process_recording(final_path, session_name, notes_text=_notes_text2))
+
                             print("✅ Complete processing finished!", flush=True)
                             print(f"📄 Transcript: {result['session_info']['transcript_file']}")
                             print(f"📋 Summary: {result['session_info']['summary_file']}")
