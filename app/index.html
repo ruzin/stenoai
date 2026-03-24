@@ -5283,21 +5283,22 @@ Session started - waiting for activity...
             document.getElementById('copy-notes-btn').style.display = 'none';
             document.getElementById('reprocess-btn').style.display = 'none';
 
-            // Auto-save notes every 10 seconds
-            notesAutoSaveInterval = setInterval(() => {
-                const notes = document.getElementById('notes-content').innerText.trim();
-                if (notes && notes !== currentNotesText) {
-                    currentNotesText = notes;
-                    ipcRenderer.invoke('save-meeting-notes', currentNotesSessionName, notes);
-                }
-            }, 10000);
+            // Auto-save notes on input (debounced 2s)
+            let _notesSaveTimeout = null;
+            notesContent.addEventListener('input', () => {
+                if (_notesSaveTimeout) clearTimeout(_notesSaveTimeout);
+                _notesSaveTimeout = setTimeout(() => {
+                    const notes = notesContent.innerText.trim();
+                    if (notes && notes !== currentNotesText) {
+                        currentNotesText = notes;
+                        ipcRenderer.invoke('save-meeting-notes', currentNotesSessionName, notes);
+                        log(`Notes auto-saved (${notes.length} chars)`);
+                    }
+                }, 2000);
+            });
         }
 
         async function hideNotesEditor() {
-            if (notesAutoSaveInterval) {
-                clearInterval(notesAutoSaveInterval);
-                notesAutoSaveInterval = null;
-            }
             // Capture final notes
             const notesContent = document.getElementById('notes-content');
             currentNotesText = notesContent ? notesContent.innerText.trim() : '';
