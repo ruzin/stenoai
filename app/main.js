@@ -1125,7 +1125,7 @@ ipcMain.handle('query-transcript', async (event, summaryFile, question) => {
 
 ipcMain.handle('save-meeting-notes', async (event, sessionName, notes) => {
   try {
-    const outputDir = path.join(getBackendCwd(), 'output');
+    const outputDir = path.join(getBackendCwd(), '_internal', 'output');
     if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
     const safeName = sessionName.replace(/[^a-zA-Z0-9_-]/g, '_');
     const notesFile = path.join(outputDir, `${safeName}_notes.txt`);
@@ -2926,7 +2926,7 @@ ipcMain.handle('process-system-audio-recording', async (event, audioFilePath, se
 
     // Check for user notes file
     const safeName = actualSessionName.replace(/[^a-zA-Z0-9_-]/g, '_');
-    const notesFile = path.join(getBackendCwd(), 'output', `${safeName}_notes.txt`);
+    const notesFile = path.join(getBackendCwd(), '_internal', 'output', `${safeName}_notes.txt`);
     const notesPath = fs.existsSync(notesFile) ? notesFile : undefined;
 
     // Use the existing processing queue to avoid concurrent Ollama/Whisper runs
