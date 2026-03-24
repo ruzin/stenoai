@@ -792,6 +792,39 @@ def process_streaming(audio_file, name, notes):
         with open(summary_path, 'w') as f:
             json.dump(complete_data, f, indent=2)
 
+        # Also save as .md for agent-friendly access
+        md_path = summary_path.with_suffix('.md')
+        md_lines = ['---']
+        md_meta = {
+            'title': session_name,
+            'date': complete_data['session_info']['processed_at'],
+            'duration_seconds': complete_data['session_info'].get('duration_seconds'),
+            'language': output_language,
+            'is_diarised': transcript_data.get('is_diarised', False),
+        }
+        for k, v in md_meta.items():
+            if v is None:
+                md_lines.append(f'{k}: null')
+            elif isinstance(v, bool):
+                md_lines.append(f'{k}: {"true" if v else "false"}')
+            elif isinstance(v, int):
+                md_lines.append(f'{k}: {v}')
+            else:
+                md_lines.append(f'{k}: "{v}"')
+        md_lines.append('---')
+        md_lines.append('')
+        md_lines.append(streamed_md)
+        md_lines.append('')
+        md_lines.append('## Transcript')
+        md_lines.append('')
+        md_lines.append(transcript_text)
+        if notes_text:
+            md_lines.append('')
+            md_lines.append('## User Notes')
+            md_lines.append('')
+            md_lines.append(notes_text)
+        md_path.write_text('\n'.join(md_lines), encoding='utf-8')
+
         # Clean up audio
         try:
             audio_path.unlink()
@@ -1073,6 +1106,111 @@ def test():
 
 
 @cli.command()
+def _parse_meeting_markdown(md_path):
+    """Parse a .md meeting file into the standard meeting dict."""
+    content = md_path.read_text(encoding='utf-8')
+
+    # Split frontmatter
+    meta = {}
+    body = content
+    if content.startswith('---'):
+        parts = content.split('---', 2)
+        if len(parts) >= 3:
+            for line in parts[1].strip().split('\n'):
+                if ':' in line:
+                    key, _, value = line.partition(':')
+                    value = value.strip().strip('"')
+                    if value == 'null':
+                        value = None
+                    elif value == 'true':
+                        value = True
+                    elif value == 'false':
+                        value = False
+                    else:
+                        try:
+                            value = int(value)
+                        except (ValueError, TypeError):
+                            pass
+                    meta[key.strip()] = value
+            body = parts[2].strip()
+
+    # Parse markdown body into sections
+    sections = {}
+    current_section = None
+    current_lines = []
+
+    for line in body.split('\n'):
+        if line.startswith('## '):
+            if current_section:
+                sections[current_section] = '\n'.join(current_lines).strip()
+            current_section = line[3:].strip().lower()
+            current_lines = []
+        else:
+            current_lines.append(line)
+    if current_section:
+        sections[current_section] = '\n'.join(current_lines).strip()
+
+    # Extract structured fields
+    participants = []
+    if 'participants' in sections:
+        participants = [p.strip() for p in sections['participants'].split(',') if p.strip()]
+
+    key_points = []
+    if 'key points' in sections:
+        for line in sections['key points'].split('\n'):
+            line = line.strip()
+            if line.startswith('- '):
+                key_points.append(line[2:])
+
+    action_items = []
+    if 'action items' in sections:
+        for line in sections['action items'].split('\n'):
+            line = line.strip()
+            if line.startswith('- '):
+                action_items.append(line[2:].replace('[ ] ', '').replace('[x] ', ''))
+
+    discussion_areas = []
+    if 'key topics' in sections:
+        current_topic = None
+        topic_lines = []
+        for line in sections['key topics'].split('\n'):
+            if line.startswith('### '):
+                if current_topic:
+                    discussion_areas.append({
+                        'title': current_topic,
+                        'analysis': '\n'.join(topic_lines).strip()
+                    })
+                current_topic = line[4:].strip()
+                topic_lines = []
+            else:
+                topic_lines.append(line)
+        if current_topic:
+            discussion_areas.append({
+                'title': current_topic,
+                'analysis': '\n'.join(topic_lines).strip()
+            })
+
+    return {
+        'session_info': {
+            'name': meta.get('title', md_path.stem),
+            'processed_at': meta.get('date', ''),
+            'duration_seconds': meta.get('duration_seconds'),
+            'summary_file': str(md_path),
+            'output_language': meta.get('language'),
+        },
+        'summary': sections.get('summary', ''),
+        'participants': participants,
+        'discussion_areas': discussion_areas,
+        'key_points': key_points,
+        'action_items': action_items,
+        'transcript': sections.get('transcript', ''),
+        'is_diarised': meta.get('is_diarised', False),
+        'diarised_text': sections.get('transcript', '') if meta.get('is_diarised') else None,
+        'user_notes': sections.get('user notes'),
+        'folders': [],
+    }
+
+
 def list_meetings():
     """List all processed meetings - optimized for fast loading"""
     from src.config import get_data_dirs, get_config
@@ -1082,12 +1220,13 @@ def list_meetings():
     # Ensure output directory exists
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Collect summary files from current output dir
+    # Collect summary files from current output dir (JSON and MD)
     seen_files = set()
     summaries = []
-    for f in output_dir.glob("*_summary.json"):
-        summaries.append(f)
-        seen_files.add(f.resolve())
+    for pattern in ("*_summary.json", "*_summary.md"):
+        for f in output_dir.glob(pattern):
+            summaries.append(f)
+            seen_files.add(f.resolve())
 
     # Also scan the default location if a custom path is set,
     # so meetings stored before the path change remain visible
@@ -1098,32 +1237,37 @@ def list_meetings():
         else:
             default_output = Path(__file__).parent / "output"
         if default_output.exists():
-            for f in default_output.glob("*_summary.json"):
-                if f.resolve() not in seen_files:
-                    summaries.append(f)
-                    seen_files.add(f.resolve())
+            for pattern in ("*_summary.json", "*_summary.md"):
+                for f in default_output.glob(pattern):
+                    if f.resolve() not in seen_files:
+                        summaries.append(f)
+                        seen_files.add(f.resolve())
 
     meetings = []
 
     # Single-pass: read each file once, extract sort key and data together
     for summary_file in summaries:
         try:
-            with open(summary_file, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                sort_key = data.get('session_info', {}).get('processed_at', '')
-                essential_meeting = {
-                    "session_info": data.get("session_info", {}),
-                    "summary": data.get("summary", ""),
-                    "participants": data.get("participants", []),
-                    "discussion_areas": data.get("discussion_areas", []),
-                    "key_points": data.get("key_points", []),
-                    "action_items": data.get("action_items", []),
-                    "transcript": data.get("transcript", ""),
-                    "is_diarised": data.get("is_diarised", False),
-                    "diarised_text": data.get("diarised_text"),
-                    "folders": data.get("folders", [])
-                }
-                meetings.append((sort_key, essential_meeting))
+            if summary_file.suffix == '.md':
+                essential_meeting = _parse_meeting_markdown(summary_file)
+                sort_key = essential_meeting.get('session_info', {}).get('processed_at', '')
+            else:
+                with open(summary_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    sort_key = data.get('session_info', {}).get('processed_at', '')
+                    essential_meeting = {
+                        "session_info": data.get("session_info", {}),
+                        "summary": data.get("summary", ""),
+                        "participants": data.get("participants", []),
+                        "discussion_areas": data.get("discussion_areas", []),
+                        "key_points": data.get("key_points", []),
+                        "action_items": data.get("action_items", []),
+                        "transcript": data.get("transcript", ""),
+                        "is_diarised": data.get("is_diarised", False),
+                        "diarised_text": data.get("diarised_text"),
+                        "folders": data.get("folders", [])
+                    }
+            meetings.append((sort_key, essential_meeting))
         except Exception as e:
             logger.warning(f"Failed to load {summary_file}: {e}")
             continue
