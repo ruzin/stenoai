@@ -7237,26 +7237,33 @@ Session started - waiting for activity...
             log(`Processing complete for: ${data.sessionName}`);
             processingMeetings.delete(data.sessionName);
 
-            // Restore UI from streaming state if still active
-            if (streamingActive || document.getElementById('notes-editor').style.display === 'block') {
-                document.getElementById('notes-editor').style.display = 'none';
-                document.querySelectorAll('#meeting-detail .meeting-section').forEach(s => s.style.display = '');
-                document.getElementById('ask-ai-btn').style.display = '';
-                document.getElementById('copy-notes-btn').style.display = '';
-                document.getElementById('reprocess-btn').style.display = '';
-                streamingActive = false;
-            }
-
             if (data.success) {
-                // Always force refresh to get the saved data with correct title
+                // Load fresh data from backend FIRST, then restore UI
+                const wasStreaming = streamingActive || document.getElementById('notes-editor').style.display === 'block';
                 loadMeetings(true).then(() => {
-                    // Auto-select the just-processed meeting
+                    // Now restore UI from streaming state
+                    if (wasStreaming) {
+                        document.getElementById('notes-editor').style.display = 'none';
+                        streamingActive = false;
+                    }
+                    document.querySelectorAll('#meeting-detail .meeting-section').forEach(s => s.style.display = '');
+                    document.getElementById('ask-ai-btn').style.display = '';
+                    document.getElementById('copy-notes-btn').style.display = '';
+                    document.getElementById('reprocess-btn').style.display = '';
+
+                    // Auto-select the just-processed meeting with fresh data
                     const currentTitle = detailTitle.textContent;
                     const idx = filteredMeetings.findIndex(m =>
                         m.session_info?.name === currentTitle ||
                         m.session_info?.name === data.sessionName
                     );
-                    if (idx !== -1) selectMeeting(idx);
+                    if (idx !== -1) {
+                        selectMeeting(idx);
+                    } else {
+                        // Fallback: select the first meeting (most recent)
+                        log('Could not find meeting by title, selecting first');
+                        if (filteredMeetings.length > 0) selectMeeting(0);
+                    }
                 });
                 
                 // Show native notification
