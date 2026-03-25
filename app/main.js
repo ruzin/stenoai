@@ -1123,6 +1123,20 @@ ipcMain.handle('query-transcript', async (event, summaryFile, question) => {
   }
 });
 
+ipcMain.handle('save-meeting-notes', async (event, sessionName, notes) => {
+  try {
+    const outputDir = path.join(getBackendCwd(), '_internal', 'output');
+    if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
+    const safeName = sessionName.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const notesFile = path.join(outputDir, `${safeName}_notes.txt`);
+    fs.writeFileSync(notesFile, notes, 'utf-8');
+    return { success: true, path: notesFile };
+  } catch (error) {
+    console.error('Failed to save meeting notes:', error);
+    return { success: false, error: error.message };
+  }
+});
+
 ipcMain.handle('update-meeting', async (event, summaryFilePath, updates) => {
   try {
     const projectRoot = path.join(__dirname, '..');
@@ -1294,52 +1308,100 @@ async function processNextInQueue() {
   
   try {
     const queueCloudKey = loadCloudApiKey();
-    const queueEnv = queueCloudKey ? { STENOAI_CLOUD_API_KEY: queueCloudKey } : {};
-    const result = await runPythonScript('simple_recorder.py', ['process', currentProcessingJob.audioFile, '--name', currentProcessingJob.sessionName], false, queueEnv);
-    console.log(`✅ Completed processing: ${currentProcessingJob.sessionName}`);
-    trackEvent('transcription_completed', { success: true });
-    trackEvent('summarization_completed', { success: true });
-    
-    // Notify frontend about completion with processed meeting data
-    if (mainWindow) {
-      try {
-        // Get the specific processed meeting data
-        const meetingsResult = await runPythonScript('simple_recorder.py', ['list-meetings'], true);
-        const allMeetings = JSON.parse(meetingsResult);
-        // Try matching by name first, then by audio file path (name may have been
-        // auto-generated from the transcript, so the original hash may no longer match)
-        let processedMeeting = allMeetings.find(m => m.session_info?.name === currentProcessingJob.sessionName);
-        if (!processedMeeting && currentProcessingJob.audioFile) {
-          const audioBasename = path.basename(currentProcessingJob.audioFile);
-          processedMeeting = allMeetings.find(m => 
-            m.session_info?.audio_file && path.basename(m.session_info.audio_file) === audioBasename
-          );
-        }
-        
-        mainWindow.webContents.send('processing-complete', { 
-          success: true, 
-          sessionName: currentProcessingJob.sessionName,
-          message: 'Processing completed successfully',
-          meetingData: processedMeeting
-        });
-      } catch (error) {
-        console.error('Error getting processed meeting data:', error);
-        mainWindow.webContents.send('processing-complete', { 
-          success: true, 
-          sessionName: currentProcessingJob.sessionName,
-          message: 'Processing completed successfully'
-        });
-      }
+    const queueEnv = queueCloudKey ? { ...require('process').env, STENOAI_CLOUD_API_KEY: queueCloudKey } : undefined;
+    const processArgs = ['process-streaming', currentProcessingJob.audioFile, '--name', currentProcessingJob.sessionName];
+    if (currentProcessingJob.notesFile && fs.existsSync(currentProcessingJob.notesFile)) {
+      processArgs.push('--notes', currentProcessingJob.notesFile);
     }
-    
+
+    await new Promise((resolve, reject) => {
+      const proc = spawn(getBackendPath(), processArgs, {
+        cwd: getBackendCwd(),
+        env: queueEnv
+      });
+
+      let stderrBuf = '';
+
+      // Timeout: kill process if it runs longer than 30 minutes
+      const procTimeout = setTimeout(() => {
+        console.error('process-streaming timed out after 30 minutes, killing');
+        proc.kill();
+      }, 30 * 60 * 1000);
+
+      proc.on('error', (err) => {
+        clearTimeout(procTimeout);
+        reject(new Error(`process-streaming spawn error: ${err.message}`));
+      });
+
+      proc.stdout.on('data', (data) => {
+        const text = data.toString();
+        // Parse protocol lines
+        text.split('\n').forEach(line => {
+          if (line.startsWith('CHUNK:')) {
+            try {
+              const encoded = line.slice(6);
+              const chunk = Buffer.from(encoded, 'base64').toString('utf-8');
+              if (mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.webContents.send('summary-chunk', { chunk, sessionName: currentProcessingJob.sessionName });
+              }
+            } catch (e) { console.log('CHUNK decode error:', e.message); }
+          } else if (line.startsWith('TRANSCRIPTION_COMPLETE:')) {
+            sendDebugLog(`Transcription complete (${line.split(':')[1]} chars)`);
+            trackEvent('transcription_completed', { success: true });
+          } else if (line.startsWith('TITLE:')) {
+            const title = line.slice(6);
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('summary-title', { title, sessionName: currentProcessingJob.sessionName });
+            }
+          } else if (line === 'STREAM_COMPLETE') {
+            trackEvent('summarization_completed', { success: true });
+          } else if (line.startsWith('SAVED:')) {
+            sendDebugLog(`Summary saved: ${line.slice(6)}`);
+          } else if (line.trim()) {
+            sendDebugLog(line.trim());
+          }
+        });
+      });
+
+      proc.stderr.on('data', (data) => {
+        const msg = data.toString().trim();
+        if (msg) {
+          stderrBuf += msg + '\n';
+          sendDebugLog(`STDERR: ${msg}`);
+        }
+      });
+
+      proc.on('close', (code) => {
+        clearTimeout(procTimeout);
+        if (code === 0) {
+          console.log(`✅ Completed streaming processing: ${currentProcessingJob.sessionName}`);
+          // Notify frontend that streaming is done and meeting is saved
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('summary-complete', {
+              success: true,
+              sessionName: currentProcessingJob.sessionName
+            });
+            // Also send processing-complete for backward compat (reloads meeting list)
+            mainWindow.webContents.send('processing-complete', {
+              success: true,
+              sessionName: currentProcessingJob.sessionName,
+              message: 'Processing completed successfully'
+            });
+          }
+          resolve();
+        } else {
+          reject(new Error(`process-streaming exited with code ${code}: ${stderrBuf.slice(-500)}`));
+        }
+      });
+    });
+
   } catch (error) {
     console.error(`❌ Processing failed for ${currentProcessingJob.sessionName}:`, error);
     trackEvent('error_occurred', { error_type: 'processing_queue' });
 
-    // Notify frontend about failure
-    if (mainWindow) {
-      mainWindow.webContents.send('processing-complete', { 
-        success: false, 
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('processing-complete', {
+        success: false,
         sessionName: currentProcessingJob.sessionName,
         error: error.message
       });
@@ -1352,8 +1414,8 @@ async function processNextInQueue() {
   }
 }
 
-function addToProcessingQueue(audioFile, sessionName) {
-  processingQueue.push({ audioFile, sessionName });
+function addToProcessingQueue(audioFile, sessionName, notesFile) {
+  processingQueue.push({ audioFile, sessionName, notesFile });
   console.log(`📋 Added to processing queue: ${sessionName} (Queue size: ${processingQueue.length})`);
   processNextInQueue();
 }
@@ -1397,9 +1459,28 @@ ipcMain.handle('start-recording-ui', async (_, sessionName) => {
       }
       console.log('Recording stdout:', output);
 
-      // Send real-time output to debug panel (same as runPythonScript)
+      // Parse streaming protocol + send to debug panel
       output.split('\n').forEach(line => {
-        if (line.trim()) sendDebugLog(line.trim());
+        if (line.startsWith('CHUNK:')) {
+          const encoded = line.slice(6);
+          try {
+            const chunk = Buffer.from(encoded, 'base64').toString('utf-8');
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('summary-chunk', { chunk, sessionName: actualSessionName });
+            }
+          } catch (e) { /* ignore decode errors */ }
+        } else if (line.startsWith('TITLE:')) {
+          const title = line.slice(6);
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('summary-title', { title, sessionName: actualSessionName });
+          }
+        } else if (line === 'STREAM_COMPLETE') {
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('summary-complete', { success: true, sessionName: actualSessionName });
+          }
+        } else if (line.trim()) {
+          sendDebugLog(line.trim());
+        }
       });
 
       // Background recording process handles complete pipeline - just notify when done
@@ -2906,8 +2987,13 @@ ipcMain.handle('process-system-audio-recording', async (event, audioFilePath, se
 
     const actualSessionName = sessionName || 'Meeting';
 
+    // Check for user notes file
+    const safeName = actualSessionName.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const notesFile = path.join(getBackendCwd(), '_internal', 'output', `${safeName}_notes.txt`);
+    const notesPath = fs.existsSync(notesFile) ? notesFile : undefined;
+
     // Use the existing processing queue to avoid concurrent Ollama/Whisper runs
-    addToProcessingQueue(audioFilePath, actualSessionName);
+    addToProcessingQueue(audioFilePath, actualSessionName, notesPath);
 
     trackEvent('recording_stopped', { recording_mode: 'system_audio' });
     return { success: true, message: 'Added to processing queue' };

@@ -1757,20 +1757,47 @@
 
         /* Meeting detail view */
         .meeting-detail {
-            padding: 32px;
             height: 100%;
             overflow-y: auto;
             display: none;
         }
 
         .meeting-detail.show {
-            display: block;
+            display: flex;
+            justify-content: center;
         }
-        
+
+        .document-body {
+            max-width: 900px;
+            width: 100%;
+            padding: 40px 32px 80px;
+        }
+
+        .notes-editor {
+            min-height: 300px;
+            margin-bottom: 24px;
+            position: relative;
+        }
+
+        .notes-content {
+            outline: none;
+            font-size: 15px;
+            line-height: 1.8;
+            color: var(--text-primary);
+            min-height: 300px;
+            caret-color: var(--accent-primary);
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+
+        .notes-content[data-placeholder]:empty:before {
+            content: attr(data-placeholder);
+            color: var(--text-muted);
+            pointer-events: none;
+        }
+
         .meeting-header {
-            margin-bottom: 36px;
-            padding-bottom: 28px;
-            border-bottom: 1px solid var(--border-subtle);
+            margin-bottom: 32px;
         }
         
         .meeting-header-top {
@@ -1781,13 +1808,13 @@
         }
         
         .meeting-title {
-            font-size: 26px;
+            font-size: 32px;
             font-weight: 700;
-            color: color-mix(in srgb, var(--text-primary) 40%, var(--text-secondary));
+            color: var(--text-primary);
             margin: 0;
             flex: 1;
-            letter-spacing: -0.02em;
-            line-height: 1.3;
+            letter-spacing: -0.03em;
+            line-height: 1.2;
         }
         
         .reprocess-btn {
@@ -1911,7 +1938,7 @@
 
         .meeting-title {
             margin: 0;
-            color: color-mix(in srgb, var(--text-primary) 40%, var(--text-secondary));
+            color: var(--text-primary);
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
@@ -2005,26 +2032,32 @@
         
         .meeting-info {
             display: flex;
-            gap: 24px;
+            gap: 8px;
             align-items: center;
             color: var(--text-muted);
             font-size: 12px;
-            margin-top: 10px;
+            margin-top: 12px;
+        }
+
+        .meeting-info span {
+            display: inline-block;
+            background: var(--bg-surface);
+            border: 1px solid var(--border-subtle);
+            border-radius: 12px;
+            padding: 3px 10px;
         }
         
         .meeting-section {
-            margin-bottom: 36px;
+            margin-bottom: 24px;
         }
 
         .section-title {
-            font-size: 12px;
+            font-size: 16px;
             font-weight: 600;
-            color: var(--text-secondary);
+            color: var(--text-primary);
             letter-spacing: -0.01em;
-            margin-bottom: 12px;
-            display: flex;
-            align-items: center;
-            gap: 8px;
+            margin-bottom: 8px;
+            margin-top: 32px;
         }
 
         .section-content {
@@ -2053,7 +2086,7 @@
             top: 14px;
             width: 5px;
             height: 5px;
-            background: var(--accent-primary);
+            background: var(--text-muted);
             border-radius: 50%;
         }
 
@@ -2063,20 +2096,22 @@
         }
 
         .action-items-list li {
-            background: var(--bg-elevated);
-            border: 1px solid var(--border-subtle);
-            border-left: 3px solid var(--accent-primary);
-            border-radius: 0 8px 8px 0;
-            padding: 14px 16px;
-            margin-bottom: 10px;
+            padding: 6px 0;
+            padding-left: 20px;
+            position: relative;
             color: var(--text-secondary);
             line-height: 1.6;
-            transition: all 0.2s ease;
         }
 
-        .action-items-list li:hover {
-            background: var(--bg-surface);
-            border-left-color: var(--success-green);
+        .action-items-list li:before {
+            content: "";
+            position: absolute;
+            left: 0;
+            top: 14px;
+            width: 5px;
+            height: 5px;
+            background: var(--text-muted);
+            border-radius: 50%;
         }
         
         /* Transcript section */
@@ -3355,6 +3390,7 @@
 
             <!-- Meeting detail view -->
             <div class="meeting-detail" id="meeting-detail">
+              <div class="document-body">
                 <div class="meeting-header">
                     <div class="meeting-header-top">
                         <div class="meeting-title-container">
@@ -3394,55 +3430,50 @@ Ask Steno
                     </div>
                 </div>
 
+                <!-- Notes editor (shown during recording) -->
+                <div class="notes-editor" id="notes-editor" style="display: none;">
+                    <div class="notes-content" id="notes-content" contenteditable="true" spellcheck="true"
+                         data-placeholder="Type your notes here..."></div>
+                    <div class="streaming-output" id="streaming-output" style="display: none;"></div>
+                </div>
+
                 <div class="meeting-section">
-                    <h2 class="section-title">
-                        <span>📋</span> Summary
-                    </h2>
+                    <h2 class="section-title">Summary</h2>
                     <div class="section-content" id="detail-summary">
                         Meeting summary will appear here...
                     </div>
                 </div>
 
                 <div class="meeting-section">
-                    <h2 class="section-title">
-                        <span>👥</span> Participants
-                    </h2>
+                    <h2 class="section-title">Participants</h2>
                     <div class="section-content" id="detail-participants">
                         <!-- Participants will be loaded here -->
                     </div>
                 </div>
 
                 <div class="meeting-section" id="discussion-areas-section">
-                    <h2 class="section-title">
-                        <span>💬</span> Key Topics
-                    </h2>
+                    <h2 class="section-title">Key Topics</h2>
                     <div class="discussion-areas-container" id="detail-discussion-areas">
                         <!-- Key topics will be loaded here -->
                     </div>
                 </div>
 
                 <div class="meeting-section">
-                    <h2 class="section-title">
-                        <span>🔑</span> Key Points
-                    </h2>
+                    <h2 class="section-title">Key Points</h2>
                     <ul class="key-points-list" id="detail-key-points">
                         <!-- Key points will be loaded here -->
                     </ul>
                 </div>
 
                 <div class="meeting-section">
-                    <h2 class="section-title">
-                        <span>✅</span> Action Items
-                    </h2>
+                    <h2 class="section-title">Action Items</h2>
                     <ul class="action-items-list" id="detail-action-items">
                         <!-- Action items will be loaded here -->
                     </ul>
                 </div>
 
                 <div class="meeting-section">
-                    <h2 class="section-title">
-                        <span>📄</span> Full Transcript
-                    </h2>
+                    <h2 class="section-title">Full Transcript</h2>
                     <div class="transcript-container">
                         <div class="transcript-content" id="detail-transcript">
                             Full transcript will appear here...
@@ -3455,6 +3486,7 @@ Ask Steno
                         </button>
                     </div>
                 </div>
+              </div>
             </div>
         </div>
     </div>
@@ -5039,6 +5071,11 @@ Session started - waiting for activity...
             selectedMeeting = filteredMeetings[index];
             if (!selectedMeeting) return;
 
+            // Reset streaming/notes state
+            document.getElementById('notes-editor').style.display = 'none';
+            document.querySelectorAll('#meeting-detail .meeting-section').forEach(s => s.style.display = '');
+            streamingActive = false;
+
             // Deselect calendar event
             selectedCalendarEvent = null;
             document.getElementById('calendar-event-detail').classList.remove('show');
@@ -5088,24 +5125,21 @@ Session started - waiting for activity...
                 discussionAreasSection.style.display = 'block';
                 selectedMeeting.discussion_areas.forEach(area => {
                     const areaDiv = document.createElement('div');
-                    areaDiv.style.marginBottom = '15px';
-                    areaDiv.style.padding = '12px';
-                    areaDiv.style.background = 'var(--bg-elevated)';
-                    areaDiv.style.borderRadius = '6px';
-                    areaDiv.style.borderLeft = '3px solid var(--accent-primary)';
+                    areaDiv.style.marginBottom = '16px';
 
                     const title = document.createElement('h4');
                     title.textContent = area.title || 'Discussion Topic';
-                    title.style.margin = '0 0 8px 0';
-                    title.style.color = 'var(--accent-primary)';
-                    title.style.fontSize = '14px';
+                    title.style.margin = '0 0 4px 0';
+                    title.style.color = 'var(--text-primary)';
+                    title.style.fontSize = '15px';
                     title.style.fontWeight = '600';
 
                     const analysis = document.createElement('p');
                     analysis.textContent = area.analysis || '';
                     analysis.style.margin = '0';
                     analysis.style.color = 'var(--text-secondary)';
-                    analysis.style.lineHeight = '1.5';
+                    analysis.style.lineHeight = '1.7';
+                    analysis.style.fontSize = '15px';
 
                     areaDiv.appendChild(title);
                     areaDiv.appendChild(analysis);
@@ -5225,8 +5259,99 @@ Session started - waiting for activity...
             }
             */
         }
-        
-        
+
+
+        // ── Notes Editor ──
+        let notesAutoSaveInterval = null;
+        let currentNotesText = '';
+        let currentNotesSessionName = '';
+
+        let _notesInputHandler = null;  // Track listener to avoid duplicates
+        let _notesSaveTimeout = null;   // Debounce timeout for auto-save
+
+        function showNotesEditor(sessionName) {
+            currentNotesSessionName = sessionName;
+            currentNotesText = '';
+
+            // Show meeting detail with notes editor
+            emptyState.style.display = 'none';
+            meetingDetail.classList.add('show');
+            detailTitle.textContent = sessionName;
+            detailDate.textContent = formatDate(new Date().toISOString());
+            detailDuration.textContent = '';
+
+            // Hide summary sections, show notes editor
+            document.querySelectorAll('#meeting-detail .meeting-section').forEach(s => s.style.display = 'none');
+            const notesEditor = document.getElementById('notes-editor');
+            notesEditor.style.display = 'block';
+            // Reset streaming state from any previous session
+            streamingActive = false;
+            streamedMarkdown = '';
+            const streamingOutput = document.getElementById('streaming-output');
+            if (streamingOutput) { streamingOutput.style.display = 'none'; streamingOutput.innerHTML = ''; }
+            const notesContent = document.getElementById('notes-content');
+            notesContent.style.display = '';
+            notesContent.innerHTML = '';
+            notesContent.focus();
+
+            // Hide action buttons not relevant during recording
+            document.getElementById('ask-ai-btn').style.display = 'none';
+            document.getElementById('copy-notes-btn').style.display = 'none';
+            document.getElementById('reprocess-btn').style.display = 'none';
+
+            // Auto-save notes on input (debounced 2s) — remove previous listener first
+            if (_notesInputHandler) {
+                notesContent.removeEventListener('input', _notesInputHandler);
+            }
+            _notesInputHandler = () => {
+                if (_notesSaveTimeout) clearTimeout(_notesSaveTimeout);
+                _notesSaveTimeout = setTimeout(() => {
+                    const notes = notesContent.innerText.trim();
+                    if (notes && notes !== currentNotesText) {
+                        currentNotesText = notes;
+                        ipcRenderer.invoke('save-meeting-notes', currentNotesSessionName, notes);
+                        log(`Notes auto-saved (${notes.length} chars)`);
+                    }
+                }, 2000);
+            };
+            notesContent.addEventListener('input', _notesInputHandler);
+        }
+
+        async function hideNotesEditor() {
+            // Clear any pending debounce save
+            if (_notesSaveTimeout) { clearTimeout(_notesSaveTimeout); _notesSaveTimeout = null; }
+            // Capture final notes
+            const notesContent = document.getElementById('notes-content');
+            currentNotesText = notesContent ? notesContent.innerText.trim() : '';
+
+            // Final save — await to ensure notes are on disk before processing starts
+            if (currentNotesText && currentNotesSessionName) {
+                try {
+                    await ipcRenderer.invoke('save-meeting-notes', currentNotesSessionName, currentNotesText);
+                    log(`Notes saved (${currentNotesText.length} chars)`);
+                } catch (e) {
+                    log(`Failed to save notes: ${e.message}`);
+                }
+            }
+
+            // DON'T restore sections here — streaming will handle the transition.
+            // Just keep notes-editor visible for the streaming renderer to use.
+            // Action buttons stay hidden until streaming completes.
+        }
+
+        // Force plain text paste in notes editor
+        document.addEventListener('DOMContentLoaded', () => {
+            const notesContent = document.getElementById('notes-content');
+            if (notesContent) {
+                notesContent.addEventListener('paste', (e) => {
+                    e.preventDefault();
+                    const text = e.clipboardData.getData('text/plain');
+                    document.execCommand('insertText', false, text);
+                });
+            }
+        });
+
+
         // ── System Audio Recording Module ──
         // Uses electron-audio-loopback to capture system audio + mic,
         // mixes them via Web Audio API, records as WebM/Opus.
@@ -5422,15 +5547,18 @@ Session started - waiting for activity...
             if (useSystemAudio) {
                 log(`Starting recording (mic + system audio): ${sessionName}`);
                 setUIState('recording');
+                showNotesEditor(sessionName);
                 try {
                     await startSystemAudioRecording();
                 } catch (error) {
                     log(`System audio start error: ${error.message}`);
+                    hideNotesEditor();
                     setUIState('ready');
                 }
             } else {
                 log(`Starting recording: ${sessionName}`);
                 setUIState('recording');
+                showNotesEditor(sessionName);
                 // Start visualizer immediately (within user-gesture frame, before IPC await)
                 // so bars appear instantly and AudioContext is never suspended.
                 const vizBars = Array.from(document.querySelectorAll('#waveform .waveform-bar'));
@@ -5443,11 +5571,13 @@ Session started - waiting for activity...
                     } else {
                         log(`Failed to start: ${result.error}`);
                         AudioVisualizer.stop();
+                        hideNotesEditor();
                         setUIState('ready');
                     }
                 } catch (error) {
                     log(`Start error: ${error.message}`);
                     AudioVisualizer.stop();
+                    hideNotesEditor();
                     setUIState('ready');
                 }
             }
@@ -5455,6 +5585,7 @@ Session started - waiting for activity...
         
         stopBtn.addEventListener('click', async () => {
             log('Stopping recording...');
+            await hideNotesEditor();
             setUIState('processing');
             stopStatusMonitoring();
 
@@ -7019,34 +7150,156 @@ Session started - waiting for activity...
         });
 
         // Listen for processing completion events
+        // ── Streaming Summary Rendering ──
+        let streamedMarkdown = '';
+        let streamingActive = false;
+
+        function escapeHtml(str) {
+            return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
+
+        function renderStreamingMarkdown(md) {
+            const container = document.getElementById('streaming-output');
+            if (!container) return;
+
+            // Hide the contenteditable, show streaming output
+            const notesContent = document.getElementById('notes-content');
+            if (notesContent) notesContent.style.display = 'none';
+            container.style.display = 'block';
+            document.getElementById('notes-editor').style.display = 'block';
+
+            // Lightweight markdown to HTML (all text escaped to prevent XSS)
+            let html = '';
+            const lines = md.split('\n');
+            let inList = false;
+
+            for (const line of lines) {
+                if (line.startsWith('## ')) {
+                    if (inList) { html += '</ul>'; inList = false; }
+                    html += `<h2 class="section-title" style="margin-top:28px;">${escapeHtml(line.slice(3))}</h2>`;
+                } else if (line.startsWith('### ')) {
+                    if (inList) { html += '</ul>'; inList = false; }
+                    html += `<h3 style="font-size:15px;font-weight:600;color:var(--text-primary);margin:16px 0 4px;">${escapeHtml(line.slice(4))}</h3>`;
+                } else if (line.startsWith('- ')) {
+                    if (!inList) { html += '<ul style="list-style:none;padding:0;">'; inList = true; }
+                    const safe = escapeHtml(line.slice(2));
+                    const text = safe.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+                    html += `<li style="padding:4px 0 4px 20px;position:relative;color:var(--text-secondary);line-height:1.6;"><span style="position:absolute;left:0;top:11px;width:5px;height:5px;background:var(--text-muted);border-radius:50%;"></span>${text}</li>`;
+                } else if (line.trim() === '') {
+                    if (inList) { html += '</ul>'; inList = false; }
+                } else {
+                    if (inList) { html += '</ul>'; inList = false; }
+                    const safe = escapeHtml(line);
+                    const text = safe.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+                    html += `<p style="color:var(--text-secondary);line-height:1.7;font-size:15px;margin:4px 0;">${text}</p>`;
+                }
+            }
+            if (inList) html += '</ul>';
+
+            container.innerHTML = html + '<p style="color:var(--accent-primary);font-size:13px;margin-top:16px;opacity:0.7;">Generating summary...</p>';
+        }
+
+        function stopStreamingRenderer() {
+            streamingActive = false;
+            const container = document.getElementById('streaming-output');
+            if (container) {
+                const indicator = container.querySelector('p:last-child');
+                if (indicator && indicator.textContent.includes('Generating')) {
+                    indicator.remove();
+                }
+            }
+        }
+
+        ipcRenderer.on('summary-chunk', (event, data) => {
+            if (!streamingActive) {
+                streamingActive = true;
+                streamedMarkdown = '';
+                // Ensure notes editor is visible for streaming, sections and buttons hidden
+                document.querySelectorAll('#meeting-detail .meeting-section').forEach(s => s.style.display = 'none');
+                document.getElementById('ask-ai-btn').style.display = 'none';
+                document.getElementById('copy-notes-btn').style.display = 'none';
+                document.getElementById('reprocess-btn').style.display = 'none';
+                const editor = document.getElementById('notes-editor');
+                if (editor) editor.style.display = 'block';
+            }
+            streamedMarkdown += data.chunk;
+            renderStreamingMarkdown(streamedMarkdown);
+        });
+
+        ipcRenderer.on('summary-title', (event, data) => {
+            if (data.title) {
+                detailTitle.textContent = data.title;
+                log(`Auto-generated title: ${data.title}`);
+                // Update the meeting entry in the sidebar (may be temp or already partially updated)
+                const tempIdx = meetings.findIndex(m =>
+                    m.session_info?.name === data.sessionName
+                );
+                if (tempIdx !== -1) {
+                    meetings[tempIdx].session_info.name = data.title;
+                    filterMeetings();
+                }
+            }
+        });
+
+        ipcRenderer.on('summary-complete', (event, data) => {
+            log(`Summary streaming complete for: ${data.sessionName}`);
+            stopStreamingRenderer();
+            // Mark that we have a completed streaming view — processing-complete
+            // should NOT replace it with the old section-based layout.
+        });
+
         ipcRenderer.on('processing-complete', (event, data) => {
             log(`Processing complete for: ${data.sessionName}`);
             processingMeetings.delete(data.sessionName);
-            
+
             if (data.success) {
-                if (data.meetingData) {
-                    // Update the specific meeting with processed data
-                    const tempMeetingIndex = meetings.findIndex(meeting => 
-                        meeting.session_info?.name === data.sessionName && meeting.summary === 'Pending...'
-                    );
-                    
-                    if (tempMeetingIndex !== -1) {
-                        // Replace temporary meeting with processed data
-                        meetings[tempMeetingIndex] = data.meetingData;
-                        meetingsLastLoaded = Date.now(); // Update cache timestamp
+                const wasStreaming = document.getElementById('notes-editor').style.display === 'block';
+
+                loadMeetings(true).then(() => {
+                    if (wasStreaming && streamedMarkdown) {
+                        // Keep the streamed markdown view — don't switch to section layout.
+                        // Just append the transcript below the streaming content and show buttons.
+                        const currentTitle = detailTitle.textContent;
+                        const meeting = filteredMeetings.find(m =>
+                            m.session_info?.name === currentTitle ||
+                            m.session_info?.name === data.sessionName
+                        );
+                        {
+                            const container = document.getElementById('streaming-output');
+                            if (container) {
+                                const indicator = container.querySelector('p:last-child');
+                                if (indicator && indicator.textContent.includes('Generating')) indicator.remove();
+                            }
+                        }
+                        // Keep sections hidden — streaming view IS the meeting view
+                        document.querySelectorAll('#meeting-detail .meeting-section').forEach(s => s.style.display = 'none');
+                        // Show action buttons
+                        document.getElementById('ask-ai-btn').style.display = '';
+                        document.getElementById('copy-notes-btn').style.display = '';
+                        document.getElementById('reprocess-btn').style.display = '';
+                        streamingActive = false;
+                        // Store selectedMeeting for Ask Steno etc.
+                        const meetingIdx = filteredMeetings.findIndex(m =>
+                            m.session_info?.name === currentTitle ||
+                            m.session_info?.name === data.sessionName
+                        );
+                        if (meetingIdx !== -1) selectedMeeting = filteredMeetings[meetingIdx];
                     } else {
-                        // Add new meeting if temp entry not found
-                        meetings.unshift(data.meetingData);
-                        meetingsLastLoaded = Date.now(); // Update cache timestamp
+                        // Non-streaming path or no streamed content — use standard selectMeeting
+                        document.getElementById('notes-editor').style.display = 'none';
+                        document.querySelectorAll('#meeting-detail .meeting-section').forEach(s => s.style.display = '');
+                        document.getElementById('ask-ai-btn').style.display = '';
+                        document.getElementById('copy-notes-btn').style.display = '';
+                        document.getElementById('reprocess-btn').style.display = '';
+                        const currentTitle = detailTitle.textContent;
+                        const idx = filteredMeetings.findIndex(m =>
+                            m.session_info?.name === currentTitle ||
+                            m.session_info?.name === data.sessionName
+                        );
+                        if (idx !== -1) selectMeeting(idx);
+                        else if (filteredMeetings.length > 0) selectMeeting(0);
                     }
-                    
-                    // Re-render the meetings list with updated data
-                    filterMeetings();
-                } else {
-                    // No meetingData provided - force refresh from backend
-                    log('No meeting data in completion event - forcing refresh');
-                    loadMeetings(true);
-                }
+                });
                 
                 // Show native notification
                 showDesktopNotification('StenoAI - Meeting Notes Ready', {

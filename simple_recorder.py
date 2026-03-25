@@ -96,7 +96,77 @@ class SimpleRecorder:
             return detected_language
 
         return "en"
-    
+
+    @staticmethod
+    def _load_user_notes(session_name: str, output_dir) -> Optional[str]:
+        """Load user notes file saved by Electron during recording."""
+        safe_name = re.sub(r'[^a-zA-Z0-9_-]', '_', session_name)
+        for candidate in [
+            Path(output_dir) / f"{safe_name}_notes.txt",
+            Path(output_dir) / f"{session_name}_notes.txt",
+        ]:
+            if candidate.exists():
+                try:
+                    text = candidate.read_text(encoding='utf-8').strip()
+                    if text:
+                        logger.info(f"Loaded user notes ({len(text)} chars)")
+                        return text
+                except Exception:
+                    pass
+                break
+        return None
+
+    @staticmethod
+    def _parse_streamed_markdown(md_text: str) -> dict:
+        """Parse streamed markdown summary into structured fields."""
+        summary_parts = []
+        participants = []
+        discussion_areas = []
+        key_points = []
+        action_items = []
+        current_section = None
+        current_topic_title = None
+        current_topic_lines = []
+
+        for line in md_text.split('\n'):
+            stripped = line.strip()
+            if stripped.startswith('## Summary'):
+                current_section = 'summary'
+            elif stripped.startswith('## Participants'):
+                current_section = 'participants'
+            elif stripped.startswith('## Key Topics'):
+                current_section = 'topics'
+            elif stripped.startswith('## Key Points'):
+                current_section = 'keypoints'
+            elif stripped.startswith('## Action Items'):
+                current_section = 'actions'
+            elif stripped.startswith('### ') and current_section == 'topics':
+                if current_topic_title:
+                    discussion_areas.append({"title": current_topic_title, "analysis": '\n'.join(current_topic_lines).strip()})
+                current_topic_title = stripped[4:]
+                current_topic_lines = []
+            elif current_section == 'summary' and stripped:
+                summary_parts.append(stripped)
+            elif current_section == 'participants' and stripped:
+                participants.extend([p.strip() for p in stripped.split(',') if p.strip()])
+            elif current_section == 'topics' and current_topic_title:
+                current_topic_lines.append(stripped)
+            elif current_section == 'keypoints' and stripped.startswith('- '):
+                key_points.append(stripped[2:])
+            elif current_section == 'actions' and stripped.startswith('- '):
+                action_items.append(stripped[2:].replace('[ ] ', '').replace('[x] ', ''))
+
+        if current_topic_title:
+            discussion_areas.append({"title": current_topic_title, "analysis": '\n'.join(current_topic_lines).strip()})
+
+        return {
+            "summary": ' '.join(summary_parts),
+            "participants": participants,
+            "discussion_areas": discussion_areas,
+            "key_points": key_points,
+            "action_items": action_items,
+        }
+
     def start_recording(self, session_name: str = "Recording") -> str:
         """Start recording audio."""
         state = self.get_state()
@@ -255,7 +325,8 @@ Summary output language: {config.get_language_name(output_language)}
         transcript_text: str,
         session_name: str = "Recording",
         duration_minutes: int = 10,
-        language: Optional[str] = None
+        language: Optional[str] = None,
+        notes_text: Optional[str] = None
     ) -> dict:
         """Summarize transcript text."""
         print("🧠 Generating summary...")
@@ -288,7 +359,7 @@ Transcript:
             language = self._resolve_output_language(configured_language)
 
         # Generate summary (using correct method name and parameters)
-        summary_result = self.summarizer.summarize_transcript(transcript_text, duration_minutes, language=language)
+        summary_result = self.summarizer.summarize_transcript(transcript_text, duration_minutes, language=language, notes=notes_text)
         
         if summary_result is None:
             return {
@@ -323,7 +394,7 @@ Transcript:
                 "action_items": []
             }
     
-    async def process_recording(self, audio_file: str, session_name: str = "Recording") -> dict:
+    async def process_recording(self, audio_file: str, session_name: str = "Recording", notes_text: Optional[str] = None) -> dict:
         """Complete processing: transcribe + summarize."""
         print(f"🔄 Processing recording: {audio_file}")
         
@@ -360,7 +431,8 @@ Transcript:
             text_for_summary,
             session_name,
             duration_minutes,
-            language=transcript_data.get("output_language")
+            language=transcript_data.get("output_language"),
+            notes_text=notes_text
         )
 
         # Step 2b: Auto-generate title for auto-named meetings
@@ -402,6 +474,7 @@ Transcript:
             "transcript": transcript_data["transcript_text"],
             "is_diarised": transcript_data.get("is_diarised", False),
             "diarised_text": transcript_data.get("diarised_text"),
+            "user_notes": notes_text,
         }
         
         with open(summary_path, 'w') as f:
@@ -426,8 +499,136 @@ Transcript:
                 print(f"⚠️ Could not clear state: {e}")
         
         print(f"📋 Processing complete - meeting available in list")
-        
+
         return complete_data
+
+    async def process_recording_streaming(self, audio_file: str, session_name: str = "Recording", notes_text: Optional[str] = None) -> dict:
+        """Process recording with streaming summary output via CHUNK: protocol."""
+        import base64
+        print(f"🔄 Processing recording: {audio_file}")
+
+        if not audio_file:
+            state = self.get_state()
+            audio_file = state.get("last_recording")
+            if not audio_file:
+                raise Exception("No audio file specified and no recent recording found")
+
+        audio_path = Path(audio_file)
+        if not audio_path.exists():
+            raise Exception(f"Audio file not found: {audio_file}")
+
+        # Step 1: Transcribe
+        transcript_data = await self.transcribe_audio(audio_file, session_name)
+        transcript_text = transcript_data.get("transcript_text", "")
+        diarised_text = transcript_data.get("diarised_text")
+        text_for_summary = diarised_text or transcript_text
+
+        duration_seconds = transcript_data.get("duration_seconds")
+        duration_minutes = int(duration_seconds / 60) if duration_seconds else 0
+
+        if duration_seconds:
+            print(f"📏 Audio duration: {duration_seconds} seconds ({int(duration_seconds)}s)")
+
+        print(f"TRANSCRIPTION_COMPLETE:{len(transcript_text)}", flush=True)
+
+        # Step 2: Streaming summary
+        if self.summarizer is None:
+            self.summarizer = OllamaSummarizer()
+
+        from src.config import get_config
+        config = get_config()
+        configured_language = config.get_language()
+        output_language = self._resolve_output_language(
+            configured_language, transcript_data.get("detected_language")
+        )
+
+        print("🧠 Generating summary...", flush=True)
+        streamed_chunks = []
+        for chunk in self.summarizer.summarize_transcript_streaming(
+            text_for_summary, duration_minutes, output_language, notes_text
+        ):
+            encoded = base64.b64encode(chunk.encode('utf-8')).decode('ascii')
+            sys.stdout.write(f"CHUNK:{encoded}\n")
+            sys.stdout.flush()
+            streamed_chunks.append(chunk)
+        streamed_md = ''.join(streamed_chunks)
+
+        print("STREAM_COMPLETE", flush=True)
+
+        # Step 3: Generate title
+        if re.match(r'^Meeting-[A-Z0-9]{6}$', session_name):
+            try:
+                generated_title = self.summarizer.generate_title(
+                    streamed_md, transcript_text, language=output_language
+                )
+                if generated_title:
+                    session_name = generated_title
+                    print(f"TITLE:{session_name}", flush=True)
+                    print(f"Auto-generated title: {session_name}")
+            except Exception as e:
+                logger.warning(f"Title generation failed: {e}")
+
+        # Step 4: Parse streamed markdown into structured JSON
+        parsed = self._parse_streamed_markdown(streamed_md)
+
+        # Step 5: Save as .md (primary format for new meetings)
+        summary_path = self.output_dir / f"{audio_path.stem}_summary.md"
+        processed_at = datetime.now().isoformat()
+        md_lines = ['---']
+        md_meta = {
+            'title': session_name,
+            'date': processed_at,
+            'duration_seconds': int(duration_seconds) if duration_seconds else None,
+            'language': output_language,
+            'is_diarised': transcript_data.get('is_diarised', False),
+        }
+        for k, v in md_meta.items():
+            if v is None:
+                md_lines.append(f'{k}: null')
+            elif isinstance(v, bool):
+                md_lines.append(f'{k}: {"true" if v else "false"}')
+            elif isinstance(v, int):
+                md_lines.append(f'{k}: {v}')
+            else:
+                escaped = str(v).replace('\\', '\\\\').replace('"', '\\"')
+                md_lines.append(f'{k}: "{escaped}"')
+        md_lines.append('---')
+        md_lines.append('')
+        md_lines.append(streamed_md)
+        md_lines.append('')
+        md_lines.append('## Transcript')
+        md_lines.append('')
+        md_lines.append(transcript_text)
+        if notes_text:
+            md_lines.append('')
+            md_lines.append('## User Notes')
+            md_lines.append('')
+            md_lines.append(notes_text)
+        summary_path.write_text('\n'.join(md_lines), encoding='utf-8')
+
+        # Clean up
+        try:
+            audio_path.unlink()
+            print(f"🗑️ Cleaned up audio file: {audio_path}")
+        except Exception:
+            pass
+
+        state_file = Path("recorder_state.json")
+        if state_file.exists():
+            try:
+                state_file.unlink()
+            except Exception:
+                pass
+
+        print(f"✅ Complete processing saved: {summary_path}")
+        print(f"SAVED:{summary_path}", flush=True)
+        return {
+            "session_info": {
+                "name": session_name,
+                "transcript_file": str(transcript_data.get("transcript_file", "")),
+                "summary_file": str(summary_path),
+            }
+        }
 
 
 # CLI Commands for Electron
@@ -486,9 +687,11 @@ def start(session_name):
                             loop = asyncio.new_event_loop()
                             asyncio.set_event_loop(loop)
                             
-                            print("📝 Transcribing...")
-                            result = loop.run_until_complete(recorder.process_recording(final_path, session_name))
-                            
+                            _notes_text = recorder._load_user_notes(session_name, recorder.output_dir)
+
+                            print("📝 Starting transcription...")
+                            result = loop.run_until_complete(recorder.process_recording_streaming(final_path, session_name, notes_text=_notes_text))
+
                             print("✅ Complete processing finished!", flush=True)
                             print(f"📄 Transcript: {result['session_info']['transcript_file']}")
                             print(f"📋 Summary: {result['session_info']['summary_file']}")
@@ -593,14 +796,25 @@ def stop():
 @cli.command()
 @click.argument('audio_file', default='')
 @click.option('--name', '-n', default='Recording', help='Session name for the recording')
-def process(audio_file, name):
+@click.option('--notes', default=None, help='Path to user notes file')
+def process(audio_file, name, notes):
     """Process audio file: transcribe + summarize"""
-    
+
     async def run_process():
         recorder = SimpleRecorder()
-        
+
+        # Read user notes if provided
+        notes_text = None
+        if notes:
+            try:
+                notes_text = Path(notes).read_text(encoding='utf-8').strip()
+                if notes_text:
+                    logger.info(f"Loaded user notes ({len(notes_text)} chars)")
+            except Exception as e:
+                logger.warning(f"Failed to read notes file: {e}")
+
         try:
-            result = await recorder.process_recording(audio_file, name)
+            result = await recorder.process_recording(audio_file, name, notes_text=notes_text)
             
             print("SUCCESS: Processing complete!")
             print(f"Transcript: {result['session_info']['transcript_file']}")
@@ -611,6 +825,132 @@ def process(audio_file, name):
             sys.exit(1)
     
     asyncio.run(run_process())
+
+
+@cli.command(name='process-streaming')
+@click.argument('audio_file', default='')
+@click.option('--name', '-n', default='Recording', help='Session name')
+@click.option('--notes', default=None, help='Path to user notes file')
+def process_streaming(audio_file, name, notes):
+    """Process audio with streaming summary output.
+
+    Transcribes audio, then streams the summary as CHUNK: prefixed lines
+    to stdout for Electron to relay to the renderer in real time.
+    """
+    import sys
+
+    async def run():
+        recorder = SimpleRecorder()
+
+        # Read user notes
+        notes_text = None
+        if notes:
+            try:
+                notes_text = Path(notes).read_text(encoding='utf-8').strip()
+                if notes_text:
+                    logger.info(f"Loaded user notes ({len(notes_text)} chars)")
+            except Exception as e:
+                logger.warning(f"Failed to read notes file: {e}")
+
+        # Step 1: Transcribe
+        transcript_data = await recorder.transcribe_audio(audio_file, name)
+        transcript_text = transcript_data.get("transcript_text", "")
+        diarised_text = transcript_data.get("diarised_text")
+        text_for_summary = diarised_text or transcript_text
+
+        duration_seconds = transcript_data.get("duration_seconds")
+        duration_minutes = int(duration_seconds / 60) if duration_seconds else 0
+
+        print(f"TRANSCRIPTION_COMPLETE:{len(transcript_text)}", flush=True)
+
+        # Step 2: Stream summary
+        if recorder.summarizer is None:
+            recorder.summarizer = OllamaSummarizer()
+
+        from src.config import get_config
+        config = get_config()
+        configured_language = config.get_language()
+        output_language = recorder._resolve_output_language(
+            configured_language, transcript_data.get("detected_language")
+        )
+
+        import base64
+        streamed_chunks = []
+        for chunk in recorder.summarizer.summarize_transcript_streaming(
+            text_for_summary, duration_minutes, output_language, notes_text
+        ):
+            encoded = base64.b64encode(chunk.encode('utf-8')).decode('ascii')
+            sys.stdout.write(f"CHUNK:{encoded}\n")
+            sys.stdout.flush()
+            streamed_chunks.append(chunk)
+        streamed_md = ''.join(streamed_chunks)
+
+        print("STREAM_COMPLETE", flush=True)
+
+        # Step 3: Generate title
+        session_name = name
+        if re.match(r'^Meeting-[A-Z0-9]{6}$', name):
+            try:
+                generated_title = recorder.summarizer.generate_title(
+                    streamed_md, transcript_text, language=output_language
+                )
+                if generated_title:
+                    session_name = generated_title
+                    print(f"TITLE:{session_name}", flush=True)
+            except Exception as e:
+                logger.warning(f"Title generation failed: {e}")
+
+        # Step 4: Save as .md
+        audio_path = Path(audio_file)
+        summary_path = recorder.output_dir / f"{audio_path.stem}_summary.md"
+
+        # Parse the streamed markdown for title generation
+        parsed = SimpleRecorder._parse_streamed_markdown(streamed_md)
+
+        # Save as .md only (primary format for new meetings)
+        summary_path = summary_path.with_suffix('.md')
+        processed_at = datetime.now().isoformat()
+        md_lines = ['---']
+        md_meta = {
+            'title': session_name,
+            'date': processed_at,
+            'duration_seconds': int(duration_seconds) if duration_seconds else None,
+            'language': output_language,
+            'is_diarised': transcript_data.get('is_diarised', False),
+        }
+        for k, v in md_meta.items():
+            if v is None:
+                md_lines.append(f'{k}: null')
+            elif isinstance(v, bool):
+                md_lines.append(f'{k}: {"true" if v else "false"}')
+            elif isinstance(v, int):
+                md_lines.append(f'{k}: {v}')
+            else:
+                escaped = str(v).replace('\\', '\\\\').replace('"', '\\"')
+                md_lines.append(f'{k}: "{escaped}"')
+        md_lines.append('---')
+        md_lines.append('')
+        md_lines.append(streamed_md)
+        md_lines.append('')
+        md_lines.append('## Transcript')
+        md_lines.append('')
+        md_lines.append(transcript_text)
+        if notes_text:
+            md_lines.append('')
+            md_lines.append('## User Notes')
+            md_lines.append('')
+            md_lines.append(notes_text)
+        summary_path.write_text('\n'.join(md_lines), encoding='utf-8')
+
+        # Clean up audio
+        try:
+            audio_path.unlink()
+        except Exception:
+            pass
+
+        print(f"SAVED:{summary_path}", flush=True)
+
+    asyncio.run(run())
 
 
 @cli.command()
@@ -721,9 +1061,12 @@ def record(duration, session_name):
                                 loop = asyncio.new_event_loop()
                                 asyncio.set_event_loop(loop)
                             
+                            # Load user notes if saved by Electron
+                            _notes_text = recorder._load_user_notes(session_name, recorder.output_dir)
+
                             print("📝 Starting transcription...")
-                            result = loop.run_until_complete(recorder.process_recording(final_path, session_name))
-                            
+                            result = loop.run_until_complete(recorder.process_recording_streaming(final_path, session_name, notes_text=_notes_text))
+
                             print("✅ Complete processing finished!", flush=True)
                             print(f"📄 Transcript: {result['session_info']['transcript_file']}")
                             print(f"📋 Summary: {result['session_info']['summary_file']}")
@@ -866,6 +1209,111 @@ def test():
         return
 
 
+def _parse_meeting_markdown(md_path):
+    """Parse a .md meeting file into the standard meeting dict."""
+    content = md_path.read_text(encoding='utf-8')
+
+    # Split frontmatter
+    meta = {}
+    body = content
+    if content.startswith('---'):
+        parts = content.split('---', 2)
+        if len(parts) >= 3:
+            for line in parts[1].strip().split('\n'):
+                if ':' in line:
+                    key, _, value = line.partition(':')
+                    value = value.strip().strip('"')
+                    if value == 'null':
+                        value = None
+                    elif value == 'true':
+                        value = True
+                    elif value == 'false':
+                        value = False
+                    else:
+                        try:
+                            value = int(value)
+                        except (ValueError, TypeError):
+                            pass
+                    meta[key.strip()] = value
+            body = parts[2].strip()
+
+    # Parse markdown body into sections
+    sections = {}
+    current_section = None
+    current_lines = []
+
+    for line in body.split('\n'):
+        if line.startswith('## '):
+            if current_section:
+                sections[current_section] = '\n'.join(current_lines).strip()
+            current_section = line[3:].strip().lower()
+            current_lines = []
+        else:
+            current_lines.append(line)
+    if current_section:
+        sections[current_section] = '\n'.join(current_lines).strip()
+
+    # Extract structured fields
+    participants = []
+    if 'participants' in sections:
+        participants = [p.strip() for p in sections['participants'].split(',') if p.strip()]
+
+    key_points = []
+    if 'key points' in sections:
+        for line in sections['key points'].split('\n'):
+            line = line.strip()
+            if line.startswith('- '):
+                key_points.append(line[2:])
+
+    action_items = []
+    if 'action items' in sections:
+        for line in sections['action items'].split('\n'):
+            line = line.strip()
+            if line.startswith('- '):
+                action_items.append(line[2:].replace('[ ] ', '').replace('[x] ', ''))
+
+    discussion_areas = []
+    if 'key topics' in sections:
+        current_topic = None
+        topic_lines = []
+        for line in sections['key topics'].split('\n'):
+            if line.startswith('### '):
+                if current_topic:
+                    discussion_areas.append({
+                        'title': current_topic,
+                        'analysis': '\n'.join(topic_lines).strip()
+                    })
+                current_topic = line[4:].strip()
+                topic_lines = []
+            else:
+                topic_lines.append(line)
+        if current_topic:
+            discussion_areas.append({
+                'title': current_topic,
+                'analysis': '\n'.join(topic_lines).strip()
+            })
+
+    return {
+        'session_info': {
+            'name': meta.get('title', md_path.stem),
+            'processed_at': meta.get('date', ''),
+            'duration_seconds': meta.get('duration_seconds'),
+            'summary_file': str(md_path),
+            'output_language': meta.get('language'),
+        },
+        'summary': sections.get('summary', ''),
+        'participants': participants,
+        'discussion_areas': discussion_areas,
+        'key_points': key_points,
+        'action_items': action_items,
+        'transcript': sections.get('transcript', ''),
+        'is_diarised': meta.get('is_diarised', False),
+        'diarised_text': sections.get('transcript', '') if meta.get('is_diarised') else None,
+        'user_notes': sections.get('user notes'),
+        'folders': [],
+    }
+
+
 @cli.command()
 def list_meetings():
     """List all processed meetings - optimized for fast loading"""
@@ -876,12 +1324,18 @@ def list_meetings():
     # Ensure output directory exists
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Collect summary files from current output dir
+    # Collect summary files from current output dir (JSON preferred over MD)
     seen_files = set()
+    seen_stems = set()
     summaries = []
-    for f in output_dir.glob("*_summary.json"):
-        summaries.append(f)
-        seen_files.add(f.resolve())
+    # JSON first — if both .json and .md exist, JSON wins (it has structured data)
+    for pattern in ("*_summary.json", "*_summary.md"):
+        for f in output_dir.glob(pattern):
+            stem = f.stem.replace('_summary', '')
+            if stem not in seen_stems:
+                summaries.append(f)
+                seen_files.add(f.resolve())
+                seen_stems.add(stem)
 
     # Also scan the default location if a custom path is set,
     # so meetings stored before the path change remain visible
@@ -892,32 +1346,39 @@ def list_meetings():
         else:
             default_output = Path(__file__).parent / "output"
         if default_output.exists():
-            for f in default_output.glob("*_summary.json"):
-                if f.resolve() not in seen_files:
-                    summaries.append(f)
-                    seen_files.add(f.resolve())
+            for pattern in ("*_summary.json", "*_summary.md"):
+                for f in default_output.glob(pattern):
+                    stem = f.stem.replace('_summary', '')
+                    if f.resolve() not in seen_files and stem not in seen_stems:
+                        summaries.append(f)
+                        seen_files.add(f.resolve())
+                        seen_stems.add(stem)
 
     meetings = []
 
     # Single-pass: read each file once, extract sort key and data together
     for summary_file in summaries:
         try:
-            with open(summary_file, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                sort_key = data.get('session_info', {}).get('processed_at', '')
-                essential_meeting = {
-                    "session_info": data.get("session_info", {}),
-                    "summary": data.get("summary", ""),
-                    "participants": data.get("participants", []),
-                    "discussion_areas": data.get("discussion_areas", []),
-                    "key_points": data.get("key_points", []),
-                    "action_items": data.get("action_items", []),
-                    "transcript": data.get("transcript", ""),
-                    "is_diarised": data.get("is_diarised", False),
-                    "diarised_text": data.get("diarised_text"),
-                    "folders": data.get("folders", [])
-                }
-                meetings.append((sort_key, essential_meeting))
+            if summary_file.suffix == '.md':
+                essential_meeting = _parse_meeting_markdown(summary_file)
+                sort_key = essential_meeting.get('session_info', {}).get('processed_at', '')
+            else:
+                with open(summary_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    sort_key = data.get('session_info', {}).get('processed_at', '')
+                    essential_meeting = {
+                        "session_info": data.get("session_info", {}),
+                        "summary": data.get("summary", ""),
+                        "participants": data.get("participants", []),
+                        "discussion_areas": data.get("discussion_areas", []),
+                        "key_points": data.get("key_points", []),
+                        "action_items": data.get("action_items", []),
+                        "transcript": data.get("transcript", ""),
+                        "is_diarised": data.get("is_diarised", False),
+                        "diarised_text": data.get("diarised_text"),
+                        "folders": data.get("folders", [])
+                    }
+            meetings.append((sort_key, essential_meeting))
         except Exception as e:
             logger.warning(f"Failed to load {summary_file}: {e}")
             continue
@@ -946,9 +1407,12 @@ def reprocess(summary_file, regenerate_title):
             sys.exit(1)
 
         try:
-            # Load existing summary file
-            with open(summary_path, 'r') as f:
-                existing_data = json.load(f)
+            # Load existing summary file (JSON or MD)
+            if summary_path.suffix == '.md':
+                existing_data = _parse_meeting_markdown(summary_path)
+            else:
+                with open(summary_path, 'r') as f:
+                    existing_data = json.load(f)
 
             # Get transcript from the data
             transcript = existing_data.get('transcript', '')
@@ -958,6 +1422,9 @@ def reprocess(summary_file, regenerate_title):
 
             session_name = existing_data.get('session_info', {}).get('name', 'Reprocessed')
             duration_minutes = existing_data.get('session_info', {}).get('duration_minutes', 10)
+            if duration_minutes is None:
+                ds = existing_data.get('session_info', {}).get('duration_seconds')
+                duration_minutes = int(ds / 60) if ds else 10
 
             print(f"🔄 Reprocessing summary for: {session_name}")
             print(f"📝 Transcript length: {len(transcript)} characters")
@@ -1008,9 +1475,58 @@ def reprocess(summary_file, regenerate_title):
             # Add reprocess timestamp
             existing_data["session_info"]["reprocessed_at"] = datetime.now().isoformat()
 
-            # Save updated summary
-            with open(summary_path, 'w') as f:
-                json.dump(existing_data, f, indent=2)
+            # Save updated summary (format matches input file)
+            if summary_path.suffix == '.md':
+                session_name = existing_data.get('session_info', {}).get('name', 'Reprocessed')
+                md_lines = ['---']
+                md_meta = {
+                    'title': session_name,
+                    'date': existing_data.get('session_info', {}).get('processed_at', datetime.now().isoformat()),
+                    'duration_seconds': existing_data.get('session_info', {}).get('duration_seconds'),
+                    'language': output_language,
+                    'is_diarised': existing_data.get('is_diarised', False),
+                }
+                for k, v in md_meta.items():
+                    if v is None:
+                        md_lines.append(f'{k}: null')
+                    elif isinstance(v, bool):
+                        md_lines.append(f'{k}: {"true" if v else "false"}')
+                    elif isinstance(v, int):
+                        md_lines.append(f'{k}: {v}')
+                    else:
+                        escaped = str(v).replace('\\', '\\\\').replace('"', '\\"')
+                        md_lines.append(f'{k}: "{escaped}"')
+                md_lines.append('---')
+                md_lines.append('')
+                # Rebuild markdown from structured data
+                md_lines.append(f"## Summary\n{existing_data.get('summary', '')}")
+                participants = existing_data.get('participants', [])
+                if participants:
+                    md_lines.append(f"\n## Participants\n{', '.join(participants)}")
+                areas = existing_data.get('discussion_areas', [])
+                if areas:
+                    md_lines.append('\n## Key Topics')
+                    for a in areas:
+                        md_lines.append(f"### {a.get('title', '')}\n{a.get('analysis', '')}")
+                points = existing_data.get('key_points', [])
+                if points:
+                    md_lines.append('\n## Key Points')
+                    for p in points:
+                        md_lines.append(f"- {p}")
+                items = existing_data.get('action_items', [])
+                if items:
+                    md_lines.append('\n## Action Items')
+                    for i in items:
+                        md_lines.append(f"- {i}")
+                if transcript:
+                    md_lines.append(f"\n## Transcript\n{transcript}")
+                notes = existing_data.get('user_notes')
+                if notes:
+                    md_lines.append(f"\n## User Notes\n{notes}")
+                summary_path.write_text('\n'.join(md_lines), encoding='utf-8')
+            else:
+                with open(summary_path, 'w') as f:
+                    json.dump(existing_data, f, indent=2)
 
             print(f"✅ Summary reprocessed successfully: {summary_path}")
             print(f"📋 New summary: {existing_data['summary'][:100]}...")
