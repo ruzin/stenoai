@@ -7228,53 +7228,36 @@ Session started - waiting for activity...
         ipcRenderer.on('summary-complete', (event, data) => {
             log(`Summary streaming complete for: ${data.sessionName}`);
             stopStreamingRenderer();
-            // Hide the streaming container, restore normal sections
-            const notesEditor = document.getElementById('notes-editor');
-            if (notesEditor) notesEditor.style.display = 'none';
-            document.querySelectorAll('#meeting-detail .meeting-section').forEach(s => s.style.display = '');
-            // Restore action buttons
-            document.getElementById('ask-ai-btn').style.display = '';
-            document.getElementById('copy-notes-btn').style.display = '';
-            document.getElementById('reprocess-btn').style.display = '';
-            // Reload meetings and auto-select the new one
-            loadMeetings(true).then(() => {
-                // Find and select the meeting by title or session name
-                const title = detailTitle.textContent;
-                const idx = filteredMeetings.findIndex(m =>
-                    m.session_info?.name === title || m.session_info?.name === data.sessionName
-                );
-                if (idx !== -1) selectMeeting(idx);
-            });
+            // Don't load meetings here — the JSON isn't saved yet.
+            // processing-complete fires after the file is saved and handles
+            // loading the final meeting data + selecting it.
         });
 
         ipcRenderer.on('processing-complete', (event, data) => {
             log(`Processing complete for: ${data.sessionName}`);
             processingMeetings.delete(data.sessionName);
-            
+
+            // Restore UI from streaming state if still active
+            if (streamingActive || document.getElementById('notes-editor').style.display === 'block') {
+                document.getElementById('notes-editor').style.display = 'none';
+                document.querySelectorAll('#meeting-detail .meeting-section').forEach(s => s.style.display = '');
+                document.getElementById('ask-ai-btn').style.display = '';
+                document.getElementById('copy-notes-btn').style.display = '';
+                document.getElementById('reprocess-btn').style.display = '';
+                streamingActive = false;
+            }
+
             if (data.success) {
-                if (data.meetingData) {
-                    // Update the specific meeting with processed data
-                    const tempMeetingIndex = meetings.findIndex(meeting => 
-                        meeting.session_info?.name === data.sessionName && meeting.summary === 'Pending...'
+                // Always force refresh to get the saved data with correct title
+                loadMeetings(true).then(() => {
+                    // Auto-select the just-processed meeting
+                    const currentTitle = detailTitle.textContent;
+                    const idx = filteredMeetings.findIndex(m =>
+                        m.session_info?.name === currentTitle ||
+                        m.session_info?.name === data.sessionName
                     );
-                    
-                    if (tempMeetingIndex !== -1) {
-                        // Replace temporary meeting with processed data
-                        meetings[tempMeetingIndex] = data.meetingData;
-                        meetingsLastLoaded = Date.now(); // Update cache timestamp
-                    } else {
-                        // Add new meeting if temp entry not found
-                        meetings.unshift(data.meetingData);
-                        meetingsLastLoaded = Date.now(); // Update cache timestamp
-                    }
-                    
-                    // Re-render the meetings list with updated data
-                    filterMeetings();
-                } else {
-                    // No meetingData provided - force refresh from backend
-                    log('No meeting data in completion event - forcing refresh');
-                    loadMeetings(true);
-                }
+                    if (idx !== -1) selectMeeting(idx);
+                });
                 
                 // Show native notification
                 showDesktopNotification('StenoAI - Meeting Notes Ready', {
