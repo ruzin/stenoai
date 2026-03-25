@@ -5070,6 +5070,11 @@ Session started - waiting for activity...
             selectedMeeting = filteredMeetings[index];
             if (!selectedMeeting) return;
 
+            // Reset streaming/notes state
+            document.getElementById('notes-editor').style.display = 'none';
+            document.querySelectorAll('#meeting-detail .meeting-section').forEach(s => s.style.display = '');
+            streamingActive = false;
+
             // Deselect calendar event
             selectedCalendarEvent = null;
             document.getElementById('calendar-event-detail').classList.remove('show');
