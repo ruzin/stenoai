@@ -687,7 +687,7 @@ Return ONLY the response in this exact JSON format:
         if notes and notes.strip():
             notes_context = f"USER NOTES (written during the meeting):\n{notes.strip()}\n\n"
 
-        return f"""{diarisation_note}{notes_context}Summarise this meeting transcript as markdown with exactly these sections:
+        return f"""{diarisation_note}{notes_context}Summarise this meeting transcript as markdown. Output ONLY the markdown below with no preamble, commentary, or explanation. Start directly with ## Summary.
 
 ## Summary
 A 1-3 sentence overview of what was discussed.

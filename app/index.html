@@ -7248,14 +7248,14 @@ Session started - waiting for activity...
                             m.session_info?.name === currentTitle ||
                             m.session_info?.name === data.sessionName
                         );
-                        if (meeting && meeting.transcript) {
+                        {
                             const container = document.getElementById('notes-editor');
                             // Remove "Generating..." if still present
                             const indicator = container.querySelector('p:last-child');
                             if (indicator && indicator.textContent.includes('Generating')) indicator.remove();
-                            // Append transcript section
-                            container.innerHTML += `<h2 class="section-title" style="margin-top:32px;">Transcript</h2><div class="transcript-content" style="background:var(--bg-primary);border:1px solid var(--border-subtle);border-radius:10px;padding:24px;font-family:'JetBrains Mono',monospace;font-size:13px;line-height:1.8;color:var(--text-secondary);white-space:pre-wrap;max-height:400px;overflow-y:auto;">${meeting.transcript}</div>`;
                         }
+                        // Keep sections hidden — streaming view IS the meeting view
+                        document.querySelectorAll('#meeting-detail .meeting-section').forEach(s => s.style.display = 'none');
                         // Show action buttons
                         document.getElementById('ask-ai-btn').style.display = '';
                         document.getElementById('copy-notes-btn').style.display = '';
