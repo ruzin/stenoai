@@ -7228,9 +7228,8 @@ Session started - waiting for activity...
         ipcRenderer.on('summary-complete', (event, data) => {
             log(`Summary streaming complete for: ${data.sessionName}`);
             stopStreamingRenderer();
-            // Don't load meetings here — the JSON isn't saved yet.
-            // processing-complete fires after the file is saved and handles
-            // loading the final meeting data + selecting it.
+            // Mark that we have a completed streaming view — processing-complete
+            // should NOT replace it with the old section-based layout.
         });
 
         ipcRenderer.on('processing-complete', (event, data) => {
@@ -7238,31 +7237,50 @@ Session started - waiting for activity...
             processingMeetings.delete(data.sessionName);
 
             if (data.success) {
-                // Load fresh data from backend FIRST, then restore UI
-                const wasStreaming = streamingActive || document.getElementById('notes-editor').style.display === 'block';
-                loadMeetings(true).then(() => {
-                    // Now restore UI from streaming state
-                    if (wasStreaming) {
-                        document.getElementById('notes-editor').style.display = 'none';
-                        streamingActive = false;
-                    }
-                    document.querySelectorAll('#meeting-detail .meeting-section').forEach(s => s.style.display = '');
-                    document.getElementById('ask-ai-btn').style.display = '';
-                    document.getElementById('copy-notes-btn').style.display = '';
-                    document.getElementById('reprocess-btn').style.display = '';
+                const wasStreaming = document.getElementById('notes-editor').style.display === 'block';
 
-                    // Auto-select the just-processed meeting with fresh data
-                    const currentTitle = detailTitle.textContent;
-                    const idx = filteredMeetings.findIndex(m =>
-                        m.session_info?.name === currentTitle ||
-                        m.session_info?.name === data.sessionName
-                    );
-                    if (idx !== -1) {
-                        selectMeeting(idx);
+                loadMeetings(true).then(() => {
+                    if (wasStreaming && streamedMarkdown) {
+                        // Keep the streamed markdown view — don't switch to section layout.
+                        // Just append the transcript below the streaming content and show buttons.
+                        const currentTitle = detailTitle.textContent;
+                        const meeting = filteredMeetings.find(m =>
+                            m.session_info?.name === currentTitle ||
+                            m.session_info?.name === data.sessionName
+                        );
+                        if (meeting && meeting.transcript) {
+                            const container = document.getElementById('notes-editor');
+                            // Remove "Generating..." if still present
+                            const indicator = container.querySelector('p:last-child');
+                            if (indicator && indicator.textContent.includes('Generating')) indicator.remove();
+                            // Append transcript section
+                            container.innerHTML += `<h2 class="section-title" style="margin-top:32px;">Transcript</h2><div class="transcript-content" style="background:var(--bg-primary);border:1px solid var(--border-subtle);border-radius:10px;padding:24px;font-family:'JetBrains Mono',monospace;font-size:13px;line-height:1.8;color:var(--text-secondary);white-space:pre-wrap;max-height:400px;overflow-y:auto;">${meeting.transcript}</div>`;
+                        }
+                        // Show action buttons
+                        document.getElementById('ask-ai-btn').style.display = '';
+                        document.getElementById('copy-notes-btn').style.display = '';
+                        document.getElementById('reprocess-btn').style.display = '';
+                        streamingActive = false;
+                        // Store selectedMeeting for Ask Steno etc.
+                        const meetingIdx = filteredMeetings.findIndex(m =>
+                            m.session_info?.name === currentTitle ||
+                            m.session_info?.name === data.sessionName
+                        );
+                        if (meetingIdx !== -1) selectedMeeting = filteredMeetings[meetingIdx];
                     } else {
-                        // Fallback: select the first meeting (most recent)
-                        log('Could not find meeting by title, selecting first');
-                        if (filteredMeetings.length > 0) selectMeeting(0);
+                        // Non-streaming path or no streamed content — use standard selectMeeting
+                        document.getElementById('notes-editor').style.display = 'none';
+                        document.querySelectorAll('#meeting-detail .meeting-section').forEach(s => s.style.display = '');
+                        document.getElementById('ask-ai-btn').style.display = '';
+                        document.getElementById('copy-notes-btn').style.display = '';
+                        document.getElementById('reprocess-btn').style.display = '';
+                        const currentTitle = detailTitle.textContent;
+                        const idx = filteredMeetings.findIndex(m =>
+                            m.session_info?.name === currentTitle ||
+                            m.session_info?.name === data.sessionName
+                        );
+                        if (idx !== -1) selectMeeting(idx);
+                        else if (filteredMeetings.length > 0) selectMeeting(0);
                     }
                 });
                 
