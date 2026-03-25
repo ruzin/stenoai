@@ -6272,35 +6272,14 @@ Session started - waiting for activity...
             log(`🔄 Reprocessing meeting: ${meetingBeingProcessed.session_info?.name}`);
             
             try {
-                // Call main process to reprocess the meeting
-                const result = await ipcRenderer.invoke('reprocess-meeting', summaryFile, regenerateTitle);
-                
-                if (result.success) {
-                    log('✅ Meeting reprocessed successfully');
-                    
-                    // Send notification for reprocessing completion
-                    showDesktopNotification('StenoAI - Reprocessing Complete', {
-                        body: `"${meetingBeingProcessed.session_info?.name || 'Meeting'}" has been reanalyzed`,
-                        requireInteraction: false
-                    }, () => {
-                        const idx = filteredMeetings.findIndex(m => m.session_info?.summary_file === summaryFile);
-                        if (idx !== -1) selectMeeting(idx);
-                    });
-                    
-                    // Reload meetings to show updated data
-                    await loadMeetings(true);
-                    // Re-select the current meeting to show updated content
-                    const updatedMeetingIndex = filteredMeetings.findIndex(m => 
-                        m.session_info?.summary_file === summaryFile
-                    );
-                    if (updatedMeetingIndex !== -1) {
-                        selectMeeting(updatedMeetingIndex);
-                    }
-                } else {
-                    log(`❌ Reprocessing failed: ${result.error}`);
+                // Kick off streaming reprocess (events will handle UI updates)
+                const result = await ipcRenderer.invoke('reprocess-meeting', summaryFile, regenerateTitle, meetingName);
+
+                if (!result.success) {
+                    log(`Reprocessing failed: ${result.error}`);
                 }
             } catch (error) {
-                log(`❌ Reprocessing error: ${error.message}`);
+                log(`Reprocessing error: ${error.message}`);
             } finally {
                 // Clear processing tracker
                 processingMeeting = null;
@@ -6308,13 +6287,11 @@ Session started - waiting for activity...
                     processingMeetings.delete(meetingName);
                     renderMeetingsList();
                 }
-                
-                // Reset button state only if we're still viewing the same meeting
-                if (selectedMeeting && selectedMeeting.session_info?.summary_file === summaryFile) {
-                    reprocessBtn.disabled = false;
-                    reprocessBtn.classList.remove('processing');
-                    reprocessBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>';
-                }
+
+                // Reset button state
+                reprocessBtn.disabled = false;
+                reprocessBtn.classList.remove('processing');
+                reprocessBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>';
             }
         });
 
@@ -7273,10 +7250,14 @@ Session started - waiting for activity...
                         }
                         // Keep sections hidden — streaming view IS the meeting view
                         document.querySelectorAll('#meeting-detail .meeting-section').forEach(s => s.style.display = 'none');
-                        // Show action buttons
+                        // Show action buttons and reset reprocess button state
                         document.getElementById('ask-ai-btn').style.display = '';
                         document.getElementById('copy-notes-btn').style.display = '';
-                        document.getElementById('reprocess-btn').style.display = '';
+                        const rpBtn = document.getElementById('reprocess-btn');
+                        rpBtn.style.display = '';
+                        rpBtn.disabled = false;
+                        rpBtn.classList.remove('processing');
+                        rpBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>';
                         streamingActive = false;
                         // Store selectedMeeting for Ask Steno etc.
                         const meetingIdx = filteredMeetings.findIndex(m =>
