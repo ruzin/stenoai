@@ -1407,9 +1407,12 @@ def reprocess(summary_file, regenerate_title):
             sys.exit(1)
 
         try:
-            # Load existing summary file
-            with open(summary_path, 'r') as f:
-                existing_data = json.load(f)
+            # Load existing summary file (JSON or MD)
+            if summary_path.suffix == '.md':
+                existing_data = _parse_meeting_markdown(summary_path)
+            else:
+                with open(summary_path, 'r') as f:
+                    existing_data = json.load(f)
 
             # Get transcript from the data
             transcript = existing_data.get('transcript', '')
@@ -1419,6 +1422,9 @@ def reprocess(summary_file, regenerate_title):
 
             session_name = existing_data.get('session_info', {}).get('name', 'Reprocessed')
             duration_minutes = existing_data.get('session_info', {}).get('duration_minutes', 10)
+            if duration_minutes is None:
+                ds = existing_data.get('session_info', {}).get('duration_seconds')
+                duration_minutes = int(ds / 60) if ds else 10
 
             print(f"🔄 Reprocessing summary for: {session_name}")
             print(f"📝 Transcript length: {len(transcript)} characters")
@@ -1469,9 +1475,58 @@ def reprocess(summary_file, regenerate_title):
             # Add reprocess timestamp
             existing_data["session_info"]["reprocessed_at"] = datetime.now().isoformat()
 
-            # Save updated summary
-            with open(summary_path, 'w') as f:
-                json.dump(existing_data, f, indent=2)
+            # Save updated summary (format matches input file)
+            if summary_path.suffix == '.md':
+                session_name = existing_data.get('session_info', {}).get('name', 'Reprocessed')
+                md_lines = ['---']
+                md_meta = {
+                    'title': session_name,
+                    'date': existing_data.get('session_info', {}).get('processed_at', datetime.now().isoformat()),
+                    'duration_seconds': existing_data.get('session_info', {}).get('duration_seconds'),
+                    'language': output_language,
+                    'is_diarised': existing_data.get('is_diarised', False),
+                }
+                for k, v in md_meta.items():
+                    if v is None:
+                        md_lines.append(f'{k}: null')
+                    elif isinstance(v, bool):
+                        md_lines.append(f'{k}: {"true" if v else "false"}')
+                    elif isinstance(v, int):
+                        md_lines.append(f'{k}: {v}')
+                    else:
+                        escaped = str(v).replace('\\', '\\\\').replace('"', '\\"')
+                        md_lines.append(f'{k}: "{escaped}"')
+                md_lines.append('---')
+                md_lines.append('')
+                # Rebuild markdown from structured data
+                md_lines.append(f"## Summary\n{existing_data.get('summary', '')}")
+                participants = existing_data.get('participants', [])
+                if participants:
+                    md_lines.append(f"\n## Participants\n{', '.join(participants)}")
+                areas = existing_data.get('discussion_areas', [])
+                if areas:
+                    md_lines.append('\n## Key Topics')
+                    for a in areas:
+                        md_lines.append(f"### {a.get('title', '')}\n{a.get('analysis', '')}")
+                points = existing_data.get('key_points', [])
+                if points:
+                    md_lines.append('\n## Key Points')
+                    for p in points:
+                        md_lines.append(f"- {p}")
+                items = existing_data.get('action_items', [])
+                if items:
+                    md_lines.append('\n## Action Items')
+                    for i in items:
+                        md_lines.append(f"- {i}")
+                if transcript:
+                    md_lines.append(f"\n## Transcript\n{transcript}")
+                notes = existing_data.get('user_notes')
+                if notes:
+                    md_lines.append(f"\n## User Notes\n{notes}")
+                summary_path.write_text('\n'.join(md_lines), encoding='utf-8')
+            else:
+                with open(summary_path, 'w') as f:
+                    json.dump(existing_data, f, indent=2)
 
             print(f"✅ Summary reprocessed successfully: {summary_path}")
             print(f"📋 New summary: {existing_data['summary'][:100]}...")
