@@ -1344,7 +1344,7 @@ async function processNextInQueue() {
               if (mainWindow && !mainWindow.isDestroyed()) {
                 mainWindow.webContents.send('summary-chunk', { chunk, sessionName: currentProcessingJob.sessionName });
               }
-            } catch (e) { /* ignore decode errors */ }
+            } catch (e) { console.log('CHUNK decode error:', e.message); }
           } else if (line.startsWith('TRANSCRIPTION_COMPLETE:')) {
             sendDebugLog(`Transcription complete (${line.split(':')[1]} chars)`);
             trackEvent('transcription_completed', { success: true });
