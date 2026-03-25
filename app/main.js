@@ -1058,7 +1058,7 @@ ipcMain.handle('clear-state', async () => {
   }
 });
 
-ipcMain.handle('reprocess-meeting', async (event, summaryFile, regenerateTitle) => {
+ipcMain.handle('reprocess-meeting', async (event, summaryFile, regenerateTitle, sessionName) => {
   try {
     const args = ['reprocess', summaryFile];
     if (regenerateTitle) args.push('--regenerate-title');
@@ -1067,11 +1067,80 @@ ipcMain.handle('reprocess-meeting', async (event, summaryFile, regenerateTitle) 
     sendDebugLog(`$ stenoai ${args.join(' ')}`);
 
     const cloudKey = loadCloudApiKey();
-    const env = cloudKey ? { STENOAI_CLOUD_API_KEY: cloudKey } : {};
-    const result = await runPythonScript('simple_recorder.py', args, false, env);
+    const reprocessEnv = cloudKey ? { ...require('process').env, STENOAI_CLOUD_API_KEY: cloudKey } : undefined;
+
+    await new Promise((resolve, reject) => {
+      const proc = spawn(getBackendPath(), args, {
+        cwd: getBackendCwd(),
+        env: reprocessEnv
+      });
+
+      let stderrBuf = '';
+
+      const procTimeout = setTimeout(() => {
+        console.error('reprocess timed out after 30 minutes, killing');
+        proc.kill();
+      }, 30 * 60 * 1000);
+
+      proc.on('error', (err) => {
+        clearTimeout(procTimeout);
+        reject(new Error(`reprocess spawn error: ${err.message}`));
+      });
+
+      proc.stdout.on('data', (data) => {
+        const text = data.toString();
+        text.split('\n').forEach(line => {
+          if (line.startsWith('CHUNK:')) {
+            try {
+              const encoded = line.slice(6);
+              const chunk = Buffer.from(encoded, 'base64').toString('utf-8');
+              if (mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.webContents.send('summary-chunk', { chunk, sessionName });
+              }
+            } catch (e) { console.log('CHUNK decode error:', e.message); }
+          } else if (line.startsWith('TITLE:')) {
+            const title = line.slice(6);
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('summary-title', { title, sessionName });
+            }
+          } else if (line === 'STREAM_COMPLETE') {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('summary-complete', { success: true, sessionName });
+            }
+          } else if (line.trim()) {
+            sendDebugLog(line.trim());
+          }
+        });
+      });
+
+      proc.stderr.on('data', (data) => {
+        const msg = data.toString().trim();
+        if (msg) {
+          stderrBuf += msg + '\n';
+          sendDebugLog(`STDERR: ${msg}`);
+        }
+      });
+
+      proc.on('close', (code) => {
+        clearTimeout(procTimeout);
+        if (code === 0) {
+          console.log(`✅ Completed reprocessing: ${sessionName}`);
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('processing-complete', {
+              success: true,
+              sessionName,
+              message: 'Reprocessing completed successfully'
+            });
+          }
+          resolve();
+        } else {
+          reject(new Error(`reprocess exited with code ${code}: ${stderrBuf.slice(-500)}`));
+        }
+      });
+    });
 
     sendDebugLog('✅ Meeting reprocessed successfully');
-    return { success: true, message: result };
+    return { success: true };
   } catch (error) {
     sendDebugLog(`❌ Reprocessing failed: ${error.message}`);
     return { success: false, error: error.message };

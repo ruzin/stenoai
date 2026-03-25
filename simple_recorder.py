@@ -1398,144 +1398,144 @@ def reprocess(summary_file, regenerate_title):
     import json
     from pathlib import Path
 
-    async def run_reprocess():
-        recorder = SimpleRecorder()
-        summary_path = Path(summary_file)
+    import base64
 
-        if not summary_path.exists():
-            print(f"ERROR: Summary file not found: {summary_file}")
+    recorder = SimpleRecorder()
+    summary_path = Path(summary_file)
+
+    if not summary_path.exists():
+        print(f"ERROR: Summary file not found: {summary_file}")
+        sys.exit(1)
+
+    try:
+        # Load existing summary file (JSON or MD)
+        if summary_path.suffix == '.md':
+            existing_data = _parse_meeting_markdown(summary_path)
+        else:
+            with open(summary_path, 'r') as f:
+                existing_data = json.load(f)
+
+        # Get transcript from the data
+        transcript = existing_data.get('transcript', '')
+        if not transcript:
+            print("ERROR: No transcript found in summary file")
             sys.exit(1)
 
-        try:
-            # Load existing summary file (JSON or MD)
-            if summary_path.suffix == '.md':
-                existing_data = _parse_meeting_markdown(summary_path)
-            else:
-                with open(summary_path, 'r') as f:
-                    existing_data = json.load(f)
+        session_name = existing_data.get('session_info', {}).get('name', 'Reprocessed')
+        duration_minutes = existing_data.get('session_info', {}).get('duration_minutes', 10)
+        if duration_minutes is None:
+            ds = existing_data.get('session_info', {}).get('duration_seconds')
+            duration_minutes = int(ds / 60) if ds else 10
 
-            # Get transcript from the data
-            transcript = existing_data.get('transcript', '')
-            if not transcript:
-                print("ERROR: No transcript found in summary file")
-                sys.exit(1)
+        # Load user notes from the meeting data
+        notes_text = existing_data.get('user_notes')
 
-            session_name = existing_data.get('session_info', {}).get('name', 'Reprocessed')
-            duration_minutes = existing_data.get('session_info', {}).get('duration_minutes', 10)
-            if duration_minutes is None:
-                ds = existing_data.get('session_info', {}).get('duration_seconds')
-                duration_minutes = int(ds / 60) if ds else 10
+        print(f"Reprocessing summary for: {session_name}")
+        print(f"Transcript length: {len(transcript)} characters")
+        if notes_text:
+            print(f"User notes: {len(notes_text)} characters")
 
-            print(f"🔄 Reprocessing summary for: {session_name}")
-            print(f"📝 Transcript length: {len(transcript)} characters")
-
-            # Re-run summarization
-            existing_session_info = existing_data.get("session_info", {})
-            output_language = existing_session_info.get("output_language")
-            if not output_language:
-                configured_language = existing_session_info.get("configured_language")
-                if not configured_language:
-                    from src.config import get_config
-                    configured_language = get_config().get_language()
-                output_language = recorder._resolve_output_language(
-                    configured_language,
-                    existing_session_info.get("detected_language")
-                )
-
-            summary_data = await recorder.summarize_transcript(
-                transcript,
-                session_name,
-                duration_minutes,
-                language=output_language
+        # Resolve output language
+        existing_session_info = existing_data.get("session_info", {})
+        output_language = existing_session_info.get("output_language")
+        if not output_language:
+            configured_language = existing_session_info.get("configured_language")
+            if not configured_language:
+                from src.config import get_config
+                configured_language = get_config().get_language()
+            output_language = recorder._resolve_output_language(
+                configured_language,
+                existing_session_info.get("detected_language")
             )
 
-            # Update the existing data with new summary
-            existing_data.update({
-                "summary": summary_data.get("summary", "") or "",
-                "participants": summary_data.get("participants", []) or [],
-                "discussion_areas": summary_data.get("discussion_areas", []) or [],
-                "key_points": summary_data.get("key_points", []) or [],
-                "action_items": summary_data.get("action_items", []) or [],
-            })
+        # Use streaming summarization (same as new recordings)
+        if recorder.summarizer is None:
+            from src.summarizer import OllamaSummarizer
+            recorder.summarizer = OllamaSummarizer()
 
-            # Regenerate title if requested
-            if regenerate_title:
-                try:
-                    generated_title = recorder.summarizer.generate_title(
-                        summary_data.get("summary", ""),
-                        transcript,
-                        language=output_language
-                    )
-                    if generated_title:
-                        existing_data["session_info"]["name"] = generated_title
-                        print(f"Auto-generated title: {generated_title}")
-                except Exception as e:
-                    print(f"Title regeneration skipped: {e}")
+        print("Generating summary...", flush=True)
+        streamed_chunks = []
+        for chunk in recorder.summarizer.summarize_transcript_streaming(
+            transcript, duration_minutes, output_language, notes_text
+        ):
+            encoded = base64.b64encode(chunk.encode('utf-8')).decode('ascii')
+            sys.stdout.write(f"CHUNK:{encoded}\n")
+            sys.stdout.flush()
+            streamed_chunks.append(chunk)
+        streamed_md = ''.join(streamed_chunks)
 
-            # Add reprocess timestamp
-            existing_data["session_info"]["reprocessed_at"] = datetime.now().isoformat()
+        print("STREAM_COMPLETE", flush=True)
 
-            # Save updated summary (format matches input file)
-            if summary_path.suffix == '.md':
-                session_name = existing_data.get('session_info', {}).get('name', 'Reprocessed')
-                md_lines = ['---']
-                md_meta = {
-                    'title': session_name,
-                    'date': existing_data.get('session_info', {}).get('processed_at', datetime.now().isoformat()),
-                    'duration_seconds': existing_data.get('session_info', {}).get('duration_seconds'),
-                    'language': output_language,
-                    'is_diarised': existing_data.get('is_diarised', False),
-                }
-                for k, v in md_meta.items():
-                    if v is None:
-                        md_lines.append(f'{k}: null')
-                    elif isinstance(v, bool):
-                        md_lines.append(f'{k}: {"true" if v else "false"}')
-                    elif isinstance(v, int):
-                        md_lines.append(f'{k}: {v}')
-                    else:
-                        escaped = str(v).replace('\\', '\\\\').replace('"', '\\"')
-                        md_lines.append(f'{k}: "{escaped}"')
-                md_lines.append('---')
+        # Regenerate title if requested
+        if regenerate_title:
+            try:
+                generated_title = recorder.summarizer.generate_title(
+                    streamed_md, transcript, language=output_language
+                )
+                if generated_title:
+                    session_name = generated_title
+                    existing_data["session_info"]["name"] = generated_title
+                    print(f"TITLE:{session_name}", flush=True)
+                    print(f"Auto-generated title: {session_name}")
+            except Exception as e:
+                print(f"Title regeneration skipped: {e}")
+
+        # Add reprocess timestamp
+        existing_data["session_info"]["reprocessed_at"] = datetime.now().isoformat()
+
+        # Save updated summary
+        if summary_path.suffix == '.md':
+            session_name = existing_data.get('session_info', {}).get('name', 'Reprocessed')
+            md_lines = ['---']
+            md_meta = {
+                'title': session_name,
+                'date': existing_data.get('session_info', {}).get('processed_at', datetime.now().isoformat()),
+                'duration_seconds': existing_data.get('session_info', {}).get('duration_seconds'),
+                'language': output_language,
+                'is_diarised': existing_data.get('is_diarised', False),
+            }
+            for k, v in md_meta.items():
+                if v is None:
+                    md_lines.append(f'{k}: null')
+                elif isinstance(v, bool):
+                    md_lines.append(f'{k}: {"true" if v else "false"}')
+                elif isinstance(v, int):
+                    md_lines.append(f'{k}: {v}')
+                else:
+                    escaped = str(v).replace('\\', '\\\\').replace('"', '\\"')
+                    md_lines.append(f'{k}: "{escaped}"')
+            md_lines.append('---')
+            md_lines.append('')
+            # Write the raw streamed markdown (preserves LLM formatting)
+            md_lines.append(streamed_md)
+            md_lines.append('')
+            md_lines.append('## Transcript')
+            md_lines.append('')
+            md_lines.append(transcript)
+            if notes_text:
                 md_lines.append('')
-                # Rebuild markdown from structured data
-                md_lines.append(f"## Summary\n{existing_data.get('summary', '')}")
-                participants = existing_data.get('participants', [])
-                if participants:
-                    md_lines.append(f"\n## Participants\n{', '.join(participants)}")
-                areas = existing_data.get('discussion_areas', [])
-                if areas:
-                    md_lines.append('\n## Key Topics')
-                    for a in areas:
-                        md_lines.append(f"### {a.get('title', '')}\n{a.get('analysis', '')}")
-                points = existing_data.get('key_points', [])
-                if points:
-                    md_lines.append('\n## Key Points')
-                    for p in points:
-                        md_lines.append(f"- {p}")
-                items = existing_data.get('action_items', [])
-                if items:
-                    md_lines.append('\n## Action Items')
-                    for i in items:
-                        md_lines.append(f"- {i}")
-                if transcript:
-                    md_lines.append(f"\n## Transcript\n{transcript}")
-                notes = existing_data.get('user_notes')
-                if notes:
-                    md_lines.append(f"\n## User Notes\n{notes}")
-                summary_path.write_text('\n'.join(md_lines), encoding='utf-8')
-            else:
-                with open(summary_path, 'w') as f:
-                    json.dump(existing_data, f, indent=2)
+                md_lines.append('## User Notes')
+                md_lines.append('')
+                md_lines.append(notes_text)
+            summary_path.write_text('\n'.join(md_lines), encoding='utf-8')
+        else:
+            # JSON format: parse streamed markdown into structured fields
+            parsed = recorder._parse_streamed_markdown(streamed_md)
+            existing_data.update({
+                "summary": parsed.get("summary", "") or "",
+                "participants": parsed.get("participants", []) or [],
+                "discussion_areas": parsed.get("discussion_areas", []) or [],
+                "key_points": parsed.get("key_points", []) or [],
+                "action_items": parsed.get("action_items", []) or [],
+            })
+            with open(summary_path, 'w') as f:
+                json.dump(existing_data, f, indent=2)
 
-            print(f"✅ Summary reprocessed successfully: {summary_path}")
-            print(f"📋 New summary: {existing_data['summary'][:100]}...")
+        print(f"Summary reprocessed successfully: {summary_path}")
 
-        except Exception as e:
-            print(f"ERROR: Failed to reprocess summary: {e}")
-            sys.exit(1)
-
-    asyncio.run(run_reprocess())
+    except Exception as e:
+        print(f"ERROR: Failed to reprocess summary: {e}")
+        sys.exit(1)
 
 
 @cli.command()
