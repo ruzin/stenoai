@@ -1294,7 +1294,6 @@ def test():
         return
 
 
-@cli.command()
 def _parse_meeting_markdown(md_path):
     """Parse a .md meeting file into the standard meeting dict."""
     content = md_path.read_text(encoding='utf-8')
@@ -1400,6 +1399,7 @@ def _parse_meeting_markdown(md_path):
     }
 
 
+@cli.command()
 def list_meetings():
     """List all processed meetings - optimized for fast loading"""
     from src.config import get_data_dirs, get_config
