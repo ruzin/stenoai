@@ -5260,6 +5260,8 @@ Session started - waiting for activity...
         let currentNotesText = '';
         let currentNotesSessionName = '';
 
+        let _notesInputHandler = null;  // Track listener to avoid duplicates
+
         function showNotesEditor(sessionName) {
             currentNotesSessionName = sessionName;
             currentNotesText = '';
@@ -5273,8 +5275,13 @@ Session started - waiting for activity...
 
             // Hide summary sections, show notes editor
             document.querySelectorAll('#meeting-detail .meeting-section').forEach(s => s.style.display = 'none');
-            document.getElementById('notes-editor').style.display = 'block';
+            const notesEditor = document.getElementById('notes-editor');
+            notesEditor.style.display = 'block';
+            // Reset streaming state from any previous session
+            streamingActive = false;
+            streamedMarkdown = '';
             const notesContent = document.getElementById('notes-content');
+            notesContent.style.display = '';
             notesContent.innerHTML = '';
             notesContent.focus();
 
@@ -5283,9 +5290,12 @@ Session started - waiting for activity...
             document.getElementById('copy-notes-btn').style.display = 'none';
             document.getElementById('reprocess-btn').style.display = 'none';
 
-            // Auto-save notes on input (debounced 2s)
+            // Auto-save notes on input (debounced 2s) — remove previous listener first
+            if (_notesInputHandler) {
+                notesContent.removeEventListener('input', _notesInputHandler);
+            }
             let _notesSaveTimeout = null;
-            notesContent.addEventListener('input', () => {
+            _notesInputHandler = () => {
                 if (_notesSaveTimeout) clearTimeout(_notesSaveTimeout);
                 _notesSaveTimeout = setTimeout(() => {
                     const notes = notesContent.innerText.trim();
@@ -5295,7 +5305,8 @@ Session started - waiting for activity...
                         log(`Notes auto-saved (${notes.length} chars)`);
                     }
                 }, 2000);
-            });
+            };
+            notesContent.addEventListener('input', _notesInputHandler);
         }
 
         async function hideNotesEditor() {
@@ -5313,14 +5324,9 @@ Session started - waiting for activity...
                 }
             }
 
-            // Hide notes editor, restore sections
-            document.getElementById('notes-editor').style.display = 'none';
-            document.querySelectorAll('#meeting-detail .meeting-section').forEach(s => s.style.display = '');
-
-            // Restore action buttons
-            document.getElementById('ask-ai-btn').style.display = '';
-            document.getElementById('copy-notes-btn').style.display = '';
-            document.getElementById('reprocess-btn').style.display = '';
+            // DON'T restore sections here — streaming will handle the transition.
+            // Just keep notes-editor visible for the streaming renderer to use.
+            // Action buttons stay hidden until streaming completes.
         }
 
         // Force plain text paste in notes editor
@@ -7192,8 +7198,11 @@ Session started - waiting for activity...
             if (!streamingActive) {
                 streamingActive = true;
                 streamedMarkdown = '';
-                // Ensure notes editor is visible for streaming
+                // Ensure notes editor is visible for streaming, sections and buttons hidden
                 document.querySelectorAll('#meeting-detail .meeting-section').forEach(s => s.style.display = 'none');
+                document.getElementById('ask-ai-btn').style.display = 'none';
+                document.getElementById('copy-notes-btn').style.display = 'none';
+                document.getElementById('reprocess-btn').style.display = 'none';
                 const editor = document.getElementById('notes-editor');
                 if (editor) editor.style.display = 'block';
             }
@@ -7205,14 +7214,37 @@ Session started - waiting for activity...
             if (data.title) {
                 detailTitle.textContent = data.title;
                 log(`Auto-generated title: ${data.title}`);
+                // Update the meeting entry in the sidebar (may be temp or already partially updated)
+                const tempIdx = meetings.findIndex(m =>
+                    m.session_info?.name === data.sessionName
+                );
+                if (tempIdx !== -1) {
+                    meetings[tempIdx].session_info.name = data.title;
+                    filterMeetings();
+                }
             }
         });
 
         ipcRenderer.on('summary-complete', (event, data) => {
             log(`Summary streaming complete for: ${data.sessionName}`);
             stopStreamingRenderer();
-            // Reload meetings to get the saved data
-            loadMeetings(true);
+            // Hide the streaming container, restore normal sections
+            const notesEditor = document.getElementById('notes-editor');
+            if (notesEditor) notesEditor.style.display = 'none';
+            document.querySelectorAll('#meeting-detail .meeting-section').forEach(s => s.style.display = '');
+            // Restore action buttons
+            document.getElementById('ask-ai-btn').style.display = '';
+            document.getElementById('copy-notes-btn').style.display = '';
+            document.getElementById('reprocess-btn').style.display = '';
+            // Reload meetings and auto-select the new one
+            loadMeetings(true).then(() => {
+                // Find and select the meeting by title or session name
+                const title = detailTitle.textContent;
+                const idx = filteredMeetings.findIndex(m =>
+                    m.session_info?.name === title || m.session_info?.name === data.sessionName
+                );
+                if (idx !== -1) selectMeeting(idx);
+            });
         });
 
         ipcRenderer.on('processing-complete', (event, data) => {
