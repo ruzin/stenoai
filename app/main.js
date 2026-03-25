@@ -1338,11 +1338,13 @@ async function processNextInQueue() {
         // Parse protocol lines
         text.split('\n').forEach(line => {
           if (line.startsWith('CHUNK:')) {
-            const encoded = line.slice(6);
-            const chunk = Buffer.from(encoded, 'base64').toString('utf-8');
-            if (mainWindow && !mainWindow.isDestroyed()) {
-              mainWindow.webContents.send('summary-chunk', { chunk, sessionName: currentProcessingJob.sessionName });
-            }
+            try {
+              const encoded = line.slice(6);
+              const chunk = Buffer.from(encoded, 'base64').toString('utf-8');
+              if (mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.webContents.send('summary-chunk', { chunk, sessionName: currentProcessingJob.sessionName });
+              }
+            } catch (e) { /* ignore decode errors */ }
           } else if (line.startsWith('TRANSCRIPTION_COMPLETE:')) {
             sendDebugLog(`Transcription complete (${line.split(':')[1]} chars)`);
             trackEvent('transcription_completed', { success: true });

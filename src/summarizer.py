@@ -750,7 +750,9 @@ TRANSCRIPT:
                         stream=True,
                     )
                     for chunk in response:
-                        content = chunk.choices[0].delta.content if chunk.choices[0].delta.content else ""
+                        if not chunk.choices:
+                            continue
+                        content = chunk.choices[0].delta.content or ""
                         if content:
                             yield content
                 except Exception as e:
@@ -759,7 +761,8 @@ TRANSCRIPT:
         else:
             # Ollama (local or remote)
             try:
-                self._ensure_ollama_ready()
+                if self.ai_provider != "remote":
+                    self._ensure_ollama_ready()
                 response = self.client.chat(
                     model=self.model_name,
                     messages=[{'role': 'user', 'content': prompt}],

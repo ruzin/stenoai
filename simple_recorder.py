@@ -148,7 +148,7 @@ class SimpleRecorder:
             elif current_section == 'summary' and stripped:
                 summary_parts.append(stripped)
             elif current_section == 'participants' and stripped:
-                participants = [p.strip() for p in stripped.split(',') if p.strip()]
+                participants.extend([p.strip() for p in stripped.split(',') if p.strip()])
             elif current_section == 'topics' and current_topic_title:
                 current_topic_lines.append(stripped)
             elif current_section == 'keypoints' and stripped.startswith('- '):
