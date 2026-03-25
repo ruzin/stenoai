@@ -3434,6 +3434,7 @@ Ask Steno
                 <div class="notes-editor" id="notes-editor" style="display: none;">
                     <div class="notes-content" id="notes-content" contenteditable="true" spellcheck="true"
                          data-placeholder="Type your notes here..."></div>
+                    <div class="streaming-output" id="streaming-output" style="display: none;"></div>
                 </div>
 
                 <div class="meeting-section">
@@ -5285,6 +5286,8 @@ Session started - waiting for activity...
             // Reset streaming state from any previous session
             streamingActive = false;
             streamedMarkdown = '';
+            const streamingOutput = document.getElementById('streaming-output');
+            if (streamingOutput) { streamingOutput.style.display = 'none'; streamingOutput.innerHTML = ''; }
             const notesContent = document.getElementById('notes-content');
             notesContent.style.display = '';
             notesContent.innerHTML = '';
@@ -7150,13 +7153,14 @@ Session started - waiting for activity...
         let streamingActive = false;
 
         function renderStreamingMarkdown(md) {
-            const container = document.getElementById('notes-editor');
+            const container = document.getElementById('streaming-output');
             if (!container) return;
-            container.style.display = 'block';
 
-            // Hide the contenteditable, use the container for rendered output
+            // Hide the contenteditable, show streaming output
             const notesContent = document.getElementById('notes-content');
             if (notesContent) notesContent.style.display = 'none';
+            container.style.display = 'block';
+            document.getElementById('notes-editor').style.display = 'block';
 
             // Lightweight markdown to HTML
             let html = '';
@@ -7189,9 +7193,8 @@ Session started - waiting for activity...
 
         function stopStreamingRenderer() {
             streamingActive = false;
-            const container = document.getElementById('notes-editor');
+            const container = document.getElementById('streaming-output');
             if (container) {
-                // Remove the "Generating..." indicator
                 const indicator = container.querySelector('p:last-child');
                 if (indicator && indicator.textContent.includes('Generating')) {
                     indicator.remove();
@@ -7254,10 +7257,11 @@ Session started - waiting for activity...
                             m.session_info?.name === data.sessionName
                         );
                         {
-                            const container = document.getElementById('notes-editor');
-                            // Remove "Generating..." if still present
-                            const indicator = container.querySelector('p:last-child');
-                            if (indicator && indicator.textContent.includes('Generating')) indicator.remove();
+                            const container = document.getElementById('streaming-output');
+                            if (container) {
+                                const indicator = container.querySelector('p:last-child');
+                                if (indicator && indicator.textContent.includes('Generating')) indicator.remove();
+                            }
                         }
                         // Keep sections hidden — streaming view IS the meeting view
                         document.querySelectorAll('#meeting-detail .meeting-section').forEach(s => s.style.display = 'none');
