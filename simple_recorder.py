@@ -429,7 +429,193 @@ Transcript:
                 print(f"⚠️ Could not clear state: {e}")
         
         print(f"📋 Processing complete - meeting available in list")
-        
+
+        return complete_data
+
+    async def process_recording_streaming(self, audio_file: str, session_name: str = "Recording", notes_text: Optional[str] = None) -> dict:
+        """Process recording with streaming summary output via CHUNK: protocol."""
+        import base64
+        print(f"🔄 Processing recording: {audio_file}")
+
+        if not audio_file:
+            state = self.get_state()
+            audio_file = state.get("last_recording")
+            if not audio_file:
+                raise Exception("No audio file specified and no recent recording found")
+
+        audio_path = Path(audio_file)
+        if not audio_path.exists():
+            raise Exception(f"Audio file not found: {audio_file}")
+
+        # Step 1: Transcribe
+        transcript_data = await self.transcribe_audio(audio_file, session_name)
+        transcript_text = transcript_data.get("transcript_text", "")
+        diarised_text = transcript_data.get("diarised_text")
+        text_for_summary = diarised_text or transcript_text
+
+        duration_seconds = transcript_data.get("duration_seconds")
+        duration_minutes = int(duration_seconds / 60) if duration_seconds else 0
+
+        if duration_seconds:
+            print(f"📏 Audio duration: {duration_seconds} seconds ({int(duration_seconds)}s)")
+
+        print(f"TRANSCRIPTION_COMPLETE:{len(transcript_text)}", flush=True)
+
+        # Step 2: Streaming summary
+        if self.summarizer is None:
+            self.summarizer = OllamaSummarizer()
+
+        from src.config import get_config
+        config = get_config()
+        configured_language = config.get_language()
+        output_language = self._resolve_output_language(
+            configured_language, transcript_data.get("detected_language")
+        )
+
+        print("🧠 Generating summary...", flush=True)
+        streamed_md = ""
+        for chunk in self.summarizer.summarize_transcript_streaming(
+            text_for_summary, duration_minutes, output_language, notes_text
+        ):
+            encoded = base64.b64encode(chunk.encode('utf-8')).decode('ascii')
+            sys.stdout.write(f"CHUNK:{encoded}\n")
+            sys.stdout.flush()
+            streamed_md += chunk
+
+        print("STREAM_COMPLETE", flush=True)
+
+        # Step 3: Generate title
+        if re.match(r'^Meeting-[A-Z0-9]{6}$', session_name):
+            try:
+                generated_title = self.summarizer.generate_title(
+                    streamed_md, transcript_text, language=output_language
+                )
+                if generated_title:
+                    session_name = generated_title
+                    print(f"TITLE:{session_name}", flush=True)
+                    print(f"Auto-generated title: {session_name}")
+            except Exception as e:
+                logger.warning(f"Title generation failed: {e}")
+
+        # Step 4: Parse streamed markdown into structured JSON
+        summary_text = ""
+        participants = []
+        discussion_areas = []
+        key_points = []
+        action_items = []
+        current_section = None
+        current_topic_title = None
+        current_topic_lines = []
+
+        for line in streamed_md.split('\n'):
+            stripped = line.strip()
+            if stripped.startswith('## Summary'):
+                current_section = 'summary'
+            elif stripped.startswith('## Participants'):
+                current_section = 'participants'
+            elif stripped.startswith('## Key Topics'):
+                current_section = 'topics'
+            elif stripped.startswith('## Key Points'):
+                current_section = 'keypoints'
+            elif stripped.startswith('## Action Items'):
+                current_section = 'actions'
+            elif stripped.startswith('### ') and current_section == 'topics':
+                if current_topic_title:
+                    discussion_areas.append({"title": current_topic_title, "analysis": '\n'.join(current_topic_lines).strip()})
+                current_topic_title = stripped[4:]
+                current_topic_lines = []
+            elif current_section == 'summary' and stripped:
+                summary_text += stripped + " "
+            elif current_section == 'participants' and stripped:
+                participants = [p.strip() for p in stripped.split(',') if p.strip()]
+            elif current_section == 'topics' and current_topic_title:
+                current_topic_lines.append(stripped)
+            elif current_section == 'keypoints' and stripped.startswith('- '):
+                key_points.append(stripped[2:])
+            elif current_section == 'actions' and stripped.startswith('- '):
+                action_items.append(stripped[2:].replace('[ ] ', '').replace('[x] ', ''))
+
+        if current_topic_title:
+            discussion_areas.append({"title": current_topic_title, "analysis": '\n'.join(current_topic_lines).strip()})
+
+        # Step 5: Save JSON
+        summary_path = self.output_dir / f"{audio_path.stem}_summary.json"
+        complete_data = {
+            "session_info": {
+                "name": session_name,
+                "audio_file": str(audio_path),
+                "transcript_file": str(transcript_data.get("transcript_file", "")),
+                "summary_file": str(summary_path),
+                "processed_at": datetime.now().isoformat(),
+                "duration_seconds": int(duration_seconds) if duration_seconds else None,
+                "duration_minutes": duration_minutes,
+                "configured_language": configured_language,
+                "detected_language": transcript_data.get("detected_language"),
+                "output_language": output_language,
+            },
+            "summary": summary_text.strip(),
+            "participants": participants,
+            "discussion_areas": discussion_areas,
+            "key_points": key_points,
+            "action_items": action_items,
+            "transcript": transcript_text,
+            "is_diarised": transcript_data.get("is_diarised", False),
+            "diarised_text": diarised_text,
+            "user_notes": notes_text,
+        }
+
+        with open(summary_path, 'w') as f:
+            json.dump(complete_data, f, indent=2)
+
+        # Also save .md
+        md_path = summary_path.with_suffix('.md')
+        md_lines = ['---']
+        md_meta = {
+            'title': session_name,
+            'date': complete_data['session_info']['processed_at'],
+            'duration_seconds': complete_data['session_info'].get('duration_seconds'),
+            'language': output_language,
+            'is_diarised': transcript_data.get('is_diarised', False),
+        }
+        for k, v in md_meta.items():
+            if v is None:
+                md_lines.append(f'{k}: null')
+            elif isinstance(v, bool):
+                md_lines.append(f'{k}: {"true" if v else "false"}')
+            elif isinstance(v, int):
+                md_lines.append(f'{k}: {v}')
+            else:
+                md_lines.append(f'{k}: "{v}"')
+        md_lines.append('---')
+        md_lines.append('')
+        md_lines.append(streamed_md)
+        md_lines.append('')
+        md_lines.append('## Transcript')
+        md_lines.append('')
+        md_lines.append(transcript_text)
+        if notes_text:
+            md_lines.append('')
+            md_lines.append('## User Notes')
+            md_lines.append('')
+            md_lines.append(notes_text)
+        md_path.write_text('\n'.join(md_lines), encoding='utf-8')
+
+        # Clean up
+        try:
+            audio_path.unlink()
+            print(f"🗑️ Cleaned up audio file: {audio_path}")
+        except Exception:
+            pass
+
+        state_file = Path("recorder_state.json")
+        if state_file.exists():
+            try:
+                state_file.unlink()
+            except Exception:
+                pass
+
+        print(f"✅ Complete processing saved: {summary_path}")
+        print(f"SAVED:{summary_path}", flush=True)
         return complete_data
 
 
@@ -505,8 +691,8 @@ def start(session_name):
                                         pass
                                     break
 
-                            print("📝 Transcribing...")
-                            result = loop.run_until_complete(recorder.process_recording(final_path, session_name, notes_text=_notes_text))
+                            print("📝 Starting transcription...")
+                            result = loop.run_until_complete(recorder.process_recording_streaming(final_path, session_name, notes_text=_notes_text))
 
                             print("✅ Complete processing finished!", flush=True)
                             print(f"📄 Transcript: {result['session_info']['transcript_file']}")
@@ -964,7 +1150,7 @@ def record(duration, session_name):
                                     break
 
                             print("📝 Starting transcription...")
-                            result = loop.run_until_complete(recorder.process_recording(final_path, session_name, notes_text=_notes_text2))
+                            result = loop.run_until_complete(recorder.process_recording_streaming(final_path, session_name, notes_text=_notes_text2))
 
                             print("✅ Complete processing finished!", flush=True)
                             print(f"📄 Transcript: {result['session_info']['transcript_file']}")

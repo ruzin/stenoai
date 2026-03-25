@@ -1445,9 +1445,28 @@ ipcMain.handle('start-recording-ui', async (_, sessionName) => {
       }
       console.log('Recording stdout:', output);
 
-      // Send real-time output to debug panel (same as runPythonScript)
+      // Parse streaming protocol + send to debug panel
       output.split('\n').forEach(line => {
-        if (line.trim()) sendDebugLog(line.trim());
+        if (line.startsWith('CHUNK:')) {
+          const encoded = line.slice(6);
+          try {
+            const chunk = Buffer.from(encoded, 'base64').toString('utf-8');
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('summary-chunk', { chunk, sessionName: actualSessionName });
+            }
+          } catch (e) { /* ignore decode errors */ }
+        } else if (line.startsWith('TITLE:')) {
+          const title = line.slice(6);
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('summary-title', { title, sessionName: actualSessionName });
+          }
+        } else if (line === 'STREAM_COMPLETE') {
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('summary-complete', { success: true, sessionName: actualSessionName });
+          }
+        } else if (line.trim()) {
+          sendDebugLog(line.trim());
+        }
       });
 
       // Background recording process handles complete pipeline - just notify when done
