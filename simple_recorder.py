@@ -571,42 +571,14 @@ Transcript:
         # Step 4: Parse streamed markdown into structured JSON
         parsed = self._parse_streamed_markdown(streamed_md)
 
-        # Step 5: Save JSON
-        summary_path = self.output_dir / f"{audio_path.stem}_summary.json"
-        complete_data = {
-            "session_info": {
-                "name": session_name,
-                "audio_file": str(audio_path),
-                "transcript_file": str(transcript_data.get("transcript_file", "")),
-                "summary_file": str(summary_path),
-                "processed_at": datetime.now().isoformat(),
-                "duration_seconds": int(duration_seconds) if duration_seconds else None,
-                "duration_minutes": duration_minutes,
-                "configured_language": configured_language,
-                "detected_language": transcript_data.get("detected_language"),
-                "output_language": output_language,
-            },
-            "summary": parsed["summary"],
-            "participants": parsed["participants"],
-            "discussion_areas": parsed["discussion_areas"],
-            "key_points": parsed["key_points"],
-            "action_items": parsed["action_items"],
-            "transcript": transcript_text,
-            "is_diarised": transcript_data.get("is_diarised", False),
-            "diarised_text": diarised_text,
-            "user_notes": notes_text,
-        }
-
-        with open(summary_path, 'w') as f:
-            json.dump(complete_data, f, indent=2)
-
-        # Also save .md
-        md_path = summary_path.with_suffix('.md')
+        # Step 5: Save as .md (primary format for new meetings)
+        summary_path = self.output_dir / f"{audio_path.stem}_summary.md"
+        processed_at = datetime.now().isoformat()
         md_lines = ['---']
         md_meta = {
             'title': session_name,
-            'date': complete_data['session_info']['processed_at'],
-            'duration_seconds': complete_data['session_info'].get('duration_seconds'),
+            'date': processed_at,
+            'duration_seconds': int(duration_seconds) if duration_seconds else None,
             'language': output_language,
             'is_diarised': transcript_data.get('is_diarised', False),
         }
@@ -618,7 +590,8 @@ Transcript:
             elif isinstance(v, int):
                 md_lines.append(f'{k}: {v}')
             else:
-                md_lines.append(f'{k}: "{v}"')
+                escaped = str(v).replace('\\', '\\\\').replace('"', '\\"')
+                md_lines.append(f'{k}: "{escaped}"')
         md_lines.append('---')
         md_lines.append('')
         md_lines.append(streamed_md)
@@ -631,7 +604,7 @@ Transcript:
             md_lines.append('## User Notes')
             md_lines.append('')
             md_lines.append(notes_text)
-        md_path.write_text('\n'.join(md_lines), encoding='utf-8')
+        summary_path.write_text('\n'.join(md_lines), encoding='utf-8')
 
         # Clean up
         try:
@@ -649,7 +622,13 @@ Transcript:
 
         print(f"✅ Complete processing saved: {summary_path}")
         print(f"SAVED:{summary_path}", flush=True)
-        return complete_data
+        return {
+            "session_info": {
+                "name": session_name,
+                "transcript_file": str(transcript_data.get("transcript_file", "")),
+                "summary_file": str(summary_path),
+            }
+        }
 
 
 # CLI Commands for Electron
@@ -921,47 +900,21 @@ def process_streaming(audio_file, name, notes):
             except Exception as e:
                 logger.warning(f"Title generation failed: {e}")
 
-        # Step 4: Save summary JSON (backward compatible)
+        # Step 4: Save as .md
         audio_path = Path(audio_file)
-        summary_path = recorder.output_dir / f"{audio_path.stem}_summary.json"
+        summary_path = recorder.output_dir / f"{audio_path.stem}_summary.md"
 
-        # Parse the streamed markdown into structured fields for JSON compat
+        # Parse the streamed markdown for title generation
         parsed = SimpleRecorder._parse_streamed_markdown(streamed_md)
 
-        complete_data = {
-            "session_info": {
-                "name": session_name,
-                "audio_file": str(audio_path),
-                "transcript_file": str(transcript_data.get("transcript_file", "")),
-                "summary_file": str(summary_path),
-                "processed_at": datetime.now().isoformat(),
-                "duration_seconds": int(duration_seconds) if duration_seconds else None,
-                "duration_minutes": duration_minutes,
-                "configured_language": configured_language,
-                "detected_language": transcript_data.get("detected_language"),
-                "output_language": output_language,
-            },
-            "summary": parsed["summary"],
-            "participants": parsed["participants"],
-            "discussion_areas": parsed["discussion_areas"],
-            "key_points": parsed["key_points"],
-            "action_items": parsed["action_items"],
-            "transcript": transcript_text,
-            "is_diarised": transcript_data.get("is_diarised", False),
-            "diarised_text": diarised_text,
-            "user_notes": notes_text,
-        }
-
-        with open(summary_path, 'w') as f:
-            json.dump(complete_data, f, indent=2)
-
-        # Also save as .md for agent-friendly access
-        md_path = summary_path.with_suffix('.md')
+        # Save as .md only (primary format for new meetings)
+        summary_path = summary_path.with_suffix('.md')
+        processed_at = datetime.now().isoformat()
         md_lines = ['---']
         md_meta = {
             'title': session_name,
-            'date': complete_data['session_info']['processed_at'],
-            'duration_seconds': complete_data['session_info'].get('duration_seconds'),
+            'date': processed_at,
+            'duration_seconds': int(duration_seconds) if duration_seconds else None,
             'language': output_language,
             'is_diarised': transcript_data.get('is_diarised', False),
         }
@@ -973,7 +926,8 @@ def process_streaming(audio_file, name, notes):
             elif isinstance(v, int):
                 md_lines.append(f'{k}: {v}')
             else:
-                md_lines.append(f'{k}: "{v}"')
+                escaped = str(v).replace('\\', '\\\\').replace('"', '\\"')
+                md_lines.append(f'{k}: "{escaped}"')
         md_lines.append('---')
         md_lines.append('')
         md_lines.append(streamed_md)
@@ -986,7 +940,7 @@ def process_streaming(audio_file, name, notes):
             md_lines.append('## User Notes')
             md_lines.append('')
             md_lines.append(notes_text)
-        md_path.write_text('\n'.join(md_lines), encoding='utf-8')
+        summary_path.write_text('\n'.join(md_lines), encoding='utf-8')
 
         # Clean up audio
         try:
