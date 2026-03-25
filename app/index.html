@@ -5267,6 +5267,7 @@ Session started - waiting for activity...
         let currentNotesSessionName = '';
 
         let _notesInputHandler = null;  // Track listener to avoid duplicates
+        let _notesSaveTimeout = null;   // Debounce timeout for auto-save
 
         function showNotesEditor(sessionName) {
             currentNotesSessionName = sessionName;
@@ -5302,7 +5303,6 @@ Session started - waiting for activity...
             if (_notesInputHandler) {
                 notesContent.removeEventListener('input', _notesInputHandler);
             }
-            let _notesSaveTimeout = null;
             _notesInputHandler = () => {
                 if (_notesSaveTimeout) clearTimeout(_notesSaveTimeout);
                 _notesSaveTimeout = setTimeout(() => {
@@ -5318,6 +5318,8 @@ Session started - waiting for activity...
         }
 
         async function hideNotesEditor() {
+            // Clear any pending debounce save
+            if (_notesSaveTimeout) { clearTimeout(_notesSaveTimeout); _notesSaveTimeout = null; }
             // Capture final notes
             const notesContent = document.getElementById('notes-content');
             currentNotesText = notesContent ? notesContent.innerText.trim() : '';
@@ -7152,6 +7154,10 @@ Session started - waiting for activity...
         let streamedMarkdown = '';
         let streamingActive = false;
 
+        function escapeHtml(str) {
+            return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
+
         function renderStreamingMarkdown(md) {
             const container = document.getElementById('streaming-output');
             if (!container) return;
@@ -7162,7 +7168,7 @@ Session started - waiting for activity...
             container.style.display = 'block';
             document.getElementById('notes-editor').style.display = 'block';
 
-            // Lightweight markdown to HTML
+            // Lightweight markdown to HTML (all text escaped to prevent XSS)
             let html = '';
             const lines = md.split('\n');
             let inList = false;
@@ -7170,19 +7176,21 @@ Session started - waiting for activity...
             for (const line of lines) {
                 if (line.startsWith('## ')) {
                     if (inList) { html += '</ul>'; inList = false; }
-                    html += `<h2 class="section-title" style="margin-top:28px;">${line.slice(3)}</h2>`;
+                    html += `<h2 class="section-title" style="margin-top:28px;">${escapeHtml(line.slice(3))}</h2>`;
                 } else if (line.startsWith('### ')) {
                     if (inList) { html += '</ul>'; inList = false; }
-                    html += `<h3 style="font-size:15px;font-weight:600;color:var(--text-primary);margin:16px 0 4px;">${line.slice(4)}</h3>`;
+                    html += `<h3 style="font-size:15px;font-weight:600;color:var(--text-primary);margin:16px 0 4px;">${escapeHtml(line.slice(4))}</h3>`;
                 } else if (line.startsWith('- ')) {
                     if (!inList) { html += '<ul style="list-style:none;padding:0;">'; inList = true; }
-                    const text = line.slice(2).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+                    const safe = escapeHtml(line.slice(2));
+                    const text = safe.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
                     html += `<li style="padding:4px 0 4px 20px;position:relative;color:var(--text-secondary);line-height:1.6;"><span style="position:absolute;left:0;top:11px;width:5px;height:5px;background:var(--text-muted);border-radius:50%;"></span>${text}</li>`;
                 } else if (line.trim() === '') {
                     if (inList) { html += '</ul>'; inList = false; }
                 } else {
                     if (inList) { html += '</ul>'; inList = false; }
-                    const text = line.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+                    const safe = escapeHtml(line);
+                    const text = safe.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
                     html += `<p style="color:var(--text-secondary);line-height:1.7;font-size:15px;margin:4px 0;">${text}</p>`;
                 }
             }

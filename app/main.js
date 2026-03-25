@@ -1322,6 +1322,17 @@ async function processNextInQueue() {
 
       let stderrBuf = '';
 
+      // Timeout: kill process if it runs longer than 30 minutes
+      const procTimeout = setTimeout(() => {
+        console.error('process-streaming timed out after 30 minutes, killing');
+        proc.kill();
+      }, 30 * 60 * 1000);
+
+      proc.on('error', (err) => {
+        clearTimeout(procTimeout);
+        reject(new Error(`process-streaming spawn error: ${err.message}`));
+      });
+
       proc.stdout.on('data', (data) => {
         const text = data.toString();
         // Parse protocol lines
@@ -1359,6 +1370,7 @@ async function processNextInQueue() {
       });
 
       proc.on('close', (code) => {
+        clearTimeout(procTimeout);
         if (code === 0) {
           console.log(`✅ Completed streaming processing: ${currentProcessingJob.sessionName}`);
           // Notify frontend that streaming is done and meeting is saved
@@ -1385,7 +1397,7 @@ async function processNextInQueue() {
     console.error(`❌ Processing failed for ${currentProcessingJob.sessionName}:`, error);
     trackEvent('error_occurred', { error_type: 'processing_queue' });
 
-    if (mainWindow) {
+    if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('processing-complete', {
         success: false,
         sessionName: currentProcessingJob.sessionName,

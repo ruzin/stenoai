@@ -96,7 +96,77 @@ class SimpleRecorder:
             return detected_language
 
         return "en"
-    
+
+    @staticmethod
+    def _load_user_notes(session_name: str, output_dir) -> Optional[str]:
+        """Load user notes file saved by Electron during recording."""
+        safe_name = re.sub(r'[^a-zA-Z0-9_-]', '_', session_name)
+        for candidate in [
+            Path(output_dir) / f"{safe_name}_notes.txt",
+            Path(output_dir) / f"{session_name}_notes.txt",
+        ]:
+            if candidate.exists():
+                try:
+                    text = candidate.read_text(encoding='utf-8').strip()
+                    if text:
+                        logger.info(f"Loaded user notes ({len(text)} chars)")
+                        return text
+                except Exception:
+                    pass
+                break
+        return None
+
+    @staticmethod
+    def _parse_streamed_markdown(md_text: str) -> dict:
+        """Parse streamed markdown summary into structured fields."""
+        summary_parts = []
+        participants = []
+        discussion_areas = []
+        key_points = []
+        action_items = []
+        current_section = None
+        current_topic_title = None
+        current_topic_lines = []
+
+        for line in md_text.split('\n'):
+            stripped = line.strip()
+            if stripped.startswith('## Summary'):
+                current_section = 'summary'
+            elif stripped.startswith('## Participants'):
+                current_section = 'participants'
+            elif stripped.startswith('## Key Topics'):
+                current_section = 'topics'
+            elif stripped.startswith('## Key Points'):
+                current_section = 'keypoints'
+            elif stripped.startswith('## Action Items'):
+                current_section = 'actions'
+            elif stripped.startswith('### ') and current_section == 'topics':
+                if current_topic_title:
+                    discussion_areas.append({"title": current_topic_title, "analysis": '\n'.join(current_topic_lines).strip()})
+                current_topic_title = stripped[4:]
+                current_topic_lines = []
+            elif current_section == 'summary' and stripped:
+                summary_parts.append(stripped)
+            elif current_section == 'participants' and stripped:
+                participants = [p.strip() for p in stripped.split(',') if p.strip()]
+            elif current_section == 'topics' and current_topic_title:
+                current_topic_lines.append(stripped)
+            elif current_section == 'keypoints' and stripped.startswith('- '):
+                key_points.append(stripped[2:])
+            elif current_section == 'actions' and stripped.startswith('- '):
+                action_items.append(stripped[2:].replace('[ ] ', '').replace('[x] ', ''))
+
+        if current_topic_title:
+            discussion_areas.append({"title": current_topic_title, "analysis": '\n'.join(current_topic_lines).strip()})
+
+        return {
+            "summary": ' '.join(summary_parts),
+            "participants": participants,
+            "discussion_areas": discussion_areas,
+            "key_points": key_points,
+            "action_items": action_items,
+        }
+
     def start_recording(self, session_name: str = "Recording") -> str:
         """Start recording audio."""
         state = self.get_state()
@@ -473,14 +543,15 @@ Transcript:
         )
 
         print("🧠 Generating summary...", flush=True)
-        streamed_md = ""
+        streamed_chunks = []
         for chunk in self.summarizer.summarize_transcript_streaming(
             text_for_summary, duration_minutes, output_language, notes_text
         ):
             encoded = base64.b64encode(chunk.encode('utf-8')).decode('ascii')
             sys.stdout.write(f"CHUNK:{encoded}\n")
             sys.stdout.flush()
-            streamed_md += chunk
+            streamed_chunks.append(chunk)
+        streamed_md = ''.join(streamed_chunks)
 
         print("STREAM_COMPLETE", flush=True)
 
@@ -498,45 +569,7 @@ Transcript:
                 logger.warning(f"Title generation failed: {e}")
 
         # Step 4: Parse streamed markdown into structured JSON
-        summary_text = ""
-        participants = []
-        discussion_areas = []
-        key_points = []
-        action_items = []
-        current_section = None
-        current_topic_title = None
-        current_topic_lines = []
-
-        for line in streamed_md.split('\n'):
-            stripped = line.strip()
-            if stripped.startswith('## Summary'):
-                current_section = 'summary'
-            elif stripped.startswith('## Participants'):
-                current_section = 'participants'
-            elif stripped.startswith('## Key Topics'):
-                current_section = 'topics'
-            elif stripped.startswith('## Key Points'):
-                current_section = 'keypoints'
-            elif stripped.startswith('## Action Items'):
-                current_section = 'actions'
-            elif stripped.startswith('### ') and current_section == 'topics':
-                if current_topic_title:
-                    discussion_areas.append({"title": current_topic_title, "analysis": '\n'.join(current_topic_lines).strip()})
-                current_topic_title = stripped[4:]
-                current_topic_lines = []
-            elif current_section == 'summary' and stripped:
-                summary_text += stripped + " "
-            elif current_section == 'participants' and stripped:
-                participants = [p.strip() for p in stripped.split(',') if p.strip()]
-            elif current_section == 'topics' and current_topic_title:
-                current_topic_lines.append(stripped)
-            elif current_section == 'keypoints' and stripped.startswith('- '):
-                key_points.append(stripped[2:])
-            elif current_section == 'actions' and stripped.startswith('- '):
-                action_items.append(stripped[2:].replace('[ ] ', '').replace('[x] ', ''))
-
-        if current_topic_title:
-            discussion_areas.append({"title": current_topic_title, "analysis": '\n'.join(current_topic_lines).strip()})
+        parsed = self._parse_streamed_markdown(streamed_md)
 
         # Step 5: Save JSON
         summary_path = self.output_dir / f"{audio_path.stem}_summary.json"
@@ -553,11 +586,11 @@ Transcript:
                 "detected_language": transcript_data.get("detected_language"),
                 "output_language": output_language,
             },
-            "summary": summary_text.strip(),
-            "participants": participants,
-            "discussion_areas": discussion_areas,
-            "key_points": key_points,
-            "action_items": action_items,
+            "summary": parsed["summary"],
+            "participants": parsed["participants"],
+            "discussion_areas": parsed["discussion_areas"],
+            "key_points": parsed["key_points"],
+            "action_items": parsed["action_items"],
             "transcript": transcript_text,
             "is_diarised": transcript_data.get("is_diarised", False),
             "diarised_text": diarised_text,
@@ -675,21 +708,7 @@ def start(session_name):
                             loop = asyncio.new_event_loop()
                             asyncio.set_event_loop(loop)
                             
-                            # Load user notes if saved by Electron
-                            _notes_text = None
-                            _safe_name = re.sub(r'[^a-zA-Z0-9_-]', '_', session_name)
-                            for _notes_candidate in [
-                                recorder.output_dir / f"{_safe_name}_notes.txt",
-                                recorder.output_dir / f"{session_name}_notes.txt",
-                            ]:
-                                if _notes_candidate.exists():
-                                    try:
-                                        _notes_text = _notes_candidate.read_text(encoding='utf-8').strip()
-                                        if _notes_text:
-                                            logger.info(f"Loaded user notes ({len(_notes_text)} chars)")
-                                    except Exception:
-                                        pass
-                                    break
+                            _notes_text = recorder._load_user_notes(session_name, recorder.output_dir)
 
                             print("📝 Starting transcription...")
                             result = loop.run_until_complete(recorder.process_recording_streaming(final_path, session_name, notes_text=_notes_text))
@@ -877,15 +896,15 @@ def process_streaming(audio_file, name, notes):
         )
 
         import base64
-        streamed_md = ""
+        streamed_chunks = []
         for chunk in recorder.summarizer.summarize_transcript_streaming(
             text_for_summary, duration_minutes, output_language, notes_text
         ):
-            # Base64-encode to avoid newlines breaking the line protocol
             encoded = base64.b64encode(chunk.encode('utf-8')).decode('ascii')
             sys.stdout.write(f"CHUNK:{encoded}\n")
             sys.stdout.flush()
-            streamed_md += chunk
+            streamed_chunks.append(chunk)
+        streamed_md = ''.join(streamed_chunks)
 
         print("STREAM_COMPLETE", flush=True)
 
@@ -907,52 +926,7 @@ def process_streaming(audio_file, name, notes):
         summary_path = recorder.output_dir / f"{audio_path.stem}_summary.json"
 
         # Parse the streamed markdown into structured fields for JSON compat
-        summary_text = ""
-        participants = []
-        discussion_areas = []
-        key_points = []
-        action_items = []
-
-        current_section = None
-        current_topic_title = None
-        current_topic_lines = []
-
-        for line in streamed_md.split('\n'):
-            stripped = line.strip()
-            if stripped.startswith('## Summary'):
-                current_section = 'summary'
-            elif stripped.startswith('## Participants'):
-                current_section = 'participants'
-            elif stripped.startswith('## Key Topics'):
-                current_section = 'topics'
-            elif stripped.startswith('## Key Points'):
-                current_section = 'keypoints'
-            elif stripped.startswith('## Action Items'):
-                current_section = 'actions'
-            elif stripped.startswith('### ') and current_section == 'topics':
-                if current_topic_title:
-                    discussion_areas.append({
-                        "title": current_topic_title,
-                        "analysis": '\n'.join(current_topic_lines).strip()
-                    })
-                current_topic_title = stripped[4:]
-                current_topic_lines = []
-            elif current_section == 'summary' and stripped:
-                summary_text += stripped + " "
-            elif current_section == 'participants' and stripped:
-                participants = [p.strip() for p in stripped.split(',') if p.strip()]
-            elif current_section == 'topics' and current_topic_title:
-                current_topic_lines.append(stripped)
-            elif current_section == 'keypoints' and stripped.startswith('- '):
-                key_points.append(stripped[2:])
-            elif current_section == 'actions' and stripped.startswith('- '):
-                action_items.append(stripped[2:].replace('[ ] ', '').replace('[x] ', ''))
-
-        if current_topic_title:
-            discussion_areas.append({
-                "title": current_topic_title,
-                "analysis": '\n'.join(current_topic_lines).strip()
-            })
+        parsed = SimpleRecorder._parse_streamed_markdown(streamed_md)
 
         complete_data = {
             "session_info": {
@@ -967,11 +941,11 @@ def process_streaming(audio_file, name, notes):
                 "detected_language": transcript_data.get("detected_language"),
                 "output_language": output_language,
             },
-            "summary": summary_text.strip(),
-            "participants": participants,
-            "discussion_areas": discussion_areas,
-            "key_points": key_points,
-            "action_items": action_items,
+            "summary": parsed["summary"],
+            "participants": parsed["participants"],
+            "discussion_areas": parsed["discussion_areas"],
+            "key_points": parsed["key_points"],
+            "action_items": parsed["action_items"],
             "transcript": transcript_text,
             "is_diarised": transcript_data.get("is_diarised", False),
             "diarised_text": diarised_text,
@@ -1134,23 +1108,10 @@ def record(duration, session_name):
                                 asyncio.set_event_loop(loop)
                             
                             # Load user notes if saved by Electron
-                            _notes_text2 = None
-                            _safe_name2 = re.sub(r'[^a-zA-Z0-9_-]', '_', session_name)
-                            for _nc2 in [
-                                recorder.output_dir / f"{_safe_name2}_notes.txt",
-                                recorder.output_dir / f"{session_name}_notes.txt",
-                            ]:
-                                if _nc2.exists():
-                                    try:
-                                        _notes_text2 = _nc2.read_text(encoding='utf-8').strip()
-                                        if _notes_text2:
-                                            logger.info(f"Loaded user notes ({len(_notes_text2)} chars)")
-                                    except Exception:
-                                        pass
-                                    break
+                            _notes_text = recorder._load_user_notes(session_name, recorder.output_dir)
 
                             print("📝 Starting transcription...")
-                            result = loop.run_until_complete(recorder.process_recording_streaming(final_path, session_name, notes_text=_notes_text2))
+                            result = loop.run_until_complete(recorder.process_recording_streaming(final_path, session_name, notes_text=_notes_text))
 
                             print("✅ Complete processing finished!", flush=True)
                             print(f"📄 Transcript: {result['session_info']['transcript_file']}")
