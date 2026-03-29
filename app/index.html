@@ -3044,33 +3044,130 @@
 
         /* Ask AI Button */
         .ask-ai-btn {
-            background: linear-gradient(135deg, rgba(129, 140, 248, 0.15) 0%, rgba(99, 102, 241, 0.15) 100%);
-            border: 1px solid rgba(129, 140, 248, 0.3);
-            color: var(--accent-primary);
-            padding: 6px 12px;
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 12px;
-            font-weight: 500;
-            transition: all 0.2s ease;
+            display: none;
+        }
+
+        .ask-bar {
+            position: sticky;
+            bottom: 0;
+            z-index: 10;
+            padding: 16px 0 20px;
+        }
+
+        .ask-bar::before {
+            content: '';
+            position: absolute;
+            top: -40px;
+            left: -48px;
+            right: -48px;
+            bottom: 0;
+            background: linear-gradient(to top, var(--bg-deep) 70%, transparent);
+            pointer-events: none;
+            z-index: -1;
+        }
+
+        .ask-bar-response {
+            background: var(--bg-elevated);
+            border: 1px solid var(--border-subtle);
+            border-radius: 12px 12px 0 0;
+            border-bottom: none;
+            padding: 14px 16px;
+            margin-bottom: -1px;
+            display: none;
+            font-size: 14px;
+            line-height: 1.7;
+            color: var(--text-primary);
+            max-height: 240px;
+            overflow-y: auto;
+        }
+
+        .ask-bar-response.show {
+            display: block;
+        }
+
+        .ask-bar-response.loading {
+            color: var(--text-muted);
+        }
+
+        .ask-bar-response.error {
+            color: #ef4444;
+        }
+
+        .ask-bar-response ul {
+            margin: 6px 0;
+            padding-left: 20px;
+        }
+
+        .ask-bar-response li {
+            margin: 2px 0;
+        }
+
+        .ask-bar-inner {
             display: flex;
             align-items: center;
-            gap: 6px;
+            background: var(--bg-deep);
+            border: 1px solid var(--border-default);
+            border-radius: 14px;
+            transition: border-color 0.15s ease;
         }
 
-        .ask-ai-btn:hover {
-            background: linear-gradient(135deg, rgba(129, 140, 248, 0.25) 0%, rgba(99, 102, 241, 0.25) 100%);
+        .ask-bar-response.show + .ask-bar-inner {
+            border-radius: 0 0 12px 12px;
+        }
+
+        .ask-bar-inner:focus-within {
             border-color: var(--accent-primary);
-            transform: translateY(-1px);
         }
 
-        .ask-ai-btn kbd {
-            background: rgba(129, 140, 248, 0.2);
-            padding: 2px 6px;
-            border-radius: 4px;
-            font-size: 10px;
+        .ask-bar-input {
+            flex: 1;
+            background: none;
+            border: none;
+            outline: none;
+            padding: 14px 16px;
+            font-size: 15px;
+            color: var(--text-primary);
             font-family: inherit;
-            margin-left: 4px;
+        }
+
+        .ask-bar-input::placeholder {
+            color: var(--text-muted);
+        }
+
+        .ask-bar-submit {
+            background: none;
+            border: none;
+            padding: 10px 14px;
+            cursor: pointer;
+            color: var(--text-muted);
+            display: flex;
+            align-items: center;
+            transition: color 0.15s ease;
+            flex-shrink: 0;
+        }
+
+        .ask-bar-submit:hover {
+            color: var(--accent-primary);
+        }
+
+        .ask-bar-submit:disabled {
+            opacity: 0.3;
+            cursor: default;
+        }
+
+        .ask-bar-submit svg {
+            width: 16px;
+            height: 16px;
+        }
+
+        [data-theme="light"] .ask-bar-inner,
+        [data-theme="light"] .ask-bar-response {
+            background: var(--bg-deep);
+            border-color: #c4c4cc;
+        }
+
+        [data-theme="light"] .ask-bar-inner:focus-within {
+            border-color: var(--accent-primary);
         }
 
         /* Light mode specific overrides */
@@ -3486,6 +3583,20 @@ Ask Steno
                         </button>
                     </div>
                 </div>
+                <!-- Bottom ask bar -->
+                <div class="ask-bar" id="ask-bar" style="display: none;">
+                  <div class="ask-bar-response" id="ask-bar-response"></div>
+                  <div class="ask-bar-inner">
+                      <input type="text" class="ask-bar-input" id="ask-bar-input" placeholder="Ask anything" autocomplete="off">
+                      <button class="ask-bar-submit" id="ask-bar-submit" title="Ask">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                              <line x1="22" y1="2" x2="11" y2="13"></line>
+                              <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                          </svg>
+                      </button>
+                  </div>
+                </div>
+
               </div>
             </div>
         </div>
@@ -5233,6 +5344,7 @@ Session started - waiting for activity...
             
             // TEMPORARY: Show reprocess button for all meetings (for testing)
             reprocessBtn.style.display = 'flex';
+            document.getElementById('ask-bar').style.display = '';
             
             /* ORIGINAL LOGIC (commented out for testing):
             // Show/hide reprocess button based on meeting quality
@@ -5298,6 +5410,7 @@ Session started - waiting for activity...
             document.getElementById('ask-ai-btn').style.display = 'none';
             document.getElementById('copy-notes-btn').style.display = 'none';
             document.getElementById('reprocess-btn').style.display = 'none';
+            document.getElementById('ask-bar').style.display = 'none';
 
             // Auto-save notes on input (debounced 2s) — remove previous listener first
             if (_notesInputHandler) {
@@ -6379,16 +6492,68 @@ Session started - waiting for activity...
             }
         }
 
-        // Ask AI button click handler
+        // Ask AI button click handler (legacy, hidden)
         askAiBtn.addEventListener('click', showAiQueryPopup);
 
-        // AI Query close button
+        // Bottom bar inline query
+        const askBarInput = document.getElementById('ask-bar-input');
+        const askBarSubmit = document.getElementById('ask-bar-submit');
+        const askBarResponse = document.getElementById('ask-bar-response');
+
+        async function submitBarQuery() {
+            const question = askBarInput.value.trim();
+            if (!question) return;
+            if (!selectedMeeting) return;
+
+            const summaryFile = selectedMeeting.session_info?.summary_file;
+            if (!summaryFile) return;
+
+            askBarSubmit.disabled = true;
+            askBarResponse.className = 'ask-bar-response show loading';
+            askBarResponse.textContent = 'Thinking...';
+
+            try {
+                const result = await ipcRenderer.invoke('query-transcript', summaryFile, question);
+                askBarResponse.classList.remove('loading');
+                if (result.success) {
+                    askBarResponse.innerHTML = formatAiResponse(result.answer);
+                } else {
+                    askBarResponse.classList.add('error');
+                    askBarResponse.textContent = result.error || 'Failed to get response';
+                }
+            } catch (error) {
+                askBarResponse.classList.remove('loading');
+                askBarResponse.classList.add('error');
+                askBarResponse.textContent = 'Failed: ' + error.message;
+            } finally {
+                askBarSubmit.disabled = false;
+            }
+        }
+
+        askBarSubmit.addEventListener('click', submitBarQuery);
+
+        askBarInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                submitBarQuery();
+            }
+            if (e.key === 'Escape') {
+                askBarInput.blur();
+                askBarResponse.classList.remove('show');
+            }
+        });
+
+        // Close response when clicking outside the ask bar
+        document.addEventListener('click', (e) => {
+            const askBar = document.getElementById('ask-bar');
+            if (askBar && !askBar.contains(e.target) && askBarResponse.classList.contains('show')) {
+                askBarResponse.classList.remove('show');
+            }
+        });
+
+        // Legacy AI Query popup handlers (kept for backward compat)
         aiQueryClose.addEventListener('click', hideAiQueryPopup);
-
-        // AI Query submit button
         aiQuerySubmit.addEventListener('click', submitAiQuery);
-
-        // AI Query input - submit on Enter
         aiQueryInput.addEventListener('keydown', (e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
@@ -7196,6 +7361,7 @@ Session started - waiting for activity...
                 document.getElementById('ask-ai-btn').style.display = 'none';
                 document.getElementById('copy-notes-btn').style.display = 'none';
                 document.getElementById('reprocess-btn').style.display = 'none';
+                document.getElementById('ask-bar').style.display = 'none';
                 const editor = document.getElementById('notes-editor');
                 if (editor) editor.style.display = 'block';
             }
@@ -7253,6 +7419,7 @@ Session started - waiting for activity...
                         // Show action buttons and reset reprocess button state
                         document.getElementById('ask-ai-btn').style.display = '';
                         document.getElementById('copy-notes-btn').style.display = '';
+                        document.getElementById('ask-bar').style.display = '';
                         const rpBtn = document.getElementById('reprocess-btn');
                         rpBtn.style.display = '';
                         rpBtn.disabled = false;
@@ -7272,6 +7439,7 @@ Session started - waiting for activity...
                         document.getElementById('ask-ai-btn').style.display = '';
                         document.getElementById('copy-notes-btn').style.display = '';
                         document.getElementById('reprocess-btn').style.display = '';
+                        document.getElementById('ask-bar').style.display = '';
                         const currentTitle = detailTitle.textContent;
                         const idx = filteredMeetings.findIndex(m =>
                             m.session_info?.name === currentTitle ||
