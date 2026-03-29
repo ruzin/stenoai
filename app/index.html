@@ -3085,6 +3085,76 @@
             display: block;
         }
 
+        .ask-bar-transcript {
+            background: var(--bg-elevated);
+            border: 1px solid var(--border-subtle);
+            border-radius: 12px 12px 0 0;
+            border-bottom: none;
+            margin-bottom: -1px;
+            display: none;
+            max-height: 280px;
+            overflow-y: auto;
+        }
+
+        .ask-bar-transcript.show {
+            display: block;
+        }
+
+        .ask-bar-transcript-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 12px;
+            border-bottom: 1px solid var(--border-subtle);
+            position: sticky;
+            top: 0;
+            background: var(--bg-elevated);
+            z-index: 1;
+        }
+
+        .ask-bar-transcript-header span {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+        }
+
+        .ask-bar-transcript-header button {
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            padding: 2px 4px;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+        }
+
+        .ask-bar-transcript-header button:hover {
+            color: var(--text-primary);
+            background: var(--bg-surface);
+        }
+
+        .ask-bar-transcript-body {
+            padding: 12px 14px;
+            font-size: 13px;
+            line-height: 1.7;
+            color: var(--text-secondary);
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+
+        .ask-bar-transcript.show + .ask-bar-response.show + .ask-bar-inner,
+        .ask-bar-transcript.show + .ask-bar-inner {
+            border-radius: 0 0 14px 14px;
+        }
+
+        [data-theme="light"] .ask-bar-transcript,
+        [data-theme="light"] .ask-bar-transcript-header {
+            background: var(--bg-deep);
+        }
+
         .ask-bar-response.loading {
             color: var(--text-muted);
         }
@@ -3109,6 +3179,50 @@
             border: 1px solid var(--border-default);
             border-radius: 14px;
             transition: border-color 0.15s ease;
+        }
+
+        .ask-bar-left {
+            display: flex;
+            align-items: center;
+            gap: 2px;
+            padding: 8px 4px 8px 10px;
+            border-right: 1px solid var(--border-subtle);
+            flex-shrink: 0;
+        }
+
+        .ask-bar-left button {
+            background: none;
+            border: none;
+            padding: 4px;
+            cursor: pointer;
+            color: var(--text-muted);
+            display: flex;
+            align-items: center;
+            border-radius: 4px;
+            transition: color 0.15s ease, background 0.15s ease;
+        }
+
+        .ask-bar-left button:hover {
+            color: var(--text-primary);
+            background: var(--bg-surface);
+        }
+
+        .ask-bar-left button svg {
+            width: 16px;
+            height: 16px;
+        }
+
+        .ask-bar-left .bar-transcript-btn svg {
+            width: 18px;
+            height: 18px;
+        }
+
+        .ask-bar-left .bar-chevron {
+            transition: transform 0.2s ease;
+        }
+
+        .ask-bar-left .bar-chevron.open {
+            transform: rotate(180deg);
         }
 
         .ask-bar-response.show + .ask-bar-inner {
@@ -3585,8 +3699,44 @@ Ask Steno
                 </div>
                 <!-- Bottom ask bar -->
                 <div class="ask-bar" id="ask-bar" style="display: none;">
+                  <div class="ask-bar-transcript" id="ask-bar-transcript">
+                      <div class="ask-bar-transcript-header">
+                          <span>Transcript</span>
+                          <div style="display: flex; align-items: center; gap: 2px;">
+                              <button id="ask-bar-transcript-copy" title="Copy transcript">
+                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                      <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                                      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                                  </svg>
+                              </button>
+                              <button id="ask-bar-transcript-close" title="Close">
+                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                                      <line x1="18" y1="6" x2="6" y2="18"></line>
+                                      <line x1="6" y1="6" x2="18" y2="18"></line>
+                                  </svg>
+                              </button>
+                          </div>
+                      </div>
+                      <div class="ask-bar-transcript-body" id="ask-bar-transcript-body"></div>
+                  </div>
                   <div class="ask-bar-response" id="ask-bar-response"></div>
                   <div class="ask-bar-inner">
+                      <div class="ask-bar-left" id="ask-bar-left">
+                          <button class="bar-transcript-btn" id="bar-transcript-btn" title="Toggle transcript">
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                  <line x1="4" y1="6" x2="4" y2="18"></line>
+                                  <line x1="8" y1="10" x2="8" y2="18"></line>
+                                  <line x1="12" y1="4" x2="12" y2="18"></line>
+                                  <line x1="16" y1="8" x2="16" y2="18"></line>
+                                  <line x1="20" y1="12" x2="20" y2="18"></line>
+                              </svg>
+                          </button>
+                          <button class="bar-chevron" id="bar-chevron" title="Show transcript">
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                  <polyline points="6 9 12 15 18 9"></polyline>
+                              </svg>
+                          </button>
+                      </div>
                       <input type="text" class="ask-bar-input" id="ask-bar-input" placeholder="Ask anything" autocomplete="off">
                       <button class="ask-bar-submit" id="ask-bar-submit" title="Ask">
                           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -6543,11 +6693,60 @@ Session started - waiting for activity...
             }
         });
 
-        // Close response when clicking outside the ask bar
+        // Transcript toggle from bottom bar
+        const barChevron = document.getElementById('bar-chevron');
+        const barTranscriptBtn = document.getElementById('bar-transcript-btn');
+
+        const askBarTranscript = document.getElementById('ask-bar-transcript');
+        const askBarTranscriptBody = document.getElementById('ask-bar-transcript-body');
+
+        function toggleTranscriptPanel() {
+            const isOpen = askBarTranscript.classList.contains('show');
+            if (isOpen) {
+                askBarTranscript.classList.remove('show');
+                barChevron.classList.remove('open');
+            } else {
+                // Copy transcript content
+                const transcriptEl = document.getElementById('detail-transcript');
+                askBarTranscriptBody.textContent = transcriptEl ? transcriptEl.textContent : '';
+                askBarTranscript.classList.add('show');
+                barChevron.classList.add('open');
+                // Scroll to bottom of transcript
+                askBarTranscriptBody.scrollTop = askBarTranscriptBody.scrollHeight;
+            }
+        }
+
+        barChevron.addEventListener('click', toggleTranscriptPanel);
+        barTranscriptBtn.addEventListener('click', toggleTranscriptPanel);
+        document.getElementById('ask-bar-transcript-close').addEventListener('click', (e) => {
+            e.stopPropagation();
+            askBarTranscript.classList.remove('show');
+            barChevron.classList.remove('open');
+        });
+        document.getElementById('ask-bar-transcript-copy').addEventListener('click', (e) => {
+            e.stopPropagation();
+            const text = askBarTranscriptBody.textContent;
+            if (text) {
+                navigator.clipboard.writeText(text);
+                const btn = e.currentTarget;
+                const origHTML = btn.innerHTML;
+                btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>';
+                setTimeout(() => { btn.innerHTML = origHTML; }, 1500);
+                log('Transcript copied to clipboard');
+            }
+        });
+
+        // Close response/transcript when clicking outside the ask bar
         document.addEventListener('click', (e) => {
             const askBar = document.getElementById('ask-bar');
-            if (askBar && !askBar.contains(e.target) && askBarResponse.classList.contains('show')) {
-                askBarResponse.classList.remove('show');
+            if (askBar && !askBar.contains(e.target)) {
+                if (askBarResponse.classList.contains('show')) {
+                    askBarResponse.classList.remove('show');
+                }
+                if (askBarTranscript.classList.contains('show')) {
+                    askBarTranscript.classList.remove('show');
+                    barChevron.classList.remove('open');
+                }
             }
         });
 
