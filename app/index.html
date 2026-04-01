@@ -3505,7 +3505,7 @@
                     <div id="calendar-sidebar-list"></div>
                 </div>
                 <div class="sidebar-title">
-                    <h2>Meetings</h2>
+                    <h2>Notes</h2>
                 </div>
                 <div class="search-wrapper">
                     <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -4845,7 +4845,7 @@ Session started - waiting for activity...
                 ondragleave="this.classList.remove('drag-over')"
                 ondrop="handleAllMeetingsDrop(event)">
                 ${folderIcon('#71717a')}
-                All Meetings
+                All Notes
                 <span class="folder-count">${allCount}</span>
             </div>`;
             for (const f of folders) {
@@ -4983,7 +4983,7 @@ Session started - waiting for activity...
             const name = folder ? folder.name : 'this folder';
             const count = meetings.filter(m => (m.folders || []).includes(contextFolderId)).length;
             const msg = count > 0
-                ? `Delete folder "${name}"?\n\n${count} meeting${count === 1 ? '' : 's'} will be moved back to All Meetings. No recordings or transcripts will be deleted.`
+                ? `Delete folder "${name}"?\n\n${count} meeting${count === 1 ? '' : 's'} will be moved back to All Notes. No recordings or transcripts will be deleted.`
                 : `Delete folder "${name}"?\n\nNo recordings or transcripts will be deleted.`;
             if (!confirm(msg)) { contextFolderId = null; return; }
             await deleteFolder_(contextFolderId);
@@ -5050,7 +5050,7 @@ Session started - waiting for activity...
             let html = '<div style="padding: 4px 10px; font-size: 11px; color: var(--text-muted); font-weight: 500;">Move to...</div>';
             html += `<div class="context-menu-item" onclick="event.stopPropagation(); moveToAllMeetings()">
                 ${folderIcon('#71717a')}
-                All Meetings ${isUnfiled ? '<span style="color: var(--text-muted); font-size: 11px;">(current)</span>' : ''}
+                All Notes ${isUnfiled ? '<span style="color: var(--text-muted); font-size: 11px;">(current)</span>' : ''}
             </div>`;
             for (const f of folders) {
                 const inFolder = meetingFolders.includes(f.id);
