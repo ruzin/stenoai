@@ -5331,6 +5331,51 @@ Session started - waiting for activity...
             });
         }
         
+        // Populate the detail-transcript element with meeting transcript data
+        function populateTranscript(meeting) {
+            if (!meeting) return;
+            if (meeting.is_diarised && meeting.diarised_text) {
+                detailTranscript.innerHTML = '';
+                detailTranscript.style.whiteSpace = 'normal';
+                const blocks = meeting.diarised_text.split(/(?=\[You\]|\[Others\])/);
+                blocks.forEach(block => {
+                    const trimmed = block.trim();
+                    if (!trimmed) return;
+                    const div = document.createElement('div');
+                    div.style.cssText = 'margin-bottom:12px;padding:8px 12px;border-radius:6px;white-space:normal;';
+                    if (trimmed.startsWith('[You]')) {
+                        div.style.borderLeft = '3px solid var(--accent-primary, #818cf8)';
+                        div.style.background = 'rgba(129, 140, 248, 0.06)';
+                        const label = document.createElement('div');
+                        label.textContent = 'You';
+                        label.style.cssText = 'display:inline-block;font-size:11px;font-weight:600;color:var(--accent-primary,#818cf8);background:rgba(129,140,248,0.12);padding:1px 6px;border-radius:3px;margin-bottom:6px;';
+                        div.appendChild(label);
+                        const text = document.createElement('div');
+                        text.style.cssText = 'margin:0;line-height:1.7;';
+                        text.textContent = trimmed.replace('[You]', '').trim();
+                        div.appendChild(text);
+                    } else if (trimmed.startsWith('[Others]')) {
+                        div.style.borderLeft = '3px solid var(--text-muted, #888)';
+                        div.style.background = 'rgba(136, 136, 136, 0.06)';
+                        const label = document.createElement('div');
+                        label.textContent = 'Others';
+                        label.style.cssText = 'display:inline-block;font-size:11px;font-weight:600;color:var(--text-muted,#888);background:rgba(136,136,136,0.12);padding:1px 6px;border-radius:3px;margin-bottom:6px;';
+                        div.appendChild(label);
+                        const text = document.createElement('div');
+                        text.style.cssText = 'margin:0;line-height:1.7;';
+                        text.textContent = trimmed.replace('[Others]', '').trim();
+                        div.appendChild(text);
+                    } else {
+                        div.textContent = trimmed;
+                    }
+                    detailTranscript.appendChild(div);
+                });
+            } else {
+                detailTranscript.style.whiteSpace = 'pre-wrap';
+                detailTranscript.textContent = meeting.transcript || 'No transcript available';
+            }
+        }
+
         // Select and display meeting details
         function selectMeeting(index) {
             selectedMeeting = filteredMeetings[index];
@@ -5439,47 +5484,7 @@ Session started - waiting for activity...
             }
             
             // Transcript — render diarised view if available
-            if (selectedMeeting.is_diarised && selectedMeeting.diarised_text) {
-                detailTranscript.innerHTML = '';
-                // Override pre-wrap on container so block elements render properly
-                detailTranscript.style.whiteSpace = 'normal';
-                const blocks = selectedMeeting.diarised_text.split(/(?=\[You\]|\[Others\])/);
-                blocks.forEach(block => {
-                    const trimmed = block.trim();
-                    if (!trimmed) return;
-                    const div = document.createElement('div');
-                    div.style.cssText = 'margin-bottom:12px;padding:8px 12px;border-radius:6px;white-space:normal;';
-                    if (trimmed.startsWith('[You]')) {
-                        div.style.borderLeft = '3px solid var(--accent-primary, #818cf8)';
-                        div.style.background = 'rgba(129, 140, 248, 0.06)';
-                        const label = document.createElement('div');
-                        label.textContent = 'You';
-                        label.style.cssText = 'display:inline-block;font-size:11px;font-weight:600;color:var(--accent-primary,#818cf8);background:rgba(129,140,248,0.12);padding:1px 6px;border-radius:3px;margin-bottom:6px;';
-                        div.appendChild(label);
-                        const text = document.createElement('div');
-                        text.style.cssText = 'margin:0;line-height:1.7;';
-                        text.textContent = trimmed.replace('[You]', '').trim();
-                        div.appendChild(text);
-                    } else if (trimmed.startsWith('[Others]')) {
-                        div.style.borderLeft = '3px solid var(--text-muted, #888)';
-                        div.style.background = 'rgba(136, 136, 136, 0.06)';
-                        const label = document.createElement('div');
-                        label.textContent = 'Others';
-                        label.style.cssText = 'display:inline-block;font-size:11px;font-weight:600;color:var(--text-muted,#888);background:rgba(136,136,136,0.12);padding:1px 6px;border-radius:3px;margin-bottom:6px;';
-                        div.appendChild(label);
-                        const text = document.createElement('div');
-                        text.style.cssText = 'margin:0;line-height:1.7;';
-                        text.textContent = trimmed.replace('[Others]', '').trim();
-                        div.appendChild(text);
-                    } else {
-                        div.textContent = trimmed;
-                    }
-                    detailTranscript.appendChild(div);
-                });
-            } else {
-                detailTranscript.style.whiteSpace = 'pre-wrap';
-                detailTranscript.textContent = selectedMeeting.transcript || 'No transcript available';
-            }
+            populateTranscript(selectedMeeting);
             
             // Set reprocess button state based on whether this meeting is currently processing
             const isCurrentlyProcessing = processingMeeting && processingMeeting.session_info?.summary_file === selectedMeeting.session_info?.summary_file;
@@ -6712,7 +6717,13 @@ Session started - waiting for activity...
             } else {
                 // Copy transcript content
                 const transcriptEl = document.getElementById('detail-transcript');
-                askBarTranscriptBody.textContent = transcriptEl ? transcriptEl.textContent : '';
+                if (transcriptEl) {
+                    askBarTranscriptBody.innerHTML = transcriptEl.innerHTML;
+                    askBarTranscriptBody.style.whiteSpace = transcriptEl.style.whiteSpace || 'pre-wrap';
+                } else {
+                    askBarTranscriptBody.textContent = '';
+                    askBarTranscriptBody.style.whiteSpace = 'pre-wrap';
+                }
                 askBarTranscript.classList.add('show');
                 barChevron.classList.add('open');
                 // Scroll to bottom of transcript
@@ -7634,7 +7645,10 @@ Session started - waiting for activity...
                             m.session_info?.name === currentTitle ||
                             m.session_info?.name === data.sessionName
                         );
-                        if (meetingIdx !== -1) selectedMeeting = filteredMeetings[meetingIdx];
+                        if (meetingIdx !== -1) {
+                            selectedMeeting = filteredMeetings[meetingIdx];
+                            populateTranscript(selectedMeeting);
+                        }
                     } else {
                         // Non-streaming path or no streamed content — use standard selectMeeting
                         document.getElementById('notes-editor').style.display = 'none';
