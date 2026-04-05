@@ -42,6 +42,22 @@ class WhisperTranscriberAutoLanguageTests(unittest.TestCase):
         self.assertIsNone(result["detected_language"])
         self.assertNotIn("language", model.transcribe.call_args.kwargs)
 
+    def test_explicit_language_skips_auto_detection(self):
+        model = Mock()
+        segment = Mock()
+        segment.text = " Bonjour "
+        model.transcribe.return_value = [segment]
+
+        transcriber = self._build_transcriber(model)
+        result = transcriber._transcribe_whisper_cpp(
+            Path("/tmp/stenoai-test.wav"),
+            language="fr",
+        )
+
+        self.assertEqual(result["text"], "Bonjour")
+        self.assertIsNone(result["detected_language"])
+        model.auto_detect_language.assert_not_called()
+        self.assertEqual(model.transcribe.call_args.kwargs.get("language"), "fr")
 
 if __name__ == "__main__":
     unittest.main()
