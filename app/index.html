@@ -1764,13 +1764,16 @@
 
         .meeting-detail.show {
             display: flex;
-            justify-content: center;
+            flex-direction: column;
         }
 
         .document-body {
             max-width: 900px;
             width: 100%;
-            padding: 40px 32px 80px;
+            margin: 0 auto;
+            padding: 40px 32px 32px;
+            box-sizing: border-box;
+            flex: 1 0 auto;
         }
 
         .notes-editor {
@@ -3061,11 +3064,11 @@
         .ask-bar::before {
             content: '';
             position: absolute;
-            top: -56px;
-            left: -48px;
-            right: -48px;
+            top: -40px;
+            left: 0;
+            right: 0;
             bottom: 0;
-            background: linear-gradient(to top, var(--bg-deep) 55%, rgba(0,0,0,0) 100%);
+            background: linear-gradient(to top, var(--bg-deep) 60%, rgba(0,0,0,0) 100%);
             pointer-events: none;
             z-index: -1;
         }
@@ -3708,8 +3711,9 @@ Ask Steno
                         </button>
                     </div>
                 </div>
-                <!-- Bottom ask bar -->
-                <div class="ask-bar" id="ask-bar" style="display: none;">
+              </div>
+              <!-- Bottom ask bar (sibling of document-body, sticky inside meeting-detail flex column) -->
+              <div class="ask-bar" id="ask-bar" style="display: none;">
                   <div class="ask-bar-transcript" id="ask-bar-transcript">
                       <div class="ask-bar-transcript-header">
                           <span>Transcript</span>
@@ -3756,8 +3760,6 @@ Ask Steno
                           </svg>
                       </button>
                   </div>
-                </div>
-
               </div>
             </div>
         </div>
