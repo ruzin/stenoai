@@ -3055,17 +3055,17 @@
             position: sticky;
             bottom: 0;
             z-index: 10;
-            padding: 16px 0 20px;
+            padding: 16px 0 24px;
         }
 
         .ask-bar::before {
             content: '';
             position: absolute;
-            top: -40px;
+            top: -56px;
             left: -48px;
             right: -48px;
             bottom: 0;
-            background: linear-gradient(to top, var(--bg-deep) 70%, transparent);
+            background: linear-gradient(to top, var(--bg-deep) 55%, rgba(0,0,0,0) 100%);
             pointer-events: none;
             z-index: -1;
         }
@@ -3073,16 +3073,17 @@
         .ask-bar-response {
             background: var(--bg-elevated);
             border: 1px solid var(--border-subtle);
-            border-radius: 12px 12px 0 0;
-            border-bottom: none;
-            padding: 14px 16px;
-            margin-bottom: -1px;
+            border-radius: 18px 18px 6px 6px;
+            padding: 14px 18px;
+            margin: 0 auto 8px;
+            max-width: 680px;
             display: none;
             font-size: 14px;
             line-height: 1.7;
             color: var(--text-primary);
             max-height: 240px;
             overflow-y: auto;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
         }
 
         .ask-bar-response.show {
@@ -3092,12 +3093,13 @@
         .ask-bar-transcript {
             background: var(--bg-elevated);
             border: 1px solid var(--border-subtle);
-            border-radius: 12px 12px 0 0;
-            border-bottom: none;
-            margin-bottom: -1px;
+            border-radius: 18px 18px 6px 6px;
+            margin: 0 auto 8px;
+            max-width: 680px;
             display: none;
             max-height: 280px;
             overflow-y: auto;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
         }
 
         .ask-bar-transcript.show {
@@ -3151,7 +3153,7 @@
 
         .ask-bar-transcript.show + .ask-bar-response.show + .ask-bar-inner,
         .ask-bar-transcript.show + .ask-bar-inner {
-            border-radius: 0 0 14px 14px;
+            border-radius: 999px;
         }
 
         [data-theme="light"] .ask-bar-transcript,
@@ -3179,18 +3181,22 @@
         .ask-bar-inner {
             display: flex;
             align-items: center;
-            background: var(--bg-deep);
-            border: 1px solid var(--border-default);
-            border-radius: 14px;
-            transition: border-color 0.15s ease;
+            background: var(--bg-elevated);
+            border: 1px solid var(--border-subtle);
+            border-radius: 999px;
+            max-width: 680px;
+            margin: 0 auto;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.22), 0 2px 6px rgba(0, 0, 0, 0.08);
+            backdrop-filter: saturate(160%) blur(10px);
+            -webkit-backdrop-filter: saturate(160%) blur(10px);
+            transition: border-color 0.15s ease, box-shadow 0.15s ease;
         }
 
         .ask-bar-left {
             display: flex;
             align-items: center;
             gap: 2px;
-            padding: 8px 4px 8px 10px;
-            border-right: 1px solid var(--border-subtle);
+            padding: 6px 6px 6px 14px;
             flex-shrink: 0;
         }
 
@@ -3230,11 +3236,12 @@
         }
 
         .ask-bar-response.show + .ask-bar-inner {
-            border-radius: 0 0 12px 12px;
+            border-radius: 999px;
         }
 
         .ask-bar-inner:focus-within {
             border-color: var(--accent-primary);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.24), 0 0 0 3px rgba(129, 140, 248, 0.18);
         }
 
         .ask-bar-input {
@@ -3242,7 +3249,7 @@
             background: none;
             border: none;
             outline: none;
-            padding: 14px 16px;
+            padding: 13px 8px 13px 4px;
             font-size: 15px;
             color: var(--text-primary);
             font-family: inherit;
@@ -3255,7 +3262,7 @@
         .ask-bar-submit {
             background: none;
             border: none;
-            padding: 10px 14px;
+            padding: 10px 18px 10px 12px;
             cursor: pointer;
             color: var(--text-muted);
             display: flex;
