@@ -420,6 +420,17 @@ class WhisperTranscriber:
                     logger.error(f"Channel {ch_idx} extraction failed: {result.stderr.decode()}")
                     return None, None, None
 
+            # If ffprobe couldn't get duration from the container (e.g. WebM),
+            # calculate it from the split WAV file
+            if duration is None:
+                try:
+                    import wave
+                    with wave.open(str(mic_path), 'rb') as wf:
+                        duration = wf.getnframes() / wf.getframerate()
+                        logger.info(f"Duration from split WAV: {duration:.1f}s")
+                except Exception as e:
+                    logger.warning(f"Could not get duration from WAV: {e}")
+
             logger.info("Stereo channels split successfully")
             return mic_path, system_path, duration
         except Exception as e:
