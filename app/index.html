@@ -1768,7 +1768,7 @@
         }
 
         .document-body {
-            max-width: 900px;
+            max-width: 720px;
             width: 100%;
             margin: 0 auto;
             padding: 40px 32px 32px;
@@ -5412,13 +5412,13 @@ Session started - waiting for activity...
             // Populate details
             detailTitle.textContent = selectedMeeting.session_info?.name || 'Untitled Meeting';
             detailDate.textContent = formatDate(selectedMeeting.session_info?.processed_at);
-            const durationText = selectedMeeting.session_info?.duration_seconds ? 
+            const durationText = selectedMeeting.session_info?.duration_seconds ?
                 (() => {
                     const totalSecs = selectedMeeting.session_info.duration_seconds;
                     const hours = Math.floor(totalSecs / 3600);
                     const mins = Math.floor((totalSecs % 3600) / 60);
                     const secs = totalSecs % 60;
-                    
+
                     if (hours > 0) return `Meeting Duration: ${hours}h ${mins}m`;
                     if (mins > 0) return `Meeting Duration: ${mins}m ${secs}s`;
                     return `Meeting Duration: ${secs}s`;
@@ -7623,20 +7623,15 @@ Session started - waiting for activity...
 
                 loadMeetings(true).then(() => {
                     if (wasStreaming && streamedMarkdown) {
-                        // Keep the streamed markdown view — don't switch to section layout.
-                        // Just append the transcript below the streaming content and show buttons.
+                        // Final re-render to ensure all content (including Action Items) is visible
+                        renderStreamingMarkdown(streamedMarkdown);
+                        stopStreamingRenderer();
+
                         const currentTitle = detailTitle.textContent;
                         const meeting = filteredMeetings.find(m =>
                             m.session_info?.name === currentTitle ||
                             m.session_info?.name === data.sessionName
                         );
-                        {
-                            const container = document.getElementById('streaming-output');
-                            if (container) {
-                                const indicator = container.querySelector('p:last-child');
-                                if (indicator && indicator.textContent.includes('Generating')) indicator.remove();
-                            }
-                        }
                         // Keep sections hidden — streaming view IS the meeting view
                         document.querySelectorAll('#meeting-detail .meeting-section').forEach(s => s.style.display = 'none');
                         // Show action buttons and reset reprocess button state
@@ -7657,6 +7652,19 @@ Session started - waiting for activity...
                         if (meetingIdx !== -1) {
                             selectedMeeting = filteredMeetings[meetingIdx];
                             populateTranscript(selectedMeeting);
+                            // Populate duration from the saved meeting data
+                            const ds = selectedMeeting.session_info?.duration_seconds;
+                            const dm = selectedMeeting.session_info?.duration_minutes;
+                            if (ds) {
+                                const hours = Math.floor(ds / 3600);
+                                const mins = Math.floor((ds % 3600) / 60);
+                                const secs = ds % 60;
+                                if (hours > 0) detailDuration.textContent = `Meeting Duration: ${hours}h ${mins}m`;
+                                else if (mins > 0) detailDuration.textContent = `Meeting Duration: ${mins}m ${secs}s`;
+                                else detailDuration.textContent = `Meeting Duration: ${secs}s`;
+                            } else if (dm) {
+                                detailDuration.textContent = `Meeting Duration: ${dm} minutes`;
+                            }
                         }
                     } else {
                         // Non-streaming path or no streamed content — use standard selectMeeting
@@ -7676,14 +7684,16 @@ Session started - waiting for activity...
                     }
                 });
                 
-                // Show native notification
-                showDesktopNotification('StenoAI - Meeting Notes Ready', {
-                    body: `"${data.sessionName}" has been transcribed and summarized`,
-                    requireInteraction: false
-                }, () => {
-                    const idx = filteredMeetings.findIndex(m => m.session_info?.name === data.sessionName);
-                    if (idx !== -1) selectMeeting(idx);
-                });
+                // Only show notification if app is not focused (user is in another window)
+                if (document.hidden || !document.hasFocus()) {
+                    showDesktopNotification('StenoAI - Meeting Notes Ready', {
+                        body: `"${data.sessionName}" has been transcribed and summarized`,
+                        requireInteraction: false
+                    }, () => {
+                        const idx = filteredMeetings.findIndex(m => m.session_info?.name === data.sessionName);
+                        if (idx !== -1) selectMeeting(idx);
+                    });
+                }
                 
                 setStatus('ready', 'Processing complete');
                 setTimeout(() => setStatus('ready', 'Ready'), 3000);
