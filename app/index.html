@@ -5723,12 +5723,12 @@ Session started - waiting for activity...
                     const mins = Math.floor((totalSecs % 3600) / 60);
                     const secs = totalSecs % 60;
 
-                    if (hours > 0) return `Meeting Duration: ${hours}h ${mins}m`;
-                    if (mins > 0) return `Meeting Duration: ${mins}m ${secs}s`;
-                    return `Meeting Duration: ${secs}s`;
+                    if (hours > 0) return `${hours}h ${mins}m`;
+                    if (mins > 0) return `${mins}m ${secs}s`;
+                    return `${secs}s`;
                 })() :
                 (selectedMeeting.session_info?.duration_minutes ?
-                    `Meeting Duration: ${selectedMeeting.session_info.duration_minutes} minutes` : 'Processed');
+                    `${selectedMeeting.session_info.duration_minutes} minutes` : 'Processed');
             detailDuration.textContent = durationText;
             
             detailSummary.textContent = selectedMeeting.summary || 'No summary available';
@@ -7984,11 +7984,11 @@ Session started - waiting for activity...
                                 const hours = Math.floor(ds / 3600);
                                 const mins = Math.floor((ds % 3600) / 60);
                                 const secs = ds % 60;
-                                if (hours > 0) detailDuration.textContent = `Meeting Duration: ${hours}h ${mins}m`;
-                                else if (mins > 0) detailDuration.textContent = `Meeting Duration: ${mins}m ${secs}s`;
-                                else detailDuration.textContent = `Meeting Duration: ${secs}s`;
+                                if (hours > 0) detailDuration.textContent = `${hours}h ${mins}m`;
+                                else if (mins > 0) detailDuration.textContent = `${mins}m ${secs}s`;
+                                else detailDuration.textContent = `${secs}s`;
                             } else if (dm) {
-                                detailDuration.textContent = `Meeting Duration: ${dm} minutes`;
+                                detailDuration.textContent = `${dm} minutes`;
                             }
                         }
                     } else {
