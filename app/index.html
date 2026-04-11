@@ -339,6 +339,174 @@
             cursor: not-allowed;
             transform: none;
         }
+
+        /* + New Note button (header, next to gear) */
+        .new-note-btn {
+            background: var(--bg-surface);
+            color: var(--text-primary);
+            border: 1px solid var(--border-default);
+            padding: 6px 14px;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            font-family: inherit;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            transition: all 0.2s ease;
+            margin-right: 8px;
+        }
+
+        .new-note-btn:hover {
+            background: var(--bg-elevated);
+            border-color: var(--border-default);
+            transform: translateY(-1px);
+        }
+
+        [data-theme="light"] .new-note-btn {
+            background: var(--bg-surface);
+            border-color: var(--border-default);
+            color: var(--text-primary);
+        }
+
+        [data-theme="light"] .new-note-btn:hover {
+            background: var(--bg-elevated);
+        }
+
+        /* Ask bar recording controls */
+        .ask-bar-rec-controls {
+            display: none;
+            align-items: center;
+            gap: 6px;
+            padding-left: 4px;
+        }
+
+        .ask-bar-rec-controls.show {
+            display: flex;
+        }
+
+        .ask-bar-rec-divider {
+            width: 1px;
+            height: 20px;
+            background: var(--border-subtle);
+            margin: 0 4px;
+            display: none;
+        }
+
+        .ask-bar-rec-controls.show + .ask-bar-rec-divider {
+            display: block;
+        }
+
+        .bar-pause-btn {
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            font-size: 13px;
+            font-weight: 500;
+            font-family: inherit;
+            cursor: pointer;
+            padding: 4px 6px;
+            border-radius: 4px;
+            transition: color 0.15s ease, background 0.15s ease;
+        }
+
+        .bar-pause-btn:hover {
+            color: var(--text-primary);
+            background: var(--bg-surface);
+        }
+
+        .bar-stop-btn {
+            background: none;
+            border: none;
+            cursor: pointer;
+            padding: 4px;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            transition: all 0.15s ease;
+        }
+
+        .bar-stop-btn svg {
+            width: 14px;
+            height: 14px;
+        }
+
+        .bar-stop-btn:hover {
+            background: rgba(239, 68, 68, 0.1);
+        }
+
+        /* Waveform green state when recording */
+        .ask-bar-left.recording .bar-transcript-btn {
+            color: var(--success-green);
+        }
+
+        .ask-bar-left.recording .bar-transcript-btn svg {
+            animation: barWaveformPulse 1.5s ease-in-out infinite;
+        }
+
+        @keyframes barWaveformPulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        /* Generate notes button (above ask bar) */
+        .generate-notes-btn {
+            display: none;
+            margin: 0 auto 12px;
+            width: fit-content;
+            background: linear-gradient(135deg, #4f46e5, #6366f1);
+            color: white;
+            border: none;
+            border-radius: 999px;
+            padding: 10px 24px;
+            font-weight: 600;
+            font-size: 14px;
+            font-family: inherit;
+            cursor: pointer;
+            box-shadow: 0 4px 16px rgba(99, 102, 241, 0.35);
+            transition: all 0.2s ease;
+        }
+
+        .generate-notes-btn:hover {
+            box-shadow: 0 6px 24px rgba(99, 102, 241, 0.5);
+            transform: translateY(-1px);
+        }
+
+        .generate-notes-btn.show {
+            display: block;
+        }
+
+        [data-theme="light"] .generate-notes-btn {
+            background: linear-gradient(135deg, #4338ca, #4f46e5);
+            box-shadow: 0 4px 16px rgba(67, 56, 202, 0.3);
+        }
+
+        /* Waveform visualizer inside transcript bubble */
+        .bubble-waveform {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 3px;
+            height: 64px;
+            padding: 16px 24px;
+        }
+
+        .bubble-waveform-bar {
+            width: 4px;
+            background: var(--success-green);
+            border-radius: 2px;
+            height: 64px;
+            transform-origin: bottom;
+            transform: scaleY(0.08);
+            transition: transform 0.05s ease;
+        }
+
+        .bubble-waveform.paused .bubble-waveform-bar {
+            background: var(--text-muted);
+            transform: scaleY(0.08);
+            transition: transform 0.3s ease;
+        }
         
         /* Unified Settings Panel */
         .settings-backdrop {
@@ -3181,14 +3349,82 @@
             margin: 2px 0;
         }
 
+        /* Bottom bar row: controls pill (left) + ask pill (right) */
+        .ask-bar-row {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            max-width: 680px;
+            margin: 0 auto;
+        }
+
+        /* Separate controls pill (waveform + chevron + stop) */
+        .controls-pill {
+            display: none;
+            align-items: center;
+            gap: 2px;
+            background: var(--bg-elevated);
+            border: 1px solid var(--border-subtle);
+            border-radius: 999px;
+            padding: 6px 12px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.22), 0 2px 6px rgba(0, 0, 0, 0.08);
+            backdrop-filter: saturate(160%) blur(10px);
+            -webkit-backdrop-filter: saturate(160%) blur(10px);
+            flex-shrink: 0;
+        }
+
+        .controls-pill.show {
+            display: flex;
+        }
+
+        .controls-pill button {
+            background: none;
+            border: none;
+            padding: 4px;
+            cursor: pointer;
+            color: var(--text-muted);
+            display: flex;
+            align-items: center;
+            border-radius: 4px;
+            transition: color 0.15s ease, background 0.15s ease;
+        }
+
+        .controls-pill button:hover {
+            color: var(--text-primary);
+            background: var(--bg-surface);
+        }
+
+        .controls-pill button svg {
+            width: 16px;
+            height: 16px;
+        }
+
+        .controls-pill .bar-transcript-btn svg {
+            width: 18px;
+            height: 18px;
+        }
+
+        .controls-pill.recording .bar-transcript-btn {
+            color: var(--success-green);
+        }
+
+        .controls-pill.recording .bar-transcript-btn svg {
+            animation: barWaveformPulse 1.5s ease-in-out infinite;
+        }
+
+        [data-theme="light"] .controls-pill {
+            background: var(--bg-deep);
+            border-color: #c4c4cc;
+        }
+
         .ask-bar-inner {
             display: flex;
             align-items: center;
             background: var(--bg-elevated);
             border: 1px solid var(--border-subtle);
             border-radius: 999px;
-            max-width: 680px;
-            margin: 0 auto;
+            flex: 1;
             box-shadow: 0 10px 30px rgba(0, 0, 0, 0.22), 0 2px 6px rgba(0, 0, 0, 0.08);
             backdrop-filter: saturate(160%) blur(10px);
             -webkit-backdrop-filter: saturate(160%) blur(10px);
@@ -3196,11 +3432,7 @@
         }
 
         .ask-bar-left {
-            display: flex;
-            align-items: center;
-            gap: 2px;
-            padding: 6px 6px 6px 14px;
-            flex-shrink: 0;
+            display: none;
         }
 
         .ask-bar-left button {
@@ -3442,13 +3674,13 @@
             </svg>
             <h1>StenoAI</h1>
         </div>
-        
+
         <div class="record-controls">
             <div class="status" id="status-container">
-                <div class="status-dot ready" id="status-dot"></div>
-                <span id="status-text" style="font-size: 13px; color: var(--text-secondary);">Ready</span>
-                <!-- 8 bars — must match the 8 binGroups in audio-visualizer.js -->
-                <div class="waveform" id="waveform">
+                <div class="status-dot ready" id="status-dot" style="display: none;"></div>
+                <span id="status-text" style="font-size: 13px; color: var(--text-secondary); display: none;"></span>
+                <!-- Hidden waveform kept for JS compatibility -->
+                <div class="waveform" id="waveform" style="display:none !important;">
                     <div class="waveform-bar"></div>
                     <div class="waveform-bar"></div>
                     <div class="waveform-bar"></div>
@@ -3459,23 +3691,18 @@
                     <div class="waveform-bar"></div>
                 </div>
             </div>
-            
-            <input type="text" class="session-input" id="session-name" placeholder="Name this session...">
-            
-            <button class="btn btn-primary" id="start-btn">
-                <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor"><circle cx="6" cy="6" r="5"/></svg> Record
-            </button>
-
-            <button class="btn btn-danger" id="stop-btn" style="display: none;">
-                <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor"><rect x="1" y="1" width="10" height="10" rx="1.5"/></svg> Stop
-            </button>
-
-            <button class="btn" id="pause-btn" style="display: none;">
-                <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor"><rect x="1.5" y="1" width="3" height="10" rx="1"/><rect x="7.5" y="1" width="3" height="10" rx="1"/></svg> Pause
-            </button>
+            <!-- Hidden inputs/buttons kept for JS compatibility -->
+            <input type="text" class="session-input" id="session-name" placeholder="Name this session..." style="display: none;">
+            <button class="btn btn-primary" id="start-btn" style="display: none;">Record</button>
+            <button class="btn btn-danger" id="stop-btn" style="display: none;">Stop</button>
+            <button class="btn" id="pause-btn" style="display: none;">Pause</button>
         </div>
-        
+
         <div class="header-actions">
+            <button class="new-note-btn" id="new-note-btn" title="Start a new recording">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                New Note
+            </button>
             <button class="privacy-ghost local" id="privacy-ghost" style="display: none;" title="Privacy: All data stays on your device" aria-label="Privacy: All data stays on your device">
                 <svg width="16" height="18" viewBox="0 0 16 20" fill="none">
                     <!-- Ghost body: rounded top, wavy bottom -->
@@ -3732,11 +3959,36 @@ Ask Steno
                               </button>
                           </div>
                       </div>
+                      <div class="bubble-waveform" id="bubble-waveform" style="display: none;">
+                          <div class="bubble-waveform-bar"></div>
+                          <div class="bubble-waveform-bar"></div>
+                          <div class="bubble-waveform-bar"></div>
+                          <div class="bubble-waveform-bar"></div>
+                          <div class="bubble-waveform-bar"></div>
+                          <div class="bubble-waveform-bar"></div>
+                          <div class="bubble-waveform-bar"></div>
+                          <div class="bubble-waveform-bar"></div>
+                          <div class="bubble-waveform-bar"></div>
+                          <div class="bubble-waveform-bar"></div>
+                          <div class="bubble-waveform-bar"></div>
+                          <div class="bubble-waveform-bar"></div>
+                          <div class="bubble-waveform-bar"></div>
+                          <div class="bubble-waveform-bar"></div>
+                          <div class="bubble-waveform-bar"></div>
+                          <div class="bubble-waveform-bar"></div>
+                      </div>
                       <div class="ask-bar-transcript-body" id="ask-bar-transcript-body"></div>
                   </div>
                   <div class="ask-bar-response" id="ask-bar-response"></div>
-                  <div class="ask-bar-inner">
-                      <div class="ask-bar-left" id="ask-bar-left">
+                  <button class="generate-notes-btn" id="generate-notes-btn">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline;vertical-align:-3px;margin-right:4px;">
+                          <path d="M12 2L15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2z"/>
+                      </svg>
+                      Generate notes
+                  </button>
+                  <div class="ask-bar-row">
+                      <!-- Separate controls pill (visible during recording + on meetings) -->
+                      <div class="controls-pill" id="controls-pill">
                           <button class="bar-transcript-btn" id="bar-transcript-btn" title="Toggle transcript">
                               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                   <line x1="4" y1="6" x2="4" y2="18"></line>
@@ -3751,14 +4003,25 @@ Ask Steno
                                   <polyline points="6 9 12 15 18 9"></polyline>
                               </svg>
                           </button>
+                          <button class="bar-stop-btn" id="bar-stop-btn" title="Stop recording" style="display: none;">
+                              <svg viewBox="0 0 16 16" fill="currentColor"><rect x="2" y="2" width="12" height="12" rx="2"/></svg>
+                          </button>
                       </div>
-                      <input type="text" class="ask-bar-input" id="ask-bar-input" placeholder="Ask anything" autocomplete="off">
-                      <button class="ask-bar-submit" id="ask-bar-submit" title="Ask">
-                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                              <line x1="22" y1="2" x2="11" y2="13"></line>
-                              <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-                          </svg>
-                      </button>
+                      <!-- Hidden elements for JS compatibility -->
+                      <div id="ask-bar-left" style="display:none;"></div>
+                      <div id="ask-bar-rec-controls" style="display:none;"></div>
+                      <div id="ask-bar-rec-divider" style="display:none;"></div>
+                      <button id="bar-pause-btn" style="display:none;"></button>
+                      <!-- Main ask input pill -->
+                      <div class="ask-bar-inner">
+                          <input type="text" class="ask-bar-input" id="ask-bar-input" placeholder="Ask anything" autocomplete="off">
+                          <button class="ask-bar-submit" id="ask-bar-submit" title="Ask">
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                  <line x1="22" y1="2" x2="11" y2="13"></line>
+                                  <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                              </svg>
+                          </button>
+                      </div>
                   </div>
               </div>
             </div>
@@ -4414,6 +4677,14 @@ Session started - waiting for activity...
         const startBtn = document.getElementById('start-btn');
         const stopBtn = document.getElementById('stop-btn');
         const pauseBtn = document.getElementById('pause-btn');
+        const newNoteBtn = document.getElementById('new-note-btn');
+        const barPauseBtn = document.getElementById('bar-pause-btn');
+        const barStopBtn = document.getElementById('bar-stop-btn');
+        const barRecControls = document.getElementById('ask-bar-rec-controls');
+        const barRecDivider = document.getElementById('ask-bar-rec-divider');
+        const askBarLeft = document.getElementById('ask-bar-left');
+        const controlsPill = document.getElementById('controls-pill');
+        const generateNotesBtn = document.getElementById('generate-notes-btn');
         const settingsBtn = document.getElementById('settings-btn');
         const meetingsList = document.getElementById('meetings-list');
         const emptyState = document.getElementById('empty-state');
@@ -4555,50 +4826,71 @@ Session started - waiting for activity...
             // Update UI elements based on state
             switch(state) {
                 case 'ready':
-                    startBtn.style.display = 'inline-flex';
-                    stopBtn.style.display = 'none';
-                    pauseBtn.style.display = 'none';
                     startBtn.disabled = false;
                     sessionNameInput.disabled = false;
                     stopRecordingTimer();
-                    setStatus('ready', 'Ready');
+                    setStatus('ready', '');
                     AudioVisualizer.stop();
+                    // Header
+                    newNoteBtn.style.display = '';
+                    document.getElementById('status-text').style.display = 'none';
+                    document.getElementById('status-dot').style.display = 'none';
+                    // Controls pill: show (for transcript toggle on meetings) but hide stop
+                    controlsPill.classList.add('show');
+                    controlsPill.classList.remove('recording');
+                    document.getElementById('bar-stop-btn').style.display = 'none';
+                    generateNotesBtn.classList.remove('show');
+                    // Hide bubble waveform
+                    document.getElementById('bubble-waveform').style.display = 'none';
+                    document.getElementById('bubble-waveform').classList.remove('paused');
                     break;
 
                 case 'recording':
-                    startBtn.style.display = 'none';
-                    stopBtn.style.display = 'inline-flex';
-                    pauseBtn.style.display = 'inline-flex';
-                    pauseBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor"><rect x="1.5" y="1" width="3" height="10" rx="1"/><rect x="7.5" y="1" width="3" height="10" rx="1"/></svg> Pause';
                     startBtn.disabled = true;
                     sessionNameInput.disabled = true;
-                    stopBtn.disabled = false;
-                    pauseBtn.disabled = false;
-                    // Check if resuming from paused state (pausedElapsedTime > 0)
                     startRecordingTimer(pausedElapsedTime > 0);
-                    // Restart visualizer if resuming from pause or recovering
+                    // Header
+                    newNoteBtn.style.display = 'none';
+                    document.getElementById('status-dot').style.display = '';
+                    document.getElementById('status-text').style.display = '';
+                    // Controls pill: show with green waveform + stop
+                    controlsPill.classList.add('show');
+                    controlsPill.classList.add('recording');
+                    document.getElementById('bar-stop-btn').style.display = '';
+                    generateNotesBtn.classList.remove('show');
+                    // Show ask bar
+                    document.getElementById('ask-bar').style.display = '';
+                    // Bubble waveform ready for transcript panel
+                    document.getElementById('bubble-waveform').style.display = 'flex';
+                    document.getElementById('bubble-waveform').classList.remove('paused');
+                    document.getElementById('ask-bar-transcript-body').style.display = 'none';
+                    // Start visualizer
                     if (!AudioVisualizer._animFrame) {
-                        const bars = Array.from(document.querySelectorAll('#waveform .waveform-bar'));
+                        const bubbleBars = Array.from(document.querySelectorAll('#bubble-waveform .bubble-waveform-bar'));
                         if (_systemAudioAnalyser) {
-                            AudioVisualizer.startFromAnalyser(bars, _systemAudioAnalyser);
+                            AudioVisualizer.startFromAnalyser(bubbleBars, _systemAudioAnalyser);
                         } else {
-                            AudioVisualizer.start(bars);
+                            AudioVisualizer.start(bubbleBars);
                         }
                     }
                     break;
 
                 case 'paused':
-                    startBtn.style.display = 'none';
-                    stopBtn.style.display = 'inline-flex';
-                    pauseBtn.style.display = 'inline-flex';
-                    pauseBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor"><polygon points="2,1 11,6 2,11"/></svg> Resume';
                     startBtn.disabled = true;
                     sessionNameInput.disabled = true;
-                    stopBtn.disabled = false;
-                    pauseBtn.disabled = false;
                     AudioVisualizer.stop();
                     pauseRecordingTimer();
-                    // Show paused status with the frozen time
+                    // Header
+                    newNoteBtn.style.display = 'none';
+                    document.getElementById('status-dot').style.display = '';
+                    document.getElementById('status-text').style.display = '';
+                    // Controls pill: keep visible, remove green
+                    controlsPill.classList.add('show');
+                    controlsPill.classList.remove('recording');
+                    document.getElementById('bar-stop-btn').style.display = '';
+                    generateNotesBtn.classList.remove('show');
+                    // Pause waveform
+                    document.getElementById('bubble-waveform').classList.add('paused');
                     const minutes = Math.floor(pausedElapsedTime / 60);
                     const seconds = pausedElapsedTime % 60;
                     const timeStr = `${minutes}:${seconds.toString().padStart(2, '0')}`;
@@ -4606,14 +4898,26 @@ Session started - waiting for activity...
                     break;
 
                 case 'processing':
-                    startBtn.style.display = 'inline-flex';
-                    stopBtn.style.display = 'none';
-                    pauseBtn.style.display = 'none';
                     startBtn.disabled = true;
                     sessionNameInput.disabled = true;
                     stopRecordingTimer();
                     setStatus('processing', 'Processing...');
                     AudioVisualizer.stop();
+                    // Header
+                    newNoteBtn.style.display = 'none';
+                    document.getElementById('status-dot').style.display = '';
+                    document.getElementById('status-text').style.display = '';
+                    // Controls pill: show (for transcript) but hide stop, no green
+                    controlsPill.classList.add('show');
+                    controlsPill.classList.remove('recording');
+                    document.getElementById('bar-stop-btn').style.display = 'none';
+                    generateNotesBtn.classList.remove('show');
+                    // Hide bubble waveform, restore transcript body
+                    document.getElementById('bubble-waveform').style.display = 'none';
+                    document.getElementById('bubble-waveform').classList.remove('paused');
+                    document.getElementById('ask-bar-transcript-body').style.display = '';
+                    document.getElementById('ask-bar-transcript').classList.remove('show');
+                    document.getElementById('bar-chevron').classList.remove('open');
                     break;
             }
         }
@@ -5578,7 +5882,8 @@ Session started - waiting for activity...
             document.getElementById('ask-ai-btn').style.display = 'none';
             document.getElementById('copy-notes-btn').style.display = 'none';
             document.getElementById('reprocess-btn').style.display = 'none';
-            document.getElementById('ask-bar').style.display = 'none';
+            // Keep ask bar visible during recording (recording controls are in the pill)
+            document.getElementById('ask-bar').style.display = '';
 
             // Auto-save notes on input (debounced 2s) — remove previous listener first
             if (_notesInputHandler) {
@@ -5694,7 +5999,7 @@ Session started - waiting for activity...
                 ipcRenderer.send('system-audio-recording-state', true);
 
                 // Start waveform visualization from the mixed analyser
-                const vizBars = Array.from(document.querySelectorAll('#waveform .waveform-bar'));
+                const vizBars = Array.from(document.querySelectorAll('#bubble-waveform .bubble-waveform-bar'));
                 AudioVisualizer.startFromAnalyser(vizBars, _systemAudioAnalyser);
 
                 log('System audio recording started (mic + system audio)');
@@ -5842,7 +6147,7 @@ Session started - waiting for activity...
                 showNotesEditor(sessionName);
                 // Start visualizer immediately (within user-gesture frame, before IPC await)
                 // so bars appear instantly and AudioContext is never suspended.
-                const vizBars = Array.from(document.querySelectorAll('#waveform .waveform-bar'));
+                const vizBars = Array.from(document.querySelectorAll('#bubble-waveform .bubble-waveform-bar'));
                 AudioVisualizer.start(vizBars);
                 try {
                     const result = await ipcRenderer.invoke('start-recording-ui', sessionName);
@@ -5984,6 +6289,26 @@ Session started - waiting for activity...
                     }
                 }
             }
+        });
+
+        // + New Note button — triggers same flow as old Record button
+        newNoteBtn.addEventListener('click', () => {
+            startBtn.click();
+        });
+
+        // Ask bar recording controls — wire to existing handlers
+        barPauseBtn.addEventListener('click', () => {
+            pauseBtn.click();
+        });
+
+        barStopBtn.addEventListener('click', () => {
+            stopBtn.click();
+        });
+
+        // Generate notes button — triggers processing of the stopped recording
+        generateNotesBtn.addEventListener('click', () => {
+            generateNotesBtn.classList.remove('show');
+            stopBtn.click();
         });
 
         // Search functionality
@@ -6326,7 +6651,7 @@ Session started - waiting for activity...
             if (!event) return;
             document.getElementById('session-name').value = event.summary || 'Meeting';
             hideCalendarEventDetail();
-            document.getElementById('start-btn').click();
+            document.getElementById('new-note-btn').click();
         }
 
         async function connectCalendar(provider) {
@@ -7584,7 +7909,7 @@ Session started - waiting for activity...
                 document.getElementById('ask-ai-btn').style.display = 'none';
                 document.getElementById('copy-notes-btn').style.display = 'none';
                 document.getElementById('reprocess-btn').style.display = 'none';
-                document.getElementById('ask-bar').style.display = 'none';
+                document.getElementById('ask-bar').style.display = '';
                 const editor = document.getElementById('notes-editor');
                 if (editor) editor.style.display = 'block';
             }
