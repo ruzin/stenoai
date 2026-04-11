@@ -7122,18 +7122,23 @@ Session started - waiting for activity...
                 askBarTranscript.classList.remove('show');
                 barChevron.classList.remove('open');
             } else {
-                // Copy transcript content
-                const transcriptEl = document.getElementById('detail-transcript');
-                if (transcriptEl) {
-                    askBarTranscriptBody.innerHTML = transcriptEl.innerHTML;
-                    askBarTranscriptBody.style.whiteSpace = transcriptEl.style.whiteSpace || 'pre-wrap';
-                } else {
-                    askBarTranscriptBody.textContent = '';
+                // During recording/paused, no transcript available yet
+                if (uiState === 'recording' || uiState === 'paused') {
+                    askBarTranscriptBody.textContent = 'Transcript will appear after processing...';
                     askBarTranscriptBody.style.whiteSpace = 'pre-wrap';
+                } else {
+                    // Copy transcript content from the current meeting
+                    const transcriptEl = document.getElementById('detail-transcript');
+                    if (transcriptEl && transcriptEl.textContent.trim() && transcriptEl.textContent.trim() !== 'Full transcript will appear here...') {
+                        askBarTranscriptBody.innerHTML = transcriptEl.innerHTML;
+                        askBarTranscriptBody.style.whiteSpace = transcriptEl.style.whiteSpace || 'pre-wrap';
+                    } else {
+                        askBarTranscriptBody.textContent = '';
+                        askBarTranscriptBody.style.whiteSpace = 'pre-wrap';
+                    }
                 }
                 askBarTranscript.classList.add('show');
                 barChevron.classList.add('open');
-                // Scroll to bottom of transcript
                 askBarTranscriptBody.scrollTop = askBarTranscriptBody.scrollHeight;
             }
         }
