@@ -3405,12 +3405,71 @@
             height: 18px;
         }
 
-        .controls-pill.recording .bar-transcript-btn {
-            color: var(--success-green);
+        /* Toggle between static SVG icon and live mini waveform */
+        .controls-pill .bar-transcript-btn .mini-waveform {
+            display: none;
         }
 
-        .controls-pill.recording .bar-transcript-btn svg {
-            animation: barWaveformPulse 1.5s ease-in-out infinite;
+        .controls-pill .bar-transcript-btn .waveform-static {
+            display: block;
+        }
+
+        .controls-pill.recording .bar-transcript-btn .waveform-static {
+            display: none;
+        }
+
+        .controls-pill.recording .bar-transcript-btn .mini-waveform {
+            display: flex;
+            align-items: flex-end;
+            gap: 2px;
+            height: 18px;
+            width: 18px;
+        }
+
+        .mini-waveform-bar {
+            width: 2px;
+            background: var(--success-green);
+            border-radius: 1px;
+            height: 18px;
+            transform-origin: bottom;
+            transform: scaleY(0.15);
+            transition: transform 0.05s ease;
+        }
+
+        .controls-pill.paused .bar-transcript-btn .mini-waveform {
+            display: flex;
+            align-items: flex-end;
+            gap: 2px;
+            height: 18px;
+            width: 18px;
+        }
+
+        .controls-pill.paused .bar-transcript-btn .waveform-static {
+            display: none;
+        }
+
+        .controls-pill.paused .mini-waveform-bar {
+            background: var(--text-muted);
+            transform: scaleY(0.15);
+            transition: transform 0.3s ease;
+        }
+
+        .controls-pill .bar-pause-btn {
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            font-size: 13px;
+            font-weight: 500;
+            font-family: inherit;
+            cursor: pointer;
+            padding: 4px 6px;
+            border-radius: 4px;
+            transition: color 0.15s ease, background 0.15s ease;
+        }
+
+        .controls-pill .bar-pause-btn:hover {
+            color: var(--text-primary);
+            background: var(--bg-surface);
         }
 
         [data-theme="light"] .controls-pill {
@@ -3990,19 +4049,29 @@ Ask Steno
                       <!-- Separate controls pill (visible during recording + on meetings) -->
                       <div class="controls-pill" id="controls-pill">
                           <button class="bar-transcript-btn" id="bar-transcript-btn" title="Toggle transcript">
-                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                              <!-- Static waveform icon (shown when not recording) -->
+                              <svg class="waveform-static" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                   <line x1="4" y1="6" x2="4" y2="18"></line>
                                   <line x1="8" y1="10" x2="8" y2="18"></line>
                                   <line x1="12" y1="4" x2="12" y2="18"></line>
                                   <line x1="16" y1="8" x2="16" y2="18"></line>
                                   <line x1="20" y1="12" x2="20" y2="18"></line>
                               </svg>
+                              <!-- Live waveform bars (shown during recording) -->
+                              <div class="mini-waveform" id="mini-waveform">
+                                  <div class="mini-waveform-bar"></div>
+                                  <div class="mini-waveform-bar"></div>
+                                  <div class="mini-waveform-bar"></div>
+                                  <div class="mini-waveform-bar"></div>
+                                  <div class="mini-waveform-bar"></div>
+                              </div>
                           </button>
                           <button class="bar-chevron" id="bar-chevron" title="Show transcript">
                               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                                   <polyline points="6 9 12 15 18 9"></polyline>
                               </svg>
                           </button>
+                          <button class="bar-pause-btn" id="bar-pause-btn" style="display: none;">Pause</button>
                           <button class="bar-stop-btn" id="bar-stop-btn" title="Stop recording" style="display: none;">
                               <svg viewBox="0 0 16 16" fill="currentColor"><rect x="2" y="2" width="12" height="12" rx="2"/></svg>
                           </button>
@@ -4011,7 +4080,6 @@ Ask Steno
                       <div id="ask-bar-left" style="display:none;"></div>
                       <div id="ask-bar-rec-controls" style="display:none;"></div>
                       <div id="ask-bar-rec-divider" style="display:none;"></div>
-                      <button id="bar-pause-btn" style="display:none;"></button>
                       <!-- Main ask input pill -->
                       <div class="ask-bar-inner">
                           <input type="text" class="ask-bar-input" id="ask-bar-input" placeholder="Ask anything" autocomplete="off">
@@ -4835,14 +4903,15 @@ Session started - waiting for activity...
                     newNoteBtn.style.display = '';
                     document.getElementById('status-text').style.display = 'none';
                     document.getElementById('status-dot').style.display = 'none';
-                    // Controls pill: show (for transcript toggle on meetings) but hide stop
+                    // Controls pill: show (for transcript toggle) but hide rec controls
                     controlsPill.classList.add('show');
                     controlsPill.classList.remove('recording');
-                    document.getElementById('bar-stop-btn').style.display = 'none';
+                    controlsPill.classList.remove('paused');
+                    barStopBtn.style.display = 'none';
+                    barPauseBtn.style.display = 'none';
                     generateNotesBtn.classList.remove('show');
-                    // Hide bubble waveform
-                    document.getElementById('bubble-waveform').style.display = 'none';
-                    document.getElementById('bubble-waveform').classList.remove('paused');
+                    // Restore transcript body
+                    document.getElementById('ask-bar-transcript-body').style.display = '';
                     break;
 
                 case 'recording':
@@ -4853,24 +4922,23 @@ Session started - waiting for activity...
                     newNoteBtn.style.display = 'none';
                     document.getElementById('status-dot').style.display = '';
                     document.getElementById('status-text').style.display = '';
-                    // Controls pill: show with green waveform + stop
+                    // Controls pill: show with live waveform + pause + stop
                     controlsPill.classList.add('show');
                     controlsPill.classList.add('recording');
-                    document.getElementById('bar-stop-btn').style.display = '';
+                    controlsPill.classList.remove('paused');
+                    barStopBtn.style.display = '';
+                    barPauseBtn.style.display = '';
+                    barPauseBtn.textContent = 'Pause';
                     generateNotesBtn.classList.remove('show');
                     // Show ask bar
                     document.getElementById('ask-bar').style.display = '';
-                    // Bubble waveform ready for transcript panel
-                    document.getElementById('bubble-waveform').style.display = 'flex';
-                    document.getElementById('bubble-waveform').classList.remove('paused');
-                    document.getElementById('ask-bar-transcript-body').style.display = 'none';
-                    // Start visualizer
+                    // Start visualizer targeting mini waveform bars in the button
                     if (!AudioVisualizer._animFrame) {
-                        const bubbleBars = Array.from(document.querySelectorAll('#bubble-waveform .bubble-waveform-bar'));
+                        const miniBars = Array.from(document.querySelectorAll('#mini-waveform .mini-waveform-bar'));
                         if (_systemAudioAnalyser) {
-                            AudioVisualizer.startFromAnalyser(bubbleBars, _systemAudioAnalyser);
+                            AudioVisualizer.startFromAnalyser(miniBars, _systemAudioAnalyser);
                         } else {
-                            AudioVisualizer.start(bubbleBars);
+                            AudioVisualizer.start(miniBars);
                         }
                     }
                     break;
@@ -4884,13 +4952,14 @@ Session started - waiting for activity...
                     newNoteBtn.style.display = 'none';
                     document.getElementById('status-dot').style.display = '';
                     document.getElementById('status-text').style.display = '';
-                    // Controls pill: keep visible, remove green
+                    // Controls pill: show with resume + stop, grey waveform
                     controlsPill.classList.add('show');
                     controlsPill.classList.remove('recording');
-                    document.getElementById('bar-stop-btn').style.display = '';
+                    controlsPill.classList.add('paused');
+                    barStopBtn.style.display = '';
+                    barPauseBtn.style.display = '';
+                    barPauseBtn.textContent = 'Resume';
                     generateNotesBtn.classList.remove('show');
-                    // Pause waveform
-                    document.getElementById('bubble-waveform').classList.add('paused');
                     const minutes = Math.floor(pausedElapsedTime / 60);
                     const seconds = pausedElapsedTime % 60;
                     const timeStr = `${minutes}:${seconds.toString().padStart(2, '0')}`;
@@ -4907,14 +4976,14 @@ Session started - waiting for activity...
                     newNoteBtn.style.display = 'none';
                     document.getElementById('status-dot').style.display = '';
                     document.getElementById('status-text').style.display = '';
-                    // Controls pill: show (for transcript) but hide stop, no green
+                    // Controls pill: show (for transcript) but hide rec controls
                     controlsPill.classList.add('show');
                     controlsPill.classList.remove('recording');
-                    document.getElementById('bar-stop-btn').style.display = 'none';
+                    controlsPill.classList.remove('paused');
+                    barStopBtn.style.display = 'none';
+                    barPauseBtn.style.display = 'none';
                     generateNotesBtn.classList.remove('show');
-                    // Hide bubble waveform, restore transcript body
-                    document.getElementById('bubble-waveform').style.display = 'none';
-                    document.getElementById('bubble-waveform').classList.remove('paused');
+                    // Restore transcript body
                     document.getElementById('ask-bar-transcript-body').style.display = '';
                     document.getElementById('ask-bar-transcript').classList.remove('show');
                     document.getElementById('bar-chevron').classList.remove('open');
@@ -5884,6 +5953,10 @@ Session started - waiting for activity...
             document.getElementById('reprocess-btn').style.display = 'none';
             // Keep ask bar visible during recording (recording controls are in the pill)
             document.getElementById('ask-bar').style.display = '';
+            // Clear previous transcript from the panel
+            document.getElementById('ask-bar-transcript-body').textContent = '';
+            document.getElementById('ask-bar-transcript').classList.remove('show');
+            document.getElementById('bar-chevron').classList.remove('open');
 
             // Auto-save notes on input (debounced 2s) — remove previous listener first
             if (_notesInputHandler) {
@@ -5999,7 +6072,7 @@ Session started - waiting for activity...
                 ipcRenderer.send('system-audio-recording-state', true);
 
                 // Start waveform visualization from the mixed analyser
-                const vizBars = Array.from(document.querySelectorAll('#bubble-waveform .bubble-waveform-bar'));
+                const vizBars = Array.from(document.querySelectorAll('#mini-waveform .mini-waveform-bar'));
                 AudioVisualizer.startFromAnalyser(vizBars, _systemAudioAnalyser);
 
                 log('System audio recording started (mic + system audio)');
@@ -6147,7 +6220,7 @@ Session started - waiting for activity...
                 showNotesEditor(sessionName);
                 // Start visualizer immediately (within user-gesture frame, before IPC await)
                 // so bars appear instantly and AudioContext is never suspended.
-                const vizBars = Array.from(document.querySelectorAll('#bubble-waveform .bubble-waveform-bar'));
+                const vizBars = Array.from(document.querySelectorAll('#mini-waveform .mini-waveform-bar'));
                 AudioVisualizer.start(vizBars);
                 try {
                     const result = await ipcRenderer.invoke('start-recording-ui', sessionName);
