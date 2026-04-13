@@ -392,11 +392,11 @@ names, jargon, or context that helps interpret the transcript more accurately.
 
 """
 
-        return f"""{diarisation_note}{notes_context}You are a helpful meeting assistant. Summarise this meeting transcript into participants, discussion areas, key points and any next steps mentioned. Only base your summary on what was explicitly discussed in the transcript.
+        return f"""{diarisation_note}{notes_context}You are a helpful meeting assistant. Summarise this meeting transcript into discussion areas, key points and any next steps mentioned. Only base your summary on what was explicitly discussed in the transcript.
 
 IMPORTANT: Do not infer or assume information that wasn't directly mentioned.
 
-Include a brief overview so someone can quickly understand what happened in the meeting, who were the participants, what areas/topics were discussed, what were the key points, and what are the next steps if any were mentioned.
+Include a brief overview so someone can quickly understand what happened in the meeting, what areas/topics were discussed, what were the key points, and what are the next steps if any were mentioned.
 
 CRITICAL JSON FORMATTING RULES:
 1. ALL strings must be enclosed in double quotes "like this"
@@ -404,7 +404,7 @@ CRITICAL JSON FORMATTING RULES:
 3. NO trailing commas anywhere
 4. NO comments or extra text outside the JSON
 5. ALL array elements must be properly quoted strings
-6. If no participants, discussion areas, key points, or next steps are mentioned, return an empty array [] for that field.
+6. If no discussion areas, key points, or next steps are mentioned, return an empty array [] for that field.
 
 IMPORTANT - VARIABLE NUMBER OF ITEMS:
 - Discussion areas: Include as many as needed to organize the topics (1-2 for short meetings, 4-5 for complex discussions)
@@ -414,13 +414,11 @@ IMPORTANT - VARIABLE NUMBER OF ITEMS:
 
 CORRECT FORMAT EXAMPLE:
 {{
-  "participants": ["John Smith", "Sarah Wilson"],
   "key_points": ["Budget discussion", "Timeline review"]
 }}
 
 INCORRECT FORMAT (DO NOT DO THIS):
 {{
-  "participants": ["John", no other participants mentioned],
   "key_points": ["Budget", timeline,]
 }}
 
@@ -430,7 +428,6 @@ TRANSCRIPT:
 Return ONLY the response in this exact JSON format:
 {{
   "overview": "Brief overview of what happened in the meeting",
-  "participants": [""],
   "discussion_areas": [
     {{
       "title": "First main topic discussed",
@@ -691,9 +688,6 @@ Return ONLY the response in this exact JSON format:
 
 ## Summary
 A 1-3 sentence overview of what was discussed.
-
-## Participants
-Comma-separated list of participant names.
 
 ## Key Topics
 ### [Topic title]

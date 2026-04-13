@@ -2295,6 +2295,10 @@
             flex-shrink: 0;
         }
 
+        .permanently-hidden {
+            display: none !important;
+        }
+
         .meeting-section {
             margin-bottom: 24px;
         }
@@ -4035,11 +4039,9 @@ Ask Steno
                     </div>
                 </div>
 
-                <div class="meeting-section">
+                <div class="meeting-section permanently-hidden">
                     <h2 class="section-title">Participants</h2>
-                    <div class="section-content" id="detail-participants">
-                        <!-- Participants will be loaded here -->
-                    </div>
+                    <div class="section-content" id="detail-participants"></div>
                 </div>
 
                 <div class="meeting-section" id="discussion-areas-section">
@@ -5179,8 +5181,14 @@ Session started - waiting for activity...
             }
         }
         
-        // Filter meetings based on search query
+        // Filter meetings based on search query (debounced to prevent rapid re-renders)
+        let _filterDebounceTimer = null;
         function filterMeetings() {
+            if (_filterDebounceTimer) clearTimeout(_filterDebounceTimer);
+            _filterDebounceTimer = setTimeout(_filterMeetingsImpl, 80);
+        }
+
+        function _filterMeetingsImpl() {
             const hasSearch = searchQuery.trim().length > 0;
             let source = [...meetings];
             // When searching, search across ALL meetings regardless of folder
