@@ -2216,6 +2216,85 @@
             padding: 3px 10px;
         }
         
+        /* Add to folder pill */
+        .folder-pill {
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            background: var(--bg-surface);
+            border: 1px solid var(--border-subtle);
+            border-radius: 12px;
+            padding: 3px 10px;
+            font-size: 12px;
+            color: var(--text-muted);
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+
+        .folder-pill:hover {
+            border-color: var(--border-default);
+            color: var(--text-secondary);
+        }
+
+        .folder-pill svg {
+            width: 12px;
+            height: 12px;
+            flex-shrink: 0;
+        }
+
+        .folder-pill-dropdown {
+            display: none;
+            position: absolute;
+            top: calc(100% + 6px);
+            left: 0;
+            min-width: 180px;
+            background: var(--bg-elevated);
+            border: 1px solid var(--border-subtle);
+            border-radius: 10px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+            z-index: 50;
+            padding: 4px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .folder-pill-dropdown.open {
+            display: block;
+        }
+
+        .folder-pill-dropdown-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 7px 10px;
+            border-radius: 6px;
+            font-size: 13px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: background 0.1s ease;
+            border: none;
+            background: none;
+            width: 100%;
+            font-family: inherit;
+            text-align: left;
+        }
+
+        .folder-pill-dropdown-item:hover {
+            background: var(--bg-surface);
+            color: var(--text-primary);
+        }
+
+        .folder-pill-dropdown-item.active {
+            color: var(--accent-primary);
+        }
+
+        .folder-pill-dropdown-item svg {
+            width: 14px;
+            height: 14px;
+            flex-shrink: 0;
+        }
+
         .meeting-section {
             margin-bottom: 24px;
         }
@@ -3932,6 +4011,13 @@ Ask Steno
                     <div class="meeting-info">
                         <span id="detail-date">Date</span>
                         <span id="detail-duration">Duration</span>
+                        <div class="folder-pill" id="folder-pill" title="Add to folder">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                            </svg>
+                            <span id="folder-pill-label">Add to folder</span>
+                            <div class="folder-pill-dropdown" id="folder-pill-dropdown"></div>
+                        </div>
                     </div>
                 </div>
 
@@ -5864,6 +5950,9 @@ Session started - waiting for activity...
             
             // Transcript — render diarised view if available
             populateTranscript(selectedMeeting);
+
+            // Update folder pill
+            updateFolderPill();
             
             // Set reprocess button state based on whether this meeting is currently processing
             const isCurrentlyProcessing = processingMeeting && processingMeeting.session_info?.summary_file === selectedMeeting.session_info?.summary_file;
@@ -6380,6 +6469,85 @@ Session started - waiting for activity...
         generateNotesBtn.addEventListener('click', () => {
             generateNotesBtn.classList.remove('show');
             stopBtn.click();
+        });
+
+        // Folder pill in meeting detail
+        const folderPill = document.getElementById('folder-pill');
+        const folderPillLabel = document.getElementById('folder-pill-label');
+        const folderPillDropdown = document.getElementById('folder-pill-dropdown');
+
+        function updateFolderPill() {
+            if (!selectedMeeting) return;
+            const meetingFolders = selectedMeeting.folders || [];
+            if (meetingFolders.length > 0) {
+                const folder = folders.find(f => f.id === meetingFolders[0]);
+                folderPillLabel.textContent = folder ? folder.name : 'Add to folder';
+            } else {
+                folderPillLabel.textContent = 'Add to folder';
+            }
+        }
+
+        folderPill.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const isOpen = folderPillDropdown.classList.contains('open');
+            if (isOpen) {
+                folderPillDropdown.classList.remove('open');
+                return;
+            }
+            // Build dropdown items
+            const meetingFolders = selectedMeeting?.folders || [];
+            let html = '';
+            // "All Notes" option to remove from folder
+            if (meetingFolders.length > 0) {
+                html += `<button class="folder-pill-dropdown-item" data-folder-id="">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><polyline points="9 22 9 12 15 12 15 22"></polyline></svg>
+                    All Notes
+                </button>`;
+            }
+            folders.forEach(f => {
+                const isActive = meetingFolders.includes(f.id);
+                html += `<button class="folder-pill-dropdown-item ${isActive ? 'active' : ''}" data-folder-id="${f.id}">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+                    ${escapeHtml(f.name)}
+                </button>`;
+            });
+            folderPillDropdown.innerHTML = html;
+            folderPillDropdown.classList.add('open');
+        });
+
+        folderPillDropdown.addEventListener('click', async (e) => {
+            const item = e.target.closest('.folder-pill-dropdown-item');
+            if (!item || !selectedMeeting) return;
+            e.stopPropagation();
+            const folderId = item.dataset.folderId;
+            const summaryFile = selectedMeeting.session_info?.summary_file;
+            if (!summaryFile) return;
+
+            const oldFolders = [...(selectedMeeting.folders || [])];
+
+            if (folderId === '') {
+                // Remove from all folders
+                selectedMeeting.folders = [];
+                for (const fid of oldFolders) {
+                    await ipcRenderer.invoke('remove-meeting-from-folder', summaryFile, fid);
+                }
+            } else {
+                // Assign to folder (replace)
+                selectedMeeting.folders = [folderId];
+                for (const fid of oldFolders) {
+                    if (fid !== folderId) await ipcRenderer.invoke('remove-meeting-from-folder', summaryFile, fid);
+                }
+                await ipcRenderer.invoke('add-meeting-to-folder', summaryFile, folderId);
+            }
+
+            folderPillDropdown.classList.remove('open');
+            updateFolderPill();
+            filterMeetings();
+        });
+
+        // Close dropdown when clicking outside
+        document.addEventListener('click', () => {
+            folderPillDropdown.classList.remove('open');
         });
 
         // Search functionality
