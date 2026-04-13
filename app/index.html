@@ -3718,7 +3718,7 @@
 
     <!-- Header with recording controls -->
     <div class="header">
-        <button class="brand home-btn" title="Home">
+        <button class="brand home-btn" id="home-btn" title="Home" style="display: none;">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:2px;">
                 <polyline points="15 18 9 12 15 6"></polyline>
             </svg>
@@ -4733,6 +4733,7 @@ Session started - waiting for activity...
             document.getElementById('meeting-detail').classList.remove('show');
             document.getElementById('calendar-event-detail').classList.remove('show');
             document.querySelectorAll('.meeting-item').forEach(item => item.classList.remove('active'));
+            document.getElementById('home-btn').style.display = 'none';
             renderCalendarSidebar();
         });
 
@@ -5756,6 +5757,9 @@ Session started - waiting for activity...
             selectedMeeting = filteredMeetings[index];
             if (!selectedMeeting) return;
 
+            // Show home button when inside a note
+            document.getElementById('home-btn').style.display = '';
+
             // Reset streaming/notes state
             document.getElementById('notes-editor').style.display = 'none';
             document.querySelectorAll('#meeting-detail .meeting-section').forEach(s => s.style.display = '');
@@ -5922,6 +5926,7 @@ Session started - waiting for activity...
             // Show meeting detail with notes editor
             emptyState.style.display = 'none';
             meetingDetail.classList.add('show');
+            document.getElementById('home-btn').style.display = '';
             detailTitle.textContent = sessionName;
             detailDate.textContent = formatDate(new Date().toISOString());
             detailDuration.textContent = '';
