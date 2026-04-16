@@ -829,7 +829,7 @@ ANSWER:"""
                             yield text
                 except Exception as e:
                     logger.error(f"Anthropic streaming query failed: {e}")
-                    return
+                    raise
             else:
                 try:
                     response = self.cloud_client.chat.completions.create(
@@ -845,7 +845,7 @@ ANSWER:"""
                             yield content
                 except Exception as e:
                     logger.error(f"OpenAI streaming query failed: {e}")
-                    return
+                    raise
         else:
             # Ollama (local or remote)
             try:
@@ -862,7 +862,7 @@ ANSWER:"""
                         yield content
             except Exception as e:
                 logger.error(f"Ollama streaming query failed: {e}")
-                return
+                raise
 
     def test_connection(self) -> bool:
         """

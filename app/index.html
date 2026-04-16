@@ -4579,11 +4579,6 @@ Session started - waiting for activity...
             aiChatBar.classList.toggle('sidebar-collapsed', sidebar.classList.contains('collapsed'));
         });
 
-        // Initialise chat bar left position to match sidebar state
-        if (sidebar.classList.contains('collapsed')) {
-            aiChatBar.classList.add('sidebar-collapsed');
-        }
-
         // Brand click - return to home state
         document.querySelector('.brand').addEventListener('click', () => {
             selectedMeeting = null;
@@ -4628,6 +4623,10 @@ Session started - waiting for activity...
 
         // AI Chat Bar elements
         const aiChatBar = document.getElementById('ai-chat-bar');
+        // Initialise chat bar left position to match sidebar state (must be after aiChatBar is declared)
+        if (sidebar.classList.contains('collapsed')) {
+            aiChatBar.classList.add('sidebar-collapsed');
+        }
         const aiChatContainer = document.getElementById('ai-chat-container');
         const aiChatThread = document.getElementById('ai-chat-thread');
         const aiChatThreadToolbar = document.getElementById('ai-chat-thread-toolbar');

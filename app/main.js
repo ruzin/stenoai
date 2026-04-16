@@ -1219,6 +1219,7 @@ ipcMain.on('query-transcript-stream', (event, summaryFile, question, queryId) =>
 
   let stderrBuf = '';
   let completeSent = false;
+  let stdoutBuf = '';
 
   function sendComplete(payload) {
     if (completeSent) return;
@@ -1229,8 +1230,10 @@ ipcMain.on('query-transcript-stream', (event, summaryFile, question, queryId) =>
   }
 
   proc.stdout.on('data', (data) => {
-    const text = data.toString();
-    text.split('\n').forEach(line => {
+    stdoutBuf += data.toString();
+    const lines = stdoutBuf.split('\n');
+    stdoutBuf = lines.pop(); // retain any incomplete trailing line
+    lines.forEach(line => {
       if (line.startsWith('CHAT_CHUNK:')) {
         try {
           const chunk = Buffer.from(line.slice(11), 'base64').toString('utf-8');
