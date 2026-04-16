@@ -1770,7 +1770,7 @@
         .document-body {
             max-width: 900px;
             width: 100%;
-            padding: 40px 32px 80px;
+            padding: 40px 32px 120px;
         }
 
         .notes-editor {
@@ -2860,217 +2860,613 @@
             to { transform: rotate(360deg); }
         }
 
-        /* AI Query Popup */
-        .ai-query-popup {
+        /* Persistent AI Chat Bar */
+        .ai-chat-bar {
             position: fixed;
-            bottom: 0;
-            left: 0;
+            bottom: 24px;
+            left: 320px;
             right: 0;
-            z-index: 1001;
-            display: none;
+            z-index: 500;
+            display: flex;
             justify-content: center;
-            padding: 24px;
+            padding: 0 24px;
             pointer-events: none;
+            transition: left 0.3s ease;
         }
 
-        .ai-query-popup.show {
-            display: flex;
+        .ai-chat-bar.sidebar-collapsed {
+            left: 0;
         }
 
-        .ai-query-container {
-            background: var(--bg-elevated);
-            border: 1px solid var(--border-default);
-            border-radius: 16px;
-            box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.05);
+        .ai-chat-container {
             width: 100%;
-            max-width: 600px;
+            max-width: 780px;
             pointer-events: auto;
-            animation: slideUp 0.2s ease-out;
-            backdrop-filter: blur(12px);
+            background: transparent;
+            border: none;
+            border-radius: 20px;
+            box-shadow: none;
+            overflow: hidden;
+            position: relative;
+            transition: background 0.2s ease, box-shadow 0.2s ease;
         }
 
-        @keyframes slideUp {
-            from {
-                transform: translateY(20px);
-                opacity: 0;
-            }
-            to {
-                transform: translateY(0);
-                opacity: 1;
-            }
+        .ai-chat-container.focused {
+            background: var(--bg-elevated);
+            box-shadow: 0 4px 32px rgba(0, 0, 0, 0.35), 0 0 0 1.5px var(--accent-primary);
+            backdrop-filter: blur(16px);
         }
 
-        .ai-query-header {
-            display: flex;
-            justify-content: space-between;
+        /* Thread toolbar */
+        .ai-chat-thread-toolbar {
+            display: none;
             align-items: center;
-            padding: 16px 20px;
+            padding: 10px 14px 8px;
             border-bottom: 1px solid var(--border-subtle);
+            gap: 6px;
         }
 
-        .ai-query-header span {
-            font-size: 14px;
-            font-weight: 600;
-            color: var(--text-primary);
+        .ai-chat-container.thread-active .ai-chat-thread-toolbar {
             display: flex;
-            align-items: center;
-            gap: 8px;
         }
 
-        .ai-query-close {
+        .ai-chat-session-title {
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        .ai-chat-toolbar-actions {
+            display: flex;
+            gap: 4px;
+            flex-shrink: 0;
+        }
+
+        .ai-chat-toolbar-btn {
+            height: 28px;
+            padding: 0 8px;
+            border-radius: 8px;
             background: transparent;
             border: none;
             color: var(--text-muted);
-            font-size: 20px;
             cursor: pointer;
-            padding: 4px 8px;
-            border-radius: 6px;
-            transition: all 0.2s ease;
-            line-height: 1;
-        }
-
-        .ai-query-close:hover {
-            background: var(--bg-surface);
-            color: var(--text-primary);
-        }
-
-        .ai-query-input-row {
             display: flex;
-            gap: 12px;
-            padding: 16px 20px;
-        }
-
-        #ai-query-input {
-            flex: 1;
-            background: var(--bg-surface);
-            border: 1px solid var(--border-default);
-            color: var(--text-primary);
-            padding: 12px 16px;
-            border-radius: 10px;
-            font-size: 14px;
+            align-items: center;
+            justify-content: center;
+            gap: 5px;
+            font-size: 12px;
             font-family: inherit;
-            outline: none;
-            transition: all 0.2s ease;
+            transition: background 0.15s ease, color 0.15s ease;
         }
 
-        #ai-query-input:focus {
-            border-color: var(--accent-primary);
-            box-shadow: 0 0 0 3px var(--accent-glow);
+        .ai-chat-toolbar-btn:hover {
+            background: var(--bg-surface);
+            color: var(--text-primary);
         }
 
-        #ai-query-input::placeholder {
+        /* Title dropdown button */
+        .ai-chat-title-btn {
+            flex: 0 1 auto;
+            min-width: 0;
+            max-width: calc(100% - 90px);
+            height: 28px;
+            padding: 0 8px;
+            border-radius: 8px;
+            background: transparent;
+            border: none;
+            color: var(--text-primary);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            font-size: 13px;
+            font-weight: 600;
+            font-family: inherit;
+            transition: background 0.15s ease;
+            text-align: left;
+        }
+
+        .ai-chat-title-btn:hover {
+            background: var(--bg-surface);
+        }
+
+        .ai-chat-title-text {
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .ai-chat-title-chevron {
+            flex-shrink: 0;
+            color: var(--text-muted);
+            transition: transform 0.15s ease;
+        }
+
+        .ai-chat-title-btn.dropdown-open .ai-chat-title-chevron {
+            transform: rotate(180deg);
+        }
+
+        /* Thread message list */
+        .ai-chat-thread {
+            height: 0;
+            overflow-y: auto;
+            overflow-x: hidden;
+            transition: height 0.25s ease, padding 0.25s ease;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .ai-chat-container.thread-active .ai-chat-thread {
+            height: 280px;
+            padding: 14px 16px 10px;
+        }
+
+        /* Message bubbles */
+        .ai-chat-msg {
+            display: flex;
+            flex-direction: column;
+            max-width: 88%;
+            gap: 3px;
+        }
+
+        .ai-chat-msg.user {
+            align-self: flex-end;
+            align-items: flex-end;
+        }
+
+        .ai-chat-msg.assistant {
+            align-self: flex-start;
+            align-items: flex-start;
+        }
+
+        .ai-chat-msg-bubble {
+            padding: 8px 12px;
+            border-radius: 14px;
+            font-size: 14px;
+            line-height: 1.55;
+            word-break: break-word;
+        }
+
+        .ai-chat-msg.user .ai-chat-msg-bubble {
+            background: var(--accent-primary);
+            color: white;
+            border-bottom-right-radius: 4px;
+        }
+
+        .ai-chat-msg.assistant .ai-chat-msg-bubble {
+            background: var(--bg-surface);
+            color: var(--text-secondary);
+            border-bottom-left-radius: 4px;
+        }
+
+        .ai-chat-msg-bubble.loading {
+            display: flex;
+            align-items: center;
+            gap: 10px;
             color: var(--text-muted);
         }
 
-        .ai-query-submit {
-            background: var(--accent-primary);
-            color: white;
-            border: none;
-            padding: 12px 20px;
-            border-radius: 10px;
-            font-size: 14px;
+        .ai-chat-msg-bubble.error {
+            background: rgba(239, 68, 68, 0.08);
+            color: var(--recording-red);
+        }
+
+        .ai-chat-msg-time {
+            font-size: 11px;
+            color: var(--text-muted);
+            padding: 0 4px;
+        }
+
+        /* History dropdown */
+        .ai-chat-history-panel {
+            position: fixed;
+            width: 280px;
+            max-height: 260px;
+            user-select: none;
+            overflow-y: auto;
+            background: var(--bg-elevated);
+            border: 1px solid var(--border-default);
+            border-radius: 12px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+            opacity: 0;
+            pointer-events: none;
+            transform: translateY(-4px) scale(0.97);
+            transform-origin: top left;
+            transition: opacity 0.15s ease, transform 0.15s ease;
+            z-index: 9999;
+            padding: 6px;
+        }
+
+        .ai-chat-history-panel.open {
+            opacity: 1;
+            pointer-events: auto;
+            transform: translateY(0) scale(1);
+        }
+
+        .ai-chat-history-list {
+            display: flex;
+            flex-direction: column;
+            gap: 1px;
+        }
+
+        .ai-chat-history-group-label {
+            padding: 6px 10px 3px;
+            font-size: 11px;
             font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+
+        .ai-chat-history-item {
+            padding: 6px 8px;
+            border-radius: 8px;
             cursor: pointer;
-            transition: all 0.2s ease;
+            transition: background 0.12s ease;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            position: relative;
+        }
+
+        .ai-chat-history-item-spinner {
+            flex-shrink: 0;
+            width: 12px;
+            height: 12px;
+            border: 1.5px solid var(--border-default);
+            border-top-color: var(--accent-primary);
+            border-radius: 50%;
+            animation: spin 0.7s linear infinite;
+        }
+
+        .ai-chat-history-item:hover {
+            background: var(--bg-surface);
+        }
+
+        .ai-chat-history-item.active {
+            background: var(--accent-glow);
+        }
+
+        .ai-chat-history-item.active .ai-chat-history-item-preview {
+            color: var(--text-primary);
+            font-weight: 500;
+        }
+
+        .ai-chat-history-item-preview {
+            flex: 1;
+            font-size: 13px;
+            color: var(--text-secondary);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .ai-chat-history-item-rename-input {
+            flex: 1;
+            font-size: 13px;
+            font-family: inherit;
+            color: var(--text-primary);
+            background: var(--bg-elevated);
+            border: 1px solid var(--accent-primary);
+            border-radius: 5px;
+            padding: 1px 6px;
+            outline: none;
+            min-width: 0;
+        }
+
+        .ai-chat-history-dots-btn {
+            flex-shrink: 0;
+            width: 22px;
+            height: 22px;
+            border-radius: 5px;
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            opacity: 0;
+            transition: opacity 0.12s ease, background 0.12s ease;
+        }
+
+        .ai-chat-history-item:hover .ai-chat-history-dots-btn,
+        .ai-chat-history-dots-btn.menu-open {
+            opacity: 1;
+        }
+
+        .ai-chat-history-dots-btn:hover {
+            background: var(--border-subtle);
+            color: var(--text-primary);
+        }
+
+        /* Session context menu */
+        .ai-chat-session-menu {
+            position: fixed;
+            width: 148px;
+            background: var(--bg-elevated);
+            border: 1px solid var(--border-default);
+            border-radius: 10px;
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+            padding: 4px;
+            z-index: 10000;
+            opacity: 0;
+            pointer-events: none;
+            transform: scale(0.95);
+            transform-origin: top right;
+            transition: opacity 0.12s ease, transform 0.12s ease;
+        }
+
+        .ai-chat-session-menu.open {
+            opacity: 1;
+            pointer-events: auto;
+            transform: scale(1);
+        }
+
+        .ai-chat-session-menu-item {
+            display: flex;
+            align-items: center;
+            gap: 9px;
+            padding: 8px 10px;
+            border-radius: 7px;
+            font-size: 13px;
+            font-family: inherit;
+            color: var(--text-primary);
+            background: transparent;
+            border: none;
+            cursor: pointer;
+            width: 100%;
+            text-align: left;
+            transition: background 0.1s ease;
+        }
+
+        .ai-chat-session-menu-item:hover {
+            background: var(--bg-surface);
+        }
+
+        .ai-chat-session-menu-item.danger {
+            color: var(--recording-red);
+        }
+
+        .ai-chat-session-menu-item.danger:hover {
+            background: rgba(239, 68, 68, 0.08);
+        }
+
+        .ai-chat-history-empty {
+            padding: 20px;
+            text-align: center;
+            color: var(--text-muted);
+            font-size: 13px;
+        }
+
+        /* Prompt chips row */
+        .ai-chat-prompts-row {
             display: flex;
             align-items: center;
             gap: 8px;
+            padding: 0 14px;
+            flex-wrap: nowrap;
+            overflow: hidden;
+            max-height: 0;
+            transition: max-height 0.22s ease, padding 0.22s ease;
         }
 
-        .ai-query-submit:hover {
+        .ai-chat-prompts-row::-webkit-scrollbar { display: none; }
+
+        .ai-chat-container.focused:not(.thread-active) .ai-chat-prompts-row {
+            max-height: 56px;
+            padding: 12px 14px 8px;
+        }
+
+        .ai-chat-prompt-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            color: var(--text-muted);
+            font-size: 12px;
+            font-family: inherit;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: color 0.15s ease;
+            flex-shrink: 0;
+            user-select: none;
+        }
+
+        .ai-chat-prompt-chip:hover {
+            color: var(--text-primary);
+        }
+
+        .ai-chat-prompt-chip svg {
+            flex-shrink: 0;
+            opacity: 0.5;
+        }
+
+        /* Input wrap — always visible as the sole element when unfocused */
+        .ai-chat-input-wrap {
+            margin: 0;
+            border: 1px solid var(--border-default);
+            border-radius: 20px;
+            overflow: hidden;
+            background: #ffffff;
+            transition: margin 0.22s ease, border-radius 0.22s ease;
+        }
+
+        .ai-chat-container.focused .ai-chat-input-wrap {
+            margin: 0 12px 12px;
+            border-radius: 12px;
+        }
+
+        /* Unfocused hint pill */
+        .ai-chat-hint {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 0 4px 4px;
+            cursor: pointer;
+            border-radius: 8px;
+            border: none;
+            font-size: 12px;
+            color: var(--text-muted);
+            white-space: nowrap;
+            flex-shrink: 0;
+            pointer-events: auto;
+            transition: opacity 0.15s ease;
+        }
+
+        .ai-chat-hint:hover {
+            opacity: 0.75;
+        }
+
+        .ai-chat-container.focused .ai-chat-hint,
+        .ai-chat-container.has-history .ai-chat-hint {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .ai-chat-hint-icon {
+            width: 20px;
+            height: 20px;
+            border-radius: 5px;
             background: var(--accent-primary);
-            filter: brightness(1.1);
-            transform: translateY(-1px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            flex-shrink: 0;
         }
 
-        .ai-query-submit:active {
-            transform: translateY(0);
+        /* Input row */
+        .ai-chat-input-row {
+            display: flex;
+            align-items: center;
+            padding: 10px 12px;
+            gap: 8px;
         }
 
-        .ai-query-submit:disabled {
-            opacity: 0.6;
+        .ai-chat-history-btn {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            transition: color 0.15s ease;
+        }
+
+        .ai-chat-history-btn:hover {
+            color: var(--text-primary);
+        }
+
+        .ai-chat-input {
+            flex: 1;
+            background: transparent;
+            border: none;
+            outline: none;
+            color: var(--text-primary);
+            font-size: 14px;
+            font-family: inherit;
+            resize: none;
+            line-height: 1.5;
+            max-height: 120px;
+            padding-right: 40px;
+            overflow-y: auto;
+        }
+
+        .ai-chat-input::placeholder {
+            color: var(--text-muted);
+        }
+
+        .ai-chat-mic-btn {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            transition: color 0.15s ease, background 0.15s ease;
+        }
+
+        .ai-chat-mic-btn:hover {
+            color: var(--text-primary);
+        }
+
+        .ai-chat-mic-btn.recording {
+            color: var(--accent-primary);
+            background: rgba(129, 140, 248, 0.15);
+        }
+
+        .ai-chat-submit {
+            width: 0;
+            min-width: 0;
+            height: 30px;
+            border-radius: 50%;
+            background: var(--accent-primary);
+            border: none;
+            color: white;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            overflow: hidden;
+            opacity: 0;
+            pointer-events: none;
+            transition: width 0.15s ease, min-width 0.15s ease, opacity 0.15s ease;
+        }
+
+        .ai-chat-submit.visible {
+            width: 30px;
+            min-width: 30px;
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        .ai-chat-submit .submit-stop-icon { display: none; }
+        .ai-chat-submit.stopping .submit-send-icon { display: none; }
+        .ai-chat-submit.stopping .submit-stop-icon { display: flex; }
+
+        .ai-chat-submit:hover {
+            filter: brightness(1.12);
+            transform: scale(1.05);
+        }
+
+        .ai-chat-submit:active {
+            transform: scale(0.97);
+        }
+
+        .ai-chat-submit:disabled {
+            opacity: 0.5;
             cursor: not-allowed;
             transform: none;
         }
 
-        .ai-query-response {
-            padding: 0 20px 20px;
-            display: none;
-        }
-
-        .ai-query-response.show {
-            display: block;
-        }
-
-        .ai-query-response-content {
-            background: var(--bg-surface);
-            border: 1px solid var(--border-subtle);
-            border-radius: 10px;
-            padding: 16px;
-            color: var(--text-secondary);
-            font-size: 14px;
-            line-height: 1.6;
-            max-height: 200px;
-            overflow-y: auto;
-        }
-
-        .ai-query-response-content.loading {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 12px;
-            color: var(--text-muted);
-            padding: 24px;
-        }
-
-        .ai-query-response-content.error {
-            color: var(--recording-red);
-            background: rgba(239, 68, 68, 0.1);
-            border-color: rgba(239, 68, 68, 0.2);
-        }
-
-        .ai-query-spinner {
-            width: 20px;
-            height: 20px;
+        .ai-chat-spinner {
+            width: 16px;
+            height: 16px;
             border: 2px solid var(--border-default);
             border-top-color: var(--accent-primary);
             border-radius: 50%;
             animation: spin 0.8s linear infinite;
+            flex-shrink: 0;
         }
 
         @keyframes spin {
             to { transform: rotate(360deg); }
-        }
-
-        /* Ask AI Button */
-        .ask-ai-btn {
-            background: linear-gradient(135deg, rgba(129, 140, 248, 0.15) 0%, rgba(99, 102, 241, 0.15) 100%);
-            border: 1px solid rgba(129, 140, 248, 0.3);
-            color: var(--accent-primary);
-            padding: 6px 12px;
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 12px;
-            font-weight: 500;
-            transition: all 0.2s ease;
-            display: flex;
-            align-items: center;
-            gap: 6px;
-        }
-
-        .ask-ai-btn:hover {
-            background: linear-gradient(135deg, rgba(129, 140, 248, 0.25) 0%, rgba(99, 102, 241, 0.25) 100%);
-            border-color: var(--accent-primary);
-            transform: translateY(-1px);
-        }
-
-        .ask-ai-btn kbd {
-            background: rgba(129, 140, 248, 0.2);
-            padding: 2px 6px;
-            border-radius: 4px;
-            font-size: 10px;
-            font-family: inherit;
-            margin-left: 4px;
         }
 
         /* Light mode specific overrides */
@@ -3101,8 +3497,8 @@
             background: linear-gradient(135deg, #c2410c, #d97706);
         }
 
-        [data-theme="light"] .ai-query-container {
-            box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.08), 0 0 0 1px rgba(0, 0, 0, 0.06);
+        [data-theme="light"] .ai-chat-container {
+            box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08), 0 0 0 1px rgba(0, 0, 0, 0.06);
         }
 
         [data-theme="light"] .setup-modal {
@@ -3403,12 +3799,6 @@
                             </button>
                         </div>
                         <div style="display: flex; gap: 8px; align-items: center;">
-                            <button class="ask-ai-btn" id="ask-ai-btn" title="Ask Steno about this meeting">
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
-                                </svg>
-Ask Steno
-                            </button>
                             <button class="copy-notes-btn" id="copy-notes-btn" title="Copy meeting notes">
                                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                     <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
@@ -3498,28 +3888,73 @@ Ask Steno
         </div>
     </div>
 
-    <!-- AI Query Popup -->
-    <div class="ai-query-popup" id="ai-query-popup">
-        <div class="ai-query-container">
-            <div class="ai-query-header">
-                <span>
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <circle cx="12" cy="12" r="10"></circle>
-                        <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
-                        <line x1="12" y1="17" x2="12.01" y2="17"></line>
+    <!-- Persistent AI Chat Bar -->
+    <div class="ai-chat-bar" id="ai-chat-bar" style="display: none;">
+        <div class="ai-chat-container" id="ai-chat-container">
+            <!-- Thread toolbar: shown only in THREAD_ACTIVE state -->
+            <div class="ai-chat-thread-toolbar" id="ai-chat-thread-toolbar">
+                <!-- Title with dropdown chevron -->
+                <button class="ai-chat-title-btn" id="ai-chat-title-btn" title="Chat history">
+                    <span class="ai-chat-title-text" id="ai-chat-title-text">Chat</span>
+                    <svg class="ai-chat-title-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="6 9 12 15 18 9"></polyline>
                     </svg>
-                    Ask Steno about this meeting
-                </span>
-                <button class="ai-query-close" id="ai-query-close">&times;</button>
-            </div>
-            <div class="ai-query-input-row">
-                <input type="text" id="ai-query-input" placeholder="What was discussed about...">
-                <button class="ai-query-submit" id="ai-query-submit">
-                    Ask
+                </button>
+                <!-- New chat button — pushed to far right -->
+                <button class="ai-chat-toolbar-btn ai-chat-new-chat-btn" id="ai-chat-new-chat-btn" title="New chat" style="margin-left: auto; flex-shrink: 0;">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+                    </svg>
+                    New chat
                 </button>
             </div>
-            <div class="ai-query-response" id="ai-query-response">
-                <div class="ai-query-response-content" id="ai-query-response-content"></div>
+            <!-- Scrollable message thread -->
+            <div class="ai-chat-thread" id="ai-chat-thread"></div>
+            <!-- Prompt chips row — visible when focused (not in thread mode) -->
+            <div class="ai-chat-prompts-row" id="ai-chat-prompts-row">
+                <button class="ai-chat-history-btn" id="ai-chat-history-btn-input" title="Chat history">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline>
+                    </svg>
+                </button>
+                <span class="ai-chat-prompt-chip" data-prompt="Write a follow up email">
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
+                    Write follow up email
+                </span>
+                <span class="ai-chat-prompt-chip" data-prompt="List my to-dos">
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
+                    List my to-dos
+                </span>
+                <span class="ai-chat-prompt-chip" data-prompt="Make the notes longer">
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
+                    Make notes longer
+                </span>
+            </div>
+            <!-- Input row wrapped in outlined container -->
+            <div class="ai-chat-input-wrap">
+                <div class="ai-chat-input-row">
+                    <textarea class="ai-chat-input" id="ai-chat-input" placeholder="Ask anything…" rows="1"></textarea>
+                    <span class="ai-chat-hint" id="ai-chat-hint">
+                        <span class="ai-chat-hint-icon">
+                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
+                        </span>
+                        Write follow up email
+                    </span>
+                    <button class="ai-chat-mic-btn" id="ai-chat-mic-btn" title="Voice input" style="display:none;" disabled>
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+                            <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line>
+                        </svg>
+                    </button>
+                    <button class="ai-chat-submit" id="ai-chat-submit" title="Send">
+                        <span class="submit-send-icon">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 4l8 8h-5v8h-6v-8H4l8-8z"/></svg>
+                        </span>
+                        <span class="submit-stop-icon">
+                            <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
+                        </span>
+                    </button>
+                </div>
             </div>
         </div>
     </div>
@@ -4101,6 +4536,23 @@ Session started - waiting for activity...
         </div>
     </div>
 
+    <!-- History dropdown: direct body child so z-index is in root stacking context -->
+    <div class="ai-chat-history-panel" id="ai-chat-history-panel">
+        <div class="ai-chat-history-list" id="ai-chat-history-list"></div>
+    </div>
+
+    <!-- Session context menu: direct body child -->
+    <div class="ai-chat-session-menu" id="ai-chat-session-menu">
+        <button class="ai-chat-session-menu-item" id="ai-chat-session-rename-btn">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
+            Rename
+        </button>
+        <button class="ai-chat-session-menu-item danger" id="ai-chat-session-delete-btn">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path><path d="M9 6V4h6v2"></path></svg>
+            Delete
+        </button>
+    </div>
+
     <script src="audio-visualizer.js"></script>
     <script>
         const { ipcRenderer } = require('electron');
@@ -4124,7 +4576,13 @@ Session started - waiting for activity...
             sidebar.classList.toggle('collapsed');
             sidebarToggle.classList.toggle('collapsed');
             localStorage.setItem('sidebarCollapsed', sidebar.classList.contains('collapsed'));
+            aiChatBar.classList.toggle('sidebar-collapsed', sidebar.classList.contains('collapsed'));
         });
+
+        // Initialise chat bar left position to match sidebar state
+        if (sidebar.classList.contains('collapsed')) {
+            aiChatBar.classList.add('sidebar-collapsed');
+        }
 
         // Brand click - return to home state
         document.querySelector('.brand').addEventListener('click', () => {
@@ -4168,14 +4626,26 @@ Session started - waiting for activity...
         const copyNotesBtn = document.getElementById('copy-notes-btn');
         const editTitleBtn = document.getElementById('edit-title-btn');
 
-        // AI Query elements
-        const askAiBtn = document.getElementById('ask-ai-btn');
-        const aiQueryPopup = document.getElementById('ai-query-popup');
-        const aiQueryClose = document.getElementById('ai-query-close');
-        const aiQueryInput = document.getElementById('ai-query-input');
-        const aiQuerySubmit = document.getElementById('ai-query-submit');
-        const aiQueryResponse = document.getElementById('ai-query-response');
-        const aiQueryResponseContent = document.getElementById('ai-query-response-content');
+        // AI Chat Bar elements
+        const aiChatBar = document.getElementById('ai-chat-bar');
+        const aiChatContainer = document.getElementById('ai-chat-container');
+        const aiChatThread = document.getElementById('ai-chat-thread');
+        const aiChatThreadToolbar = document.getElementById('ai-chat-thread-toolbar');
+        const aiChatSessionTitle = null; // element removed; title no longer shown
+        const aiChatTitleBtn = document.getElementById('ai-chat-title-btn');
+        const aiChatTitleText = document.getElementById('ai-chat-title-text');
+        const aiChatHistoryPanel = document.getElementById('ai-chat-history-panel');
+        const aiChatHistoryList = document.getElementById('ai-chat-history-list');
+        const aiChatSessionMenu = document.getElementById('ai-chat-session-menu');
+        const aiChatSessionRenameBtn = document.getElementById('ai-chat-session-rename-btn');
+        const aiChatSessionDeleteBtn = document.getElementById('ai-chat-session-delete-btn');
+        const aiChatMicBtn = document.getElementById('ai-chat-mic-btn');
+        const aiChatNewChatBtn = document.getElementById('ai-chat-new-chat-btn');
+        const aiChatHistoryBtnInput = document.getElementById('ai-chat-history-btn-input');
+        const aiChatHistoryBtnThread = document.getElementById('ai-chat-history-btn-thread');
+
+        const aiChatInput = document.getElementById('ai-chat-input');
+        const aiChatSubmit = document.getElementById('ai-chat-submit');
 
         // Setup elements
         const setupOverlay = document.getElementById('setup-overlay');
@@ -4440,6 +4910,7 @@ Session started - waiting for activity...
                         selectedMeeting = null;
                         emptyState.style.display = 'flex';
                         meetingDetail.classList.remove('show');
+                        hideAiChatBar();
                     }
                 } else {
                     log(`Failed to delete meeting: ${result.error}`);
@@ -5089,7 +5560,9 @@ Session started - waiting for activity...
             // Show meeting details
             emptyState.style.display = 'none';
             meetingDetail.classList.add('show');
-            
+            aiChatCurrentSummaryFile = selectedMeeting?.session_info?.summary_file || null;
+            showAiChatBar();
+
             // Populate details
             detailTitle.textContent = selectedMeeting.session_info?.name || 'Untitled Meeting';
             detailDate.textContent = formatDate(selectedMeeting.session_info?.processed_at);
@@ -5295,7 +5768,7 @@ Session started - waiting for activity...
             notesContent.focus();
 
             // Hide action buttons not relevant during recording
-            document.getElementById('ask-ai-btn').style.display = 'none';
+            aiChatBar.style.display = 'none';
             document.getElementById('copy-notes-btn').style.display = 'none';
             document.getElementById('reprocess-btn').style.display = 'none';
 
@@ -6253,7 +6726,7 @@ Session started - waiting for activity...
                 return;
             }
 
-            const regenerateTitle = confirm('Also regenerate the meeting title?');
+            const regenerateTitle = await ipcRenderer.invoke('confirm-yes-no', 'Also regenerate the meeting title?');
 
             // Track which meeting is being processed
             processingMeeting = selectedMeeting;
@@ -6295,121 +6768,704 @@ Session started - waiting for activity...
             }
         });
 
-        // AI Query functionality
-        function showAiQueryPopup() {
-            if (!selectedMeeting) {
-                log('No meeting selected for AI query');
+        // ── AI Chat: localStorage helpers ──────────────────────────────────────
+
+        function aiChatLoad(summaryFile) {
+            try {
+                return JSON.parse(localStorage.getItem('stenoai_chat_' + summaryFile)) || aiChatCreateStore();
+            } catch (e) {
+                return aiChatCreateStore();
+            }
+        }
+
+        function aiChatSave(summaryFile, store) {
+            localStorage.setItem('stenoai_chat_' + summaryFile, JSON.stringify(store));
+        }
+
+        function aiChatCreateStore() {
+            return { currentSessionId: null, sessions: [] };
+        }
+
+        function aiChatGetCurrentSession(store) {
+            if (!store.currentSessionId) return null;
+            return store.sessions.find(s => s.id === store.currentSessionId) || null;
+        }
+
+        function aiChatStartNewSession(store) {
+            const session = { id: Date.now().toString(), createdAt: new Date().toISOString(), messages: [] };
+            store.sessions.unshift(session);
+            store.currentSessionId = session.id;
+            return session;
+        }
+
+        // ── AI Chat: state machine ─────────────────────────────────────────────
+
+        let aiChatState = 'MINIMIZED';
+        let aiChatCurrentSummaryFile = null;
+        let aiSpeechRecognition = null;
+        let aiSpeechRecording = false;
+        const aiChatPendingQueries = new Set(); // summaryFiles with in-flight queries
+        const aiChatQueryIds = new Map(); // summaryFile → queryId (for per-meeting cancellation)
+
+        function setAiChatState(state) {
+            aiChatState = state;
+            if (state === 'THREAD_ACTIVE') {
+                aiChatContainer.classList.add('thread-active');
+                aiChatContainer.classList.add('focused');
+                closeHistoryPanel();
+                setTimeout(() => { aiChatThread.scrollTop = aiChatThread.scrollHeight; }, 50);
+            } else if (state === 'COMPOSING_NEW') {
+                aiChatContainer.classList.remove('thread-active');
+                aiChatContainer.classList.add('focused');
+                closeHistoryPanel();
+                aiChatInput.focus();
+            } else {
+                // MINIMIZED
+                aiChatContainer.classList.remove('thread-active');
+                aiChatContainer.classList.remove('focused');
+                closeHistoryPanel();
+            }
+        }
+
+        // ── AI Chat: show / hide ───────────────────────────────────────────────
+
+        function isSessionPending(session) {
+            return session ? aiChatPendingQueries.has(session.id) : false;
+        }
+
+        function syncSubmitButton(session) {
+            const pending = isSessionPending(session);
+            aiChatSubmit.disabled = false;
+            aiChatSubmit.classList.toggle('stopping', pending);
+            aiChatSubmit.classList.toggle('visible', pending || aiChatInput.value.trim().length > 0);
+        }
+
+        function showAiChatBar() {
+            aiChatBar.style.display = 'flex';
+            const sf = aiChatCurrentSummaryFile;
+            if (!sf) {
+                syncSubmitButton(null);
+                setAiChatState('MINIMIZED');
                 return;
             }
-            aiQueryPopup.classList.add('show');
-            aiQueryInput.value = '';
-            aiQueryResponse.classList.remove('show');
-            aiQueryResponseContent.textContent = '';
-            aiQueryResponseContent.classList.remove('loading', 'error');
-            setTimeout(() => aiQueryInput.focus(), 100);
+            const store = aiChatLoad(sf);
+            const session = aiChatGetCurrentSession(store);
+            // Sync stop/send button to the current session's state
+            syncSubmitButton(session);
+            // If this session has a query in-flight, show thread with loading bubble
+            if (isSessionPending(session)) {
+                if (session && session.messages.length > 0) {
+                    renderAiThread(session);
+                    updateAiSessionTitle(session);
+                }
+                setAiChatState('THREAD_ACTIVE');
+                appendLoadingBubble();
+            } else {
+                // Always start minimized on navigation — user clicks to expand
+                const hasHistory = session && session.messages.length > 0;
+                aiChatInput.placeholder = hasHistory ? 'Continue chat…' : 'Ask anything…';
+                aiChatContainer.classList.toggle('has-history', hasHistory);
+                setAiChatState('MINIMIZED');
+            }
         }
 
-        function hideAiQueryPopup() {
-            aiQueryPopup.classList.remove('show');
-            aiQueryInput.value = '';
-            aiQueryResponse.classList.remove('show');
+        function hideAiChatBar() {
+            aiChatBar.style.display = 'none';
+            aiChatInput.value = '';
+            aiChatSubmit.classList.remove('visible');
+            aiChatInput.style.height = '';
+            aiChatThread.textContent = '';
+            setAiChatState('MINIMIZED');
         }
+
+        // ── AI Chat: response formatting ──────────────────────────────────────
 
         function formatAiResponse(text) {
-            // Escape HTML
             const escaped = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-            // Bold **text**
             let html = escaped.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-            // Bullet points: lines starting with * or -
             html = html.replace(/^[\*\-]\s+(.+)$/gm, '<li>$1</li>');
-            // Wrap consecutive <li> in <ul>
             html = html.replace(/((?:<li>.*<\/li>\n?)+)/g, '<ul>$1</ul>');
-            // Line breaks for remaining newlines
             html = html.replace(/\n/g, '<br>');
-            // Clean up <br> inside/around <ul>
             html = html.replace(/<br><ul>/g, '<ul>');
             html = html.replace(/<\/ul><br>/g, '</ul>');
             html = html.replace(/<ul><br>/g, '<ul>');
             return html;
         }
 
-        async function submitAiQuery() {
-            const question = aiQueryInput.value.trim();
-            if (!question) return;
-            if (!selectedMeeting) {
-                log('No meeting selected for AI query');
-                return;
+        // ── AI Chat: thread rendering ──────────────────────────────────────────
+
+        function buildMessageEl(msg) {
+            const row = document.createElement('div');
+            row.className = 'ai-chat-msg ' + msg.role;
+            const bubble = document.createElement('div');
+            bubble.className = 'ai-chat-msg-bubble';
+            if (msg.role === 'assistant') {
+                bubble.insertAdjacentHTML('beforeend', formatAiResponse(msg.content));
+            } else {
+                bubble.textContent = msg.content;
             }
-
-            const summaryFile = selectedMeeting.session_info?.summary_file;
-            if (!summaryFile) {
-                log('No summary file found for AI query');
-                return;
-            }
-
-            // Show loading state
-            aiQuerySubmit.disabled = true;
-            aiQueryResponse.classList.add('show');
-            aiQueryResponseContent.classList.add('loading');
-            aiQueryResponseContent.classList.remove('error');
-            aiQueryResponseContent.innerHTML = '<div class="ai-query-spinner"></div>Thinking...';
-
-            log(`Asking AI: ${question.substring(0, 50)}...`);
-
-            try {
-                const result = await ipcRenderer.invoke('query-transcript', summaryFile, question);
-
-                if (result.success) {
-                    aiQueryResponseContent.classList.remove('loading');
-                    aiQueryResponseContent.innerHTML = formatAiResponse(result.answer);
-                    log('AI response received');
-                } else {
-                    aiQueryResponseContent.classList.remove('loading');
-                    aiQueryResponseContent.classList.add('error');
-                    aiQueryResponseContent.textContent = result.error || 'Failed to get response from AI';
-                    log(`AI query failed: ${result.error}`);
-                }
-            } catch (error) {
-                aiQueryResponseContent.classList.remove('loading');
-                aiQueryResponseContent.classList.add('error');
-                aiQueryResponseContent.textContent = 'Failed to query AI: ' + error.message;
-                log(`AI query error: ${error.message}`);
-            } finally {
-                aiQuerySubmit.disabled = false;
-            }
+            row.appendChild(bubble);
+            return row;
         }
 
-        // Ask AI button click handler
-        askAiBtn.addEventListener('click', showAiQueryPopup);
+        function renderAiThread(session) {
+            aiChatThread.textContent = '';
+            session.messages.forEach(msg => {
+                aiChatThread.appendChild(buildMessageEl(msg));
+            });
+            setTimeout(() => { aiChatThread.scrollTop = aiChatThread.scrollHeight; }, 0);
+        }
 
-        // AI Query close button
-        aiQueryClose.addEventListener('click', hideAiQueryPopup);
+        function updateAiSessionTitle(session) {
+            const firstUser = session.messages.find(m => m.role === 'user');
+            const title = firstUser
+                ? firstUser.content.substring(0, 50) + (firstUser.content.length > 50 ? '…' : '')
+                : 'Chat';
+            if (aiChatTitleText) aiChatTitleText.textContent = title;
+        }
 
-        // AI Query submit button
-        aiQuerySubmit.addEventListener('click', submitAiQuery);
+        function appendLoadingBubble() {
+            const row = document.createElement('div');
+            row.className = 'ai-chat-msg assistant loading-bubble';
+            const bubble = document.createElement('div');
+            bubble.className = 'ai-chat-msg-bubble loading';
+            bubble.insertAdjacentHTML('beforeend', '<div class="ai-chat-spinner"></div>Thinking…');
+            row.appendChild(bubble);
+            aiChatThread.appendChild(row);
+            aiChatThread.scrollTop = aiChatThread.scrollHeight;
+        }
 
-        // AI Query input - submit on Enter
-        aiQueryInput.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
+        function replaceLoadingBubble(content, isError) {
+            const loadingBubble = aiChatThread.querySelector('.loading-bubble');
+            if (!loadingBubble) return;
+            const bubble = loadingBubble.querySelector('.ai-chat-msg-bubble');
+            bubble.textContent = '';
+            if (isError) {
+                bubble.classList.add('error');
+                bubble.textContent = content;
+            } else {
+                bubble.insertAdjacentHTML('beforeend', formatAiResponse(content));
+            }
+            loadingBubble.classList.remove('loading-bubble');
+            aiChatThread.scrollTop = aiChatThread.scrollHeight;
+        }
+
+        // ── AI Chat: submit ────────────────────────────────────────────────────
+
+        function submitAiQuery() {
+            const question = aiChatInput.value.trim();
+            if (!question) return;
+            if (!selectedMeeting) { log('No meeting selected for AI query'); return; }
+
+            const summaryFile = selectedMeeting.session_info?.summary_file;
+            if (!summaryFile) { log('No summary file found for AI query'); return; }
+
+            aiChatCurrentSummaryFile = summaryFile;
+            let store = aiChatLoad(summaryFile);
+            let session = aiChatGetCurrentSession(store);
+            if (!session) session = aiChatStartNewSession(store);
+
+            if (aiChatPendingQueries.has(session.id)) return; // this session already in-flight
+
+            const sessionId = session.id;
+
+            const userMsg = { role: 'user', content: question, timestamp: new Date().toISOString() };
+            session.messages.push(userMsg);
+            aiChatSave(summaryFile, store);
+
+            // Render user message and transition to thread
+            aiChatThread.appendChild(buildMessageEl(userMsg));
+            aiChatInput.value = '';
+            aiChatInput.style.height = '';
+            updateAiSessionTitle(session);
+            setAiChatState('THREAD_ACTIVE');
+            appendLoadingBubble();
+
+            const queryId = Date.now();
+            aiChatQueryIds.set(sessionId, queryId);
+            aiChatPendingQueries.add(sessionId);
+            // Show stop button (only if we're still viewing this session)
+            if (aiChatCurrentSummaryFile === summaryFile) {
+                syncSubmitButton(session);
+            }
+            log('Asking AI: ' + question.substring(0, 50) + '...');
+
+            let streamedContent = '';
+            let streamBubbleEl = null;
+
+            function onChatChunk(event, data) {
+                if (data.queryId !== queryId) return; // not our query
+                if (aiChatQueryIds.get(sessionId) !== queryId) return; // cancelled
+
+                if (!streamBubbleEl) {
+                    // First chunk: transition spinner to live text
+                    const loadingRow = aiChatThread.querySelector('.loading-bubble');
+                    if (loadingRow) {
+                        const bubble = loadingRow.querySelector('.ai-chat-msg-bubble');
+                        bubble.classList.remove('loading');
+                        bubble.textContent = '';
+                        loadingRow.classList.remove('loading-bubble');
+                        streamBubbleEl = bubble;
+                    }
+                }
+
+                streamedContent += data.chunk;
+                if (streamBubbleEl) {
+                    streamBubbleEl.textContent = '';
+                    streamBubbleEl.insertAdjacentHTML('beforeend', formatAiResponse(streamedContent));
+                    aiChatThread.scrollTop = aiChatThread.scrollHeight;
+                }
+            }
+
+            function onChatComplete(event, data) {
+                if (data.queryId !== queryId) return; // not our query
+
+                // Always clean up listeners
+                ipcRenderer.removeListener('chat-chunk', onChatChunk);
+                ipcRenderer.removeListener('chat-complete', onChatComplete);
+
+                if (aiChatQueryIds.get(sessionId) !== queryId) return; // cancelled
+
+                const isError = !data.success;
+                const answerContent = data.success
+                    ? (streamedContent || 'No response received.')
+                    : (data.error || 'Failed to get response from AI');
+
+                // If streaming never started (error before first chunk), replace loading bubble
+                if (!streamBubbleEl) {
+                    replaceLoadingBubble(answerContent, isError);
+                } else if (isError) {
+                    streamBubbleEl.classList.add('error');
+                }
+
+                const assistantMsg = { role: 'assistant', content: answerContent, timestamp: new Date().toISOString() };
+                session.messages.push(assistantMsg);
+                aiChatSave(summaryFile, store);
+
+                if (data.success) { log('AI response received'); }
+                else { log('AI query failed: ' + data.error); }
+
+                aiChatQueryIds.delete(sessionId);
+                aiChatPendingQueries.delete(sessionId);
+                if (aiChatCurrentSummaryFile === summaryFile) {
+                    const cs = aiChatLoad(summaryFile);
+                    const cSession = aiChatGetCurrentSession(cs);
+                    if (cSession && cSession.id === sessionId) {
+                        syncSubmitButton(null); // query done — show send
+                    }
+                }
+            }
+
+            ipcRenderer.on('chat-chunk', onChatChunk);
+            ipcRenderer.on('chat-complete', onChatComplete);
+
+            ipcRenderer.send('query-transcript-stream', summaryFile, question, queryId);
+        }
+
+        function stopAiQuery() {
+            const sf = aiChatCurrentSummaryFile;
+            if (!sf) return;
+            const store = aiChatLoad(sf);
+            const session = aiChatGetCurrentSession(store);
+            if (!session || !aiChatQueryIds.has(session.id)) return;
+            const sessionId = session.id;
+            aiChatQueryIds.delete(sessionId); // invalidate — in-flight result will be discarded
+            aiChatPendingQueries.delete(sessionId);
+
+            // Remove loading bubble
+            const loadingBubble = aiChatThread.querySelector('.loading-bubble');
+            if (loadingBubble) loadingBubble.remove();
+
+            aiChatSubmit.classList.remove('stopping');
+
+            aiChatSubmit.classList.toggle('visible', aiChatInput.value.trim().length > 0);
+        }
+
+        // ── AI Chat: history panel ─────────────────────────────────────────────
+
+        function closeHistoryPanel() {
+            aiChatHistoryPanel.classList.remove('open');
+            if (aiChatTitleBtn) aiChatTitleBtn.classList.remove('dropdown-open');
+        }
+
+        // ── Session context menu ───────────────────────────────────────────────
+
+        let aiChatSessionMenuTarget = null; // { sessionId, summaryFile, dotsBtn, previewEl }
+
+        function openSessionContextMenu(sessionId, summaryFile, dotsBtn, previewEl) {
+            aiChatSessionMenuTarget = { sessionId, summaryFile, dotsBtn, previewEl };
+            dotsBtn.classList.add('menu-open');
+            const rect = dotsBtn.getBoundingClientRect();
+            aiChatSessionMenu.style.top = (rect.bottom + 4) + 'px';
+            aiChatSessionMenu.style.left = (rect.right - 148) + 'px'; // right-align to button
+            aiChatSessionMenu.classList.add('open');
+        }
+
+        function closeSessionContextMenu() {
+            aiChatSessionMenu.classList.remove('open');
+            if (aiChatSessionMenuTarget && aiChatSessionMenuTarget.dotsBtn) {
+                aiChatSessionMenuTarget.dotsBtn.classList.remove('menu-open');
+            }
+            aiChatSessionMenuTarget = null;
+        }
+
+        function deleteAiSession(sessionId, summaryFile) {
+            const store = aiChatLoad(summaryFile);
+            store.sessions = store.sessions.filter(s => s.id !== sessionId);
+            const wasActive = store.currentSessionId === sessionId;
+            if (wasActive) store.currentSessionId = null;
+            aiChatSave(summaryFile, store);
+
+            // If we deleted the active session for the current meeting, switch to another
+            if (aiChatCurrentSummaryFile === summaryFile && wasActive) {
+                aiChatThread.textContent = '';
+                if (store.sessions.length > 0) {
+                    // Switch to most recent remaining session
+                    const next = store.sessions[0];
+                    store.currentSessionId = next.id;
+                    aiChatSave(summaryFile, store);
+                    renderAiThread(next);
+                    updateAiSessionTitle(next);
+                    syncSubmitButton(next);
+                    setAiChatState('THREAD_ACTIVE');
+                } else {
+                    // No sessions left — open a fresh chat
+                    aiChatInput.placeholder = 'Ask anything…';
+                    aiChatContainer.classList.remove('has-history');
+                    syncSubmitButton(null);
+                    setAiChatState('COMPOSING_NEW');
+                }
+            }
+            // Re-render history list
+            renderHistoryList(aiChatLoad(summaryFile));
+        }
+
+        function startInlineRename(sessionId, summaryFile, previewEl) {
+            const store = aiChatLoad(summaryFile);
+            const session = store.sessions.find(s => s.id === sessionId);
+            if (!session) return;
+            const currentName = session.name || (session.messages.find(m => m.role === 'user')?.content.substring(0, 55) || 'Chat');
+
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.className = 'ai-chat-history-item-rename-input';
+            input.value = currentName;
+            previewEl.replaceWith(input);
+            input.focus();
+            input.select();
+
+            function saveRename() {
+                const newName = input.value.trim();
+                if (newName) {
+                    const store2 = aiChatLoad(summaryFile);
+                    const s = store2.sessions.find(s => s.id === sessionId);
+                    if (s) { s.name = newName; aiChatSave(summaryFile, store2); }
+                    // Update title button if this is current session
+                    if (aiChatCurrentSummaryFile === summaryFile && aiChatTitleText) {
+                        const cs = aiChatLoad(summaryFile);
+                        if (cs.currentSessionId === sessionId) aiChatTitleText.textContent = newName;
+                    }
+                }
+                renderHistoryList(aiChatLoad(summaryFile));
+            }
+
+            input.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') { e.preventDefault(); saveRename(); }
+                if (e.key === 'Escape') { renderHistoryList(aiChatLoad(summaryFile)); }
+            });
+            input.addEventListener('blur', saveRename, { once: true });
+            input.addEventListener('click', (e) => e.stopPropagation());
+        }
+
+        aiChatSessionRenameBtn.addEventListener('click', () => {
+            if (!aiChatSessionMenuTarget) return;
+            const { sessionId, summaryFile, previewEl } = aiChatSessionMenuTarget;
+            closeSessionContextMenu();
+            startInlineRename(sessionId, summaryFile, previewEl);
+        });
+
+        aiChatSessionDeleteBtn.addEventListener('click', () => {
+            if (!aiChatSessionMenuTarget) return;
+            const { sessionId, summaryFile } = aiChatSessionMenuTarget;
+            closeSessionContextMenu();
+            deleteAiSession(sessionId, summaryFile);
+        });
+
+        function openHistoryPanel() {
+            if (!aiChatCurrentSummaryFile) return;
+            // Toggle if already open
+            if (aiChatHistoryPanel.classList.contains('open')) {
+                closeHistoryPanel();
+                return;
+            }
+            const store = aiChatLoad(aiChatCurrentSummaryFile);
+            renderHistoryList(store);
+
+            // Use title button if visible (THREAD_ACTIVE), otherwise fall back to input-row button
+            const titleVisible = aiChatTitleBtn && aiChatTitleBtn.offsetParent !== null;
+            const anchor = titleVisible ? aiChatTitleBtn : (aiChatHistoryBtnInput || aiChatBar);
+            const rect = anchor.getBoundingClientRect();
+            const barRect = aiChatBar.getBoundingClientRect();
+            const margin = 8;
+            // Measure actual panel width after layout
+            const panelWidth = aiChatHistoryPanel.offsetWidth || 280;
+            // Ideal: left-align to anchor; clamp so right edge stays within bar right edge
+            const maxLeft = barRect.right - panelWidth - margin;
+            const minLeft = barRect.left + margin;
+            const left = Math.max(minLeft, Math.min(rect.left, maxLeft));
+            aiChatHistoryPanel.style.left = left + 'px';
+            // When thread is not expanded, open above the button to avoid overflow
+            if (aiChatState !== 'THREAD_ACTIVE') {
+                aiChatHistoryPanel.style.top = 'auto';
+                aiChatHistoryPanel.style.bottom = (window.innerHeight - rect.top + 4) + 'px';
+                aiChatHistoryPanel.style.transformOrigin = 'bottom left';
+            } else {
+                aiChatHistoryPanel.style.top = (rect.bottom + 4) + 'px';
+                aiChatHistoryPanel.style.bottom = 'auto';
+                aiChatHistoryPanel.style.transformOrigin = 'top left';
+            }
+
+            aiChatHistoryPanel.classList.add('open');
+            if (aiChatTitleBtn) aiChatTitleBtn.classList.add('dropdown-open');
+        }
+
+        function aiChatDateGroup(dateStr) {
+            const now = new Date();
+            const d = new Date(dateStr);
+            const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+            const diffDays = Math.floor((todayStart - new Date(d.getFullYear(), d.getMonth(), d.getDate())) / 86400000);
+            if (diffDays === 0) return 'Today';
+            if (diffDays === 1) return 'Yesterday';
+            if (diffDays <= 7) return 'This week';
+            if (diffDays <= 14) return 'Last week';
+            if (diffDays <= 30) return 'This month';
+            return 'Older';
+        }
+
+        function renderHistoryList(store) {
+            aiChatHistoryList.textContent = '';
+            if (!store.sessions.length) {
+                const empty = document.createElement('div');
+                empty.className = 'ai-chat-history-empty';
+                empty.textContent = 'No previous chats';
+                aiChatHistoryList.appendChild(empty);
+                return;
+            }
+
+            // Sort newest-first
+            const sorted = [...store.sessions].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+            let lastGroup = null;
+            sorted.forEach(session => {
+                const group = aiChatDateGroup(session.createdAt);
+                if (group !== lastGroup) {
+                    lastGroup = group;
+                    const label = document.createElement('div');
+                    label.className = 'ai-chat-history-group-label';
+                    label.textContent = group;
+                    aiChatHistoryList.appendChild(label);
+                }
+
+                const firstUser = session.messages.find(m => m.role === 'user');
+                const preview = firstUser ? firstUser.content.substring(0, 55) + (firstUser.content.length > 55 ? '…' : '') : 'Empty chat';
+
+                const item = document.createElement('div');
+                item.className = 'ai-chat-history-item' + (session.id === store.currentSessionId ? ' active' : '');
+
+                const previewEl = document.createElement('div');
+                previewEl.className = 'ai-chat-history-item-preview';
+                previewEl.textContent = session.name || preview;
+                item.appendChild(previewEl);
+
+                if (aiChatPendingQueries.has(session.id)) {
+                    const spinner = document.createElement('div');
+                    spinner.className = 'ai-chat-history-item-spinner';
+                    item.appendChild(spinner);
+                }
+
+                // Three-dot menu button
+                const sf = aiChatCurrentSummaryFile;
+                const dotsBtn = document.createElement('button');
+                dotsBtn.className = 'ai-chat-history-dots-btn';
+                dotsBtn.title = 'More options';
+                dotsBtn.insertAdjacentHTML('beforeend', '<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>');
+                dotsBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    if (aiChatSessionMenu.classList.contains('open') && aiChatSessionMenuTarget && aiChatSessionMenuTarget.sessionId === session.id) {
+                        closeSessionContextMenu();
+                    } else {
+                        closeSessionContextMenu();
+                        openSessionContextMenu(session.id, sf, dotsBtn, previewEl);
+                    }
+                });
+                item.appendChild(dotsBtn);
+
+                item.addEventListener('click', () => resumeAiSession(session.id));
+                aiChatHistoryList.appendChild(item);
+            });
+        }
+
+        function resumeAiSession(sessionId) {
+            if (!aiChatCurrentSummaryFile) return;
+            const store = aiChatLoad(aiChatCurrentSummaryFile);
+            store.currentSessionId = sessionId;
+            aiChatSave(aiChatCurrentSummaryFile, store);
+            const session = aiChatGetCurrentSession(store);
+            if (session) {
+                renderAiThread(session);
+                updateAiSessionTitle(session);
+                // If this session has a query in-flight, show loading bubble + stop; else send
+                if (isSessionPending(session)) {
+                    appendLoadingBubble();
+                }
+            }
+            syncSubmitButton(session);
+            closeHistoryPanel();
+            setAiChatState('THREAD_ACTIVE');
+        }
+
+        function startNewAiChat() {
+            if (!aiChatCurrentSummaryFile) return;
+            const store = aiChatLoad(aiChatCurrentSummaryFile);
+            store.currentSessionId = null;
+            aiChatSave(aiChatCurrentSummaryFile, store);
+            aiChatThread.textContent = '';
+            if (aiChatSessionTitle) aiChatSessionTitle.textContent = '';
+            aiChatInput.placeholder = 'Ask anything…';
+            aiChatContainer.classList.remove('has-history');
+            syncSubmitButton(null); // new session — no pending query
+            setAiChatState('COMPOSING_NEW');
+        }
+
+        // ── AI Chat: speech recognition ────────────────────────────────────────
+
+        function initSpeechRecognition() {
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (!SpeechRecognition) return;
+            // Mic button hidden until local STT approach is implemented
+            // aiChatMicBtn.style.display = '';
+            aiSpeechRecognition = new SpeechRecognition();
+            aiSpeechRecognition.continuous = true;
+            aiSpeechRecognition.interimResults = true;
+            let committed = '';
+            aiSpeechRecognition.onresult = (e) => {
+                let interim = '';
+                for (let i = e.resultIndex; i < e.results.length; i++) {
+                    if (e.results[i].isFinal) {
+                        committed += e.results[i][0].transcript;
+                    } else {
+                        interim += e.results[i][0].transcript;
+                    }
+                }
+                aiChatInput.value = committed + interim;
+                aiChatSubmit.classList.toggle('visible', aiChatInput.value.trim().length > 0);
+            };
+            aiSpeechRecognition.onend = () => {
+                aiSpeechRecording = false;
+                aiChatMicBtn.classList.remove('recording');
+                committed = '';
+            };
+            aiChatMicBtn.addEventListener('click', () => {
+                if (aiSpeechRecording) {
+                    aiSpeechRecognition.stop();
+                } else {
+                    committed = '';
+                    aiChatInput.value = '';
+                    aiSpeechRecognition.start();
+                    aiSpeechRecording = true;
+                    aiChatMicBtn.classList.add('recording');
+                }
+            });
+        }
+
+        initSpeechRecognition();
+
+        // ── AI Chat: event listeners ───────────────────────────────────────────
+
+        aiChatSubmit.addEventListener('click', () => {
+            if (aiChatSubmit.classList.contains('stopping')) {
+                stopAiQuery();
+            } else {
                 submitAiQuery();
             }
-            if (e.key === 'Escape') {
-                hideAiQueryPopup();
+        });
+
+        document.querySelectorAll('.ai-chat-prompt-chip').forEach(chip => {
+            chip.addEventListener('click', () => {
+                aiChatInput.value = chip.dataset.prompt;
+                aiChatSubmit.classList.add('visible');
+                if (selectedMeeting?.session_info?.summary_file) {
+                    aiChatCurrentSummaryFile = selectedMeeting.session_info.summary_file;
+                    startNewAiChat();
+                }
+                submitAiQuery();
+            });
+        });
+
+        aiChatNewChatBtn.addEventListener('click', startNewAiChat);
+        document.getElementById('ai-chat-hint').addEventListener('click', () => {
+            aiChatInput.value = 'Write a follow up email';
+            aiChatSubmit.classList.add('visible');
+            if (selectedMeeting?.session_info?.summary_file) {
+                aiChatCurrentSummaryFile = selectedMeeting.session_info.summary_file;
+                startNewAiChat();
+            }
+            submitAiQuery();
+        });
+        aiChatHistoryBtnInput.addEventListener('click', (e) => { e.stopPropagation(); openHistoryPanel(); });
+        if (aiChatHistoryBtnThread) aiChatHistoryBtnThread.addEventListener('click', (e) => { e.stopPropagation(); openHistoryPanel(); });
+        aiChatTitleBtn.addEventListener('click', (e) => { e.stopPropagation(); openHistoryPanel(); });
+
+        aiChatInput.addEventListener('focus', () => {
+            if (aiChatState === 'MINIMIZED') {
+                const sf = aiChatCurrentSummaryFile;
+                const store = sf ? aiChatLoad(sf) : aiChatCreateStore();
+                const session = aiChatGetCurrentSession(store);
+                const isPending = isSessionPending(session);
+                if (session && session.messages.length > 0) {
+                    renderAiThread(session);
+                    updateAiSessionTitle(session);
+                    if (isPending) appendLoadingBubble();
+                    setAiChatState('THREAD_ACTIVE');
+                } else if (isPending) {
+                    setAiChatState('THREAD_ACTIVE');
+                    appendLoadingBubble();
+                } else {
+                    setAiChatState('COMPOSING_NEW');
+                }
+            } else {
+                aiChatContainer.classList.add('focused');
+            }
+        });
+
+        document.addEventListener('mousedown', (e) => {
+            if (aiChatSessionMenu.classList.contains('open') && !aiChatSessionMenu.contains(e.target)) {
+                closeSessionContextMenu();
+            }
+            if (aiChatHistoryPanel.classList.contains('open') && !aiChatHistoryPanel.contains(e.target) && !aiChatTitleBtn.contains(e.target) && !aiChatSessionMenu.contains(e.target)) {
+                closeHistoryPanel();
+            }
+            if (aiChatState !== 'MINIMIZED' && !aiChatContainer.closest('.ai-chat-bar').contains(e.target) && !aiChatHistoryPanel.contains(e.target) && !aiChatSessionMenu.contains(e.target)) {
+                setAiChatState('MINIMIZED');
+            }
+        });
+
+        aiChatInput.addEventListener('input', () => {
+            const hasText = aiChatInput.value.trim().length > 0;
+            aiChatSubmit.classList.toggle('visible', hasText);
+            aiChatInput.style.height = 'auto';
+            aiChatInput.style.height = aiChatInput.scrollHeight + 'px';
+        });
+
+        aiChatInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                if (!aiChatQueryIds.has(aiChatCurrentSummaryFile)) submitAiQuery();
             }
         });
 
         // Global keyboard shortcuts
         document.addEventListener('keydown', (e) => {
-            // Cmd+K or Ctrl+K to open AI query
-            if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
-                e.preventDefault();
-                if (aiQueryPopup.classList.contains('show')) {
-                    hideAiQueryPopup();
-                } else if (selectedMeeting) {
-                    showAiQueryPopup();
-                }
-            }
             // Cmd+, or Ctrl+, to toggle settings
             if ((e.metaKey || e.ctrlKey) && e.key === ',') {
                 e.preventDefault();
@@ -6417,18 +7473,15 @@ Session started - waiting for activity...
             }
             // Escape to close panels
             if (e.key === 'Escape') {
-                if (aiQueryPopup.classList.contains('show')) {
-                    hideAiQueryPopup();
+                if (aiChatSessionMenu.classList.contains('open')) {
+                    closeSessionContextMenu();
+                } else if (aiChatHistoryPanel.classList.contains('open')) {
+                    closeHistoryPanel();
+                } else if (aiChatState !== 'MINIMIZED') {
+                    setAiChatState('MINIMIZED');
                 } else if (settingsVisible) {
                     toggleSettings();
                 }
-            }
-        });
-
-        // Close AI query popup when clicking outside
-        aiQueryPopup.addEventListener('click', (e) => {
-            if (e.target === aiQueryPopup) {
-                hideAiQueryPopup();
             }
         });
 
@@ -7193,7 +8246,7 @@ Session started - waiting for activity...
                 streamedMarkdown = '';
                 // Ensure notes editor is visible for streaming, sections and buttons hidden
                 document.querySelectorAll('#meeting-detail .meeting-section').forEach(s => s.style.display = 'none');
-                document.getElementById('ask-ai-btn').style.display = 'none';
+                aiChatBar.style.display = 'none';
                 document.getElementById('copy-notes-btn').style.display = 'none';
                 document.getElementById('reprocess-btn').style.display = 'none';
                 const editor = document.getElementById('notes-editor');
@@ -7251,7 +8304,8 @@ Session started - waiting for activity...
                         // Keep sections hidden — streaming view IS the meeting view
                         document.querySelectorAll('#meeting-detail .meeting-section').forEach(s => s.style.display = 'none');
                         // Show action buttons and reset reprocess button state
-                        document.getElementById('ask-ai-btn').style.display = '';
+                        if (meeting) aiChatCurrentSummaryFile = meeting.session_info?.summary_file || null;
+                        showAiChatBar();
                         document.getElementById('copy-notes-btn').style.display = '';
                         const rpBtn = document.getElementById('reprocess-btn');
                         rpBtn.style.display = '';
@@ -7269,7 +8323,7 @@ Session started - waiting for activity...
                         // Non-streaming path or no streamed content — use standard selectMeeting
                         document.getElementById('notes-editor').style.display = 'none';
                         document.querySelectorAll('#meeting-detail .meeting-section').forEach(s => s.style.display = '');
-                        document.getElementById('ask-ai-btn').style.display = '';
+                        showAiChatBar();
                         document.getElementById('copy-notes-btn').style.display = '';
                         document.getElementById('reprocess-btn').style.display = '';
                         const currentTitle = detailTitle.textContent;

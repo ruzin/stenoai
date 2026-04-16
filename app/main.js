@@ -14,6 +14,9 @@ const crypto = require('crypto');
 const { PostHog } = require('posthog-node');
 const { initMain } = require('electron-audio-loopback');
 
+// Set app name for dev mode (electron-builder sets productName for built apps)
+app.setName('StenoAI');
+
 // Initialize electron-audio-loopback before app is ready
 initMain();
 
@@ -1025,6 +1028,17 @@ ipcMain.handle('test-system', async () => {
   }
 });
 
+ipcMain.handle('confirm-yes-no', async (event, message) => {
+  const { response } = await dialog.showMessageBox(mainWindow, {
+    type: 'question',
+    buttons: ['Yes', 'No'],
+    defaultId: 0,
+    cancelId: 1,
+    message,
+  });
+  return response === 0;
+});
+
 ipcMain.handle('select-audio-file', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
     properties: ['openFile'],
@@ -1190,6 +1204,75 @@ ipcMain.handle('query-transcript', async (event, summaryFile, question) => {
     trackEvent('error_occurred', { error_type: 'query_transcript' });
     return { success: false, error: error.message };
   }
+});
+
+ipcMain.on('query-transcript-stream', (event, summaryFile, question, queryId) => {
+  sendDebugLog(`🤖 Streaming query: ${question.substring(0, 50)}...`);
+
+  const cloudKey = loadCloudApiKey();
+  const env = cloudKey ? { ...require('process').env, STENOAI_CLOUD_API_KEY: cloudKey } : undefined;
+
+  const proc = spawn(getBackendPath(), ['query-streaming', summaryFile, '-q', question], {
+    cwd: getBackendCwd(),
+    env
+  });
+
+  let stderrBuf = '';
+  let completeSent = false;
+
+  function sendComplete(payload) {
+    if (completeSent) return;
+    completeSent = true;
+    if (!event.sender.isDestroyed()) {
+      event.sender.send('chat-complete', { ...payload, queryId });
+    }
+  }
+
+  proc.stdout.on('data', (data) => {
+    const text = data.toString();
+    text.split('\n').forEach(line => {
+      if (line.startsWith('CHAT_CHUNK:')) {
+        try {
+          const chunk = Buffer.from(line.slice(11), 'base64').toString('utf-8');
+          if (!event.sender.isDestroyed()) {
+            event.sender.send('chat-chunk', { chunk, queryId });
+          }
+        } catch (e) {
+          console.log('CHAT_CHUNK decode error:', e.message);
+        }
+      } else if (line === 'CHAT_STREAM_COMPLETE') {
+        trackEvent('ai_query_used', { success: true });
+        sendComplete({ success: true });
+      } else if (line.startsWith('CHAT_ERROR:')) {
+        trackEvent('ai_query_used', { success: false });
+        sendComplete({ success: false, error: line.slice(11) });
+      } else if (line.trim()) {
+        sendDebugLog(line.trim());
+      }
+    });
+  });
+
+  proc.stderr.on('data', (data) => {
+    const msg = data.toString().trim();
+    if (msg) {
+      stderrBuf += msg + '\n';
+      sendDebugLog(`STDERR: ${msg}`);
+    }
+  });
+
+  proc.on('error', (err) => {
+    sendDebugLog(`❌ Streaming query spawn error: ${err.message}`);
+    trackEvent('error_occurred', { error_type: 'query_transcript_stream' });
+    sendComplete({ success: false, error: err.message });
+  });
+
+  proc.on('close', (code) => {
+    if (code !== 0) {
+      sendDebugLog(`❌ Streaming query failed (code ${code})`);
+      trackEvent('ai_query_used', { success: false });
+      sendComplete({ success: false, error: stderrBuf.slice(-200) || `Process exited with code ${code}` });
+    }
+  });
 });
 
 ipcMain.handle('save-meeting-notes', async (event, sessionName, notes) => {

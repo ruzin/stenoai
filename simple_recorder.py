@@ -1605,6 +1605,70 @@ def query(transcript_file, question):
         print(json.dumps({"success": False, "error": f"Query failed: {e}"}))
 
 
+@cli.command(name='query-streaming')
+@click.argument('transcript_file')
+@click.option('--question', '-q', required=True, help='Question to ask about the transcript')
+def query_streaming(transcript_file, question):
+    """Query a transcript with AI, streaming the response as CHAT_CHUNK: lines."""
+    import base64
+    from pathlib import Path
+
+    transcript_path = Path(transcript_file)
+    language = None
+
+    if transcript_file.endswith('.json'):
+        if not transcript_path.exists():
+            print(f"CHAT_ERROR:File not found: {transcript_file}", flush=True)
+            return
+        try:
+            with open(transcript_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                transcript_text = data.get('transcript', '')
+                if not transcript_text:
+                    print("CHAT_ERROR:No transcript found in summary file", flush=True)
+                    return
+                session_info = data.get("session_info", {})
+                language = session_info.get("output_language")
+        except Exception as e:
+            print(f"CHAT_ERROR:Failed to read summary file: {e}", flush=True)
+            return
+    else:
+        if not transcript_path.exists():
+            print(f"CHAT_ERROR:File not found: {transcript_file}", flush=True)
+            return
+        try:
+            with open(transcript_path, 'r', encoding='utf-8') as f:
+                transcript_text = f.read()
+        except Exception as e:
+            print(f"CHAT_ERROR:Failed to read transcript: {e}", flush=True)
+            return
+
+    if not transcript_text or transcript_text.strip() == "":
+        print("CHAT_ERROR:Transcript is empty", flush=True)
+        return
+
+    try:
+        from src.config import get_config
+        config = get_config()
+        if transcript_file.endswith('.json'):
+            if not language:
+                language = config.get_language()
+        else:
+            language = config.get_language()
+        if language == "auto":
+            language = "en"
+
+        summarizer = OllamaSummarizer()
+        for chunk in summarizer.query_transcript_streaming(transcript_text, question, language=language):
+            encoded = base64.b64encode(chunk.encode('utf-8')).decode('ascii')
+            sys.stdout.write(f"CHAT_CHUNK:{encoded}\n")
+            sys.stdout.flush()
+
+        print("CHAT_STREAM_COMPLETE", flush=True)
+    except Exception as e:
+        print(f"CHAT_ERROR:{e}", flush=True)
+
+
 @cli.command()
 def list_failed():
     """List summary files that failed processing (have fallback summaries)"""

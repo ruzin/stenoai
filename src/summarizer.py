@@ -776,6 +776,94 @@ TRANSCRIPT:
                 logger.error(f"Ollama streaming failed: {e}")
                 return
 
+    def query_transcript_streaming(self, transcript: str, question: str, language: str = "en"):
+        """Generator that yields answer chunks from the LLM for a transcript query.
+
+        Args:
+            transcript: The meeting transcript text
+            question: The question to ask about the transcript
+            language: Language code for the response
+
+        Yields:
+            str: Text chunks as they arrive from the LLM
+        """
+        if not transcript or transcript.strip() == "":
+            yield "No transcript available to query."
+            return
+        if not question or question.strip() == "":
+            yield "Please provide a question."
+            return
+
+        if language and language not in ("en", "auto"):
+            from .config import get_config
+            language_name = get_config().get_language_name(language)
+            if language_name != "Unknown":
+                query_lang_instruction = f"\nRespond in {language_name}."
+            else:
+                query_lang_instruction = ""
+        else:
+            query_lang_instruction = ""
+
+        prompt = f"""Answer the following question based ONLY on the meeting transcript below.
+If the information is not in the transcript, say "This isn't mentioned in the transcript."
+Be concise and direct.{query_lang_instruction}
+
+QUESTION: {question}
+
+TRANSCRIPT:
+{transcript}
+
+ANSWER:"""
+
+        logger.info(f"Streaming transcript query: {question[:50]}...")
+
+        if self.ai_provider == "cloud":
+            if self.cloud_provider == "anthropic":
+                try:
+                    with self.anthropic_client.messages.stream(
+                        model=self.model_name,
+                        max_tokens=1024,
+                        messages=[{"role": "user", "content": prompt}],
+                    ) as stream:
+                        for text in stream.text_stream:
+                            yield text
+                except Exception as e:
+                    logger.error(f"Anthropic streaming query failed: {e}")
+                    return
+            else:
+                try:
+                    response = self.cloud_client.chat.completions.create(
+                        model=self.model_name,
+                        messages=[{"role": "user", "content": prompt}],
+                        stream=True,
+                    )
+                    for chunk in response:
+                        if not chunk.choices:
+                            continue
+                        content = chunk.choices[0].delta.content or ""
+                        if content:
+                            yield content
+                except Exception as e:
+                    logger.error(f"OpenAI streaming query failed: {e}")
+                    return
+        else:
+            # Ollama (local or remote)
+            try:
+                if self.ai_provider != "remote":
+                    self._ensure_ollama_ready()
+                response = self.client.chat(
+                    model=self.model_name,
+                    messages=[{'role': 'user', 'content': prompt}],
+                    stream=True,
+                )
+                for chunk in response:
+                    content = chunk.get('message', {}).get('content', '')
+                    if content:
+                        yield content
+            except Exception as e:
+                logger.error(f"Ollama streaming query failed: {e}")
+                return
+
     def test_connection(self) -> bool:
         """
         Test connection to Ollama.
