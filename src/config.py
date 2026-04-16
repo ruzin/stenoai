@@ -471,9 +471,11 @@ def get_data_dirs() -> Dict[str, Path]:
     config = get_config()
     custom = config.get_storage_path()
 
+    import sys
     if custom:
         base = Path(custom)
-    elif "StenoAI.app" in str(Path(__file__)) or "Applications" in str(Path(__file__)):
+    elif getattr(sys, 'frozen', False) or "StenoAI.app" in str(Path(__file__)) or "Applications" in str(Path(__file__)):
+        # PyInstaller bundle (dev or packaged) or installed app — use safe user data dir
         base = Path.home() / "Library" / "Application Support" / "stenoai"
     else:
         base = Path(__file__).parent.parent  # project root in dev
