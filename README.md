@@ -142,12 +142,10 @@ Have questions or suggestions? [Join our Discord](https://discord.gg/DZ6vcQnxxu)
 ## Future Roadmap
 
 ### Enhanced Features
-- Custom summarization templates
-- Speaker Diarisation
-
-### StenoAI Med
-- HIPAA compliance for healthcare workflows
-- EHR integration for medical notes
+- Live transcription during recording
+- NVIDIA Parakeet as a transcription engine option
+- Editing notes after processing
+- Windows version
 
 ## Installation
 
