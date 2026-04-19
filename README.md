@@ -3,7 +3,7 @@
 
   # StenoAI
 
-  *Your very own stenographer for every meeting*
+  *Your private stenographer for every meeting*
 </div>
 
 <p align="center">
@@ -139,22 +139,6 @@ Have questions or suggestions? [Join our Discord](https://discord.gg/DZ6vcQnxxu)
 - `deepseek-r1:14b` (9.0GB): Strong reasoning and analysis capabilities
 - `gpt-oss:20b` (14GB): OpenAI open-weight model with reasoning capabilities
 
-### StenoAI Local Model Performance vs Claude Sonnet 4.6: Closing the Gap! 🚀
-
-#### YouTube Video Summary Challenge (11m 36s): [High-Speed Rail Systems Around the World](https://www.youtube.com/watch?v=9wJCltuawSs)
-
-<sub>Scored on: overall quality, factual accuracy, completeness, and hallucination (each out of 10).</sub>
-
-| # | Provider | Model | Overall | Accuracy | Complete | No Halluc. | Notes |
-|:-:|----------|-------|:-------:|:--------:|:--------:|:----------:|-------|
-| 1 | Anthropic | Claude Sonnet 4.6 | 9.8 | 9.8 | 9.5 | 10.0 | <sub>Most precise; perfect framing</sub> |
-| 2 | Anthropic | Claude Haiku | 9.5 | 9.5 | 9.0 | 10.0 | <sub>Very strong; slightly less detailed</sub> |
-| 3 | **StenoAI** | **DeepSeek R1:8B** | 8.8 | 9.0 | 8.0 | 8.5 | <sub>Broad coverage; fewer numerical details</sub> |
-| 4 | **StenoAI** | **Qwen 3:8B** | 8.5 | 9.0 | 7.5 | 8.5 | <sub>Accurate but more compressed</sub> |
-| 5 | OpenAI | GPT-4.1 | 8.3 | 9.0 | 8.0 | 6.5 | <sub>Accurate but invented meeting framing</sub> |
-| 6 | OpenAI | GPT-4o Mini | 8.0 | 8.5 | 7.5 | 6.0 | <sub>Invented framing and participants</sub> |
-| 7 | **StenoAI** | **Gemma 3:4B** | 7.0 | 8.5 | 7.0 | 3.5 | <sub>Fabricated participants and action items</sub> |
-
 ## Future Roadmap
 
 ### Enhanced Features
@@ -240,30 +224,14 @@ stenoai/
 
 ### Debug Logs
 
-StenoAI includes a built-in debug panel for troubleshooting issues:
+**Setup wizard debug console:** during first-time setup, expand the debug console panel to see real-time logs of model downloads and service startup.
 
-**In-App Debug Panel:**
-1. Launch StenoAI
-2. Click the 🔨 hammer icon (next to settings)
-3. The debug panel shows real-time logs of all operations
-
-**Terminal Logging (Advanced):**
-For detailed system-level logs, run the app from Terminal:
+**Terminal logging (recommended for runtime issues):** launch the app from a terminal to stream all logs (Python subprocess output, Whisper transcription, Ollama API traffic, error stack traces):
 ```bash
-# Launch StenoAI with full logging
 /Applications/StenoAI.app/Contents/MacOS/StenoAI
 ```
 
-This displays comprehensive logs including:
-- Python subprocess output
-- Whisper transcription details  
-- Ollama API communication
-- HTTP requests and responses
-- Error stack traces
-- Performance timing
-
-**System Console Logs:**
-For system-level debugging:
+**System Console:**
 ```bash
 # View recent StenoAI-related logs
 log show --last 10m --predicate 'process CONTAINS "StenoAI" OR eventMessage CONTAINS "ollama"' --info
@@ -272,11 +240,15 @@ log show --last 10m --predicate 'process CONTAINS "StenoAI" OR eventMessage CONT
 log stream --predicate 'eventMessage CONTAINS "ollama" OR process CONTAINS "StenoAI"' --level info
 ```
 
-**Common Issues:**
-- **Recording stops early**: Check microphone permissions and available disk space
-- **"Processing failed"**: Usually Ollama service or model issues - check terminal logs
-- **Empty transcripts**: Whisper couldn't detect speech - verify audio input levels
-- **Slow processing**: Normal for longer recordings - Ollama processing is CPU-intensive especially on older intel Macs
+### Common Issues
+
+- **Update didn't install**: Auto-updates are applied on next quit. Quit via the **StenoAI → Quit** menu (not just closing the window), then reopen.
+- **No system audio / no `[Others]` speaker labels**: macOS needs **Screen Recording** permission. Go to **System Settings → Privacy & Security → Screen & System Audio Recording**, enable StenoAI, and relaunch the app.
+- **`stenoai://` deep link doesn't start recording**: Make sure StenoAI has launched at least once after install so the URL scheme is registered. If it still fails, check the terminal log for `Protocol handler registration` output.
+- **Recording stops early**: Check microphone permissions, Screen Recording permission (if using system audio), and available disk space.
+- **"Processing failed"**: Usually an Ollama service or model issue — check the terminal logs.
+- **Empty transcripts**: Whisper couldn't detect speech — verify audio input levels.
+- **Slow processing**: Normal for longer recordings; Ollama is CPU-intensive, especially on older Intel Macs.
 
 ### Logs Location
 - **User Data**: `~/Library/Application Support/stenoai/`
