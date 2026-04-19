@@ -960,13 +960,12 @@ TITLE:"""
             else:
                 query_lang_instruction = ""
 
-            prompt = f"""Answer the following question based ONLY on the meeting transcript below.
-If the information is not in the transcript, say "This isn't mentioned in the transcript."
-Be concise and direct.{query_lang_instruction}
+            prompt = f"""Answer the following question based on the meeting content below (summary, key topics, and transcript).
+Be concise and direct. If the answer requires inference from what was discussed, that's fine.
+Only say you don't know if the topic truly wasn't discussed at all.{query_lang_instruction}
 
 QUESTION: {question}
 
-TRANSCRIPT:
 {transcript}
 
 ANSWER:"""

@@ -1183,13 +1183,11 @@
         }
 
         .sidebar-header h2 {
-            font-size: 13px;
+            font-size: 11px;
             font-weight: 600;
             text-transform: uppercase;
-            letter-spacing: 0.05em;
-            background: linear-gradient(135deg, #6366f1, #818cf8);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
+            letter-spacing: 0.08em;
+            color: var(--text-muted);
         }
         
         
@@ -3669,18 +3667,6 @@
         }
 
         /* Light mode specific overrides */
-        [data-theme="light"] .brand h1 {
-            background: linear-gradient(135deg, #4338ca, #6366f1);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-        }
-
-        [data-theme="light"] .brand svg rect:first-child {
-            fill: #e0e7ff;
-        }
-        [data-theme="light"] .brand svg path {
-            fill: #4338ca;
-        }
 
         [data-theme="light"] body {
             background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
@@ -8201,6 +8187,10 @@ Session started - waiting for activity...
                 const wasStreaming = document.getElementById('notes-editor').style.display === 'block';
 
                 loadMeetings(true).then(() => {
+                    // Flush the debounced filterMeetings so filteredMeetings is current
+                    if (_filterDebounceTimer) clearTimeout(_filterDebounceTimer);
+                    _filterMeetingsImpl();
+
                     if (wasStreaming && streamedMarkdown) {
                         // Final re-render to ensure all content (including Action Items) is visible
                         renderStreamingMarkdown(streamedMarkdown);

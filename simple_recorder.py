@@ -598,7 +598,7 @@ Transcript:
         md_lines.append('')
         md_lines.append('## Transcript')
         md_lines.append('')
-        md_lines.append(transcript_text)
+        md_lines.append(diarised_text or transcript_text)
         if notes_text:
             md_lines.append('')
             md_lines.append('## User Notes')
@@ -934,7 +934,7 @@ def process_streaming(audio_file, name, notes):
         md_lines.append('')
         md_lines.append('## Transcript')
         md_lines.append('')
-        md_lines.append(transcript_text)
+        md_lines.append(diarised_text or transcript_text)
         if notes_text:
             md_lines.append('')
             md_lines.append('## User Notes')
@@ -1563,6 +1563,33 @@ def query(transcript_file, question):
                     return
                 session_info = data.get("session_info", {})
                 language = session_info.get("output_language")
+        except Exception as e:
+            print(json.dumps({"success": False, "error": f"Failed to read summary file: {e}"}))
+            return
+    elif transcript_file.endswith('.md'):
+        # Handle markdown summary files — parse sections
+        if not transcript_path.exists():
+            print(json.dumps({"success": False, "error": f"File not found: {transcript_file}"}))
+            return
+
+        try:
+            meeting_data = _parse_meeting_markdown(transcript_path)
+            raw_transcript = meeting_data.get('transcript', '')
+            # Build rich context: summary + key points + transcript
+            parts = []
+            if meeting_data.get('summary'):
+                parts.append(f"SUMMARY:\n{meeting_data['summary']}")
+            if meeting_data.get('discussion_areas'):
+                topics = '\n'.join(f"- {d['title']}: {d['analysis']}" for d in meeting_data['discussion_areas'])
+                parts.append(f"KEY TOPICS:\n{topics}")
+            if meeting_data.get('key_points'):
+                points = '\n'.join(f"- {p}" for p in meeting_data['key_points'])
+                parts.append(f"KEY POINTS:\n{points}")
+            if raw_transcript:
+                parts.append(f"TRANSCRIPT:\n{raw_transcript}")
+            transcript_text = '\n\n'.join(parts)
+            session_info = meeting_data.get("session_info", {})
+            language = session_info.get("output_language")
         except Exception as e:
             print(json.dumps({"success": False, "error": f"Failed to read summary file: {e}"}))
             return
