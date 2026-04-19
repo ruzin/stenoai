@@ -13,6 +13,7 @@ const { URL, URLSearchParams } = require('url');
 const crypto = require('crypto');
 const { PostHog } = require('posthog-node');
 const { initMain } = require('electron-audio-loopback');
+const { autoUpdater } = require('electron-updater');
 
 // Initialize electron-audio-loopback before app is ready
 initMain();
@@ -703,6 +704,7 @@ if (!gotSingleInstanceLock) {
 
     createWindow();
     createTray();
+    setupAutoUpdater();
     const protocolRegistered = registerShortcutProtocolClient();
     sendDebugLog(`Protocol handler registration (${SHORTCUT_PROTOCOL}): ${protocolRegistered}`);
 
@@ -2088,6 +2090,65 @@ ipcMain.handle('setup-python', async () => {
   } catch (error) {
     return { success: false, error: error.message };
   }
+});
+
+// ── Auto-updater ──
+function setupAutoUpdater() {
+  // Don't check for updates in dev mode
+  if (!app.isPackaged) {
+    sendDebugLog('Auto-updater: skipped (dev mode)');
+    return;
+  }
+
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+
+  autoUpdater.on('checking-for-update', () => {
+    sendDebugLog('Auto-updater: checking for updates...');
+  });
+
+  autoUpdater.on('update-available', (info) => {
+    sendDebugLog(`Auto-updater: update available (v${info.version})`);
+    if (mainWindow) {
+      mainWindow.webContents.send('update-available', { version: info.version });
+    }
+  });
+
+  autoUpdater.on('update-not-available', () => {
+    sendDebugLog('Auto-updater: up to date');
+  });
+
+  autoUpdater.on('download-progress', (progress) => {
+    sendDebugLog(`Auto-updater: downloading ${Math.round(progress.percent)}%`);
+    if (mainWindow) {
+      mainWindow.webContents.send('update-download-progress', { percent: Math.round(progress.percent) });
+    }
+  });
+
+  autoUpdater.on('update-downloaded', (info) => {
+    sendDebugLog(`Auto-updater: v${info.version} ready to install`);
+    if (mainWindow) {
+      mainWindow.webContents.send('update-downloaded', { version: info.version });
+    }
+  });
+
+  autoUpdater.on('error', (err) => {
+    sendDebugLog(`Auto-updater error: ${err.message}`);
+  });
+
+  // Check on launch (after a short delay to not block startup)
+  setTimeout(() => {
+    autoUpdater.checkForUpdates().catch(() => {});
+  }, 10000);
+
+  // Re-check every 30 minutes
+  setInterval(() => {
+    autoUpdater.checkForUpdates().catch(() => {});
+  }, 30 * 60 * 1000);
+}
+
+ipcMain.on('install-update', () => {
+  autoUpdater.quitAndInstall(false, true);
 });
 
 // Add IPC handler for sending debug logs to frontend

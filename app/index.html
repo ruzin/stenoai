@@ -38,15 +38,15 @@
         }
 
         [data-theme="light"] {
-            --bg-deep: #e9ecf0;
-            --bg-primary: #f1f3f6;
-            --bg-elevated: #e1e5ea;
-            --bg-surface: #d8dce3;
-            --border-subtle: #cdd2d9;
-            --border-default: #a8b0b9;
-            --text-primary: #1a1d21;
-            --text-secondary: #495057;
-            --text-muted: #6c757d;
+            --bg-deep: #f0eeeb;
+            --bg-primary: #f5f4f0;
+            --bg-elevated: #e8e6e2;
+            --bg-surface: #dedad6;
+            --border-subtle: #d0ccc7;
+            --border-default: #b0aba4;
+            --text-primary: #33312e;
+            --text-secondary: #5c5955;
+            --text-muted: #8a857e;
             --accent-primary: #5b5fc7;
             --accent-glow: rgba(91, 95, 199, 0.12);
             --recording-red: #dc3545;
@@ -113,30 +113,24 @@
             display: none;
         }
 
-        .brand {
+        .brand.home-btn {
             display: flex;
             align-items: center;
-            gap: 10px;
+            gap: 2px;
             cursor: pointer;
             -webkit-app-region: no-drag;
+            background: none;
+            border: 1px solid var(--border-subtle);
+            border-radius: 8px;
+            padding: 5px 10px;
+            color: var(--text-muted);
+            transition: all 0.2s ease;
         }
 
-        .brand svg {
-            transition: all 0.3s ease;
-        }
-
-        .brand:hover svg {
-            filter: drop-shadow(0 0 8px rgba(99, 102, 241, 0.5));
-            transform: scale(1.05);
-        }
-
-        .brand h1 {
-            font-size: 18px;
-            font-weight: 700;
-            letter-spacing: -0.02em;
-            background: linear-gradient(135deg, #6366f1, #818cf8);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
+        .brand.home-btn:hover {
+            background: var(--bg-surface);
+            color: var(--text-primary);
+            border-color: var(--border-default);
         }
 
         /* Prominent recording timer */
@@ -338,6 +332,168 @@
             opacity: 0.5;
             cursor: not-allowed;
             transform: none;
+        }
+
+        /* + New Note button (header, next to gear) */
+        .new-note-btn {
+            background: var(--bg-surface);
+            color: var(--text-primary);
+            border: 1px solid var(--border-default);
+            padding: 6px 14px;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            font-family: inherit;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            transition: all 0.2s ease;
+            margin-right: 8px;
+        }
+
+        .new-note-btn:hover {
+            background: var(--bg-elevated);
+            border-color: var(--border-default);
+            transform: translateY(-1px);
+        }
+
+        [data-theme="light"] .new-note-btn {
+            background: var(--bg-surface);
+            border-color: var(--border-default);
+            color: var(--text-primary);
+        }
+
+        [data-theme="light"] .new-note-btn:hover {
+            background: var(--bg-elevated);
+        }
+
+        /* Update badge (next to + New Note) */
+        .update-badge {
+            display: none;
+            align-items: center;
+            gap: 5px;
+            background: var(--bg-surface);
+            color: var(--text-primary);
+            border: 1px solid var(--border-default);
+            padding: 6px 14px;
+            border-radius: 8px;
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            font-family: inherit;
+            transition: all 0.2s ease;
+            margin-right: 8px;
+        }
+        .update-badge:hover {
+            background: var(--bg-elevated);
+            border-color: var(--border-default);
+            transform: translateY(-1px);
+        }
+        .update-badge.show {
+            display: flex;
+        }
+
+        /* Ask bar recording controls */
+        .ask-bar-rec-controls {
+            display: none;
+            align-items: center;
+            gap: 6px;
+            padding-left: 4px;
+        }
+
+        .ask-bar-rec-controls.show {
+            display: flex;
+        }
+
+        .ask-bar-rec-divider {
+            width: 1px;
+            height: 20px;
+            background: var(--border-subtle);
+            margin: 0 4px;
+            display: none;
+        }
+
+        .ask-bar-rec-controls.show + .ask-bar-rec-divider {
+            display: block;
+        }
+
+        .bar-pause-btn {
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            font-size: 13px;
+            font-weight: 500;
+            font-family: inherit;
+            cursor: pointer;
+            padding: 4px 6px;
+            border-radius: 4px;
+            transition: color 0.15s ease, background 0.15s ease;
+        }
+
+        .bar-pause-btn:hover {
+            color: var(--text-primary);
+            background: var(--bg-surface);
+        }
+
+        .bar-stop-btn {
+            background: none;
+            border: none;
+            cursor: pointer;
+            padding: 4px;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            transition: all 0.15s ease;
+        }
+
+        .bar-stop-btn svg {
+            width: 14px;
+            height: 14px;
+        }
+
+        .bar-stop-btn:hover {
+            background: rgba(239, 68, 68, 0.1);
+        }
+
+        /* Waveform green state when recording */
+        .ask-bar-left.recording .bar-transcript-btn {
+            color: var(--success-green);
+        }
+
+        .ask-bar-left.recording .bar-transcript-btn svg {
+            animation: barWaveformPulse 1.5s ease-in-out infinite;
+        }
+
+        @keyframes barWaveformPulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        /* Waveform visualizer inside transcript bubble */
+        .bubble-waveform {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 3px;
+            height: 64px;
+            padding: 16px 24px;
+        }
+
+        .bubble-waveform-bar {
+            width: 4px;
+            background: var(--success-green);
+            border-radius: 2px;
+            height: 64px;
+            transform-origin: bottom;
+            transform: scaleY(0.08);
+            transition: transform 0.05s ease;
+        }
+
+        .bubble-waveform.paused .bubble-waveform-bar {
+            background: var(--text-muted);
+            transform: scaleY(0.08);
+            transition: transform 0.3s ease;
         }
         
         /* Unified Settings Panel */
@@ -1021,13 +1177,11 @@
         }
 
         .sidebar-header h2 {
-            font-size: 13px;
+            font-size: 11px;
             font-weight: 600;
             text-transform: uppercase;
-            letter-spacing: 0.05em;
-            background: linear-gradient(135deg, #6366f1, #818cf8);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
+            letter-spacing: 0.08em;
+            color: var(--text-muted);
         }
         
         
@@ -1049,9 +1203,9 @@
             background: var(--bg-surface);
             border: 1px solid var(--border-subtle);
             color: var(--text-primary);
-            padding: 10px 14px 10px 32px;
-            border-radius: 8px;
-            font-size: 14px;
+            padding: 7px 12px 7px 30px;
+            border-radius: 999px;
+            font-size: 13px;
             font-family: inherit;
             width: 100%;
             outline: none;
@@ -1764,13 +1918,16 @@
 
         .meeting-detail.show {
             display: flex;
-            justify-content: center;
+            flex-direction: column;
         }
 
         .document-body {
-            max-width: 900px;
+            max-width: 720px;
             width: 100%;
-            padding: 40px 32px 80px;
+            margin: 0 auto;
+            padding: 40px 32px 32px;
+            box-sizing: border-box;
+            flex: 1 0 auto;
         }
 
         .notes-editor {
@@ -1810,11 +1967,12 @@
         .meeting-title {
             font-size: 32px;
             font-weight: 700;
+            font-family: Charter, 'Iowan Old Style', Georgia, 'Times New Roman', serif;
             color: var(--text-primary);
             margin: 0;
             flex: 1;
-            letter-spacing: -0.03em;
-            line-height: 1.2;
+            letter-spacing: -0.02em;
+            line-height: 1.25;
         }
         
         .reprocess-btn {
@@ -1864,6 +2022,10 @@
             animation: spin 1s linear infinite;
         }
         
+        #transcript-section {
+            display: none !important;
+        }
+
         .transcript-container {
             position: relative;
         }
@@ -2047,16 +2209,100 @@
             padding: 3px 10px;
         }
         
+        /* Add to folder pill */
+        .folder-pill {
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            background: var(--bg-surface);
+            border: 1px solid var(--border-subtle);
+            border-radius: 12px;
+            padding: 3px 10px;
+            font-size: 12px;
+            color: var(--text-muted);
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+
+        .folder-pill:hover {
+            border-color: var(--border-default);
+            color: var(--text-secondary);
+        }
+
+        .folder-pill svg {
+            width: 12px;
+            height: 12px;
+            flex-shrink: 0;
+        }
+
+        .folder-pill-dropdown {
+            display: none;
+            position: absolute;
+            top: calc(100% + 6px);
+            left: 0;
+            min-width: 180px;
+            background: var(--bg-elevated);
+            border: 1px solid var(--border-subtle);
+            border-radius: 10px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+            z-index: 50;
+            padding: 4px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .folder-pill-dropdown.open {
+            display: block;
+        }
+
+        .folder-pill-dropdown-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 7px 10px;
+            border-radius: 6px;
+            font-size: 13px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: background 0.1s ease;
+            border: none;
+            background: none;
+            width: 100%;
+            font-family: inherit;
+            text-align: left;
+        }
+
+        .folder-pill-dropdown-item:hover {
+            background: var(--bg-surface);
+            color: var(--text-primary);
+        }
+
+        .folder-pill-dropdown-item.active {
+            color: var(--accent-primary);
+        }
+
+        .folder-pill-dropdown-item svg {
+            width: 14px;
+            height: 14px;
+            flex-shrink: 0;
+        }
+
+        .permanently-hidden {
+            display: none !important;
+        }
+
         .meeting-section {
-            margin-bottom: 24px;
+            margin-bottom: 36px;
         }
 
         .section-title {
-            font-size: 16px;
+            font-size: 11px;
             font-weight: 600;
-            color: var(--text-primary);
-            letter-spacing: -0.01em;
-            margin-bottom: 8px;
+            color: var(--text-muted);
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            margin-bottom: 10px;
             margin-top: 32px;
         }
 
@@ -3044,48 +3290,377 @@
 
         /* Ask AI Button */
         .ask-ai-btn {
-            background: linear-gradient(135deg, rgba(129, 140, 248, 0.15) 0%, rgba(99, 102, 241, 0.15) 100%);
-            border: 1px solid rgba(129, 140, 248, 0.3);
-            color: var(--accent-primary);
-            padding: 6px 12px;
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 12px;
-            font-weight: 500;
-            transition: all 0.2s ease;
+            display: none;
+        }
+
+        .ask-bar {
+            position: sticky;
+            bottom: 0;
+            z-index: 10;
+            padding: 16px 0 24px;
+        }
+
+        .ask-bar::before {
+            content: '';
+            position: absolute;
+            top: -40px;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: linear-gradient(to top, var(--bg-deep) 60%, rgba(0,0,0,0) 100%);
+            pointer-events: none;
+            z-index: -1;
+        }
+
+        .ask-bar-response {
+            background: var(--bg-elevated);
+            border: 1px solid var(--border-subtle);
+            border-radius: 18px 18px 6px 6px;
+            padding: 14px 18px;
+            margin: 0 auto 8px;
+            max-width: 680px;
+            display: none;
+            font-size: 14px;
+            line-height: 1.7;
+            color: var(--text-primary);
+            max-height: 240px;
+            overflow-y: auto;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+        }
+
+        .ask-bar-response.show {
+            display: block;
+        }
+
+        .ask-bar-transcript {
+            background: var(--bg-elevated);
+            border: 1px solid var(--border-subtle);
+            border-radius: 18px 18px 6px 6px;
+            margin: 0 auto 8px;
+            max-width: 680px;
+            display: none;
+            max-height: 280px;
+            overflow-y: auto;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+        }
+
+        .ask-bar-transcript.show {
+            display: block;
+        }
+
+        .ask-bar-transcript-header {
             display: flex;
             align-items: center;
-            gap: 6px;
+            justify-content: space-between;
+            padding: 8px 12px;
+            border-bottom: 1px solid var(--border-subtle);
+            position: sticky;
+            top: 0;
+            background: var(--bg-elevated);
+            z-index: 1;
         }
 
-        .ask-ai-btn:hover {
-            background: linear-gradient(135deg, rgba(129, 140, 248, 0.25) 0%, rgba(99, 102, 241, 0.25) 100%);
-            border-color: var(--accent-primary);
-            transform: translateY(-1px);
+        .ask-bar-transcript-header span {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
         }
 
-        .ask-ai-btn kbd {
-            background: rgba(129, 140, 248, 0.2);
-            padding: 2px 6px;
+        .ask-bar-transcript-header button {
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            padding: 2px 4px;
             border-radius: 4px;
-            font-size: 10px;
+            display: flex;
+            align-items: center;
+        }
+
+        .ask-bar-transcript-header button:hover {
+            color: var(--text-primary);
+            background: var(--bg-surface);
+        }
+
+        .ask-bar-transcript-body {
+            padding: 12px 14px;
+            font-size: 13px;
+            line-height: 1.7;
+            color: var(--text-secondary);
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+
+        .ask-bar-transcript.show + .ask-bar-response.show + .ask-bar-inner,
+        .ask-bar-transcript.show + .ask-bar-inner {
+            border-radius: 999px;
+        }
+
+        [data-theme="light"] .ask-bar-transcript,
+        [data-theme="light"] .ask-bar-transcript-header {
+            background: var(--bg-deep);
+        }
+
+        .ask-bar-response.loading {
+            color: var(--text-muted);
+        }
+
+        .ask-bar-response.error {
+            color: #ef4444;
+        }
+
+        .ask-bar-response ul {
+            margin: 6px 0;
+            padding-left: 20px;
+        }
+
+        .ask-bar-response li {
+            margin: 2px 0;
+        }
+
+        /* Bottom bar row: controls pill (left) + ask pill (right) */
+        .ask-bar-row {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            max-width: 680px;
+            margin: 0 auto;
+        }
+
+        /* Separate controls pill (waveform + chevron + stop) */
+        .controls-pill {
+            display: none;
+            align-items: center;
+            gap: 2px;
+            background: var(--bg-elevated);
+            border: 1px solid var(--border-subtle);
+            border-radius: 999px;
+            padding: 6px 12px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.22), 0 2px 6px rgba(0, 0, 0, 0.08);
+            backdrop-filter: saturate(160%) blur(10px);
+            -webkit-backdrop-filter: saturate(160%) blur(10px);
+            flex-shrink: 0;
+        }
+
+        .controls-pill.show {
+            display: flex;
+        }
+
+        .controls-pill button {
+            background: none;
+            border: none;
+            padding: 4px;
+            cursor: pointer;
+            color: var(--text-muted);
+            display: flex;
+            align-items: center;
+            border-radius: 4px;
+            transition: color 0.15s ease, background 0.15s ease;
+        }
+
+        .controls-pill button:hover {
+            color: var(--text-primary);
+            background: var(--bg-surface);
+        }
+
+        .controls-pill button svg {
+            width: 16px;
+            height: 16px;
+        }
+
+        .controls-pill .bar-transcript-btn svg {
+            width: 18px;
+            height: 18px;
+        }
+
+        /* Toggle between static SVG icon and live mini waveform */
+        .controls-pill .bar-transcript-btn .mini-waveform {
+            display: none;
+        }
+
+        .controls-pill .bar-transcript-btn .waveform-static {
+            display: block;
+        }
+
+        .controls-pill.recording .bar-transcript-btn .waveform-static {
+            display: none;
+        }
+
+        .controls-pill.recording .bar-transcript-btn .mini-waveform {
+            display: flex;
+            align-items: flex-end;
+            gap: 2px;
+            height: 18px;
+            width: 18px;
+        }
+
+        .mini-waveform-bar {
+            width: 2px;
+            background: var(--success-green);
+            border-radius: 1px;
+            height: 18px;
+            transform-origin: bottom;
+            transform: scaleY(0.15);
+            transition: transform 0.05s ease;
+        }
+
+        .controls-pill.paused .bar-transcript-btn .mini-waveform {
+            display: flex;
+            align-items: flex-end;
+            gap: 2px;
+            height: 18px;
+            width: 18px;
+        }
+
+        .controls-pill.paused .bar-transcript-btn .waveform-static {
+            display: none;
+        }
+
+        .controls-pill.paused .mini-waveform-bar {
+            background: var(--text-muted);
+            transform: scaleY(0.15);
+            transition: transform 0.3s ease;
+        }
+
+        .controls-pill .bar-pause-btn {
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            font-size: 13px;
+            font-weight: 500;
             font-family: inherit;
-            margin-left: 4px;
+            cursor: pointer;
+            padding: 4px 6px;
+            border-radius: 4px;
+            transition: color 0.15s ease, background 0.15s ease;
+        }
+
+        .controls-pill .bar-pause-btn:hover {
+            color: var(--text-primary);
+            background: var(--bg-surface);
+        }
+
+        [data-theme="light"] .controls-pill {
+            background: var(--bg-deep);
+            border-color: #c4c4cc;
+        }
+
+        .ask-bar-inner {
+            display: flex;
+            align-items: center;
+            background: var(--bg-elevated);
+            border: 1px solid var(--border-subtle);
+            border-radius: 999px;
+            flex: 1;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.22), 0 2px 6px rgba(0, 0, 0, 0.08);
+            backdrop-filter: saturate(160%) blur(10px);
+            -webkit-backdrop-filter: saturate(160%) blur(10px);
+            transition: border-color 0.15s ease, box-shadow 0.15s ease;
+        }
+
+        .ask-bar-left {
+            display: none;
+        }
+
+        .ask-bar-left button {
+            background: none;
+            border: none;
+            padding: 4px;
+            cursor: pointer;
+            color: var(--text-muted);
+            display: flex;
+            align-items: center;
+            border-radius: 4px;
+            transition: color 0.15s ease, background 0.15s ease;
+        }
+
+        .ask-bar-left button:hover {
+            color: var(--text-primary);
+            background: var(--bg-surface);
+        }
+
+        .ask-bar-left button svg {
+            width: 16px;
+            height: 16px;
+        }
+
+        .ask-bar-left .bar-transcript-btn svg {
+            width: 18px;
+            height: 18px;
+        }
+
+        .ask-bar-left .bar-chevron {
+            transition: transform 0.2s ease;
+        }
+
+        .ask-bar-left .bar-chevron.open {
+            transform: rotate(180deg);
+        }
+
+        .ask-bar-response.show + .ask-bar-inner {
+            border-radius: 999px;
+        }
+
+        .ask-bar-inner:focus-within {
+            border-color: var(--accent-primary);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.24), 0 0 0 3px rgba(129, 140, 248, 0.18);
+        }
+
+        .ask-bar-input {
+            flex: 1;
+            background: none;
+            border: none;
+            outline: none;
+            padding: 13px 8px 13px 20px;
+            font-size: 15px;
+            color: var(--text-primary);
+            font-family: inherit;
+        }
+
+        .ask-bar-input::placeholder {
+            color: var(--text-muted);
+        }
+
+        .ask-bar-submit {
+            background: none;
+            border: none;
+            padding: 10px 18px 10px 12px;
+            cursor: pointer;
+            color: var(--text-muted);
+            display: flex;
+            align-items: center;
+            transition: color 0.15s ease;
+            flex-shrink: 0;
+        }
+
+        .ask-bar-submit:hover {
+            color: var(--accent-primary);
+        }
+
+        .ask-bar-submit:disabled {
+            opacity: 0.3;
+            cursor: default;
+        }
+
+        .ask-bar-submit svg {
+            width: 16px;
+            height: 16px;
+        }
+
+        [data-theme="light"] .ask-bar-inner,
+        [data-theme="light"] .ask-bar-response {
+            background: var(--bg-deep);
+            border-color: #c4c4cc;
+        }
+
+        [data-theme="light"] .ask-bar-inner:focus-within {
+            border-color: var(--accent-primary);
         }
 
         /* Light mode specific overrides */
-        [data-theme="light"] .brand h1 {
-            background: linear-gradient(135deg, #4338ca, #6366f1);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-        }
-
-        [data-theme="light"] .brand svg rect:first-child {
-            fill: #e0e7ff;
-        }
-        [data-theme="light"] .brand svg path {
-            fill: #4338ca;
-        }
 
         [data-theme="light"] body {
             background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
@@ -3208,22 +3783,22 @@
 
     <!-- Header with recording controls -->
     <div class="header">
-        <div class="brand">
-            <svg width="24" height="24" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <rect width="32" height="32" rx="8" fill="#0f172a"/>
-                <rect width="30" height="30" x="1" y="1" rx="7" stroke="rgba(255,255,255,0.1)"/>
-                <path d="M16 10c-1.1 0-2 .9-2 2v4c0 1.1.9 2 2 2s2-.9 2-2v-4c0-1.1-.9-2-2-2z" fill="white"/>
-                <path d="M12 15v1c0 2.2 1.8 4 4 4s4-1.8 4-4v-1h1v1c0 2.7-1.9 4.9-4.5 5.4v1.6h2v1h-5v-1h2v-1.6c-2.6-.5-4.5-2.7-4.5-5.4v-1h1z" fill="white"/>
+        <button class="brand home-btn" id="home-btn" title="Home" style="display: none;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:2px;">
+                <polyline points="15 18 9 12 15 6"></polyline>
             </svg>
-            <h1>StenoAI</h1>
-        </div>
-        
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
+                <polyline points="9 22 9 12 15 12 15 22"></polyline>
+            </svg>
+        </button>
+
         <div class="record-controls">
             <div class="status" id="status-container">
-                <div class="status-dot ready" id="status-dot"></div>
-                <span id="status-text" style="font-size: 13px; color: var(--text-secondary);">Ready</span>
-                <!-- 8 bars — must match the 8 binGroups in audio-visualizer.js -->
-                <div class="waveform" id="waveform">
+                <div class="status-dot ready" id="status-dot" style="display: none;"></div>
+                <span id="status-text" style="font-size: 13px; color: var(--text-secondary); display: none;"></span>
+                <!-- Hidden waveform kept for JS compatibility -->
+                <div class="waveform" id="waveform" style="display:none !important;">
                     <div class="waveform-bar"></div>
                     <div class="waveform-bar"></div>
                     <div class="waveform-bar"></div>
@@ -3234,23 +3809,22 @@
                     <div class="waveform-bar"></div>
                 </div>
             </div>
-            
-            <input type="text" class="session-input" id="session-name" placeholder="Name this session...">
-            
-            <button class="btn btn-primary" id="start-btn">
-                <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor"><circle cx="6" cy="6" r="5"/></svg> Record
-            </button>
-
-            <button class="btn btn-danger" id="stop-btn" style="display: none;">
-                <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor"><rect x="1" y="1" width="10" height="10" rx="1.5"/></svg> Stop
-            </button>
-
-            <button class="btn" id="pause-btn" style="display: none;">
-                <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor"><rect x="1.5" y="1" width="3" height="10" rx="1"/><rect x="7.5" y="1" width="3" height="10" rx="1"/></svg> Pause
-            </button>
+            <!-- Hidden inputs/buttons kept for JS compatibility -->
+            <input type="text" class="session-input" id="session-name" placeholder="Name this session..." style="display: none;">
+            <button class="btn btn-primary" id="start-btn" style="display: none;">Record</button>
+            <button class="btn btn-danger" id="stop-btn" style="display: none;">Stop</button>
+            <button class="btn" id="pause-btn" style="display: none;">Pause</button>
         </div>
-        
+
         <div class="header-actions">
+            <button class="update-badge" id="update-badge" title="Click to restart and update">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                <span id="update-badge-text">Restart to update</span>
+            </button>
+            <button class="new-note-btn" id="new-note-btn" title="Start a new recording">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                New Note
+            </button>
             <button class="privacy-ghost local" id="privacy-ghost" style="display: none;" title="Privacy: All data stays on your device" aria-label="Privacy: All data stays on your device">
                 <svg width="16" height="18" viewBox="0 0 16 20" fill="none">
                     <!-- Ghost body: rounded top, wavy bottom -->
@@ -3290,14 +3864,14 @@
                     <div id="calendar-sidebar-list"></div>
                 </div>
                 <div class="sidebar-title">
-                    <h2>Meetings</h2>
+                    <h2>Notes</h2>
                 </div>
                 <div class="search-wrapper">
                     <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <circle cx="11" cy="11" r="8"></circle>
                         <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
                     </svg>
-                    <input type="text" class="search-input" id="search-input" placeholder="Search meetings...">
+                    <input type="text" class="search-input" id="search-input" placeholder="Search notes...">
                 </div>
             </div>
 
@@ -3341,8 +3915,8 @@
         <div class="content">
             <!-- Empty state -->
             <div class="content-empty" id="empty-state">
-                <h3>Ready to capture your meeting</h3>
-                <p>Select a meeting from the sidebar or start recording</p>
+                <h3>Ready to capture beautiful notes</h3>
+                <p>Always get consent when transcribing others</p>
                 <div class="shortcut-hint">
                     <span>Quick start:</span>
                     <kbd class="kbd">⌘</kbd>
@@ -3427,6 +4001,13 @@ Ask Steno
                     <div class="meeting-info">
                         <span id="detail-date">Date</span>
                         <span id="detail-duration">Duration</span>
+                        <div class="folder-pill" id="folder-pill" title="Add to folder">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                            </svg>
+                            <span id="folder-pill-label">Add to folder</span>
+                            <div class="folder-pill-dropdown" id="folder-pill-dropdown"></div>
+                        </div>
                     </div>
                 </div>
 
@@ -3444,11 +4025,9 @@ Ask Steno
                     </div>
                 </div>
 
-                <div class="meeting-section">
+                <div class="meeting-section permanently-hidden">
                     <h2 class="section-title">Participants</h2>
-                    <div class="section-content" id="detail-participants">
-                        <!-- Participants will be loaded here -->
-                    </div>
+                    <div class="section-content" id="detail-participants"></div>
                 </div>
 
                 <div class="meeting-section" id="discussion-areas-section">
@@ -3472,7 +4051,7 @@ Ask Steno
                     </ul>
                 </div>
 
-                <div class="meeting-section">
+                <div class="meeting-section" id="transcript-section">
                     <h2 class="section-title">Full Transcript</h2>
                     <div class="transcript-container">
                         <div class="transcript-content" id="detail-transcript">
@@ -3486,6 +4065,94 @@ Ask Steno
                         </button>
                     </div>
                 </div>
+              </div>
+              <!-- Bottom ask bar (sibling of document-body, sticky inside meeting-detail flex column) -->
+              <div class="ask-bar" id="ask-bar" style="display: none;">
+                  <div class="ask-bar-transcript" id="ask-bar-transcript">
+                      <div class="ask-bar-transcript-header">
+                          <span>Transcript</span>
+                          <div style="display: flex; align-items: center; gap: 2px;">
+                              <button id="ask-bar-transcript-copy" title="Copy transcript">
+                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                      <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                                      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                                  </svg>
+                              </button>
+                              <button id="ask-bar-transcript-close" title="Close">
+                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                                      <line x1="18" y1="6" x2="6" y2="18"></line>
+                                      <line x1="6" y1="6" x2="18" y2="18"></line>
+                                  </svg>
+                              </button>
+                          </div>
+                      </div>
+                      <div class="bubble-waveform" id="bubble-waveform" style="display: none;">
+                          <div class="bubble-waveform-bar"></div>
+                          <div class="bubble-waveform-bar"></div>
+                          <div class="bubble-waveform-bar"></div>
+                          <div class="bubble-waveform-bar"></div>
+                          <div class="bubble-waveform-bar"></div>
+                          <div class="bubble-waveform-bar"></div>
+                          <div class="bubble-waveform-bar"></div>
+                          <div class="bubble-waveform-bar"></div>
+                          <div class="bubble-waveform-bar"></div>
+                          <div class="bubble-waveform-bar"></div>
+                          <div class="bubble-waveform-bar"></div>
+                          <div class="bubble-waveform-bar"></div>
+                          <div class="bubble-waveform-bar"></div>
+                          <div class="bubble-waveform-bar"></div>
+                          <div class="bubble-waveform-bar"></div>
+                          <div class="bubble-waveform-bar"></div>
+                      </div>
+                      <div class="ask-bar-transcript-body" id="ask-bar-transcript-body"></div>
+                  </div>
+                  <div class="ask-bar-response" id="ask-bar-response"></div>
+                  <div class="ask-bar-row">
+                      <!-- Separate controls pill (visible during recording + on meetings) -->
+                      <div class="controls-pill" id="controls-pill">
+                          <button class="bar-transcript-btn" id="bar-transcript-btn" title="Toggle transcript">
+                              <!-- Static waveform icon (shown when not recording) -->
+                              <svg class="waveform-static" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                  <line x1="4" y1="6" x2="4" y2="18"></line>
+                                  <line x1="8" y1="10" x2="8" y2="18"></line>
+                                  <line x1="12" y1="4" x2="12" y2="18"></line>
+                                  <line x1="16" y1="8" x2="16" y2="18"></line>
+                                  <line x1="20" y1="12" x2="20" y2="18"></line>
+                              </svg>
+                              <!-- Live waveform bars (shown during recording) -->
+                              <div class="mini-waveform" id="mini-waveform">
+                                  <div class="mini-waveform-bar"></div>
+                                  <div class="mini-waveform-bar"></div>
+                                  <div class="mini-waveform-bar"></div>
+                                  <div class="mini-waveform-bar"></div>
+                                  <div class="mini-waveform-bar"></div>
+                              </div>
+                          </button>
+                          <button class="bar-chevron" id="bar-chevron" title="Show transcript">
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                  <polyline points="6 9 12 15 18 9"></polyline>
+                              </svg>
+                          </button>
+                          <button class="bar-pause-btn" id="bar-pause-btn" style="display: none;">Pause</button>
+                          <button class="bar-stop-btn" id="bar-stop-btn" title="Stop recording" style="display: none;">
+                              <svg viewBox="0 0 16 16" fill="currentColor"><rect x="2" y="2" width="12" height="12" rx="2"/></svg>
+                          </button>
+                      </div>
+                      <!-- Hidden elements for JS compatibility -->
+                      <div id="ask-bar-left" style="display:none;"></div>
+                      <div id="ask-bar-rec-controls" style="display:none;"></div>
+                      <div id="ask-bar-rec-divider" style="display:none;"></div>
+                      <!-- Main ask input pill -->
+                      <div class="ask-bar-inner">
+                          <input type="text" class="ask-bar-input" id="ask-bar-input" placeholder="Ask anything" autocomplete="off">
+                          <button class="ask-bar-submit" id="ask-bar-submit" title="Ask">
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                  <line x1="22" y1="2" x2="11" y2="13"></line>
+                                  <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                              </svg>
+                          </button>
+                      </div>
+                  </div>
               </div>
             </div>
         </div>
@@ -4134,12 +4801,20 @@ Session started - waiting for activity...
             document.getElementById('meeting-detail').classList.remove('show');
             document.getElementById('calendar-event-detail').classList.remove('show');
             document.querySelectorAll('.meeting-item').forEach(item => item.classList.remove('active'));
+            document.getElementById('home-btn').style.display = 'none';
             renderCalendarSidebar();
         });
 
         const startBtn = document.getElementById('start-btn');
         const stopBtn = document.getElementById('stop-btn');
         const pauseBtn = document.getElementById('pause-btn');
+        const newNoteBtn = document.getElementById('new-note-btn');
+        const barPauseBtn = document.getElementById('bar-pause-btn');
+        const barStopBtn = document.getElementById('bar-stop-btn');
+        const barRecControls = document.getElementById('ask-bar-rec-controls');
+        const barRecDivider = document.getElementById('ask-bar-rec-divider');
+        const askBarLeft = document.getElementById('ask-bar-left');
+        const controlsPill = document.getElementById('controls-pill');
         const settingsBtn = document.getElementById('settings-btn');
         const meetingsList = document.getElementById('meetings-list');
         const emptyState = document.getElementById('empty-state');
@@ -4281,50 +4956,76 @@ Session started - waiting for activity...
             // Update UI elements based on state
             switch(state) {
                 case 'ready':
-                    startBtn.style.display = 'inline-flex';
-                    stopBtn.style.display = 'none';
-                    pauseBtn.style.display = 'none';
                     startBtn.disabled = false;
                     sessionNameInput.disabled = false;
                     stopRecordingTimer();
-                    setStatus('ready', 'Ready');
+                    setStatus('ready', '');
                     AudioVisualizer.stop();
+                    // Header
+                    newNoteBtn.style.display = '';
+                    document.getElementById('status-text').style.display = 'none';
+                    document.getElementById('status-dot').style.display = 'none';
+                    // Controls pill: show (for transcript toggle) but hide rec controls
+                    controlsPill.classList.add('show');
+                    controlsPill.classList.remove('recording');
+                    controlsPill.classList.remove('paused');
+                    barStopBtn.style.display = 'none';
+                    barPauseBtn.style.display = 'none';
+                    // Restore transcript body
+                    document.getElementById('ask-bar-transcript-body').style.display = '';
                     break;
 
                 case 'recording':
-                    startBtn.style.display = 'none';
-                    stopBtn.style.display = 'inline-flex';
-                    pauseBtn.style.display = 'inline-flex';
-                    pauseBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor"><rect x="1.5" y="1" width="3" height="10" rx="1"/><rect x="7.5" y="1" width="3" height="10" rx="1"/></svg> Pause';
                     startBtn.disabled = true;
                     sessionNameInput.disabled = true;
-                    stopBtn.disabled = false;
-                    pauseBtn.disabled = false;
-                    // Check if resuming from paused state (pausedElapsedTime > 0)
                     startRecordingTimer(pausedElapsedTime > 0);
-                    // Restart visualizer if resuming from pause or recovering
+                    // Header
+                    newNoteBtn.style.display = 'none';
+                    document.getElementById('status-dot').style.display = '';
+                    document.getElementById('status-text').style.display = '';
+                    // Controls pill: show with live waveform + pause + stop
+                    controlsPill.classList.add('show');
+                    controlsPill.classList.add('recording');
+                    controlsPill.classList.remove('paused');
+                    barStopBtn.style.display = '';
+                    barPauseBtn.style.display = '';
+                    barPauseBtn.textContent = 'Pause';
+                    // Show ask bar
+                    document.getElementById('ask-bar').style.display = '';
+                    // Start visualizer targeting mini waveform bars in the button.
+                    // Defer one frame so the controls-pill display change flushes
+                    // and querySelectorAll returns the laid-out bars.
                     if (!AudioVisualizer._animFrame) {
-                        const bars = Array.from(document.querySelectorAll('#waveform .waveform-bar'));
-                        if (_systemAudioAnalyser) {
-                            AudioVisualizer.startFromAnalyser(bars, _systemAudioAnalyser);
-                        } else {
-                            AudioVisualizer.start(bars);
-                        }
+                        requestAnimationFrame(() => {
+                            // Skip if state moved on before the frame fired (e.g. user stopped recording)
+                            if (uiState !== 'recording') return;
+                            const miniBars = Array.from(document.querySelectorAll('#mini-waveform .mini-waveform-bar'));
+                            if (!miniBars.length) return;
+                            if (_systemAudioAnalyser) {
+                                AudioVisualizer.startFromAnalyser(miniBars, _systemAudioAnalyser);
+                            } else {
+                                AudioVisualizer.start(miniBars);
+                            }
+                        });
                     }
                     break;
 
                 case 'paused':
-                    startBtn.style.display = 'none';
-                    stopBtn.style.display = 'inline-flex';
-                    pauseBtn.style.display = 'inline-flex';
-                    pauseBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor"><polygon points="2,1 11,6 2,11"/></svg> Resume';
                     startBtn.disabled = true;
                     sessionNameInput.disabled = true;
-                    stopBtn.disabled = false;
-                    pauseBtn.disabled = false;
                     AudioVisualizer.stop();
                     pauseRecordingTimer();
-                    // Show paused status with the frozen time
+                    // Header
+                    newNoteBtn.style.display = 'none';
+                    document.getElementById('status-dot').style.display = '';
+                    document.getElementById('status-text').style.display = '';
+                    // Controls pill: show with resume + stop, grey waveform
+                    controlsPill.classList.add('show');
+                    controlsPill.classList.remove('recording');
+                    controlsPill.classList.add('paused');
+                    barStopBtn.style.display = '';
+                    barPauseBtn.style.display = '';
+                    barPauseBtn.textContent = 'Resume';
                     const minutes = Math.floor(pausedElapsedTime / 60);
                     const seconds = pausedElapsedTime % 60;
                     const timeStr = `${minutes}:${seconds.toString().padStart(2, '0')}`;
@@ -4332,14 +5033,25 @@ Session started - waiting for activity...
                     break;
 
                 case 'processing':
-                    startBtn.style.display = 'inline-flex';
-                    stopBtn.style.display = 'none';
-                    pauseBtn.style.display = 'none';
                     startBtn.disabled = true;
                     sessionNameInput.disabled = true;
                     stopRecordingTimer();
                     setStatus('processing', 'Processing...');
                     AudioVisualizer.stop();
+                    // Header
+                    newNoteBtn.style.display = 'none';
+                    document.getElementById('status-dot').style.display = '';
+                    document.getElementById('status-text').style.display = '';
+                    // Controls pill: show (for transcript) but hide rec controls
+                    controlsPill.classList.add('show');
+                    controlsPill.classList.remove('recording');
+                    controlsPill.classList.remove('paused');
+                    barStopBtn.style.display = 'none';
+                    barPauseBtn.style.display = 'none';
+                    // Restore transcript body
+                    document.getElementById('ask-bar-transcript-body').style.display = '';
+                    document.getElementById('ask-bar-transcript').classList.remove('show');
+                    document.getElementById('bar-chevron').classList.remove('open');
                     break;
             }
         }
@@ -4451,8 +5163,14 @@ Session started - waiting for activity...
             }
         }
         
-        // Filter meetings based on search query
+        // Filter meetings based on search query (debounced to prevent rapid re-renders)
+        let _filterDebounceTimer = null;
         function filterMeetings() {
+            if (_filterDebounceTimer) clearTimeout(_filterDebounceTimer);
+            _filterDebounceTimer = setTimeout(_filterMeetingsImpl, 80);
+        }
+
+        function _filterMeetingsImpl() {
             const hasSearch = searchQuery.trim().length > 0;
             let source = [...meetings];
             // When searching, search across ALL meetings regardless of folder
@@ -4580,7 +5298,7 @@ Session started - waiting for activity...
                 ondragleave="this.classList.remove('drag-over')"
                 ondrop="handleAllMeetingsDrop(event)">
                 ${folderIcon('#71717a')}
-                All Meetings
+                All Notes
                 <span class="folder-count">${allCount}</span>
             </div>`;
             for (const f of folders) {
@@ -4718,7 +5436,7 @@ Session started - waiting for activity...
             const name = folder ? folder.name : 'this folder';
             const count = meetings.filter(m => (m.folders || []).includes(contextFolderId)).length;
             const msg = count > 0
-                ? `Delete folder "${name}"?\n\n${count} meeting${count === 1 ? '' : 's'} will be moved back to All Meetings. No recordings or transcripts will be deleted.`
+                ? `Delete folder "${name}"?\n\n${count} meeting${count === 1 ? '' : 's'} will be moved back to All Notes. No recordings or transcripts will be deleted.`
                 : `Delete folder "${name}"?\n\nNo recordings or transcripts will be deleted.`;
             if (!confirm(msg)) { contextFolderId = null; return; }
             await deleteFolder_(contextFolderId);
@@ -4785,7 +5503,7 @@ Session started - waiting for activity...
             let html = '<div style="padding: 4px 10px; font-size: 11px; color: var(--text-muted); font-weight: 500;">Move to...</div>';
             html += `<div class="context-menu-item" onclick="event.stopPropagation(); moveToAllMeetings()">
                 ${folderIcon('#71717a')}
-                All Meetings ${isUnfiled ? '<span style="color: var(--text-muted); font-size: 11px;">(current)</span>' : ''}
+                All Notes ${isUnfiled ? '<span style="color: var(--text-muted); font-size: 11px;">(current)</span>' : ''}
             </div>`;
             for (const f of folders) {
                 const inFolder = meetingFolders.includes(f.id);
@@ -5048,7 +5766,6 @@ Session started - waiting for activity...
                         <span class="meeting-line-title" ondblclick="event.stopPropagation(); renameMeeting(${index}, this)">${escapeHtml(title)}</span>
                         ${isProcessing ? '<span class="meeting-item-spinner"></span>' : ''}
                         <span class="meeting-line-meta">
-                            ${actionCount > 0 ? `<span class="meeting-line-badge">${actionCount}</span>` : ''}
                             <span class="meeting-line-date">${date}</span>
                         </span>
                     </div>
@@ -5066,10 +5783,58 @@ Session started - waiting for activity...
             });
         }
         
+        // Populate the detail-transcript element with meeting transcript data
+        function populateTranscript(meeting) {
+            if (!meeting) return;
+            if (meeting.is_diarised && meeting.diarised_text) {
+                detailTranscript.innerHTML = '';
+                detailTranscript.style.whiteSpace = 'normal';
+                const blocks = meeting.diarised_text.split(/(?=\[You\]|\[Others\])/);
+                blocks.forEach(block => {
+                    const trimmed = block.trim();
+                    if (!trimmed) return;
+                    const div = document.createElement('div');
+                    div.style.cssText = 'margin-bottom:12px;padding:8px 12px;border-radius:6px;white-space:normal;';
+                    if (trimmed.startsWith('[You]')) {
+                        div.style.borderLeft = '3px solid var(--accent-primary, #818cf8)';
+                        div.style.background = 'rgba(129, 140, 248, 0.06)';
+                        const label = document.createElement('div');
+                        label.textContent = 'You';
+                        label.style.cssText = 'display:inline-block;font-size:11px;font-weight:600;color:var(--accent-primary,#818cf8);background:rgba(129,140,248,0.12);padding:1px 6px;border-radius:3px;margin-bottom:6px;';
+                        div.appendChild(label);
+                        const text = document.createElement('div');
+                        text.style.cssText = 'margin:0;line-height:1.7;';
+                        text.textContent = trimmed.replace('[You]', '').trim();
+                        div.appendChild(text);
+                    } else if (trimmed.startsWith('[Others]')) {
+                        div.style.borderLeft = '3px solid var(--text-muted, #888)';
+                        div.style.background = 'rgba(136, 136, 136, 0.06)';
+                        const label = document.createElement('div');
+                        label.textContent = 'Others';
+                        label.style.cssText = 'display:inline-block;font-size:11px;font-weight:600;color:var(--text-muted,#888);background:rgba(136,136,136,0.12);padding:1px 6px;border-radius:3px;margin-bottom:6px;';
+                        div.appendChild(label);
+                        const text = document.createElement('div');
+                        text.style.cssText = 'margin:0;line-height:1.7;';
+                        text.textContent = trimmed.replace('[Others]', '').trim();
+                        div.appendChild(text);
+                    } else {
+                        div.textContent = trimmed;
+                    }
+                    detailTranscript.appendChild(div);
+                });
+            } else {
+                detailTranscript.style.whiteSpace = 'pre-wrap';
+                detailTranscript.textContent = meeting.transcript || 'No transcript available';
+            }
+        }
+
         // Select and display meeting details
         function selectMeeting(index) {
             selectedMeeting = filteredMeetings[index];
             if (!selectedMeeting) return;
+
+            // Show home button when inside a note
+            document.getElementById('home-btn').style.display = '';
 
             // Reset streaming/notes state
             document.getElementById('notes-editor').style.display = 'none';
@@ -5093,19 +5858,19 @@ Session started - waiting for activity...
             // Populate details
             detailTitle.textContent = selectedMeeting.session_info?.name || 'Untitled Meeting';
             detailDate.textContent = formatDate(selectedMeeting.session_info?.processed_at);
-            const durationText = selectedMeeting.session_info?.duration_seconds ? 
+            const durationText = selectedMeeting.session_info?.duration_seconds ?
                 (() => {
                     const totalSecs = selectedMeeting.session_info.duration_seconds;
                     const hours = Math.floor(totalSecs / 3600);
                     const mins = Math.floor((totalSecs % 3600) / 60);
                     const secs = totalSecs % 60;
-                    
-                    if (hours > 0) return `Meeting Duration: ${hours}h ${mins}m`;
-                    if (mins > 0) return `Meeting Duration: ${mins}m ${secs}s`;
-                    return `Meeting Duration: ${secs}s`;
+
+                    if (hours > 0) return `${hours}h ${mins}m`;
+                    if (mins > 0) return `${mins}m ${secs}s`;
+                    return `${secs}s`;
                 })() :
                 (selectedMeeting.session_info?.duration_minutes ?
-                    `Meeting Duration: ${selectedMeeting.session_info.duration_minutes} minutes` : 'Processed');
+                    `${selectedMeeting.session_info.duration_minutes} minutes` : 'Processed');
             detailDuration.textContent = durationText;
             
             detailSummary.textContent = selectedMeeting.summary || 'No summary available';
@@ -5174,47 +5939,10 @@ Session started - waiting for activity...
             }
             
             // Transcript — render diarised view if available
-            if (selectedMeeting.is_diarised && selectedMeeting.diarised_text) {
-                detailTranscript.innerHTML = '';
-                // Override pre-wrap on container so block elements render properly
-                detailTranscript.style.whiteSpace = 'normal';
-                const blocks = selectedMeeting.diarised_text.split(/(?=\[You\]|\[Others\])/);
-                blocks.forEach(block => {
-                    const trimmed = block.trim();
-                    if (!trimmed) return;
-                    const div = document.createElement('div');
-                    div.style.cssText = 'margin-bottom:12px;padding:8px 12px;border-radius:6px;white-space:normal;';
-                    if (trimmed.startsWith('[You]')) {
-                        div.style.borderLeft = '3px solid var(--accent-primary, #818cf8)';
-                        div.style.background = 'rgba(129, 140, 248, 0.06)';
-                        const label = document.createElement('div');
-                        label.textContent = 'You';
-                        label.style.cssText = 'display:inline-block;font-size:11px;font-weight:600;color:var(--accent-primary,#818cf8);background:rgba(129,140,248,0.12);padding:1px 6px;border-radius:3px;margin-bottom:6px;';
-                        div.appendChild(label);
-                        const text = document.createElement('div');
-                        text.style.cssText = 'margin:0;line-height:1.7;';
-                        text.textContent = trimmed.replace('[You]', '').trim();
-                        div.appendChild(text);
-                    } else if (trimmed.startsWith('[Others]')) {
-                        div.style.borderLeft = '3px solid var(--text-muted, #888)';
-                        div.style.background = 'rgba(136, 136, 136, 0.06)';
-                        const label = document.createElement('div');
-                        label.textContent = 'Others';
-                        label.style.cssText = 'display:inline-block;font-size:11px;font-weight:600;color:var(--text-muted,#888);background:rgba(136,136,136,0.12);padding:1px 6px;border-radius:3px;margin-bottom:6px;';
-                        div.appendChild(label);
-                        const text = document.createElement('div');
-                        text.style.cssText = 'margin:0;line-height:1.7;';
-                        text.textContent = trimmed.replace('[Others]', '').trim();
-                        div.appendChild(text);
-                    } else {
-                        div.textContent = trimmed;
-                    }
-                    detailTranscript.appendChild(div);
-                });
-            } else {
-                detailTranscript.style.whiteSpace = 'pre-wrap';
-                detailTranscript.textContent = selectedMeeting.transcript || 'No transcript available';
-            }
+            populateTranscript(selectedMeeting);
+
+            // Update folder pill
+            updateFolderPill();
             
             // Set reprocess button state based on whether this meeting is currently processing
             const isCurrentlyProcessing = processingMeeting && processingMeeting.session_info?.summary_file === selectedMeeting.session_info?.summary_file;
@@ -5233,6 +5961,7 @@ Session started - waiting for activity...
             
             // TEMPORARY: Show reprocess button for all meetings (for testing)
             reprocessBtn.style.display = 'flex';
+            document.getElementById('ask-bar').style.display = '';
             
             /* ORIGINAL LOGIC (commented out for testing):
             // Show/hide reprocess button based on meeting quality
@@ -5276,6 +6005,7 @@ Session started - waiting for activity...
             // Show meeting detail with notes editor
             emptyState.style.display = 'none';
             meetingDetail.classList.add('show');
+            document.getElementById('home-btn').style.display = '';
             detailTitle.textContent = sessionName;
             detailDate.textContent = formatDate(new Date().toISOString());
             detailDuration.textContent = '';
@@ -5298,6 +6028,12 @@ Session started - waiting for activity...
             document.getElementById('ask-ai-btn').style.display = 'none';
             document.getElementById('copy-notes-btn').style.display = 'none';
             document.getElementById('reprocess-btn').style.display = 'none';
+            // Keep ask bar visible during recording (recording controls are in the pill)
+            document.getElementById('ask-bar').style.display = '';
+            // Clear previous transcript from the panel
+            document.getElementById('ask-bar-transcript-body').textContent = '';
+            document.getElementById('ask-bar-transcript').classList.remove('show');
+            document.getElementById('bar-chevron').classList.remove('open');
 
             // Auto-save notes on input (debounced 2s) — remove previous listener first
             if (_notesInputHandler) {
@@ -5413,7 +6149,7 @@ Session started - waiting for activity...
                 ipcRenderer.send('system-audio-recording-state', true);
 
                 // Start waveform visualization from the mixed analyser
-                const vizBars = Array.from(document.querySelectorAll('#waveform .waveform-bar'));
+                const vizBars = Array.from(document.querySelectorAll('#mini-waveform .mini-waveform-bar'));
                 AudioVisualizer.startFromAnalyser(vizBars, _systemAudioAnalyser);
 
                 log('System audio recording started (mic + system audio)');
@@ -5561,7 +6297,7 @@ Session started - waiting for activity...
                 showNotesEditor(sessionName);
                 // Start visualizer immediately (within user-gesture frame, before IPC await)
                 // so bars appear instantly and AudioContext is never suspended.
-                const vizBars = Array.from(document.querySelectorAll('#waveform .waveform-bar'));
+                const vizBars = Array.from(document.querySelectorAll('#mini-waveform .mini-waveform-bar'));
                 AudioVisualizer.start(vizBars);
                 try {
                     const result = await ipcRenderer.invoke('start-recording-ui', sessionName);
@@ -5703,6 +6439,102 @@ Session started - waiting for activity...
                     }
                 }
             }
+        });
+
+        // + New Note button — triggers same flow as old Record button
+        newNoteBtn.addEventListener('click', () => {
+            startBtn.click();
+        });
+
+        // Ask bar recording controls — wire to existing handlers
+        barPauseBtn.addEventListener('click', () => {
+            pauseBtn.click();
+        });
+
+        barStopBtn.addEventListener('click', () => {
+            stopBtn.click();
+        });
+
+        // Folder pill in meeting detail
+        const folderPill = document.getElementById('folder-pill');
+        const folderPillLabel = document.getElementById('folder-pill-label');
+        const folderPillDropdown = document.getElementById('folder-pill-dropdown');
+
+        function updateFolderPill() {
+            if (!selectedMeeting) return;
+            const meetingFolders = selectedMeeting.folders || [];
+            if (meetingFolders.length > 0) {
+                const folder = folders.find(f => f.id === meetingFolders[0]);
+                folderPillLabel.textContent = folder ? folder.name : 'Add to folder';
+            } else {
+                folderPillLabel.textContent = 'Add to folder';
+            }
+        }
+
+        folderPill.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const isOpen = folderPillDropdown.classList.contains('open');
+            if (isOpen) {
+                folderPillDropdown.classList.remove('open');
+                return;
+            }
+            // Build dropdown items
+            const meetingFolders = selectedMeeting?.folders || [];
+            let html = '';
+            // "All Notes" option to remove from folder
+            if (meetingFolders.length > 0) {
+                html += `<button class="folder-pill-dropdown-item" data-folder-id="">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><polyline points="9 22 9 12 15 12 15 22"></polyline></svg>
+                    All Notes
+                </button>`;
+            }
+            folders.forEach(f => {
+                const isActive = meetingFolders.includes(f.id);
+                html += `<button class="folder-pill-dropdown-item ${isActive ? 'active' : ''}" data-folder-id="${f.id}">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+                    ${escapeHtml(f.name)}
+                </button>`;
+            });
+            folderPillDropdown.innerHTML = html;
+            folderPillDropdown.classList.add('open');
+        });
+
+        folderPillDropdown.addEventListener('click', async (e) => {
+            const item = e.target.closest('.folder-pill-dropdown-item');
+            if (!item || !selectedMeeting) return;
+            e.stopPropagation();
+            const folderId = item.dataset.folderId;
+            const summaryFile = selectedMeeting.session_info?.summary_file;
+            if (!summaryFile) return;
+
+            const oldFolders = [...(selectedMeeting.folders || [])];
+
+            if (folderId === '') {
+                // Remove from all folders
+                selectedMeeting.folders = [];
+                for (const fid of oldFolders) {
+                    await ipcRenderer.invoke('remove-meeting-from-folder', summaryFile, fid);
+                }
+            } else {
+                // Assign to folder (replace)
+                selectedMeeting.folders = [folderId];
+                for (const fid of oldFolders) {
+                    if (fid !== folderId) await ipcRenderer.invoke('remove-meeting-from-folder', summaryFile, fid);
+                }
+                await ipcRenderer.invoke('add-meeting-to-folder', summaryFile, folderId);
+            }
+
+            folderPillDropdown.classList.remove('open');
+            updateFolderPill();
+            filterMeetings();
+        });
+
+        // Close dropdown when clicking outside
+        document.addEventListener('click', (e) => {
+            if (!folderPillDropdown.classList.contains('open')) return;
+            if (folderPillDropdown.contains(e.target)) return;
+            if (e.target.closest && e.target.closest('#folder-pill')) return;
+            folderPillDropdown.classList.remove('open');
         });
 
         // Search functionality
@@ -6045,7 +6877,7 @@ Session started - waiting for activity...
             if (!event) return;
             document.getElementById('session-name').value = event.summary || 'Meeting';
             hideCalendarEventDetail();
-            document.getElementById('start-btn').click();
+            document.getElementById('new-note-btn').click();
         }
 
         async function connectCalendar(provider) {
@@ -6379,16 +7211,132 @@ Session started - waiting for activity...
             }
         }
 
-        // Ask AI button click handler
+        // Ask AI button click handler (legacy, hidden)
         askAiBtn.addEventListener('click', showAiQueryPopup);
 
-        // AI Query close button
+        // Bottom bar inline query
+        const askBarInput = document.getElementById('ask-bar-input');
+        const askBarSubmit = document.getElementById('ask-bar-submit');
+        const askBarResponse = document.getElementById('ask-bar-response');
+
+        async function submitBarQuery() {
+            const question = askBarInput.value.trim();
+            if (!question) return;
+            if (!selectedMeeting) return;
+
+            const summaryFile = selectedMeeting.session_info?.summary_file;
+            if (!summaryFile) return;
+
+            askBarSubmit.disabled = true;
+            askBarResponse.className = 'ask-bar-response show loading';
+            askBarResponse.textContent = 'Thinking...';
+
+            try {
+                const result = await ipcRenderer.invoke('query-transcript', summaryFile, question);
+                askBarResponse.classList.remove('loading');
+                if (result.success) {
+                    askBarResponse.innerHTML = formatAiResponse(result.answer);
+                } else {
+                    askBarResponse.classList.add('error');
+                    askBarResponse.textContent = result.error || 'Failed to get response';
+                }
+            } catch (error) {
+                askBarResponse.classList.remove('loading');
+                askBarResponse.classList.add('error');
+                askBarResponse.textContent = 'Failed: ' + error.message;
+            } finally {
+                askBarSubmit.disabled = false;
+            }
+        }
+
+        askBarSubmit.addEventListener('click', submitBarQuery);
+
+        askBarInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                submitBarQuery();
+            }
+            if (e.key === 'Escape') {
+                askBarInput.blur();
+                askBarResponse.classList.remove('show');
+                if (askBarTranscript) {
+                    askBarTranscript.classList.remove('show');
+                    if (barChevron) barChevron.classList.remove('open');
+                }
+            }
+        });
+
+        // Transcript toggle from bottom bar
+        const barChevron = document.getElementById('bar-chevron');
+        const barTranscriptBtn = document.getElementById('bar-transcript-btn');
+
+        const askBarTranscript = document.getElementById('ask-bar-transcript');
+        const askBarTranscriptBody = document.getElementById('ask-bar-transcript-body');
+
+        function toggleTranscriptPanel() {
+            const isOpen = askBarTranscript.classList.contains('show');
+            if (isOpen) {
+                askBarTranscript.classList.remove('show');
+                barChevron.classList.remove('open');
+            } else {
+                // During recording/paused, no transcript available yet
+                if (uiState === 'recording' || uiState === 'paused') {
+                    askBarTranscriptBody.textContent = 'Transcript will appear after processing...';
+                    askBarTranscriptBody.style.whiteSpace = 'pre-wrap';
+                } else {
+                    // Copy transcript content from the current meeting
+                    const transcriptEl = document.getElementById('detail-transcript');
+                    if (transcriptEl && transcriptEl.textContent.trim() && transcriptEl.textContent.trim() !== 'Full transcript will appear here...') {
+                        askBarTranscriptBody.innerHTML = transcriptEl.innerHTML;
+                        askBarTranscriptBody.style.whiteSpace = transcriptEl.style.whiteSpace || 'pre-wrap';
+                    } else {
+                        askBarTranscriptBody.textContent = '';
+                        askBarTranscriptBody.style.whiteSpace = 'pre-wrap';
+                    }
+                }
+                askBarTranscript.classList.add('show');
+                barChevron.classList.add('open');
+                askBarTranscriptBody.scrollTop = askBarTranscriptBody.scrollHeight;
+            }
+        }
+
+        barChevron.addEventListener('click', toggleTranscriptPanel);
+        barTranscriptBtn.addEventListener('click', toggleTranscriptPanel);
+        document.getElementById('ask-bar-transcript-close').addEventListener('click', (e) => {
+            e.stopPropagation();
+            askBarTranscript.classList.remove('show');
+            barChevron.classList.remove('open');
+        });
+        document.getElementById('ask-bar-transcript-copy').addEventListener('click', (e) => {
+            e.stopPropagation();
+            const text = askBarTranscriptBody.textContent;
+            if (text) {
+                navigator.clipboard.writeText(text);
+                const btn = e.currentTarget;
+                const origHTML = btn.innerHTML;
+                btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>';
+                setTimeout(() => { btn.innerHTML = origHTML; }, 1500);
+                log('Transcript copied to clipboard');
+            }
+        });
+
+        // Close response/transcript when clicking outside the ask bar
+        document.addEventListener('click', (e) => {
+            const askBar = document.getElementById('ask-bar');
+            if (askBar && !askBar.contains(e.target)) {
+                if (askBarResponse.classList.contains('show')) {
+                    askBarResponse.classList.remove('show');
+                }
+                if (askBarTranscript.classList.contains('show')) {
+                    askBarTranscript.classList.remove('show');
+                    barChevron.classList.remove('open');
+                }
+            }
+        });
+
+        // Legacy AI Query popup handlers (kept for backward compat)
         aiQueryClose.addEventListener('click', hideAiQueryPopup);
-
-        // AI Query submit button
         aiQuerySubmit.addEventListener('click', submitAiQuery);
-
-        // AI Query input - submit on Enter
         aiQueryInput.addEventListener('keydown', (e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
@@ -6684,6 +7632,30 @@ Session started - waiting for activity...
         // Listen for debug messages from backend
         ipcRenderer.on('debug-log', (event, message) => {
             debugLog(message);
+        });
+
+        // ── Auto-update UI ──
+        const updateBadge = document.getElementById('update-badge');
+        const updateBadgeText = document.getElementById('update-badge-text');
+
+        ipcRenderer.on('update-available', (event, data) => {
+            log(`Update available: v${data.version}`);
+            updateBadgeText.textContent = `Updating...`;
+        });
+
+        ipcRenderer.on('update-download-progress', (event, data) => {
+            updateBadgeText.textContent = `Updating ${data.percent}%`;
+        });
+
+        ipcRenderer.on('update-downloaded', (event, data) => {
+            log(`Update downloaded: v${data.version}`);
+            updateBadgeText.textContent = `Restart to update`;
+            updateBadge.title = `Restart and update to v${data.version}`;
+            updateBadge.classList.add('show');
+        });
+
+        updateBadge.addEventListener('click', () => {
+            ipcRenderer.send('install-update');
         });
 
         // Listen for macOS shortcut start action
@@ -7196,6 +8168,7 @@ Session started - waiting for activity...
                 document.getElementById('ask-ai-btn').style.display = 'none';
                 document.getElementById('copy-notes-btn').style.display = 'none';
                 document.getElementById('reprocess-btn').style.display = 'none';
+                document.getElementById('ask-bar').style.display = '';
                 const editor = document.getElementById('notes-editor');
                 if (editor) editor.style.display = 'block';
             }
@@ -7233,26 +8206,26 @@ Session started - waiting for activity...
                 const wasStreaming = document.getElementById('notes-editor').style.display === 'block';
 
                 loadMeetings(true).then(() => {
+                    // Flush the debounced filterMeetings so filteredMeetings is current
+                    if (_filterDebounceTimer) clearTimeout(_filterDebounceTimer);
+                    _filterMeetingsImpl();
+
                     if (wasStreaming && streamedMarkdown) {
-                        // Keep the streamed markdown view — don't switch to section layout.
-                        // Just append the transcript below the streaming content and show buttons.
+                        // Final re-render to ensure all content (including Action Items) is visible
+                        renderStreamingMarkdown(streamedMarkdown);
+                        stopStreamingRenderer();
+
                         const currentTitle = detailTitle.textContent;
                         const meeting = filteredMeetings.find(m =>
                             m.session_info?.name === currentTitle ||
                             m.session_info?.name === data.sessionName
                         );
-                        {
-                            const container = document.getElementById('streaming-output');
-                            if (container) {
-                                const indicator = container.querySelector('p:last-child');
-                                if (indicator && indicator.textContent.includes('Generating')) indicator.remove();
-                            }
-                        }
                         // Keep sections hidden — streaming view IS the meeting view
                         document.querySelectorAll('#meeting-detail .meeting-section').forEach(s => s.style.display = 'none');
                         // Show action buttons and reset reprocess button state
                         document.getElementById('ask-ai-btn').style.display = '';
                         document.getElementById('copy-notes-btn').style.display = '';
+                        document.getElementById('ask-bar').style.display = '';
                         const rpBtn = document.getElementById('reprocess-btn');
                         rpBtn.style.display = '';
                         rpBtn.disabled = false;
@@ -7264,7 +8237,23 @@ Session started - waiting for activity...
                             m.session_info?.name === currentTitle ||
                             m.session_info?.name === data.sessionName
                         );
-                        if (meetingIdx !== -1) selectedMeeting = filteredMeetings[meetingIdx];
+                        if (meetingIdx !== -1) {
+                            selectedMeeting = filteredMeetings[meetingIdx];
+                            populateTranscript(selectedMeeting);
+                            // Populate duration from the saved meeting data
+                            const ds = selectedMeeting.session_info?.duration_seconds;
+                            const dm = selectedMeeting.session_info?.duration_minutes;
+                            if (ds) {
+                                const hours = Math.floor(ds / 3600);
+                                const mins = Math.floor((ds % 3600) / 60);
+                                const secs = ds % 60;
+                                if (hours > 0) detailDuration.textContent = `${hours}h ${mins}m`;
+                                else if (mins > 0) detailDuration.textContent = `${mins}m ${secs}s`;
+                                else detailDuration.textContent = `${secs}s`;
+                            } else if (dm) {
+                                detailDuration.textContent = `${dm} minutes`;
+                            }
+                        }
                     } else {
                         // Non-streaming path or no streamed content — use standard selectMeeting
                         document.getElementById('notes-editor').style.display = 'none';
@@ -7272,6 +8261,7 @@ Session started - waiting for activity...
                         document.getElementById('ask-ai-btn').style.display = '';
                         document.getElementById('copy-notes-btn').style.display = '';
                         document.getElementById('reprocess-btn').style.display = '';
+                        document.getElementById('ask-bar').style.display = '';
                         const currentTitle = detailTitle.textContent;
                         const idx = filteredMeetings.findIndex(m =>
                             m.session_info?.name === currentTitle ||
@@ -7282,14 +8272,16 @@ Session started - waiting for activity...
                     }
                 });
                 
-                // Show native notification
-                showDesktopNotification('StenoAI - Meeting Notes Ready', {
-                    body: `"${data.sessionName}" has been transcribed and summarized`,
-                    requireInteraction: false
-                }, () => {
-                    const idx = filteredMeetings.findIndex(m => m.session_info?.name === data.sessionName);
-                    if (idx !== -1) selectMeeting(idx);
-                });
+                // Only show notification if app is not focused (user is in another window)
+                if (document.hidden || !document.hasFocus()) {
+                    showDesktopNotification('StenoAI - Meeting Notes Ready', {
+                        body: `"${data.sessionName}" has been transcribed and summarized`,
+                        requireInteraction: false
+                    }, () => {
+                        const idx = filteredMeetings.findIndex(m => m.session_info?.name === data.sessionName);
+                        if (idx !== -1) selectMeeting(idx);
+                    });
+                }
                 
                 setStatus('ready', 'Processing complete');
                 setTimeout(() => setStatus('ready', 'Ready'), 3000);

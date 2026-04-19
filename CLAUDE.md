@@ -1,80 +1,43 @@
-# Claude Code Instructions
+# CLAUDE.md
 
-This file contains instructions for Claude Code to help with this meeting transcription POC project. Do not use excessive emojis anywhere.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Project Overview
-This is a local meeting transcription service:
+Do not use excessive emojis anywhere.
 
-### Desktop App
-- sounddevice for audio recording
-- whisper.cpp (via pywhispercpp) for transcription
-- Bundled Ollama for LLM summarization
-- Electron GUI with PyInstaller-bundled Python backend
+## Architecture
 
-## Project Structure
-```
-stenoai/
-├── app/                  # Electron desktop app
-├── src/                  # Python backend
-│   ├── audio_recorder.py      # Local audio recording
-│   ├── transcriber.py         # whisper.cpp transcription
-│   ├── summarizer.py          # Ollama LLM processing
-│   ├── ollama_manager.py      # Bundled Ollama management
-│   ├── config.py              # User settings & model selection
-│   └── models.py              # Data models
-├── bin/                  # Bundled binaries (Ollama, ffmpeg)
-├── dist/                 # PyInstaller build output
-├── scripts/              # Build scripts
-├── simple_recorder.py    # CLI interface (entry point)
-├── stenoai.spec          # PyInstaller configuration
-├── website/              # Marketing site
-├── recordings/           # Local audio files
-├── transcripts/          # Local transcripts
-└── output/              # Processed summaries
-```
+The app is a thin Electron shell over a PyInstaller-bundled Python CLI. There is no long-running Python service — every operation is a subprocess invocation.
+
+- **Electron main (`app/main.js`, ~4.3k lines)** owns the UI window, tray, deep-link protocol, and orchestrates everything via `ipcMain.handle(...)`. Handlers shell out to the bundled backend through `getBackendPath()` → `process.resourcesPath/stenoai/stenoai` (or `dist/stenoai/stenoai` in dev) using `child_process.spawn`.
+- **Renderer (`app/index.html`, ~9.7k lines)** is a single-page HTML/JS UI; no framework. All cross-process work goes through IPC.
+- **Python CLI (`simple_recorder.py`, ~2.5k lines, ~46 click commands)** is the single entry point bundled by `stenoai.spec`. Sub-modules in `src/`: `audio_recorder` (sounddevice), `transcriber` (pywhispercpp), `summarizer` (Ollama HTTP client), `ollama_manager` (lifecycle of the bundled `ollama serve`), `config` (JSON-backed user settings + model registry), `folders`, `models`.
+- **State across CLI invocations** is persisted to `recorder_state.json` and similar small JSON files — there is no daemon. Long-running recordings are a `record` subprocess kept alive by the Electron main process.
+- **User data lives in `~/Library/Application Support/stenoai/`** (`recordings/`, `transcripts/`, `output/`), resolved via `src.config.get_data_dirs()`. Repo-root `recordings/`/`transcripts/`/`output/` dirs are dev-only scratch.
+- **Bundled binaries (`bin/`)**: Ollama + ffmpeg, downloaded by `scripts/download-ollama.sh`. PyInstaller copies them into `dist/stenoai/ollama/` and `dist/stenoai/ffmpeg`. Electron then re-bundles `dist/stenoai/` as an `extraResource`.
+- **Deep links**: app registers the `stenoai://` URL scheme. Handler logic is in `app/main.js` near `SHORTCUT_PROTOCOL`. Used by macOS Shortcuts: `stenoai://record/start?name=...` and `stenoai://record/stop`.
 
 ## Development Commands
 
-### CLI Commands (via bundled backend: `dist/stenoai/stenoai`)
-- Check status: `stenoai status`
-- Setup check: `stenoai setup-check`
-- Download whisper model: `stenoai download-whisper-model`
-- Start recording: `stenoai start --name meeting_name`
-- Stop recording: `stenoai stop`
-- Transcribe audio: `stenoai transcribe filename.wav`
-- Summarize transcript: `stenoai summarize filename.txt`
-- Full pipeline: `stenoai pipeline filename.wav`
-- List failed summaries: `stenoai list_failed`
-- Reprocess failed summary: `stenoai reprocess path/to/summary.json`
+### Backend (Python)
+- Build the bundled backend: `source venv/bin/activate && pyinstaller stenoai.spec --noconfirm`
+- Inspect CLI surface: `dist/stenoai/stenoai --help`
+- Most relevant CLI commands for debugging: `status`, `setup-check`, `list_failed`, `reprocess path/to/summary.json`, `query transcript.txt`, `pipeline filename.wav`
+- Lint: `ruff check .`
+- Run all tests: `python -m unittest discover tests`
+- Run a single test: `python -m unittest tests.test_config.ConfigStoragePathTests.test_set_storage_path_handles_permission_errors`
 
-### Desktop App Commands
-- Start app: `cd app && npm start`
-- Build app: `cd app && npm run build`
-- Build backend: `source venv/bin/activate && pyinstaller stenoai.spec --noconfirm`
+### Desktop App (Electron)
+- Start app (dev): `cd app && npm start`
+- Build DMG (local, for testing): `cd app && npm run build`
 
-## Setup Instructions (Development)
-1. Create virtual environment: `python -m venv venv`
-2. Activate virtual environment: `source venv/bin/activate`
-3. Install dependencies: `pip install -r requirements.txt`
-4. Download bundled binaries: `./scripts/download-ollama.sh`
-5. Build the backend: `pyinstaller stenoai.spec --noconfirm`
-6. Start the app: `cd app && npm install && npm start`
+For setup from a clean checkout, see `CONTRIBUTING.md` and `README.md`.
 
-Note: Ollama is bundled in `bin/` - no system installation needed.
-
-## Testing Commands
-- Test basic functionality: `dist/stenoai/stenoai status`
-- Test setup: `dist/stenoai/stenoai setup-check`
-- Test audio devices: `python -c "import sounddevice; print(sounddevice.query_devices())"`
-
-## Dependencies
-- sounddevice>=0.4.6 (audio recording)
-- numpy>=1.24.0 (audio processing)
-- pywhispercpp (whisper.cpp transcription - preferred, faster)
-- ollama>=0.1.7 (LLM client)
-- click>=8.1.0 (CLI interface)
-- pydantic>=2.5.0 (data validation)
-- pyinstaller (bundling)
+## Production Readiness
+This app ships as a signed DMG to real users. Before considering any change complete:
+- **Packaged app test**: Dev mode (`npm start`) is not sufficient. Always rebuild the DMG (`npm run build`) and test the installed app from `/Applications`.
+- **Cold start test**: Kill all background processes (`pkill -f ollama`) and launch the app fresh. The full pipeline (record, transcribe, summarize) must work with no pre-existing services running.
+- **No shelling out to bundled binaries for operations that have an HTTP/library API**. macOS SIP + Electron hardened runtime strips `DYLD_LIBRARY_PATH` from child processes. Use the `ollama` Python package (HTTP API) for model operations, not `subprocess.run([ollama_path, ...])`. The only acceptable use of the Ollama binary is `ollama serve` (starting the server), which is covered by the `com.apple.security.cs.allow-dyld-environment-variables` entitlement.
+- **No bare `exit()` in Python code**. PyInstaller bundles don't have `exit` as a builtin. Always use `sys.exit()`.
 
 ## Brand Colors
 StenoAI logo gradient (used in website logo SVG and app header):
@@ -84,19 +47,6 @@ StenoAI logo gradient (used in website logo SVG and app header):
 - CSS: `linear-gradient(135deg, #6366f1, #0ea5e9, #06b6d4)`
 
 App UI accent: `--accent-primary: #818cf8` (lighter indigo, used for focus states, active tabs, toggles)
-
-## Production Readiness
-This app ships as a signed DMG to real users. Before considering any change complete:
-- **Packaged app test**: Dev mode (`npm start`) is not sufficient. Always rebuild the DMG (`npm run build`) and test the installed app from `/Applications`.
-- **Cold start test**: Kill all background processes (`pkill -f ollama`) and launch the app fresh. The full pipeline (record, transcribe, summarize) must work with no pre-existing services running.
-- **No shelling out to bundled binaries for operations that have an HTTP/library API**. macOS SIP + Electron hardened runtime strips `DYLD_LIBRARY_PATH` from child processes. Use the `ollama` Python package (HTTP API) for model operations, not `subprocess.run([ollama_path, ...])`. The only acceptable use of the Ollama binary is `ollama serve` (starting the server), which is covered by the `com.apple.security.cs.allow-dyld-environment-variables` entitlement.
-- **No bare `exit()` in Python code**. PyInstaller bundles don't have `exit` as a builtin. Always use `sys.exit()`.
-
-## Code Style
-- Follow PEP 8 guidelines
-- Use type hints where appropriate
-- Write docstrings for functions and classes
-- Use logging for debugging and monitoring
 
 ## Git Workflow
 - Always create a branch for changes unless explicitly told otherwise
@@ -108,7 +58,7 @@ This app ships as a signed DMG to real users. Before considering any change comp
   - Categorize findings by severity (critical/medium/low) and fix critical issues before merging
 
 ## Git Commit Guidelines
-- Do NOT include "🤖 Generated with Claude Code" attribution in commit messages
+- Do NOT include "Generated with Claude Code" attribution in commit messages
 - Do NOT include "Co-Authored-By: Claude <noreply@anthropic.com>" in commit messages
 - Keep commit messages concise and focused on what changed
 - Use conventional commit format when appropriate (feat:, fix:, docs:, etc.)

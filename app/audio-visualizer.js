@@ -69,18 +69,13 @@ window.AudioVisualizer = {
         });
     },
 
-    // 8 log-spaced octave bands — must match the 8 .waveform-bar elements in index.html
+    // 5 frequency bands — matches the 5 mini waveform bars in controls pill
     _binGroups: [
-        [0],
-        [1, 2],
-        [3, 4],
-        [5, 6, 7, 8],
-        [9, 10, 11, 12, 13, 14, 15, 16, 17],
-        [18, 19, 20, 21, 22, 23, 24, 25, 26,
-         27, 28, 29, 30, 31, 32, 33, 34],
-        [35, 36, 37, 38, 39, 40, 41, 42],
-        [43, 44, 45, 46, 47, 48, 49, 50, 51,
-         52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63]
+        [0, 1, 2, 3],
+        [4, 5, 6, 7, 8, 9, 10, 11],
+        [12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23],
+        [24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40],
+        [41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63]
     ],
 
     _loop(bars, analyser, dataArray) {
@@ -96,8 +91,8 @@ window.AudioVisualizer = {
                 const group = binGroups[i];
                 if (!group) return;
                 const avg = group.reduce((sum, b) => sum + (dataArray[b] || 0), 0) / group.length;
-                // scaleY 0.2 (min 4px visual) to 1.0 (full 20px) — no layout reflow
-                bar.style.transform = `scaleY(${Math.max(0.2, avg / 255)})`;
+                // scaleY 0.08 (min) to 1.0 (full height) — no layout reflow
+                bar.style.transform = `scaleY(${Math.max(0.08, avg / 255)})`;
             });
         }
         this._animFrame = requestAnimationFrame(() => this._loop(bars, analyser, dataArray));
