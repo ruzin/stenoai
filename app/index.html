@@ -4997,6 +4997,8 @@ Session started - waiting for activity...
                     // and querySelectorAll returns the laid-out bars.
                     if (!AudioVisualizer._animFrame) {
                         requestAnimationFrame(() => {
+                            // Skip if state moved on before the frame fired (e.g. user stopped recording)
+                            if (uiState !== 'recording') return;
                             const miniBars = Array.from(document.querySelectorAll('#mini-waveform .mini-waveform-bar'));
                             if (!miniBars.length) return;
                             if (_systemAudioAnalyser) {
