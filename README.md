@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="website/public/stenoai-logo-512.svg" alt="StenoAI Logo" width="120" height="120">
+  <img src="website/public/dragonfly-logo-512.png" alt="StenoAI Logo" width="120" height="120">
 
   # StenoAI
 
