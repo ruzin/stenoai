@@ -115,11 +115,30 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        fetch-tags: true
 
     - name: Get version from package.json
       id: package_version
       working-directory: app
       run: echo "version=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
+
+    - name: Extract annotated tag message
+      id: tag_body
+      if: startsWith(github.ref, 'refs/tags/v')
+      run: |
+        # Pull the body of the annotated tag (strips the PGP signature if any).
+        # Falls back to the commit subject if the tag is lightweight.
+        MSG=$(git for-each-ref --format='%(contents:body)' "refs/tags/${{ github.ref_name }}")
+        if [ -z "$MSG" ]; then
+          MSG=$(git for-each-ref --format='%(contents:subject)' "refs/tags/${{ github.ref_name }}")
+        fi
+        {
+          echo 'text<<STENO_RELEASE_EOF'
+          echo "$MSG"
+          echo 'STENO_RELEASE_EOF'
+        } >> "$GITHUB_OUTPUT"
 
     - name: Download all build artifacts
       uses: actions/download-artifact@v4
@@ -152,9 +171,7 @@ jobs:
         body: |
           ## StenoAI v${{ github.event.inputs.version || steps.package_version.outputs.version }}
 
-          ### What's New
-
-          ${{ github.event.head_commit.message }}
+          ${{ steps.tag_body.outputs.text }}
 
           ### Downloads
 
