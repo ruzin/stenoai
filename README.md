@@ -37,22 +37,19 @@
 - **2026-03-23** 🗣️ Speaker diarisation — [You] vs [Others] labels for system audio recordings
 - **2026-03-23** 🌍 Auto-detect language — 99 languages supported out of the box
 - **2026-03-04** 🏷️ Auto-generated meeting titles — AI creates short titles from your transcripts
-- **2026-03-04** ⌨️ macOS Shortcuts support — Start/stop recordings via Apple Shortcuts deep links
-- **2026-03-04** 🤖 Updated model lineup — Qwen 3.5 9B, DeepSeek-R1 14B, GPT-OSS 20B; Ollama v0.17.5
-- **2026-03-04** 🙈 Hide dock icon — Run StenoAI in menu-bar-only mode
 
 ## Features
 
-- **Local transcription** using whisper.cpp
-- **AI summarization** with Ollama models
-- **Privacy-first** - 100% local processing, your data never leaves your device
-- **Multiple AI models** - Choose from 5 models optimized for different use cases
-- **Ask Steno** - Query your meetings with natural language questions
-- **Multi-language support** - Auto-detect and transcribe 99 languages
-- **Speaker diarisation** - [You] vs [Others] labels for system audio recordings
-- **Remote Ollama server** - Run AI models on another machine on your network
-- **System audio capture** - Record mic + system audio simultaneously for virtual meetings with headphones
-- **macOS desktop app** with intuitive interface
+- **Privacy-first** — 100% on-device; your recordings, transcripts, and summaries never leave your Mac
+- **In-app note-taking** — Jot notes while you record; they're folded straight into the AI summary
+- **Ask your meetings** — Natural-language Q&A across any saved note, including summary, key topics, and full transcript
+- **System audio capture** — Record both sides of virtual meetings, headphones on, no extra setup
+- **Speaker diarisation** — `[You]` vs `[Others]` labels on system-audio recordings
+- **Multi-language** — Auto-detect and transcribe in 99 languages
+- **Markdown notes** — Summaries and transcripts saved as clean Markdown you can edit, search, or sync
+- **Remote Ollama server** — Offload summarisation to a beefier Mac or workstation on your network
+- **Bring your own cloud model** — Optional OpenAI, Anthropic, or custom API endpoint for users who prefer a hosted LLM
+- **Under the hood** — Local transcription via whisper.cpp, summarisation via bundled Ollama (5 models to choose from)
 
 ## macOS Shortcuts (Optional)
 
