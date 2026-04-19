@@ -470,38 +470,6 @@
             50% { opacity: 0.5; }
         }
 
-        /* Generate notes button (above ask bar) */
-        .generate-notes-btn {
-            display: none;
-            margin: 0 auto 12px;
-            width: fit-content;
-            background: linear-gradient(135deg, #4f46e5, #6366f1);
-            color: white;
-            border: none;
-            border-radius: 999px;
-            padding: 10px 24px;
-            font-weight: 600;
-            font-size: 14px;
-            font-family: inherit;
-            cursor: pointer;
-            box-shadow: 0 4px 16px rgba(99, 102, 241, 0.35);
-            transition: all 0.2s ease;
-        }
-
-        .generate-notes-btn:hover {
-            box-shadow: 0 6px 24px rgba(99, 102, 241, 0.5);
-            transform: translateY(-1px);
-        }
-
-        .generate-notes-btn.show {
-            display: block;
-        }
-
-        [data-theme="light"] .generate-notes-btn {
-            background: linear-gradient(135deg, #4338ca, #4f46e5);
-            box-shadow: 0 4px 16px rgba(67, 56, 202, 0.3);
-        }
-
         /* Waveform visualizer inside transcript bubble */
         .bubble-waveform {
             display: flex;
@@ -4139,12 +4107,6 @@ Ask Steno
                       <div class="ask-bar-transcript-body" id="ask-bar-transcript-body"></div>
                   </div>
                   <div class="ask-bar-response" id="ask-bar-response"></div>
-                  <button class="generate-notes-btn" id="generate-notes-btn">
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline;vertical-align:-3px;margin-right:4px;">
-                          <path d="M12 2L15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2z"/>
-                      </svg>
-                      Generate notes
-                  </button>
                   <div class="ask-bar-row">
                       <!-- Separate controls pill (visible during recording + on meetings) -->
                       <div class="controls-pill" id="controls-pill">
@@ -4853,7 +4815,6 @@ Session started - waiting for activity...
         const barRecDivider = document.getElementById('ask-bar-rec-divider');
         const askBarLeft = document.getElementById('ask-bar-left');
         const controlsPill = document.getElementById('controls-pill');
-        const generateNotesBtn = document.getElementById('generate-notes-btn');
         const settingsBtn = document.getElementById('settings-btn');
         const meetingsList = document.getElementById('meetings-list');
         const emptyState = document.getElementById('empty-state');
@@ -5010,7 +4971,6 @@ Session started - waiting for activity...
                     controlsPill.classList.remove('paused');
                     barStopBtn.style.display = 'none';
                     barPauseBtn.style.display = 'none';
-                    generateNotesBtn.classList.remove('show');
                     // Restore transcript body
                     document.getElementById('ask-bar-transcript-body').style.display = '';
                     break;
@@ -5030,17 +4990,21 @@ Session started - waiting for activity...
                     barStopBtn.style.display = '';
                     barPauseBtn.style.display = '';
                     barPauseBtn.textContent = 'Pause';
-                    generateNotesBtn.classList.remove('show');
                     // Show ask bar
                     document.getElementById('ask-bar').style.display = '';
-                    // Start visualizer targeting mini waveform bars in the button
+                    // Start visualizer targeting mini waveform bars in the button.
+                    // Defer one frame so the controls-pill display change flushes
+                    // and querySelectorAll returns the laid-out bars.
                     if (!AudioVisualizer._animFrame) {
-                        const miniBars = Array.from(document.querySelectorAll('#mini-waveform .mini-waveform-bar'));
-                        if (_systemAudioAnalyser) {
-                            AudioVisualizer.startFromAnalyser(miniBars, _systemAudioAnalyser);
-                        } else {
-                            AudioVisualizer.start(miniBars);
-                        }
+                        requestAnimationFrame(() => {
+                            const miniBars = Array.from(document.querySelectorAll('#mini-waveform .mini-waveform-bar'));
+                            if (!miniBars.length) return;
+                            if (_systemAudioAnalyser) {
+                                AudioVisualizer.startFromAnalyser(miniBars, _systemAudioAnalyser);
+                            } else {
+                                AudioVisualizer.start(miniBars);
+                            }
+                        });
                     }
                     break;
 
@@ -5060,7 +5024,6 @@ Session started - waiting for activity...
                     barStopBtn.style.display = '';
                     barPauseBtn.style.display = '';
                     barPauseBtn.textContent = 'Resume';
-                    generateNotesBtn.classList.remove('show');
                     const minutes = Math.floor(pausedElapsedTime / 60);
                     const seconds = pausedElapsedTime % 60;
                     const timeStr = `${minutes}:${seconds.toString().padStart(2, '0')}`;
@@ -5083,7 +5046,6 @@ Session started - waiting for activity...
                     controlsPill.classList.remove('paused');
                     barStopBtn.style.display = 'none';
                     barPauseBtn.style.display = 'none';
-                    generateNotesBtn.classList.remove('show');
                     // Restore transcript body
                     document.getElementById('ask-bar-transcript-body').style.display = '';
                     document.getElementById('ask-bar-transcript').classList.remove('show');
@@ -6491,12 +6453,6 @@ Session started - waiting for activity...
             stopBtn.click();
         });
 
-        // Generate notes button — triggers processing of the stopped recording
-        generateNotesBtn.addEventListener('click', () => {
-            generateNotesBtn.classList.remove('show');
-            stopBtn.click();
-        });
-
         // Folder pill in meeting detail
         const folderPill = document.getElementById('folder-pill');
         const folderPillLabel = document.getElementById('folder-pill-label');
@@ -6572,7 +6528,10 @@ Session started - waiting for activity...
         });
 
         // Close dropdown when clicking outside
-        document.addEventListener('click', () => {
+        document.addEventListener('click', (e) => {
+            if (!folderPillDropdown.classList.contains('open')) return;
+            if (folderPillDropdown.contains(e.target)) return;
+            if (e.target.closest && e.target.closest('#folder-pill')) return;
             folderPillDropdown.classList.remove('open');
         });
 
@@ -7298,6 +7257,10 @@ Session started - waiting for activity...
             if (e.key === 'Escape') {
                 askBarInput.blur();
                 askBarResponse.classList.remove('show');
+                if (askBarTranscript) {
+                    askBarTranscript.classList.remove('show');
+                    if (barChevron) barChevron.classList.remove('open');
+                }
             }
         });
 

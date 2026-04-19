@@ -1614,10 +1614,7 @@ def query(transcript_file, question):
     try:
         from src.config import get_config
         config = get_config()
-        if transcript_file.endswith('.json'):
-            if not language:
-                language = config.get_language()
-        else:
+        if not language:
             language = config.get_language()
         if language == "auto":
             language = "en"
