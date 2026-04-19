@@ -29,14 +29,17 @@
 <p align="center"><sub><i>Disclaimer: This is an independent open-source project for meeting-notes productivity and is not affiliated with, endorsed by, or associated with any similarly named company.</i></sub></p>
 
 ## 📢 What's New
+- **2026-04-19** 🔄 In-app auto-updates — Updates download in the background and install on next quit; no more manual DMG downloads
+- **2026-04-19** 💬 Inline ask bar — Query your meetings from a floating bar at the bottom of every note
+- **2026-04-19** 📂 Ask against saved markdown — The ask bar now reads your saved `.md` notes directly (summary, topics, and full transcript)
+- **2026-04-19** 📝 Diarised markdown export — Saved transcripts include `[You]` / `[Others]` speaker labels
+- **2026-03-25** ✍️ In-app note-taking — Jot notes during a recording and they're folded into the AI summary
 - **2026-03-23** 🗣️ Speaker diarisation — [You] vs [Others] labels for system audio recordings
 - **2026-03-23** 🌍 Auto-detect language — 99 languages supported out of the box
 - **2026-03-04** 🏷️ Auto-generated meeting titles — AI creates short titles from your transcripts
 - **2026-03-04** ⌨️ macOS Shortcuts support — Start/stop recordings via Apple Shortcuts deep links
 - **2026-03-04** 🤖 Updated model lineup — Qwen 3.5 9B, DeepSeek-R1 14B, GPT-OSS 20B; Ollama v0.17.5
 - **2026-03-04** 🙈 Hide dock icon — Run StenoAI in menu-bar-only mode
-- **2026-02-22** 🌍 Multi-language support — Transcribe and summarize in 10 languages
-- **2026-02-19** 🎧 System audio capture — Record both sides of virtual meetings, even with headphones on
 
 ## Features
 
