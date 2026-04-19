@@ -368,6 +368,32 @@
             background: var(--bg-elevated);
         }
 
+        /* Update badge (next to + New Note) */
+        .update-badge {
+            display: none;
+            align-items: center;
+            gap: 5px;
+            background: var(--bg-surface);
+            color: var(--text-primary);
+            border: 1px solid var(--border-default);
+            padding: 6px 14px;
+            border-radius: 8px;
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            font-family: inherit;
+            transition: all 0.2s ease;
+            margin-right: 8px;
+        }
+        .update-badge:hover {
+            background: var(--bg-elevated);
+            border-color: var(--border-default);
+            transform: translateY(-1px);
+        }
+        .update-badge.show {
+            display: flex;
+        }
+
         /* Ask bar recording controls */
         .ask-bar-rec-controls {
             display: none;
@@ -3823,6 +3849,10 @@
         </div>
 
         <div class="header-actions">
+            <button class="update-badge" id="update-badge" title="Click to restart and update">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                <span id="update-badge-text">Restart to update</span>
+            </button>
             <button class="new-note-btn" id="new-note-btn" title="Start a new recording">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
                 New Note
@@ -7637,6 +7667,30 @@ Session started - waiting for activity...
         // Listen for debug messages from backend
         ipcRenderer.on('debug-log', (event, message) => {
             debugLog(message);
+        });
+
+        // ── Auto-update UI ──
+        const updateBadge = document.getElementById('update-badge');
+        const updateBadgeText = document.getElementById('update-badge-text');
+
+        ipcRenderer.on('update-available', (event, data) => {
+            log(`Update available: v${data.version}`);
+            updateBadgeText.textContent = `Updating...`;
+        });
+
+        ipcRenderer.on('update-download-progress', (event, data) => {
+            updateBadgeText.textContent = `Updating ${data.percent}%`;
+        });
+
+        ipcRenderer.on('update-downloaded', (event, data) => {
+            log(`Update downloaded: v${data.version}`);
+            updateBadgeText.textContent = `Restart to update`;
+            updateBadge.title = `Restart and update to v${data.version}`;
+            updateBadge.classList.add('show');
+        });
+
+        updateBadge.addEventListener('click', () => {
+            ipcRenderer.send('install-update');
         });
 
         // Listen for macOS shortcut start action
