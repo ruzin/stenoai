@@ -1629,6 +1629,84 @@ def query(transcript_file, question):
         print(json.dumps({"success": False, "error": f"Query failed: {e}"}))
 
 
+@cli.command(name='query-streaming')
+@click.argument('transcript_file')
+@click.option('--question', '-q', required=True, help='Question to ask about the transcript')
+def query_streaming(transcript_file, question):
+    """Query a transcript with streaming output. Emits CHUNK:base64 lines then STREAM_COMPLETE."""
+    import sys
+    import base64
+    from pathlib import Path
+
+    transcript_path = Path(transcript_file)
+    language = None
+
+    if transcript_file.endswith('.json'):
+        if not transcript_path.exists():
+            print(f"STREAM_ERROR:File not found: {transcript_file}", flush=True)
+            return
+        try:
+            with open(transcript_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                transcript_text = data.get('transcript', '')
+                if not transcript_text:
+                    print("STREAM_ERROR:No transcript found in summary file", flush=True)
+                    return
+                session_info = data.get("session_info", {})
+                language = session_info.get("output_language")
+        except Exception as e:
+            print(f"STREAM_ERROR:Failed to read file: {e}", flush=True)
+            return
+    elif transcript_file.endswith('.md'):
+        if not transcript_path.exists():
+            print(f"STREAM_ERROR:File not found: {transcript_file}", flush=True)
+            return
+        try:
+            meeting_data = _parse_meeting_markdown(transcript_path)
+            parts = []
+            if meeting_data.get('summary'):
+                parts.append(f"SUMMARY:\n{meeting_data['summary']}")
+            if meeting_data.get('discussion_areas'):
+                topics = '\n'.join(f"- {d['title']}: {d['analysis']}" for d in meeting_data['discussion_areas'])
+                parts.append(f"KEY TOPICS:\n{topics}")
+            if meeting_data.get('key_points'):
+                points = '\n'.join(f"- {p}" for p in meeting_data['key_points'])
+                parts.append(f"KEY POINTS:\n{points}")
+            if meeting_data.get('transcript'):
+                parts.append(f"TRANSCRIPT:\n{meeting_data['transcript']}")
+            transcript_text = '\n\n'.join(parts)
+            session_info = meeting_data.get("session_info", {})
+            language = session_info.get("output_language")
+        except Exception as e:
+            print(f"STREAM_ERROR:Failed to read file: {e}", flush=True)
+            return
+    else:
+        if not transcript_path.exists():
+            print(f"STREAM_ERROR:File not found: {transcript_file}", flush=True)
+            return
+        try:
+            transcript_text = transcript_path.read_text(encoding='utf-8')
+        except Exception as e:
+            print(f"STREAM_ERROR:Failed to read file: {e}", flush=True)
+            return
+
+    if not language:
+        from src.config import get_config
+        language = get_config().get_language()
+    if language == "auto":
+        language = "en"
+
+    try:
+        summarizer = OllamaSummarizer()
+        for chunk in summarizer.query_transcript_streaming(transcript_text, question, language=language):
+            encoded = base64.b64encode(chunk.encode('utf-8')).decode('ascii')
+            sys.stdout.write(f"CHAT_CHUNK:{encoded}\n")
+            sys.stdout.flush()
+        print("CHAT_STREAM_COMPLETE", flush=True)
+    except Exception as e:
+        print(f"CHAT_STREAM_ERROR:{e}", flush=True)
+
+
 @cli.command()
 def list_failed():
     """List summary files that failed processing (have fallback summaries)"""

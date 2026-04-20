@@ -1194,6 +1194,108 @@ ipcMain.handle('query-transcript', async (event, summaryFile, question) => {
   }
 });
 
+const activeQueryProcs = new Map();
+
+ipcMain.on('query-cancel', (_event, queryId) => {
+  const proc = activeQueryProcs.get(queryId);
+  if (proc) {
+    console.log(`[QUERY] Cancelling queryId=${queryId}`);
+    proc.kill();
+    activeQueryProcs.delete(queryId);
+  }
+});
+
+ipcMain.on('query-transcript-stream', (event, queryId, summaryFile, question) => {
+  console.log(`[QUERY] IPC received: question="${question.substring(0, 50)}" file="${summaryFile}"`);
+  sendDebugLog(`🤖 Streaming query: ${question.substring(0, 50)}...`);
+  const cloudKey = loadCloudApiKey();
+  const env = cloudKey ? { ...process.env, STENOAI_CLOUD_API_KEY: cloudKey } : process.env;
+
+  let proc;
+  try {
+    const backendPath = getBackendPath();
+    proc = require('child_process').spawn(backendPath, ['query-streaming', summaryFile, '-q', question], {
+      env,
+      cwd: getBackendCwd(),
+    });
+  } catch (err) {
+    event.sender.send('query-done', { queryId, success: false, error: err.message });
+    return;
+  }
+
+  activeQueryProcs.set(queryId, proc);
+  let buf = '';
+  let chunkCount = 0;
+  proc.stdout.on('data', (data) => {
+    buf += data.toString();
+    const lines = buf.split('\n');
+    buf = lines.pop();
+    for (const line of lines) {
+      if (line.startsWith('CHAT_CHUNK:') || line.startsWith('CHUNK:')) {
+        const prefixLen = line.startsWith('CHAT_CHUNK:') ? 11 : 6;
+        try {
+          const chunk = Buffer.from(line.slice(prefixLen), 'base64').toString('utf-8');
+          chunkCount++;
+          if (chunkCount === 1) console.log(`[QUERY] First chunk received (queryId=${queryId})`);
+          if (!event.sender.isDestroyed()) event.sender.send('query-chunk', { queryId, chunk });
+          else console.log(`[QUERY] Sender destroyed, cannot send chunk`);
+        } catch (e) { console.log(`[QUERY] Chunk decode error: ${e.message}`); }
+      } else if (line === 'CHAT_STREAM_COMPLETE' || line === 'STREAM_COMPLETE') {
+        console.log(`[QUERY] STREAM_COMPLETE received, ${chunkCount} chunks sent`);
+        if (!event.sender.isDestroyed()) event.sender.send('query-done', { queryId, success: true });
+        else console.log(`[QUERY] Sender destroyed at STREAM_COMPLETE`);
+      } else if (line.startsWith('CHAT_STREAM_ERROR:') || line.startsWith('STREAM_ERROR:')) {
+        const errMsg = line.startsWith('CHAT_STREAM_ERROR:') ? line.slice(18) : line.slice(13);
+        console.log(`[QUERY] STREAM_ERROR: ${errMsg}`);
+        if (!event.sender.isDestroyed()) event.sender.send('query-done', { queryId, success: false, error: errMsg });
+      }
+    }
+  });
+
+  proc.stderr.on('data', (data) => {
+    const msg = data.toString().trim();
+    if (msg) console.log(`[QUERY stderr] ${msg.substring(0, 200)}`);
+  });
+
+  proc.on('close', (code) => {
+    activeQueryProcs.delete(queryId);
+    console.log(`[QUERY] Process closed, code=${code}, chunks=${chunkCount}, bufRemainder=${buf.length > 0 ? JSON.stringify(buf.substring(0, 100)) : 'empty'}`);
+    if (buf.trim() === 'CHAT_STREAM_COMPLETE' || buf.trim() === 'STREAM_COMPLETE') {
+      console.log(`[QUERY] STREAM_COMPLETE was in buf remainder — sending done now`);
+      if (!event.sender.isDestroyed()) event.sender.send('query-done', { queryId, success: true });
+    } else if (code !== 0 && code !== null && !event.sender.isDestroyed()) {
+      // code === null means killed (cancelled) — renderer already handles that case
+      event.sender.send('query-done', { queryId, success: false, error: `Process exited with code ${code}` });
+    }
+  });
+
+  proc.on('error', (err) => {
+    activeQueryProcs.delete(queryId);
+    if (!event.sender.isDestroyed()) event.sender.send('query-done', { queryId, success: false, error: err.message });
+  });
+});
+
+ipcMain.handle('save-chat-sessions', async (event, data) => {
+  try {
+    const filePath = path.join(app.getPath('userData'), 'chat_sessions.json');
+    fs.writeFileSync(filePath, JSON.stringify(data), 'utf-8');
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('load-chat-sessions', async () => {
+  try {
+    const filePath = path.join(app.getPath('userData'), 'chat_sessions.json');
+    if (!fs.existsSync(filePath)) return { success: true, data: null };
+    const raw = fs.readFileSync(filePath, 'utf-8');
+    return { success: true, data: JSON.parse(raw) };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
 ipcMain.handle('save-meeting-notes', async (event, sessionName, notes) => {
   try {
     const outputDir = path.join(getBackendCwd(), '_internal', 'output');

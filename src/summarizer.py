@@ -930,6 +930,67 @@ TITLE:"""
             logger.warning(f"Failed to generate meeting title: {e}")
             return None
 
+    def query_transcript_streaming(self, transcript: str, question: str, language: str = "en"):
+        """Generator that yields text chunks from the LLM for a transcript query."""
+        if not transcript or transcript.strip() == "":
+            yield "No transcript available to query."
+            return
+        if not question or question.strip() == "":
+            yield "Please provide a question."
+            return
+
+        if language and language not in ("en", "auto"):
+            from .config import get_config
+            language_name = get_config().get_language_name(language)
+            query_lang_instruction = f"\nRespond in {language_name}." if language_name != "Unknown" else ""
+        else:
+            query_lang_instruction = ""
+
+        prompt = f"""Answer the following question based on the meeting content below (summary, key topics, and transcript).
+Be concise and direct. If the answer requires inference from what was discussed, that's fine.
+Only say you don't know if the topic truly wasn't discussed at all.{query_lang_instruction}
+
+QUESTION: {question}
+
+{transcript}
+
+ANSWER:"""
+
+        try:
+            if self.ai_provider == "cloud":
+                if self.cloud_provider == "anthropic":
+                    with self.anthropic_client.messages.stream(
+                        model=self.model_name,
+                        max_tokens=2048,
+                        messages=[{"role": "user", "content": prompt}],
+                    ) as stream:
+                        for text in stream.text_stream:
+                            yield text
+                else:
+                    response = self.cloud_client.chat.completions.create(
+                        model=self.model_name,
+                        messages=[{"role": "user", "content": prompt}],
+                        stream=True,
+                    )
+                    for chunk in response:
+                        content = chunk.choices[0].delta.content
+                        if content:
+                            yield content
+            else:
+                self._ensure_ollama_ready()
+                stream = self.client.chat(
+                    model=self.model_name,
+                    messages=[{"role": "user", "content": prompt}],
+                    stream=True,
+                )
+                for chunk in stream:
+                    content = chunk['message']['content']
+                    if content:
+                        yield content
+        except Exception as e:
+            logger.error(f"Streaming query failed: {e}")
+            yield f"\n[Error: {e}]"
+
     def query_transcript(self, transcript: str, question: str, language: str = "en") -> Optional[str]:
         """
         Query a transcript with a question using Ollama.

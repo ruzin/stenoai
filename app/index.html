@@ -1913,6 +1913,7 @@
         .meeting-detail {
             height: 100%;
             overflow-y: auto;
+            scrollbar-gutter: stable;
             display: none;
         }
 
@@ -3312,60 +3313,278 @@
             z-index: -1;
         }
 
-        .ask-bar-response {
+        .ask-bar-chat-window {
+            display: none;
+            flex-direction: column;
             background: var(--bg-elevated);
             border: 1px solid var(--border-subtle);
-            border-radius: 18px 18px 6px 6px;
-            padding: 14px 18px;
-            margin: 0 auto 8px;
+            border-radius: 22px;
             max-width: 680px;
-            display: none;
-            font-size: 14px;
-            line-height: 1.7;
-            color: var(--text-primary);
-            max-height: 240px;
-            overflow-y: auto;
-            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+            margin: 0 auto 8px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.22), 0 2px 6px rgba(0, 0, 0, 0.08);
+            backdrop-filter: saturate(160%) blur(10px);
+            -webkit-backdrop-filter: saturate(160%) blur(10px);
+            overflow: hidden;
         }
 
-        .ask-bar-response.show {
-            display: block;
+        .ask-bar-chat-window.show {
+            display: flex;
+            animation: chatWindowIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
         }
+
+        .ask-bar-chat-window.hiding {
+            animation: chatWindowOut 0.15s ease-in forwards;
+        }
+
+        @keyframes chatWindowIn {
+            from { opacity: 0; transform: translateY(10px) scale(0.98); }
+            to   { opacity: 1; transform: translateY(0) scale(1); }
+        }
+
+        @keyframes chatWindowOut {
+            from { opacity: 1; transform: translateY(0) scale(1); }
+            to   { opacity: 0; transform: translateY(6px) scale(0.98); }
+        }
+
+        .ask-bar-chat-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 14px;
+            border-bottom: 1px solid var(--border-subtle);
+            flex-shrink: 0;
+        }
+
+        .ask-bar-chat-title-group {
+            position: relative;
+            display: flex;
+            align-items: center;
+        }
+
+        .ask-bar-chat-title-btn {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            background: none;
+            border: none;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-primary);
+            padding: 4px 8px;
+            border-radius: 8px;
+            font-family: inherit;
+        }
+
+        .ask-bar-chat-title-btn:hover { background: var(--bg-surface); }
+
+        .ask-bar-chat-chevron {
+            width: 14px;
+            height: 14px;
+            color: var(--text-muted);
+            flex-shrink: 0;
+            transition: transform 0.15s ease;
+        }
+
+        .ask-bar-chat-title-btn.open .ask-bar-chat-chevron { transform: rotate(180deg); }
+
+        .ask-bar-new-chat-btn {
+            background: none;
+            border: 1px solid var(--border-subtle);
+            border-radius: 8px;
+            padding: 4px 10px;
+            font-size: 12px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-family: inherit;
+            transition: background 0.15s ease, color 0.15s ease;
+        }
+
+        .ask-bar-new-chat-btn:hover { background: var(--bg-surface); color: var(--text-primary); }
+
+        .ask-bar-chat-history-menu {
+            display: none;
+            position: absolute;
+            top: calc(100% + 4px);
+            left: 0;
+            background: var(--bg-elevated);
+            border: 1px solid var(--border-subtle);
+            border-radius: 12px;
+            min-width: 240px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+            z-index: 30;
+            overflow: hidden;
+            padding: 6px;
+        }
+
+        .ask-bar-chat-history-menu.show { display: block; }
+
+        .ask-bar-history-group-label {
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--text-muted);
+            padding: 4px 8px 2px;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+
+        .ask-bar-history-menu-item {
+            display: flex;
+            align-items: center;
+            padding: 7px 10px;
+            font-size: 13px;
+            color: var(--text-secondary);
+            border-radius: 8px;
+            cursor: pointer;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            transition: background 0.1s ease, color 0.1s ease;
+        }
+        .ask-bar-history-menu-item:hover { background: var(--bg-surface); color: var(--text-primary); }
+        .ask-bar-history-menu-item.active { background: var(--bg-surface); color: var(--text-primary); font-weight: 500; }
+        .ask-bar-history-item-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .ask-bar-history-item-actions { display: flex; align-items: center; gap: 2px; margin-left: auto; flex-shrink: 0; opacity: 0; transition: opacity 0.1s ease; }
+        .ask-bar-history-menu-item:hover .ask-bar-history-item-actions { opacity: 1; }
+        .ask-bar-history-item-more {
+            background: none; border: none; cursor: pointer; color: var(--text-muted);
+            width: 24px; height: 24px; border-radius: 6px;
+            display: flex; align-items: center; justify-content: center;
+            transition: background 0.1s, color 0.1s;
+        }
+        .ask-bar-history-item-more:hover { background: var(--bg-deep); color: var(--text-primary); }
+        .ask-bar-item-context-menu {
+            position: fixed; z-index: 200;
+            background: var(--bg-elevated); border: 1px solid var(--border-subtle);
+            border-radius: 10px; padding: 4px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.22);
+            min-width: 140px;
+        }
+        .ask-bar-item-context-menu button {
+            display: flex; align-items: center; gap: 8px;
+            width: 100%; background: none; border: none; cursor: pointer;
+            padding: 7px 10px; border-radius: 7px; font-size: 13px; font-family: inherit;
+            color: var(--text-secondary); transition: background 0.1s, color 0.1s;
+        }
+        .ask-bar-item-context-menu button:hover { background: var(--bg-surface); color: var(--text-primary); }
+        .ask-bar-item-context-menu button.danger { color: #f87171; }
+        .ask-bar-item-context-menu button.danger:hover { background: rgba(248,113,113,0.1); color: #f87171; }
+        .ask-bar-history-item-thinking { display: inline-flex; align-items: center; gap: 3px; margin-left: auto; padding-right: 4px; }
+        .ask-bar-history-item-thinking span {
+            display: inline-block; width: 4px; height: 4px; border-radius: 50%;
+            background: var(--text-muted);
+            animation: thinking-bounce 1.2s infinite ease-in-out;
+        }
+        .ask-bar-history-item-thinking span:nth-child(2) { animation-delay: 0.2s; }
+        .ask-bar-history-item-thinking span:nth-child(3) { animation-delay: 0.4s; }
+
+        .ask-bar-messages {
+            height: 280px;
+            overflow-y: auto;
+            overscroll-behavior: contain;
+            padding: 14px 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            max-height: 380px;
+            min-height: 60px;
+        }
+
+        .ask-bar-msg-user {
+            align-self: flex-end;
+            background: var(--bg-surface);
+            border: 1px solid var(--border-subtle);
+            border-radius: 18px 18px 4px 18px;
+            padding: 8px 14px;
+            font-size: 14px;
+            color: var(--text-primary);
+            max-width: 75%;
+        }
+
+        .ask-bar-msg-ai {
+            align-self: flex-start;
+            font-size: 14px;
+            color: var(--text-primary);
+            line-height: 1.7;
+            max-width: 90%;
+        }
+
+        .ask-bar-msg-ai ul, .ask-bar-msg-ai ol { margin: 4px 0; padding-left: 20px; }
+        .ask-bar-msg-ai li { margin: 2px 0; }
+
+        .ask-bar-msg-thinking {
+            align-self: flex-start;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 0;
+        }
+
+        .ask-bar-thinking-dots { display: flex; align-items: center; gap: 4px; }
+
+        .ask-bar-thinking-label {
+            font-size: 13px;
+            color: var(--text-muted);
+        }
+
+        .ask-bar-thinking-dots span {
+            display: inline-block;
+            width: 5px;
+            height: 5px;
+            border-radius: 50%;
+            background: var(--text-muted);
+            animation: thinking-bounce 1.2s infinite ease-in-out;
+        }
+
+        .ask-bar-thinking-dots span:nth-child(2) { animation-delay: 0.2s; }
+        .ask-bar-thinking-dots span:nth-child(3) { animation-delay: 0.4s; }
+
+        @keyframes thinking-bounce {
+            0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
+            40% { transform: scale(1); opacity: 1; }
+        }
+
+        [data-theme="light"] .ask-bar-chat-window,
+        [data-theme="light"] .ask-bar-chat-header,
+        [data-theme="light"] .ask-bar-chat-history-menu { background: var(--bg-deep); }
 
         .ask-bar-transcript {
             background: var(--bg-elevated);
             border: 1px solid var(--border-subtle);
-            border-radius: 18px 18px 6px 6px;
-            margin: 0 auto 8px;
+            border-radius: 22px;
             max-width: 680px;
+            margin: 0 auto 8px;
             display: none;
-            max-height: 280px;
-            overflow-y: auto;
-            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+            overflow: hidden;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.22), 0 2px 6px rgba(0, 0, 0, 0.08);
+            backdrop-filter: saturate(160%) blur(10px);
+            -webkit-backdrop-filter: saturate(160%) blur(10px);
         }
 
         .ask-bar-transcript.show {
             display: block;
+            animation: chatWindowIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        }
+
+        .ask-bar-transcript.hiding {
+            animation: chatWindowOut 0.15s ease-in forwards;
         }
 
         .ask-bar-transcript-header {
             display: flex;
             align-items: center;
             justify-content: space-between;
-            padding: 8px 12px;
+            padding: 10px 14px;
             border-bottom: 1px solid var(--border-subtle);
-            position: sticky;
-            top: 0;
             background: var(--bg-elevated);
-            z-index: 1;
+            flex-shrink: 0;
         }
 
         .ask-bar-transcript-header span {
-            font-size: 12px;
+            font-size: 13px;
             font-weight: 600;
-            color: var(--text-secondary);
-            text-transform: uppercase;
-            letter-spacing: 0.03em;
+            color: var(--text-primary);
+            padding: 4px 8px;
         }
 
         .ask-bar-transcript-header button {
@@ -3373,8 +3592,8 @@
             border: none;
             color: var(--text-muted);
             cursor: pointer;
-            padding: 2px 4px;
-            border-radius: 4px;
+            padding: 4px 6px;
+            border-radius: 6px;
             display: flex;
             align-items: center;
         }
@@ -3385,45 +3604,28 @@
         }
 
         .ask-bar-transcript-body {
-            padding: 12px 14px;
+            padding: 14px 16px;
             font-size: 13px;
             line-height: 1.7;
             color: var(--text-secondary);
             white-space: pre-wrap;
             word-wrap: break-word;
+            height: 280px;
+            max-height: 380px;
+            overflow-y: auto;
+            overscroll-behavior: contain;
         }
 
-        .ask-bar-transcript.show + .ask-bar-response.show + .ask-bar-inner,
-        .ask-bar-transcript.show + .ask-bar-inner {
-            border-radius: 999px;
-        }
 
         [data-theme="light"] .ask-bar-transcript,
         [data-theme="light"] .ask-bar-transcript-header {
             background: var(--bg-deep);
         }
 
-        .ask-bar-response.loading {
-            color: var(--text-muted);
-        }
-
-        .ask-bar-response.error {
-            color: #ef4444;
-        }
-
-        .ask-bar-response ul {
-            margin: 6px 0;
-            padding-left: 20px;
-        }
-
-        .ask-bar-response li {
-            margin: 2px 0;
-        }
-
         /* Bottom bar row: controls pill (left) + ask pill (right) */
         .ask-bar-row {
             display: flex;
-            align-items: center;
+            align-items: stretch;
             justify-content: center;
             gap: 8px;
             max-width: 680px;
@@ -3434,19 +3636,43 @@
         .controls-pill {
             display: none;
             align-items: center;
+            justify-content: center;
             gap: 2px;
             background: var(--bg-elevated);
             border: 1px solid var(--border-subtle);
-            border-radius: 999px;
+            border-radius: 22px;
             padding: 6px 12px;
             box-shadow: 0 10px 30px rgba(0, 0, 0, 0.22), 0 2px 6px rgba(0, 0, 0, 0.08);
             backdrop-filter: saturate(160%) blur(10px);
             -webkit-backdrop-filter: saturate(160%) blur(10px);
             flex-shrink: 0;
+            align-self: stretch;
+            position: relative;
         }
 
         .controls-pill.show {
             display: flex;
+            cursor: pointer;
+        }
+
+        .controls-pill.show::before {
+            content: '';
+            position: absolute;
+            inset: 3px;
+            border-radius: 18px;
+            background: var(--bg-surface);
+            opacity: 0;
+            transition: opacity 0.15s ease;
+            pointer-events: none;
+        }
+
+        .controls-pill.show:hover::before {
+            opacity: 1;
+        }
+
+        .controls-pill > * {
+            position: relative;
+            z-index: 1;
         }
 
         .controls-pill button {
@@ -3458,12 +3684,11 @@
             display: flex;
             align-items: center;
             border-radius: 4px;
-            transition: color 0.15s ease, background 0.15s ease;
+            transition: color 0.15s ease;
         }
 
-        .controls-pill button:hover {
+        .controls-pill:hover button {
             color: var(--text-primary);
-            background: var(--bg-surface);
         }
 
         .controls-pill button svg {
@@ -3474,6 +3699,21 @@
         .controls-pill .bar-transcript-btn svg {
             width: 18px;
             height: 18px;
+        }
+
+        .controls-pill .bar-chevron {
+            width: 14px;
+            height: 14px;
+            flex-shrink: 0;
+            transition: transform 0.2s ease;
+        }
+
+        .controls-pill .bar-chevron.open {
+            transform: rotate(180deg);
+        }
+
+        .controls-pill .bar-transcript-btn {
+            gap: 6px;
         }
 
         /* Toggle between static SVG icon and live mini waveform */
@@ -3540,7 +3780,6 @@
 
         .controls-pill .bar-pause-btn:hover {
             color: var(--text-primary);
-            background: var(--bg-surface);
         }
 
         [data-theme="light"] .controls-pill {
@@ -3550,15 +3789,147 @@
 
         .ask-bar-inner {
             display: flex;
-            align-items: center;
+            flex-direction: column;
+            align-items: stretch;
             background: var(--bg-elevated);
             border: 1px solid var(--border-subtle);
-            border-radius: 999px;
+            border-radius: 22px;
             flex: 1;
             box-shadow: 0 10px 30px rgba(0, 0, 0, 0.22), 0 2px 6px rgba(0, 0, 0, 0.08);
             backdrop-filter: saturate(160%) blur(10px);
             -webkit-backdrop-filter: saturate(160%) blur(10px);
             transition: border-color 0.15s ease, box-shadow 0.15s ease;
+            position: relative;
+        }
+
+        .ask-bar-inner::before {
+            content: '';
+            position: absolute;
+            inset: 3px;
+            border-radius: 18px;
+            background: var(--bg-surface);
+            opacity: 0;
+            transition: opacity 0.15s ease;
+            pointer-events: none;
+        }
+
+        .ask-bar-inner:hover:not(.expanded)::before {
+            opacity: 1;
+        }
+
+        [data-theme="light"] .ask-bar-inner:hover:not(.expanded)::before {
+            opacity: 0;
+        }
+
+        .ask-bar-inner > * {
+            position: relative;
+            z-index: 1;
+        }
+
+        .ask-bar-row:has(.ask-bar-inner.expanded) .controls-pill {
+            display: none;
+        }
+
+        .ask-bar-expanded-panel {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            padding: 0 16px;
+            max-height: 0;
+            overflow: hidden;
+            opacity: 0;
+            transition: max-height 0.25s cubic-bezier(0.4, 0, 0.2, 1), padding 0.25s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s ease;
+        }
+
+        .ask-bar-inner.expanded .ask-bar-expanded-panel {
+            max-height: 200px;
+            padding: 14px 16px 4px;
+            opacity: 1;
+        }
+
+        .ask-bar-input-row {
+            display: flex;
+            align-items: center;
+        }
+
+        .ask-bar-history-wrap {
+            position: relative;
+            display: flex;
+            align-items: center;
+        }
+
+        .ask-bar-history-btn {
+            background: none;
+            border: none;
+            cursor: pointer;
+            color: var(--text-muted);
+            padding: 4px 6px;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            transition: color 0.15s ease, background 0.15s ease;
+        }
+
+        .ask-bar-history-btn:hover {
+            color: var(--text-primary);
+            background: var(--bg-surface);
+        }
+
+        .ask-bar-history-dropdown {
+            display: none;
+            position: absolute;
+            top: calc(100% + 4px);
+            left: 0;
+            background: var(--bg-elevated);
+            border: 1px solid var(--border-subtle);
+            border-radius: 10px;
+            min-width: 260px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+            z-index: 20;
+            overflow: hidden;
+        }
+
+        .ask-bar-history-dropdown.show {
+            display: block;
+        }
+
+        .ask-bar-history-item {
+            padding: 8px 14px;
+            font-size: 13px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            transition: background 0.1s ease, color 0.1s ease;
+        }
+
+        .ask-bar-history-item:hover {
+            background: var(--bg-surface);
+            color: var(--text-primary);
+        }
+
+        .ask-bar-prompts {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .ask-bar-prompt-chip {
+            background: none;
+            border: 1px solid var(--border-subtle);
+            border-radius: 8px;
+            padding: 4px 10px;
+            font-size: 12px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-family: inherit;
+            transition: background 0.15s ease, color 0.15s ease;
+        }
+
+        .ask-bar-prompt-chip:hover {
+            background: var(--bg-surface);
+            color: var(--text-primary);
         }
 
         .ask-bar-left {
@@ -3600,10 +3971,6 @@
             transform: rotate(180deg);
         }
 
-        .ask-bar-response.show + .ask-bar-inner {
-            border-radius: 999px;
-        }
-
         .ask-bar-inner:focus-within {
             border-color: var(--accent-primary);
             box-shadow: 0 10px 30px rgba(0, 0, 0, 0.24), 0 0 0 3px rgba(129, 140, 248, 0.18);
@@ -3622,36 +3989,64 @@
 
         .ask-bar-input::placeholder {
             color: var(--text-muted);
+            transition: color 0.15s ease;
         }
 
-        .ask-bar-submit {
-            background: none;
-            border: none;
-            padding: 10px 18px 10px 12px;
-            cursor: pointer;
+        .ask-bar-inner:hover:not(.expanded) .ask-bar-input::placeholder {
+            color: var(--text-primary);
+        }
+
+        [data-theme="light"] .ask-bar-inner:hover:not(.expanded) .ask-bar-input::placeholder {
             color: var(--text-muted);
+        }
+
+        .ask-bar-submit,
+        .ask-bar-stop {
+            background: var(--text-muted);
+            border: none;
+            border-radius: 50%;
+            width: 28px;
+            height: 28px;
+            margin: 0 8px 0 4px;
+            cursor: pointer;
+            color: var(--bg-deep);
             display: flex;
             align-items: center;
-            transition: color 0.15s ease;
+            justify-content: center;
+            transition: background 0.15s ease, transform 0.1s ease;
             flex-shrink: 0;
         }
 
-        .ask-bar-submit:hover {
-            color: var(--accent-primary);
-        }
-
         .ask-bar-submit:disabled {
-            opacity: 0.3;
+            background: var(--border-subtle);
             cursor: default;
         }
 
-        .ask-bar-submit svg {
-            width: 16px;
-            height: 16px;
+        .ask-bar-submit:not(:disabled):hover {
+            background: var(--accent-primary);
+            transform: scale(1.05);
         }
 
-        [data-theme="light"] .ask-bar-inner,
-        [data-theme="light"] .ask-bar-response {
+        .ask-bar-inner.has-text .ask-bar-submit:not(:disabled) {
+            background: var(--accent-primary);
+        }
+
+        .ask-bar-stop {
+            background: var(--accent-primary);
+        }
+
+        .ask-bar-stop:hover {
+            background: #a5b4fc;
+            transform: scale(1.05);
+        }
+
+        .ask-bar-submit svg,
+        .ask-bar-stop svg {
+            width: 14px;
+            height: 14px;
+        }
+
+        [data-theme="light"] .ask-bar-inner {
             background: var(--bg-deep);
             border-color: #c4c4cc;
         }
@@ -4078,10 +4473,9 @@ Ask Steno
                                       <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
                                   </svg>
                               </button>
-                              <button id="ask-bar-transcript-close" title="Close">
+                              <button id="ask-bar-transcript-close" title="Minimise">
                                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-                                      <line x1="18" y1="6" x2="6" y2="18"></line>
-                                      <line x1="6" y1="6" x2="18" y2="18"></line>
+                                      <line x1="5" y1="12" x2="19" y2="12"></line>
                                   </svg>
                               </button>
                           </div>
@@ -4106,7 +4500,21 @@ Ask Steno
                       </div>
                       <div class="ask-bar-transcript-body" id="ask-bar-transcript-body"></div>
                   </div>
-                  <div class="ask-bar-response" id="ask-bar-response"></div>
+                  <div class="ask-bar-chat-window" id="ask-bar-chat-window">
+                      <div class="ask-bar-chat-header">
+                          <div class="ask-bar-chat-title-group">
+                              <button class="ask-bar-chat-title-btn" id="ask-bar-chat-title-btn">
+                                  <span id="ask-bar-chat-title">New chat</span>
+                                  <svg class="ask-bar-chat-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                      <polyline points="6 9 12 15 18 9"></polyline>
+                                  </svg>
+                              </button>
+                              <div class="ask-bar-chat-history-menu" id="ask-bar-chat-history-menu"></div>
+                          </div>
+                          <button class="ask-bar-new-chat-btn" id="ask-bar-new-chat-btn">New chat</button>
+                      </div>
+                      <div class="ask-bar-messages" id="ask-bar-messages"></div>
+                  </div>
                   <div class="ask-bar-row">
                       <!-- Separate controls pill (visible during recording + on meetings) -->
                       <div class="controls-pill" id="controls-pill">
@@ -4127,10 +4535,9 @@ Ask Steno
                                   <div class="mini-waveform-bar"></div>
                                   <div class="mini-waveform-bar"></div>
                               </div>
-                          </button>
-                          <button class="bar-chevron" id="bar-chevron" title="Show transcript">
-                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                                  <polyline points="6 9 12 15 18 9"></polyline>
+                              <!-- Chevron (points up; rotates down when transcript is open) -->
+                              <svg class="bar-chevron" id="bar-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                  <polyline points="6 15 12 9 18 15"></polyline>
                               </svg>
                           </button>
                           <button class="bar-pause-btn" id="bar-pause-btn" style="display: none;">Pause</button>
@@ -4143,14 +4550,29 @@ Ask Steno
                       <div id="ask-bar-rec-controls" style="display:none;"></div>
                       <div id="ask-bar-rec-divider" style="display:none;"></div>
                       <!-- Main ask input pill -->
-                      <div class="ask-bar-inner">
-                          <input type="text" class="ask-bar-input" id="ask-bar-input" placeholder="Ask anything" autocomplete="off">
-                          <button class="ask-bar-submit" id="ask-bar-submit" title="Ask">
-                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                  <line x1="22" y1="2" x2="11" y2="13"></line>
-                                  <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-                              </svg>
-                          </button>
+                      <div class="ask-bar-inner" id="ask-bar-inner">
+                          <!-- Expanded panel: hidden by default, shown on focus -->
+                          <div class="ask-bar-expanded-panel" id="ask-bar-expanded-panel">
+                              <div class="ask-bar-prompts">
+                                  <button class="ask-bar-prompt-chip" data-prompt="Summarize the key decisions made">Summarize key decisions</button>
+                                  <button class="ask-bar-prompt-chip" data-prompt="What action items were discussed?">Action items</button>
+                                  <button class="ask-bar-prompt-chip" data-prompt="What were the main topics covered?">Main topics</button>
+                              </div>
+                          </div>
+                          <!-- Input row -->
+                          <div class="ask-bar-input-row">
+                              <input type="text" class="ask-bar-input" id="ask-bar-input" placeholder="Ask anything" autocomplete="off">
+                              <button class="ask-bar-submit" id="ask-bar-submit" title="Ask" disabled>
+                                  <svg viewBox="0 0 24 24" fill="currentColor">
+                                      <path d="M12 4l-1.41 1.41L16.17 11H4v2h12.17l-5.58 5.59L12 20l8-8-8-8z" transform="rotate(-90 12 12)"/>
+                                  </svg>
+                              </button>
+                              <button class="ask-bar-stop" id="ask-bar-stop" title="Stop" style="display:none;">
+                                  <svg viewBox="0 0 24 24" fill="currentColor">
+                                      <rect x="6" y="6" width="12" height="12" rx="2"/>
+                                  </svg>
+                              </button>
+                          </div>
                       </div>
                   </div>
               </div>
@@ -5832,6 +6254,15 @@ Session started - waiting for activity...
         function selectMeeting(index) {
             selectedMeeting = filteredMeetings[index];
             if (!selectedMeeting) return;
+            activeChatSessionId = null;
+            if (typeof meetingChats !== 'undefined') {
+                const mid = selectedMeeting?.session_info?.name || selectedMeeting?.session_info?.summary_file || selectedMeeting?.id;
+                const sessions = meetingChats.get(mid);
+                if (sessions && sessions.length > 0) activeChatSessionId = sessions[0].id;
+            }
+            if (typeof hideChatWindow === 'function') hideChatWindow(); else if (typeof askBarChatWindow !== 'undefined') askBarChatWindow.classList.remove('show');
+            if (typeof askBarInner !== 'undefined') askBarInner.classList.remove('expanded');
+            if (typeof updateInputPlaceholder === 'function') updateInputPlaceholder();
 
             // Show home button when inside a note
             document.getElementById('home-btn').style.display = '';
@@ -5962,6 +6393,9 @@ Session started - waiting for activity...
             // TEMPORARY: Show reprocess button for all meetings (for testing)
             reprocessBtn.style.display = 'flex';
             document.getElementById('ask-bar').style.display = '';
+            controlsPill.classList.add('show');
+            controlsPill.classList.remove('recording');
+            controlsPill.classList.remove('paused');
             
             /* ORIGINAL LOGIC (commented out for testing):
             // Show/hide reprocess button based on meeting quality
@@ -6447,11 +6881,13 @@ Session started - waiting for activity...
         });
 
         // Ask bar recording controls — wire to existing handlers
-        barPauseBtn.addEventListener('click', () => {
+        barPauseBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
             pauseBtn.click();
         });
 
-        barStopBtn.addEventListener('click', () => {
+        barStopBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
             stopBtn.click();
         });
 
@@ -7217,39 +7653,574 @@ Session started - waiting for activity...
         // Bottom bar inline query
         const askBarInput = document.getElementById('ask-bar-input');
         const askBarSubmit = document.getElementById('ask-bar-submit');
-        const askBarResponse = document.getElementById('ask-bar-response');
+        const askBarStop = document.getElementById('ask-bar-stop');
+        const askBarInner = document.getElementById('ask-bar-inner');
+        const askBarChatWindow = document.getElementById('ask-bar-chat-window');
+        const askBarMessages = document.getElementById('ask-bar-messages');
 
-        async function submitBarQuery() {
-            const question = askBarInput.value.trim();
-            if (!question) return;
-            if (!selectedMeeting) return;
+        // Chat session data: meetingId -> [{id, title, messages: [{role, content}]}]
+        const meetingChats = new Map();
+        let activeChatSessionId = null;
 
-            const summaryFile = selectedMeeting.session_info?.summary_file;
-            if (!summaryFile) return;
+        function saveChatSessions() {
+            const data = Array.from(meetingChats.entries());
+            ipcRenderer.invoke('save-chat-sessions', data).catch(() => {});
+        }
 
-            askBarSubmit.disabled = true;
-            askBarResponse.className = 'ask-bar-response show loading';
-            askBarResponse.textContent = 'Thinking...';
-
-            try {
-                const result = await ipcRenderer.invoke('query-transcript', summaryFile, question);
-                askBarResponse.classList.remove('loading');
-                if (result.success) {
-                    askBarResponse.innerHTML = formatAiResponse(result.answer);
-                } else {
-                    askBarResponse.classList.add('error');
-                    askBarResponse.textContent = result.error || 'Failed to get response';
+        ipcRenderer.invoke('load-chat-sessions').then(result => {
+            if (result?.success && Array.isArray(result.data)) {
+                for (const [key, sessions] of result.data) {
+                    meetingChats.set(key, sessions);
                 }
-            } catch (error) {
-                askBarResponse.classList.remove('loading');
-                askBarResponse.classList.add('error');
-                askBarResponse.textContent = 'Failed: ' + error.message;
-            } finally {
-                askBarSubmit.disabled = false;
+            }
+        }).catch(() => {});
+
+        function getActiveMeetingId() {
+            return selectedMeeting?.session_info?.name
+                || selectedMeeting?.session_info?.summary_file
+                || selectedMeeting?.id;
+        }
+
+        function getOrCreateSession(meetingId) {
+            if (!meetingChats.has(meetingId)) meetingChats.set(meetingId, []);
+            const sessions = meetingChats.get(meetingId);
+            if (!activeChatSessionId || !sessions.find(s => s.id === activeChatSessionId)) {
+                return createNewChatSession(meetingId);
+            }
+            return sessions.find(s => s.id === activeChatSessionId);
+        }
+
+        function createNewChatSession(meetingId) {
+            if (!meetingChats.has(meetingId)) meetingChats.set(meetingId, []);
+            const id = Date.now().toString();
+            const session = { id, title: 'New chat', messages: [] };
+            meetingChats.get(meetingId).unshift(session);
+            activeChatSessionId = id;
+            return session;
+        }
+
+        // Render formatted AI text as safe DOM nodes (no innerHTML needed)
+        function appendFormattedText(el, text) {
+            const parts = text.split(/\*\*(.+?)\*\*/);
+            parts.forEach((part, i) => {
+                if (i % 2 === 1) {
+                    const strong = document.createElement('strong');
+                    strong.textContent = part;
+                    el.appendChild(strong);
+                } else if (part) {
+                    el.appendChild(document.createTextNode(part));
+                }
+            });
+        }
+
+        function renderFormattedContent(container, text) {
+            container.replaceChildren();
+            const lines = text.split('\n');
+            let currentUl = null;
+            let currentOl = null;
+            for (const line of lines) {
+                const bulletMatch = line.match(/^[\*\-]\s+(.+)$/);
+                const numberedMatch = line.match(/^(\d+)[.)]\s+(.+)$/);
+                const headingMatch = line.match(/^#{1,3}\s+(.+)$/);
+                if (bulletMatch) {
+                    currentOl = null;
+                    if (!currentUl) {
+                        currentUl = document.createElement('ul');
+                        container.appendChild(currentUl);
+                    }
+                    const li = document.createElement('li');
+                    appendFormattedText(li, bulletMatch[1]);
+                    currentUl.appendChild(li);
+                } else if (numberedMatch) {
+                    currentUl = null;
+                    if (!currentOl) {
+                        currentOl = document.createElement('ol');
+                        container.appendChild(currentOl);
+                    }
+                    const li = document.createElement('li');
+                    appendFormattedText(li, numberedMatch[2]);
+                    currentOl.appendChild(li);
+                } else if (headingMatch) {
+                    currentUl = null; currentOl = null;
+                    const h = document.createElement('strong');
+                    h.style.display = 'block';
+                    h.style.marginTop = '6px';
+                    appendFormattedText(h, headingMatch[1]);
+                    container.appendChild(h);
+                } else {
+                    currentUl = null; currentOl = null;
+                    if (line.trim() === '') {
+                        container.appendChild(document.createElement('br'));
+                    } else {
+                        const span = document.createElement('span');
+                        span.style.display = 'block';
+                        appendFormattedText(span, line);
+                        container.appendChild(span);
+                    }
+                }
             }
         }
 
+        function updateInputPlaceholder() {
+            const meetingId = getActiveMeetingId();
+            const sessions = meetingId ? (meetingChats.get(meetingId) || []) : [];
+            const session = sessions.find(s => s.id === activeChatSessionId);
+            askBarInput.placeholder = (session && session.messages.length > 0)
+                ? 'Continue chat'
+                : 'Ask anything';
+        }
+
+        function renderChatWindow() {
+            const meetingId = getActiveMeetingId();
+            if (!meetingId) {
+                hideChatWindow();
+                return;
+            }
+            const sessions = meetingChats.get(meetingId) || [];
+            const session = sessions.find(s => s.id === activeChatSessionId);
+            if (!session) {
+                hideChatWindow();
+                updateInputPlaceholder();
+                return;
+            }
+            if (session.messages.length === 0) {
+                askBarMessages.replaceChildren();
+                document.getElementById('ask-bar-chat-title').textContent = session.title;
+                updateInputPlaceholder();
+                return;
+            }
+
+            document.getElementById('ask-bar-chat-title').textContent = session.title;
+
+            askBarMessages.replaceChildren(
+                ...session.messages
+                    .filter(msg => msg.role !== 'ai' || msg.content.trim() !== '')
+                    .map(msg => {
+                        const el = document.createElement('div');
+                        el.className = msg.role === 'user' ? 'ask-bar-msg-user' : 'ask-bar-msg-ai';
+                        if (msg.role === 'ai') {
+                            renderFormattedContent(el, msg.content);
+                        } else {
+                            el.textContent = msg.content;
+                        }
+                        return el;
+                    })
+            );
+
+            if (session.pending) appendThinking();
+
+            showChatWindow();
+            askBarMessages.scrollTop = askBarMessages.scrollHeight;
+            updateInputPlaceholder();
+        }
+
+        function appendThinking() {
+            const el = document.createElement('div');
+            el.className = 'ask-bar-msg-thinking';
+            el.id = 'ask-bar-thinking-msg';
+            const dots = document.createElement('span');
+            dots.className = 'ask-bar-thinking-dots';
+            for (let i = 0; i < 3; i++) dots.appendChild(document.createElement('span'));
+            const label = document.createElement('span');
+            label.className = 'ask-bar-thinking-label';
+            label.textContent = 'Thinking';
+            el.appendChild(dots);
+            el.appendChild(label);
+            askBarMessages.appendChild(el);
+            askBarMessages.scrollTop = askBarMessages.scrollHeight;
+        }
+
+        function removeThinking() {
+            document.getElementById('ask-bar-thinking-msg')?.remove();
+        }
+
+        let activeQueryId = null;
+        let activeQuerySession = null;
+        let activeQueryAiMsg = null;
+        let activeQueryChunkHandler = null;
+        let activeQueryDoneHandler = null;
+
+        function setQueryPending(isPending) {
+            askBarSubmit.style.display = isPending ? 'none' : 'flex';
+            askBarStop.style.display = isPending ? 'flex' : 'none';
+        }
+
+        function finishQuery(session, aiMsg, sessionId) {
+            ipcRenderer.removeListener('query-chunk', activeQueryChunkHandler);
+            ipcRenderer.removeListener('query-done', activeQueryDoneHandler);
+            activeQueryId = null;
+            activeQuerySession = null;
+            activeQueryAiMsg = null;
+            activeQueryChunkHandler = null;
+            activeQueryDoneHandler = null;
+            session.pending = false;
+            setQueryPending(false);
+            refreshHistoryMenuDots();
+            saveChatSessions();
+            if (activeChatSessionId === sessionId) {
+                removeThinking();
+                renderChatWindow();
+                askBarInner.classList.add('expanded');
+            }
+        }
+
+        function submitBarQuery() {
+            if (activeQueryId) return;
+            const question = askBarInput.value.trim();
+            if (!question) return;
+            if (!selectedMeeting) return;
+            const summaryFile = selectedMeeting.session_info?.summary_file;
+            if (!summaryFile) return;
+
+            const meetingId = getActiveMeetingId();
+            const session = getOrCreateSession(meetingId);
+
+            // Add user message and show immediately
+            session.messages.push({ role: 'user', content: question });
+            if (session.messages.length === 1) {
+                session.title = question.length > 40 ? question.slice(0, 40) + '\u2026' : question;
+            }
+            askBarInput.value = '';
+            askBarInner.classList.remove('has-text');
+            askBarSubmit.disabled = true;
+
+            // Create empty AI message placeholder for streaming
+            const aiMsg = { role: 'ai', content: '' };
+            session.messages.push(aiMsg);
+            session.pending = true;
+            renderChatWindow();
+            refreshHistoryMenuDots();
+            showChatWindow();
+            setQueryPending(true);
+
+            const queryId = Date.now().toString();
+            activeQueryId = queryId;
+            activeQuerySession = session;
+            activeQueryAiMsg = aiMsg;
+
+            const sessionId = session.id;
+            let streamingEl = null;
+
+            activeQueryChunkHandler = (_e, { queryId: id, chunk }) => {
+                if (id !== queryId) return;
+                aiMsg.content += chunk;
+                if (activeChatSessionId !== sessionId) return;
+                removeThinking();
+                // Append a fresh AI bubble at the end of the messages container.
+                // Don't reuse prior AI messages from history — appending always keeps
+                // the new response below the just-sent user message.
+                if (!streamingEl || !streamingEl.isConnected) {
+                    streamingEl = document.createElement('div');
+                    streamingEl.className = 'ask-bar-msg-ai';
+                    askBarMessages.appendChild(streamingEl);
+                }
+                renderFormattedContent(streamingEl, aiMsg.content);
+                askBarMessages.scrollTop = askBarMessages.scrollHeight;
+            };
+
+            activeQueryDoneHandler = (_e, { queryId: id, success, error }) => {
+                if (id !== queryId) return;
+                if (!success && !aiMsg.content) {
+                    aiMsg.content = error || 'Failed to get response';
+                }
+                finishQuery(session, aiMsg, sessionId);
+            };
+
+            ipcRenderer.on('query-chunk', activeQueryChunkHandler);
+            ipcRenderer.on('query-done', activeQueryDoneHandler);
+            ipcRenderer.send('query-transcript-stream', queryId, summaryFile, question);
+        }
+
         askBarSubmit.addEventListener('click', submitBarQuery);
+
+        askBarStop.addEventListener('click', () => {
+            if (!activeQueryId) return;
+            const queryId = activeQueryId;
+            const session = activeQuerySession;
+            const aiMsg = activeQueryAiMsg;
+            const sessionId = session?.id;
+            // Keep focus in the input so the chat stays expanded after the stop button is hidden.
+            askBarInput.focus();
+            suppressChatCollapse = true;
+            ipcRenderer.send('query-cancel', queryId);
+            if (aiMsg && !aiMsg.content) {
+                aiMsg.content = 'Stopped';
+            } else if (aiMsg) {
+                aiMsg.content += '\n\n*Stopped*';
+            }
+            finishQuery(session, aiMsg, sessionId);
+        });
+
+        function hideChatWindow() {
+            if (!askBarChatWindow.classList.contains('show')) return;
+            askBarChatWindow.classList.add('hiding');
+            askBarChatWindow.addEventListener('animationend', () => {
+                askBarChatWindow.classList.remove('show', 'hiding');
+            }, { once: true });
+        }
+
+        function showChatWindow() {
+            // Cancel any in-progress hide animation so its animationend doesn't remove .show
+            askBarChatWindow.classList.remove('hiding');
+            // Instantly clear the transcript so both panels never occupy space simultaneously
+            const transcript = document.getElementById('ask-bar-transcript');
+            if (transcript && transcript.classList.contains('show')) {
+                transcript.classList.remove('show', 'hiding');
+                document.getElementById('bar-chevron')?.classList.remove('open');
+            }
+            askBarChatWindow.classList.add('show');
+        }
+
+        // Prevent scroll from propagating to background notes. stopPropagation() alone
+        // doesn't stop native scroll chaining — when .ask-bar-messages isn't scrollable
+        // (content fits) or hits a boundary, the browser chains the scroll up to
+        // .meeting-detail. Take over scrolling manually to fully prevent that.
+        askBarChatWindow.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            askBarMessages.scrollTop += e.deltaY;
+        }, { passive: false });
+
+        // mousedown on the chat window, prompt chips, or stop button prevents blur from collapsing everything
+        let suppressChatCollapse = false;
+        askBarChatWindow.addEventListener('mousedown', () => { suppressChatCollapse = true; });
+        document.getElementById('ask-bar-expanded-panel').addEventListener('mousedown', () => { suppressChatCollapse = true; });
+        askBarStop.addEventListener('mousedown', () => { suppressChatCollapse = true; });
+
+        // Expand panel on focus; restore chat window if session has messages
+        askBarInput.addEventListener('focus', () => {
+            askBarInner.classList.add('expanded');
+            renderChatWindow();
+        });
+
+        // Collapse when focus leaves both the input and chat window
+        askBarInner.addEventListener('focusout', () => {
+            setTimeout(() => {
+                // If focus is back inside the chat UI, don't collapse — regardless of flag
+                const active = document.activeElement;
+                if (active && (askBarInner.contains(active) || askBarChatWindow.contains(active))) {
+                    suppressChatCollapse = false;
+                    return;
+                }
+                if (suppressChatCollapse) {
+                    suppressChatCollapse = false;
+                    return;
+                }
+                const meetingId = getActiveMeetingId();
+                const sessions = meetingId ? (meetingChats.get(meetingId) || []) : [];
+                const activeSession = sessions.find(s => s.id === activeChatSessionId);
+                askBarInner.classList.remove('expanded');
+                hideChatWindow();
+            }, 0);
+        });
+
+        // Show/hide submit button based on input content
+        askBarInput.addEventListener('input', () => {
+            const hasText = askBarInput.value.trim().length > 0;
+            askBarInner.classList.toggle('has-text', hasText);
+            askBarSubmit.disabled = !hasText;
+        });
+
+        // Prompt chip clicks
+        document.querySelectorAll('.ask-bar-prompt-chip').forEach(chip => {
+            chip.addEventListener('click', () => {
+                askBarInput.value = chip.dataset.prompt;
+                askBarInner.classList.add('has-text');
+                submitBarQuery();
+            });
+        });
+
+        // Chat history title button + dropdown
+        const askBarChatTitleBtn = document.getElementById('ask-bar-chat-title-btn');
+        const askBarChatHistoryMenu = document.getElementById('ask-bar-chat-history-menu');
+
+        function renderHistoryMenu() {
+            const meetingId = getActiveMeetingId();
+            const sessions = meetingId ? (meetingChats.get(meetingId) || []) : [];
+            if (sessions.length === 0) {
+                askBarChatHistoryMenu.classList.remove('show');
+                askBarChatTitleBtn.classList.remove('open');
+                return;
+            }
+
+            const label = document.createElement('div');
+            label.className = 'ask-bar-history-group-label';
+            label.textContent = 'Today';
+
+            const items = sessions.map(s => {
+                const item = document.createElement('div');
+                item.className = 'ask-bar-history-menu-item' + (s.id === activeChatSessionId ? ' active' : '');
+
+                const titleSpan = document.createElement('span');
+                titleSpan.className = 'ask-bar-history-item-title';
+                titleSpan.textContent = s.title;
+                item.appendChild(titleSpan);
+
+                if (s.pending) {
+                    const dots = document.createElement('span');
+                    dots.className = 'ask-bar-history-item-thinking';
+                    for (let i = 0; i < 3; i++) dots.appendChild(document.createElement('span'));
+                    item.appendChild(dots);
+                }
+
+                const actions = document.createElement('div');
+                actions.className = 'ask-bar-history-item-actions';
+                const moreBtn = document.createElement('button');
+                moreBtn.className = 'ask-bar-history-item-more';
+                moreBtn.title = 'More options';
+                moreBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>';
+                actions.appendChild(moreBtn);
+                item.appendChild(actions);
+
+                moreBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    openChatItemMenu(e, s, item, titleSpan);
+                });
+
+                item.addEventListener('click', () => {
+                    activeChatSessionId = s.id;
+                    renderChatWindow();
+                    askBarChatHistoryMenu.classList.remove('show');
+                    askBarChatTitleBtn.classList.remove('open');
+                });
+                return item;
+            });
+
+            askBarChatHistoryMenu.replaceChildren(label, ...items);
+            askBarChatHistoryMenu.classList.toggle('show');
+            askBarChatTitleBtn.classList.toggle('open');
+        }
+
+        let activeItemContextMenu = null;
+
+        function closeItemContextMenu() {
+            if (activeItemContextMenu) {
+                activeItemContextMenu.remove();
+                activeItemContextMenu = null;
+            }
+        }
+
+        function openChatItemMenu(e, session, itemEl, titleSpan) {
+            closeItemContextMenu();
+            const meetingId = getActiveMeetingId();
+            const menu = document.createElement('div');
+            menu.className = 'ask-bar-item-context-menu';
+            activeItemContextMenu = menu;
+
+            const renameBtn = document.createElement('button');
+            renameBtn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> Rename';
+            renameBtn.addEventListener('click', (ev) => {
+                ev.stopPropagation();
+                closeItemContextMenu();
+                const input = document.createElement('input');
+                input.value = session.title;
+                input.style.cssText = 'flex:1;background:none;border:none;outline:none;font-size:13px;color:var(--text-primary);font-family:inherit;min-width:0;';
+                titleSpan.replaceWith(input);
+                input.focus();
+                input.select();
+                const commit = () => {
+                    const newTitle = input.value.trim() || session.title;
+                    session.title = newTitle;
+                    saveChatSessions();
+                    const span = document.createElement('span');
+                    span.className = 'ask-bar-history-item-title';
+                    span.textContent = newTitle;
+                    input.replaceWith(span);
+                    if (activeChatSessionId === session.id) {
+                        document.getElementById('ask-bar-chat-title').textContent = newTitle;
+                    }
+                };
+                input.addEventListener('blur', commit);
+                input.addEventListener('keydown', (k) => { if (k.key === 'Enter') input.blur(); if (k.key === 'Escape') { input.value = session.title; input.blur(); } });
+            });
+
+            const deleteBtn = document.createElement('button');
+            deleteBtn.className = 'danger';
+            deleteBtn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg> Delete';
+            deleteBtn.addEventListener('click', (ev) => {
+                ev.stopPropagation();
+                closeItemContextMenu();
+                if (!meetingId) return;
+                const sessions = meetingChats.get(meetingId) || [];
+                const idx = sessions.findIndex(s => s.id === session.id);
+                if (idx !== -1) sessions.splice(idx, 1);
+                if (activeChatSessionId === session.id) {
+                    activeChatSessionId = sessions.length > 0 ? sessions[0].id : null;
+                    if (sessions.length === 0) {
+                        createNewChatSession(meetingId);
+                        activeChatSessionId = meetingChats.get(meetingId)[0].id;
+                    }
+                    renderChatWindow();
+                }
+                saveChatSessions();
+                askBarChatHistoryMenu.classList.remove('show');
+                askBarChatTitleBtn.classList.remove('open');
+            });
+
+            menu.appendChild(renameBtn);
+            menu.appendChild(deleteBtn);
+            document.body.appendChild(menu);
+
+            const rect = e.currentTarget.getBoundingClientRect();
+            menu.style.top = (rect.bottom + 4) + 'px';
+            menu.style.left = rect.left + 'px';
+            // Clamp to viewport
+            requestAnimationFrame(() => {
+                const mr = menu.getBoundingClientRect();
+                if (mr.right > window.innerWidth - 8) menu.style.left = (window.innerWidth - mr.width - 8) + 'px';
+                if (mr.bottom > window.innerHeight - 8) menu.style.top = (rect.top - mr.height - 4) + 'px';
+            });
+        }
+
+        document.addEventListener('click', () => closeItemContextMenu());
+
+        function refreshHistoryMenuDots() {
+            if (!askBarChatHistoryMenu.classList.contains('show')) return;
+            const meetingId = getActiveMeetingId();
+            const sessions = meetingId ? (meetingChats.get(meetingId) || []) : [];
+            const items = askBarChatHistoryMenu.querySelectorAll('.ask-bar-history-menu-item');
+            items.forEach((item, i) => {
+                const s = sessions[i];
+                if (!s) return;
+                const existing = item.querySelector('.ask-bar-history-item-thinking');
+                if (s.pending && !existing) {
+                    const dots = document.createElement('span');
+                    dots.className = 'ask-bar-history-item-thinking';
+                    for (let j = 0; j < 3; j++) dots.appendChild(document.createElement('span'));
+                    item.appendChild(dots);
+                } else if (!s.pending && existing) {
+                    existing.remove();
+                }
+            });
+        }
+
+        askBarChatTitleBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            renderHistoryMenu();
+        });
+
+        document.getElementById('ask-bar-new-chat-btn').addEventListener('click', () => {
+            const meetingId = getActiveMeetingId();
+            if (!meetingId) return;
+            const sessions = meetingChats.get(meetingId) || [];
+            const current = sessions.find(s => s.id === activeChatSessionId);
+            if (current && current.messages.length === 0) return;
+            createNewChatSession(meetingId);
+            renderChatWindow();
+            showChatWindow();
+            askBarInner.classList.add('expanded');
+            askBarInput.focus();
+        });
+
+        document.addEventListener('click', (e) => {
+            askBarChatHistoryMenu?.classList.remove('show');
+            askBarChatTitleBtn?.classList.remove('open');
+            const askBar = document.getElementById('ask-bar');
+            if (askBar && !askBar.contains(e.target)) {
+                askBarInner.classList.remove('expanded');
+                hideChatWindow();
+            }
+        });
 
         askBarInput.addEventListener('keydown', (e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
@@ -7258,7 +8229,7 @@ Session started - waiting for activity...
             }
             if (e.key === 'Escape') {
                 askBarInput.blur();
-                askBarResponse.classList.remove('show');
+                askBarInner.classList.remove('expanded', 'has-text');
                 if (askBarTranscript) {
                     askBarTranscript.classList.remove('show');
                     if (barChevron) barChevron.classList.remove('open');
@@ -7273,10 +8244,18 @@ Session started - waiting for activity...
         const askBarTranscript = document.getElementById('ask-bar-transcript');
         const askBarTranscriptBody = document.getElementById('ask-bar-transcript-body');
 
+        function hideTranscript() {
+            if (!askBarTranscript.classList.contains('show')) return;
+            askBarTranscript.classList.add('hiding');
+            askBarTranscript.addEventListener('animationend', () => {
+                askBarTranscript.classList.remove('show', 'hiding');
+            }, { once: true });
+        }
+
         function toggleTranscriptPanel() {
             const isOpen = askBarTranscript.classList.contains('show');
             if (isOpen) {
-                askBarTranscript.classList.remove('show');
+                hideTranscript();
                 barChevron.classList.remove('open');
             } else {
                 // During recording/paused, no transcript available yet
@@ -7300,11 +8279,10 @@ Session started - waiting for activity...
             }
         }
 
-        barChevron.addEventListener('click', toggleTranscriptPanel);
-        barTranscriptBtn.addEventListener('click', toggleTranscriptPanel);
+        controlsPill.addEventListener('click', toggleTranscriptPanel);
         document.getElementById('ask-bar-transcript-close').addEventListener('click', (e) => {
             e.stopPropagation();
-            askBarTranscript.classList.remove('show');
+            hideTranscript();
             barChevron.classList.remove('open');
         });
         document.getElementById('ask-bar-transcript-copy').addEventListener('click', (e) => {
@@ -7320,15 +8298,11 @@ Session started - waiting for activity...
             }
         });
 
-        // Close response/transcript when clicking outside the ask bar
+        // Close transcript when clicking outside its panel
         document.addEventListener('click', (e) => {
-            const askBar = document.getElementById('ask-bar');
-            if (askBar && !askBar.contains(e.target)) {
-                if (askBarResponse.classList.contains('show')) {
-                    askBarResponse.classList.remove('show');
-                }
-                if (askBarTranscript.classList.contains('show')) {
-                    askBarTranscript.classList.remove('show');
+            if (askBarTranscript.classList.contains('show')) {
+                if (!askBarTranscript.contains(e.target) && !controlsPill.contains(e.target)) {
+                    hideTranscript();
                     barChevron.classList.remove('open');
                 }
             }
@@ -8226,6 +9200,9 @@ Session started - waiting for activity...
                         document.getElementById('ask-ai-btn').style.display = '';
                         document.getElementById('copy-notes-btn').style.display = '';
                         document.getElementById('ask-bar').style.display = '';
+                        controlsPill.classList.add('show');
+                        controlsPill.classList.remove('recording');
+                        controlsPill.classList.remove('paused');
                         const rpBtn = document.getElementById('reprocess-btn');
                         rpBtn.style.display = '';
                         rpBtn.disabled = false;
