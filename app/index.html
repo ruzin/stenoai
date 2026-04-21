@@ -7626,7 +7626,7 @@ Session started - waiting for activity...
         ipcRenderer.invoke('load-chat-sessions').then(result => {
             if (result?.success && Array.isArray(result.data)) {
                 for (const [key, sessions] of result.data) {
-                    meetingChats.set(key, sessions);
+                    if (!meetingChats.has(key)) meetingChats.set(key, sessions);
                 }
             }
         }).catch(() => {});

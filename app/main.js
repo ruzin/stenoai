@@ -1238,7 +1238,11 @@ ipcMain.on('query-transcript-stream', (event, queryId, summaryFile, question) =>
           chunkCount++;
           if (chunkCount === 1) console.log(`[QUERY] First chunk received (queryId=${queryId})`);
           if (!event.sender.isDestroyed()) event.sender.send('query-chunk', { queryId, chunk });
-          else console.log(`[QUERY] Sender destroyed, cannot send chunk`);
+          else {
+            console.log(`[QUERY] Sender destroyed, killing process queryId=${queryId}`);
+            proc.kill();
+            activeQueryProcs.delete(queryId);
+          }
         } catch (e) { console.log(`[QUERY] Chunk decode error: ${e.message}`); }
       } else if (line === 'CHAT_STREAM_COMPLETE' || line === 'STREAM_COMPLETE') {
         console.log(`[QUERY] STREAM_COMPLETE received, ${chunkCount} chunks sent`);

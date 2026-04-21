@@ -977,7 +977,11 @@ ANSWER:"""
                         if content:
                             yield content
             else:
-                self._ensure_ollama_ready()
+                if self.ai_provider == "remote":
+                    self.client = ollama.Client(host=self.remote_url)
+                else:
+                    self._ensure_ollama_ready()
+                    self.client = ollama.Client()
                 stream = self.client.chat(
                     model=self.model_name,
                     messages=[{"role": "user", "content": prompt}],
