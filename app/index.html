@@ -420,6 +420,23 @@
             display: block;
         }
 
+        .bar-pause-btn {
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            font-size: 13px;
+            font-weight: 500;
+            font-family: inherit;
+            cursor: pointer;
+            padding: 4px 6px;
+            border-radius: 4px;
+            transition: color 0.15s ease, background 0.15s ease;
+        }
+
+        .bar-pause-btn:hover {
+            color: var(--text-primary);
+            background: var(--bg-surface);
+        }
 
         .bar-stop-btn {
             background: none;
@@ -3732,8 +3749,22 @@
             transform: scaleY(0.15);
             transition: transform 0.3s ease;
         }
+        .controls-pill .bar-pause-btn {
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            font-size: 13px;
+            font-weight: 500;
+            font-family: inherit;
+            cursor: pointer;
+            padding: 4px 6px;
+            border-radius: 4px;
+            transition: color 0.15s ease, background 0.15s ease;
+        }
 
-
+        .controls-pill .bar-pause-btn:hover {
+            color: var(--text-primary);
+        }
 
         [data-theme="light"] .controls-pill {
             background: var(--bg-deep);
@@ -4491,6 +4522,7 @@ Ask Steno
                                   <polyline points="6 15 12 9 18 15"></polyline>
                               </svg>
                           </button>
+                          <button class="bar-pause-btn" id="bar-pause-btn" style="display: none;">Pause</button>
                           <button class="bar-stop-btn" id="bar-stop-btn" title="Stop recording" style="display: none;">
                               <svg viewBox="0 0 16 16" fill="currentColor"><rect x="2" y="2" width="12" height="12" rx="2"/></svg>
                           </button>
@@ -5181,7 +5213,7 @@ Session started - waiting for activity...
         const stopBtn = document.getElementById('stop-btn');
         const pauseBtn = document.getElementById('pause-btn');
         const newNoteBtn = document.getElementById('new-note-btn');
-
+        const barPauseBtn = document.getElementById('bar-pause-btn');
         const barStopBtn = document.getElementById('bar-stop-btn');
         const barRecControls = document.getElementById('ask-bar-rec-controls');
         const barRecDivider = document.getElementById('ask-bar-rec-divider');
@@ -5341,6 +5373,7 @@ Session started - waiting for activity...
                     controlsPill.classList.remove('recording');
                     controlsPill.classList.remove('paused');
                     barStopBtn.style.display = 'none';
+                    barPauseBtn.style.display = 'none';
                     // Restore transcript body
                     document.getElementById('ask-bar-transcript-body').style.display = '';
                     break;
@@ -5353,11 +5386,13 @@ Session started - waiting for activity...
                     newNoteBtn.style.display = 'none';
                     document.getElementById('status-dot').style.display = '';
                     document.getElementById('status-text').style.display = '';
-                    // Controls pill: show with live waveform + stop
+                    // Controls pill: show with live waveform + pause + stop
                     controlsPill.classList.add('show');
                     controlsPill.classList.add('recording');
                     controlsPill.classList.remove('paused');
                     barStopBtn.style.display = '';
+                    barPauseBtn.style.display = '';
+                    barPauseBtn.textContent = 'Pause';
                     // Show ask bar
                     document.getElementById('ask-bar').style.display = '';
                     // Start visualizer targeting mini waveform bars in the button.
@@ -5392,6 +5427,8 @@ Session started - waiting for activity...
                     controlsPill.classList.remove('recording');
                     controlsPill.classList.add('paused');
                     barStopBtn.style.display = '';
+                    barPauseBtn.style.display = '';
+                    barPauseBtn.textContent = 'Resume';
                     const minutes = Math.floor(pausedElapsedTime / 60);
                     const seconds = pausedElapsedTime % 60;
                     const timeStr = `${minutes}:${seconds.toString().padStart(2, '0')}`;
@@ -5413,6 +5450,7 @@ Session started - waiting for activity...
                     controlsPill.classList.remove('recording');
                     controlsPill.classList.remove('paused');
                     barStopBtn.style.display = 'none';
+                    barPauseBtn.style.display = 'none';
                     // Restore transcript body
                     document.getElementById('ask-bar-transcript-body').style.display = '';
                     document.getElementById('ask-bar-transcript').classList.remove('show');
@@ -6824,6 +6862,11 @@ Session started - waiting for activity...
         });
 
         // Ask bar recording controls — wire to existing handlers
+        barPauseBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            pauseBtn.click();
+        });
+
         barStopBtn.addEventListener('click', (e) => {
             e.stopPropagation();
             stopBtn.click();

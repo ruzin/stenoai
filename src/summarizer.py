@@ -930,6 +930,23 @@ TITLE:"""
             logger.warning(f"Failed to generate meeting title: {e}")
             return None
 
+    def _build_query_prompt(self, transcript: str, question: str, language: str = "en") -> str:
+        if language and language not in ("en", "auto"):
+            from .config import get_config
+            language_name = get_config().get_language_name(language)
+            query_lang_instruction = f"\nRespond in {language_name}." if language_name != "Unknown" else ""
+        else:
+            query_lang_instruction = ""
+        return f"""Answer the following question based on the meeting content below (summary, key topics, and transcript).
+Be concise and direct. If the answer requires inference from what was discussed, that's fine.
+Only say you don't know if the topic truly wasn't discussed at all.{query_lang_instruction}
+
+QUESTION: {question}
+
+{transcript}
+
+ANSWER:"""
+
     def query_transcript_streaming(self, transcript: str, question: str, language: str = "en"):
         """Generator that yields text chunks from the LLM for a transcript query."""
         if not transcript or transcript.strip() == "":
@@ -939,22 +956,7 @@ TITLE:"""
             yield "Please provide a question."
             return
 
-        if language and language not in ("en", "auto"):
-            from .config import get_config
-            language_name = get_config().get_language_name(language)
-            query_lang_instruction = f"\nRespond in {language_name}." if language_name != "Unknown" else ""
-        else:
-            query_lang_instruction = ""
-
-        prompt = f"""Answer the following question based on the meeting content below (summary, key topics, and transcript).
-Be concise and direct. If the answer requires inference from what was discussed, that's fine.
-Only say you don't know if the topic truly wasn't discussed at all.{query_lang_instruction}
-
-QUESTION: {question}
-
-{transcript}
-
-ANSWER:"""
+        prompt = self._build_query_prompt(transcript, question, language)
 
         try:
             if self.ai_provider == "cloud":
@@ -1014,26 +1016,7 @@ ANSWER:"""
             if not question or question.strip() == "":
                 return "Please provide a question."
 
-            # Build language instruction for query responses
-            if language and language not in ("en", "auto"):
-                from .config import get_config
-                language_name = get_config().get_language_name(language)
-                if language_name != "Unknown":
-                    query_lang_instruction = f"\nRespond in {language_name}."
-                else:
-                    query_lang_instruction = ""
-            else:
-                query_lang_instruction = ""
-
-            prompt = f"""Answer the following question based on the meeting content below (summary, key topics, and transcript).
-Be concise and direct. If the answer requires inference from what was discussed, that's fine.
-Only say you don't know if the topic truly wasn't discussed at all.{query_lang_instruction}
-
-QUESTION: {question}
-
-{transcript}
-
-ANSWER:"""
+            prompt = self._build_query_prompt(transcript, question, language)
 
             logger.info(f"Querying transcript with question: {question[:50]}...")
 

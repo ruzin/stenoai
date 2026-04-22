@@ -1224,6 +1224,12 @@ ipcMain.on('query-transcript-stream', (event, queryId, summaryFile, question) =>
   }
 
   activeQueryProcs.set(queryId, proc);
+  event.sender.once('destroyed', () => {
+    if (activeQueryProcs.has(queryId)) {
+      proc.kill();
+      activeQueryProcs.delete(queryId);
+    }
+  });
   let buf = '';
   let chunkCount = 0;
   proc.stdout.on('data', (data) => {
