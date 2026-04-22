@@ -1343,37 +1343,36 @@ ipcMain.handle('update-meeting', async (event, summaryFilePath, updates) => {
       };
     }
 
-    const data = JSON.parse(fs.readFileSync(absolutePath, 'utf8'));
+    const fileContent = fs.readFileSync(absolutePath, 'utf8');
 
-    // Update fields - only update fields that are provided
-    if (updates.name !== undefined) {
-      data.session_info.name = updates.name;
+    if (absolutePath.endsWith('.md')) {
+      // .md format: update YAML frontmatter fields
+      let updatedContent = fileContent;
+      if (updates.name !== undefined) {
+        const escapedName = updates.name.replace(/"/g, '\\"');
+        updatedContent = updatedContent.replace(
+          /^title:\s*".*"$/m,
+          `title: "${escapedName}"`
+        );
+      }
+      fs.writeFileSync(absolutePath, updatedContent, 'utf8');
+    } else {
+      // .json format: update structured fields
+      const data = JSON.parse(fileContent);
+      if (updates.name !== undefined) data.session_info.name = updates.name;
+      if (updates.summary !== undefined) data.summary = updates.summary;
+      if (updates.participants !== undefined) data.participants = updates.participants;
+      if (updates.key_points !== undefined) data.key_points = updates.key_points;
+      if (updates.action_items !== undefined) data.action_items = updates.action_items;
+      data.session_info.updated_at = new Date().toISOString();
+      fs.writeFileSync(absolutePath, JSON.stringify(data, null, 2), 'utf8');
     }
-    if (updates.summary !== undefined) {
-      data.summary = updates.summary;
-    }
-    if (updates.participants !== undefined) {
-      data.participants = updates.participants;
-    }
-    if (updates.key_points !== undefined) {
-      data.key_points = updates.key_points;
-    }
-    if (updates.action_items !== undefined) {
-      data.action_items = updates.action_items;
-    }
-
-    // Add updated timestamp
-    data.session_info.updated_at = new Date().toISOString();
-
-    // Write back to file
-    fs.writeFileSync(absolutePath, JSON.stringify(data, null, 2), 'utf8');
 
     console.log(`Updated meeting: ${absolutePath}`);
 
     return {
       success: true,
-      message: 'Meeting updated successfully',
-      updatedData: data
+      message: 'Meeting updated successfully'
     };
   } catch (error) {
     console.error('Update meeting error:', error);
