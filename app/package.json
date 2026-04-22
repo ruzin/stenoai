@@ -86,7 +86,7 @@
       }
     ],
     "mac": {
-      "icon": "build/icon.icns",
+      "icon": "build/icon-dragonfly.icns",
       "category": "public.app-category.productivity",
       "target": [
         "dmg",

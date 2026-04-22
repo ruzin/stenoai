@@ -105,7 +105,7 @@ export default function App() {
       <header className="sticky top-0 z-30 backdrop-blur supports-[backdrop-filter]:bg-slate-950/50 border-b border-white/10">
         <div className="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
           <a href="#" className="flex items-center gap-2 hover:opacity-80 transition-opacity">
-            <div className="p-2 rounded-xl bg-slate-800 border border-white/10"><Mic className="w-5 h-5" aria-hidden="true" /></div>
+            <img src="/dragonfly-logo-512.png" alt="stenoAI" className="w-9 h-9 rounded-xl" />
             <span className="text-lg font-semibold tracking-tight">stenoAI</span>
           </a>
           <nav className="hidden md:flex items-center gap-6 text-sm text-slate-300">
@@ -330,7 +330,7 @@ export default function App() {
         <div className="max-w-6xl mx-auto px-4 py-10 text-sm text-slate-400">
           <div className="flex flex-col md:flex-row gap-4 md:items-center md:justify-between">
             <div className="flex items-center gap-2 text-slate-300">
-              <Mic className="w-4 h-4" aria-hidden="true" /> <span className="font-semibold">stenoAI</span>
+              <img src="/dragonfly-logo-512.png" alt="" className="w-4 h-4 rounded" /> <span className="font-semibold">stenoAI</span>
             </div>
             <div className="flex gap-4">
               <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 hover:text-white">
