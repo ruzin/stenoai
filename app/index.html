@@ -5382,10 +5382,10 @@ Session started - waiting for activity...
                     startBtn.disabled = true;
                     sessionNameInput.disabled = true;
                     startRecordingTimer(pausedElapsedTime > 0);
-                    // Header
+                    // Header: status indicator hidden — bottom pill conveys state + time
                     newNoteBtn.style.display = 'none';
-                    document.getElementById('status-dot').style.display = '';
-                    document.getElementById('status-text').style.display = '';
+                    document.getElementById('status-dot').style.display = 'none';
+                    document.getElementById('status-text').style.display = 'none';
                     // Controls pill: show with live waveform + pause + stop
                     controlsPill.classList.add('show');
                     controlsPill.classList.add('recording');
@@ -5418,10 +5418,10 @@ Session started - waiting for activity...
                     sessionNameInput.disabled = true;
                     AudioVisualizer.stop();
                     pauseRecordingTimer();
-                    // Header
+                    // Header: status indicator hidden — bottom pill conveys state
                     newNoteBtn.style.display = 'none';
-                    document.getElementById('status-dot').style.display = '';
-                    document.getElementById('status-text').style.display = '';
+                    document.getElementById('status-dot').style.display = 'none';
+                    document.getElementById('status-text').style.display = 'none';
                     // Controls pill: show with resume + stop, grey waveform
                     controlsPill.classList.add('show');
                     controlsPill.classList.remove('recording');
@@ -5439,12 +5439,11 @@ Session started - waiting for activity...
                     startBtn.disabled = true;
                     sessionNameInput.disabled = true;
                     stopRecordingTimer();
-                    setStatus('processing', 'Processing...');
                     AudioVisualizer.stop();
-                    // Header
+                    // Header: status indicator hidden — the scanner inside the note carries the state
                     newNoteBtn.style.display = 'none';
-                    document.getElementById('status-dot').style.display = '';
-                    document.getElementById('status-text').style.display = '';
+                    document.getElementById('status-dot').style.display = 'none';
+                    document.getElementById('status-text').style.display = 'none';
                     // Controls pill: show (for transcript) but hide rec controls
                     controlsPill.classList.add('show');
                     controlsPill.classList.remove('recording');
@@ -5455,6 +5454,20 @@ Session started - waiting for activity...
                     document.getElementById('ask-bar-transcript-body').style.display = '';
                     document.getElementById('ask-bar-transcript').classList.remove('show');
                     document.getElementById('bar-chevron').classList.remove('open');
+                    // Surface the analysis scanner at the top of the notes editor while the
+                    // backend transcribes — it will slide down + relabel to "Generating notes"
+                    // once the first summary chunk arrives (see `summary-chunk` handler).
+                    {
+                        const editor = document.getElementById('notes-editor');
+                        if (editor) editor.style.display = 'block';
+                        const scanner = document.getElementById('generation-scanner');
+                        if (scanner) {
+                            scanner.style.display = 'flex';
+                            scanner.style.top = '0px';
+                        }
+                        const lbl = document.getElementById('generation-scanner-label');
+                        if (lbl) lbl.textContent = 'Analyzing transcript';
+                    }
                     break;
             }
         }
