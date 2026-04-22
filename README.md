@@ -42,7 +42,7 @@
 ## Sponsors
 
 > [!TIP]
-> **[Recall.ai](https://www.recall.ai/product/desktop-recording-sdk?utm_source=github&utm_medium=sponsorship&utm_campaign=ruzin-stenoai)** — a hosted desktop recording API for Zoom, Google Meet, Microsoft Teams, and in-person meetings. If you're looking for a hosted desktop recording API, [check out Recall.ai](https://www.recall.ai/product/desktop-recording-sdk?utm_source=github&utm_medium=sponsorship&utm_campaign=ruzin-stenoai).
+> **[Recall.ai](https://www.recall.ai/product/desktop-recording-sdk?utm_source=github&utm_medium=sponsorship&utm_campaign=ruzin-stenoai)** — a hosted desktop recording API for Zoom, Google Meet, Microsoft Teams, and in-person meetings. If you're looking for a hosted desktop recording API, check out Recall.ai.
 
 ## Features
 
