@@ -1442,6 +1442,18 @@
             opacity: 0.5;
         }
 
+        .meeting-item.recording .meeting-dot {
+            background: #ef4444;
+            box-shadow: 0 0 8px rgba(239, 68, 68, 0.6);
+            opacity: 1;
+            animation: pulse 1.2s infinite;
+        }
+
+        .meeting-item.recording .meeting-line-date {
+            color: #ef4444;
+            font-weight: 600;
+        }
+
         .meeting-item.active .meeting-line-title {
             color: var(--text-primary);
             font-weight: 600;
@@ -6171,21 +6183,32 @@ Session started - waiting for activity...
             }
 
             meetingsList.innerHTML = filteredMeetings.map((meeting, index) => {
-                const isProcessing = processingMeetings.has(meeting.session_info?.name);
+                const isRecording = !!meeting.is_recording;
+                const isProcessing = !isRecording && processingMeetings.has(meeting.session_info?.name);
                 const actionCount = (meeting.action_items || []).length;
                 const title = meeting.session_info?.name || 'Untitled Meeting';
-                const date = formatShortDate(meeting.session_info?.processed_at);
+                const date = isRecording ? 'Recording' : formatShortDate(meeting.session_info?.processed_at);
+                const classes = ['meeting-item'];
+                if (isRecording) classes.push('recording');
+                if (isProcessing) classes.push('processing');
+                // Live entries shouldn't be draggable/renamable/deletable — the real
+                // entry (with all those affordances) shows up once processing finishes.
+                const draggable = isRecording ? '' : 'draggable="true"';
+                const contextMenu = isRecording ? '' : `oncontextmenu="showMeetingContextMenu(event, ${index})"`;
+                const dragStart = isRecording ? '' : `ondragstart="handleMeetingDragStart(event, ${index})"`;
+                const rename = isRecording ? '' : `ondblclick="event.stopPropagation(); renameMeeting(${index}, this)"`;
+                const deleteBtn = isRecording ? '' : `<button class="meeting-delete" onclick="deleteMeeting(${index}, event)" title="Delete meeting">✕</button>`;
                 return `
-                <div class="meeting-item ${isProcessing ? 'processing' : ''}" data-index="${index}" draggable="true" oncontextmenu="showMeetingContextMenu(event, ${index})" ondragstart="handleMeetingDragStart(event, ${index})">
+                <div class="${classes.join(' ')}" data-index="${index}" ${draggable} ${contextMenu} ${dragStart}>
                     <span class="meeting-dot"></span>
                     <div class="meeting-line-body">
-                        <span class="meeting-line-title" ondblclick="event.stopPropagation(); renameMeeting(${index}, this)">${escapeHtml(title)}</span>
+                        <span class="meeting-line-title" ${rename}>${escapeHtml(title)}</span>
                         ${isProcessing ? '<span class="meeting-item-spinner"></span>' : ''}
                         <span class="meeting-line-meta">
                             <span class="meeting-line-date">${date}</span>
                         </span>
                     </div>
-                    <button class="meeting-delete" onclick="deleteMeeting(${index}, event)" title="Delete meeting">✕</button>
+                    ${deleteBtn}
                 </div>
                 `;
             }).join('');
@@ -6248,6 +6271,33 @@ Session started - waiting for activity...
         function selectMeeting(index) {
             selectedMeeting = filteredMeetings[index];
             if (!selectedMeeting) return;
+
+            // Live recording: restore the in-progress notes editor view WITHOUT
+            // re-initializing (showNotesEditor would wipe the user's typed notes).
+            // The recording is already running — we just un-hide what's already in
+            // the DOM from the initial start.
+            if (selectedMeeting.is_recording) {
+                document.querySelectorAll('.meeting-item').forEach((item, i) => {
+                    item.classList.toggle('active', i === index);
+                });
+                selectedCalendarEvent = null;
+                document.getElementById('calendar-event-detail').classList.remove('show');
+                renderCalendarSidebar();
+                emptyState.style.display = 'none';
+                meetingDetail.classList.add('show');
+                document.getElementById('home-btn').style.display = '';
+                detailTitle.textContent = selectedMeeting.session_info?.name || 'Untitled';
+                // Show notes editor, hide processed-meeting sections
+                document.querySelectorAll('#meeting-detail .meeting-section').forEach(s => s.style.display = 'none');
+                document.getElementById('notes-editor').style.display = 'block';
+                // Keep action buttons hidden (they appear after processing)
+                document.getElementById('ask-ai-btn').style.display = 'none';
+                document.getElementById('copy-notes-btn').style.display = 'none';
+                document.getElementById('reprocess-btn').style.display = 'none';
+                document.getElementById('ask-bar').style.display = '';
+                return;
+            }
+
             activeChatSessionId = null;
             if (typeof meetingChats !== 'undefined') {
                 const mid = selectedMeeting?.session_info?.name || selectedMeeting?.session_info?.summary_file || selectedMeeting?.id;
@@ -6425,6 +6475,33 @@ Session started - waiting for activity...
 
         let _notesInputHandler = null;  // Track listener to avoid duplicates
         let _notesSaveTimeout = null;   // Debounce timeout for auto-save
+
+        // --- Live recording sidebar entry -----------------------------------
+        // Ephemeral entry shown at the top of the meetings list while a recording
+        // is active so the user can navigate away and click back. Replaced by the
+        // real .md entry once processing finishes (loadMeetings refresh).
+        function upsertLiveMeeting(sessionName) {
+            meetings = meetings.filter(m => !(m.is_recording && m.session_info?.name === sessionName));
+            meetings.unshift({
+                is_recording: true,
+                session_info: {
+                    name: sessionName,
+                    processed_at: new Date().toISOString(),
+                    duration_seconds: null,
+                },
+                summary: '',
+                key_points: [],
+                action_items: [],
+                transcript: '',
+            });
+            filterMeetings();
+        }
+
+        function removeLiveMeeting(sessionName) {
+            const before = meetings.length;
+            meetings = meetings.filter(m => !(m.is_recording && m.session_info?.name === sessionName));
+            if (meetings.length !== before) filterMeetings();
+        }
 
         function showNotesEditor(sessionName) {
             currentNotesSessionName = sessionName;
@@ -6692,10 +6769,10 @@ Session started - waiting for activity...
                 return;
             }
 
-            // Generate session name if empty or use Meeting-HASH format
+            // Generate session name if empty or already in the auto-Note/Meeting-HASH format
             let sessionName = sessionNameInput.value.trim();
-            if (!sessionName || sessionName === 'Meeting' || /^Meeting-[A-Z0-9]{6}$/.test(sessionName)) {
-                sessionName = `Meeting-${generateMeetingHash()}`;
+            if (!sessionName || sessionName === 'Meeting' || sessionName === 'Note' || /^(Meeting|Note)-[A-Z0-9]{6}$/.test(sessionName)) {
+                sessionName = `Note-${generateMeetingHash()}`;
                 sessionNameInput.value = sessionName;
             }
 
@@ -6707,6 +6784,10 @@ Session started - waiting for activity...
             } catch (e) {
                 // Fall back to mic-only
             }
+
+            // Surface a "Recording…" entry in the sidebar immediately so the user
+            // can click away to another note and return without losing the session.
+            upsertLiveMeeting(sessionName);
 
             if (useSystemAudio) {
                 log(`Starting recording (mic + system audio): ${sessionName}`);
@@ -6756,6 +6837,10 @@ Session started - waiting for activity...
             // Add current session to processing list immediately
             const currentSessionName = sessionNameInput.value.trim() || 'Meeting';
             processingMeetings.add(currentSessionName);
+
+            // Drop the live-recording sidebar entry (if any) before inserting
+            // the processing temp — otherwise we'd end up with two entries.
+            meetings = meetings.filter(m => !(m.is_recording && m.session_info?.name === currentSessionName));
 
             // Add a temporary meeting entry to show processing
             const tempMeeting = {
