@@ -12,6 +12,7 @@
   <a href="https://discord.gg/DZ6vcQnxxu"><img src="https://img.shields.io/badge/Discord-Join%20Server-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue?style=for-the-badge" alt="License"></a>
   <img src="https://img.shields.io/badge/Platform-macOS-000000?style=for-the-badge&logo=apple&logoColor=white" alt="macOS">
+  <a href="#sponsor"><img src="https://img.shields.io/badge/Sponsor-%E2%9D%A4-EA4AAA?style=for-the-badge" alt="Sponsor"></a>
 </p>
 
 <p align="center">AI-powered meeting intelligence that runs entirely on your device, your private data never leaves anywhere. Record, transcribe, summarize, and query your meetings using local AI models. Perfect for healthcare, legal and finance professionals with confidential data needs.</p>
@@ -37,6 +38,11 @@
 - **2026-03-23** 🗣️ Speaker diarisation — [You] vs [Others] labels for system audio recordings
 - **2026-03-23** 🌍 Auto-detect language — 99 languages supported out of the box
 - **2026-03-04** 🏷️ Auto-generated meeting titles — AI creates short titles from your transcripts
+
+## Sponsor
+
+> [!TIP]
+> **[Recall.ai](https://www.recall.ai/product/desktop-recording-sdk?utm_source=github&utm_medium=sponsorship&utm_campaign=ruzin-stenoai)** — a hosted desktop recording API for Zoom, Google Meet, Microsoft Teams, and in-person meetings.
 
 ## Features
 
