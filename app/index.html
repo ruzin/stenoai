@@ -8620,6 +8620,13 @@ Session started - waiting for activity...
                 pendingTitle = titleElement.textContent;
             });
 
+            titleElement.addEventListener('paste', (e) => {
+                e.preventDefault();
+                const text = (e.clipboardData || window.clipboardData).getData('text/plain');
+                const cleaned = text.replace(/[\r\n]+/g, ' ').trim();
+                document.execCommand('insertText', false, cleaned);
+            });
+
             titleElement.addEventListener('keydown', (e) => {
                 if (e.key === 'Enter') {
                     e.preventDefault();
@@ -8634,7 +8641,7 @@ Session started - waiting for activity...
             titleElement.addEventListener('blur', async () => {
                 if (!editingMeeting) return;
                 const meeting = editingMeeting;
-                const newTitle = pendingTitle.trim();
+                const newTitle = pendingTitle.replace(/[\r\n]+/g, ' ').trim();
                 editingMeeting = null;
                 pendingTitle = '';
 
