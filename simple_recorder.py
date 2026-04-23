@@ -1222,7 +1222,10 @@ def _parse_meeting_markdown(md_path):
             for line in parts[1].strip().split('\n'):
                 if ':' in line:
                     key, _, value = line.partition(':')
-                    value = value.strip().strip('"')
+                    value = value.strip()
+                    if value.startswith('"') and value.endswith('"'):
+                        import re as _re
+                        value = _re.sub(r'\\(.)', lambda m: m.group(1), value[1:-1])
                     if value == 'null':
                         value = None
                     elif value == 'true':
