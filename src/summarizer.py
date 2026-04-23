@@ -930,6 +930,77 @@ TITLE:"""
             logger.warning(f"Failed to generate meeting title: {e}")
             return None
 
+    def _build_query_prompt(self, transcript: str, question: str, language: str = "en") -> str:
+        if language and language not in ("en", "auto"):
+            from .config import get_config
+            language_name = get_config().get_language_name(language)
+            query_lang_instruction = f"\nRespond in {language_name}." if language_name != "Unknown" else ""
+        else:
+            query_lang_instruction = ""
+        return f"""Answer the following question based on the meeting content below (summary, key topics, and transcript).
+Be concise and direct. If the answer requires inference from what was discussed, that's fine.
+Only say you don't know if the topic truly wasn't discussed at all.{query_lang_instruction}
+
+QUESTION: {question}
+
+{transcript}
+
+ANSWER:"""
+
+    def query_transcript_streaming(self, transcript: str, question: str, language: str = "en"):
+        """Generator that yields text chunks from the LLM for a transcript query."""
+        if not transcript or transcript.strip() == "":
+            yield "No transcript available to query."
+            return
+        if not question or question.strip() == "":
+            yield "Please provide a question."
+            return
+
+        prompt = self._build_query_prompt(transcript, question, language)
+
+        try:
+            if self.ai_provider == "cloud":
+                if self.cloud_provider == "anthropic":
+                    with self.anthropic_client.messages.stream(
+                        model=self.model_name,
+                        max_tokens=2048,
+                        messages=[{"role": "user", "content": prompt}],
+                    ) as stream:
+                        for text in stream.text_stream:
+                            yield text
+                else:
+                    response = self.cloud_client.chat.completions.create(
+                        model=self.model_name,
+                        messages=[{"role": "user", "content": prompt}],
+                        stream=True,
+                    )
+                    for chunk in response:
+                        # Some providers emit chunk variants with empty choices
+                        # (e.g. usage-only chunks); skip those instead of crashing.
+                        if not chunk.choices:
+                            continue
+                        content = chunk.choices[0].delta.content
+                        if content:
+                            yield content
+            else:
+                if self.ai_provider == "remote":
+                    self.client = ollama.Client(host=self.remote_url)
+                else:
+                    self._ensure_ollama_ready()
+                    self.client = ollama.Client()
+                stream = self.client.chat(
+                    model=self.model_name,
+                    messages=[{"role": "user", "content": prompt}],
+                    stream=True,
+                )
+                for chunk in stream:
+                    content = chunk['message']['content']
+                    if content:
+                        yield content
+        except Exception as e:
+            logger.error(f"Streaming query failed: {e}")
+            yield f"\n[Error: {e}]"
+
     def query_transcript(self, transcript: str, question: str, language: str = "en") -> Optional[str]:
         """
         Query a transcript with a question using Ollama.
@@ -949,26 +1020,7 @@ TITLE:"""
             if not question or question.strip() == "":
                 return "Please provide a question."
 
-            # Build language instruction for query responses
-            if language and language not in ("en", "auto"):
-                from .config import get_config
-                language_name = get_config().get_language_name(language)
-                if language_name != "Unknown":
-                    query_lang_instruction = f"\nRespond in {language_name}."
-                else:
-                    query_lang_instruction = ""
-            else:
-                query_lang_instruction = ""
-
-            prompt = f"""Answer the following question based on the meeting content below (summary, key topics, and transcript).
-Be concise and direct. If the answer requires inference from what was discussed, that's fine.
-Only say you don't know if the topic truly wasn't discussed at all.{query_lang_instruction}
-
-QUESTION: {question}
-
-{transcript}
-
-ANSWER:"""
+            prompt = self._build_query_prompt(transcript, question, language)
 
             logger.info(f"Querying transcript with question: {question[:50]}...")
 
