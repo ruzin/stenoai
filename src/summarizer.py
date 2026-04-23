@@ -975,6 +975,10 @@ ANSWER:"""
                         stream=True,
                     )
                     for chunk in response:
+                        # Some providers emit chunk variants with empty choices
+                        # (e.g. usage-only chunks); skip those instead of crashing.
+                        if not chunk.choices:
+                            continue
                         content = chunk.choices[0].delta.content
                         if content:
                             yield content

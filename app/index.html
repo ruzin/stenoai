@@ -3761,19 +3761,8 @@
             transform: scaleY(0.15);
             transition: transform 0.3s ease;
         }
-        .controls-pill .bar-pause-btn {
-            background: none;
-            border: none;
-            color: var(--text-secondary);
-            font-size: 13px;
-            font-weight: 500;
-            font-family: inherit;
-            cursor: pointer;
-            padding: 4px 6px;
-            border-radius: 4px;
-            transition: color 0.15s ease, background 0.15s ease;
-        }
-
+        /* base .bar-pause-btn + :hover rules live in the top of this file;
+           the controls-pill version inherits, with only the hover tint differing */
         .controls-pill .bar-pause-btn:hover {
             color: var(--text-primary);
         }
@@ -6799,6 +6788,7 @@ Session started - waiting for activity...
                     log(`System audio start error: ${error.message}`);
                     hideNotesEditor();
                     setUIState('ready');
+                    removeLiveMeeting(sessionName);
                 }
             } else {
                 log(`Starting recording: ${sessionName}`);
@@ -6818,12 +6808,14 @@ Session started - waiting for activity...
                         AudioVisualizer.stop();
                         hideNotesEditor();
                         setUIState('ready');
+                        removeLiveMeeting(sessionName);
                     }
                 } catch (error) {
                     log(`Start error: ${error.message}`);
                     AudioVisualizer.stop();
                     hideNotesEditor();
                     setUIState('ready');
+                    removeLiveMeeting(sessionName);
                 }
             }
         });
@@ -7884,8 +7876,13 @@ Session started - waiting for activity...
 
             document.getElementById('ask-bar-chat-title').textContent = session.title;
 
+            // Exclude the currently-streaming AI message — the chunk handler
+            // owns its DOM element (streamingEl) and appends it separately.
+            // Rendering it here would produce a duplicate bubble.
+            const streamingMsg = activeQueryId ? activeQueryAiMsg : null;
             askBarMessages.replaceChildren(
                 ...session.messages
+                    .filter(msg => msg !== streamingMsg)
                     .filter(msg => msg.role !== 'ai' || msg.content.trim() !== '')
                     .map(msg => {
                         const el = document.createElement('div');
@@ -8043,16 +8040,30 @@ Session started - waiting for activity...
             finishQuery(session, aiMsg, sessionId);
         });
 
+        // Tracked so showChatWindow can cancel a pending hide's animationend
+        // before it gets a chance to rip `.show` back off a just-opened panel.
+        let _chatHideAnimHandler = null;
+
         function hideChatWindow() {
             if (!askBarChatWindow.classList.contains('show')) return;
+            if (_chatHideAnimHandler) {
+                askBarChatWindow.removeEventListener('animationend', _chatHideAnimHandler);
+            }
             askBarChatWindow.classList.add('hiding');
-            askBarChatWindow.addEventListener('animationend', () => {
+            _chatHideAnimHandler = () => {
                 askBarChatWindow.classList.remove('show', 'hiding');
-            }, { once: true });
+                _chatHideAnimHandler = null;
+            };
+            askBarChatWindow.addEventListener('animationend', _chatHideAnimHandler, { once: true });
         }
 
         function showChatWindow() {
-            // Cancel any in-progress hide animation so its animationend doesn't remove .show
+            // Cancel any pending hide animation + its listener so a late animationend
+            // doesn't strip `.show` right after the panel finishes opening.
+            if (_chatHideAnimHandler) {
+                askBarChatWindow.removeEventListener('animationend', _chatHideAnimHandler);
+                _chatHideAnimHandler = null;
+            }
             askBarChatWindow.classList.remove('hiding');
             // Instantly clear the transcript so both panels never occupy space simultaneously
             const transcript = document.getElementById('ask-bar-transcript');
@@ -8204,10 +8215,15 @@ Session started - waiting for activity...
             renameBtn.addEventListener('click', (ev) => {
                 ev.stopPropagation();
                 closeItemContextMenu();
+                // Re-query the current title span from the item — the reference
+                // captured by the outer closure goes stale after the first rename
+                // (we replace it with a brand-new span on commit).
+                const currentTitleSpan = itemEl.querySelector('.ask-bar-history-item-title') || titleSpan;
+                if (!currentTitleSpan.isConnected) return;
                 const input = document.createElement('input');
                 input.value = session.title;
                 input.style.cssText = 'flex:1;background:none;border:none;outline:none;font-size:13px;color:var(--text-primary);font-family:inherit;min-width:0;';
-                titleSpan.replaceWith(input);
+                currentTitleSpan.replaceWith(input);
                 input.focus();
                 input.select();
                 const commit = () => {
@@ -8659,11 +8675,18 @@ Session started - waiting for activity...
                         await loadMeetings(true);
                         log(`✏️ Meeting name updated to: ${newTitle}`);
                     } else {
-                        titleElement.textContent = originalTitle;
+                        // Only revert the visible title if the user is still on this
+                        // meeting; otherwise we'd overwrite whichever meeting they
+                        // switched to mid-save with this one's original title.
+                        if (selectedMeeting === meeting) {
+                            titleElement.textContent = originalTitle;
+                        }
                         log(`❌ Failed to update meeting name: ${result.error}`);
                     }
                 } catch (error) {
-                    titleElement.textContent = originalTitle;
+                    if (selectedMeeting === meeting) {
+                        titleElement.textContent = originalTitle;
+                    }
                     log(`❌ Error updating meeting name: ${error.message}`);
                 }
             });

@@ -1224,12 +1224,16 @@ ipcMain.on('query-transcript-stream', (event, queryId, summaryFile, question) =>
   }
 
   activeQueryProcs.set(queryId, proc);
-  event.sender.once('destroyed', () => {
+  // Kill the spawned proc if the renderer sender goes away before the query
+  // finishes. Keep a reference so we can remove the listener on normal close
+  // (otherwise repeated queries on a long-lived sender leak one-time listeners).
+  const onSenderDestroyed = () => {
     if (activeQueryProcs.has(queryId)) {
       proc.kill();
       activeQueryProcs.delete(queryId);
     }
-  });
+  };
+  event.sender.once('destroyed', onSenderDestroyed);
   let buf = '';
   let chunkCount = 0;
   proc.stdout.on('data', (data) => {
@@ -1269,6 +1273,9 @@ ipcMain.on('query-transcript-stream', (event, queryId, summaryFile, question) =>
 
   proc.on('close', (code) => {
     activeQueryProcs.delete(queryId);
+    if (!event.sender.isDestroyed()) {
+      event.sender.removeListener('destroyed', onSenderDestroyed);
+    }
     console.log(`[QUERY] Process closed, code=${code}, chunks=${chunkCount}, bufRemainder=${buf.length > 0 ? JSON.stringify(buf.substring(0, 100)) : 'empty'}`);
     if (buf.trim() === 'CHAT_STREAM_COMPLETE' || buf.trim() === 'STREAM_COMPLETE') {
       console.log(`[QUERY] STREAM_COMPLETE was in buf remainder — sending done now`);
