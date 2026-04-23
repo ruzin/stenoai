@@ -8435,6 +8435,8 @@ Session started - waiting for activity...
                     hideAiQueryPopup();
                 } else if (settingsVisible) {
                     toggleSettings();
+                } else if (activeQueryId) {
+                    askBarStop.click();
                 }
             }
         });
@@ -9133,10 +9135,7 @@ Session started - waiting for activity...
         // ── Streaming Summary Rendering ──
         let streamedMarkdown = '';
         let streamingActive = false;
-
-        function escapeHtml(str) {
-            return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-        }
+        let scannerRafPending = false;
 
         function renderStreamingMarkdown(md) {
             const container = document.getElementById('streaming-output');
@@ -9186,7 +9185,16 @@ Session started - waiting for activity...
             const scanner = document.getElementById('generation-scanner');
             if (scanner) {
                 scanner.style.display = 'flex';
-                scanner.style.top = (container.scrollHeight - 14) + 'px';
+                if (!scannerRafPending) {
+                    scannerRafPending = true;
+                    requestAnimationFrame(() => {
+                        scannerRafPending = false;
+                        const s = document.getElementById('generation-scanner');
+                        if (s && s.style.display !== 'none') {
+                            s.style.top = Math.max(0, container.scrollHeight - 40) + 'px';
+                        }
+                    });
+                }
             }
 
             const detailPanel = document.getElementById('meeting-detail');
@@ -9195,6 +9203,7 @@ Session started - waiting for activity...
 
         function stopStreamingRenderer() {
             streamingActive = false;
+            scannerRafPending = false;
             const scanner = document.getElementById('generation-scanner');
             if (scanner) scanner.style.display = 'none';
         }

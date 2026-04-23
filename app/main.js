@@ -1355,7 +1355,10 @@ ipcMain.handle('update-meeting', async (event, summaryFilePath, updates) => {
       // .md format: update YAML frontmatter fields
       let updatedContent = fileContent;
       if (updates.name !== undefined) {
-        const escapedName = updates.name.replace(/"/g, '\\"');
+        if (updates.name.includes('\n') || updates.name.includes('\r')) {
+          return { success: false, error: 'Title cannot contain newlines' };
+        }
+        const escapedName = updates.name.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
         updatedContent = updatedContent.replace(
           /^title:\s*".*"$/m,
           `title: "${escapedName}"`
