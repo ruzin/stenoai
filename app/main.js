@@ -2269,6 +2269,10 @@ function setupAutoUpdater() {
 }
 
 ipcMain.on('install-update', () => {
+  // Bypass the mainWindow 'close' handler's preventDefault+hide so that
+  // quitAndInstall's window-close step actually quits the app. Without this
+  // the app just minimises and Squirrel never gets to apply the update.
+  isQuitting = true;
   autoUpdater.quitAndInstall(false, true);
 });
 
