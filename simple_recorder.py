@@ -1226,7 +1226,12 @@ def _parse_meeting_markdown(md_path):
                     if value.startswith('"') and value.endswith('"'):
                         import re as _re
                         value = _re.sub(r'\\(.)', lambda m: m.group(1), value[1:-1])
-                    if value == 'null':
+                    elif value.startswith('['):
+                        try:
+                            value = json.loads(value)
+                        except (ValueError, TypeError):
+                            value = []
+                    elif value == 'null':
                         value = None
                     elif value == 'true':
                         value = True
@@ -1313,7 +1318,7 @@ def _parse_meeting_markdown(md_path):
         'is_diarised': meta.get('is_diarised', False),
         'diarised_text': sections.get('transcript', '') if meta.get('is_diarised') else None,
         'user_notes': sections.get('user notes'),
-        'folders': [],
+        'folders': meta.get('folders', []),
     }
 
 
@@ -1538,6 +1543,66 @@ def reprocess(summary_file, regenerate_title):
 
     except Exception as e:
         print(f"ERROR: Failed to reprocess summary: {e}")
+        sys.exit(1)
+
+
+@cli.command('regen-title')
+@click.argument('summary_file', required=True)
+def regen_title(summary_file):
+    """Regenerate only the title for an existing meeting."""
+    import json
+    from pathlib import Path
+
+    recorder = SimpleRecorder()
+    summary_path = Path(summary_file)
+
+    if not summary_path.exists():
+        print(f"ERROR: Summary file not found: {summary_file}")
+        sys.exit(1)
+
+    try:
+        if summary_path.suffix == '.md':
+            existing_data = _parse_meeting_markdown(summary_path)
+        else:
+            with open(summary_path, 'r') as f:
+                existing_data = json.load(f)
+
+        transcript = existing_data.get('transcript', '')
+        summary = existing_data.get('summary', '')
+        session_info = existing_data.get('session_info', {})
+        output_language = session_info.get('output_language') or session_info.get('configured_language') or 'en'
+
+        if not transcript and not summary:
+            print("ERROR: No transcript or summary found in file")
+            sys.exit(1)
+
+        if recorder.summarizer is None:
+            from src.summarizer import OllamaSummarizer
+            recorder.summarizer = OllamaSummarizer()
+
+        generated_title = recorder.summarizer.generate_title(summary, transcript, language=output_language)
+        if not generated_title:
+            print("ERROR: Title generation returned empty result")
+            sys.exit(1)
+
+        # Update and save
+        existing_data['session_info']['name'] = generated_title
+        if summary_path.suffix == '.md':
+            # Rewrite the title in the YAML front matter only
+            text = summary_path.read_text(encoding='utf-8')
+            import re
+            escaped = generated_title.replace('\\', '\\\\').replace('"', '\\"')
+            text = re.sub(r'^title:.*$', f'title: "{escaped}"', text, flags=re.MULTILINE)
+            summary_path.write_text(text, encoding='utf-8')
+        else:
+            with open(summary_path, 'w') as f:
+                json.dump(existing_data, f, indent=2)
+
+        print(f"TITLE:{generated_title}", flush=True)
+        print(f"Title updated: {generated_title}")
+
+    except Exception as e:
+        print(f"ERROR: Failed to regenerate title: {e}")
         sys.exit(1)
 
 
@@ -1994,7 +2059,8 @@ def list_models():
 
                 models[name] = {
                     "size": size_str,
-                    "description": " / ".join(detail_parts) if detail_parts else ""
+                    "description": " / ".join(detail_parts) if detail_parts else "",
+                    "installed": True
                 }
 
             result = {
@@ -2016,6 +2082,18 @@ def list_models():
             }
     else:
         models = config.list_supported_models()
+        try:
+            import ollama as ollama_pkg
+            installed_names = {getattr(m, 'model', '') for m in (getattr(ollama_pkg.list(), 'models', []) or [])}
+        except Exception:
+            installed_names = set()
+        for model_id, info in models.items():
+            # Match exactly, or where Ollama appended extra detail after the tag
+            # e.g. "deepseek-r1:14b" matches "deepseek-r1:14b-qwen-distill-q4_K_M"
+            info['installed'] = any(
+                name == model_id or name.startswith(model_id + '-')
+                for name in installed_names
+            )
         result = {
             "current_model": current_model,
             "supported_models": models,
@@ -2269,6 +2347,17 @@ def create_folder(name, color):
         print(json.dumps({"success": True, "folder": folder}))
     else:
         print(json.dumps({"success": False, "error": "Failed to create folder"}))
+
+
+@cli.command()
+@click.argument('folder_id')
+@click.argument('icon')
+def update_folder_icon(folder_id, icon):
+    """Update a folder's icon"""
+    from src.folders import get_folders_manager
+    mgr = get_folders_manager()
+    success = mgr.update_icon(folder_id, icon)
+    print(json.dumps({"success": success}))
 
 
 @cli.command()
