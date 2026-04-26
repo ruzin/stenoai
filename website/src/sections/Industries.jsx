@@ -1,15 +1,15 @@
 import { motion as Motion } from "framer-motion";
 
 const inds = [
-  { title: "Healthcare", body: "Patient consultations and clinical meetings stay on your device. Suitable for confidential contexts without cloud risk." },
-  { title: "Legal", body: "Client calls and case discussions remain privileged — enforced by architecture, not policy or a privacy checkbox." },
+  { title: "Government", body: "Sensitive briefings, policy discussions, and internal reviews stay within your perimeter. No cloud dependencies, no third-party processors, no records leaving the device." },
+  { title: "Defense", body: "Operational planning and classified discussions run entirely on-device. Works offline, on air-gapped networks, with nothing transiting an external server." },
+  { title: "Legal", body: "Client calls and case discussions remain privileged. Enforced by architecture, not policy or a privacy checkbox." },
   { title: "Finance", body: "Earnings prep, board meetings, deal discussions. None of it touches a third-party server." },
-  { title: "Research", body: "Interview recordings and sensitive study data stay local. Full transcripts available for analysis the moment a session ends." },
 ];
 
 export function Industries() {
   return (
-    <section id="industries" className="sect">
+    <section id="industries" className="sect" style={{ background: "var(--surface-sunken)" }}>
       <div className="container-site grid md:grid-cols-[1fr_1.1fr] gap-10 md:gap-20 items-start">
 
         <Motion.div
@@ -34,7 +34,7 @@ export function Industries() {
           </h2>
           <p className="text-fg-2 text-lg leading-[1.55]">
             If your meetings contain confidential data, you can't send audio to a third party.
-            stenoAI is built for people who already know that.
+            stenoAI is built for people who understand this.
           </p>
           <blockquote
             className="mt-10 text-fg-2"

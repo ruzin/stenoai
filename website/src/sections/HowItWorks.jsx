@@ -41,7 +41,7 @@ export function HowItWorks() {
             Three steps. Zero cloud.
           </h2>
           <p className="text-fg-2 text-lg leading-[1.55]" style={{ maxWidth: "56ch" }}>
-            From raw audio to structured notes, every step happens on your machine — including the language model.
+            From raw audio to structured notes, every step happens on your machine, including the language model.
           </p>
         </div>
 

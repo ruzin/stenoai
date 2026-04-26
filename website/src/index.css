@@ -4,7 +4,7 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 /* ═══════════════════════════════════════════════════
-   Raw tokens — light mode (warm paper + ink)
+   Raw tokens - light mode (warm paper + ink)
    ═══════════════════════════════════════════════════ */
 :root {
   --paper-0: #FAF9F5;
@@ -21,7 +21,7 @@
   --red-600: #B84A3A;
   --green-600: #4F7A5B;
 
-  /* Semantic — light */
+  /* Semantic - light */
   --page:                var(--paper-0);
   --surface:             var(--paper-0);
   --surface-raised:      #FFFFFF;
@@ -61,7 +61,7 @@
 }
 
 /* ═══════════════════════════════════════════════════
-   Semantic tokens — dark mode
+   Semantic tokens - dark mode
    ═══════════════════════════════════════════════════ */
 .dark {
   --page:                #1A1A18;
@@ -94,7 +94,7 @@
 }
 
 /* ═══════════════════════════════════════════════════
-   Tailwind v4 theme — exposes CSS vars as utilities
+   Tailwind v4 theme - exposes CSS vars as utilities
    ═══════════════════════════════════════════════════ */
 @theme {
   /* Raw color scale */
@@ -108,7 +108,7 @@
   --color-ink-300: #A8A8A0;
   --color-ink-100: #D6D4CB;
 
-  /* Semantic utilities — resolve to CSS vars so dark mode works automatically */
+  /* Semantic utilities - resolve to CSS vars so dark mode works automatically */
   --color-page:           var(--page);
   --color-surface:        var(--surface);
   --color-surface-raised: var(--surface-raised);
@@ -146,7 +146,7 @@
 }
 
 /* ═══════════════════════════════════════════════════
-   Base styles — in @layer base so Tailwind utilities override them
+   Base styles - in @layer base so Tailwind utilities override them
    ═══════════════════════════════════════════════════ */
 *, *::before, *::after { box-sizing: border-box; }
 
@@ -183,7 +183,7 @@
 }
 
 /* ═══════════════════════════════════════════════════
-   @utility — reusable component shorthands
+   @utility - reusable component shorthands
    ═══════════════════════════════════════════════════ */
 @utility sect {
   padding-top: 112px;
@@ -224,7 +224,7 @@
 .btn-primary:hover { background-color: var(--primary-hover); text-decoration: none; }
 .btn-ghost:hover   { background-color: var(--surface-hover); text-decoration: none; }
 
-/* CTA section — inverted button colors on the dark ink block */
+/* CTA section - inverted button colors on the dark ink block */
 .cta-wrap .btn-primary {
   background-color: var(--primary-fg);
   color: var(--primary);
@@ -255,7 +255,7 @@
 }
 
 /* ═══════════════════════════════════════════════════
-   Container — responsive padding
+   Container - responsive padding
    ═══════════════════════════════════════════════════ */
 @layer utilities {
   .container-site {
@@ -274,7 +274,7 @@
 }
 
 /* ═══════════════════════════════════════════════════
-   Responsive — section padding
+   Responsive - section padding
    ═══════════════════════════════════════════════════ */
 @media (max-width: 640px) {
   .sect { padding-top: 72px; padding-bottom: 72px; }

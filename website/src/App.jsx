@@ -1,5 +1,6 @@
 import { Nav } from "./sections/Nav";
 import { Hero } from "./sections/Hero";
+import { TrustStrip } from "./sections/TrustStrip";
 import { HowItWorks } from "./sections/HowItWorks";
 import { Features } from "./sections/Features";
 import { Models } from "./sections/Models";
@@ -13,6 +14,7 @@ export default function App() {
     <>
       <Nav />
       <Hero />
+      <TrustStrip />
       <HowItWorks />
       <Features />
       <Models />

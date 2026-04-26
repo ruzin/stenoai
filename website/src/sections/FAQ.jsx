@@ -3,12 +3,12 @@ import { Plus, Minus } from "lucide-react";
 import { AnimatePresence, motion as Motion } from "framer-motion";
 
 const faqs = [
-  { q: "What's included for free?", a: "Unlimited local transcription and summarization. No account, no tier, no upsell. stenoAI is open source — you can build and run it yourself if you prefer." },
+  { q: "What's included for free?", a: "Unlimited local transcription and summarization. No account, no tier, no upsell. stenoAI is open source. You can build and run it yourself if you prefer." },
   { q: "Which AI models can I use?", a: "Five open-weight models: Llama 3.2 3B, Gemma 3 4B, Qwen 3.5 9B, DeepSeek-R1 14B, and GPT-OSS 20B. All run locally on your Mac." },
-  { q: "Is my data really private?", a: "Yes. stenoAI makes no network requests after install. The source is open — you can verify it yourself, or have your security team do so." },
-  { q: "How accurate is the transcription?", a: "stenoAI uses Whisper. Results depend on audio clarity — quiet rooms and good microphones produce the best outcomes. Whisper performs well across 99 languages." },
+  { q: "Is my data really private?", a: "Yes. stenoAI makes no network requests after install. The source is open, so you can verify it yourself, or have your security team do so." },
+  { q: "How accurate is the transcription?", a: "stenoAI uses Whisper. Results depend on audio clarity. Quiet rooms and good microphones produce the best outcomes. Whisper performs well across 99 languages." },
   { q: "What Mac do I need?", a: "macOS only, on Apple Silicon or Intel. Apple Silicon is recommended for speed. The app runs comfortably on an M1 MacBook Air." },
-  { q: "Does it work with remote meetings?", a: "Yes. stenoAI captures system audio and microphone simultaneously — both sides of a Zoom, Teams, or Meet call are transcribed without any bot joining the meeting." },
+  { q: "Does it work with remote meetings?", a: "Yes. stenoAI captures system audio and microphone simultaneously. Both sides of a Zoom, Teams, or Meet call are transcribed without any bot joining the meeting." },
 ];
 
 export function FAQ() {

@@ -38,7 +38,7 @@ export function Models() {
           </h2>
           <p className="text-fg-2 text-lg leading-[1.55]" style={{ maxWidth: "44ch" }}>
             Five open-weight models included. Switch instantly without restarting.
-            All run on your Mac — none phone home.
+            All run on your Mac.
           </p>
         </Motion.div>
 

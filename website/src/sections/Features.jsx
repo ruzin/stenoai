@@ -1,9 +1,9 @@
-import { Cpu, SlidersHorizontal, MessageSquare, ShieldOff, Layers, HardDrive } from "lucide-react";
+import { Cpu, NotebookPen, MessageSquare, ShieldOff, Layers, HardDrive } from "lucide-react";
 import { motion as Motion } from "framer-motion";
 
 const feats = [
   { icon: <Cpu size={18} aria-hidden="true" />, title: "Local transcription", body: "Whisper.cpp runs on Apple Silicon and Intel. Fast on a laptop, private by architecture." },
-  { icon: <SlidersHorizontal size={18} aria-hidden="true" />, title: "Choose your model", body: "Llama 3.2, Gemma, Qwen, DeepSeek, GPT-OSS. Switch any time; all open-weight models run locally." },
+  { icon: <NotebookPen size={18} aria-hidden="true" />, title: "AI notepad", body: "Jot notes during a recording. They're merged with the transcript to shape the AI summary." },
   { icon: <MessageSquare size={18} aria-hidden="true" />, title: "Ask your meetings", body: "Chat with a model that has full context of the transcript. Answers come with citations to the source." },
   { icon: <ShieldOff size={18} aria-hidden="true" />, title: "No data leaves", body: "Zero network requests after install. Verified by inspectable, open-source code you can audit yourself." },
   { icon: <Layers size={18} aria-hidden="true" />, title: "99 languages", body: "Whisper auto-detects the language spoken. Works equally well across multilingual meetings." },
@@ -29,7 +29,7 @@ export function Features() {
             Built for focus. Engineered for privacy.
           </h2>
           <p className="text-fg-2 text-lg leading-[1.55]" style={{ maxWidth: "56ch" }}>
-            Every capability is designed around one constraint: your audio never leaves your device.
+            Every capability is designed around one principle: your audio never leaves your device.
           </p>
         </div>
 

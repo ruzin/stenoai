@@ -21,17 +21,11 @@ export function Hero() {
   }, []);
 
   return (
-    <section className="pt-[64px] pb-[56px] md:pt-[88px] md:pb-[80px]">
+    <section className="pt-[40px] pb-[56px] md:pt-[56px] md:pb-[80px]">
       <div className="container-site grid md:grid-cols-[1.1fr_1fr] gap-10 md:gap-16 items-center">
 
         {/* Copy */}
         <div>
-          <Motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}>
-            <div className="text-fg-2 text-xs tracking-[0.06em] uppercase mb-5">
-              On-device · No cloud · Open source
-            </div>
-          </Motion.div>
-
           <Motion.h1
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
@@ -46,7 +40,7 @@ export function Hero() {
               maxWidth: "14ch",
             }}
           >
-            Meeting notes that never leave your Mac.
+            Notes that never leave your Mac.
           </Motion.h1>
 
           <Motion.p
@@ -57,7 +51,7 @@ export function Hero() {
             style={{ maxWidth: "44ch" }}
           >
             stenoAI records, transcribes, and summarizes every meeting on-device.
-            No cloud, no bots joining your calls, no accounts.
+            No cloud, no usage limits and no bots joining your calls.
           </Motion.p>
 
           <Motion.div
@@ -84,7 +78,7 @@ export function Hero() {
               <ShieldCheck size={13} aria-hidden="true" /> No network requests after install
             </span>
             <span className="inline-flex items-center gap-1.5 text-fg-2 text-[13px]">
-              <Lock size={13} aria-hidden="true" /> Open source — verify it yourself
+              <Lock size={13} aria-hidden="true" /> Open source, verify it yourself
             </span>
           </Motion.div>
         </div>
@@ -128,7 +122,7 @@ export function Hero() {
               >
                 Q1 budget sync
               </div>
-              <div className="text-fg-2 text-[13px] mb-5">Feb 15, 2026 · 42 min · Ana, Marcus, Priya</div>
+              <div className="text-fg-2 text-[13px] mb-5">Feb 15, 2026 · 42 min</div>
               <p className="text-sm leading-[1.6] text-fg-1 mb-6">
                 The team reviewed Q1 variance. Engineering is 8% under plan; marketing is 3% over, driven by a paid pilot. Decision: reallocate $40k through March 31.
               </p>
@@ -136,7 +130,7 @@ export function Hero() {
               <div className="text-sm font-medium text-fg-1 mb-2.5">Key points</div>
               <ul className="list-none p-0 m-0 flex flex-col gap-2 mb-5">
                 {[
-                  "Engineering underspend — two hires slipped to March.",
+                  "Engineering underspend: two hires slipped to March.",
                   "Paid pilot ahead of signups, over budget.",
                   "Reallocate $40k; revisit at next sync.",
                 ].map((item) => (
@@ -165,7 +159,7 @@ export function Hero() {
           <div className="mt-3 flex items-center gap-1.5 text-fg-muted text-[12px]">
             <Cpu size={12} aria-hidden="true" />
             Summarized locally with{" "}
-            <code style={{ fontFamily: "var(--font-mono)", fontSize: 11 }}>llama3.2:3b</code>
+            <code style={{ fontFamily: "var(--font-mono)", fontSize: 11 }}>gemma3:4b</code>
           </div>
         </Motion.div>
 

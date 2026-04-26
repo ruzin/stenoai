@@ -10,6 +10,15 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" />
+  <script>
+    (function() {
+      var stored = localStorage.getItem('theme');
+      var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      if (stored === 'dark' || (!stored && prefersDark)) {
+        document.documentElement.classList.add('dark');
+      }
+    })();
+  </script>
   <style>
     :root {
       --page: #FAF9F5;
@@ -23,16 +32,14 @@
       --font-sans: 'Inter',-apple-system,'Segoe UI','Helvetica Neue',sans-serif;
       --font-mono: 'SF Mono','Menlo','Consolas',monospace;
     }
-    @media (prefers-color-scheme: dark) {
-      :root {
-        --page: #1A1A18;
-        --fg-1: #EDEAE0;
-        --fg-2: #9A968A;
-        --fg-muted: #5D5A52;
-        --border-subtle: rgba(237,234,224,0.06);
-        --border: rgba(237,234,224,0.10);
-        --surface-hover: #242420;
-      }
+    :root.dark {
+      --page: #1A1A18;
+      --fg-1: #EDEAE0;
+      --fg-2: #9A968A;
+      --fg-muted: #5D5A52;
+      --border-subtle: rgba(237,234,224,0.06);
+      --border: rgba(237,234,224,0.10);
+      --surface-hover: #242420;
     }
     *, *::before, *::after { box-sizing: border-box; }
     html, body {
