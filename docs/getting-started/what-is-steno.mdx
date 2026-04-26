@@ -1,0 +1,54 @@
+---
+title: "What is Steno?"
+description: "Steno is a macOS app that records, transcribes, and summarizes meetings entirely on-device. Your audio never leaves your Mac."
+---
+
+Steno is a macOS app that records, transcribes, and summarizes meetings using AI models that run entirely on your device. There are no cloud uploads, no accounts required, and no network requests after installation. Your audio, transcripts, and summaries are stored locally in `~/Library/Application Support/stenoai/`.
+
+## How it works
+
+Steno runs a local pipeline on every recording:
+
+1. **Record** -- captures microphone audio, system audio (both sides of a call), or both simultaneously
+2. **Transcribe** -- runs [Whisper](https://github.com/ggerganov/whisper.cpp) locally to produce a verbatim transcript with speaker labels
+3. **Summarize** -- passes the transcript to a small language model running via [Ollama](https://ollama.com) on your Mac to produce structured notes: summary, key topics, and action items
+4. **Query** -- ask natural-language questions against any saved note from the inline ask bar
+
+Every step runs offline. Steno does not communicate with any external server unless you explicitly configure a cloud model (OpenAI, Anthropic, or a custom endpoint) as an optional alternative to the local model.
+
+## Who it's for
+
+Steno is built for professionals who work with confidential audio:
+
+- **Healthcare** -- clinical consultations, case reviews, MDT meetings
+- **Legal** -- client calls, depositions, strategy sessions
+- **Finance** -- investment committee meetings, client briefings
+- **Any role** where recordings leaving your device is not acceptable
+
+It is also used by developers, researchers, and individuals who simply prefer their data to stay on their own hardware.
+
+## What Steno is not
+
+Steno is not a meeting bot. It does not join your video calls as a participant, does not require calendar access, and does not require you to share a link with other attendees. It records audio from your Mac's audio system -- the other people on the call never know it is running.
+
+## Supported platforms
+
+macOS 12 (Monterey) or later. Apple Silicon and Intel both supported.
+
+---
+
+<Accordion title="Does Steno require an internet connection?">
+No. After the initial download and model installation (which requires a connection to download model files), Steno runs entirely offline. All transcription and summarization happens on your Mac.
+</Accordion>
+
+<Accordion title="What data does Steno store and where?">
+All data is stored in `~/Library/Application Support/stenoai/`. This includes recordings (`recordings/`), transcripts (`transcripts/`), and summaries (`output/`). Nothing is stored remotely.
+</Accordion>
+
+<Accordion title="Is Steno open source?">
+Yes. The source code is available at [github.com/ruzin/stenoai](https://github.com/ruzin/stenoai) under the MIT license.
+</Accordion>
+
+<Accordion title="What hardware does Steno need?">
+A Mac with at least 8GB of RAM. Apple Silicon (M1 or later) gives the best transcription and summarization performance. Intel Macs are supported but will run more slowly on larger models.
+</Accordion>

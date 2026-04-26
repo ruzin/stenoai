@@ -1,0 +1,48 @@
+---
+title: "Transcription"
+description: "Steno transcribes recordings using Whisper running locally on your Mac. 99 languages, automatic language detection, no audio uploads."
+---
+
+Steno transcribes recordings using [whisper.cpp](https://github.com/ggerganov/whisper.cpp), a local implementation of OpenAI's Whisper model. Transcription runs entirely on your device -- your audio is never sent to any server.
+
+## How it works
+
+When you stop a recording, Steno automatically starts transcription. The Whisper model processes the audio file locally and outputs a verbatim transcript with timestamps.
+
+Transcription speed on Apple Silicon:
+
+| Model | 30-min recording |
+|-------|----------------|
+| `whisper-base` | ~1-2 min |
+| `whisper-small` (default) | ~2-4 min |
+| `whisper-medium` | ~5-10 min |
+
+## Language support
+
+Steno auto-detects the language from the audio. 99 languages are supported. You do not need to set the language manually.
+
+## Speaker labels
+
+Transcripts include `[You]` and `[Others]` labels when system audio is enabled. `[You]` labels lines from your microphone; `[Others]` labels the audio from your speakers.
+
+## Viewing the transcript
+
+The full transcript appears in the right pane of any saved note, below the AI summary. Transcripts are also saved as plain text files in `~/Library/Application Support/stenoai/transcripts/`.
+
+## Re-transcribing a recording
+
+You can re-run transcription on any saved recording -- for example, to use a more accurate model or to fix a previous transcription. Open the recording, click the options menu, and select **Re-transcribe**.
+
+## Choosing a model
+
+See [Transcription models](/models/transcription-models) for a full comparison of the available Whisper models.
+
+---
+
+<Accordion title="Does Steno transcribe in real time?">
+No. Steno transcribes after recording is stopped. Real-time transcription is on the roadmap.
+</Accordion>
+
+<Accordion title="Can I edit the transcript?">
+Transcripts are saved as plain text files. You can open and edit them in any text editor. Changes to the transcript file are reflected in Steno the next time you open the note.
+</Accordion>

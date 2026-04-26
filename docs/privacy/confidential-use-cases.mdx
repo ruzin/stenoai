@@ -1,0 +1,85 @@
+---
+title: "Confidential use cases"
+description: "Steno is used by healthcare, legal, and finance professionals who cannot send meeting audio to cloud services. Here is how it fits each context."
+---
+
+Steno was built for professionals who work with audio they cannot send to a cloud service. Because all transcription and summarization runs on-device, it is suitable for contexts where confidentiality is a hard requirement.
+
+<Warning>
+Steno is not certified under HIPAA, SOC 2, or any other compliance framework. It does not make compliance claims. If you work in a regulated environment, consult your compliance team before using any recording tool -- including Steno. The value Steno provides is technical: no data leaves your device.
+</Warning>
+
+## Healthcare
+
+**The problem with cloud recorders in clinical settings**
+
+Clinical conversations contain protected health information. Cloud-based meeting recorders -- including dedicated AI note-takers -- transmit audio or transcripts to external servers for processing. This creates data transfer obligations and risk, regardless of the vendor's compliance certifications.
+
+**How Steno fits**
+
+- Audio is processed entirely on the clinician's Mac using a local Whisper model
+- Transcripts and summaries are stored in the local filesystem, not synced to any cloud
+- No vendor relationship is created for PHI processing
+- Clinicians can use Steno on their organization-issued Mac without installing third-party cloud services
+
+**Typical uses**
+
+- Recording and summarizing clinical consultations for notes
+- MDT (multidisciplinary team) meeting notes
+- Supervision sessions, case reviews, and CPD recordings
+
+## Legal
+
+**The challenge for legal professionals**
+
+Legal professional privilege protects communications between lawyers and clients. Routing those conversations through a cloud AI service raises questions about whether the privilege is maintained and whether client consent is required.
+
+**How Steno fits**
+
+- No audio leaves the device -- the privilege analysis is the same as a local dictation recorder
+- Transcripts are stored as plain Markdown files you control entirely
+- Can be run on a device managed by your firm without creating any external data processor relationship
+
+**Typical uses**
+
+- Client call notes
+- Deposition prep and review
+- Strategy meeting notes
+
+## Finance
+
+**Why finance teams use local AI tools**
+
+Investment discussions, earnings calls, and client advisory conversations may be subject to information barriers, insider trading rules, or client confidentiality obligations. Cloud recording services create an external data trail.
+
+**How Steno fits**
+
+- Processing is isolated to the analyst's or advisor's local machine
+- No audio or transcript is transmitted externally (unless a cloud model is configured -- off by default)
+- Compatible with firm policies that prohibit cloud services for sensitive discussions
+
+**Typical uses**
+
+- Investment committee notes
+- Client relationship meeting notes
+- Research call notes
+
+## General guidance
+
+For any regulated or confidential context:
+
+1. Use the local model (the default) -- do not configure a cloud model for sensitive recordings
+2. Verify audio is not being captured by any other app or system service before recording
+3. Store recordings on an encrypted volume (macOS FileVault covers this)
+4. Review your organization's recording consent policies -- Steno does not manage consent
+5. Steno saves raw audio in `~/Library/Application Support/stenoai/recordings/` -- delete files you no longer need
+
+---
+
+<Accordion title="Does Steno help with meeting consent requirements?">
+No. Steno does not notify other participants that a recording is being made, manage consent workflows, or add disclosure notices. Consent obligations vary by jurisdiction and context -- this is your responsibility.
+</Accordion>
+
+<Accordion title="Can IT deploy Steno to managed Macs?">
+Steno is a standard macOS app distributed as a signed DMG. It can be deployed via MDM (e.g., Jamf) by distributing the `.app` bundle. Contact the project via GitHub for enterprise deployment questions.
+</Accordion>

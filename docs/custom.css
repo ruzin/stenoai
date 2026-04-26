@@ -1,0 +1,159 @@
+/* Steno design system — Mintlify overrides
+   Ink-on-paper palette. No brand accent. Charter serif for headings. */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,450;14..32,500;14..32,600&family=JetBrains+Mono:wght@400;500&display=swap');
+
+/* ── Tokens ────────────────────────────────────────────────────────────────── */
+
+:root {
+  --steno-serif: 'Charter', 'Bitstream Charter', 'Sitka Text', 'Iowan Old Style', Cambria, Georgia, serif;
+  --steno-sans:  'Inter', -apple-system, 'Segoe UI', sans-serif;
+  --steno-mono:  'JetBrains Mono', 'SF Mono', 'Menlo', monospace;
+
+  --paper-0: #FAF9F5;
+  --paper-1: #F5F3EC;
+  --paper-2: #EFEBE1;
+  --ink-900: #1B1B19;
+  --ink-500: #6B6B66;
+  --ink-300: #A8A8A0;
+  --red-600: #B84A3A;
+}
+
+.dark {
+  --paper-0: #1A1A18;
+  --paper-1: #222220;
+  --paper-2: #2A2A27;
+  --ink-900: #EDEAE0;
+  --ink-500: #9E9B91;
+  --ink-300: #5A5A55;
+}
+
+/* ── Page surface ───────────────────────────────────────────────────────────── */
+
+body, .mintlify-root {
+  background-color: var(--paper-0);
+  font-family: var(--steno-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── Typography ─────────────────────────────────────────────────────────────── */
+
+/* Charter serif for H1 and H2 only */
+h1, h2,
+.prose h1, .prose h2 {
+  font-family: var(--steno-serif);
+  font-weight: 400;
+  letter-spacing: -0.02em;
+}
+
+h3, h4, h5, h6,
+.prose h3, .prose h4 {
+  font-family: var(--steno-sans);
+  font-weight: 500;
+}
+
+/* Body prose */
+.prose {
+  font-family: var(--steno-sans);
+  font-size: 15px;
+  line-height: 1.65;
+  color: var(--ink-900);
+}
+
+.prose p {
+  color: var(--ink-900);
+}
+
+/* Code and inline mono */
+code, pre, kbd, .prose code {
+  font-family: var(--steno-mono);
+  font-size: 0.875em;
+}
+
+/* ── Navigation ─────────────────────────────────────────────────────────────── */
+
+/* Sidebar background matches page — no separation */
+nav, aside, [class*="sidebar"] {
+  background-color: var(--paper-0);
+  border-color: rgba(27, 27, 25, 0.08);
+}
+
+/* ── Callouts / admonitions ─────────────────────────────────────────────────── */
+
+/* Tone down the default colorful callouts */
+[class*="callout"], [class*="note"], [class*="warning"], [class*="tip"] {
+  border-radius: 8px;
+  font-size: 14px;
+}
+
+/* ── Tables ─────────────────────────────────────────────────────────────────── */
+
+.prose table {
+  font-size: 14px;
+  border-collapse: collapse;
+}
+
+.prose th {
+  font-weight: 500;
+  font-family: var(--steno-sans);
+  border-bottom: 1px solid rgba(27, 27, 25, 0.12);
+}
+
+.prose td {
+  border-bottom: 1px solid rgba(27, 27, 25, 0.06);
+  padding: 10px 12px;
+}
+
+/* ── Buttons ─────────────────────────────────────────────────────────────────── */
+
+/* Primary CTA uses ink, not accent */
+.btn-primary, [class*="cta"] {
+  background-color: var(--ink-900);
+  color: var(--paper-0);
+  border-radius: 8px;
+  font-family: var(--steno-sans);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+/* ── Topbar CTA (Download button) ──────────────────────────────────────────── */
+
+/* Light mode: ink background, paper text */
+#topbar-cta-button a > span.absolute {
+  background-color: #1B1B19 !important;
+  border-radius: 8px !important;
+}
+
+#topbar-cta-button a span.z-10,
+#topbar-cta-button a svg {
+  color: #FAF9F5 !important;
+}
+
+/* Dark mode: paper background, ink text */
+.dark #topbar-cta-button a > span.absolute {
+  background-color: #EDEAE0 !important;
+}
+
+.dark #topbar-cta-button a span.z-10,
+.dark #topbar-cta-button a svg {
+  color: #1A1A18 !important;
+}
+
+/* ── Dark mode adjustments ──────────────────────────────────────────────────── */
+
+.dark body, .dark .mintlify-root {
+  background-color: #1A1A18;
+}
+
+.dark .prose {
+  color: #EDEAE0;
+}
+
+.dark .prose p {
+  color: #EDEAE0;
+}
+
+.dark nav, .dark aside, .dark [class*="sidebar"] {
+  background-color: #1A1A18;
+  border-color: rgba(237, 234, 224, 0.08);
+}

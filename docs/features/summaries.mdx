@@ -1,0 +1,47 @@
+---
+title: "Summaries and notes"
+description: "After transcription, Steno generates structured meeting notes: a summary paragraph, key topics, and action items -- all from a local language model."
+---
+
+After each recording is transcribed, Steno generates structured notes using a local language model running via [Ollama](https://ollama.com). Notes are saved as Markdown files on your device.
+
+## What Steno generates
+
+Each note includes:
+
+- **Summary** -- a short paragraph covering the main points of the meeting
+- **Key topics** -- a bulleted list of the subjects discussed
+- **Action items** -- tasks or commitments identified in the transcript
+
+The quality and detail of notes depends on the model you are using. Larger models produce more accurate and detailed output. See [Summarization models](/models/summarization-models).
+
+## In-recording notes
+
+You can type notes during a recording using the notes panel. These notes are folded into the AI summary when summarization runs -- Steno treats them as additional context alongside the transcript.
+
+## Output format
+
+Summaries are saved as Markdown files in `~/Library/Application Support/stenoai/output/`. They are plain text and work with any Markdown editor, note-taking app, or sync service.
+
+## Regenerating a summary
+
+You can regenerate the summary for any existing recording:
+
+1. Open the recording
+2. Click the options menu
+3. Select **Re-summarize**
+4. Optionally switch to a different model before running
+
+## Asking questions about a note
+
+Use the [ask bar](/features/ask-your-meetings) at the bottom of any note to query the meeting content in plain English.
+
+---
+
+<Accordion title="Can I customize the summary format?">
+Not yet via the UI. The prompt used for summarization is configurable in the source code for users who build from source.
+</Accordion>
+
+<Accordion title="Where are summaries saved?">
+In `~/Library/Application Support/stenoai/output/` as `.md` files named after the recording.
+</Accordion>

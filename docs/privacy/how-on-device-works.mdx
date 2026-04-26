@@ -1,0 +1,78 @@
+---
+title: "How on-device processing works"
+description: "Steno transcribes and summarizes your meetings using AI models that run entirely on your Mac. No audio is sent to any server."
+---
+
+Steno processes your recordings using two AI models that run locally on your hardware. After the initial model download, the app makes no network requests related to your recordings. Your audio, transcripts, and summaries never leave your Mac.
+
+## The processing pipeline
+
+When you stop a recording, Steno runs this sequence entirely on your device:
+
+```
+Audio file (local)
+  → whisper.cpp (on-device transcription)
+  → transcript.md (saved locally)
+  → Ollama (on-device LLM)
+  → summary.md (saved locally)
+```
+
+No step in this pipeline contacts an external server. The models are downloaded once during setup and then run offline indefinitely.
+
+## What runs on your Mac
+
+**Transcription -- whisper.cpp**
+
+Steno uses [whisper.cpp](https://github.com/ggerganov/whisper.cpp), a C++ port of OpenAI's Whisper model optimized for Apple Silicon. The model weights are stored in `~/Library/Application Support/stenoai/` and executed entirely in-process. There is no Whisper API call.
+
+**Summarization -- Ollama**
+
+Steno bundles [Ollama](https://ollama.com), which manages and runs small language models locally. When Steno starts, it launches a local Ollama server that listens only on `127.0.0.1` (loopback). All summarization and query requests go to `http://localhost:11434` -- they never leave your machine.
+
+## What network requests does Steno make?
+
+| Request | When | Why |
+|---------|------|-----|
+| Model download | First launch / setup only | Downloads Whisper and Ollama model weights |
+| Update check | On app launch | Checks `github.com/ruzin/stenoai` for new releases |
+| Nothing else | Never | No telemetry, no usage tracking, no audio upload |
+
+To verify this yourself, you can monitor network traffic with [Little Snitch](https://www.obdev.at/products/littlesnitch/) or macOS's built-in `nettop` while Steno is processing a recording.
+
+## Where your data is stored
+
+All data lives in `~/Library/Application Support/stenoai/`:
+
+```
+stenoai/
+├── recordings/      # .wav audio files
+├── transcripts/     # .txt verbatim transcripts
+├── output/          # .md summaries and notes
+└── models/          # Whisper model weights
+```
+
+Ollama model weights are stored separately in `~/.ollama/models/` (Ollama's default location).
+
+## Using a cloud model (optional)
+
+Steno optionally supports OpenAI, Anthropic, or a custom API endpoint as an alternative to the local Ollama model. If you configure a cloud model in **Settings → Models**, your transcripts (not audio) are sent to that provider's API for summarization.
+
+This is opt-in, off by default, and clearly indicated in the UI. If you work with confidential data, use the local model.
+
+---
+
+<Accordion title="Does Steno send any telemetry or usage data?">
+No. Steno does not include any analytics, crash reporting, or telemetry. The only outbound requests are the update check on launch and model downloads during setup.
+</Accordion>
+
+<Accordion title="Can I use Steno in an air-gapped environment?">
+Yes, after the initial setup. Download the app and models on a connected machine, then move the installation to your air-gapped environment. All processing runs offline.
+</Accordion>
+
+<Accordion title="Is Steno suitable for confidential recordings?">
+Steno is designed for professionals handling confidential audio. Because all processing is local and no data leaves your device, it is suitable for use cases where sending audio to a cloud service would be inappropriate -- clinical consultations, legal calls, financial briefings. Review your organization's specific policies before using any recording tool for regulated data.
+</Accordion>
+
+<Accordion title="Where does Ollama run?">
+Steno bundles a copy of Ollama and starts it as a local process on `127.0.0.1:11434` when the app launches. It is not accessible from the network. When you quit Steno, Ollama is stopped.
+</Accordion>

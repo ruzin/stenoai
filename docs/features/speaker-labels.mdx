@@ -1,0 +1,30 @@
+---
+title: "Speaker labels"
+description: "Steno labels transcript lines as [You] or [Others] when system audio is enabled, making it easy to follow who said what in virtual meetings."
+---
+
+When Steno captures both microphone and system audio, transcripts include speaker labels: `[You]` for lines from your microphone and `[Others]` for audio from your speakers (the other participants).
+
+## How it works
+
+Steno records the two audio channels separately -- your microphone and your system audio -- and processes them in parallel through Whisper. The resulting transcript interleaves both channels with their respective labels based on timing.
+
+## Requirements
+
+Speaker labels require **system audio capture** to be enabled. Microphone-only recordings produce a single-channel transcript without speaker differentiation.
+
+See [Recording → System audio](/features/recording) for setup instructions.
+
+## Limitations
+
+- Labels are binary: `[You]` and `[Others]`. Individual speakers among "Others" are not distinguished.
+- Label accuracy depends on audio separation. If microphone audio bleeds into system audio or vice versa, some lines may be mislabeled.
+- In-person meetings (microphone only) do not support speaker labels.
+
+Multi-speaker diarisation (identifying individual speakers by voice) is on the roadmap.
+
+---
+
+<Accordion title="Can Steno identify individual speakers by name?">
+Not currently. Speaker labels distinguish only between your audio (`[You]`) and all other audio (`[Others]`). Individual speaker identification is planned for a future release.
+</Accordion>

@@ -1,0 +1,74 @@
+---
+title: "Installation"
+description: "Download and install Steno on macOS. The setup takes about five minutes, most of which is downloading the local AI models."
+---
+
+## Requirements
+
+- macOS 12 (Monterey) or later
+- 8GB RAM minimum (16GB recommended for larger models)
+- ~5GB free disk space for the default models
+
+## Install Steno
+
+<Steps>
+  <Step title="Download the DMG">
+    Go to [stenoai.co](https://stenoai.co) and click **Download**. Choose the right build for your Mac:
+
+    - **Apple Silicon** (M1, M2, M3, M4) -- use the `arm64` build
+    - **Intel** -- use the `x64` build
+
+    If you are unsure, go to **Apple menu → About This Mac** and look for "Apple M" in the chip name.
+  </Step>
+
+  <Step title="Open the DMG and drag to Applications">
+    Open the downloaded `.dmg` file. Drag the Steno icon into your Applications folder.
+  </Step>
+
+  <Step title="Launch Steno">
+    Open Steno from Applications. macOS may show a security prompt on first launch -- click **Open** to proceed. This prompt appears because Steno is distributed outside the Mac App Store.
+
+    If macOS blocks the app entirely, go to **System Settings → Privacy & Security** and click **Open Anyway** next to the Steno entry.
+  </Step>
+
+  <Step title="Download models">
+    On first launch, Steno will prompt you to download the default models:
+
+    - Transcription: `whisper-small` (~480MB)
+    - Summarization: `llama3.2:3b` (~2GB)
+
+    Both downloads happen inside the app. This requires an internet connection and takes a few minutes depending on your connection. After this, Steno runs entirely offline.
+  </Step>
+
+  <Step title="Grant microphone access">
+    When you start your first recording, macOS will prompt for microphone permission. Click **Allow**. To record system audio (both sides of a call), follow the [system audio setup](/features/recording) guide.
+  </Step>
+</Steps>
+
+## Verify the installation
+
+Once setup is complete, go to **Settings → Setup Check** inside the app. This runs a diagnostic that confirms:
+
+- Whisper model is installed and functional
+- Ollama is running and the summarization model is loaded
+- Storage paths are writable
+
+If any check fails, the setup screen will show the specific error and how to resolve it.
+
+## Updates
+
+Steno updates automatically in the background. When an update is ready, you will see an **Update available** notice in the app. Updates install on the next quit -- you do not need to re-download a DMG manually.
+
+---
+
+<Accordion title="Can I install Steno without an internet connection?">
+You need an internet connection to download the initial model files. After that, Steno runs fully offline.
+</Accordion>
+
+<Accordion title="Why is the app not opening on macOS?">
+macOS Gatekeeper may block apps distributed outside the App Store. Go to **System Settings → Privacy & Security** and click **Open Anyway** next to Steno. This is a one-time step.
+</Accordion>
+
+<Accordion title="How do I uninstall Steno?">
+Delete Steno from your Applications folder. To also remove all data (recordings, transcripts, summaries, models), delete `~/Library/Application Support/stenoai/`.
+</Accordion>
