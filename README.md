@@ -3,7 +3,7 @@
 
   # StenoAI
 
-  *Your private stenographer for every meeting*
+  *Your private stenographer*
 </div>
 
 <p align="center">
@@ -20,7 +20,7 @@
 <p align="center"><sub>Trusted by users at <b>AWS</b>, <b>Deliveroo</b>, <b>Tesco</b> & <b>HashiCorp</b>.</sub></p>
 
 <div align="center">
-  <img src="website/public/readme-img.png" alt="StenoAI Interface" width="800">
+  <img src="website/public/readme.png" alt="StenoAI Interface" width="800">
 
   <br>
 
@@ -41,8 +41,9 @@
 
 ## Sponsors
 
-> [!TIP]
-> **[Recall.ai](https://www.recall.ai/product/desktop-recording-sdk?utm_source=github&utm_medium=sponsorship&utm_campaign=ruzin-stenoai)** — a hosted desktop recording API for Zoom, Google Meet, Microsoft Teams, and in-person meetings. If you're looking for a hosted desktop recording API, check out Recall.ai.
+### Recall.ai - API for desktop recording
+
+If you're looking for a hosted desktop recording API, consider checking out [Recall.ai](https://www.recall.ai/product/desktop-recording-sdk?utm_source=github&utm_medium=sponsorship&utm_campaign=ruzin-stenoai), an API that records Zoom, Google Meet, Microsoft Teams, in-person meetings, and more.
 
 ## Features
 
