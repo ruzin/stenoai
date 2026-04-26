@@ -1,1 +1,270 @@
 @import "tailwindcss";
+
+/* ── Dark mode variant (class-based) ── */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ═══════════════════════════════════════════════════
+   Raw tokens — light mode (warm paper + ink)
+   ═══════════════════════════════════════════════════ */
+:root {
+  --paper-0: #FAF9F5;
+  --paper-1: #F5F3EC;
+  --paper-2: #EFEBE1;
+  --paper-3: #E5DFD1;
+
+  --ink-900: #1B1B19;
+  --ink-700: #3D3D39;
+  --ink-500: #6B6B66;
+  --ink-300: #A8A8A0;
+  --ink-100: #D6D4CB;
+
+  --red-600: #B84A3A;
+  --green-600: #4F7A5B;
+
+  /* Semantic — light */
+  --page:                var(--paper-0);
+  --surface:             var(--paper-0);
+  --surface-raised:      #FFFFFF;
+  --surface-sunken:      var(--paper-1);
+  --surface-hover:       var(--paper-1);
+  --surface-active:      var(--paper-2);
+  --surface-translucent: rgba(250, 249, 245, 0.82);
+
+  --fg-1:      var(--ink-900);
+  --fg-2:      var(--ink-500);
+  --fg-muted:  var(--ink-300);
+  --fg-inverse: var(--paper-0);
+
+  --border-subtle: rgba(27, 27, 25, 0.06);
+  --border:        rgba(27, 27, 25, 0.10);
+  --border-strong: rgba(27, 27, 25, 0.22);
+
+  --primary:       var(--ink-900);
+  --primary-hover: var(--ink-700);
+  --primary-fg:    var(--paper-0);
+  --focus-ring:    rgba(27, 27, 25, 0.35);
+
+  --recording: var(--red-600);
+
+  --shadow-sm: 0 1px 2px rgba(27, 27, 25, 0.05);
+  --shadow-md: 0 8px 24px -8px rgba(27, 27, 25, 0.14), 0 2px 4px -2px rgba(27, 27, 25, 0.06);
+  --shadow-lg: 0 24px 48px -16px rgba(27, 27, 25, 0.22), 0 4px 8px -4px rgba(27, 27, 25, 0.08);
+
+  --font-serif: 'Charter', 'Bitstream Charter', 'Sitka Text', 'Iowan Old Style', Cambria, Georgia, serif;
+  --font-sans:  'Inter', -apple-system, 'Segoe UI', 'Helvetica Neue', sans-serif;
+  --font-mono:  'JetBrains Mono', 'SF Mono', 'Menlo', 'Consolas', monospace;
+
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+  --dur-fast: 120ms;
+  --dur:      200ms;
+  --dur-slow: 320ms;
+}
+
+/* ═══════════════════════════════════════════════════
+   Semantic tokens — dark mode
+   ═══════════════════════════════════════════════════ */
+.dark {
+  --page:                #1A1A18;
+  --surface:             #1A1A18;
+  --surface-raised:      #24241F;
+  --surface-sunken:      #14140F;
+  --surface-hover:       #242420;
+  --surface-active:      #2E2E28;
+  --surface-translucent: rgba(26, 26, 24, 0.78);
+
+  --fg-1:      #EDEAE0;
+  --fg-2:      #9A968A;
+  --fg-muted:  #5D5A52;
+  --fg-inverse: var(--ink-900);
+
+  --border-subtle: rgba(237, 234, 224, 0.06);
+  --border:        rgba(237, 234, 224, 0.10);
+  --border-strong: rgba(237, 234, 224, 0.20);
+
+  --primary:       #EDEAE0;
+  --primary-hover: #FFFFFF;
+  --primary-fg:    #1A1A18;
+  --focus-ring:    rgba(237, 234, 224, 0.45);
+
+  --recording: #D17563;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.45);
+  --shadow-md: 0 8px 24px -8px rgba(0, 0, 0, 0.55), 0 2px 4px -2px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 24px 48px -16px rgba(0, 0, 0, 0.6), 0 4px 8px -4px rgba(0, 0, 0, 0.3);
+}
+
+/* ═══════════════════════════════════════════════════
+   Tailwind v4 theme — exposes CSS vars as utilities
+   ═══════════════════════════════════════════════════ */
+@theme {
+  /* Raw color scale */
+  --color-paper-0: #FAF9F5;
+  --color-paper-1: #F5F3EC;
+  --color-paper-2: #EFEBE1;
+  --color-paper-3: #E5DFD1;
+  --color-ink-900: #1B1B19;
+  --color-ink-700: #3D3D39;
+  --color-ink-500: #6B6B66;
+  --color-ink-300: #A8A8A0;
+  --color-ink-100: #D6D4CB;
+
+  /* Semantic utilities — resolve to CSS vars so dark mode works automatically */
+  --color-page:           var(--page);
+  --color-surface:        var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-surface-sunken: var(--surface-sunken);
+  --color-surface-hover:  var(--surface-hover);
+  --color-fg-1:           var(--fg-1);
+  --color-fg-2:           var(--fg-2);
+  --color-fg-muted:       var(--fg-muted);
+  --color-fg-inverse:     var(--fg-inverse);
+  --color-primary:        var(--primary);
+  --color-primary-hover:  var(--primary-hover);
+  --color-primary-fg:     var(--primary-fg);
+  --color-border:         var(--border);
+  --color-border-subtle:  var(--border-subtle);
+  --color-border-strong:  var(--border-strong);
+  --color-recording:      var(--recording);
+
+  /* Font families */
+  --font-serif: var(--font-serif);
+  --font-sans:  var(--font-sans);
+  --font-mono:  var(--font-mono);
+
+  /* Shadows */
+  --shadow-sm: var(--shadow-sm);
+  --shadow-md: var(--shadow-md);
+  --shadow-lg: var(--shadow-lg);
+
+  /* Border radius */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius:    8px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+}
+
+/* ═══════════════════════════════════════════════════
+   Base styles — in @layer base so Tailwind utilities override them
+   ═══════════════════════════════════════════════════ */
+*, *::before, *::after { box-sizing: border-box; }
+
+@layer base {
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--page);
+    color: var(--fg-1);
+    font-family: var(--font-sans);
+    font-size: 15px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  h1, h2, h3, h4, h5, h6, p { margin: 0; }
+
+  a {
+    color: inherit;
+    text-decoration: underline;
+    text-decoration-color: var(--border-strong);
+    text-decoration-thickness: 1px;
+    text-underline-offset: 0.22em;
+    transition: text-decoration-color var(--dur-fast) var(--ease);
+  }
+  a:hover { text-decoration-color: var(--fg-1); }
+
+  :focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+}
+
+/* ═══════════════════════════════════════════════════
+   @utility — reusable component shorthands
+   ═══════════════════════════════════════════════════ */
+@utility container-site {
+  max-width: 1120px;
+  margin-left: auto;
+  margin-right: auto;
+  padding-left: 28px;
+  padding-right: 28px;
+}
+
+@utility sect {
+  padding-top: 112px;
+  padding-bottom: 112px;
+}
+
+@utility btn-base {
+  font-family: var(--font-sans);
+  font-size: 14px;
+  font-weight: 500;
+  padding: 10px 18px;
+  border-radius: var(--radius);
+  border: 0;
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+
+@utility btn-primary {
+  background-color: var(--primary);
+  color: var(--primary-fg);
+}
+
+@utility btn-ghost {
+  background-color: transparent;
+  color: var(--fg-1);
+}
+
+@utility btn-sm {
+  padding: 7px 12px;
+  font-size: 13px;
+}
+
+/* Hover states via plain CSS (not @utility which doesn't support pseudo-selectors) */
+.btn-primary:hover { background-color: var(--primary-hover); text-decoration: none; }
+.btn-ghost:hover   { background-color: var(--surface-hover); text-decoration: none; }
+
+/* CTA section — inverted button colors on the dark ink block */
+.cta-wrap .btn-primary {
+  background-color: var(--primary-fg);
+  color: var(--primary);
+}
+.cta-wrap .btn-primary:hover {
+  background-color: var(--primary-fg);
+  filter: brightness(0.94);
+}
+.cta-wrap .btn-ghost {
+  color: var(--primary-fg);
+  box-shadow: inset 0 0 0 1px rgba(250, 249, 245, 0.25);
+}
+.cta-wrap .btn-ghost:hover {
+  background: rgba(250, 249, 245, 0.08);
+  color: var(--primary-fg);
+}
+
+/* Hero recording pulse */
+@keyframes recording-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(184, 74, 58, 0.45); }
+  70%  { box-shadow: 0 0 0 6px rgba(184, 74, 58, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(184, 74, 58, 0); }
+}
+.rec-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--recording);
+  animation: recording-pulse 1.6s cubic-bezier(0.2,0,0,1) infinite;
+}
+
+/* ═══════════════════════════════════════════════════
+   Responsive — 900px breakpoint
+   ═══════════════════════════════════════════════════ */
+@media (max-width: 900px) {
+  .sect { padding-top: 80px; padding-bottom: 80px; }
+}
