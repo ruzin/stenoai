@@ -3,36 +3,136 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Terms of Service - StenoAI</title>
+  <title>Terms of Service — stenoAI</title>
   <meta name="description" content="stenoAI terms of service." />
+  <link rel="icon" type="image/svg+xml" href="/stenoai-logo.svg" />
   <link rel="icon" type="image/png" href="/dragonfly-logo-512.png" />
-  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" />
+  <script>
+    (function() {
+      var stored = localStorage.getItem('theme');
+      var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      if (stored === 'dark' || (!stored && prefersDark)) {
+        document.documentElement.classList.add('dark');
+      }
+    })();
+  </script>
+  <style>
+    :root {
+      --page: #FAF9F5;
+      --fg-1: #1B1B19;
+      --fg-2: #6B6B66;
+      --fg-muted: #A8A8A0;
+      --border-subtle: rgba(27,27,25,0.06);
+      --border: rgba(27,27,25,0.10);
+      --surface-hover: #F5F3EC;
+      --font-serif: 'Charter','Bitstream Charter','Sitka Text','Iowan Old Style',Cambria,Georgia,serif;
+      --font-sans: 'Inter',-apple-system,'Segoe UI','Helvetica Neue',sans-serif;
+      --font-mono: 'SF Mono','Menlo','Consolas',monospace;
+    }
+    :root.dark {
+      --page: #1A1A18;
+      --fg-1: #EDEAE0;
+      --fg-2: #9A968A;
+      --fg-muted: #5D5A52;
+      --border-subtle: rgba(237,234,224,0.06);
+      --border: rgba(237,234,224,0.10);
+      --surface-hover: #242420;
+    }
+    *, *::before, *::after { box-sizing: border-box; }
+    html, body {
+      margin: 0; padding: 0;
+      background: var(--page);
+      color: var(--fg-1);
+      font-family: var(--font-sans);
+      font-size: 15px;
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+    h1, h2, h3, p, ul { margin: 0; }
+    a { color: var(--fg-1); text-underline-offset: 0.22em; }
+    a:hover { opacity: 0.7; }
+    nav {
+      position: sticky; top: 0; z-index: 40;
+      border-bottom: 1px solid var(--border-subtle);
+      background: var(--page);
+    }
+    nav .inner {
+      max-width: 800px; margin: 0 auto;
+      padding: 16px 24px;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .brand { display: flex; align-items: center; gap: 10px; text-decoration: none; color: var(--fg-1); }
+    .brand-mark { width: 20px; height: 20px; }
+    .brand-name {
+      font-family: var(--font-serif);
+      font-size: 17px; font-weight: 400;
+      letter-spacing: -0.01em;
+    }
+    .back { font-size: 13px; color: var(--fg-2); text-decoration: none; }
+    .back:hover { color: var(--fg-1); opacity: 1; }
+    main { max-width: 800px; margin: 0 auto; padding: 56px 24px 80px; }
+    h1 {
+      font-family: var(--font-serif);
+      font-size: clamp(28px, 4vw, 40px);
+      font-weight: 400; letter-spacing: -0.02em; line-height: 1.1;
+      color: var(--fg-1); margin-bottom: 8px;
+    }
+    .dateline { font-size: 13px; color: var(--fg-muted); margin-bottom: 48px; }
+    .content { display: flex; flex-direction: column; gap: 32px; }
+    .content section { display: flex; flex-direction: column; gap: 12px; }
+    h2 {
+      font-family: var(--font-sans);
+      font-size: 17px; font-weight: 600;
+      color: var(--fg-1);
+    }
+    p { color: var(--fg-2); }
+    strong { color: var(--fg-1); font-weight: 600; }
+    ul { color: var(--fg-2); padding-left: 20px; display: flex; flex-direction: column; gap: 6px; }
+    code {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      background: var(--surface-hover);
+      padding: 2px 6px;
+      border-radius: 4px;
+      color: var(--fg-1);
+    }
+    footer {
+      border-top: 1px solid var(--border-subtle);
+      padding: 24px;
+      text-align: center;
+      font-size: 13px;
+      color: var(--fg-muted);
+    }
+  </style>
 </head>
-<body class="min-h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-slate-900 text-slate-100">
-  <header class="sticky top-0 z-30 backdrop-blur bg-slate-950/50 border-b border-white/10">
-    <div class="max-w-4xl mx-auto px-4 py-4 flex items-center justify-between">
-      <a href="/" class="flex items-center gap-2 hover:opacity-80 transition-opacity">
-        <img src="/dragonfly-logo-512.png" alt="stenoAI" class="w-8 h-8" />
-        <span class="text-lg font-semibold tracking-tight">stenoAI</span>
+<body>
+  <nav>
+    <div class="inner">
+      <a href="/" class="brand">
+        <img src="/dragonfly-logo-512.png" class="brand-mark" alt="" aria-hidden="true" style="border-radius:5px" />
+        <span class="brand-name">stenoAI.</span>
       </a>
-      <a href="/" class="text-sm text-slate-400 hover:text-white transition-colors">&larr; Back to home</a>
+      <a href="/" class="back">&larr; Back to home</a>
     </div>
-  </header>
+  </nav>
 
-  <main class="max-w-4xl mx-auto px-4 py-12 md:py-20">
-    <h1 class="text-3xl md:text-4xl font-bold mb-2">Terms of Service</h1>
-    <p class="text-sm text-slate-400 mb-10">Last updated: February 15, 2026</p>
+  <main>
+    <h1>Terms of Service</h1>
+    <p class="dateline">Last updated: February 15, 2026</p>
 
-    <div class="space-y-8 text-sm text-slate-300 leading-relaxed">
+    <div class="content">
       <section>
-        <h2 class="text-lg font-semibold text-slate-100 mb-3">Acceptance of terms</h2>
-        <p>By downloading and using StenoAI, you agree to these terms. StenoAI is open-source software provided under the terms of its <a href="https://github.com/ruzin/stenoai/blob/main/LICENSE" class="text-indigo-400 hover:text-indigo-300 underline">license</a>.</p>
+        <h2>Acceptance of terms</h2>
+        <p>By downloading and using StenoAI, you agree to these terms. StenoAI is open-source software provided under the terms of its <a href="https://github.com/ruzin/stenoai/blob/main/LICENSE">license</a>.</p>
       </section>
 
       <section>
-        <h2 class="text-lg font-semibold text-slate-100 mb-3">Use of the software</h2>
-        <p class="mb-3">StenoAI is provided free of charge for personal and professional use. You are responsible for:</p>
-        <ul class="list-disc pl-6 space-y-2">
+        <h2>Use of the software</h2>
+        <p>StenoAI is provided free of charge for personal and professional use. You are responsible for:</p>
+        <ul>
           <li>Ensuring you have consent to record meetings in your jurisdiction</li>
           <li>Complying with applicable laws regarding audio recording and data privacy</li>
           <li>Maintaining the security of your device and local data</li>
@@ -40,26 +140,22 @@
       </section>
 
       <section>
-        <h2 class="text-lg font-semibold text-slate-100 mb-3">Disclaimer of warranties</h2>
+        <h2>Disclaimer of warranties</h2>
         <p>StenoAI is provided "as is" without warranty of any kind. Transcription and summarization accuracy depend on audio quality, hardware, and model selection. We do not guarantee the accuracy, completeness, or reliability of AI-generated content.</p>
       </section>
 
       <section>
-        <h2 class="text-lg font-semibold text-slate-100 mb-3">Limitation of liability</h2>
+        <h2>Limitation of liability</h2>
         <p>To the fullest extent permitted by law, the StenoAI project and its contributors shall not be liable for any indirect, incidental, special, or consequential damages arising from the use of the software.</p>
       </section>
 
       <section>
-        <h2 class="text-lg font-semibold text-slate-100 mb-3">Changes to these terms</h2>
+        <h2>Changes to these terms</h2>
         <p>We may update these terms from time to time. Changes will be reflected on this page with an updated date. Continued use of StenoAI after changes constitutes acceptance of the revised terms.</p>
       </section>
     </div>
   </main>
 
-  <footer class="border-t border-white/10">
-    <div class="max-w-4xl mx-auto px-4 py-6 text-xs text-slate-500 text-center">
-      &copy; 2026 StenoAI
-    </div>
-  </footer>
+  <footer>&copy; 2026 stenoAI</footer>
 </body>
 </html>

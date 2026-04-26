@@ -3,36 +3,141 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Privacy Policy - stenoAI</title>
+  <title>Privacy Policy — stenoAI</title>
   <meta name="description" content="stenoAI privacy policy. Learn how we protect your data with local-first processing." />
+  <link rel="icon" type="image/svg+xml" href="/stenoai-logo.svg" />
   <link rel="icon" type="image/png" href="/dragonfly-logo-512.png" />
-  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" />
+  <script>
+    (function() {
+      var stored = localStorage.getItem('theme');
+      var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      if (stored === 'dark' || (!stored && prefersDark)) {
+        document.documentElement.classList.add('dark');
+      }
+    })();
+  </script>
+  <style>
+    :root {
+      --page: #FAF9F5;
+      --fg-1: #1B1B19;
+      --fg-2: #6B6B66;
+      --fg-muted: #A8A8A0;
+      --border-subtle: rgba(27,27,25,0.06);
+      --border: rgba(27,27,25,0.10);
+      --surface-hover: #F5F3EC;
+      --font-serif: 'Charter','Bitstream Charter','Sitka Text','Iowan Old Style',Cambria,Georgia,serif;
+      --font-sans: 'Inter',-apple-system,'Segoe UI','Helvetica Neue',sans-serif;
+      --font-mono: 'SF Mono','Menlo','Consolas',monospace;
+    }
+    :root.dark {
+      --page: #1A1A18;
+      --fg-1: #EDEAE0;
+      --fg-2: #9A968A;
+      --fg-muted: #5D5A52;
+      --border-subtle: rgba(237,234,224,0.06);
+      --border: rgba(237,234,224,0.10);
+      --surface-hover: #242420;
+    }
+    *, *::before, *::after { box-sizing: border-box; }
+    html, body {
+      margin: 0; padding: 0;
+      background: var(--page);
+      color: var(--fg-1);
+      font-family: var(--font-sans);
+      font-size: 15px;
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+    h1, h2, h3, p, ul { margin: 0; }
+    a { color: var(--fg-1); text-underline-offset: 0.22em; }
+    a:hover { opacity: 0.7; }
+    nav {
+      position: sticky; top: 0; z-index: 40;
+      border-bottom: 1px solid var(--border-subtle);
+      background: var(--page);
+    }
+    nav .inner {
+      max-width: 800px; margin: 0 auto;
+      padding: 16px 24px;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .brand { display: flex; align-items: center; gap: 10px; text-decoration: none; color: var(--fg-1); }
+    .brand-mark { width: 20px; height: 20px; }
+    .brand-name {
+      font-family: var(--font-serif);
+      font-size: 17px; font-weight: 400;
+      letter-spacing: -0.01em;
+    }
+    .back { font-size: 13px; color: var(--fg-2); text-decoration: none; }
+    .back:hover { color: var(--fg-1); opacity: 1; }
+    main { max-width: 800px; margin: 0 auto; padding: 56px 24px 80px; }
+    h1 {
+      font-family: var(--font-serif);
+      font-size: clamp(28px, 4vw, 40px);
+      font-weight: 400; letter-spacing: -0.02em; line-height: 1.1;
+      color: var(--fg-1); margin-bottom: 8px;
+    }
+    .dateline { font-size: 13px; color: var(--fg-muted); margin-bottom: 48px; }
+    .content { display: flex; flex-direction: column; gap: 32px; }
+    .content section { display: flex; flex-direction: column; gap: 12px; }
+    h2 {
+      font-family: var(--font-sans);
+      font-size: 17px; font-weight: 600;
+      color: var(--fg-1);
+    }
+    h3 {
+      font-family: var(--font-sans);
+      font-size: 15px; font-weight: 500;
+      color: var(--fg-1);
+    }
+    p { color: var(--fg-2); }
+    strong { color: var(--fg-1); font-weight: 600; }
+    ul { color: var(--fg-2); padding-left: 20px; display: flex; flex-direction: column; gap: 6px; }
+    code {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      background: var(--surface-hover);
+      padding: 2px 6px;
+      border-radius: 4px;
+      color: var(--fg-1);
+    }
+    footer {
+      border-top: 1px solid var(--border-subtle);
+      padding: 24px;
+      text-align: center;
+      font-size: 13px;
+      color: var(--fg-muted);
+    }
+  </style>
 </head>
-<body class="min-h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-slate-900 text-slate-100">
-  <header class="sticky top-0 z-30 backdrop-blur bg-slate-950/50 border-b border-white/10">
-    <div class="max-w-4xl mx-auto px-4 py-4 flex items-center justify-between">
-      <a href="/" class="flex items-center gap-2 hover:opacity-80 transition-opacity">
-        <img src="/dragonfly-logo-512.png" alt="stenoAI" class="w-8 h-8" />
-        <span class="text-lg font-semibold tracking-tight">stenoAI</span>
+<body>
+  <nav>
+    <div class="inner">
+      <a href="/" class="brand">
+        <img src="/dragonfly-logo-512.png" class="brand-mark" alt="" aria-hidden="true" style="border-radius:5px" />
+        <span class="brand-name">stenoAI.</span>
       </a>
-      <a href="/" class="text-sm text-slate-400 hover:text-white transition-colors">&larr; Back to home</a>
+      <a href="/" class="back">&larr; Back to home</a>
     </div>
-  </header>
+  </nav>
 
-  <main class="max-w-4xl mx-auto px-4 py-12 md:py-20">
-    <h1 class="text-3xl md:text-4xl font-bold mb-2">Privacy Policy</h1>
-    <p class="text-sm text-slate-400 mb-10">Last updated: March 3, 2026</p>
+  <main>
+    <h1>Privacy Policy</h1>
+    <p class="dateline">Last updated: March 3, 2026</p>
 
-    <div class="space-y-8 text-sm text-slate-300 leading-relaxed">
+    <div class="content">
       <section>
-        <h2 class="text-lg font-semibold text-slate-100 mb-3">Overview</h2>
+        <h2>Overview</h2>
         <p>StenoAI is a privacy-first, open-source meeting notes application that runs entirely on your local device. We are committed to protecting your privacy and being transparent about our data practices.</p>
       </section>
 
       <section>
-        <h2 class="text-lg font-semibold text-slate-100 mb-3">Data that stays on your device</h2>
-        <p class="mb-3">The following data is processed and stored exclusively on your Mac and is never transmitted to any external server:</p>
-        <ul class="list-disc pl-6 space-y-2">
+        <h2>Data that stays on your device</h2>
+        <p>The following data is processed and stored exclusively on your Mac and is never transmitted to any external server:</p>
+        <ul>
           <li>Audio recordings of your meetings</li>
           <li>Transcriptions generated by the local Whisper model</li>
           <li>AI-generated summaries, action items, and key points</li>
@@ -41,10 +146,10 @@
       </section>
 
       <section>
-        <h2 class="text-lg font-semibold text-slate-100 mb-3">Google Calendar integration (optional)</h2>
-        <p class="mb-3">If you choose to connect Google Calendar, StenoAI accesses your calendar data with the <code class="text-xs bg-slate-800 px-1.5 py-0.5 rounded">calendar.readonly</code> scope. This means:</p>
-        <ul class="list-disc pl-6 space-y-2">
-          <li>StenoAI can only <strong class="text-slate-100">read</strong> your calendar events -- it cannot create, modify, or delete events</li>
+        <h2>Google Calendar integration (optional)</h2>
+        <p>If you choose to connect Google Calendar, StenoAI accesses your calendar data with the <code>calendar.readonly</code> scope. This means:</p>
+        <ul>
+          <li>StenoAI can only <strong>read</strong> your calendar events — it cannot create, modify, or delete events</li>
           <li>Event data (titles, times, attendees, descriptions) is fetched directly from Google's API to your device</li>
           <li>Calendar data is held in memory only and is never written to disk or sent to any third-party server</li>
           <li>OAuth tokens are encrypted using macOS Keychain (via Electron safeStorage) and stored locally</li>
@@ -53,78 +158,74 @@
       </section>
 
       <section>
-        <h2 class="text-lg font-semibold text-slate-100 mb-3">Google user data: collection, use, and protection</h2>
-        <p class="mb-4">This section describes how StenoAI handles data received from Google APIs, in compliance with the <a href="https://developers.google.com/terms/api-services-user-data-policy" class="text-indigo-400 hover:text-indigo-300 underline">Google API Services User Data Policy</a>.</p>
+        <h2>Google user data: collection, use, and protection</h2>
+        <p>This section describes how StenoAI handles data received from Google APIs, in compliance with the <a href="https://developers.google.com/terms/api-services-user-data-policy">Google API Services User Data Policy</a>.</p>
 
-        <h3 class="text-base font-medium text-slate-200 mb-2">Data accessed</h3>
-        <p class="mb-3">When you connect Google Calendar, StenoAI accesses the following Google user data via the <code class="text-xs bg-slate-800 px-1.5 py-0.5 rounded">calendar.readonly</code> scope:</p>
-        <ul class="list-disc pl-6 space-y-2 mb-5">
+        <h3>Data accessed</h3>
+        <p>When you connect Google Calendar, StenoAI accesses the following Google user data via the <code>calendar.readonly</code> scope:</p>
+        <ul>
           <li>Calendar event titles and descriptions</li>
           <li>Event start and end times</li>
           <li>Attendee names and email addresses</li>
           <li>Event metadata (location, recurrence, status)</li>
         </ul>
 
-        <h3 class="text-base font-medium text-slate-200 mb-2">Data usage</h3>
-        <p class="mb-3">Google Calendar data is used solely to:</p>
-        <ul class="list-disc pl-6 space-y-2 mb-5">
+        <h3>Data usage</h3>
+        <p>Google Calendar data is used solely to:</p>
+        <ul>
           <li>Display your upcoming meetings within the StenoAI interface so you can quickly start recording a session</li>
           <li>Auto-populate meeting names and attendee lists for your transcription sessions</li>
         </ul>
-        <p class="mb-5">Google user data is never used for advertising, profiling, or any purpose unrelated to the app's core meeting-transcription functionality.</p>
+        <p>Google user data is never used for advertising, profiling, or any purpose unrelated to the app's core meeting-transcription functionality.</p>
 
-        <h3 class="text-base font-medium text-slate-200 mb-2">Data sharing</h3>
-        <p class="mb-5">StenoAI does <strong class="text-slate-100">not</strong> share, sell, or transfer Google user data to any third party. Calendar data stays entirely on your device and is never sent to StenoAI servers, analytics services, or any other external service.</p>
+        <h3>Data sharing</h3>
+        <p>StenoAI does <strong>not</strong> share, sell, or transfer Google user data to any third party. Calendar data stays entirely on your device and is never sent to StenoAI servers, analytics services, or any other external service.</p>
 
-        <h3 class="text-base font-medium text-slate-200 mb-2">Data storage and protection</h3>
-        <ul class="list-disc pl-6 space-y-2 mb-5">
-          <li>Calendar event data is held <strong class="text-slate-100">in memory only</strong> while the app is running. It is never persisted to disk.</li>
-          <li>OAuth refresh and access tokens are encrypted at rest using <strong class="text-slate-100">macOS Keychain</strong> via Electron's safeStorage API, which provides OS-level encryption tied to your user account.</li>
+        <h3>Data storage and protection</h3>
+        <ul>
+          <li>Calendar event data is held <strong>in memory only</strong> while the app is running. It is never persisted to disk.</li>
+          <li>OAuth refresh and access tokens are encrypted at rest using <strong>macOS Keychain</strong> via Electron's safeStorage API, which provides OS-level encryption tied to your user account.</li>
           <li>All communication with Google APIs occurs over HTTPS/TLS.</li>
         </ul>
 
-        <h3 class="text-base font-medium text-slate-200 mb-2">Data retention and deletion</h3>
-        <ul class="list-disc pl-6 space-y-2 mb-5">
-          <li>Calendar event data is not retained -- it exists only in application memory and is discarded when the app is closed or when you navigate away from the calendar view.</li>
+        <h3>Data retention and deletion</h3>
+        <ul>
+          <li>Calendar event data is not retained — it exists only in application memory and is discarded when the app is closed or when you navigate away from the calendar view.</li>
           <li>OAuth tokens are retained locally until you disconnect Google Calendar.</li>
-          <li><strong class="text-slate-100">To delete all Google data:</strong> Open StenoAI Settings and click "Disconnect Google Calendar." This immediately revokes the OAuth token with Google and deletes all stored credentials from your device.</li>
+          <li><strong>To delete all Google data:</strong> Open StenoAI Settings and click "Disconnect Google Calendar." This immediately revokes the OAuth token with Google and deletes all stored credentials from your device.</li>
           <li>Uninstalling StenoAI also removes all locally stored tokens and data.</li>
-          <li>You can also revoke access at any time from your <a href="https://myaccount.google.com/permissions" class="text-indigo-400 hover:text-indigo-300 underline">Google Account permissions page</a>.</li>
+          <li>You can also revoke access at any time from your <a href="https://myaccount.google.com/permissions">Google Account permissions page</a>.</li>
         </ul>
       </section>
 
       <section>
-        <h2 class="text-lg font-semibold text-slate-100 mb-3">Analytics (optional)</h2>
-        <p class="mb-3">StenoAI includes optional, privacy-safe analytics via PostHog to help improve the product. This can be disabled in Settings. When enabled, we collect:</p>
-        <ul class="list-disc pl-6 space-y-2">
+        <h2>Analytics (optional)</h2>
+        <p>StenoAI includes optional, privacy-safe analytics via PostHog to help improve the product. This can be disabled in Settings. When enabled, we collect:</p>
+        <ul>
           <li>Anonymous usage events (e.g., "recording started", "summary generated")</li>
-          <li>Duration buckets (e.g., "5-15 minutes") -- never exact durations</li>
+          <li>Duration buckets (e.g., "5-15 minutes") — never exact durations</li>
           <li>App version and platform information</li>
         </ul>
-        <p class="mt-3">We never collect or transmit: audio content, transcript text, summary content, file paths, meeting names, or any personally identifiable information.</p>
+        <p>We never collect or transmit: audio content, transcript text, summary content, file paths, meeting names, or any personally identifiable information.</p>
       </section>
 
       <section>
-        <h2 class="text-lg font-semibold text-slate-100 mb-3">Third-party services</h2>
-        <p class="mb-3">StenoAI connects to the internet only for:</p>
-        <ul class="list-disc pl-6 space-y-2">
+        <h2>Third-party services</h2>
+        <p>StenoAI connects to the internet only for:</p>
+        <ul>
           <li>Google Calendar API (if connected by you)</li>
-          <li>PostHog analytics (enabled by default -- can be disabled in Settings)</li>
+          <li>PostHog analytics (enabled by default — can be disabled in Settings)</li>
           <li>Checking for app updates via GitHub</li>
         </ul>
       </section>
 
       <section>
-        <h2 class="text-lg font-semibold text-slate-100 mb-3">Contact</h2>
-        <p>For privacy-related questions, open an issue on <a href="https://github.com/ruzin/stenoai" class="text-indigo-400 hover:text-indigo-300 underline">GitHub</a> or reach out on <a href="https://discord.gg/DZ6vcQnxxu" class="text-indigo-400 hover:text-indigo-300 underline">Discord</a>.</p>
+        <h2>Contact</h2>
+        <p>For privacy-related questions, open an issue on <a href="https://github.com/ruzin/stenoai">GitHub</a> or reach out on <a href="https://discord.gg/DZ6vcQnxxu">Discord</a>.</p>
       </section>
     </div>
   </main>
 
-  <footer class="border-t border-white/10">
-    <div class="max-w-4xl mx-auto px-4 py-6 text-xs text-slate-500 text-center">
-      &copy; 2026 stenoAI
-    </div>
-  </footer>
+  <footer>&copy; 2026 stenoAI</footer>
 </body>
 </html>
