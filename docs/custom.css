@@ -80,8 +80,11 @@ nav, aside, [class*="sidebar"] {
 
 /* ── Callouts / admonitions ─────────────────────────────────────────────────── */
 
-/* Tone down the default colorful callouts */
-[class*="callout"], [class*="note"], [class*="warning"], [class*="tip"] {
+/* Tone down the default colorful callouts — scoped to prose content to avoid unintended matches */
+.prose [class*="callout"],
+.prose [class*="note"],
+.prose [class*="warning"],
+.prose [class*="tip"] {
   border-radius: 8px;
   font-size: 14px;
 }

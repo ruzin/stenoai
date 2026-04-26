@@ -3,7 +3,7 @@ title: "How on-device processing works"
 description: "Steno transcribes and summarizes your meetings using AI models that run entirely on your Mac. No audio is sent to any server."
 ---
 
-Steno processes your recordings using two AI models that run locally on your hardware. After the initial model download, the app makes no network requests related to your recordings. Your audio, transcripts, and summaries never leave your Mac.
+Steno processes your recordings using two AI models that run locally on your hardware. After the initial model download, the app makes no network requests related to your recordings by default. Your audio, transcripts, and summaries stay on your Mac unless you optionally configure a cloud summarization model (see below).
 
 ## The processing pipeline
 
@@ -12,7 +12,7 @@ When you stop a recording, Steno runs this sequence entirely on your device:
 ```
 Audio file (local)
   → whisper.cpp (on-device transcription)
-  → transcript.md (saved locally)
+  → transcript.txt (saved locally)
   → Ollama (on-device LLM)
   → summary.md (saved locally)
 ```
@@ -27,7 +27,7 @@ Steno uses [whisper.cpp](https://github.com/ggerganov/whisper.cpp), a C++ port o
 
 **Summarization -- Ollama**
 
-Steno bundles [Ollama](https://ollama.com), which manages and runs small language models locally. When Steno starts, it launches a local Ollama server that listens only on `127.0.0.1` (loopback). All summarization and query requests go to `http://localhost:11434` -- they never leave your machine.
+Steno bundles [Ollama](https://ollama.com), which manages and runs small language models locally. When Steno starts, it launches a local Ollama server that by default listens only on `127.0.0.1` (loopback). All summarization and query requests go to `http://localhost:11434` -- they do not leave your machine unless `OLLAMA_HOST` is overridden in your environment.
 
 ## What network requests does Steno make?
 
