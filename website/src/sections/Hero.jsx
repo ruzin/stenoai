@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { Download, ArrowRight, ShieldCheck, Lock, Cpu } from "lucide-react";
 import { motion as Motion } from "framer-motion";
+import { trackDownload } from "../analytics";
 
 const DOWNLOAD_ARM = "https://github.com/ruzin/stenoai/releases/latest/download/stenoAI-macos-arm64.dmg";
 
@@ -20,8 +21,8 @@ export function Hero() {
   }, []);
 
   return (
-    <section className="pt-[88px] pb-[80px]">
-      <div className="container-site grid md:grid-cols-[1.1fr_1fr] gap-16 items-center">
+    <section className="pt-[64px] pb-[56px] md:pt-[88px] md:pb-[80px]">
+      <div className="container-site grid md:grid-cols-[1.1fr_1fr] gap-10 md:gap-16 items-center">
 
         {/* Copy */}
         <div>
@@ -65,7 +66,7 @@ export function Hero() {
             transition={{ duration: 0.5, delay: 0.15 }}
             className="flex gap-[10px] flex-wrap"
           >
-            <a href="#download" className="btn-base btn-primary inline-flex items-center gap-2 no-underline hover:no-underline">
+            <a href="#download" onClick={() => trackDownload('hero', 'unknown')} className="btn-base btn-primary inline-flex items-center gap-2 no-underline hover:no-underline">
               <Download size={15} aria-hidden="true" /> Download for Mac
             </a>
             <a href="#how" className="btn-base btn-ghost inline-flex items-center gap-2 no-underline hover:no-underline">
@@ -93,7 +94,7 @@ export function Hero() {
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.6, delay: 0.1 }}
-          className="relative"
+          className="relative max-w-full overflow-x-auto"
         >
           <div
             className="rounded-[14px] overflow-hidden"
@@ -101,7 +102,7 @@ export function Hero() {
           >
             {/* Title bar */}
             <div
-              className="flex gap-[6px] items-center px-[14px] py-[10px]"
+              className="flex gap-[6px] items-center px-3 md:px-[14px] py-[10px]"
               style={{ background: "var(--surface-sunken)", borderBottom: "1px solid var(--border-subtle)" }}
             >
               <span className="w-[10px] h-[10px] rounded-full bg-[#FF5F57] block" />
@@ -114,7 +115,7 @@ export function Hero() {
             </div>
 
             {/* Content */}
-            <div className="px-8 pt-7 pb-8">
+            <div className="px-4 sm:px-6 md:px-8 pt-7 pb-8">
               <div
                 className="mb-1.5"
                 style={{

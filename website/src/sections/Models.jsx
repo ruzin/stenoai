@@ -15,7 +15,7 @@ export function Models() {
 
   return (
     <section id="models" className="sect">
-      <div className="container-site grid md:grid-cols-2 gap-20 items-center">
+      <div className="container-site grid md:grid-cols-2 gap-10 md:gap-20 items-center">
 
         <Motion.div
           initial={{ opacity: 0, y: 8 }}

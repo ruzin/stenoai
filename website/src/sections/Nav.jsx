@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { Github, Download } from "lucide-react";
 import { StenoMark, Wordmark } from "../components/Brand";
 import { ThemeToggle } from "../components/ThemeToggle";
+import { trackDownload, trackGitHub } from "../analytics";
 
 const GITHUB_URL = "https://github.com/ruzin/stenoai";
 
@@ -43,12 +44,14 @@ export function Nav() {
             href={GITHUB_URL}
             target="_blank"
             rel="noopener noreferrer"
+            onClick={() => trackGitHub('nav')}
             className="hidden md:inline-flex btn-base btn-ghost btn-sm items-center gap-2 no-underline hover:no-underline"
           >
             <Github size={14} aria-hidden="true" /> GitHub
           </a>
           <a
             href="#download"
+            onClick={() => trackDownload('nav', 'unknown')}
             className="btn-base btn-primary btn-sm inline-flex items-center gap-2 no-underline hover:no-underline"
           >
             Download

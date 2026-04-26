@@ -14,7 +14,7 @@ export function Features() {
   return (
     <section id="features" className="sect" style={{ background: "var(--surface-sunken)" }}>
       <div className="container-site">
-        <div className="mb-[72px]" style={{ maxWidth: 640 }}>
+        <div className="mb-[48px] md:mb-[72px]" style={{ maxWidth: 640 }}>
           <h2
             style={{
               fontFamily: "var(--font-serif)",
@@ -33,7 +33,7 @@ export function Features() {
           </p>
         </div>
 
-        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-10 gap-x-12">
+        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-8 sm:gap-10 sm:gap-x-12">
           {feats.map((f, i) => (
             <Motion.div
               key={f.title}

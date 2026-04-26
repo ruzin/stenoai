@@ -185,14 +185,6 @@
 /* ═══════════════════════════════════════════════════
    @utility — reusable component shorthands
    ═══════════════════════════════════════════════════ */
-@utility container-site {
-  max-width: 1120px;
-  margin-left: auto;
-  margin-right: auto;
-  padding-left: 28px;
-  padding-right: 28px;
-}
-
 @utility sect {
   padding-top: 112px;
   padding-bottom: 112px;
@@ -263,8 +255,30 @@
 }
 
 /* ═══════════════════════════════════════════════════
-   Responsive — 900px breakpoint
+   Container — responsive padding
    ═══════════════════════════════════════════════════ */
-@media (max-width: 900px) {
+@layer utilities {
+  .container-site {
+    max-width: 1120px;
+    margin-left: auto;
+    margin-right: auto;
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+  @media (min-width: 640px) {
+    .container-site { padding-left: 20px; padding-right: 20px; }
+  }
+  @media (min-width: 768px) {
+    .container-site { padding-left: 28px; padding-right: 28px; }
+  }
+}
+
+/* ═══════════════════════════════════════════════════
+   Responsive — section padding
+   ═══════════════════════════════════════════════════ */
+@media (max-width: 640px) {
+  .sect { padding-top: 72px; padding-bottom: 72px; }
+}
+@media (min-width: 641px) and (max-width: 900px) {
   .sect { padding-top: 80px; padding-bottom: 80px; }
 }

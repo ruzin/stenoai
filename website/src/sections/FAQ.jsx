@@ -40,8 +40,8 @@ export function FAQ() {
             >
               <button
                 onClick={() => setOpen(open === i ? null : i)}
-                className="w-full bg-transparent border-0 py-6 flex justify-between items-center gap-5 cursor-pointer text-left text-fg-1"
-                style={{ fontFamily: "var(--font-sans)", fontSize: 17, fontWeight: 500 }}
+                className="w-full bg-transparent border-0 py-6 flex justify-between items-center gap-5 cursor-pointer text-left text-fg-1 text-base md:text-[17px]"
+                style={{ fontFamily: "var(--font-sans)", fontWeight: 500 }}
               >
                 <span>{f.q}</span>
                 <span className="text-fg-2 flex-shrink-0">

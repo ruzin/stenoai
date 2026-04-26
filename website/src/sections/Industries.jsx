@@ -10,7 +10,7 @@ const inds = [
 export function Industries() {
   return (
     <section id="industries" className="sect">
-      <div className="container-site grid md:grid-cols-[1fr_1.1fr] gap-20 items-start">
+      <div className="container-site grid md:grid-cols-[1fr_1.1fr] gap-10 md:gap-20 items-start">
 
         <Motion.div
           initial={{ opacity: 0, y: 8 }}
@@ -40,7 +40,7 @@ export function Industries() {
             className="mt-10 text-fg-2"
             style={{
               fontFamily: "var(--font-serif)",
-              fontSize: 22,
+              fontSize: "clamp(18px, 3vw, 22px)",
               fontStyle: "italic",
               fontWeight: 400,
               lineHeight: 1.4,

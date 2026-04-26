@@ -26,7 +26,7 @@ export function HowItWorks() {
   return (
     <section id="how" className="sect">
       <div className="container-site">
-        <div className="mb-[72px]" style={{ maxWidth: 640 }}>
+        <div className="mb-[48px] md:mb-[72px]" style={{ maxWidth: 640 }}>
           <h2
             style={{
               fontFamily: "var(--font-serif)",
@@ -45,7 +45,7 @@ export function HowItWorks() {
           </p>
         </div>
 
-        <div className="grid md:grid-cols-3 gap-12">
+        <div className="grid md:grid-cols-3 gap-8 md:gap-12">
           {steps.map((s, i) => (
             <Motion.div
               key={s.n}

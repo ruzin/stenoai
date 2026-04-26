@@ -1,5 +1,6 @@
 import { Download } from "lucide-react";
 import { motion as Motion } from "framer-motion";
+import { trackDownload } from "../analytics";
 
 const DOWNLOAD_ARM = "https://github.com/ruzin/stenoai/releases/latest/download/stenoAI-macos-arm64.dmg";
 const DOWNLOAD_X64 = "https://github.com/ruzin/stenoai/releases/latest/download/stenoAI-macos-x64.dmg";
@@ -13,7 +14,7 @@ export function CTAFooter() {
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true }}
           transition={{ duration: 0.5 }}
-          className="cta-wrap rounded-[20px] px-16 py-24 text-center"
+          className="cta-wrap rounded-[14px] md:rounded-[20px] px-6 py-14 sm:px-10 sm:py-16 md:px-16 md:py-24 text-center"
           style={{ backgroundColor: "var(--primary)", color: "var(--primary-fg)" }}
         >
           <div style={{ maxWidth: 520, margin: "0 auto" }}>
@@ -37,12 +38,14 @@ export function CTAFooter() {
             <div className="flex gap-[10px] justify-center flex-wrap">
               <a
                 href={DOWNLOAD_ARM}
+                onClick={() => trackDownload('cta_footer', 'arm64')}
                 className="btn-base btn-primary no-underline"
               >
                 <Download size={15} aria-hidden="true" /> Apple Silicon
               </a>
               <a
                 href={DOWNLOAD_X64}
+                onClick={() => trackDownload('cta_footer', 'x64')}
                 className="btn-base btn-ghost no-underline"
               >
                 Intel Macs
