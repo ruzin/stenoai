@@ -14,6 +14,28 @@ const crypto = require('crypto');
 const { PostHog } = require('posthog-node');
 const { initMain } = require('electron-audio-loopback');
 const { autoUpdater } = require('electron-updater');
+const settingsStore = require('./src/settings-store');
+
+// E2E test-harness hooks. Set via env vars; production sees none of these.
+//   STENOAI_USER_DATA_DIR — per-test temp userData dir (must be set before app.whenReady)
+//   STENOAI_E2E=1         — skip tray, auto-updater, PostHog telemetry
+//   STENOAI_E2E_MOCK_IPC=1 — install deterministic mock IPC handlers
+if (process.env.STENOAI_USER_DATA_DIR) {
+  app.setPath('userData', process.env.STENOAI_USER_DATA_DIR);
+}
+const IS_E2E = process.env.STENOAI_E2E === '1';
+const IS_E2E_MOCK_IPC = process.env.STENOAI_E2E_MOCK_IPC === '1';
+if (IS_E2E_MOCK_IPC) {
+  require('./e2e-mock-ipc').install({ ipcMain, BrowserWindow });
+}
+
+// Load the persisted renderer preference synchronously, before any window is
+// created. STENOAI_NEW_UI=1 env var overrides the file for E2E / dogfooding.
+settingsStore.load(app);
+function resolveUseNewRenderer() {
+  if (process.env.STENOAI_NEW_UI === '1') return true;
+  return settingsStore.get('newRenderer');
+}
 
 // Initialize electron-audio-loopback before app is ready
 initMain();
@@ -22,6 +44,9 @@ let mainWindow;
 let pythonProcess;
 let tray = null;
 let isQuitting = false;
+// true once the window has been shown for the first time (React mounted).
+// Prevents activate/focus handlers from showing the window before it's ready.
+let windowReadyToShow = false;
 let shortcutQueue = [];
 let pendingShortcutUrls = [];
 let rendererShortcutReady = false;
@@ -330,6 +355,10 @@ function durationBucket(seconds) {
  * Initialize PostHog telemetry by reading config from Python backend.
  */
 async function initTelemetry() {
+  if (IS_E2E) {
+    telemetryEnabled = false;
+    return;
+  }
   try {
     const result = await new Promise((resolve, reject) => {
       const proc = spawn(getBackendPath(), ['get-telemetry'], {
@@ -451,29 +480,83 @@ function validateSafeFilePath(filepath, allowedBaseDirs) {
   }
 }
 
-function createWindow() {
+function createWindow(options = {}) {
   rendererShortcutReady = false;
-  mainWindow = new BrowserWindow({
+  const useNew = resolveUseNewRenderer();
+  const legacyPrefs = { nodeIntegration: true, contextIsolation: false };
+  const newPrefs = {
+    nodeIntegration: false,
+    contextIsolation: true,
+    sandbox: false,
+    preload: path.join(__dirname, 'preload.js'),
+    scrollBounce: true,
+  };
+
+  const windowOpts = {
     width: 1200,
     height: 800,
     minWidth: 1000,
     minHeight: 600,
-    webPreferences: {
-      nodeIntegration: true,
-      contextIsolation: false
-    },
+    webPreferences: useNew ? newPrefs : legacyPrefs,
     titleBarStyle: 'hiddenInset',
-    show: false
-  });
+    show: false,
+    backgroundColor: useNew ? '#FAF9F5' : '#ffffff',
+  };
+  // The new React UI renders the macOS traffic lights inside the sidebar's
+  // top band rather than floating above a fixed titlebar.
+  if (useNew) {
+    windowOpts.trafficLightPosition = { x: 18, y: 18 };
+  }
+  if (options.bounds && typeof options.bounds.x === 'number') {
+    Object.assign(windowOpts, options.bounds);
+  }
 
-  mainWindow.loadFile('index.html');
+  mainWindow = new BrowserWindow(windowOpts);
+
+  if (useNew) {
+    const rendererDist = path.join(__dirname, 'renderer', 'dist', 'index.html');
+    if (fs.existsSync(rendererDist)) {
+      const hash = process.env.STENOAI_RENDERER_HASH;
+      if (hash) {
+        mainWindow.loadFile(rendererDist, { hash });
+      } else {
+        mainWindow.loadFile(rendererDist);
+      }
+    } else {
+      console.warn('[renderer] new renderer requested but dist missing — falling back to legacy');
+      mainWindow.loadFile('index.html');
+    }
+  } else {
+    mainWindow.loadFile('index.html');
+  }
   
+  windowReadyToShow = false;
+
+  const showWhenReady = () => {
+    windowReadyToShow = true;
+    if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isVisible()) {
+      mainWindow.show();
+    }
+  };
+
   mainWindow.once('ready-to-show', () => {
     if (launchedByShortcut) {
       return;
     }
-    mainWindow.show();
+    if (!useNew) {
+      showWhenReady();
+      return;
+    }
+    // For the new React renderer, wait until React signals it has mounted.
+    // Fall back to showing after 4 s in case the signal never arrives.
+    const fallback = setTimeout(showWhenReady, 4000);
+    ipcMain.once('renderer-ready-to-show', () => {
+      clearTimeout(fallback);
+      showWhenReady();
+    });
   });
+
+
 
   // On macOS, hide to tray instead of destroying (like Slack, Spotify)
   mainWindow.on('close', (event) => {
@@ -490,6 +573,23 @@ function createWindow() {
       pythonProcess.kill();
     }
   });
+}
+
+// Destroy and re-create the main window with fresh webPreferences (needed
+// when flipping the renderer feature flag — reload() cannot change the
+// preload path or contextIsolation setting). Window bounds are preserved.
+function rebuildMainWindow() {
+  let bounds = null;
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    try { bounds = mainWindow.getBounds(); } catch (e) { bounds = null; }
+    mainWindow.removeAllListeners('close');
+    mainWindow.destroy();
+  }
+  mainWindow = null;
+  createWindow({ bounds });
+  if (tray) {
+    updateTrayMenu();
+  }
 }
 
 function getTrayIconPath(recording) {
@@ -559,6 +659,15 @@ function updateTrayMenu() {
         if (mainWindow) mainWindow.hide();
       }
     },
+    { type: 'separator' },
+    {
+      label: resolveUseNewRenderer() ? 'Switch to legacy UI' : 'Switch to new UI (beta)',
+      click: () => {
+        const next = !resolveUseNewRenderer();
+        settingsStore.set('newRenderer', next);
+        rebuildMainWindow();
+      }
+    },
     {
       label: `StenoAI v${appVersion}`,
       enabled: false
@@ -604,24 +713,32 @@ if (!gotSingleInstanceLock) {
     }
   });
 
+  // Sends the custom in-app quit dialog to the renderer and waits for a response.
+  // Falls back to true (allow quit) if the window is unavailable.
+  async function showCustomQuitDialog(type, jobCount) {
+    if (!mainWindow || mainWindow.isDestroyed()) return true;
+    mainWindow.show();
+    mainWindow.focus();
+    mainWindow.webContents.send('show-quit-dialog', { type, jobCount });
+    return new Promise((resolve) => {
+      ipcMain.once('quit-dialog-response', (_event, data) => {
+        resolve(data && data.confirmed === true);
+      });
+    });
+  }
+
   app.on('before-quit', async (event) => {
     if (isQuitting) return;
 
     // Use synchronous flag -- systemAudioRecordingActive is updated via IPC on each state change
     if (currentRecordingProcess || systemAudioRecordingActive) {
       event.preventDefault();
-      const { response } = await dialog.showMessageBox(mainWindow || null, {
-        type: 'warning',
-        buttons: ['Cancel', 'Stop & Quit'],
-        defaultId: 0,
-        cancelId: 0,
-        title: 'Recording in Progress',
-        message: 'A recording is still in progress. Quitting will stop and save the recording.',
-      });
-      if (response === 1) {
+      const confirmed = await showCustomQuitDialog('recording');
+      if (confirmed) {
         if (currentRecordingProcess) {
           currentRecordingProcess.kill('SIGTERM');
           currentRecordingProcess = null;
+          currentRecordingSessionName = null;
         }
         if (systemAudioRecordingActive && mainWindow && !mainWindow.isDestroyed()) {
           try {
@@ -638,15 +755,8 @@ if (!gotSingleInstanceLock) {
     } else if (isProcessing || processingQueue.length > 0) {
       event.preventDefault();
       const jobCount = processingQueue.length + (isProcessing ? 1 : 0);
-      const { response } = await dialog.showMessageBox(mainWindow || null, {
-        type: 'warning',
-        buttons: ['Cancel', 'Quit Anyway'],
-        defaultId: 0,
-        cancelId: 0,
-        title: 'Processing in Progress',
-        message: `${jobCount} recording${jobCount > 1 ? 's are' : ' is'} still being processed. Quitting will cancel processing.`,
-      });
-      if (response === 1) {
+      const confirmed = await showCustomQuitDialog('processing', jobCount);
+      if (confirmed) {
         isQuitting = true;
         app.quit();
       }
@@ -703,7 +813,7 @@ if (!gotSingleInstanceLock) {
     Menu.setApplicationMenu(appMenu);
 
     createWindow();
-    createTray();
+    if (!IS_E2E) createTray();
     setupAutoUpdater();
     const protocolRegistered = registerShortcutProtocolClient();
     sendDebugLog(`Protocol handler registration (${SHORTCUT_PROTOCOL}): ${protocolRegistered}`);
@@ -821,8 +931,12 @@ if (!gotSingleInstanceLock) {
   app.on('activate', () => {
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore();
-      mainWindow.show();
-      mainWindow.focus();
+      // Only show if the window has finished its initial load.
+      // On first launch, windowReadyToShow is false until React mounts.
+      if (windowReadyToShow) {
+        mainWindow.show();
+        mainWindow.focus();
+      }
       launchedByShortcut = false;
     } else {
       launchedByShortcut = false;
@@ -1149,6 +1263,48 @@ ipcMain.handle('reprocess-meeting', async (event, summaryFile, regenerateTitle, 
   }
 });
 
+ipcMain.handle('regen-meeting-title', async (event, summaryFile, sessionName) => {
+  try {
+    const cloudKey = loadCloudApiKey();
+    const regenEnv = cloudKey ? { ...require('process').env, STENOAI_CLOUD_API_KEY: cloudKey } : undefined;
+
+    await new Promise((resolve, reject) => {
+      const proc = spawn(getBackendPath(), ['regen-title', summaryFile], {
+        cwd: getBackendCwd(),
+        env: regenEnv,
+      });
+
+      let stderrBuf = '';
+      const procTimeout = setTimeout(() => { proc.kill(); }, 2 * 60 * 1000);
+
+      proc.on('error', (err) => { clearTimeout(procTimeout); reject(new Error(err.message)); });
+
+      proc.stdout.on('data', (data) => {
+        data.toString().split('\n').forEach((line) => {
+          if (line.startsWith('TITLE:')) {
+            const title = line.slice(6);
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('summary-title', { title, sessionName });
+            }
+          }
+        });
+      });
+
+      proc.stderr.on('data', (data) => { stderrBuf += data.toString(); });
+
+      proc.on('close', (code) => {
+        clearTimeout(procTimeout);
+        if (code === 0) resolve();
+        else reject(new Error(`regen-title exited with code ${code}: ${stderrBuf.slice(-300)}`));
+      });
+    });
+
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
 ipcMain.handle('query-transcript', async (event, summaryFile, question) => {
   try {
     sendDebugLog(`🤖 Querying transcript: ${question.substring(0, 50)}...`);
@@ -1356,30 +1512,66 @@ ipcMain.handle('update-meeting', async (event, summaryFilePath, updates) => {
       };
     }
 
-    const fileContent = fs.readFileSync(absolutePath, 'utf8');
+    const isMarkdown = absolutePath.endsWith('.md');
+    let data;
 
-    if (absolutePath.endsWith('.md')) {
-      // .md format: update YAML frontmatter fields
-      let updatedContent = fileContent;
-      if (updates.name !== undefined) {
-        if (updates.name.includes('\n') || updates.name.includes('\r')) {
-          return { success: false, error: 'Title cannot contain newlines' };
+    if (isMarkdown) {
+      const raw = fs.readFileSync(absolutePath, 'utf8');
+      let frontmatter = {};
+      let body = raw;
+
+      if (raw.startsWith('---')) {
+        const parts = raw.split('---', 3);
+        if (parts.length >= 3) {
+          for (const line of parts[1].trim().split('\n')) {
+            const colon = line.indexOf(':');
+            if (colon !== -1) {
+              const key = line.slice(0, colon).trim();
+              const val = line.slice(colon + 1).trim().replace(/^"|"$/g, '');
+              frontmatter[key] = val;
+            }
+          }
+          body = parts[2];
         }
-        const escapedName = updates.name.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-        updatedContent = updatedContent.replace(
-          /^title:\s*".*"$/m,
-          `title: "${escapedName}"`
-        );
       }
-      fs.writeFileSync(absolutePath, updatedContent, 'utf8');
+
+      if (updates.name !== undefined) {
+        frontmatter.title = updates.name;
+      }
+      frontmatter.updated_at = new Date().toISOString();
+
+      const fmLines = Object.entries(frontmatter)
+        .map(([k, v]) => `${k}: "${v}"`)
+        .join('\n');
+      const updated = `---\n${fmLines}\n---${body}`;
+      fs.writeFileSync(absolutePath, updated, 'utf8');
+
+      data = {
+        session_info: {
+          name: frontmatter.title ?? '',
+          summary_file: absolutePath,
+          updated_at: frontmatter.updated_at,
+        },
+      };
     } else {
-      // .json format: update structured fields
-      const data = JSON.parse(fileContent);
-      if (updates.name !== undefined) data.session_info.name = updates.name;
-      if (updates.summary !== undefined) data.summary = updates.summary;
-      if (updates.participants !== undefined) data.participants = updates.participants;
-      if (updates.key_points !== undefined) data.key_points = updates.key_points;
-      if (updates.action_items !== undefined) data.action_items = updates.action_items;
+      data = JSON.parse(fs.readFileSync(absolutePath, 'utf8'));
+
+      if (updates.name !== undefined) {
+        data.session_info.name = updates.name;
+      }
+      if (updates.summary !== undefined) {
+        data.summary = updates.summary;
+      }
+      if (updates.participants !== undefined) {
+        data.participants = updates.participants;
+      }
+      if (updates.key_points !== undefined) {
+        data.key_points = updates.key_points;
+      }
+      if (updates.action_items !== undefined) {
+        data.action_items = updates.action_items;
+      }
+
       data.session_info.updated_at = new Date().toISOString();
       fs.writeFileSync(absolutePath, JSON.stringify(data, null, 2), 'utf8');
     }
@@ -1392,6 +1584,15 @@ ipcMain.handle('update-meeting', async (event, summaryFilePath, updates) => {
     };
   } catch (error) {
     console.error('Update meeting error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('reveal-meeting-folder', async (event, filePath) => {
+  try {
+    shell.showItemInFolder(filePath);
+    return { success: true };
+  } catch (error) {
     return { success: false, error: error.message };
   }
 });
@@ -1412,6 +1613,8 @@ ipcMain.handle('delete-meeting', async (event, meetingData) => {
 
     const summaryFile = meeting.session_info?.summary_file;
     const transcriptFile = meeting.session_info?.transcript_file;
+    const audioFile = meeting.session_info?.audio_file;
+    const sessionName = meeting.session_info?.name;
 
     // Convert relative paths to absolute paths
     const absolutePaths = [];
@@ -1420,6 +1623,14 @@ ipcMain.handle('delete-meeting', async (event, meetingData) => {
     }
     if (transcriptFile) {
       absolutePaths.push(path.isAbsolute(transcriptFile) ? transcriptFile : path.join(projectRoot, transcriptFile));
+    }
+    if (audioFile) {
+      absolutePaths.push(path.isAbsolute(audioFile) ? audioFile : path.join(projectRoot, audioFile));
+    }
+    if (summaryFile && sessionName) {
+      const outputDir = path.dirname(path.isAbsolute(summaryFile) ? summaryFile : path.join(projectRoot, summaryFile));
+      const safeName = sessionName.replace(/[^a-zA-Z0-9_-]/g, '_');
+      absolutePaths.push(path.join(outputDir, `${safeName}_notes.txt`));
     }
 
     console.log('Attempting to delete files:', absolutePaths);
@@ -1473,19 +1684,82 @@ ipcMain.handle('get-queue-status', async () => {
     isProcessing,
     queueSize: processingQueue.length,
     currentJob: currentProcessingJob?.sessionName || null,
-    hasRecording: currentRecordingProcess !== null || systemAudioRecordingActive
+    hasRecording: currentRecordingProcess !== null || systemAudioRecordingActive,
+    isPaused: currentRecordingProcess !== null && recordingRuntimeState.isPaused,
+    elapsedSeconds: currentRecordingProcess !== null ? getRecordingElapsedSeconds() : 0,
+    sessionName: currentRecordingSessionName
   };
 });
 
 // Global recording state management
 let systemAudioRecordingActive = false;  // Track system audio recording for tray/quit
 let currentRecordingProcess = null;
+let currentRecordingSessionName = null;  // Surfaced in get-queue-status so renderer knows which meeting is live
 let processingQueue = [];
 let isProcessing = false;
 let currentProcessingJob = null;
+let recordingRuntimeState = {
+  startedAtMs: null,
+  pausedAtMs: null,
+  pausedTotalMs: 0,
+  isPaused: false
+};
 let ollamaProcess = null;  // Track spawned Ollama process for cleanup on quit
 let ollamaPid = null;      // Store PID separately since unref() disconnects the process
 let ollamaStartedByUs = false;
+
+function resetRecordingRuntimeState() {
+  recordingRuntimeState = {
+    startedAtMs: null,
+    pausedAtMs: null,
+    pausedTotalMs: 0,
+    isPaused: false
+  };
+}
+
+function startRecordingRuntimeState() {
+  recordingRuntimeState = {
+    startedAtMs: Date.now(),
+    pausedAtMs: null,
+    pausedTotalMs: 0,
+    isPaused: false
+  };
+}
+
+function markRecordingPaused() {
+  if (!recordingRuntimeState.startedAtMs || recordingRuntimeState.isPaused) {
+    return;
+  }
+  recordingRuntimeState.isPaused = true;
+  recordingRuntimeState.pausedAtMs = Date.now();
+}
+
+function markRecordingResumed() {
+  if (!recordingRuntimeState.isPaused) {
+    return;
+  }
+  if (recordingRuntimeState.pausedAtMs) {
+    recordingRuntimeState.pausedTotalMs += Date.now() - recordingRuntimeState.pausedAtMs;
+  }
+  recordingRuntimeState.isPaused = false;
+  recordingRuntimeState.pausedAtMs = null;
+}
+
+function getRecordingElapsedSeconds() {
+  if (!recordingRuntimeState.startedAtMs) {
+    return 0;
+  }
+
+  let pausedMs = recordingRuntimeState.pausedTotalMs;
+  if (recordingRuntimeState.isPaused && recordingRuntimeState.pausedAtMs) {
+    pausedMs += Date.now() - recordingRuntimeState.pausedAtMs;
+  }
+
+  return Math.max(
+    0,
+    Math.floor((Date.now() - recordingRuntimeState.startedAtMs - pausedMs) / 1000)
+  );
+}
 
 // Processing queue management
 async function processNextInQueue() {
@@ -1636,6 +1910,8 @@ ipcMain.handle('start-recording-ui', async (_, sessionName) => {
       cwd: getBackendCwd(),
       env: Object.keys(recordEnv).length > 0 ? { ...require('process').env, ...recordEnv } : undefined
     });
+    currentRecordingSessionName = actualSessionName;
+    startRecordingRuntimeState();
 
     let hasStarted = false;
     let processingSucceeded = false;
@@ -1749,6 +2025,8 @@ ipcMain.handle('start-recording-ui', async (_, sessionName) => {
       console.log(`Recording process closed with code ${code}`);
       sendDebugLog(`Recording process completed with exit code: ${code}`);
       currentRecordingProcess = null;
+      currentRecordingSessionName = null;
+      resetRecordingRuntimeState();
       updateTrayIcon(false);
 
       // If process exited without a success or failure message, notify the user
@@ -1775,6 +2053,8 @@ ipcMain.handle('start-recording-ui', async (_, sessionName) => {
   } catch (error) {
     console.error('Start recording UI error:', error.message);
     currentRecordingProcess = null;
+    currentRecordingSessionName = null;
+    resetRecordingRuntimeState();
     updateTrayIcon(false);
     trackEvent('error_occurred', { error_type: 'start_recording_ui' });
     return { success: false, error: error.message };
@@ -1794,6 +2074,7 @@ ipcMain.handle('pause-recording-ui', async () => {
     // Send SIGUSR1 to pause recording (Unix only)
     if (process.platform !== 'win32') {
       currentRecordingProcess.kill('SIGUSR1');
+      markRecordingPaused();
       sendDebugLog('SIGUSR1 sent successfully');
       return { success: true, message: 'Recording paused' };
     } else {
@@ -1819,6 +2100,7 @@ ipcMain.handle('resume-recording-ui', async () => {
     // Send SIGUSR2 to resume recording (Unix only)
     if (process.platform !== 'win32') {
       currentRecordingProcess.kill('SIGUSR2');
+      markRecordingResumed();
       sendDebugLog('SIGUSR2 sent successfully');
       return { success: true, message: 'Recording resumed' };
     } else {
@@ -1845,6 +2127,8 @@ ipcMain.handle('stop-recording-ui', async () => {
     // Don't wait - let the process complete independently
     // The process will handle: stop recording → transcribe → summarize → exit
     currentRecordingProcess = null;
+    currentRecordingSessionName = null;
+    resetRecordingRuntimeState();
     updateTrayIcon(false);
 
     trackEvent('recording_stopped');
@@ -1855,6 +2139,8 @@ ipcMain.handle('stop-recording-ui', async () => {
   } catch (error) {
     console.error('Stop recording UI error:', error.message);
     currentRecordingProcess = null;
+    currentRecordingSessionName = null;
+    resetRecordingRuntimeState();
     updateTrayIcon(false);
     trackEvent('error_occurred', { error_type: 'stop_recording_ui' });
     return { success: false, error: error.message };
@@ -2215,6 +2501,10 @@ ipcMain.handle('setup-python', async () => {
 
 // ── Auto-updater ──
 function setupAutoUpdater() {
+  if (IS_E2E) {
+    sendDebugLog('Auto-updater: skipped (E2E mode)');
+    return;
+  }
   // Don't check for updates in dev mode
   if (!app.isPackaged) {
     sendDebugLog('Auto-updater: skipped (dev mode)');
@@ -2684,6 +2974,16 @@ ipcMain.handle('create-folder', async (event, name, color) => {
 ipcMain.handle('rename-folder', async (event, folderId, name) => {
   try {
     const result = await runPythonScript('simple_recorder.py', ['rename-folder', folderId, name]);
+    const jsonMatch = result.match(/\{.*\}/s);
+    return jsonMatch ? JSON.parse(jsonMatch[0]) : { success: true };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('update-folder-icon', async (event, folderId, icon) => {
+  try {
+    const result = await runPythonScript('simple_recorder.py', ['update-folder-icon', folderId, icon]);
     const jsonMatch = result.match(/\{.*\}/s);
     return jsonMatch ? JSON.parse(jsonMatch[0]) : { success: true };
   } catch (error) {
@@ -3577,6 +3877,28 @@ ipcMain.handle('open-release-page', async (event, url) => {
     return { success: false, error: error.message };
   }
 });
+
+// Generic external-URL opener for renderer-triggered links (e.g. meeting
+// join URLs on Home). Http/https only — rejects custom schemes so a
+// compromised renderer cannot launch arbitrary protocol handlers.
+ipcMain.handle('open-external', async (event, url) => {
+  try {
+    if (typeof url !== 'string' || !url) {
+      return { success: false, error: 'invalid url' };
+    }
+    let parsed;
+    try { parsed = new URL(url); } catch {
+      return { success: false, error: 'invalid url' };
+    }
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return { success: false, error: 'unsupported scheme' };
+    }
+    await shell.openExternal(url);
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
 // ── Google Calendar: Token Storage ──────────────────────────────────────
 
 function getTokenFilePath() {
@@ -4326,19 +4648,41 @@ ipcMain.handle('google-auth-disconnect', async () => {
   }
 });
 
+function normalizeCalendarEvent(event) {
+  const start =
+    event.start?.dateTime ||
+    event.start?.date ||
+    (typeof event.start === 'string' ? event.start : '');
+  const end =
+    event.end?.dateTime ||
+    event.end?.date ||
+    (typeof event.end === 'string' ? event.end : '');
+  return {
+    id: event.id,
+    title: event.summary || event.title || 'No title',
+    start,
+    end,
+    meeting_url:
+      event.hangoutLink ||
+      event.onlineMeeting?.joinUrl ||
+      event.meeting_url ||
+      undefined,
+  };
+}
+
 ipcMain.handle('get-calendar-events', async () => {
   try {
     // Check which provider is connected (only one at a time)
     const googleToken = await getValidAccessToken();
     if (googleToken) {
-      const events = await fetchCalendarEvents(googleToken);
-      return { success: true, events };
+      const raw = await fetchCalendarEvents(googleToken);
+      return { success: true, events: raw.map(normalizeCalendarEvent) };
     }
 
     const outlookToken = await getValidOutlookAccessToken();
     if (outlookToken) {
-      const events = await fetchOutlookCalendarEvents(outlookToken);
-      return { success: true, events };
+      const raw = await fetchOutlookCalendarEvents(outlookToken);
+      return { success: true, events: raw.map(normalizeCalendarEvent) };
     }
 
     return { success: false, needsAuth: true };
