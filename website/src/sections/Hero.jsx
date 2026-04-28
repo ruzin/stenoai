@@ -40,7 +40,7 @@ export function Hero() {
               maxWidth: "14ch",
             }}
           >
-            AI that runs privately on your Mac
+            AI that runs privately on your Mac.
           </Motion.h1>
 
           <Motion.p
