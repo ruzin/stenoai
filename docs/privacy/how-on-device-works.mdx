@@ -62,7 +62,7 @@ This is opt-in, off by default, and clearly indicated in the UI. If you work wit
 ---
 
 <Accordion title="Does Steno send any telemetry or usage data?">
-No. The Steno app does not include any analytics, crash reporting, or telemetry. The only outbound requests from the app are the update check on launch and model downloads during setup. (The Steno documentation site itself uses PostHog for anonymous visitor counts -- this is independent of the app and does not run when you use Steno.)
+No. The Steno app does not include any analytics, crash reporting, or telemetry. In the default local configuration, the only outbound requests from the app are the update check on launch and model downloads during setup. If you enable a cloud summarization model, transcripts are sent to that provider's API. (The Steno documentation site itself uses PostHog for anonymous visitor counts -- this is independent of the app and does not run when you use Steno.)
 </Accordion>
 
 <Accordion title="Can I use Steno in an air-gapped environment?">
