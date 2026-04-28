@@ -3,7 +3,7 @@ title: "What is Steno?"
 description: "Steno is a macOS app that records, transcribes, and summarizes meetings entirely on-device. Your audio never leaves your Mac."
 ---
 
-Steno is a macOS app that records, transcribes, and summarizes meetings using AI models that run entirely on your device. There are no cloud uploads, no accounts required, and no network requests after installation. Your audio, transcripts, and summaries are stored locally in `~/Library/Application Support/stenoai/`.
+Steno is a macOS app that records, transcribes, and summarizes meetings using AI models that run entirely on your device. By default there are no cloud uploads and no accounts required; the only outbound requests are model downloads during setup and update checks on launch. Your audio, transcripts, and summaries are stored locally in `~/Library/Application Support/stenoai/` (you can change the location in Settings).
 
 ## How it works
 
@@ -38,7 +38,7 @@ macOS 12 (Monterey) or later. Apple Silicon and Intel both supported.
 ---
 
 <Accordion title="Does Steno require an internet connection?">
-No. After the initial download and model installation (which requires a connection to download model files), Steno runs entirely offline. All transcription and summarization happens on your Mac.
+No, in the default local configuration. After the initial download and model installation, Steno runs offline -- transcription and summarization happen on your Mac. The app still performs a lightweight update check on launch, and if you opt into a cloud summarization model (OpenAI, Anthropic, or a custom endpoint) it will reach that provider's API for summary generation only.
 </Accordion>
 
 <Accordion title="What data does Steno store and where?">

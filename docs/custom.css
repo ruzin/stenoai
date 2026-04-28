@@ -123,23 +123,23 @@ nav, aside, [class*="sidebar"] {
 
 /* Light mode: ink background, paper text */
 #topbar-cta-button a > span.absolute {
-  background-color: #1B1B19 !important;
-  border-radius: 8px !important;
+  background-color: #1B1B19;
+  border-radius: 8px;
 }
 
 #topbar-cta-button a span.z-10,
 #topbar-cta-button a svg {
-  color: #FAF9F5 !important;
+  color: #FAF9F5;
 }
 
 /* Dark mode: paper background, ink text */
 .dark #topbar-cta-button a > span.absolute {
-  background-color: #EDEAE0 !important;
+  background-color: #EDEAE0;
 }
 
 .dark #topbar-cta-button a span.z-10,
 .dark #topbar-cta-button a svg {
-  color: #1A1A18 !important;
+  color: #1A1A18;
 }
 
 /* ── Dark mode adjustments ──────────────────────────────────────────────────── */

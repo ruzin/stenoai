@@ -3,7 +3,7 @@
   "name": "Steno",
   "logo": {
     "light": "/logo/wordmark.svg",
-    "dark": "/logo/wordmark.svg",
+    "dark": "/logo/wordmark-dark.svg",
     "href": "https://stenoai.co"
   },
   "favicon": "/logo/dragonfly.png",
