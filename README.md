@@ -29,6 +29,12 @@
 
 <p align="center"><sub><i>Disclaimer: This is an independent open-source project for meeting-notes productivity and is not affiliated with, endorsed by, or associated with any similarly named company.</i></sub></p>
 
+## Sponsors
+
+### Recall.ai - API for desktop recording
+
+If you're looking for a hosted desktop recording API, consider checking out [Recall.ai](https://www.recall.ai/product/desktop-recording-sdk?utm_source=github&utm_medium=sponsorship&utm_campaign=ruzin-stenoai), an API that records Zoom, Google Meet, Microsoft Teams, in-person meetings, and more.
+
 ## 📢 What's New
 - **2026-04-19** 🔄 In-app auto-updates — Updates download in the background and install on next quit; no more manual DMG downloads
 - **2026-04-19** 💬 Inline ask bar — Query your meetings from a floating bar at the bottom of every note
@@ -38,12 +44,6 @@
 - **2026-03-23** 🗣️ Speaker diarisation — [You] vs [Others] labels for system audio recordings
 - **2026-03-23** 🌍 Auto-detect language — 99 languages supported out of the box
 - **2026-03-04** 🏷️ Auto-generated meeting titles — AI creates short titles from your transcripts
-
-## Sponsors
-
-### Recall.ai - API for desktop recording
-
-If you're looking for a hosted desktop recording API, consider checking out [Recall.ai](https://www.recall.ai/product/desktop-recording-sdk?utm_source=github&utm_medium=sponsorship&utm_campaign=ruzin-stenoai), an API that records Zoom, Google Meet, Microsoft Teams, in-person meetings, and more.
 
 ## Features
 
