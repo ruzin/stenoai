@@ -1,0 +1,57 @@
+---
+title: "Ask your meetings"
+description: "Query any saved meeting note in plain English. Steno answers from your local transcript and summary -- no data leaves your Mac."
+---
+
+Every meeting note in Steno has an inline ask bar. Type a question in plain English and Steno answers from the saved transcript, summary, and key topics using the local language model.
+
+## How to use it
+
+1. Open a saved note from the sidebar
+2. Click the **Ask** bar at the bottom of the pane
+3. Type your question and press Return
+
+Steno reads the saved `.md` files for that meeting -- the summary, key topics, and full transcript -- and passes them with your question to the local model. The answer streams inline below the ask bar.
+
+## What you can ask
+
+The ask bar is useful for questions you would ask a colleague who was in the meeting:
+
+- "What decisions were made?"
+- "What did we agree to do about the pricing change?"
+- "Who is responsible for the API migration?"
+- "Summarize this in three bullet points."
+- "What were the concerns raised about the timeline?"
+- "Was there anything about [client name]?"
+
+Questions that reference specific details from the meeting work best. Vague questions ("what happened?") return less useful answers than specific ones ("what was the outcome of the budget discussion?").
+
+## What Steno reads
+
+When you ask a question, Steno reads three sources from the saved note:
+
+| Source | Content |
+|--------|---------|
+| Summary | The AI-generated paragraph summary of the meeting |
+| Key topics | The structured list of topics identified during summarization |
+| Full transcript | The verbatim transcript with timestamps and speaker labels |
+
+The full transcript is included when it fits within the model's context window. For long meetings, Steno trims the transcript intelligently, keeping the most relevant sections.
+
+## Privacy
+
+All queries are processed by the local model on your Mac. Your questions and the meeting content are not sent to any external server unless you have configured a cloud model in Settings.
+
+---
+
+<Accordion title="Can I ask questions across multiple meetings?">
+Not yet. The ask bar currently works against a single meeting's saved note. Cross-meeting search is on the roadmap.
+</Accordion>
+
+<Accordion title="The answers are not very accurate -- what should I try?">
+Larger models produce better answers. In **Settings → Models → Summarization**, switch to `qwen3.5:9b` or `deepseek-r1:14b`. Also check that the full transcript was saved -- if transcription failed or was skipped, the model only has the summary to work from.
+</Accordion>
+
+<Accordion title="Can I ask in a language other than English?">
+Yes. The ask bar passes your question directly to the language model, which supports multilingual input. Results may vary by model and language.
+</Accordion>

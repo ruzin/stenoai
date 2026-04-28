@@ -1,0 +1,62 @@
+---
+title: "Remote Ollama setup"
+description: "Offload summarization to a more powerful Mac or workstation on your network. Useful if your laptop cannot run larger models comfortably."
+---
+
+By default, Steno runs Ollama on the same machine where you record. If you have a more powerful Mac on your local network -- a desktop, a Mac Studio, or a Mac mini -- you can run Ollama there and point Steno at it.
+
+This keeps summarization local to your network (no cloud involvement) while freeing your laptop's resources.
+
+## Set up Ollama on the remote machine
+
+<Steps>
+  <Step title="Install Ollama">
+    Download and install Ollama on the remote machine from [ollama.com](https://ollama.com).
+  </Step>
+
+  <Step title="Pull the model you want to use">
+    ```bash
+    ollama pull deepseek-r1:14b
+    ```
+    You can use any model supported by Ollama, including larger ones that would not run on your laptop.
+  </Step>
+
+  <Step title="Configure Ollama to accept remote connections">
+    By default, Ollama only listens on `127.0.0.1`. To accept connections from other machines on your network, set the `OLLAMA_HOST` environment variable before starting Ollama:
+
+    ```bash
+    OLLAMA_HOST=0.0.0.0:11434 ollama serve
+    ```
+
+    For a persistent setup on macOS, add `OLLAMA_HOST=0.0.0.0:11434` to a launchd plist or use a tool like [LaunchControl](https://soma-zone.com/LaunchControl/).
+  </Step>
+
+  <Step title="Note the remote machine's local IP address">
+    On the remote Mac, go to **System Settings → Network** and note the local IP address (e.g., `192.168.1.10`).
+  </Step>
+</Steps>
+
+## Point Steno at the remote Ollama
+
+1. Open **Settings → Models → Summarization**
+2. Select **Remote Ollama**
+3. Enter the remote machine's address: `http://192.168.1.10:11434`
+4. Select the model you want to use
+
+Steno will send the transcript to the remote Ollama for summarization. Audio is never transmitted -- only the text transcript is sent over your local network.
+
+## Notes
+
+- Both machines must be on the same network. This does not work over the internet without additional configuration (VPN or tunnel).
+- If the remote machine is not reachable, Steno will fall back to the local model.
+- The remote Ollama address is not persisted if Steno is reinstalled -- you will need to re-enter it.
+
+---
+
+<Accordion title="Is it secure to expose Ollama on the local network?">
+Ollama has no authentication by default. Anyone on your local network who can reach the IP and port can send requests to it. For a trusted home or small office network this is usually acceptable. On a shared or corporate network, use a firewall rule to restrict access to specific IPs.
+</Accordion>
+
+<Accordion title="Can I use a remote Ollama server over the internet?">
+Not directly without additional setup. You would need a VPN or an SSH tunnel. This is outside the scope of Steno itself -- set up the tunnel first, then point Steno at `http://localhost:[forwarded-port]`.
+</Accordion>

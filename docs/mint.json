@@ -1,0 +1,102 @@
+{
+  "$schema": "https://mintlify.com/schema.json",
+  "name": "Steno",
+  "logo": {
+    "light": "/logo/wordmark.svg",
+    "dark": "/logo/wordmark-dark.svg",
+    "href": "https://stenoai.co"
+  },
+  "favicon": "/logo/dragonfly.png",
+  "colors": {
+    "primary": "#1B1B19",
+    "light": "#6B6B66",
+    "dark": "#EDEAE0",
+    "background": {
+      "light": "#FAF9F5",
+      "dark": "#1A1A18"
+    }
+  },
+  "topbarLinks": [
+    {
+      "name": "GitHub",
+      "url": "https://github.com/ruzin/stenoai"
+    }
+  ],
+  "topbarCtaButton": {
+    "name": "Download",
+    "url": "https://stenoai.co/#download"
+  },
+  "tabs": [],
+  "anchors": [
+    {
+      "name": "GitHub",
+      "icon": "github",
+      "url": "https://github.com/ruzin/stenoai"
+    },
+    {
+      "name": "Discord",
+      "icon": "discord",
+      "url": "https://discord.gg/DZ6vcQnxxu"
+    }
+  ],
+  "navigation": [
+    {
+      "group": "Getting started",
+      "pages": [
+        "getting-started/what-is-steno",
+        "getting-started/installation",
+        "getting-started/first-recording"
+      ]
+    },
+    {
+      "group": "Features",
+      "pages": [
+        "features/recording",
+        "features/transcription",
+        "features/summaries",
+        "features/ask-your-meetings",
+        "features/speaker-labels",
+        "features/apple-shortcuts"
+      ]
+    },
+    {
+      "group": "Privacy",
+      "pages": [
+        "privacy/how-on-device-works",
+        "privacy/confidential-use-cases"
+      ]
+    },
+    {
+      "group": "Models",
+      "pages": [
+        "models/transcription-models",
+        "models/summarization-models",
+        "models/remote-ollama"
+      ]
+    },
+    {
+      "group": "Compare",
+      "pages": [
+        "compare/local-vs-cloud",
+        "compare/steno-vs-otter",
+        "compare/steno-vs-fireflies"
+      ]
+    },
+    {
+      "group": "Reference",
+      "pages": [
+        "faq"
+      ]
+    }
+  ],
+  "analytics": {
+    "posthog": {
+      "apiKey": "phc_U2cnTyIyKGNSVaK18FyBMltd8nmN7uHxhhm21fAHwqb"
+    }
+  },
+  "footerSocials": {
+    "github": "https://github.com/ruzin/stenoai",
+    "discord": "https://discord.gg/DZ6vcQnxxu",
+    "x": "https://x.com/ruzin_saleem"
+  }
+}

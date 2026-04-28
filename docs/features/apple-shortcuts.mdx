@@ -1,0 +1,90 @@
+---
+title: "Apple Shortcuts"
+description: "Automate meeting recordings on macOS using Apple Shortcuts and the Steno deep link protocol. Start and stop recordings from a keyboard shortcut, menu bar script, or calendar event."
+---
+
+Steno supports automation via the `stenoai://` deep link scheme. You can trigger recording start and stop from Apple Shortcuts, Automator, or any tool that can open URLs on macOS.
+
+## Deep links
+
+| Action | URL |
+|--------|-----|
+| Start recording | `stenoai://record/start` |
+| Start recording with a name | `stenoai://record/start?name=Meeting%20Name` |
+| Stop recording | `stenoai://record/stop` |
+
+The `name` parameter is URL-encoded. Spaces become `%20`.
+
+## Create a start/stop shortcut
+
+<Steps>
+  <Step title="Open the Shortcuts app">
+    Open **Shortcuts** from your Applications folder or search for it with Spotlight.
+  </Step>
+
+  <Step title="Create a new shortcut">
+    Click the **+** button to create a new shortcut. Name it "Start Steno recording".
+  </Step>
+
+  <Step title="Add the Open URLs action">
+    Search for "Open URLs" in the action search bar and add it to the shortcut.
+  </Step>
+
+  <Step title="Set the URL">
+    Enter `stenoai://record/start` as the URL. To pass a name, use `stenoai://record/start?name=Daily%20Standup`.
+  </Step>
+
+  <Step title="Add a keyboard shortcut (optional)">
+    In the shortcut's settings (top-right menu), assign a keyboard shortcut -- for example `⌃⌥R` -- so you can start a recording without opening any app.
+  </Step>
+</Steps>
+
+Create a second shortcut for `stenoai://record/stop` and assign it a different key combination.
+
+## Calendar automation
+
+macOS Shortcuts cannot natively trigger at calendar event start times. To automate recordings based on your calendar, use [Rules - Calendar Automation](https://apps.apple.com/app/rules-calendar-automation/id1619042151) as a bridge.
+
+<Steps>
+  <Step title="Create the Shortcuts workflow">
+    In Shortcuts, create a shortcut that:
+    1. Uses **Find Calendar Events** (limit to 1, upcoming, sorted by start date)
+    2. Extracts the event title
+    3. URL-encodes the title
+    4. Opens `stenoai://record/start?name=[encoded title]`
+  </Step>
+
+  <Step title="Set up a Rules trigger">
+    In Rules, create a calendar trigger:
+    - **Source**: your target calendar
+    - **Trigger**: event start (or a few minutes before)
+    - **Condition**: event note contains `steno` (use this as an opt-in marker)
+    - **Action**: run your Steno shortcut
+  </Step>
+
+  <Step title="Mark events for recording">
+    In Calendar, add the word `steno` to the notes field of any event you want automatically recorded. Events without this marker will not trigger Steno.
+  </Step>
+</Steps>
+
+## Use with the menu bar
+
+Steno runs a menu bar icon when active. You can trigger recordings from the menu bar without using Shortcuts. The deep links are most useful when you want to trigger recordings from other apps, scripts, or automations.
+
+---
+
+<Accordion title="Does Steno need to be open for deep links to work?">
+Yes. Steno must be running (in the menu bar is fine) to receive deep link events. If Steno is closed, the URL will launch it but may not immediately start recording on the first open.
+</Accordion>
+
+<Accordion title="Can I pass the meeting name dynamically?">
+Yes. URL-encode the name and pass it as the `name` query parameter: `stenoai://record/start?name=Weekly%20Product%20Sync`. Steno uses this as the recording title.
+</Accordion>
+
+<Accordion title="Does this work with Raycast or Alfred?">
+Yes. Both Raycast and Alfred can open URLs. Create a script command or workflow that opens `stenoai://record/start` or `stenoai://record/stop`.
+</Accordion>
+
+<Accordion title="Why do I need Rules for calendar automation?">
+macOS Shortcuts does not provide a trigger that fires at a calendar event's start time. Rules adds this capability. It watches your calendar and runs a Shortcut when an event starts.
+</Accordion>

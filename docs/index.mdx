@@ -1,0 +1,46 @@
+---
+title: "Steno documentation"
+description: "Steno records, transcribes, and summarizes your meetings entirely on-device. Your audio never leaves your Mac."
+---
+
+<CardGroup cols={2}>
+  <Card title="Quick start" icon="bolt" href="/getting-started/what-is-steno">
+    Install Steno and make your first recording in five minutes.
+  </Card>
+  <Card title="Privacy" icon="shield" href="/privacy/how-on-device-works">
+    How on-device processing works and what never leaves your Mac.
+  </Card>
+  <Card title="Models" icon="microchip" href="/models/transcription-models">
+    Choose the right Whisper and Ollama models for your hardware.
+  </Card>
+  <Card title="Compare" icon="scale-balanced" href="/compare/local-vs-cloud">
+    Local vs cloud meeting AI -- trade-offs and when to use each.
+  </Card>
+</CardGroup>
+
+## What is Steno?
+
+Steno is a macOS app that records, transcribes, and summarizes meetings using AI models that run entirely on your device. There are no cloud uploads, no accounts required, and no network requests related to your recordings. Steno checks for updates on launch; all recording, transcription, and summarization stays on your device by default.
+
+Your audio, transcripts, and summaries are stored locally in `~/Library/Application Support/stenoai/`.
+
+## How it works
+
+<Steps>
+  <Step title="Record">
+    Capture microphone audio, system audio (both sides of a call), or both.
+  </Step>
+  <Step title="Transcribe">
+    Whisper runs locally to produce a verbatim transcript with speaker labels.
+  </Step>
+  <Step title="Summarize">
+    A local language model generates structured notes: summary, topics, action items.
+  </Step>
+  <Step title="Query">
+    Ask questions about any saved note from the inline ask bar.
+  </Step>
+</Steps>
+
+## Trusted by users at AWS, Deliveroo, Tesco, and HashiCorp.
+
+Open source under the MIT license -- [github.com/ruzin/stenoai](https://github.com/ruzin/stenoai).

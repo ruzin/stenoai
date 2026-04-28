@@ -1,0 +1,84 @@
+---
+title: "FAQ"
+description: "Answers to common questions about Steno -- installation, privacy, recordings, and models."
+---
+
+## Privacy and data
+
+<Accordion title="Does Steno send my recordings anywhere?">
+No. Steno processes all recordings using AI models that run locally on your Mac. No audio, transcript, or summary is transmitted to any external server. The only network requests Steno makes are the initial model download and a version check on launch.
+</Accordion>
+
+<Accordion title="Where does Steno store my data?">
+All data is stored in `~/Library/Application Support/stenoai/`:
+
+- `recordings/` -- raw `.wav` audio files
+- `transcripts/` -- verbatim transcript text
+- `output/` -- Markdown summaries and notes
+
+Nothing is stored remotely.
+</Accordion>
+
+<Accordion title="Does Steno collect telemetry or analytics?">
+No. The Steno app has no analytics, crash reporting, or usage tracking. (The Steno documentation site uses PostHog analytics separately from the app.)
+</Accordion>
+
+<Accordion title="Is Steno suitable for confidential meetings?">
+Steno is designed for professionals handling confidential audio. Because processing is entirely local, it is suitable for use cases where sending audio to a cloud service is not acceptable -- clinical consultations, legal calls, financial meetings. Review your organization's specific policies before using any recording tool with regulated data. See [Confidential use cases](/privacy/confidential-use-cases) for more detail.
+</Accordion>
+
+## Installation and setup
+
+<Accordion title="Why is macOS blocking Steno from opening?">
+Steno is signed but distributed outside the Mac App Store. On first launch, macOS Gatekeeper may block it. Go to **System Settings → Privacy & Security** and click **Open Anyway** next to Steno. This is a one-time step.
+</Accordion>
+
+<Accordion title="How much disk space does Steno need?">
+The default setup requires approximately 3GB: ~480MB for `whisper-small` and ~2GB for `llama3.2:3b`. Larger models take more space. Recordings accumulate over time in `~/Library/Application Support/stenoai/recordings/`.
+</Accordion>
+
+<Accordion title="How do I update Steno?">
+Steno updates automatically in the background. When an update is ready, you will see a notice in the app. The update installs on the next quit -- you do not need to download a new DMG.
+</Accordion>
+
+<Accordion title="How do I uninstall Steno?">
+Delete Steno from your Applications folder. To also remove all recordings, transcripts, and model files, delete `~/Library/Application Support/stenoai/` and `~/.ollama/` (if you want to remove the Ollama models too).
+</Accordion>
+
+## Recording
+
+<Accordion title="How do I record both sides of a call?">
+Steno can capture system audio -- the audio playing through your Mac's speakers or headphones, which includes the other participants on a call. See [Recording](/features/recording) for setup instructions. System audio capture requires a one-time permission setup.
+</Accordion>
+
+<Accordion title="Can Steno record in-person meetings?">
+Yes. Steno records from your Mac's microphone, which will pick up voices in the room. For best results, place your laptop centrally and use `whisper-medium` for cleaner transcription of in-person audio.
+</Accordion>
+
+<Accordion title="Do the other people on my call know Steno is recording?">
+No. Steno captures audio from your Mac's audio system without joining the call as a participant. Other attendees will not see a bot or receive a notification from Steno. Recording consent obligations are your responsibility.
+</Accordion>
+
+## Transcription and summaries
+
+<Accordion title="Transcription is slow -- how do I speed it up?">
+Switch to `whisper-base` in **Settings → Models → Transcription** for faster processing at slightly lower accuracy. On Apple Silicon, `whisper-small` processes a 30-minute meeting in roughly 2-4 minutes.
+</Accordion>
+
+<Accordion title="The summary is missing key points from my meeting -- what should I try?">
+Switch to a larger summarization model. In **Settings → Models → Summarization**, try `qwen3.5:9b` or `deepseek-r1:14b`. Larger models produce more detailed and accurate notes. You can re-summarize any existing recording from its detail view.
+</Accordion>
+
+<Accordion title="Can Steno transcribe recordings in languages other than English?">
+Yes. Whisper supports 99 languages. Steno auto-detects the language from the audio -- no manual configuration is needed. English, Spanish, French, German, Japanese, and Chinese perform particularly well.
+</Accordion>
+
+## Models
+
+<Accordion title="What models does Steno use?">
+Transcription: [Whisper](https://github.com/ggerganov/whisper.cpp) (base, small, or medium). Summarization: any model supported by [Ollama](https://ollama.com), with `llama3.2:3b` as the default. See [Transcription models](/models/transcription-models) and [Summarization models](/models/summarization-models) for the full comparison.
+</Accordion>
+
+<Accordion title="Can I use OpenAI or Claude for summarization?">
+Yes. Steno optionally supports OpenAI, Anthropic, or a custom API endpoint as an alternative to the local model. Configure this in **Settings → Models → Summarization → Cloud model**. Note that this sends your transcript (not audio) to the selected provider's API.
+</Accordion>

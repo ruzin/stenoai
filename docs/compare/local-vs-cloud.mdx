@@ -1,0 +1,70 @@
+---
+title: "Local vs cloud meeting AI"
+description: "A comparison of local and cloud-based AI meeting recorders: privacy, accuracy, cost, and the trade-offs of each approach."
+---
+
+AI meeting tools fall into two categories: those that process audio in the cloud and those that process it on your device. The right choice depends on your privacy requirements, hardware, and how much you trust third parties with your recordings.
+
+## How each approach works
+
+**Cloud-based meeting AI** (Otter.ai, Fireflies.ai, Fathom, Grain, etc.)
+
+Your audio or a live audio stream is sent to the vendor's servers. Transcription and summarization happen remotely and the results are returned to you. The vendor processes, stores, and may use your audio data under the terms of their privacy policy.
+
+**Local meeting AI** (Steno)
+
+All processing happens on your Mac using models downloaded during setup. No audio leaves your device. Transcription uses [whisper.cpp](https://github.com/ggerganov/whisper.cpp); summarization uses a small language model running via [Ollama](https://ollama.com). There are no ongoing cloud costs and no vendor relationship for your audio data.
+
+## Side-by-side comparison
+
+| | Steno (local) | Cloud meeting AI |
+|---|---|---|
+| **Audio stays on device** | Yes -- never transmitted | No -- sent to vendor servers |
+| **Works offline** | Yes | No |
+| **Account required** | No | Yes |
+| **Cost** | Free (open source) | $10-$30/month typically |
+| **Transcription accuracy** | High (Whisper) | High (varies by vendor) |
+| **Supported languages** | 99 | Varies (usually 30-60) |
+| **Speaker labels** | Yes (`[You]` / `[Others]`) | Yes (varies) |
+| **Meeting bot joins your call** | No | Often yes |
+| **Other participants notified** | No | Sometimes |
+| **Works with any call platform** | Yes | Varies |
+| **Works in-person** | Yes | Depends on product |
+| **Internet required** | No (after setup) | Yes, always |
+| **Data used to train models** | No | Check vendor policy |
+| **Suitable for confidential audio** | Yes | Requires careful review |
+
+## When to use a cloud recorder
+
+Cloud tools have real advantages in certain situations:
+
+- You need real-time transcription shared with other meeting participants
+- You want automatic calendar integration and bot joining
+- Your team needs a shared workspace for meeting notes
+- Accuracy for a specific language or accent is critical and you need to evaluate vendors
+
+## When to use Steno
+
+- Your recordings contain confidential, regulated, or privileged information
+- You do not want a meeting bot appearing in your calls
+- You want zero ongoing cost
+- You work offline or in environments with restricted internet access
+- You prefer to keep your data entirely under your own control
+
+## Accuracy
+
+Steno uses OpenAI's Whisper model, the same underlying model used by many cloud services. Accuracy is high across common languages and recording conditions. For the best results, use `whisper-medium` for important recordings where accuracy matters most.
+
+---
+
+<Accordion title="Can I use Steno alongside a cloud tool?">
+Yes. Steno is independent of your call platform. You can run Steno for local notes while also using a team-facing cloud tool for shared notes -- they do not conflict.
+</Accordion>
+
+<Accordion title="Is local processing slower than cloud?">
+On Apple Silicon, transcription is fast -- a 30-minute meeting processes in 3-6 minutes with `whisper-small`. Cloud tools return transcripts in roughly real-time. If speed is critical, cloud is faster today. If you have a meeting to review after the fact, local processing is fast enough for most workflows.
+</Accordion>
+
+<Accordion title="What about privacy policies for cloud recorders?">
+Cloud recording vendors have detailed privacy policies, but they generally involve storing your audio on their servers, using it for service improvement, and sharing it with subprocessors. Review the specific policy for any cloud tool you use with confidential audio.
+</Accordion>

@@ -1,0 +1,63 @@
+---
+title: "Summarization models"
+description: "Steno generates meeting summaries using local Ollama models by default, with optional cloud model support. Choose a model based on your hardware, privacy requirements, and the quality of notes you need."
+---
+
+After transcription, Steno passes the transcript to a language model to generate structured notes: a summary paragraph, key topics, and action items. By default, this uses a local model running via [Ollama](https://ollama.com) entirely on your Mac. You can optionally configure a cloud model (OpenAI, Anthropic, or custom endpoint) — see the section below.
+
+## Available models
+
+| Model | Size | Speed | Quality | Best for |
+|-------|------|-------|---------|----------|
+| `llama3.2:3b` | ~2GB | Fast | Good | Quick meetings, daily use **(default)** |
+| `gemma3:4b` | ~2.5GB | Fast | Good | Lightweight alternative to llama |
+| `qwen3.5:9b` | ~6.6GB | Moderate | Very good | Structured output, action items |
+| `deepseek-r1:14b` | ~9GB | Slower | Excellent | Complex meetings, detailed analysis |
+| `gpt-oss:20b` | ~14GB | Slow | Excellent | Highest quality local output |
+
+Larger models produce better-structured, more detailed notes. The trade-off is processing time and disk space.
+
+## How to change models
+
+1. Open **Settings → Models → Summarization**
+2. Select a model from the list
+3. If the model is not yet downloaded, Steno will download it via Ollama
+
+The new model is used for all future recordings. You can re-summarize an existing recording from its detail view using any model.
+
+## Choosing the right model
+
+**For daily use:** `llama3.2:3b` (default) works well for most meetings. Notes are clear and concise without requiring significant processing time.
+
+**For important meetings:** `qwen3.5:9b` or `deepseek-r1:14b` produce more detailed notes with better-identified action items and more accurate key topics.
+
+**For hardware with limited RAM:** Stay with `llama3.2:3b` or `gemma3:4b`. The larger models require at least 16GB RAM to run comfortably without swapping.
+
+## Using a cloud model
+
+Steno optionally supports OpenAI, Anthropic, or a custom API endpoint as an alternative to a local model. If configured, your transcript (not your audio) is sent to that API for summarization.
+
+To configure a cloud model:
+1. Open **Settings → Models → Summarization**
+2. Select **Cloud model**
+3. Choose the provider and enter your API key
+
+Cloud models are off by default. If you work with confidential recordings, use a local model.
+
+---
+
+<Accordion title="Which model produces the best action items?">
+`qwen3.5:9b` is particularly good at identifying and formatting action items from meeting transcripts. If structured output is important, it is worth the extra size over the default `llama3.2:3b`.
+</Accordion>
+
+<Accordion title="How much disk space do the models require?">
+The default setup (`whisper-small` + `llama3.2:3b`) requires approximately 2.5GB. The largest model (`gpt-oss:20b`) requires ~14GB. Models are stored in `~/.ollama/models/`.
+</Accordion>
+
+<Accordion title="Can I delete models I no longer use?">
+Yes. Run `ollama rm [model-name]` in Terminal to remove a model and free the disk space. You can re-download it later from within Steno.
+</Accordion>
+
+<Accordion title="My Mac has 8GB RAM -- which model should I use?">
+Stick with `llama3.2:3b` (the default). It runs comfortably on 8GB. The 9B and larger models will cause swapping on 8GB, significantly slowing both summarization and your Mac.
+</Accordion>

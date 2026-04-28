@@ -1,0 +1,61 @@
+---
+title: "Transcription models"
+description: "Steno uses Whisper models for local transcription. Choose the right model based on your accuracy requirements and available hardware."
+---
+
+Steno transcribes recordings using [whisper.cpp](https://github.com/ggerganov/whisper.cpp), a local port of OpenAI's Whisper model. All transcription runs on your Mac -- no audio is sent to any server.
+
+## Available models
+
+| Model | Size | Speed | Accuracy | Best for |
+|-------|------|-------|----------|----------|
+| `whisper-base` | ~150MB | Fastest | Good | Quick notes, clear audio |
+| `whisper-small` | ~480MB | Fast | Very good | Most meetings **(default)** |
+| `whisper-medium` | ~1.5GB | Moderate | Excellent | Important recordings, difficult audio |
+
+`whisper-small` is the default and handles most meetings well. The larger models take longer to process but produce noticeably better results for noisy recordings, strong accents, or technical terminology.
+
+## How to change models
+
+1. Open **Settings** in Steno
+2. Select **Models → Transcription**
+3. Choose a model from the list
+4. If the model is not yet downloaded, Steno will prompt you to download it
+
+The model is applied to all future recordings. Existing recordings are not re-transcribed automatically, but you can re-run transcription on any recording from its detail view.
+
+## Speed estimates (Apple Silicon)
+
+Transcription runs faster than real-time on Apple Silicon. These are approximate figures for a 30-minute recording on an M-series Mac:
+
+| Model | Processing time |
+|-------|----------------|
+| `whisper-base` | ~1-2 minutes |
+| `whisper-small` | ~2-4 minutes |
+| `whisper-medium` | ~5-10 minutes |
+
+On Intel Macs, expect roughly 2-3× slower processing times.
+
+## Language support
+
+All Whisper models support 99 languages. Steno auto-detects the language from the first few seconds of audio -- you do not need to configure this manually. English, Spanish, French, German, Japanese, Chinese, and Portuguese perform especially well.
+
+## Accuracy tips
+
+- **Record in a quiet environment** -- background noise is the biggest accuracy factor
+- **Use a good microphone** -- system audio capture (both call sides) is more accurate than microphone-only for virtual meetings
+- **Use `whisper-medium` for technical content** -- it handles domain-specific terminology, proper nouns, and acronyms better than the smaller models
+
+---
+
+<Accordion title="Which model should I start with?">
+Start with `whisper-small` (the default). It is fast and accurate for most meeting types. Switch to `whisper-medium` if you notice accuracy issues with important recordings.
+</Accordion>
+
+<Accordion title="Can I re-transcribe a recording with a different model?">
+Yes. Open the recording, click the options menu, and select **Re-transcribe**. Choose the model you want to use. This overwrites the existing transcript.
+</Accordion>
+
+<Accordion title="Does transcription accuracy vary by language?">
+Yes. Whisper was trained on significantly more English data than other languages. English, Spanish, French, and German accuracy is high. Less common languages may have lower accuracy, particularly for technical vocabulary.
+</Accordion>

@@ -1,0 +1,72 @@
+---
+title: "Steno vs Fireflies.ai"
+description: "A direct comparison of Steno and Fireflies.ai: privacy, cost, features, and which is the right fit for your workflow."
+---
+
+Fireflies.ai is a cloud-based meeting recording and intelligence platform. Steno is a local macOS app. Both transcribe and summarize meetings, but they differ significantly in how they handle your audio and who they are designed for.
+
+## At a glance
+
+| | Steno | Fireflies.ai |
+|---|---|---|
+| **Audio processing** | On your Mac | Fireflies' servers |
+| **Account required** | No | Yes |
+| **Price** | Free | Free (limited) / $10-$19/user/month |
+| **Works offline** | Yes | No |
+| **Meeting bot** | No | Yes (Fred bot) |
+| **Bot visible to participants** | No | Yes |
+| **Supported platforms** | macOS only | Web, Zoom, Meet, Teams, etc. |
+| **Transcription** | Whisper (local) | Proprietary cloud |
+| **Languages** | 99 | ~60 |
+| **Speaker labels** | Yes | Yes |
+| **CRM integration** | No | Yes (Salesforce, HubSpot, etc.) |
+| **Search across all meetings** | On-device | Cloud |
+| **Suitable for confidential audio** | Yes | Requires review |
+
+## Privacy
+
+Fireflies records meetings via its "Fred" bot, which joins your calls and records audio server-side. The audio is processed on Fireflies' infrastructure and stored in your Fireflies account.
+
+Steno records audio on your Mac and processes it entirely locally in its default configuration. Nothing is transmitted to any server unless you explicitly configure a cloud summarization model (off by default). If your meetings contain information you cannot send to a third party, use Steno with the default local model.
+
+## Meeting bot vs local recording
+
+Fireflies' bot joins your video call as a visible participant. Attendees can see and hear that Fred has joined. This is standard for enterprise AI notetakers, but it changes the dynamic of the meeting and requires attendee awareness.
+
+Steno captures audio from your Mac's audio system silently. No bot appears. The other participants are not notified by the app -- consent obligations remain yours to manage.
+
+## CRM and integrations
+
+Fireflies has deep integration with sales and business workflows: Salesforce, HubSpot, Slack, and others. It is widely used in sales and customer success teams where meeting notes need to flow into a CRM automatically.
+
+Steno has no CRM integration. Its output is plain Markdown files, which you can route into other tools manually or via automation.
+
+## Cost
+
+Fireflies' free plan limits monthly transcription credits. The Pro plan is $10/user/month and Business is $19/user/month.
+
+Steno is free and open source.
+
+## When to choose Steno
+
+- Your meetings contain confidential or privileged information
+- You do not want a visible bot in your calls
+- You want free, unlimited local transcription
+- You are a solo user on macOS and do not need team features
+
+## When to choose Fireflies.ai
+
+- You need automatic CRM sync for sales or customer calls
+- Your team needs a shared meeting intelligence platform
+- You rely on integrations with tools like Slack, Notion, or HubSpot
+- You need cross-platform recording (Zoom, Google Meet, Teams, etc.)
+
+---
+
+<Accordion title="Does Fireflies store my audio permanently?">
+Fireflies stores recordings and transcripts in your account. Retention policies depend on your plan. Review Fireflies' privacy policy for current details on data storage and deletion.
+</Accordion>
+
+<Accordion title="Can Steno record Zoom or Google Meet calls?">
+Yes. Steno captures system audio from your Mac, which includes the audio output from any call platform -- Zoom, Google Meet, Teams, or any other app playing audio through your Mac's speakers. The other participants do not see any bot.
+</Accordion>
