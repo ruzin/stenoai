@@ -714,16 +714,27 @@ if (!gotSingleInstanceLock) {
   });
 
   // Sends the custom in-app quit dialog to the renderer and waits for a response.
-  // Falls back to true (allow quit) if the window is unavailable.
+  // Falls back to true (allow quit) if the window is unavailable. The legacy
+  // renderer doesn't implement the quit-dialog-response channel, so we skip the
+  // custom dialog there and preserve prior legacy behavior. For the new renderer
+  // a 5s timeout guards against a wedged React tree -- on timeout we resolve
+  // false to preserve any active recording rather than killing it silently.
   async function showCustomQuitDialog(type, jobCount) {
     if (!mainWindow || mainWindow.isDestroyed()) return true;
+    if (!resolveUseNewRenderer()) return true;
     mainWindow.show();
     mainWindow.focus();
     mainWindow.webContents.send('show-quit-dialog', { type, jobCount });
     return new Promise((resolve) => {
-      ipcMain.once('quit-dialog-response', (_event, data) => {
+      const handler = (_event, data) => {
+        clearTimeout(timer);
         resolve(data && data.confirmed === true);
-      });
+      };
+      const timer = setTimeout(() => {
+        ipcMain.removeListener('quit-dialog-response', handler);
+        resolve(false);
+      }, 5000);
+      ipcMain.once('quit-dialog-response', handler);
     });
   }
 
@@ -3871,6 +3882,19 @@ ipcMain.handle('check-announcements', async () => {
 
 ipcMain.handle('open-release-page', async (event, url) => {
   try {
+    if (typeof url !== 'string' || !url) {
+      return { success: false, error: 'invalid url' };
+    }
+    let parsed;
+    try { parsed = new URL(url); } catch {
+      return { success: false, error: 'invalid url' };
+    }
+    // Release pages live on github.com -- restrict to that origin so a
+    // compromised renderer cannot launch arbitrary external URLs through
+    // this channel.
+    if (parsed.protocol !== 'https:' || parsed.hostname !== 'github.com') {
+      return { success: false, error: 'unsupported url' };
+    }
     await shell.openExternal(url);
     return { success: true };
   } catch (error) {

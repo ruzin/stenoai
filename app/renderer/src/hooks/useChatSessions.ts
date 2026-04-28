@@ -63,11 +63,16 @@ export function useChatSessions(summaryFile: string | null) {
 
   const blob = query.data ?? emptyBlob();
 
-  // Only expose sessions that belong to this meeting
-  const meetingSessions = React.useMemo(
-    () => (summaryFile ? blob.sessions.filter((s) => s.summaryFile === summaryFile) : []),
-    [blob.sessions, summaryFile],
-  );
+  // Only expose sessions that belong to this meeting. Legacy sessions migrated
+  // from the old renderer don't have a summaryFile (the legacy format only
+  // tracked meeting names, not file paths), so we surface them on every meeting
+  // view rather than dropping them silently. Users can rename or delete them.
+  const meetingSessions = React.useMemo(() => {
+    if (!summaryFile) return [];
+    const matched = blob.sessions.filter((s) => s.summaryFile === summaryFile);
+    const orphans = blob.sessions.filter((s) => !s.summaryFile);
+    return [...matched, ...orphans];
+  }, [blob.sessions, summaryFile]);
 
   // Always read the freshest blob from the cache so that rapid-fire mutations
   // (createSession → appendMessage in the same tick) don't clobber each other
@@ -91,8 +96,15 @@ export function useChatSessions(summaryFile: string | null) {
 
   const persist = React.useCallback(
     async (next: ChatSessionsBlob) => {
+      const previous = queryClient.getQueryData<ChatSessionsBlob>(CHAT_KEY);
       queryClient.setQueryData(CHAT_KEY, next);
-      await ipc().chat.save(next);
+      const res = await ipc().chat.save(next);
+      if (!res.success) {
+        // Rollback so the cache and disk stay in sync, and surface the error
+        // to callers instead of swallowing the failure.
+        queryClient.setQueryData(CHAT_KEY, previous);
+        throw new Error(res.error || 'Failed to save chat sessions');
+      }
     },
     [queryClient],
   );

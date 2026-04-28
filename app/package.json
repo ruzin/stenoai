@@ -31,8 +31,7 @@
     "release:minor": "npm run version:minor && npm run build",
     "release:major": "npm run version:major && npm run build",
     "test:e2e": "playwright test --config ../e2e/playwright.config.ts",
-    "test:e2e:update": "playwright test --config ../e2e/playwright.config.ts --update-snapshots",
-    "postinstall": "node ../e2e/scripts/link-node-modules.js"
+    "test:e2e:update": "playwright test --config ../e2e/playwright.config.ts --update-snapshots"
   },
   "keywords": [
     "audio",
