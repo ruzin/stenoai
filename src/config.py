@@ -80,6 +80,9 @@ class Config:
         }
     }
 
+
+    SUPPORTED_WHISPER_MODELS = ["tiny", "base", "small", "medium", "large", "large-v3-turbo"]
+
     # Languages shown in the settings dropdown (curated/tested)
     SUPPORTED_LANGUAGES = {
         "auto": "Auto (detect)",
@@ -192,6 +195,8 @@ class Config:
             "cloud_model": "gpt-4o-mini",
             "anonymous_id": str(uuid.uuid4()),
             "storage_path": "",
+            "keep_recordings": False,
+            "whisper_model": "small",
             "version": "1.0"
         }
 
@@ -316,6 +321,29 @@ class Config:
             True if saved successfully, False otherwise
         """
         self._config["hide_dock_icon"] = enabled
+        return self._save()
+
+
+    def get_keep_recordings(self) -> bool:
+        """Get whether audio recordings should be kept after processing."""
+        return self._config.get("keep_recordings", False)
+
+    def set_keep_recordings(self, enabled: bool) -> bool:
+        """Set whether audio recordings should be kept after processing."""
+        self._config["keep_recordings"] = enabled
+        return self._save()
+
+
+    def get_whisper_model(self) -> str:
+        """Get the configured Whisper model size."""
+        return self._config.get("whisper_model", "small")
+
+    def set_whisper_model(self, model_size: str) -> bool:
+        """Set the Whisper model size."""
+        if model_size not in self.SUPPORTED_WHISPER_MODELS:
+            logger.error(f"Unsupported Whisper model: {model_size}")
+            return False
+        self._config["whisper_model"] = model_size
         return self._save()
 
     def get_system_audio_enabled(self) -> bool:

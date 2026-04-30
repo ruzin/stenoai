@@ -253,7 +253,8 @@ class SimpleRecorder:
 
         # Initialize transcriber only when needed
         if self.transcriber is None:
-            self.transcriber = WhisperTranscriber()
+            from src.config import get_config
+            self.transcriber = WhisperTranscriber(model_size=get_config().get_whisper_model())
 
         # Get configured language
         from src.config import get_config
@@ -483,11 +484,13 @@ Transcript:
         print(f"✅ Complete processing saved: {summary_path}")
         
         # Clean up WAV file after successful processing
-        try:
-            audio_path.unlink()
-            print(f"🗑️ Cleaned up audio file: {audio_path}")
-        except Exception as e:
-            print(f"⚠️ Could not delete audio file: {e}")
+        from src.config import get_config
+        if not get_config().get_keep_recordings():
+            try:
+                audio_path.unlink()
+                print(f"🗑️ Cleaned up audio file: {audio_path}")
+            except Exception as e:
+                print(f"⚠️ Could not delete audio file: {e}")
         
         # Clear any recording state after successful processing
         state_file = Path("recorder_state.json")
@@ -607,11 +610,13 @@ Transcript:
         summary_path.write_text('\n'.join(md_lines), encoding='utf-8')
 
         # Clean up
-        try:
-            audio_path.unlink()
-            print(f"🗑️ Cleaned up audio file: {audio_path}")
-        except Exception:
-            pass
+        from src.config import get_config
+        if not get_config().get_keep_recordings():
+            try:
+                audio_path.unlink()
+                print(f"🗑️ Cleaned up audio file: {audio_path}")
+            except Exception:
+                pass
 
         state_file = Path("recorder_state.json")
         if state_file.exists():
@@ -943,14 +948,62 @@ def process_streaming(audio_file, name, notes):
         summary_path.write_text('\n'.join(md_lines), encoding='utf-8')
 
         # Clean up audio
-        try:
-            audio_path.unlink()
-        except Exception:
-            pass
+        from src.config import get_config
+        if not get_config().get_keep_recordings():
+            try:
+                audio_path.unlink()
+            except Exception:
+                pass
 
         print(f"SAVED:{summary_path}", flush=True)
 
     asyncio.run(run())
+
+
+
+
+@cli.command(name='get-whisper-model')
+def get_whisper_model_cmd():
+    """Get the configured Whisper model size."""
+    from src.config import get_config
+    config = get_config()
+    print(json.dumps({
+        "whisper_model": config.get_whisper_model(),
+        "supported_models": config.SUPPORTED_WHISPER_MODELS
+    }))
+
+
+@cli.command(name='set-whisper-model')
+@click.argument('model_size')
+def set_whisper_model_cmd(model_size: str):
+    """Set the Whisper model size."""
+    from src.config import get_config
+    config = get_config()
+    if config.set_whisper_model(model_size):
+        print(json.dumps({"success": True, "whisper_model": model_size}))
+    else:
+        print(json.dumps({"success": False, "error": f"Unsupported model: {model_size}. Supported: {config.SUPPORTED_WHISPER_MODELS}"}))
+
+
+@cli.command(name='get-keep-recordings')
+def get_keep_recordings_cmd():
+    """Get whether recordings are kept after processing."""
+    from src.config import get_config
+    config = get_config()
+    print(json.dumps({"keep_recordings": config.get_keep_recordings()}))
+
+
+@cli.command(name='set-keep-recordings')
+@click.argument('enabled', type=bool)
+def set_keep_recordings_cmd(enabled: bool):
+    """Set whether recordings are kept after processing."""
+    from src.config import get_config
+    config = get_config()
+    if config.set_keep_recordings(enabled):
+        status = "enabled" if enabled else "disabled"
+        print(json.dumps({"success": True, "keep_recordings": enabled}))
+    else:
+        print(json.dumps({"success": False}))
 
 
 @cli.command()
@@ -1177,7 +1230,8 @@ def test():
             return
             
         try:
-            transcriber = WhisperTranscriber()
+            from src.config import get_config
+            transcriber = WhisperTranscriber(model_size=get_config().get_whisper_model())
             print("✅ Whisper transcriber ready")
         except Exception as e:
             print(f"❌ Whisper initialization failed: {e}")
@@ -2480,7 +2534,9 @@ def download_whisper_model():
 
         # This will trigger the model download if not present
         print("Initializing Whisper model (will download if needed)...")
-        model = WhisperCppModel("small")
+        from src.config import get_config
+        model_size = get_config().get_whisper_model()
+        model = WhisperCppModel(model_size)
         print("SUCCESS: Whisper model ready")
 
     except Exception as e:

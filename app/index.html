@@ -4944,6 +4944,16 @@ Commands and output will appear here...
 
                     <div class="settings-row">
                         <div class="settings-row-text">
+                            <span>Keep recordings</span>
+                            <small>Save audio files after processing (for reuse or reprocessing)</small>
+                        </div>
+                        <label class="settings-toggle">
+                            <input type="checkbox" id="keep-recordings-toggle">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                    <div class="settings-row">
+                        <div class="settings-row-text">
                             <span>Record system audio</span>
                             <small>Capture audio from virtual meetings (requires macOS 12.3+)</small>
                         </div>
@@ -5046,6 +5056,24 @@ Commands and output will appear here...
                             <div class="privacy-warning">
                                 Transcripts will be sent to a third-party cloud service. No audio files leave your device.
                             </div>
+                        </div>
+                    </div>
+
+                    <div class="settings-section" style="margin-top: 16px;">
+                        <h3>Transcription Model</h3>
+                        <div class="settings-row">
+                            <div class="settings-row-text">
+                                <span>Whisper model size</span>
+                                <small>Larger models are more accurate but slower to load</small>
+                            </div>
+                            <select id="whisper-model-select" class="theme-select">
+                                <option value="tiny">Tiny (fastest)</option>
+                                <option value="base">Base</option>
+                                <option value="small">Small (default)</option>
+                                <option value="medium">Medium</option>
+                                <option value="large">Large</option>
+                                <option value="large-v3-turbo">Large v3 Turbo (best)</option>
+                            </select>
                         </div>
                     </div>
 
@@ -7512,6 +7540,12 @@ Session started - waiting for activity...
                     ),
                     loadNotificationSettings().catch(err =>
                         log(`Notification settings load failed: ${err.message}`)
+                    ),
+                    loadKeepRecordingsSettings().catch(err =>
+                        log(`Keep recordings settings load failed: ${err.message}`)
+                    ),
+                    loadWhisperModelSettings().catch(err =>
+                        log(`Whisper model settings load failed: ${err.message}`)
                     ),
                     loadDockIconSettings().catch(err =>
                         log(`Dock icon settings load failed: ${err.message}`)
@@ -10035,6 +10069,30 @@ Session started - waiting for activity...
             }, duration);
         }
 
+        async function loadWhisperModelSettings() {
+            try {
+                const result = await ipcRenderer.invoke('get-whisper-model');
+                const select = document.getElementById('whisper-model-select');
+                if (select && result.whisper_model) {
+                    select.value = result.whisper_model;
+                }
+            } catch (error) {
+                console.error('Error loading whisper model settings:', error);
+            }
+        }
+
+        async function loadKeepRecordingsSettings() {
+            try {
+                const result = await ipcRenderer.invoke('get-keep-recordings');
+                const toggle = document.getElementById('keep-recordings-toggle');
+                if (toggle) {
+                    toggle.checked = result.keep_recordings || false;
+                }
+            } catch (error) {
+                console.error('Error loading keep recordings settings:', error);
+            }
+        }
+
         async function loadNotificationSettings() {
             try {
                 const result = await ipcRenderer.invoke('get-notifications');
@@ -10179,6 +10237,48 @@ Session started - waiting for activity...
                 }
             }
         }
+
+        // Setup whisper model select event listener
+        document.addEventListener('DOMContentLoaded', () => {
+            const whisperModelSelect = document.getElementById('whisper-model-select');
+            if (whisperModelSelect) {
+                whisperModelSelect.addEventListener('change', async (e) => {
+                    try {
+                        const modelSize = e.target.value;
+                        const result = await ipcRenderer.invoke('set-whisper-model', modelSize);
+                        if (result.success) {
+                            showModelNotification(
+                                `Transcription model set to ${modelSize}`,
+                                'success'
+                            );
+                        }
+                    } catch (error) {
+                        console.error('Error saving whisper model setting:', error);
+                    }
+                });
+            }
+        });
+
+        // Setup keep recordings toggle event listener
+        document.addEventListener('DOMContentLoaded', () => {
+            const keepRecordingsToggle = document.getElementById('keep-recordings-toggle');
+            if (keepRecordingsToggle) {
+                keepRecordingsToggle.addEventListener('change', async (e) => {
+                    try {
+                        const enabled = e.target.checked;
+                        const result = await ipcRenderer.invoke('set-keep-recordings', enabled);
+                        if (result.success) {
+                            showModelNotification(
+                                `Keep recordings ${enabled ? 'enabled' : 'disabled'}`,
+                                'success'
+                            );
+                        }
+                    } catch (error) {
+                        console.error('Error saving keep recordings setting:', error);
+                    }
+                });
+            }
+        });
 
         // Setup notification toggle event listener
         document.addEventListener('DOMContentLoaded', () => {
