@@ -10073,7 +10073,7 @@ Session started - waiting for activity...
             try {
                 const result = await ipcRenderer.invoke('get-whisper-model');
                 const select = document.getElementById('whisper-model-select');
-                if (select && result.whisper_model) {
+                if (select && result.whisper_model && !result.error) {
                     select.value = result.whisper_model;
                 }
             } catch (error) {
@@ -10085,7 +10085,7 @@ Session started - waiting for activity...
             try {
                 const result = await ipcRenderer.invoke('get-keep-recordings');
                 const toggle = document.getElementById('keep-recordings-toggle');
-                if (toggle) {
+                if (toggle && !result.error) {
                     toggle.checked = result.keep_recordings || false;
                 }
             } catch (error) {

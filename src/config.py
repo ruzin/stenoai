@@ -336,7 +336,11 @@ class Config:
 
     def get_whisper_model(self) -> str:
         """Get the configured Whisper model size."""
-        return self._config.get("whisper_model", "small")
+        model = self._config.get("whisper_model", "small")
+        if model not in self.SUPPORTED_WHISPER_MODELS:
+            logger.warning(f"Invalid Whisper model in config: {model}; falling back to small")
+            return "small"
+        return model
 
     def set_whisper_model(self, model_size: str) -> bool:
         """Set the Whisper model size."""
