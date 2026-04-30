@@ -4,7 +4,7 @@ import { ipc } from '@/lib/ipc';
 import { unwrap } from '@/lib/result';
 import { meetingsKeys } from './meetingKeys';
 import { navigate } from '@/lib/router';
-import type { QueueStatus } from '@/lib/ipc';
+import type { Meeting, QueueStatus } from '@/lib/ipc';
 
 export type RecordingStatus = 'idle' | 'recording' | 'paused' | 'processing';
 
@@ -32,6 +32,20 @@ export function useRecording() {
 
   React.useEffect(() => {
     const off = ipc().on.processingComplete((data) => {
+      // Pre-seed the meetings list cache with the freshly processed meeting
+      // so MeetingDetail can find it on first render -- otherwise the brief
+      // window between navigation and the refetch landing shows "not found".
+      if (data.success && data.meetingData?.session_info.summary_file) {
+        const newMeeting = data.meetingData as Meeting;
+        const newSummaryFile = newMeeting.session_info.summary_file;
+        qc.setQueryData<Meeting[]>(meetingsKeys.list(), (prev) => {
+          if (!prev) return [newMeeting];
+          const filtered = prev.filter(
+            (m) => m.session_info.summary_file !== newSummaryFile,
+          );
+          return [newMeeting, ...filtered];
+        });
+      }
       qc.invalidateQueries({ queryKey: meetingsKeys.all });
       qc.invalidateQueries({ queryKey: queueKey });
       if (data.success && data.meetingData?.session_info.summary_file) {

@@ -70,7 +70,7 @@ export function TranscriptBar() {
 
 export function AskBar() {
   const { activeSummaryFile, activeMeetingName, transcriptOpen, setTranscriptOpen } = useAskBar();
-  const chat = useChatSessions(activeSummaryFile);
+  const chat = useChatSessions(activeSummaryFile, activeMeetingName);
   const streaming = useStreamingQuery();
 
   const [expanded, setExpanded] = React.useState(false);
@@ -143,8 +143,8 @@ export function AskBar() {
     setActiveStreamId(null);
   }, [activeStreamId, streaming, chat]);
 
-  const submit = async () => {
-    const q = input.trim();
+  const submitPrompt = async (raw: string) => {
+    const q = raw.trim();
     if (!q || !activeSummaryFile || isStreaming) return;
 
     let sessionId = session?.id ?? null;
@@ -163,6 +163,8 @@ export function AskBar() {
     setExpanded(true);
     setTranscriptOpen(false);
   };
+
+  const submit = () => submitPrompt(input);
 
   const stop = () => {
     if (!activeStreamId) return;
@@ -238,6 +240,26 @@ export function AskBar() {
               streaming={isStreaming}
             />
           </div>
+        </div>
+      )}
+
+      {/* Suggestion chips — appear when ask bar is focused with empty conversation */}
+      {expanded && !hasMessages && !isStreaming && (
+        <div
+          className="mv-chat flex flex-wrap items-center gap-2"
+          style={{ padding: '10px 14px' }}
+        >
+          {SUGGESTION_CHIPS.map((chip) => (
+            <button
+              key={chip.label}
+              type="button"
+              onClick={() => void submitPrompt(chip.prompt)}
+              className="rounded-lg border px-2.5 py-1 text-xs transition-colors hover:bg-[color:var(--surface-hover)] hover:text-[color:var(--fg-1)]"
+              style={{ borderColor: 'var(--border-subtle)', color: 'var(--fg-2)' }}
+            >
+              {chip.label}
+            </button>
+          ))}
         </div>
       )}
 
@@ -589,6 +611,12 @@ function renderInline(text: string): React.ReactNode {
     </>
   );
 }
+
+const SUGGESTION_CHIPS: { label: string; prompt: string }[] = [
+  { label: 'Summarize key decisions', prompt: 'Summarize the key decisions made' },
+  { label: 'Action items', prompt: 'What action items were discussed?' },
+  { label: 'Main topics', prompt: 'What were the main topics covered?' },
+];
 
 function deriveSessionName(prompt: string): string {
   const trimmed = prompt.trim().replace(/\s+/g, ' ');

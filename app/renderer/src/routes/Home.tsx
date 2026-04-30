@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Filter, Mic, RefreshCw, Square } from 'lucide-react';
+import { Filter, PencilLine, RefreshCw, Square } from 'lucide-react';
 import { MeetingsShell } from '@/components/MeetingsShell';
 import { UpcomingCard } from '@/components/home/UpcomingCard';
 import { PreviousRow } from '@/components/home/PreviousRow';
@@ -95,8 +95,8 @@ export function Home({ mode }: HomeProps) {
               onClick={onToggleRecording}
               className="gap-2"
             >
-              {isRecording ? <Square className="size-4" /> : <Mic className="size-4" />}
-              {isRecording ? 'Stop recording' : 'Start recording'}
+              {isRecording ? <Square className="size-4" /> : <PencilLine className="size-4" />}
+              {isRecording ? 'Stop recording' : 'New note'}
             </Button>
             <p
               className="flex items-center gap-1.5 text-xs"

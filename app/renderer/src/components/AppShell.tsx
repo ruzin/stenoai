@@ -81,7 +81,15 @@ export function AppShell({
         )}
 
         {askBarSlot && (
-          <div id="ask-bar-slot" className="mv-dock">
+          <div
+            id="ask-bar-slot"
+            className="mv-dock"
+            /* The scroll container above reserves a vertical scrollbar on the
+               right, shifting its centered children left by ~scrollbar-width/2.
+               Mirror that offset on the dock so the chat composer aligns with
+               the notes column instead of sitting visibly right of it. */
+            style={{ paddingRight: 15 }}
+          >
             <div
               className="mv-dock-inner"
               style={{ maxWidth: 820, width: '100%', margin: '0 auto', padding: '0 56px' }}

@@ -16,8 +16,8 @@ import { ipc } from '@/lib/ipc';
 type ProcessingStage = 'transcribing' | 'summarizing' | 'finalizing' | 'error';
 
 const STAGE_LABEL: Record<ProcessingStage, string> = {
-  transcribing: 'Transcribing audio…',
-  summarizing: 'Writing summary…',
+  transcribing: 'Analyzing transcript',
+  summarizing: 'Generating notes',
   finalizing: 'Almost done…',
   error: 'Couldn’t process this recording.',
 };
@@ -170,41 +170,44 @@ function StageCard({
   stage: ProcessingStage;
   streamText: string;
 }) {
-  const labelColor =
-    stage === 'finalizing' ? 'var(--fg-1)' : 'var(--fg-2)';
   return (
-    <div>
-      <div className="flex items-center gap-3 py-3">
-        <Loader2
-          className="animate-spin"
-          size={18}
-          style={{ color: 'var(--fg-2)' }}
-        />
-        <span
-          className="text-[17px] transition-colors"
-          style={{
-            color: labelColor,
-            fontFamily: 'var(--font-sans)',
-          }}
-        >
-          {STAGE_LABEL[stage]}
-        </span>
-      </div>
-
+    <div className="relative" style={{ maxWidth: '72ch' }}>
       {streamText && (
         <div
-          className="mt-4 whitespace-pre-wrap text-[15px] transition-opacity duration-fast ease-steno"
+          className="mb-3 whitespace-pre-wrap text-[15px]"
           style={{
             color: 'var(--fg-1)',
             fontFamily: 'var(--font-sans)',
             lineHeight: 1.6,
-            maxWidth: '72ch',
-            opacity: 1,
           }}
         >
           {streamText}
         </div>
       )}
+
+      {/* Scanner bar — rides at the bottom of streamed text, slides down as
+          more tokens arrive, matching the legacy generation-scanner. */}
+      <div
+        className="flex items-center gap-2.5 rounded-lg px-3.5 py-2.5"
+        style={{
+          background: 'var(--surface-raised)',
+          border: '1px solid var(--border-subtle)',
+          boxShadow: 'var(--shadow-md)',
+          transition: 'all 0.45s cubic-bezier(0.33, 1, 0.68, 1)',
+        }}
+      >
+        <Loader2
+          className="animate-spin"
+          size={14}
+          style={{ color: 'var(--fg-2)' }}
+        />
+        <span
+          className="text-[13px] transition-colors"
+          style={{ color: 'var(--fg-1)', fontFamily: 'var(--font-sans)' }}
+        >
+          {STAGE_LABEL[stage]}
+        </span>
+      </div>
     </div>
   );
 }

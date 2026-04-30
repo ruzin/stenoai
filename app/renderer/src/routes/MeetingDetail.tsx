@@ -78,7 +78,7 @@ export function MeetingDetail({ summaryFile }: MeetingDetailProps) {
 
   return (
     <MeetingsShell activeSummaryFile={summaryFile}>
-      {meeting.isLoading ? (
+      {meeting.isLoading || (meeting.isFetching && !meeting.data) ? (
         <div className="flex min-h-[40vh] items-center justify-center text-[color:var(--fg-2)]">
           Loading meeting…
         </div>

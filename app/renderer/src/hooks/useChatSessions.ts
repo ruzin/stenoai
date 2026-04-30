@@ -41,7 +41,7 @@ function migrateLegacyBlob(legacy: LegacyBlob): ChatSessionsBlob {
   return { sessions };
 }
 
-export function useChatSessions(summaryFile: string | null) {
+export function useChatSessions(summaryFile: string | null, meetingName?: string | null) {
   const queryClient = useQueryClient();
   const [activeId, setActiveId] = React.useState<string | null>(null);
 
@@ -63,16 +63,22 @@ export function useChatSessions(summaryFile: string | null) {
 
   const blob = query.data ?? emptyBlob();
 
-  // Only expose sessions that belong to this meeting. Legacy sessions migrated
-  // from the old renderer don't have a summaryFile (the legacy format only
-  // tracked meeting names, not file paths), so we surface them on every meeting
-  // view rather than dropping them silently. Users can rename or delete them.
+  // Expose sessions that belong to this meeting. Legacy sessions migrated from
+  // the old renderer don't have a summaryFile (the legacy format only tracked
+  // meeting names), so we best-effort match them via the "meetingName — title"
+  // prefix the migration writes into the session name. Sessions that can't be
+  // associated with any meeting stay in the blob but aren't surfaced here, so
+  // they don't leak across meetings.
   const meetingSessions = React.useMemo(() => {
     if (!summaryFile) return [];
     const matched = blob.sessions.filter((s) => s.summaryFile === summaryFile);
-    const orphans = blob.sessions.filter((s) => !s.summaryFile);
-    return [...matched, ...orphans];
-  }, [blob.sessions, summaryFile]);
+    if (!meetingName) return matched;
+    const legacyPrefix = `${meetingName} — `;
+    const legacyMatches = blob.sessions.filter(
+      (s) => !s.summaryFile && s.name.startsWith(legacyPrefix),
+    );
+    return [...matched, ...legacyMatches];
+  }, [blob.sessions, summaryFile, meetingName]);
 
   // Always read the freshest blob from the cache so that rapid-fire mutations
   // (createSession → appendMessage in the same tick) don't clobber each other

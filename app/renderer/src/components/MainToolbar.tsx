@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Mic, MoreHorizontal, Monitor, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
+import { MoreHorizontal, Monitor, PanelLeftClose, PanelLeftOpen, PencilLine, Settings as SettingsIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { AudioWave } from '@/components/AudioWave';
@@ -13,6 +13,7 @@ import {
   useSystemAudioSetting,
 } from '@/hooks/useSettings';
 import type { RecordingStatus } from '@/hooks/useRecording';
+import { navigate } from '@/lib/router';
 import { cn } from '@/lib/utils';
 
 interface MainToolbarProps {
@@ -70,16 +71,25 @@ export function MainToolbar({
             <PanelLeftClose className="size-[15px]" />
           )}
         </button>
+        <button
+          type="button"
+          onClick={() => navigate('/settings')}
+          aria-label="Settings"
+          title="Settings"
+          className="inline-flex h-[26px] w-7 items-center justify-center rounded-md text-[color:var(--fg-2)] transition-colors hover:bg-[color:var(--surface-hover)] hover:text-[color:var(--fg-1)]"
+        >
+          <SettingsIcon className="size-[15px]" />
+        </button>
         <RecordingOptionsPopover />
         <button
           type="button"
           onClick={onToggleRecording}
           className={cn('record-btn', isRecording && 'is-recording')}
           aria-label={
-            isRecording ? 'Open recording in progress' : 'Start recording'
+            isRecording ? 'Open recording in progress' : 'New note'
           }
           title={
-            isRecording ? 'Open recording in progress' : 'Start recording'
+            isRecording ? 'Open recording in progress' : 'New note'
           }
         >
           {isRecording ? (
@@ -104,8 +114,8 @@ export function MainToolbar({
             </>
           ) : (
             <>
-              <Mic className="size-[13px]" />
-              Start recording
+              <PencilLine className="size-[13px]" />
+              New note
             </>
           )}
         </button>

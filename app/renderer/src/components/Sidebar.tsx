@@ -5,7 +5,6 @@ import {
   Inbox,
   Plus,
   Search,
-  Settings as SettingsIcon,
 } from 'lucide-react';
 import { navigate } from '@/lib/router';
 import { cn, shortcut } from '@/lib/utils';
@@ -218,12 +217,29 @@ export function Sidebar({
             className="inline-flex h-[22px] w-[22px] items-center justify-center"
             style={{ color: 'var(--fg-1)' }}
           >
-            <svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <g stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" fill="none">
-                <path d="M24 6 C16 6 10 10 10 17 C10 24 18 25 24 25 C30 25 38 26 38 33 C38 40 32 42 24 42" />
-                <path d="M24 25 L24 42" strokeDasharray="1 3" opacity="0.55" />
-              </g>
-              <circle cx="24" cy="42" r="2" fill="currentColor" />
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 64 64"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M28 7 Q29 9.5 30 12.5" />
+              <path d="M36 7 Q35 9.5 34 12.5" />
+              <circle cx="32" cy="15" r="3.8" />
+              <circle cx="30.5" cy="15" r="0.7" fill="currentColor" stroke="none" />
+              <circle cx="33.5" cy="15" r="0.7" fill="currentColor" stroke="none" />
+              <path d="M30 19 Q28 19 28 21 L28 50 L32 60 L36 50 L36 21 Q36 19 34 19 Z" />
+              <line x1="28" y1="32" x2="36" y2="32" />
+              <line x1="28" y1="38" x2="36" y2="38" />
+              <line x1="28" y1="44" x2="36" y2="44" />
+              <line x1="28" y1="50" x2="36" y2="50" />
+              <path d="M28 22 C18 15 8 17 4 22 C10 28 20 28 28 27 Z" />
+              <path d="M36 22 C46 15 56 17 60 22 C50 28 44 28 36 27 Z" />
+              <path d="M28 28 C18 30 10 35 6 40 C14 39 22 36 28 33 Z" />
+              <path d="M36 28 C46 30 54 35 58 40 C50 39 42 36 36 33 Z" />
             </svg>
           </span>
           <span
@@ -389,23 +405,6 @@ export function Sidebar({
             onClose={() => setIconPicker(null)}
           />
         )}
-
-        {/* Footer */}
-        <div
-          className="flex items-center px-2 pb-3 pt-2"
-          style={{ borderTop: '1px solid var(--border-subtle)' }}
-        >
-          <button
-            type="button"
-            onClick={() => navigate('/settings')}
-            aria-label="Settings"
-            title="Settings"
-            className="inline-flex size-7 items-center justify-center rounded-md transition-colors hover:bg-[color:var(--surface-hover)] hover:text-[color:var(--fg-1)]"
-            style={{ color: 'var(--fg-2)' }}
-          >
-            <SettingsIcon className="size-[15px]" />
-          </button>
-        </div>
       </div>
 
       {/* Resize handle */}

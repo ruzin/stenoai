@@ -1,5 +1,4 @@
 import { cn } from '@/lib/utils';
-import appIconSrc from '@/assets/app-icon.png';
 
 interface AppIconProps {
   size?: number;
@@ -8,13 +7,35 @@ interface AppIconProps {
 
 export function AppIcon({ size = 80, className }: AppIconProps) {
   return (
-    <img
-      src={appIconSrc}
-      alt="StenoAI"
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 64 64"
       width={size}
       height={size}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-label="StenoAI"
+      role="img"
       className={cn('shrink-0', className)}
-      style={{ borderRadius: size * 0.2235 }}
-    />
+      style={{ color: 'var(--fg-1)' }}
+    >
+      <path d="M28 7 Q29 9.5 30 12.5" />
+      <path d="M36 7 Q35 9.5 34 12.5" />
+      <circle cx="32" cy="15" r="3.8" />
+      <circle cx="30.5" cy="15" r="0.7" fill="currentColor" stroke="none" />
+      <circle cx="33.5" cy="15" r="0.7" fill="currentColor" stroke="none" />
+      <path d="M30 19 Q28 19 28 21 L28 50 L32 60 L36 50 L36 21 Q36 19 34 19 Z" />
+      <line x1="28" y1="32" x2="36" y2="32" />
+      <line x1="28" y1="38" x2="36" y2="38" />
+      <line x1="28" y1="44" x2="36" y2="44" />
+      <line x1="28" y1="50" x2="36" y2="50" />
+      <path d="M28 22 C18 15 8 17 4 22 C10 28 20 28 28 27 Z" />
+      <path d="M36 22 C46 15 56 17 60 22 C50 28 44 28 36 27 Z" />
+      <path d="M28 28 C18 30 10 35 6 40 C14 39 22 36 28 33 Z" />
+      <path d="M36 28 C46 30 54 35 58 40 C50 39 42 36 36 33 Z" />
+    </svg>
   );
 }
