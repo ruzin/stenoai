@@ -13,12 +13,21 @@ import time
 from pathlib import Path
 from typing import Optional, Tuple
 
-# How long pull_with_fallback waits for the *completed* byte count to advance
-# before it gives up on a candidate and falls through to the next one. This
-# catches the gov-VPN case where Ollama's blob fetches all EOF immediately and
-# Ollama keeps emitting status updates with completed=0 while it internally
-# retries (1+2+4+8+16+32s = ~63s) — without this we'd wait the full ~63s.
-PULL_PROGRESS_TIMEOUT_SECONDS = 10.0
+# pull_with_fallback uses a two-tier timeout so it bails out fast when Ollama
+# is floundering on a blocked registry (catching the gov-VPN signature) but
+# tolerates ordinary mid-download stalls on flaky-but-working networks.
+#
+#   PULL_NO_BYTES_TIMEOUT_SECONDS — applies until the first byte of an
+#       active download arrives. This is the gov-VPN signature: Ollama keeps
+#       emitting status updates with completed=0 while it internally retries
+#       (1+2+4+8+16+32s = ~63s) before giving up. We abort sooner.
+#
+#   PULL_STALL_TIMEOUT_SECONDS — applies once completed > 0. Real downloads
+#       can stall briefly mid-stream (TCP backoff, server-side throttling).
+#       Observed locally: a healthy WiFi pull paused for >10s at 83% of a
+#       blob before resuming. A short timeout here false-positives.
+PULL_NO_BYTES_TIMEOUT_SECONDS = 10.0
+PULL_STALL_TIMEOUT_SECONDS = 60.0
 
 logger = logging.getLogger(__name__)
 
@@ -482,11 +491,21 @@ def pull_with_fallback(internal_id: str, progress_callback=None) -> Tuple[bool, 
                     if completed > last_completed:
                         last_completed = completed
                         last_progress_time = time.time()
-                    elif time.time() - last_progress_time > PULL_PROGRESS_TIMEOUT_SECONDS:
-                        raise TimeoutError(
-                            f"No download progress for {PULL_PROGRESS_TIMEOUT_SECONDS:.0f}s "
-                            f"(stuck at {completed}/{total} bytes) — likely network block"
+                    else:
+                        elapsed = time.time() - last_progress_time
+                        # Strict timeout until first byte arrives; lenient
+                        # afterwards (real connections sometimes stall briefly).
+                        timeout = (
+                            PULL_NO_BYTES_TIMEOUT_SECONDS
+                            if last_completed == 0
+                            else PULL_STALL_TIMEOUT_SECONDS
                         )
+                        if elapsed > timeout:
+                            raise TimeoutError(
+                                f"No download progress for {timeout:.0f}s "
+                                f"(stuck at {completed}/{total} bytes) — "
+                                f"{'blocked registry' if last_completed == 0 else 'connection stalled'}"
+                            )
 
                 if progress_callback:
                     progress_callback(tag, status, completed, total)

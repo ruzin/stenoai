@@ -110,7 +110,7 @@ class PullWithFallbackTests(unittest.TestCase):
 
         # Lower the timeout to keep the test fast.
         with patch.object(ollama_manager, "start_ollama_server", return_value=True), \
-             patch.object(ollama_manager, "PULL_PROGRESS_TIMEOUT_SECONDS", 0.1), \
+             patch.object(ollama_manager, "PULL_NO_BYTES_TIMEOUT_SECONDS", 0.1), \
              patch.object(ollama_manager, "_pull_stream", side_effect=fake_pull_stream):
             success, resolved = ollama_manager.pull_with_fallback("llama3.2:3b")
 
@@ -130,10 +130,50 @@ class PullWithFallbackTests(unittest.TestCase):
             chunks.append(c)
 
         with patch.object(ollama_manager, "start_ollama_server", return_value=True), \
-             patch.object(ollama_manager, "PULL_PROGRESS_TIMEOUT_SECONDS", 0.1), \
+             patch.object(ollama_manager, "PULL_NO_BYTES_TIMEOUT_SECONDS", 0.1), \
              patch.object(ollama_manager, "_pull_stream", return_value=iter(chunks)):
             success, resolved = ollama_manager.pull_with_fallback("llama3.2:3b")
 
+        self.assertTrue(success)
+        self.assertEqual(resolved, "llama3.2:3b")
+
+    def test_mid_download_stall_uses_lenient_timeout(self):
+        # Real-world false-positive: download progressed to 83%, paused
+        # briefly, the strict 10s no-bytes timeout would have killed it.
+        # With a 60s stall timeout once bytes have flowed, a brief pause
+        # is tolerated until the next chunk arrives.
+        import time as time_module
+
+        chunks = []
+        for completed in (100, 200, 300):
+            c = MagicMock()
+            c.status = "pulling"
+            c.completed = completed
+            c.total = 1000
+            chunks.append(c)
+        # Now simulate a stall: same completed, repeated. We'll let the
+        # iterator keep yielding the last value briefly to verify we don't
+        # raise immediately.
+        stall_chunk = MagicMock()
+        stall_chunk.status = "pulling"
+        stall_chunk.completed = 300
+        stall_chunk.total = 1000
+        chunks.extend([stall_chunk] * 3)
+        # Then resume.
+        for completed in (400, 1000):
+            c = MagicMock()
+            c.status = "pulling"
+            c.completed = completed
+            c.total = 1000
+            chunks.append(c)
+
+        with patch.object(ollama_manager, "start_ollama_server", return_value=True), \
+             patch.object(ollama_manager, "PULL_NO_BYTES_TIMEOUT_SECONDS", 0.1), \
+             patch.object(ollama_manager, "PULL_STALL_TIMEOUT_SECONDS", 5.0), \
+             patch.object(ollama_manager, "_pull_stream", return_value=iter(chunks)):
+            success, resolved = ollama_manager.pull_with_fallback("llama3.2:3b")
+
+        # No timeout, primary succeeded.
         self.assertTrue(success)
         self.assertEqual(resolved, "llama3.2:3b")
 
