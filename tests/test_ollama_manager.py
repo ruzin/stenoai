@@ -29,7 +29,7 @@ class PullWithFallbackTests(unittest.TestCase):
 
     def test_returns_resolved_tag_when_primary_succeeds(self):
         with patch.object(ollama_manager, "start_ollama_server", return_value=True), \
-             patch("ollama.pull", return_value=iter(_fake_progress_chunks())):
+             patch.object(ollama_manager, "_pull_stream", return_value=iter(_fake_progress_chunks())):
             success, resolved = ollama_manager.pull_with_fallback("llama3.2:3b")
 
         self.assertTrue(success)
@@ -46,7 +46,7 @@ class PullWithFallbackTests(unittest.TestCase):
             return iter(_fake_progress_chunks())
 
         with patch.object(ollama_manager, "start_ollama_server", return_value=True), \
-             patch("ollama.pull", side_effect=fake_pull):
+             patch.object(ollama_manager, "_pull_stream", side_effect=fake_pull):
             success, resolved = ollama_manager.pull_with_fallback("llama3.2:3b")
 
         self.assertTrue(success)
@@ -56,11 +56,33 @@ class PullWithFallbackTests(unittest.TestCase):
 
     def test_returns_failure_when_all_candidates_fail(self):
         with patch.object(ollama_manager, "start_ollama_server", return_value=True), \
-             patch("ollama.pull", side_effect=RuntimeError("network unreachable")):
+             patch.object(ollama_manager, "_pull_stream", side_effect=RuntimeError("network unreachable")):
             success, resolved = ollama_manager.pull_with_fallback("llama3.2:3b")
 
         self.assertFalse(success)
         self.assertIsNone(resolved)
+
+    def test_read_timeout_on_primary_falls_back_to_mirror(self):
+        # Simulates the gov-VPN case: registry is reachable (probe passes,
+        # manifest fetch succeeds) but blob downloads stall — httpx raises
+        # ReadTimeout, which should be caught and the mirror tried instead.
+        import httpx
+        primary_mirror = Config.HF_MIRRORS["llama3.2:3b"]
+        call_log = []
+
+        def fake_pull_stream(tag):
+            call_log.append(tag)
+            if tag == "llama3.2:3b":
+                raise httpx.ReadTimeout("read timeout after 10s")
+            return iter(_fake_progress_chunks())
+
+        with patch.object(ollama_manager, "start_ollama_server", return_value=True), \
+             patch.object(ollama_manager, "_pull_stream", side_effect=fake_pull_stream):
+            success, resolved = ollama_manager.pull_with_fallback("llama3.2:3b")
+
+        self.assertTrue(success)
+        self.assertEqual(resolved, primary_mirror)
+        self.assertEqual(call_log, ["llama3.2:3b", primary_mirror])
 
     def test_no_fallback_for_unmirrored_model_attempted(self):
         # qwen3:8b is deprecated and not in HF_MIRRORS — only the primary tag
@@ -72,7 +94,7 @@ class PullWithFallbackTests(unittest.TestCase):
             raise RuntimeError("registry blocked")
 
         with patch.object(ollama_manager, "start_ollama_server", return_value=True), \
-             patch("ollama.pull", side_effect=fake_pull):
+             patch.object(ollama_manager, "_pull_stream", side_effect=fake_pull):
             success, resolved = ollama_manager.pull_with_fallback("qwen3:8b")
 
         self.assertFalse(success)
@@ -92,7 +114,7 @@ class PullWithFallbackTests(unittest.TestCase):
             return iter(_fake_progress_chunks())
 
         with patch.object(ollama_manager, "start_ollama_server", return_value=True), \
-             patch("ollama.pull", side_effect=fake_pull):
+             patch.object(ollama_manager, "_pull_stream", side_effect=fake_pull):
             ollama_manager.pull_with_fallback("llama3.2:3b", progress_callback=cb)
 
         # The callback should have fired with the mirror tag, not the failed primary.
@@ -120,7 +142,7 @@ class RegistryProbeTests(unittest.TestCase):
 
         with patch.object(ollama_manager, "start_ollama_server", return_value=True), \
              patch.object(ollama_manager, "_registry_reachable", return_value=False), \
-             patch("ollama.pull", side_effect=fake_pull):
+             patch.object(ollama_manager, "_pull_stream", side_effect=fake_pull):
             success, resolved = ollama_manager.pull_with_fallback("llama3.2:3b")
 
         self.assertTrue(success)
@@ -140,7 +162,7 @@ class RegistryProbeTests(unittest.TestCase):
 
         with patch.object(ollama_manager, "start_ollama_server", return_value=True), \
              patch.object(ollama_manager, "_registry_reachable", return_value=False), \
-             patch("ollama.pull", side_effect=fake_pull):
+             patch.object(ollama_manager, "_pull_stream", side_effect=fake_pull):
             success, resolved = ollama_manager.pull_with_fallback("qwen3:8b")
 
         self.assertFalse(success)
