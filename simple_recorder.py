@@ -2530,6 +2530,25 @@ def check_model(model_name):
         except Exception as e:
             print(json.dumps({"installed": False, "model": model_name, "error": str(e)}))
     else:
+        # Backend dispatch: llamacpp-routed models live on the filesystem
+        # under ~/Library/Application Support/stenoai/models/, not in
+        # Ollama's manifest store. Branch before contacting Ollama.
+        from src.config import Config
+        if Config.get_backend(model_name) == "local-llamacpp":
+            from src.hf_downloader import is_model_downloaded
+            from src.llamacpp_manager import get_local_models_dir
+            repo, filename = Config.get_hf_repo_filename(model_name)
+            payload = {
+                "installed": False,
+                "model": model_name,
+                "backend": "local-llamacpp",
+            }
+            if repo and filename:
+                if is_model_downloaded(repo, filename, get_local_models_dir()):
+                    payload["installed"] = True
+            print(json.dumps(payload))
+            return
+
         from src.ollama_manager import start_ollama_server, find_installed_tag
         start_ollama_server()
         try:
@@ -2537,6 +2556,7 @@ def check_model(model_name):
             payload = {
                 "installed": resolved_tag is not None,
                 "model": model_name,
+                "backend": "local-ollama",
             }
             if resolved_tag and resolved_tag != model_name:
                 payload["resolved_tag"] = resolved_tag
@@ -2548,14 +2568,64 @@ def check_model(model_name):
 @cli.command()
 @click.argument('model_name')
 def pull_model(model_name):
-    """Download an Ollama model (uses HTTP API).
+    """Download a model.
 
-    Falls back to the HuggingFace GGUF mirror (hf.co/...) when the registry
-    pull fails — this is the recovery path for VPN/firewall environments where
-    registry.ollama.ai is blocked but huggingface.co is reachable.
+    Backend dispatch on the model's configured ``backend`` field:
+    - ``local-ollama``: uses Ollama's pull, with HF-mirror fallback when
+      registry.ollama.ai is blocked (the original VPN-recovery path).
+    - ``local-llamacpp``: downloads the GGUF directly from HuggingFace
+      to ~/Library/Application Support/stenoai/models/. No Ollama
+      involvement — these are the multimodal models Ollama can't load.
     """
-    from src.ollama_manager import pull_with_fallback
     from src.config import Config, get_config
+
+    backend = Config.get_backend(model_name)
+
+    if backend == "local-llamacpp":
+        from src.hf_downloader import download_gguf
+        from src.llamacpp_manager import get_local_models_dir
+        repo, filename = Config.get_hf_repo_filename(model_name)
+        if not repo or not filename:
+            print(json.dumps({
+                "success": False,
+                "error": f"{model_name} is configured for llamacpp but missing hf_repo / hf_filename",
+            }))
+            return
+
+        last_pct = {"value": -1}
+
+        def progress_cb(done, total):
+            # Throttle to whole-percent updates so the renderer's debug
+            # log stays readable on large downloads.
+            if total <= 0:
+                return
+            pct = int(done * 100 / total)
+            if pct != last_pct["value"]:
+                last_pct["value"] = pct
+                print(f"pulling {filename} {pct}%", flush=True)
+
+        print(f"[local-llamacpp] downloading {repo}/{filename}", flush=True)
+        try:
+            target = download_gguf(
+                repo, filename,
+                get_local_models_dir(),
+                progress_callback=progress_cb,
+            )
+            print(json.dumps({
+                "success": True,
+                "model": model_name,
+                "backend": "local-llamacpp",
+                "path": str(target),
+            }))
+        except Exception as e:
+            print(json.dumps({
+                "success": False,
+                "error": str(e),
+                "backend": "local-llamacpp",
+            }))
+        return
+
+    from src.ollama_manager import pull_with_fallback
 
     last_tag = {"tag": None}
 

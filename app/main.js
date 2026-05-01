@@ -809,6 +809,21 @@ if (!gotSingleInstanceLock) {
       try { process.kill(ollamaPid, 'SIGTERM'); } catch (_) {}
       ollamaPid = null;
     }
+    // Same dance for llama-server (used for multimodal-split-GGUF models
+    // Ollama can't load — Gemma 4, Qwen 3.5). Only the Python backend
+    // spawns it, so there's no in-process JS variable equivalent to
+    // ollamaPid; the PID file is the single source of truth.
+    const llamacppPidFile = path.join(getBackendCwd(), '_internal', 'llamacpp.pid');
+    try {
+      const pid = parseInt(require('fs').readFileSync(llamacppPidFile, 'utf8').trim(), 10);
+      if (pid) {
+        process.kill(pid, 'SIGTERM');
+        setTimeout(() => {
+          try { process.kill(pid, 'SIGKILL'); } catch (_) {}
+        }, 1000);
+      }
+      require('fs').unlinkSync(llamacppPidFile);
+    } catch (_) {}
     await shutdownTelemetry();
   });
 
