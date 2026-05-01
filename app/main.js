@@ -1459,25 +1459,69 @@ ipcMain.on('query-transcript-stream', (event, queryId, summaryFile, question) =>
   });
 });
 
+// Chat sessions persistence.
+//
+// The legacy renderer reads/writes `chat_sessions.json` as a flat array.
+// The new renderer uses an enriched `{ sessions: [...] }` shape. To avoid
+// silently breaking the legacy UI when a user toggles between renderers, we
+// store the new shape in a separate file (`chat_sessions_v2.json`) and never
+// modify the legacy file. On first load, if v2 is absent we read the legacy
+// file once for migration; subsequent saves only touch v2.
+//
+// Writes use tmp+rename to keep the file atomic across crashes / power loss
+// (a truncated chat_sessions file is hard to recover and would lose all
+// chat history on next launch).
+const CHAT_SESSIONS_V2_FILENAME = 'chat_sessions_v2.json';
+const CHAT_SESSIONS_LEGACY_FILENAME = 'chat_sessions.json';
+
+function chatSessionsV2Path() {
+  return path.join(app.getPath('userData'), CHAT_SESSIONS_V2_FILENAME);
+}
+
+function chatSessionsLegacyPath() {
+  return path.join(app.getPath('userData'), CHAT_SESSIONS_LEGACY_FILENAME);
+}
+
 ipcMain.handle('save-chat-sessions', async (event, data) => {
+  const filePath = chatSessionsV2Path();
+  const tmpPath = `${filePath}.tmp`;
   try {
-    const filePath = path.join(app.getPath('userData'), 'chat_sessions.json');
-    fs.writeFileSync(filePath, JSON.stringify(data), 'utf-8');
+    fs.writeFileSync(tmpPath, JSON.stringify(data), 'utf-8');
+    fs.renameSync(tmpPath, filePath);
     return { success: true };
   } catch (err) {
+    try { if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath); } catch (_) {}
     return { success: false, error: err.message };
   }
 });
 
 ipcMain.handle('load-chat-sessions', async () => {
-  try {
-    const filePath = path.join(app.getPath('userData'), 'chat_sessions.json');
-    if (!fs.existsSync(filePath)) return { success: true, data: null };
-    const raw = fs.readFileSync(filePath, 'utf-8');
-    return { success: true, data: JSON.parse(raw) };
-  } catch (err) {
-    return { success: false, error: err.message };
+  const v2Path = chatSessionsV2Path();
+  // Prefer v2 file when present
+  if (fs.existsSync(v2Path)) {
+    try {
+      const raw = fs.readFileSync(v2Path, 'utf-8');
+      return { success: true, data: JSON.parse(raw) };
+    } catch (err) {
+      // Corrupt v2 file — quarantine it so we don't keep failing on every load,
+      // then fall through to legacy migration / empty state.
+      const corruptPath = `${v2Path}.corrupt-${Date.now()}`;
+      try { fs.renameSync(v2Path, corruptPath); } catch (_) {}
+      console.error(`[chat-sessions] v2 file unreadable, quarantined to ${corruptPath}:`, err.message);
+    }
   }
+  // First run on the new renderer: try to migrate from the legacy file.
+  // Legacy file is read but never modified, so legacy renderer remains intact.
+  const legacyPath = chatSessionsLegacyPath();
+  if (fs.existsSync(legacyPath)) {
+    try {
+      const raw = fs.readFileSync(legacyPath, 'utf-8');
+      return { success: true, data: JSON.parse(raw), migratedFromLegacy: true };
+    } catch (err) {
+      console.error('[chat-sessions] legacy file unreadable:', err.message);
+    }
+  }
+  return { success: true, data: null };
 });
 
 ipcMain.handle('save-meeting-notes', async (event, sessionName, notes) => {
@@ -1601,7 +1645,13 @@ ipcMain.handle('update-meeting', async (event, summaryFilePath, updates) => {
 
 ipcMain.handle('reveal-meeting-folder', async (event, filePath) => {
   try {
-    shell.showItemInFolder(filePath);
+    const projectRoot = path.join(__dirname, '..');
+    const allowedBaseDirs = getAllowedBaseDirs();
+    const absolutePath = path.isAbsolute(filePath) ? filePath : path.join(projectRoot, filePath);
+    if (!validateSafeFilePath(absolutePath, allowedBaseDirs)) {
+      return { success: false, error: 'Invalid file path: outside allowed directories' };
+    }
+    shell.showItemInFolder(absolutePath);
     return { success: true };
   } catch (error) {
     return { success: false, error: error.message };

@@ -222,7 +222,15 @@ interface ChatSessionsBlob {
     updatedAt: number;
   }>;
 }
-type LoadChatSessionsResponse = Result<{ data: ChatSessionsBlob | null }>;
+// `data` is null when no chat history exists. `migratedFromLegacy: true` is set
+// when main returned the legacy `chat_sessions.json` blob (a flat array) on a
+// fresh install of the new renderer; the renderer migrates the shape in memory
+// and persists to `chat_sessions_v2.json` on next save. The legacy file is
+// never modified, so toggling back to the legacy renderer keeps working.
+type LoadChatSessionsResponse = Result<{
+  data: ChatSessionsBlob | LegacyBlob | null;
+  migratedFromLegacy?: boolean;
+}>;
 ```
 
 ---
