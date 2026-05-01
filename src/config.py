@@ -25,15 +25,18 @@ class Config:
     # models without an entry simply fail without fallback.
     HF_MIRRORS = {
         "llama3.2:3b": "hf.co/bartowski/Llama-3.2-3B-Instruct-GGUF:Q4_K_M",
-        "qwen3.5:9b": "hf.co/bartowski/Qwen_Qwen3.5-9B-GGUF:Q4_K_M",
+        "gemma4:e2b": "hf.co/bartowski/google_gemma-4-E2B-it-GGUF:Q4_K_M",
         "deepseek-r1:14b": "hf.co/bartowski/DeepSeek-R1-Distill-Qwen-14B-GGUF:Q4_K_M",
         "gpt-oss:20b": "hf.co/bartowski/openai_gpt-oss-20b-GGUF:Q4_K_M",
-        # NOTE: gemma3:4b deliberately omitted. Google's Gemma models are
-        # gated on HuggingFace (license acceptance required), so pulling via
-        # Ollama without an HF token fails with:
-        #   "realm host 'huggingface.co' does not match original host 'hf.co'"
-        # Adding HF token support is tracked separately; for now users on
-        # restricted networks should pick a non-gated model.
+        # NOTE: qwen3.5:9b deliberately omitted. Both bartowski and unsloth
+        # GGUFs ship a separate mmproj vision file that Ollama 0.17.x can't
+        # load (returns 500 'unable to load model'); see
+        # https://github.com/ollama/ollama/issues/14575 . The Ollama-registry
+        # version is repackaged and works fine, so the Ollama tag itself is
+        # supported — just no HF fallback until upstream resolves it.
+        # NOTE: gemma3:4b deliberately omitted. Superseded by gemma4:e2b
+        # (Apache 2.0, no licence gating). The bartowski mirror for gemma3
+        # tripped Ollama's auth-realm check; gemma4 doesn't.
     }
 
     # Supported models with metadata (organized by parameter size, ascending)
@@ -46,13 +49,22 @@ class Config:
             "speed": "very fast",
             "quality": "good"
         },
+        "gemma4:e2b": {
+            "name": "Gemma 4 E2B",
+            "size": "3.3GB",
+            "params": "2.3B effective",
+            "description": "Apache 2.0 multimodal model — replaces Gemma 3",
+            "speed": "fast",
+            "quality": "good"
+        },
         "gemma3:4b": {
             "name": "Gemma 3 4B",
             "size": "2.5GB",
             "params": "4B",
-            "description": "Lightweight and efficient",
+            "description": "Replaced by Gemma 4 E2B",
             "speed": "fast",
-            "quality": "good"
+            "quality": "good",
+            "deprecated": True
         },
         "qwen3.5:9b": {
             "name": "Qwen 3.5 9B",

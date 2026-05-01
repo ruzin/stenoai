@@ -45,24 +45,23 @@ class ConfigLanguageTests(unittest.TestCase):
 
 
 class HFMirrorTests(unittest.TestCase):
-    # Models we know need HF auth (license-gated) and so can't be pulled
-    # via Ollama's vanilla hf.co/... path without an HF token. Excluded
-    # from the "every active model has a mirror" assertion below.
-    HF_GATED_MODELS = {"gemma3:4b"}
+    # Models we deliberately don't put behind the HF fallback. Reasons differ
+    # (license gating, upstream Ollama bug, etc.) — see HF_MIRRORS comment.
+    HF_FALLBACK_EXEMPT = {"qwen3.5:9b"}
 
-    def test_every_active_non_gated_model_has_mirror(self):
-        # Models without a `deprecated: True` flag and not on a license gate
-        # should be coverable by the HF fallback so VPN-blocked users can
-        # still complete setup.
+    def test_every_active_supported_model_has_mirror(self):
+        # Active (non-deprecated) models should be coverable by the HF
+        # fallback so VPN-blocked users can complete setup, except for the
+        # exemptions documented in HF_FALLBACK_EXEMPT.
         active = {
             name for name, meta in Config.SUPPORTED_MODELS.items()
             if not meta.get("deprecated")
         }
-        expected = active - self.HF_GATED_MODELS
+        expected = active - self.HF_FALLBACK_EXEMPT
         missing = expected - set(Config.HF_MIRRORS.keys())
         self.assertEqual(
             missing, set(),
-            f"Non-gated active models without an HF mirror: {missing}"
+            f"Active models without an HF mirror: {missing}"
         )
 
     def test_hf_mirrors_use_hf_co_prefix(self):
