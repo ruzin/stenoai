@@ -343,3 +343,81 @@ def has_model(model_name: str) -> bool:
     """
     models = list_models()
     return model_name in models
+
+
+def find_installed_tag(internal_id: str) -> Optional[str]:
+    """
+    Check if any candidate tag for this internal ID is installed locally.
+
+    Walks through the internal ID and its HuggingFace mirror (if any),
+    returning the first tag actually present in `ollama list`. Used so a model
+    pulled via the HF fallback is still recognised as installed on later runs.
+    """
+    from src.config import Config
+
+    try:
+        import ollama
+        response = ollama.list()
+        models_list = getattr(response, 'models', []) or []
+        installed = [getattr(m, 'model', '') for m in models_list]
+    except Exception as e:
+        logger.error(f"Failed to list installed models: {e}")
+        return None
+
+    for tag in Config.get_pull_candidates(internal_id):
+        if tag in installed:
+            return tag
+    return None
+
+
+def pull_with_fallback(internal_id: str, progress_callback=None) -> Tuple[bool, Optional[str]]:
+    """
+    Pull a model via the HTTP API, falling back to its HuggingFace mirror on failure.
+
+    The first attempt uses the canonical Ollama tag (e.g. ``llama3.2:3b``). If
+    that fails (commonly because ``registry.ollama.ai`` is blocked by a corporate
+    VPN), and a HuggingFace mirror is configured for this model, retry against
+    ``hf.co/...`` which usually reaches ``huggingface.co`` instead.
+
+    Args:
+        internal_id: Internal model identifier (e.g. ``llama3.2:3b``).
+        progress_callback: Optional callable receiving (tag, status, completed, total).
+
+    Returns:
+        (success, resolved_tag). resolved_tag is the actual Ollama tag the model
+        was pulled as, which may differ from internal_id when the fallback fires.
+    """
+    from src.config import Config
+
+    if not start_ollama_server():
+        return False, None
+
+    try:
+        import ollama
+    except ImportError:
+        logger.error("ollama Python client not available")
+        return False, None
+
+    candidates = Config.get_pull_candidates(internal_id)
+    last_error: Optional[Exception] = None
+
+    for idx, tag in enumerate(candidates):
+        attempt_label = "primary" if idx == 0 else "HF mirror fallback"
+        logger.info(f"Pulling {tag} ({attempt_label}, internal: {internal_id})")
+        try:
+            for progress in ollama.pull(tag, stream=True):
+                status = getattr(progress, 'status', '') or ''
+                total = getattr(progress, 'total', 0) or 0
+                completed = getattr(progress, 'completed', 0) or 0
+                if progress_callback:
+                    progress_callback(tag, status, completed, total)
+            logger.info(f"Successfully pulled {tag}")
+            return True, tag
+        except Exception as e:
+            last_error = e
+            logger.warning(f"Pull failed for {tag}: {e}")
+            if idx < len(candidates) - 1:
+                logger.info(f"Trying next candidate for {internal_id}")
+
+    logger.error(f"All pull candidates failed for {internal_id}: {last_error}")
+    return False, None

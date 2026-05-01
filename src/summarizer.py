@@ -230,44 +230,61 @@ class OllamaSummarizer:
         return fallback_summary
     
     def _ensure_model_available(self) -> bool:
-        """Ensure the required model is downloaded and available (uses HTTP API)."""
+        """Ensure the required model is downloaded and available (uses HTTP API).
+
+        Resolves the configured internal model ID against installed tags,
+        accepting either the canonical Ollama tag or its HuggingFace mirror tag
+        (so a model pulled via the HF fallback during setup is still recognised).
+        Falls back to pulling via the HF mirror if the registry pull fails.
+        """
+        from .config import get_config
+
         try:
-            # Use the ollama Python client (HTTP API) instead of the binary
-            # This avoids SIP/DYLD issues on macOS when running from a packaged app
-            response = ollama.list()
-            models = getattr(response, 'models', []) or []
-            model_names = [getattr(m, 'model', '') for m in models]
+            internal_id = self.model_name
 
-            if self.model_name in model_names:
-                logger.info(f"Model {self.model_name} is already available")
+            installed_tag = ollama_manager.find_installed_tag(internal_id)
+            if installed_tag:
+                if installed_tag != self.model_name:
+                    logger.info(
+                        f"Model {internal_id} is installed as {installed_tag} "
+                        "(HF mirror) — using that tag"
+                    )
+                    self.model_name = installed_tag
+                else:
+                    logger.info(f"Model {self.model_name} is already available")
                 return True
 
-            # Model not found, try to pull it
-            logger.info(f"Downloading model {self.model_name}...")
+            logger.info(f"Downloading model {internal_id}...")
+            success, resolved_tag = ollama_manager.pull_with_fallback(internal_id)
+            if success and resolved_tag:
+                logger.info(f"Successfully downloaded {internal_id} as {resolved_tag}")
+                self.model_name = resolved_tag
+                if resolved_tag != internal_id:
+                    try:
+                        get_config().set_resolved_pull_tag(internal_id, resolved_tag)
+                    except Exception as e:
+                        logger.warning(f"Could not persist resolved tag: {e}")
+                return True
+
+            # Last-resort: try any other supported model that's already installed,
+            # so a working summary is still possible when the requested model
+            # can't be pulled.
             try:
-                ollama.pull(self.model_name)
-                logger.info(f"Successfully downloaded model {self.model_name}")
-                return True
-            except Exception as e:
-                logger.error(f"Failed to download model {self.model_name}: {e}")
+                response = ollama.list()
+                models = getattr(response, 'models', []) or []
+                installed = [getattr(m, 'model', '') for m in models]
+            except Exception:
+                installed = []
 
-            # Try fallback models from supported list
-            fallback_models = ["llama3.2:3b", "gemma3:4b", "qwen3.5:9b", "deepseek-r1:14b"]
-            for fallback in fallback_models:
-                if fallback in model_names:
-                    logger.info(f"Using already-installed fallback model: {fallback}")
-                    self.model_name = fallback
-                    return True
-
-            for fallback in fallback_models:
-                logger.info(f"Trying fallback model: {fallback}")
-                try:
-                    ollama.pull(fallback)
-                    logger.info(f"Successfully downloaded fallback model {fallback}")
-                    self.model_name = fallback
-                    return True
-                except Exception:
-                    continue
+            from .config import Config
+            for candidate_id in Config.SUPPORTED_MODELS.keys():
+                for candidate_tag in Config.get_pull_candidates(candidate_id):
+                    if candidate_tag in installed:
+                        logger.info(
+                            f"Using already-installed alternative model: {candidate_tag}"
+                        )
+                        self.model_name = candidate_tag
+                        return True
 
             return False
 

@@ -2513,15 +2513,17 @@ def check_model(model_name):
         except Exception as e:
             print(json.dumps({"installed": False, "model": model_name, "error": str(e)}))
     else:
-        from src.ollama_manager import start_ollama_server
+        from src.ollama_manager import start_ollama_server, find_installed_tag
         start_ollama_server()
         try:
-            import ollama
-            response = ollama.list()
-            models = getattr(response, 'models', []) or []
-            model_names = [getattr(m, 'model', '') for m in models]
-            installed = model_name in model_names
-            print(json.dumps({"installed": installed, "model": model_name}))
+            resolved_tag = find_installed_tag(model_name)
+            payload = {
+                "installed": resolved_tag is not None,
+                "model": model_name,
+            }
+            if resolved_tag and resolved_tag != model_name:
+                payload["resolved_tag"] = resolved_tag
+            print(json.dumps(payload))
         except Exception as e:
             print(json.dumps({"installed": False, "model": model_name, "error": str(e)}))
 
@@ -2529,21 +2531,49 @@ def check_model(model_name):
 @cli.command()
 @click.argument('model_name')
 def pull_model(model_name):
-    """Download an Ollama model (uses HTTP API)."""
-    from src.ollama_manager import start_ollama_server
-    start_ollama_server()
+    """Download an Ollama model (uses HTTP API).
+
+    Falls back to the HuggingFace GGUF mirror (hf.co/...) when the registry
+    pull fails — this is the recovery path for VPN/firewall environments where
+    registry.ollama.ai is blocked but huggingface.co is reachable.
+    """
+    from src.ollama_manager import pull_with_fallback
+    from src.config import Config, get_config
+
+    last_tag = {"tag": None}
+
+    def progress_cb(tag, status, completed, total):
+        if tag != last_tag["tag"]:
+            attempt = "primary" if tag == model_name else "HF mirror fallback"
+            print(f"[{attempt}] pulling {tag}", flush=True)
+            last_tag["tag"] = tag
+        if total > 0:
+            pct = int(completed / total * 100)
+            print(f"{status} {pct}%", flush=True)
+        elif status:
+            print(status, flush=True)
+
     try:
-        import ollama
-        for progress in ollama.pull(model_name, stream=True):
-            status = getattr(progress, 'status', '') or ''
-            total = getattr(progress, 'total', 0) or 0
-            completed = getattr(progress, 'completed', 0) or 0
-            if total > 0:
-                pct = int(completed / total * 100)
-                print(f"{status} {pct}%", flush=True)
-            elif status:
-                print(status, flush=True)
-        print(json.dumps({"success": True, "model": model_name}))
+        success, resolved_tag = pull_with_fallback(model_name, progress_callback=progress_cb)
+        if success and resolved_tag:
+            if resolved_tag != model_name:
+                try:
+                    get_config().set_resolved_pull_tag(model_name, resolved_tag)
+                except Exception:
+                    pass
+            print(json.dumps({
+                "success": True,
+                "model": model_name,
+                "resolved_tag": resolved_tag,
+                "fallback_used": resolved_tag != model_name,
+            }))
+        else:
+            mirror = Config.get_hf_mirror(model_name)
+            print(json.dumps({
+                "success": False,
+                "error": "All pull candidates failed",
+                "tried": [model_name] + ([mirror] if mirror else []),
+            }))
     except Exception as e:
         print(json.dumps({"success": False, "error": str(e)}))
 

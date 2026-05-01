@@ -2381,81 +2381,90 @@ ipcMain.handle('setup-ollama-and-model', async () => {
     }
     
     sendDebugLog('Downloading AI model (this may take several minutes)...');
-    sendDebugLog('POST http://127.0.0.1:11434/api/pull {name: "llama3.2:3b"}');
+    const backendPath = getBackendPath();
+    sendDebugLog(`$ ${backendPath} pull-model llama3.2:3b`);
 
-    const http = require('http');
     return new Promise((resolve) => {
-      const postData = JSON.stringify({ name: 'llama3.2:3b' });
-      const req = http.request({
-        hostname: '127.0.0.1',
-        port: 11434,
-        path: '/api/pull',
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        timeout: 600000
-      }, (res) => {
-        let lastStatus = '';
-        res.on('data', (chunk) => {
-          // Ollama streams newline-delimited JSON
-          const lines = chunk.toString().split('\n').filter(Boolean);
-          for (const line of lines) {
-            try {
-              const json = JSON.parse(line);
-              if (json.error) {
-                sendDebugLog(`Pull error: ${json.error}`);
-                return;
-              }
-              // Log progress without spamming duplicate status
-              const status = json.status || '';
-              if (json.total && json.completed) {
-                const pct = Math.round((json.completed / json.total) * 100);
-                const msg = `${status} ${pct}%`;
-                if (msg !== lastStatus) {
-                  sendDebugLog(msg);
-                  lastStatus = msg;
-                }
-              } else if (status !== lastStatus) {
-                sendDebugLog(status);
-                lastStatus = status;
-              }
-            } catch (e) {
-              // Non-JSON line, log as-is
-              sendDebugLog(chunk.toString().trim());
-            }
-          }
-        });
-
-        res.on('end', async () => {
-          if (res.statusCode === 200) {
-            sendDebugLog('AI model download completed successfully');
-            try {
-              await runPythonScript('simple_recorder.py', ['set-model', 'llama3.2:3b'], true);
-            } catch (e) {
-              // Non-fatal -- config reset is best-effort
-            }
-            trackEvent('setup_completed', { step: 'ollama_and_model' });
-            resolve({ success: true, message: 'Ollama and AI model ready' });
-          } else {
-            sendDebugLog(`AI model download failed with status: ${res.statusCode}`);
-            trackEvent('setup_failed', { step: 'ollama_and_model' });
-            resolve({ success: false, error: 'Failed to download AI model', details: `HTTP ${res.statusCode}` });
-          }
-        });
+      const proc = spawn(backendPath, ['pull-model', 'llama3.2:3b'], {
+        cwd: getBackendCwd(),
+        env: { ...process.env, ...getOllamaEnv() },
       });
 
-      req.on('error', (error) => {
-        sendDebugLog(`Pull request error: ${error.message}`);
+      let stdoutBuffer = '';
+      let stderrBuffer = '';
+      let lastStatus = '';
+      let timedOut = false;
+
+      // 10 minute hard cap matches the previous HTTP timeout.
+      const timer = setTimeout(() => {
+        timedOut = true;
+        sendDebugLog('Model pull timed out after 10 minutes');
+        try { proc.kill('SIGTERM'); } catch (_) {}
+      }, 600000);
+
+      proc.stdout.on('data', (chunk) => {
+        stdoutBuffer += chunk.toString();
+        let idx;
+        while ((idx = stdoutBuffer.indexOf('\n')) !== -1) {
+          const line = stdoutBuffer.slice(0, idx).trim();
+          stdoutBuffer = stdoutBuffer.slice(idx + 1);
+          if (!line) continue;
+          // Final-result JSON ends with a brace; everything else is progress.
+          if (line.startsWith('{') && line.endsWith('}')) continue;
+          if (line !== lastStatus) {
+            sendDebugLog(line);
+            lastStatus = line;
+          }
+        }
+      });
+
+      proc.stderr.on('data', (chunk) => {
+        stderrBuffer += chunk.toString();
+      });
+
+      proc.on('close', async (code) => {
+        clearTimeout(timer);
+        if (timedOut) {
+          resolve({ success: false, error: 'Model download timed out' });
+          return;
+        }
+
+        // Parse the trailing JSON line (the CLI emits one final JSON summary).
+        let result = null;
+        const remaining = stdoutBuffer.trim();
+        const tail = remaining || lastStatus;
+        if (tail && tail.startsWith('{') && tail.endsWith('}')) {
+          try { result = JSON.parse(tail); } catch (_) {}
+        }
+
+        if (code === 0 && result && result.success) {
+          if (result.fallback_used) {
+            sendDebugLog(`Used HuggingFace mirror: ${result.resolved_tag}`);
+          }
+          sendDebugLog('AI model download completed successfully');
+          try {
+            await runPythonScript('simple_recorder.py', ['set-model', 'llama3.2:3b'], true);
+          } catch (e) {
+            // Non-fatal — config reset is best-effort
+          }
+          trackEvent('setup_completed', {
+            step: 'ollama_and_model',
+            fallback_used: !!result.fallback_used,
+          });
+          resolve({ success: true, message: 'Ollama and AI model ready' });
+        } else {
+          const errMsg = (result && result.error) || stderrBuffer.trim() || `exit ${code}`;
+          sendDebugLog(`AI model download failed: ${errMsg}`);
+          trackEvent('setup_failed', { step: 'ollama_and_model' });
+          resolve({ success: false, error: 'Failed to download AI model', details: errMsg });
+        }
+      });
+
+      proc.on('error', (error) => {
+        clearTimeout(timer);
+        sendDebugLog(`Pull subprocess error: ${error.message}`);
         resolve({ success: false, error: 'Failed to download AI model', details: error.message });
       });
-
-      req.on('timeout', () => {
-        req.destroy();
-        sendDebugLog('Model pull timed out after 10 minutes');
-        resolve({ success: false, error: 'Model download timed out' });
-      });
-
-      req.write(postData);
-      req.end();
     });
   } catch (error) {
     return { success: false, error: error.message };

@@ -18,6 +18,19 @@ class Config:
 
     DEFAULT_MODEL = "llama3.2:3b"
 
+    # HuggingFace GGUF mirrors for each supported model. Used as a fallback
+    # when registry.ollama.ai is blocked (corporate VPNs, locked-down networks).
+    # The huggingface.co host is more commonly reachable than registry.ollama.ai.
+    # Only models with a verified bartowski (or equivalent) GGUF repo are listed;
+    # models without an entry simply fail without fallback.
+    HF_MIRRORS = {
+        "llama3.2:3b": "hf.co/bartowski/Llama-3.2-3B-Instruct-GGUF:Q4_K_M",
+        "gemma3:4b": "hf.co/bartowski/gemma-3-4b-it-GGUF:Q4_K_M",
+        "qwen3.5:9b": "hf.co/bartowski/Qwen_Qwen3.5-9B-GGUF:Q4_K_M",
+        "deepseek-r1:14b": "hf.co/bartowski/DeepSeek-R1-Distill-Qwen-14B-GGUF:Q4_K_M",
+        "gpt-oss:20b": "hf.co/bartowski/openai_gpt-oss-20b-GGUF:Q4_K_M",
+    }
+
     # Supported models with metadata (organized by parameter size, ascending)
     SUPPORTED_MODELS = {
         "llama3.2:3b": {
@@ -192,6 +205,7 @@ class Config:
             "cloud_model": "gpt-4o-mini",
             "anonymous_id": str(uuid.uuid4()),
             "storage_path": "",
+            "resolved_pull_tags": {},
             "version": "1.0"
         }
 
@@ -249,6 +263,40 @@ class Config:
             logger.warning(f"Model {model_name} not in supported list, but allowing anyway")
 
         self._config["model"] = model_name
+        return self._save()
+
+    @classmethod
+    def get_hf_mirror(cls, model_name: str) -> Optional[str]:
+        """Return the HuggingFace mirror tag for an internal model ID, or None."""
+        return cls.HF_MIRRORS.get(model_name)
+
+    @classmethod
+    def get_pull_candidates(cls, model_name: str) -> list:
+        """
+        Return ordered list of Ollama tags to try when pulling/checking a model.
+        Internal ID first, HF mirror second (if known).
+        """
+        candidates = [model_name]
+        mirror = cls.HF_MIRRORS.get(model_name)
+        if mirror and mirror not in candidates:
+            candidates.append(mirror)
+        return candidates
+
+    def get_resolved_pull_tag(self, model_name: str) -> Optional[str]:
+        """
+        Get the actual Ollama tag a model was pulled as.
+        When the registry pull fails and we fall back to the HF mirror, the model
+        is tagged under the hf.co/... name. This stores that mapping so later
+        ollama.chat / ollama.list lookups resolve correctly.
+        """
+        resolved = self._config.get("resolved_pull_tags", {}) or {}
+        return resolved.get(model_name)
+
+    def set_resolved_pull_tag(self, model_name: str, actual_tag: str) -> bool:
+        """Persist the actual tag a model was pulled as."""
+        resolved = self._config.get("resolved_pull_tags", {}) or {}
+        resolved[model_name] = actual_tag
+        self._config["resolved_pull_tags"] = resolved
         return self._save()
 
     def get_model_info(self, model_name: str) -> Optional[Dict[str, str]]:
