@@ -5720,7 +5720,11 @@ Session started - waiting for activity...
             </div>`;
             for (const f of folders) {
                 const count = meetings.filter(m => (m.folders || []).includes(f.id)).length;
-                html += `<div class="folder-item ${activeFolderId === f.id ? 'active' : ''}" onclick="setActiveFolder('${f.id}')" oncontextmenu="confirmDeleteFolder(event, '${f.id}')" ondblclick="event.stopPropagation(); renameFolderInline(event, '${f.id}')"
+                // handleFolderClickOrDouble debounces single clicks so a
+                // pending double-click doesn't trigger setActiveFolder
+                // (which rebuilds the folder list and would clobber the
+                // inline rename input mid-edit).
+                html += `<div class="folder-item ${activeFolderId === f.id ? 'active' : ''}" onclick="handleFolderClickOrDouble(event, '${f.id}')" oncontextmenu="confirmDeleteFolder(event, '${f.id}')"
                     data-folder-id="${f.id}"
                     draggable="true"
                     ondragstart="handleFolderDragStart(event, '${f.id}')"
@@ -5755,6 +5759,36 @@ Session started - waiting for activity...
             activeFolderId = folderId;
             renderFolderList();
             filterMeetings();
+        }
+
+        // Per-folder click coalescing: if a second click on the same folder
+        // arrives within 250ms, treat as double-click and start an inline
+        // rename instead of changing active folder. The single-click branch
+        // is delayed so it never runs before a possible dblclick — that's
+        // what was clobbering the rename input previously (setActiveFolder
+        // re-renders the list, destroying the in-progress edit before the
+        // user can type).
+        let folderClickTimer = null;
+        let folderClickPendingId = null;
+        function handleFolderClickOrDouble(event, folderId) {
+            if (folderClickTimer && folderClickPendingId === folderId) {
+                clearTimeout(folderClickTimer);
+                folderClickTimer = null;
+                folderClickPendingId = null;
+                event.stopPropagation();
+                renameFolderInline(event, folderId);
+                return;
+            }
+            // Cancel any pending click on a different folder.
+            if (folderClickTimer) {
+                clearTimeout(folderClickTimer);
+            }
+            folderClickPendingId = folderId;
+            folderClickTimer = setTimeout(() => {
+                folderClickTimer = null;
+                folderClickPendingId = null;
+                setActiveFolder(folderId);
+            }, 250);
         }
 
         async function createNewFolder() {
