@@ -47,7 +47,10 @@ class ConfigLanguageTests(unittest.TestCase):
 class HFMirrorTests(unittest.TestCase):
     # Models we deliberately don't put behind the HF fallback. Reasons differ
     # (license gating, upstream Ollama bug, etc.) — see HF_MIRRORS comment.
-    HF_FALLBACK_EXEMPT = {"qwen3.5:9b"}
+    HF_FALLBACK_EXEMPT = {
+        "qwen3.5:9b",  # multimodal split-GGUF, Ollama can't load it
+        "gemma3:4b",   # licence-gated on HF, needs HF token support
+    }
 
     def test_every_active_supported_model_has_mirror(self):
         # Active (non-deprecated) models should be coverable by the HF
