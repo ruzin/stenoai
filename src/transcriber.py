@@ -325,8 +325,24 @@ class WhisperTranscriber:
 
             # Combine all segment texts
             transcript = " ".join(segment.text.strip() for segment in segments)
+            # pywhispercpp t0/t1 are in centiseconds (1/100 s)
+            def _cs_to_seconds(value):
+                try:
+                    return float(value) / 100.0
+                except (TypeError, ValueError):
+                    return 0.0
+            segment_list = [
+                {
+                    "text": s.text.strip(),
+                    "start": _cs_to_seconds(getattr(s, "t0", 0)),
+                    "end": _cs_to_seconds(getattr(s, "t1", 0)),
+                }
+                for s in segments
+                if s.text and s.text.strip()
+            ]
             return {
                 "text": transcript.strip(),
+                "segments": segment_list,
                 "duration_seconds": duration_seconds,
                 "detected_language": detected_language,
                 "detected_language_probability": detected_language_probability,
@@ -503,6 +519,8 @@ class WhisperTranscriber:
 
             mic_text = ""
             system_text = ""
+            mic_segments = []
+            system_segments = []
             detected_language = None
             detected_language_probability = None
 
@@ -511,6 +529,7 @@ class WhisperTranscriber:
                 mic_result = self.transcribe_audio(mic_path, language)
                 if mic_result and mic_result.get("text"):
                     mic_text = mic_result["text"]
+                    mic_segments = mic_result.get("segments") or []
                     # Propagate detected language from the first channel with speech
                     if not detected_language and mic_result.get("detected_language"):
                         detected_language = mic_result["detected_language"]
@@ -523,26 +542,61 @@ class WhisperTranscriber:
                 sys_result = self.transcribe_audio(system_path, language)
                 if sys_result and sys_result.get("text"):
                     system_text = sys_result["text"]
+                    system_segments = sys_result.get("segments") or []
                     if not detected_language and sys_result.get("detected_language"):
                         detected_language = sys_result["detected_language"]
                         detected_language_probability = sys_result.get("detected_language_probability")
             else:
                 logger.info("System channel is silent, skipping")
 
-            # Build combined plain text and labelled text
+            # Build combined plain text and time-ordered labelled text
             plain_parts = []
-            labelled_parts = []
-
             if mic_text:
                 plain_parts.append(mic_text)
-                labelled_parts.append(f"[You] {mic_text}")
             if system_text:
                 plain_parts.append(system_text)
-                labelled_parts.append(f"[Others] {system_text}")
-
             plain_text = "\n\n".join(plain_parts) if plain_parts else "No speech detected in audio"
-            diarised_text = "\n\n".join(labelled_parts) if labelled_parts else None
-            is_diarised = bool(diarised_text)
+
+            # If only one channel has speech, drop speaker prefix (single-source recording)
+            single_source = bool(mic_text) ^ bool(system_text)
+
+            # Interleave segments by start time, prefix with [mm:ss] and speaker
+            tagged = (
+                [(s.get("start", 0.0), "[You]", s.get("text", "")) for s in mic_segments]
+                + [(s.get("start", 0.0), "[Others]", s.get("text", "")) for s in system_segments]
+            )
+            tagged.sort(key=lambda x: x[0])
+
+            def _fmt_ts(seconds: float) -> str:
+                seconds = max(0, int(seconds))
+                mm, ss = divmod(seconds, 60)
+                return f"[{mm:02d}:{ss:02d}]"
+
+            if single_source:
+                labelled_lines = [
+                    f"{_fmt_ts(start)} {text}".strip()
+                    for start, _speaker, text in tagged
+                    if text
+                ]
+            else:
+                labelled_lines = [
+                    f"{_fmt_ts(start)} {speaker} {text}".strip()
+                    for start, speaker, text in tagged
+                    if text
+                ]
+            # Fallback to non-segmented output if segments unavailable (e.g. openai-whisper backend)
+            if not labelled_lines:
+                if single_source:
+                    labelled_lines.append(mic_text or system_text)
+                else:
+                    if mic_text:
+                        labelled_lines.append(f"[You] {mic_text}")
+                    if system_text:
+                        labelled_lines.append(f"[Others] {system_text}")
+
+            diarised_text = "\n".join(labelled_lines) if labelled_lines else None
+            # is_diarised reflects whether multi-speaker labels were applied
+            is_diarised = bool(diarised_text) and not single_source
 
             return {
                 "text": plain_text,

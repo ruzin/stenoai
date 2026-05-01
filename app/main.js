@@ -2316,37 +2316,53 @@ ipcMain.handle('setup-ollama-and-model', async () => {
     }
     sendDebugLog(`Found bundled Ollama at: ${finalOllamaPath}`);
 
+    // Reuse already-running Ollama if its API is reachable on 11434.
+    // Avoids "address already in use" on retries when a previous spawn is still alive.
+    const httpProbe = require('http');
+    const ollamaAlreadyRunning = await new Promise((resolve) => {
+      const req = httpProbe.get('http://127.0.0.1:11434/api/tags', { timeout: 1500 }, (res) => {
+        resolve(res.statusCode === 200);
+      });
+      req.on('error', () => resolve(false));
+      req.on('timeout', () => { req.destroy(); resolve(false); });
+    });
+    if (ollamaAlreadyRunning) {
+      sendDebugLog('Ollama already running on 127.0.0.1:11434 — reusing existing instance');
+    }
+
     // Start Ollama service with stderr capture for diagnostics
-    sendDebugLog('Starting Ollama service...');
-    sendDebugLog(`$ ${finalOllamaPath} serve`);
+    if (!ollamaAlreadyRunning) sendDebugLog('Starting Ollama service...');
     let ollamaExited = false;
     let ollamaExitCode = null;
     let ollamaDyldError = false;
-    ollamaProcess = spawn(finalOllamaPath, ['serve'], { detached: true, stdio: ['ignore', 'ignore', 'pipe'], env: getOllamaEnv() });
-    ollamaPid = ollamaProcess.pid;
-    // Write PID file so quit handler can find the process
-    try { require('fs').writeFileSync(path.join(getBackendCwd(), '_internal', 'ollama.pid'), String(ollamaPid)); } catch (_) {}
-    ollamaProcess.stderr.on('data', (data) => {
-      const msg = data.toString().trim();
-      if (msg) sendDebugLog(`Ollama: ${msg}`);
-      if (msg.includes('Symbol not found') || msg.includes('dyld')) ollamaDyldError = true;
-    });
-    ollamaProcess.on('exit', (code) => {
-      ollamaExited = true;
-      ollamaExitCode = code;
-      ollamaPid = null;
-      if (code !== 0 && code !== null) {
-        sendDebugLog(`Ollama process exited with code ${code}`);
-      }
-    });
-    ollamaProcess.unref();
-    ollamaStartedByUs = true;
+    if (!ollamaAlreadyRunning) {
+      sendDebugLog(`$ ${finalOllamaPath} serve`);
+      ollamaProcess = spawn(finalOllamaPath, ['serve'], { detached: true, stdio: ['ignore', 'ignore', 'pipe'], env: getOllamaEnv() });
+      ollamaPid = ollamaProcess.pid;
+      // Write PID file so quit handler can find the process
+      try { require('fs').writeFileSync(path.join(getBackendCwd(), '_internal', 'ollama.pid'), String(ollamaPid)); } catch (_) {}
+      ollamaProcess.stderr.on('data', (data) => {
+        const msg = data.toString().trim();
+        if (msg) sendDebugLog(`Ollama: ${msg}`);
+        if (msg.includes('Symbol not found') || msg.includes('dyld')) ollamaDyldError = true;
+      });
+      ollamaProcess.on('exit', (code) => {
+        ollamaExited = true;
+        ollamaExitCode = code;
+        ollamaPid = null;
+        if (code !== 0 && code !== null) {
+          sendDebugLog(`Ollama process exited with code ${code}`);
+        }
+      });
+      ollamaProcess.unref();
+      ollamaStartedByUs = true;
+    }
 
     // Wait for Ollama to be ready (poll with early exit detection)
     sendDebugLog('Waiting for Ollama service to be ready...');
-    const maxAttempts = 30;
-    let ready = false;
-    for (let i = 0; i < maxAttempts; i++) {
+    const maxAttempts = ollamaAlreadyRunning ? 1 : 30;
+    let ready = ollamaAlreadyRunning;
+    for (let i = 0; i < maxAttempts && !ready; i++) {
       await new Promise(resolve => setTimeout(resolve, 1000));
       if (ollamaExited) {
         sendDebugLog(`Ollama process died during startup (exit code: ${ollamaExitCode})`);

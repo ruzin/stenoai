@@ -257,11 +257,21 @@ class SimpleRecorder:
 
         # Get configured language
         from src.config import get_config
+        from src.chinese import apply_variant
         config = get_config()
         configured_language = config.get_language()
+        # whisper.cpp only knows "zh"; map zh-Hans/zh-Hant before invoking
+        whisper_language = config.get_whisper_language()
+        chinese_variant = config.get_chinese_variant()
 
         # Transcribe with diarisation support (stereo → [You]/[Others])
-        transcript_result = self.transcriber.transcribe_diarised(audio_path, language=configured_language)
+        transcript_result = self.transcriber.transcribe_diarised(audio_path, language=whisper_language)
+
+        # Convert Chinese variant if user picked Traditional (whisper outputs simplified)
+        if chinese_variant and isinstance(transcript_result, dict):
+            for k in ("text", "diarised_text"):
+                if transcript_result.get(k):
+                    transcript_result[k] = apply_variant(transcript_result[k], chinese_variant)
 
         # Handle different return types
         duration_seconds = None
@@ -290,9 +300,17 @@ class SimpleRecorder:
         # Save transcript (use diarised text if available for the saved file)
         transcript_path = self.transcripts_dir / f"{audio_path.stem}_transcript.txt"
         saved_transcript = diarised_text if diarised_text else transcript_text
+        if duration_seconds:
+            total = int(duration_seconds)
+            hh, rem = divmod(total, 3600)
+            mm, ss = divmod(rem, 60)
+            duration_str = f"{hh:d}:{mm:02d}:{ss:02d}" if hh else f"{mm:d}:{ss:02d}"
+        else:
+            duration_str = "Unknown"
         transcript_content = f"""Session: {session_name}
 File: {audio_path.name}
 Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+Duration: {duration_str}
 Language setting: {config.get_language_name(configured_language)}
 Detected language: {detected_language_name}
 Summary output language: {config.get_language_name(output_language)}
@@ -360,6 +378,17 @@ Transcript:
 
         # Generate summary (using correct method name and parameters)
         summary_result = self.summarizer.summarize_transcript(transcript_text, duration_minutes, language=language, notes=notes_text)
+
+        # Apply Chinese variant conversion to LLM output (LLM may emit either form)
+        try:
+            from src.chinese import apply_variant
+            variant = get_config().get_chinese_variant()
+            if variant and isinstance(summary_result, dict):
+                for k in ("summary", "title", "text"):
+                    if summary_result.get(k):
+                        summary_result[k] = apply_variant(summary_result[k], variant)
+        except Exception:
+            pass
         
         if summary_result is None:
             return {
@@ -551,7 +580,8 @@ Transcript:
             sys.stdout.write(f"CHUNK:{encoded}\n")
             sys.stdout.flush()
             streamed_chunks.append(chunk)
-        streamed_md = ''.join(streamed_chunks)
+        from src.summarizer import normalize_markdown
+        streamed_md = normalize_markdown(''.join(streamed_chunks)) or ''
 
         print("STREAM_COMPLETE", flush=True)
 
@@ -883,7 +913,8 @@ def process_streaming(audio_file, name, notes):
             sys.stdout.write(f"CHUNK:{encoded}\n")
             sys.stdout.flush()
             streamed_chunks.append(chunk)
-        streamed_md = ''.join(streamed_chunks)
+        from src.summarizer import normalize_markdown
+        streamed_md = normalize_markdown(''.join(streamed_chunks)) or ''
 
         print("STREAM_COMPLETE", flush=True)
 
@@ -1465,7 +1496,8 @@ def reprocess(summary_file, regenerate_title):
             sys.stdout.write(f"CHUNK:{encoded}\n")
             sys.stdout.flush()
             streamed_chunks.append(chunk)
-        streamed_md = ''.join(streamed_chunks)
+        from src.summarizer import normalize_markdown
+        streamed_md = normalize_markdown(''.join(streamed_chunks)) or ''
 
         print("STREAM_COMPLETE", flush=True)
 

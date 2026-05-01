@@ -6,6 +6,7 @@ except ImportError:
     OLLAMA_AVAILABLE = False
 import json
 import logging
+import re
 import subprocess
 import time
 import os
@@ -14,6 +15,24 @@ from .models import MeetingTranscript, ActionItem, Decision
 from . import ollama_manager
 
 logger = logging.getLogger(__name__)
+
+
+def normalize_markdown(text: Optional[str]) -> Optional[str]:
+    """Fix common LLM markdown spacing issues (e.g. CJK output without ASCII spaces).
+
+    - Insert space after #/##/### heading markers if missing
+    - Insert space after - or * bullet markers if missing
+    - Collapse 3+ consecutive blank lines to 2
+    """
+    if not text:
+        return text
+    # Heading: ###text -> ### text
+    text = re.sub(r'(?m)^(#{1,6})(?=\S)', r'\1 ', text)
+    # Bullet: -text or *text at line start -> - text / * text
+    text = re.sub(r'(?m)^([-*])(?=\S)', r'\1 ', text)
+    # Collapse excess blank lines
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    return text
 
 
 class OllamaSummarizer:
@@ -703,7 +722,12 @@ Brief analysis of what was discussed about this topic.
 - [Action item 1]
 - [Action item 2]
 
-Only include information explicitly discussed. Do not infer or assume.{language_instruction}
+Only include information explicitly discussed. Do not infer or assume.
+
+Formatting rules (strict):
+- Always put a single space between ## or ### and the heading text.
+- Always put a single space between - and the bullet text.
+- Use a blank line before each heading.{language_instruction}
 
 TRANSCRIPT:
 {transcript}"""

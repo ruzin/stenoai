@@ -90,7 +90,8 @@ class Config:
         "nl": "Dutch",
         "pt": "Portuguese",
         "ja": "Japanese",
-        "zh": "Chinese",
+        "zh-Hans": "Chinese (Simplified)",
+        "zh-Hant": "Chinese (Traditional)",
         "ko": "Korean",
         "hi": "Hindi",
         "ar": "Arabic",
@@ -337,7 +338,27 @@ class Config:
 
     def get_language(self) -> str:
         """Get the configured language code for transcription and summarization."""
-        return self._config.get("language", "en")
+        code = self._config.get("language", "en")
+        # Migrate legacy "zh" → "zh-Hans" (pre-traditional-Chinese release)
+        if code == "zh":
+            return "zh-Hans"
+        return code
+
+    def get_whisper_language(self) -> str:
+        """Map UI language code to whisper.cpp language code (whisper only knows 'zh')."""
+        code = self.get_language()
+        if code in ("zh-Hans", "zh-Hant"):
+            return "zh"
+        return code
+
+    def get_chinese_variant(self) -> Optional[str]:
+        """Return 'simplified', 'traditional', or None for non-Chinese."""
+        code = self.get_language()
+        if code == "zh-Hant":
+            return "traditional"
+        if code == "zh-Hans":
+            return "simplified"
+        return None
 
     def set_language(self, language_code: str) -> bool:
         """
