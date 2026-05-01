@@ -10242,15 +10242,24 @@ Session started - waiting for activity...
         document.addEventListener('DOMContentLoaded', () => {
             const whisperModelSelect = document.getElementById('whisper-model-select');
             if (whisperModelSelect) {
+                // Approximate sizes pywhispercpp downloads on first use
+                const LARGE_MODEL_HINTS = {
+                    medium: '~1.5 GB',
+                    large: '~3 GB',
+                    'large-v3-turbo': '~1.5 GB',
+                };
                 whisperModelSelect.addEventListener('change', async (e) => {
                     try {
                         const modelSize = e.target.value;
                         const result = await ipcRenderer.invoke('set-whisper-model', modelSize);
                         if (result.success) {
-                            showModelNotification(
-                                `Transcription model set to ${modelSize}`,
-                                'success'
-                            );
+                            const sizeHint = LARGE_MODEL_HINTS[modelSize];
+                            const message = sizeHint
+                                ? `Transcription model set to ${modelSize}. First use will download ${sizeHint}.`
+                                : `Transcription model set to ${modelSize}`;
+                            showModelNotification(message, 'success');
+                        } else if (result.error) {
+                            showModelNotification(`Failed to set model: ${result.error}`, 'error');
                         }
                     } catch (error) {
                         console.error('Error saving whisper model setting:', error);

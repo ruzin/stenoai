@@ -171,4 +171,3 @@ prompt_tests/outputs/
 
 # Bundled Ollama binary (downloaded during build)
 bin/
-app/package-lock.json

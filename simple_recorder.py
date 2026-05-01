@@ -251,14 +251,14 @@ class SimpleRecorder:
 
         print(f"📝 Transcribing: {audio_path.name}")
 
-        # Initialize transcriber only when needed
-        if self.transcriber is None:
-            from src.config import get_config
-            self.transcriber = WhisperTranscriber(model_size=get_config().get_whisper_model())
-
-        # Get configured language
         from src.config import get_config
         config = get_config()
+
+        # Initialize transcriber only when needed
+        if self.transcriber is None:
+            self.transcriber = WhisperTranscriber(model_size=config.get_whisper_model())
+
+        # Get configured language
         configured_language = config.get_language()
 
         # Transcribe with diarisation support (stereo → [You]/[Others])
@@ -969,7 +969,7 @@ def get_whisper_model_cmd():
     config = get_config()
     print(json.dumps({
         "whisper_model": config.get_whisper_model(),
-        "supported_models": config.SUPPORTED_WHISPER_MODELS
+        "supported_models": list(config.SUPPORTED_WHISPER_MODELS),
     }))
 
 
@@ -982,7 +982,11 @@ def set_whisper_model_cmd(model_size: str):
     if config.set_whisper_model(model_size):
         print(json.dumps({"success": True, "whisper_model": model_size}))
     else:
-        print(json.dumps({"success": False, "error": f"Unsupported model: {model_size}. Supported: {config.SUPPORTED_WHISPER_MODELS}"}))
+        print(json.dumps({
+            "success": False,
+            "error": f"Unsupported model: {model_size}",
+            "supported_models": list(config.SUPPORTED_WHISPER_MODELS),
+        }))
 
 
 @cli.command(name='get-keep-recordings')
@@ -1000,10 +1004,9 @@ def set_keep_recordings_cmd(enabled: bool):
     from src.config import get_config
     config = get_config()
     if config.set_keep_recordings(enabled):
-        status = "enabled" if enabled else "disabled"
         print(json.dumps({"success": True, "keep_recordings": enabled}))
     else:
-        print(json.dumps({"success": False}))
+        print(json.dumps({"success": False, "error": "Failed to persist setting"}))
 
 
 @cli.command()

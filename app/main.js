@@ -2904,7 +2904,7 @@ ipcMain.handle('set-whisper-model', async (event, modelSize) => {
   try {
     const result = await runPythonScript('simple_recorder.py', ['set-whisper-model', modelSize]);
     return JSON.parse(result.trim());
-  } catch (e) { return { success: false }; }
+  } catch (e) { return { success: false, error: e.message }; }
 });
 
 ipcMain.handle('get-keep-recordings', async () => {
@@ -2918,7 +2918,7 @@ ipcMain.handle('set-keep-recordings', async (event, enabled) => {
   try {
     const result = await runPythonScript('simple_recorder.py', ['set-keep-recordings', enabled.toString()]);
     return JSON.parse(result.trim());
-  } catch (e) { return { success: false }; }
+  } catch (e) { return { success: false, error: e.message }; }
 });
 
 ipcMain.handle('get-notifications', handleGetNotifications);
