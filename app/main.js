@@ -2393,6 +2393,7 @@ ipcMain.handle('setup-ollama-and-model', async () => {
       let stdoutBuffer = '';
       let stderrBuffer = '';
       let lastStatus = '';
+      let result = null;
       let timedOut = false;
 
       // 10 minute hard cap matches the previous HTTP timeout.
@@ -2409,8 +2410,12 @@ ipcMain.handle('setup-ollama-and-model', async () => {
           const line = stdoutBuffer.slice(0, idx).trim();
           stdoutBuffer = stdoutBuffer.slice(idx + 1);
           if (!line) continue;
-          // Final-result JSON ends with a brace; everything else is progress.
-          if (line.startsWith('{') && line.endsWith('}')) continue;
+          // The CLI emits a single trailing JSON object as its final result.
+          // Capture it; everything else is a progress line.
+          if (line.startsWith('{') && line.endsWith('}')) {
+            try { result = JSON.parse(line); } catch (_) {}
+            continue;
+          }
           if (line !== lastStatus) {
             sendDebugLog(line);
             lastStatus = line;
@@ -2429,12 +2434,13 @@ ipcMain.handle('setup-ollama-and-model', async () => {
           return;
         }
 
-        // Parse the trailing JSON line (the CLI emits one final JSON summary).
-        let result = null;
-        const remaining = stdoutBuffer.trim();
-        const tail = remaining || lastStatus;
-        if (tail && tail.startsWith('{') && tail.endsWith('}')) {
-          try { result = JSON.parse(tail); } catch (_) {}
+        // Last-resort: if the CLI's trailing JSON wasn't followed by a newline,
+        // it's still sitting in stdoutBuffer instead of `result`.
+        if (!result) {
+          const tail = stdoutBuffer.trim();
+          if (tail && tail.startsWith('{') && tail.endsWith('}')) {
+            try { result = JSON.parse(tail); } catch (_) {}
+          }
         }
 
         if (code === 0 && result && result.success) {
