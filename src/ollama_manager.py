@@ -13,6 +13,13 @@ import time
 from pathlib import Path
 from typing import Optional, Tuple
 
+# How long pull_with_fallback waits for the *completed* byte count to advance
+# before it gives up on a candidate and falls through to the next one. This
+# catches the gov-VPN case where Ollama's blob fetches all EOF immediately and
+# Ollama keeps emitting status updates with completed=0 while it internally
+# retries (1+2+4+8+16+32s = ~63s) — without this we'd wait the full ~63s.
+PULL_PROGRESS_TIMEOUT_SECONDS = 10.0
+
 logger = logging.getLogger(__name__)
 
 # Ollama download URL for macOS
@@ -370,26 +377,21 @@ def find_installed_tag(internal_id: str) -> Optional[str]:
     return None
 
 
-def _pull_stream(tag: str, no_progress_timeout: float = 10.0):
+def _pull_stream(tag: str):
     """
-    Stream a model pull with a per-read timeout on the underlying HTTP socket.
-
-    The vanilla ``ollama.pull(stream=True)`` has no read timeout, so when the
-    Ollama server is internally retrying a blob fetch (e.g. corporate proxy
-    allows the manifest endpoint but kills blob connections), the pull-stream
-    goes silent for ~60s while Ollama exhausts its 5-attempt backoff budget
-    (1+2+4+8+16+32s). Setting a 10s read timeout here means we bail out as
-    soon as the stream stalls, letting the fallback fire ~50s sooner.
-
-    On healthy networks Ollama emits progress updates every ~50-100ms so the
-    timeout never trips.
+    Stream a model pull. Generous network timeouts; the *progress* timeout
+    that catches stalled blob downloads on a blocked VPN is enforced by the
+    caller (pull_with_fallback) — we can't enforce it at the socket layer
+    because Ollama keeps emitting status updates with completed=0 while it
+    internally retries failed parts, so socket-level read timeouts never
+    trip.
     """
     import httpx
     import ollama
 
     client = ollama.Client(timeout=httpx.Timeout(
         connect=10.0,
-        read=no_progress_timeout,
+        read=30.0,
         write=10.0,
         pool=10.0,
     ))
@@ -469,10 +471,23 @@ def pull_with_fallback(internal_id: str, progress_callback=None) -> Tuple[bool, 
         attempt_label = "primary" if idx == 0 and tag == internal_id else "HF mirror fallback"
         logger.info(f"Pulling {tag} ({attempt_label}, internal: {internal_id})")
         try:
+            last_completed = 0
+            last_progress_time = time.time()
             for progress in _pull_stream(tag):
                 status = getattr(progress, 'status', '') or ''
                 total = getattr(progress, 'total', 0) or 0
                 completed = getattr(progress, 'completed', 0) or 0
+
+                if total > 0:
+                    if completed > last_completed:
+                        last_completed = completed
+                        last_progress_time = time.time()
+                    elif time.time() - last_progress_time > PULL_PROGRESS_TIMEOUT_SECONDS:
+                        raise TimeoutError(
+                            f"No download progress for {PULL_PROGRESS_TIMEOUT_SECONDS:.0f}s "
+                            f"(stuck at {completed}/{total} bytes) — likely network block"
+                        )
+
                 if progress_callback:
                     progress_callback(tag, status, completed, total)
             logger.info(f"Successfully pulled {tag}")

@@ -84,6 +84,59 @@ class PullWithFallbackTests(unittest.TestCase):
         self.assertEqual(resolved, primary_mirror)
         self.assertEqual(call_log, ["llama3.2:3b", primary_mirror])
 
+    def test_progress_timeout_on_stalled_primary_falls_back(self):
+        # The actual gov-VPN signature: Ollama keeps streaming status updates
+        # with completed=0 while it internally retries. The socket never goes
+        # silent (so a network-level read timeout never fires), but no actual
+        # bytes get through. Our progress-based timeout must catch this.
+        primary_mirror = Config.HF_MIRRORS["llama3.2:3b"]
+        call_log = []
+
+        def stalled_stream():
+            # Yields 'pulling 0%' forever — same shape as Ollama's stream
+            # during blocked-blob retries.
+            chunk = MagicMock()
+            chunk.status = "pulling"
+            chunk.completed = 0
+            chunk.total = 1_000_000_000
+            while True:
+                yield chunk
+
+        def fake_pull_stream(tag):
+            call_log.append(tag)
+            if tag == "llama3.2:3b":
+                return stalled_stream()
+            return iter(_fake_progress_chunks())
+
+        # Lower the timeout to keep the test fast.
+        with patch.object(ollama_manager, "start_ollama_server", return_value=True), \
+             patch.object(ollama_manager, "PULL_PROGRESS_TIMEOUT_SECONDS", 0.1), \
+             patch.object(ollama_manager, "_pull_stream", side_effect=fake_pull_stream):
+            success, resolved = ollama_manager.pull_with_fallback("llama3.2:3b")
+
+        self.assertTrue(success)
+        self.assertEqual(resolved, primary_mirror)
+        self.assertEqual(call_log, ["llama3.2:3b", primary_mirror])
+
+    def test_progress_resets_on_actual_byte_advance(self):
+        # If completed advances, the timeout window resets — slow but real
+        # downloads must not be killed.
+        chunks = []
+        for completed in (10, 20, 30):
+            c = MagicMock()
+            c.status = "pulling"
+            c.completed = completed
+            c.total = 100
+            chunks.append(c)
+
+        with patch.object(ollama_manager, "start_ollama_server", return_value=True), \
+             patch.object(ollama_manager, "PULL_PROGRESS_TIMEOUT_SECONDS", 0.1), \
+             patch.object(ollama_manager, "_pull_stream", return_value=iter(chunks)):
+            success, resolved = ollama_manager.pull_with_fallback("llama3.2:3b")
+
+        self.assertTrue(success)
+        self.assertEqual(resolved, "llama3.2:3b")
+
     def test_no_fallback_for_unmirrored_model_attempted(self):
         # qwen3:8b is deprecated and not in HF_MIRRORS — only the primary tag
         # should be tried, no extra HF attempt.

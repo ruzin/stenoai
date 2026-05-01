@@ -25,10 +25,15 @@ class Config:
     # models without an entry simply fail without fallback.
     HF_MIRRORS = {
         "llama3.2:3b": "hf.co/bartowski/Llama-3.2-3B-Instruct-GGUF:Q4_K_M",
-        "gemma3:4b": "hf.co/bartowski/gemma-3-4b-it-GGUF:Q4_K_M",
         "qwen3.5:9b": "hf.co/bartowski/Qwen_Qwen3.5-9B-GGUF:Q4_K_M",
         "deepseek-r1:14b": "hf.co/bartowski/DeepSeek-R1-Distill-Qwen-14B-GGUF:Q4_K_M",
         "gpt-oss:20b": "hf.co/bartowski/openai_gpt-oss-20b-GGUF:Q4_K_M",
+        # NOTE: gemma3:4b deliberately omitted. Google's Gemma models are
+        # gated on HuggingFace (license acceptance required), so pulling via
+        # Ollama without an HF token fails with:
+        #   "realm host 'huggingface.co' does not match original host 'hf.co'"
+        # Adding HF token support is tracked separately; for now users on
+        # restricted networks should pick a non-gated model.
     }
 
     # Supported models with metadata (organized by parameter size, ascending)
