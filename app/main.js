@@ -3291,18 +3291,32 @@ ipcMain.handle('pull-model', async (event, modelName) => {
         cwd: getBackendCwd()
       });
 
-      let lastStdoutLine = '';
+      // Buffer stdout by newlines: a single Node 'data' event can carry
+      // multiple lines (progress + final JSON together), so naïvely treating
+      // each chunk as a single line drops the JSON result on a fast pull.
+      // The CLI emits its final summary as a trailing JSON object — we
+      // capture each JSON line into pullResult as it arrives.
+      let stdoutBuffer = '';
+      let pullResult = null;
 
       proc.stdout.on('data', (data) => {
-        const output = data.toString().trim();
-        sendDebugLog(output);
-        if (output) lastStdoutLine = output;
-
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.webContents.send('model-pull-progress', {
-            model: modelName,
-            progress: output
-          });
+        stdoutBuffer += data.toString();
+        let idx;
+        while ((idx = stdoutBuffer.indexOf('\n')) !== -1) {
+          const line = stdoutBuffer.slice(0, idx).trim();
+          stdoutBuffer = stdoutBuffer.slice(idx + 1);
+          if (!line) continue;
+          if (line.startsWith('{') && line.endsWith('}')) {
+            try { pullResult = JSON.parse(line); } catch (_) {}
+            continue;
+          }
+          sendDebugLog(line);
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('model-pull-progress', {
+              model: modelName,
+              progress: line
+            });
+          }
         }
       });
 
@@ -3319,11 +3333,14 @@ ipcMain.handle('pull-model', async (event, modelName) => {
       });
 
       proc.on('close', (code) => {
-        // The backend prints a JSON result as the last stdout line.
-        // Check it even on exit code 0, since the Python CLI may
-        // catch errors and still exit cleanly.
-        let pullResult = null;
-        try { pullResult = JSON.parse(lastStdoutLine); } catch (_) {}
+        // Last-resort: a JSON tail that arrived without a trailing newline
+        // is still in the buffer; check it.
+        if (!pullResult) {
+          const tail = stdoutBuffer.trim();
+          if (tail && tail.startsWith('{') && tail.endsWith('}')) {
+            try { pullResult = JSON.parse(tail); } catch (_) {}
+          }
+        }
 
         const succeeded = code === 0 && (!pullResult || pullResult.success !== false);
 

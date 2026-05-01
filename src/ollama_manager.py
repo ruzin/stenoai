@@ -394,6 +394,10 @@ def _pull_stream(tag: str):
     because Ollama keeps emitting status updates with completed=0 while it
     internally retries failed parts, so socket-level read timeouts never
     trip.
+
+    Yielded as a generator so the underlying httpx connection is closed on
+    iterator finalisation, including the early-exit path where the caller
+    raises TimeoutError mid-stream.
     """
     import httpx
     import ollama
@@ -404,7 +408,18 @@ def _pull_stream(tag: str):
         write=10.0,
         pool=10.0,
     ))
-    return client.pull(tag, stream=True)
+    try:
+        for progress in client.pull(tag, stream=True):
+            yield progress
+    finally:
+        # ollama.Client wraps an httpx.Client at `_client`. Closing it
+        # avoids leaking the connection pool when the caller abandons the
+        # iterator (e.g. our progress timeout raises). Touching the
+        # private attribute is stable across recent ollama-python releases.
+        try:
+            client._client.close()
+        except Exception:
+            pass
 
 
 def _registry_reachable(host: str = "registry.ollama.ai", timeout: float = 3.0) -> bool:
