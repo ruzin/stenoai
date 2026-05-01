@@ -5804,13 +5804,21 @@ Session started - waiting for activity...
             const item = document.querySelector(`.folder-item[data-folder-id="${folderId}"]`);
             if (!item) return;
 
+            // Stop click/mousedown from bubbling to the parent .folder-item:
+            // its onclick handler calls setActiveFolder() -> renderFolderList()
+            // -> container.innerHTML = html, which destroys this very input
+            // mid-edit. That's why the rename "reverts" before the user can type.
             item.innerHTML = `
                 ${folderIcon(folder.color)}
-                <input type="text" id="rename-folder-input" value="${escapeHtml(folder.name)}" style="
-                    flex: 1; background: var(--bg-deep); border: 1px solid var(--accent-primary);
-                    border-radius: 4px; padding: 3px 6px; font-size: 12px; color: var(--text-primary);
-                    outline: none; font-family: inherit; min-width: 0;
-                ">
+                <input type="text" id="rename-folder-input"
+                    value="${escapeHtml(folder.name)}"
+                    onclick="event.stopPropagation()"
+                    onmousedown="event.stopPropagation()"
+                    style="
+                        flex: 1; background: var(--bg-deep); border: 1px solid var(--accent-primary);
+                        border-radius: 4px; padding: 3px 6px; font-size: 12px; color: var(--text-primary);
+                        outline: none; font-family: inherit; min-width: 0;
+                    ">
             `;
             const input = document.getElementById('rename-folder-input');
             input.focus();
