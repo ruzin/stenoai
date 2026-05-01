@@ -6,6 +6,7 @@ except ImportError:
     OLLAMA_AVAILABLE = False
 import json
 import logging
+import re
 import subprocess
 import time
 import os
@@ -14,6 +15,105 @@ from .models import MeetingTranscript, ActionItem, Decision
 from . import ollama_manager
 
 logger = logging.getLogger(__name__)
+
+
+# Pattern matches a complete reasoning block emitted by DeepSeek-R1 / similar
+# models. ``re.DOTALL`` is required because the block spans multiple lines.
+_THINK_BLOCK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
+
+
+def _strip_reasoning_tags(text: str) -> str:
+    """
+    Remove ``<think>...</think>`` reasoning blocks from a model response.
+
+    Reasoning-tuned models (DeepSeek-R1 and family) emit a ``<think>`` chain
+    of thought before their final answer. Ollama's curated *registry*
+    distributions ship a Modelfile/template that strips these server-side,
+    but raw HuggingFace GGUFs (e.g. the ``hf.co/bartowski/...`` mirrors we
+    fall back to on a blocked registry) don't have that template, so the
+    tags pass straight through to our parser.
+
+    Without this strip, JSON extraction (``find('{') ... rfind('}')``) can
+    span across the model's draft inside ``<think>`` and the real final
+    answer, producing malformed JSON. Also handles an *unclosed* trailing
+    ``<think>`` (model truncated mid-reasoning) by dropping everything
+    from the opening tag onward.
+    """
+    if not text or "<think>" not in text:
+        return text
+    cleaned = _THINK_BLOCK_RE.sub("", text)
+    open_idx = cleaned.find("<think>")
+    if open_idx != -1:
+        cleaned = cleaned[:open_idx]
+    return cleaned.strip()
+
+
+def _strip_reasoning_tags_streaming(chunks):
+    """
+    Generator that yields ``chunks`` with ``<think>...</think>`` blocks
+    suppressed in-flight. Same purpose as ``_strip_reasoning_tags`` but
+    works on a stream where tags can straddle chunk boundaries.
+
+    Strategy: maintain a small holdback buffer so we never yield a
+    fragment that *could* extend into a ``<think>`` opener. When a
+    full ``<think>`` is observed we switch to suppressing mode and
+    drop everything until ``</think>`` (again with a tail-buffer for
+    partial closers). Final-chunk flushing yields any tail that can't
+    be a partial tag.
+    """
+    OPEN, CLOSE = "<think>", "</think>"
+    suppressing = False
+    buffer = ""
+
+    def trailing_partial_match(text: str, target: str) -> int:
+        """How many trailing chars of *text* could be a prefix of *target*."""
+        max_len = min(len(text), len(target) - 1)
+        for i in range(max_len, 0, -1):
+            if text.endswith(target[:i]):
+                return i
+        return 0
+
+    for chunk in chunks:
+        buffer += chunk
+        produced = []
+        while True:
+            if suppressing:
+                idx = buffer.find(CLOSE)
+                if idx == -1:
+                    # Still inside a <think>; drop everything except a
+                    # possible partial closing tag at the end.
+                    keep = trailing_partial_match(buffer, CLOSE)
+                    buffer = buffer[len(buffer) - keep:] if keep else ""
+                    break
+                buffer = buffer[idx + len(CLOSE):]
+                suppressing = False
+                # loop again; remaining buffer might contain another tag
+            else:
+                idx = buffer.find(OPEN)
+                if idx == -1:
+                    # No <think> in buffer. Yield everything except a
+                    # possible partial opener at the end.
+                    keep = trailing_partial_match(buffer, OPEN)
+                    if keep:
+                        produced.append(buffer[:len(buffer) - keep])
+                        buffer = buffer[len(buffer) - keep:]
+                    else:
+                        produced.append(buffer)
+                        buffer = ""
+                    break
+                if idx > 0:
+                    produced.append(buffer[:idx])
+                buffer = buffer[idx + len(OPEN):]
+                suppressing = True
+                # loop again to find </think> in remaining buffer
+        out = "".join(produced)
+        if out:
+            yield out
+
+    # Stream ended. Flush any remaining buffer unless we're still
+    # mid-reasoning (in which case the tail is reasoning we want to drop).
+    if buffer and not suppressing:
+        yield buffer
 
 
 class OllamaSummarizer:
@@ -562,6 +662,8 @@ Return ONLY the response in this exact JSON format:
 
                 response_text = ollama_response['message']['content'].strip()
 
+            response_text = _strip_reasoning_tags(response_text)
+
             logger.info(f"Received response from {self.ai_provider}")
             logger.info(f"Response length: {len(response_text)} characters")
             logger.info(f"Response preview: {response_text[:200]}...")
@@ -779,10 +881,19 @@ TRANSCRIPT:
                     messages=[{'role': 'user', 'content': prompt}],
                     stream=True,
                 )
-                for chunk in response:
-                    content = chunk.get('message', {}).get('content', '')
-                    if content:
-                        yield content
+
+                def _chunk_contents():
+                    for chunk in response:
+                        content = chunk.get('message', {}).get('content', '')
+                        if content:
+                            yield content
+
+                # Reasoning models (DeepSeek-R1 family) emit <think>...</think>
+                # blocks before their answer. Ollama-registry templates strip
+                # these server-side; raw HuggingFace GGUFs (our fallback path)
+                # do not, so we strip them client-side.
+                for visible in _strip_reasoning_tags_streaming(_chunk_contents()):
+                    yield visible
             except Exception as e:
                 logger.error(f"Ollama streaming failed: {e}")
                 return
