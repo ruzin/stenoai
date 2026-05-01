@@ -370,6 +370,30 @@ def find_installed_tag(internal_id: str) -> Optional[str]:
     return None
 
 
+def _registry_reachable(host: str = "registry.ollama.ai", timeout: float = 3.0) -> bool:
+    """
+    Quick liveness check for the Ollama registry.
+
+    Used to decide whether to even attempt the primary pull when an HF mirror
+    is available. Without this, a blocked VPN forces Ollama through ~60s of
+    internal exponential-backoff retries (5 attempts: 1s+2s+4s+8s+16s+32s)
+    before our fallback fires. Probing first cuts that to ~3s.
+
+    Returns True for any HTTP response below 500 (treats 401 / 404 as "host
+    is reachable" — registry.ollama.ai responds 401 to unauthenticated /v2/).
+    """
+    try:
+        import httpx
+        r = httpx.head(
+            f"https://{host}/v2/",
+            timeout=timeout,
+            follow_redirects=False,
+        )
+        return r.status_code < 500
+    except Exception:
+        return False
+
+
 def pull_with_fallback(internal_id: str, progress_callback=None) -> Tuple[bool, Optional[str]]:
     """
     Pull a model via the HTTP API, falling back to its HuggingFace mirror on failure.
@@ -378,6 +402,10 @@ def pull_with_fallback(internal_id: str, progress_callback=None) -> Tuple[bool, 
     that fails (commonly because ``registry.ollama.ai`` is blocked by a corporate
     VPN), and a HuggingFace mirror is configured for this model, retry against
     ``hf.co/...`` which usually reaches ``huggingface.co`` instead.
+
+    When a mirror is available, we also probe registry connectivity up-front
+    so a blocked registry skips straight to the mirror without waiting through
+    Ollama's ~60s internal retry budget.
 
     Args:
         internal_id: Internal model identifier (e.g. ``llama3.2:3b``).
@@ -399,10 +427,20 @@ def pull_with_fallback(internal_id: str, progress_callback=None) -> Tuple[bool, 
         return False, None
 
     candidates = Config.get_pull_candidates(internal_id)
+
+    # If a mirror exists, probe the registry first; on a blocked network this
+    # saves ~60s of Ollama-internal retries before our fallback kicks in.
+    if len(candidates) > 1 and not _registry_reachable():
+        logger.info(
+            "registry.ollama.ai not reachable in 3s — skipping primary, "
+            "going straight to HF mirror"
+        )
+        candidates = candidates[1:]
+
     last_error: Optional[Exception] = None
 
     for idx, tag in enumerate(candidates):
-        attempt_label = "primary" if idx == 0 else "HF mirror fallback"
+        attempt_label = "primary" if idx == 0 and tag == internal_id else "HF mirror fallback"
         logger.info(f"Pulling {tag} ({attempt_label}, internal: {internal_id})")
         try:
             for progress in ollama.pull(tag, stream=True):

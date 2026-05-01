@@ -19,6 +19,14 @@ def _fake_progress_chunks():
 
 
 class PullWithFallbackTests(unittest.TestCase):
+    """Existing tests assume the registry probe succeeds (so primary is attempted)."""
+
+    def setUp(self):
+        # Default the probe to True; specific tests below override to False.
+        patcher = patch.object(ollama_manager, "_registry_reachable", return_value=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_returns_resolved_tag_when_primary_succeeds(self):
         with patch.object(ollama_manager, "start_ollama_server", return_value=True), \
              patch("ollama.pull", return_value=iter(_fake_progress_chunks())):
@@ -97,6 +105,73 @@ class PullWithFallbackTests(unittest.TestCase):
 
         self.assertFalse(success)
         self.assertIsNone(resolved)
+
+
+class RegistryProbeTests(unittest.TestCase):
+    """Behaviour when the up-front registry-reachable probe fires."""
+
+    def test_probe_failure_skips_primary_when_mirror_exists(self):
+        primary_mirror = Config.HF_MIRRORS["llama3.2:3b"]
+        call_log = []
+
+        def fake_pull(tag, stream=False):
+            call_log.append(tag)
+            return iter(_fake_progress_chunks())
+
+        with patch.object(ollama_manager, "start_ollama_server", return_value=True), \
+             patch.object(ollama_manager, "_registry_reachable", return_value=False), \
+             patch("ollama.pull", side_effect=fake_pull):
+            success, resolved = ollama_manager.pull_with_fallback("llama3.2:3b")
+
+        self.assertTrue(success)
+        self.assertEqual(resolved, primary_mirror)
+        # Critical: primary was *not* attempted at all — saves the ~60s of
+        # Ollama-internal retries we get when registry.ollama.ai is blocked.
+        self.assertEqual(call_log, [primary_mirror])
+
+    def test_probe_failure_still_tries_primary_when_no_mirror(self):
+        # Without a mirror to fall through to, the probe result doesn't matter —
+        # we must still try the canonical tag (and let it fail naturally).
+        call_log = []
+
+        def fake_pull(tag, stream=False):
+            call_log.append(tag)
+            raise RuntimeError("registry blocked")
+
+        with patch.object(ollama_manager, "start_ollama_server", return_value=True), \
+             patch.object(ollama_manager, "_registry_reachable", return_value=False), \
+             patch("ollama.pull", side_effect=fake_pull):
+            success, resolved = ollama_manager.pull_with_fallback("qwen3:8b")
+
+        self.assertFalse(success)
+        self.assertIsNone(resolved)
+        self.assertEqual(call_log, ["qwen3:8b"])
+
+    def test_probe_returns_false_on_exception(self):
+        # An httpx error during the probe should be treated as "unreachable",
+        # not propagate up.
+        with patch("httpx.head", side_effect=RuntimeError("connection refused")):
+            self.assertFalse(ollama_manager._registry_reachable())
+
+    def test_probe_returns_true_for_2xx(self):
+        response = MagicMock()
+        response.status_code = 200
+        with patch("httpx.head", return_value=response):
+            self.assertTrue(ollama_manager._registry_reachable())
+
+    def test_probe_returns_true_for_4xx(self):
+        # registry.ollama.ai responds 401 to unauthenticated /v2/ — that's
+        # still "host is up", so probe should pass.
+        response = MagicMock()
+        response.status_code = 401
+        with patch("httpx.head", return_value=response):
+            self.assertTrue(ollama_manager._registry_reachable())
+
+    def test_probe_returns_false_for_5xx(self):
+        response = MagicMock()
+        response.status_code = 503
+        with patch("httpx.head", return_value=response):
+            self.assertFalse(ollama_manager._registry_reachable())
 
 
 class FindInstalledTagTests(unittest.TestCase):
