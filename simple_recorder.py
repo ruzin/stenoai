@@ -1914,11 +1914,28 @@ def setup_check():
     else:
         checks.append(("⚠️ whisper-model", "will download on first use (~500MB)"))
 
-    # Check if LLM model is downloaded (check ~/.ollama/models/)
-    ollama_models_path = Path.home() / ".ollama" / "models" / "manifests" / "registry.ollama.ai" / "library"
-    if ollama_models_path.exists() and any(ollama_models_path.iterdir()):
-        model_names = [d.name for d in ollama_models_path.iterdir() if d.is_dir()]
-        checks.append(("✅ llm-model", ", ".join(model_names[:2])))
+    # Check if LLM model is downloaded. We must look across BOTH
+    # registry.ollama.ai (canonical pulls) and hf.co (HuggingFace fallback
+    # pulls), because a model pulled via the HF mirror lives under e.g.
+    # ~/.ollama/models/manifests/hf.co/bartowski/Llama-3.2-3B-Instruct-GGUF/
+    # and missing this check causes setup to re-run on every launch even
+    # when the model is fully installed and working.
+    ollama_manifests = Path.home() / ".ollama" / "models" / "manifests"
+    installed_models = []
+    if ollama_manifests.exists():
+        # Each installed tag is a leaf dir containing a manifest file.
+        # Walk and collect them as "<repo>:<tag>" for display.
+        for manifest_file in ollama_manifests.rglob("*"):
+            if manifest_file.is_file():
+                tag_dir = manifest_file.parent
+                installed_models.append(f"{tag_dir.parent.name}:{tag_dir.name}")
+    if installed_models:
+        # de-duplicate while preserving order
+        seen = []
+        for m in installed_models:
+            if m not in seen:
+                seen.append(m)
+        checks.append(("✅ llm-model", ", ".join(seen[:2])))
     else:
         checks.append(("❌ llm-model", "no model installed - needed for summaries"))
 
