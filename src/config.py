@@ -39,14 +39,7 @@ class Config:
         # was hf.co). Needs HF token support to fix.
     }
 
-    # Supported models with metadata (organized by parameter size, ascending).
-    #
-    # The ``backend`` field selects which local inference engine handles the
-    # model. Default is ``"local-ollama"`` (the existing path). Models that
-    # Ollama 0.17.x can't load — currently anything multimodal split-GGUF —
-    # set ``backend = "local-llamacpp"`` and download directly from
-    # HuggingFace via ``hf_repo`` + ``hf_filename``. The selection is
-    # invisible to users; see ``Config.get_backend(model_id)``.
+    # Supported models with metadata (organized by parameter size, ascending)
     SUPPORTED_MODELS = {
         "llama3.2:3b": {
             "name": "Llama 3.2 3B",
@@ -54,30 +47,15 @@ class Config:
             "params": "3B",
             "description": "Fast and lightweight for quick meetings (default)",
             "speed": "very fast",
-            "quality": "good",
-            "backend": "local-ollama",
+            "quality": "good"
         },
-        "gemma4:e2b": {
-            "name": "Gemma 4 E2B",
-            "size": "3.3GB",
-            "params": "2.3B effective",
-            "description": "Apache 2.0 multimodal (text-only mode in this app)",
+        "gemma3:4b": {
+            "name": "Gemma 3 4B",
+            "size": "2.5GB",
+            "params": "4B",
+            "description": "Lightweight and efficient",
             "speed": "fast",
-            "quality": "good",
-            "backend": "local-llamacpp",
-            "hf_repo": "bartowski/google_gemma-4-E2B-it-GGUF",
-            "hf_filename": "google_gemma-4-E2B-it-Q4_K_M.gguf",
-        },
-        "gemma4:e4b": {
-            "name": "Gemma 4 E4B",
-            "size": "5.5GB",
-            "params": "4.5B effective",
-            "description": "Larger Gemma 4 variant, better quality at ~5GB",
-            "speed": "medium",
-            "quality": "excellent",
-            "backend": "local-llamacpp",
-            "hf_repo": "bartowski/google_gemma-4-E4B-it-GGUF",
-            "hf_filename": "google_gemma-4-E4B-it-Q4_K_M.gguf",
+            "quality": "good"
         },
         "qwen3.5:9b": {
             "name": "Qwen 3.5 9B",
@@ -85,10 +63,7 @@ class Config:
             "params": "9B",
             "description": "Excellent at structured output and action items",
             "speed": "medium",
-            "quality": "excellent",
-            "backend": "local-llamacpp",
-            "hf_repo": "bartowski/Qwen_Qwen3.5-9B-GGUF",
-            "hf_filename": "Qwen_Qwen3.5-9B-Q4_K_M.gguf",
+            "quality": "excellent"
         },
         "deepseek-r1:14b": {
             "name": "DeepSeek R1 14B",
@@ -96,8 +71,7 @@ class Config:
             "params": "14B",
             "description": "Strong reasoning and analysis capabilities",
             "speed": "fast",
-            "quality": "excellent",
-            "backend": "local-ollama",
+            "quality": "excellent"
         },
         "gpt-oss:20b": {
             "name": "GPT-OSS 20B",
@@ -105,18 +79,7 @@ class Config:
             "params": "20B",
             "description": "OpenAI open-weight model with reasoning capabilities",
             "speed": "medium",
-            "quality": "excellent",
-            "backend": "local-ollama",
-        },
-        "gemma3:4b": {
-            "name": "Gemma 3 4B",
-            "size": "2.5GB",
-            "params": "4B",
-            "description": "Replaced by Gemma 4 E2B (Apache 2.0, no licence gate)",
-            "speed": "fast",
-            "quality": "good",
-            "backend": "local-ollama",
-            "deprecated": True,
+            "quality": "excellent"
         },
         "qwen3:8b": {
             "name": "Qwen 3 8B",
@@ -125,8 +88,7 @@ class Config:
             "description": "Replaced by Qwen 3.5 9B",
             "speed": "fast",
             "quality": "excellent",
-            "backend": "local-ollama",
-            "deprecated": True,
+            "deprecated": True
         },
         "deepseek-r1:8b": {
             "name": "DeepSeek R1 8B",
@@ -135,9 +97,8 @@ class Config:
             "description": "Replaced by DeepSeek R1 14B",
             "speed": "medium",
             "quality": "excellent",
-            "backend": "local-ollama",
-            "deprecated": True,
-        },
+            "deprecated": True
+        }
     }
 
     # Languages shown in the settings dropdown (curated/tested)
@@ -311,30 +272,6 @@ class Config:
 
         self._config["model"] = model_name
         return self._save()
-
-    @classmethod
-    def get_backend(cls, model_name: str) -> str:
-        """
-        Return the local inference backend for a model: ``"local-ollama"``
-        or ``"local-llamacpp"``. Defaults to ``local-ollama`` for unknown
-        models so existing behaviour is preserved.
-        """
-        meta = cls.SUPPORTED_MODELS.get(model_name)
-        if meta is None:
-            return "local-ollama"
-        return meta.get("backend", "local-ollama")
-
-    @classmethod
-    def get_hf_repo_filename(cls, model_name: str):
-        """
-        Return ``(hf_repo, hf_filename)`` for llamacpp-routed models.
-        Returns ``(None, None)`` for any other model. The downloader uses
-        these to build a ``huggingface.co/<repo>/resolve/main/<file>`` URL.
-        """
-        meta = cls.SUPPORTED_MODELS.get(model_name)
-        if meta is None:
-            return None, None
-        return meta.get("hf_repo"), meta.get("hf_filename")
 
     @classmethod
     def get_hf_mirror(cls, model_name: str) -> Optional[str]:

@@ -179,8 +179,10 @@ class OllamaSummarizer:
             logger.info(f"Remote Ollama initialized: host={self.remote_url}, model={self.model_name}")
 
         else:
-            # Local mode: existing behavior, but with backend dispatch
-            # so llamacpp-routed models bypass Ollama entirely.
+            # Local mode: existing behavior
+            if not OLLAMA_AVAILABLE:
+                raise ImportError("Ollama is not installed. Please install ollama-python.")
+
             if model_name is None:
                 try:
                     model_name = config.get_model()
@@ -190,77 +192,8 @@ class OllamaSummarizer:
                     model_name = "llama3.2:3b"
 
             self.model_name = model_name
-
-            from .config import Config
-            backend = Config.get_backend(model_name)
-
-            if backend == "local-llamacpp":
-                # Local llama.cpp path. Start the runner, then talk to it
-                # via the OpenAI-compatible API. We piggy-back on the
-                # existing cloud-provider machinery (cloud_client +
-                # cloud_provider) by pointing at localhost — that avoids
-                # forking every chat/streaming method to add a fourth
-                # provider mode.
-                self._setup_llamacpp(model_name)
-            else:
-                if not OLLAMA_AVAILABLE:
-                    raise ImportError("Ollama is not installed. Please install ollama-python.")
-                self._ensure_ollama_ready()
-                self.client = ollama.Client()
-
-    def _setup_llamacpp(self, model_name: str) -> None:
-        """
-        Boot ``llama-server`` for the configured model and wire ourselves
-        up as an OpenAI-compatible cloud provider pointing at localhost.
-
-        Reuses the existing ``cloud`` provider plumbing so all chat /
-        streaming / reasoning-tag logic just works without a new provider
-        branch in every method.
-        """
-        from . import llamacpp_manager
-        from . import hf_downloader
-        from .config import Config
-
-        repo, filename = Config.get_hf_repo_filename(model_name)
-        if not repo or not filename:
-            raise ValueError(
-                f"Model {model_name} is configured for llamacpp backend "
-                "but is missing hf_repo / hf_filename in SUPPORTED_MODELS"
-            )
-
-        model_path = hf_downloader.model_target_path(
-            repo, filename, llamacpp_manager.get_local_models_dir()
-        )
-        if not model_path.exists():
-            raise FileNotFoundError(
-                f"Model file not found: {model_path}. "
-                "Run pull-model first."
-            )
-
-        if not llamacpp_manager.start_llamacpp_server(model_path):
-            raise RuntimeError(
-                f"Failed to start llama-server for {model_name}"
-            )
-
-        # Route the rest of the class through the existing cloud-OpenAI
-        # path. The dummy api_key is fine; llama-server doesn't validate.
-        try:
-            from openai import OpenAI
-        except ImportError:
-            raise ImportError(
-                "openai package is required for the llamacpp backend "
-                "(used as the OpenAI-compatible HTTP client)."
-            )
-        self.ai_provider = "cloud"
-        self.cloud_provider = "openai"
-        self.cloud_client = OpenAI(
-            api_key="not-needed",
-            base_url=f"{llamacpp_manager.LLAMACPP_BASE_URL}/v1",
-        )
-        logger.info(
-            f"llama.cpp backend ready: model={model_name} "
-            f"({model_path.name}), endpoint={llamacpp_manager.LLAMACPP_BASE_URL}/v1"
-        )
+            self._ensure_ollama_ready()
+            self.client = ollama.Client()
     
     def _is_ollama_running(self) -> bool:
         """Check if Ollama service is running."""

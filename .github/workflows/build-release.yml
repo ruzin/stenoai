@@ -59,15 +59,6 @@ jobs:
         chmod +x scripts/download-ollama.sh
         ./scripts/download-ollama.sh
 
-    - name: Download bundled binaries (llama-server)
-      env:
-        # Per-arch download to keep DMG size minimal — the matrix runs
-        # twice and each build only needs its own architecture.
-        LLAMA_CPP_ARCH: ${{ matrix.arch }}
-      run: |
-        chmod +x scripts/download-llama-cpp.sh
-        ./scripts/download-llama-cpp.sh
-
     - name: Strip ad-hoc code signatures from dylibs (fixes install_name_tool on Intel)
       if: matrix.arch == 'x64'
       run: |

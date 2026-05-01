@@ -45,60 +45,27 @@ class ConfigLanguageTests(unittest.TestCase):
 
 
 class HFMirrorTests(unittest.TestCase):
-    # Ollama-backend models we deliberately don't put behind the HF fallback.
-    # llamacpp-backend models are exempt by definition: they have their
-    # own HF-based download path via hf_downloader and never touch the
-    # Ollama HF-mirror code.
-    HF_FALLBACK_EXEMPT_OLLAMA_MODELS = {
+    # Models we deliberately don't put behind the HF fallback. Reasons differ
+    # (license gating, upstream Ollama bug, etc.) — see HF_MIRRORS comment.
+    HF_FALLBACK_EXEMPT = {
+        "qwen3.5:9b",  # multimodal split-GGUF, Ollama can't load it
         "gemma3:4b",   # licence-gated on HF, needs HF token support
     }
 
-    def test_every_active_ollama_backed_model_has_mirror(self):
-        # Active (non-deprecated) Ollama-backed models should be
-        # coverable by the HF fallback so VPN-blocked users can complete
-        # setup. llamacpp-backed models use their own download path.
-        active_ollama = {
+    def test_every_active_supported_model_has_mirror(self):
+        # Active (non-deprecated) models should be coverable by the HF
+        # fallback so VPN-blocked users can complete setup, except for the
+        # exemptions documented in HF_FALLBACK_EXEMPT.
+        active = {
             name for name, meta in Config.SUPPORTED_MODELS.items()
             if not meta.get("deprecated")
-            and meta.get("backend", "local-ollama") == "local-ollama"
         }
-        expected = active_ollama - self.HF_FALLBACK_EXEMPT_OLLAMA_MODELS
+        expected = active - self.HF_FALLBACK_EXEMPT
         missing = expected - set(Config.HF_MIRRORS.keys())
         self.assertEqual(
             missing, set(),
-            f"Active Ollama-backed models without an HF mirror: {missing}"
+            f"Active models without an HF mirror: {missing}"
         )
-
-    def test_llamacpp_models_have_hf_repo_and_filename(self):
-        # llamacpp-backend models need both fields for the direct HF
-        # download path to find them.
-        for name, meta in Config.SUPPORTED_MODELS.items():
-            if meta.get("backend") == "local-llamacpp":
-                self.assertTrue(
-                    meta.get("hf_repo"),
-                    f"{name}: backend is llamacpp but hf_repo is missing",
-                )
-                self.assertTrue(
-                    meta.get("hf_filename"),
-                    f"{name}: backend is llamacpp but hf_filename is missing",
-                )
-
-    def test_get_backend_defaults_to_ollama(self):
-        self.assertEqual(Config.get_backend("not-a-real-model"), "local-ollama")
-        self.assertEqual(Config.get_backend("llama3.2:3b"), "local-ollama")
-
-    def test_get_backend_returns_llamacpp_for_routed_models(self):
-        self.assertEqual(Config.get_backend("gemma4:e2b"), "local-llamacpp")
-        self.assertEqual(Config.get_backend("qwen3.5:9b"), "local-llamacpp")
-
-    def test_get_hf_repo_filename(self):
-        repo, filename = Config.get_hf_repo_filename("gemma4:e2b")
-        self.assertEqual(repo, "bartowski/google_gemma-4-E2B-it-GGUF")
-        self.assertTrue(filename.endswith(".gguf"))
-
-        repo, filename = Config.get_hf_repo_filename("llama3.2:3b")
-        self.assertIsNone(repo)
-        self.assertIsNone(filename)
 
     def test_hf_mirrors_use_hf_co_prefix(self):
         for internal_id, mirror in Config.HF_MIRRORS.items():

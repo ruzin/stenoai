@@ -93,27 +93,17 @@ except Exception:
 # Bundle Ollama binary and libraries
 import os
 # SPECPATH is provided by PyInstaller and points to the spec file directory
-bin_root = os.path.join(SPECPATH, 'bin')
-if os.path.exists(bin_root):
-    for entry in os.listdir(bin_root):
-        entry_path = os.path.join(bin_root, entry)
-        # Top-level files: ffmpeg or Ollama-flat-layout files.
-        if os.path.isfile(entry_path):
-            if entry == 'ffmpeg':
-                # Root of bundle for easy PATH access.
-                binaries.append((entry_path, '.'))
+ollama_bin_dir = os.path.join(SPECPATH, 'bin')
+if os.path.exists(ollama_bin_dir):
+    for filename in os.listdir(ollama_bin_dir):
+        filepath = os.path.join(ollama_bin_dir, filename)
+        if os.path.isfile(filepath):
+            if filename == 'ffmpeg':
+                # Put ffmpeg in root of bundle for easy PATH access
+                binaries.append((filepath, '.'))
             else:
-                # Ollama files in 'ollama' subdirectory.
-                binaries.append((entry_path, 'ollama'))
-        # Nested directories: llamacpp-arm64 / llamacpp-x64 each ship a
-        # llama-server binary plus the Metal/BLAS dylibs it links to.
-        # Bundle them per-arch so dev rebuilds and CI matrix builds both
-        # work; runtime picks the matching subdir via platform.machine().
-        elif os.path.isdir(entry_path) and entry.startswith('llamacpp-'):
-            for subfile in os.listdir(entry_path):
-                subpath = os.path.join(entry_path, subfile)
-                if os.path.isfile(subpath) or os.path.islink(subpath):
-                    binaries.append((subpath, entry))
+                # Put Ollama files in 'ollama' subdirectory
+                binaries.append((filepath, 'ollama'))
 
 block_cipher = None
 
