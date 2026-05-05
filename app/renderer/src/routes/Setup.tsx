@@ -1,12 +1,27 @@
 import * as React from 'react';
-import { Check, Mic, MessageSquare, Zap, X } from 'lucide-react';
+import { Check, Cloud, HardDrive, Mic, MessageSquare, Zap, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Display, Lead, Muted } from '@/components/ui/typography';
 import { useNavigate } from '@/lib/router';
 import { useCheckMicPermission, useRequestMicPermission, useSetupStep } from '@/hooks/useSetup';
 import { useSetTelemetry, useTelemetrySetting } from '@/hooks/useSettings';
-import { ipc } from '@/lib/ipc';
+import {
+  useSetAiProvider,
+  useSetCloudApiKey,
+  useSetCloudProvider,
+  useTestCloudApi,
+} from '@/hooks/useAi';
+import { ipc, type CloudProvider } from '@/lib/ipc';
+import { cn } from '@/lib/utils';
 
 type StepStatus = 'waiting' | 'running' | 'done' | 'failed';
 
@@ -104,6 +119,21 @@ export function Setup() {
   const setTelemetry = useSetTelemetry();
   const telemetryEnabled = telemetry.data?.telemetry_enabled ?? true;
 
+  // Summarization-engine choice. 'local' downloads the bundled model
+  // (privacy + free, slower); 'cloud' wires up an API key (no download,
+  // higher quality) and skips the third install step entirely.
+  type SummaryMode = 'local' | 'cloud';
+  const [summaryMode, setSummaryMode] = React.useState<SummaryMode>('local');
+  const [cloudProvider, setCloudProviderChoice] = React.useState<CloudProvider>('openai');
+  const [cloudApiKey, setCloudApiKey] = React.useState('');
+  const setAiProvider = useSetAiProvider();
+  const setCloudProviderMut = useSetCloudProvider();
+  const setCloudKeyMut = useSetCloudApiKey();
+  const testCloudApi = useTestCloudApi();
+
+  const cloudReady = summaryMode === 'cloud' && cloudApiKey.trim().length > 0;
+  const canBegin = summaryMode === 'local' || cloudReady;
+
   const setStatus = (id: Step['id'], s: StepStatus, detail?: string) => {
     setStatuses((prev) => ({ ...prev, [id]: s }));
     if (detail !== undefined) setDetails((prev) => ({ ...prev, [id]: detail }));
@@ -132,9 +162,27 @@ export function Setup() {
       await whisperStep.mutateAsync();
       setStatus('whisper', 'done', 'Transcription engine ready');
 
-      setStatus('ollama', 'running', 'Downloading model (~2 GB)...');
-      await ollamaStep.mutateAsync();
-      setStatus('ollama', 'done', 'Model installed');
+      if (summaryMode === 'cloud') {
+        setStatus('ollama', 'running', 'Saving cloud credentials...');
+        // Persist provider preference + key, then verify with a small ping
+        // call so the user gets immediate feedback if the key is bad.
+        await setAiProvider.mutateAsync('cloud');
+        await setCloudProviderMut.mutateAsync(cloudProvider);
+        await setCloudKeyMut.mutateAsync(cloudApiKey.trim());
+        setStatus('ollama', 'running', 'Testing connection...');
+        const result = await testCloudApi.mutateAsync();
+        if (!result.ok) {
+          throw new Error(result.message || 'Cloud API test failed');
+        }
+        setStatus('ollama', 'done', `Connected to ${cloudProvider}`);
+      } else {
+        // Make sure provider is local in case the user previously had cloud
+        // configured and is re-running the wizard to switch back.
+        await setAiProvider.mutateAsync('local');
+        setStatus('ollama', 'running', 'Downloading model (~2 GB)...');
+        await ollamaStep.mutateAsync();
+        setStatus('ollama', 'done', 'Model installed');
+      }
 
       setDone(true);
     } catch (err) {
@@ -170,12 +218,20 @@ export function Setup() {
     {
       id: 'ollama',
       title: 'Summarization Engine',
-      description: 'AI-powered meeting summaries (~2 GB)',
-      icon: Zap,
+      description:
+        summaryMode === 'cloud'
+          ? 'Cloud API — fast, no download'
+          : 'Local model (~2 GB) — private, runs on your Mac',
+      icon: summaryMode === 'cloud' ? Cloud : Zap,
       status: statuses.ollama,
       detail: details.ollama,
     },
   ];
+
+  // Show the Local/Cloud chooser only before the third step has run. Once the
+  // wizard kicks off (running) or completes, we hide the chooser to avoid
+  // looking interactive after the choice is committed.
+  const showSummaryChooser = !running && statuses.ollama === 'waiting';
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -191,8 +247,111 @@ export function Setup() {
           ))}
         </div>
 
+        {showSummaryChooser && (
+          <div
+            className="mt-3 rounded-md border border-border p-4"
+            data-setup-summary-chooser
+          >
+            <div className="mb-3 text-sm font-medium text-foreground">
+              How should StenoAI summarize meetings?
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setSummaryMode('local')}
+                className={cn(
+                  'flex flex-col items-start gap-1 rounded-md border p-3 text-left transition-colors',
+                  summaryMode === 'local'
+                    ? 'border-foreground bg-muted/40'
+                    : 'border-border hover:bg-muted/20',
+                )}
+                aria-pressed={summaryMode === 'local'}
+              >
+                <div className="flex w-full items-center justify-between">
+                  <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                    <HardDrive className="size-4" />
+                    Local
+                  </div>
+                  {summaryMode === 'local' && <Check className="size-4 text-foreground" />}
+                </div>
+                <Muted className="text-[12px]">
+                  Private. Free. ~2 GB download.
+                </Muted>
+              </button>
+              <button
+                type="button"
+                onClick={() => setSummaryMode('cloud')}
+                className={cn(
+                  'flex flex-col items-start gap-1 rounded-md border p-3 text-left transition-colors',
+                  summaryMode === 'cloud'
+                    ? 'border-foreground bg-muted/40'
+                    : 'border-border hover:bg-muted/20',
+                )}
+                aria-pressed={summaryMode === 'cloud'}
+              >
+                <div className="flex w-full items-center justify-between">
+                  <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                    <Cloud className="size-4" />
+                    Cloud
+                  </div>
+                  {summaryMode === 'cloud' && <Check className="size-4 text-foreground" />}
+                </div>
+                <Muted className="text-[12px]">
+                  Fast. Higher quality. Bring your own API key.
+                </Muted>
+              </button>
+            </div>
+
+            {summaryMode === 'cloud' && (
+              <div className="mt-3 space-y-2">
+                <div>
+                  <label
+                    className="mb-1 block text-[12px] font-medium text-foreground"
+                    htmlFor="setup-cloud-provider"
+                  >
+                    Provider
+                  </label>
+                  <Select
+                    value={cloudProvider}
+                    onValueChange={(v) => setCloudProviderChoice(v as CloudProvider)}
+                  >
+                    <SelectTrigger id="setup-cloud-provider" className="h-8 text-[13px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="openai">OpenAI</SelectItem>
+                      <SelectItem value="anthropic">Anthropic</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <label
+                    className="mb-1 block text-[12px] font-medium text-foreground"
+                    htmlFor="setup-cloud-key"
+                  >
+                    API key
+                  </label>
+                  <Input
+                    id="setup-cloud-key"
+                    type="password"
+                    value={cloudApiKey}
+                    onChange={(e) => setCloudApiKey(e.target.value)}
+                    placeholder={cloudProvider === 'anthropic' ? 'sk-ant-…' : 'sk-…'}
+                    autoComplete="off"
+                    spellCheck={false}
+                  />
+                  <Muted className="mt-1 text-[11px]">
+                    Stored locally on this Mac. Never synced or sent anywhere
+                    except the provider you select.
+                  </Muted>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         <div
-          className="mt-6 flex items-start gap-4 rounded-md border border-border p-4"
+          className="mt-3 flex items-start gap-4 rounded-md border border-border p-4"
           data-setup-telemetry
         >
           <div className="min-w-0 flex-1">
@@ -212,15 +371,29 @@ export function Setup() {
           />
         </div>
 
-        <div className="mt-8 flex justify-center gap-3">
+        <div className="mt-8 flex flex-col items-center gap-2">
           {done ? (
             <Button size="lg" onClick={() => navigate('/')}>
               Continue to app
             </Button>
           ) : (
-            <Button size="lg" onClick={runSetup} disabled={running}>
+            <Button
+              size="lg"
+              onClick={runSetup}
+              disabled={running || !canBegin}
+              title={
+                !canBegin
+                  ? 'Enter your cloud API key first'
+                  : undefined
+              }
+            >
               {running ? 'Setting up...' : 'Begin setup'}
             </Button>
+          )}
+          {!done && !running && !canBegin && (
+            <Muted className="text-[12px]">
+              Enter your API key to continue.
+            </Muted>
           )}
         </div>
 
