@@ -2667,37 +2667,54 @@ ipcMain.handle('setup-ollama-and-model', async () => {
     }
     sendDebugLog(`Found bundled Ollama at: ${finalOllamaPath}`);
 
-    // Start Ollama service with stderr capture for diagnostics
-    sendDebugLog('Starting Ollama service...');
-    sendDebugLog(`$ ${finalOllamaPath} serve`);
+    // Reuse already-running Ollama if its API is reachable on 11434.
+    // Avoids "address already in use" when the user (or a previous launch)
+    // already has Ollama up.
+    const httpProbe = require('http');
+    const ollamaAlreadyRunning = await new Promise((resolve) => {
+      const req = httpProbe.get('http://127.0.0.1:11434/api/tags', { timeout: 1500 }, (res) => {
+        resolve(res.statusCode === 200);
+      });
+      req.on('error', () => resolve(false));
+      req.on('timeout', () => { req.destroy(); resolve(false); });
+    });
+    if (ollamaAlreadyRunning) {
+      sendDebugLog('Ollama already running on 127.0.0.1:11434 — reusing existing instance');
+    }
+
     let ollamaExited = false;
     let ollamaExitCode = null;
     let ollamaDyldError = false;
-    ollamaProcess = spawn(finalOllamaPath, ['serve'], { detached: true, stdio: ['ignore', 'ignore', 'pipe'], env: getOllamaEnv() });
-    ollamaPid = ollamaProcess.pid;
-    // Write PID file so quit handler can find the process
-    try { require('fs').writeFileSync(path.join(getBackendCwd(), '_internal', 'ollama.pid'), String(ollamaPid)); } catch (_) {}
-    ollamaProcess.stderr.on('data', (data) => {
-      const msg = data.toString().trim();
-      if (msg) sendDebugLog(`Ollama: ${msg}`);
-      if (msg.includes('Symbol not found') || msg.includes('dyld')) ollamaDyldError = true;
-    });
-    ollamaProcess.on('exit', (code) => {
-      ollamaExited = true;
-      ollamaExitCode = code;
-      ollamaPid = null;
-      if (code !== 0 && code !== null) {
-        sendDebugLog(`Ollama process exited with code ${code}`);
-      }
-    });
-    ollamaProcess.unref();
-    ollamaStartedByUs = true;
+    if (!ollamaAlreadyRunning) {
+      sendDebugLog('Starting Ollama service...');
+      sendDebugLog(`$ ${finalOllamaPath} serve`);
+      ollamaProcess = spawn(finalOllamaPath, ['serve'], { detached: true, stdio: ['ignore', 'ignore', 'pipe'], env: getOllamaEnv() });
+      ollamaPid = ollamaProcess.pid;
+      // Write PID file so quit handler can find the process
+      try { require('fs').writeFileSync(path.join(getBackendCwd(), '_internal', 'ollama.pid'), String(ollamaPid)); } catch (_) {}
+      ollamaProcess.stderr.on('data', (data) => {
+        const msg = data.toString().trim();
+        if (msg) sendDebugLog(`Ollama: ${msg}`);
+        if (msg.includes('Symbol not found') || msg.includes('dyld')) ollamaDyldError = true;
+      });
+      ollamaProcess.on('exit', (code) => {
+        ollamaExited = true;
+        ollamaExitCode = code;
+        ollamaPid = null;
+        if (code !== 0 && code !== null) {
+          sendDebugLog(`Ollama process exited with code ${code}`);
+        }
+      });
+      ollamaProcess.unref();
+      ollamaStartedByUs = true;
+    }
 
-    // Wait for Ollama to be ready (poll with early exit detection)
+    // Wait for Ollama to be ready (poll with early exit detection).
+    // When we reused an existing instance, skip the wait — it's already up.
     sendDebugLog('Waiting for Ollama service to be ready...');
-    const maxAttempts = 30;
-    let ready = false;
-    for (let i = 0; i < maxAttempts; i++) {
+    const maxAttempts = ollamaAlreadyRunning ? 1 : 30;
+    let ready = ollamaAlreadyRunning;
+    for (let i = 0; i < maxAttempts && !ready; i++) {
       await new Promise(resolve => setTimeout(resolve, 1000));
       if (ollamaExited) {
         sendDebugLog(`Ollama process died during startup (exit code: ${ollamaExitCode})`);
@@ -2968,7 +2985,20 @@ ipcMain.handle('get-storage-path', async () => {
   try {
     const result = await runPythonScript('simple_recorder.py', ['get-storage-path'], true);
     const jsonData = JSON.parse(result.trim());
-    return { success: true, ...jsonData };
+    // Python only returns the user's custom path (empty string when not set).
+    // Augment with the platform default so the renderer can show "where your
+    // data actually lives" without hardcoding the path. custom_path mirrors
+    // storage_path but is null when empty for cleaner conditionals.
+    const customPath = jsonData.storage_path && jsonData.storage_path.trim()
+      ? jsonData.storage_path
+      : null;
+    const defaultPath = path.join(os.homedir(), 'Library', 'Application Support', 'stenoai');
+    return {
+      success: true,
+      storage_path: customPath || defaultPath,
+      custom_path: customPath,
+      default_path: defaultPath,
+    };
   } catch (error) {
     return { success: false, error: error.message };
   }

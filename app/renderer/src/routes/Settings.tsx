@@ -4,6 +4,7 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
+  Copy,
   ExternalLink,
   Loader2,
   X,
@@ -158,6 +159,48 @@ function SettingRow({
         )}
       </div>
       <div className="shrink-0">{children}</div>
+    </div>
+  );
+}
+
+/** A read-only value with a click-to-copy button. Used for paths and IDs that
+ *  users frequently need to paste into bug reports or terminal sessions. */
+function CopyableValue({ value, mono = false }: { value: string; mono?: boolean }) {
+  const [copied, setCopied] = React.useState(false);
+  const onCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // Clipboard write may fail on systems without permission. Fail silently
+      // — the value is still visible and the user can select-copy manually.
+    }
+  };
+  return (
+    <div
+      className="inline-flex max-w-full items-center gap-1 rounded-[4px] pl-2 pr-1 py-[2px]"
+      style={{ background: 'var(--surface-sunken)', color: 'var(--fg-2)' }}
+    >
+      <code
+        className={cn(
+          'flex-1 truncate select-all text-[12px]',
+          mono && 'font-mono',
+        )}
+        title={value}
+      >
+        {value}
+      </code>
+      <button
+        type="button"
+        onClick={onCopy}
+        aria-label={copied ? 'Copied' : 'Copy to clipboard'}
+        title={copied ? 'Copied' : 'Copy to clipboard'}
+        className="inline-flex size-[22px] flex-shrink-0 items-center justify-center rounded transition-colors hover:bg-[color:var(--surface-hover)]"
+        style={{ color: copied ? 'var(--fg-1)' : 'var(--fg-2)' }}
+      >
+        {copied ? <Check size={12} /> : <Copy size={12} />}
+      </button>
     </div>
   );
 }
@@ -1061,17 +1104,7 @@ function AdvancedTab() {
           >
             Where your notes and recordings are saved
           </div>
-          {path && (
-            <code
-              className="inline-block max-w-full truncate rounded-[4px] px-2 py-[3px] font-mono text-[12px]"
-              style={{
-                color: 'var(--fg-2)',
-                background: 'var(--surface-sunken)',
-              }}
-            >
-              {path}
-            </code>
-          )}
+          {path && <CopyableValue value={path} mono />}
         </div>
         <div className="flex shrink-0 gap-2 pt-1">
           <Button
@@ -1128,14 +1161,36 @@ function AdvancedTab() {
       <SettingRow
         label="Anonymous usage analytics"
         description="Help improve StenoAI — no meeting content is ever sent"
-        noBorder
       >
         <Switch
-          checked={telemetry.data ?? false}
+          checked={telemetry.data?.telemetry_enabled ?? false}
           onCheckedChange={(v) => setTelemetry.mutate(v)}
           disabled={telemetry.data === undefined}
         />
       </SettingRow>
+
+      {telemetry.data?.anonymous_id && (
+        <div
+          className="flex items-start justify-between gap-6 py-4"
+          style={{ borderBottom: 'none' }}
+        >
+          <div className="min-w-0 flex-1">
+            <div
+              className="text-[14px] font-medium"
+              style={{ color: 'var(--fg-1)', marginBottom: 2 }}
+            >
+              Anonymous ID
+            </div>
+            <div
+              className="mb-2 text-[13px]"
+              style={{ color: 'var(--fg-2)' }}
+            >
+              Identifies this install in analytics. Useful when reporting bugs.
+            </div>
+            <CopyableValue value={telemetry.data.anonymous_id} mono />
+          </div>
+        </div>
+      )}
     </section>
   );
 }

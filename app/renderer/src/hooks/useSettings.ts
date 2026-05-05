@@ -31,7 +31,7 @@ export function useSetNotifications() {
 export function useTelemetrySetting() {
   return useQuery({
     queryKey: settingsKeys.telemetry(),
-    queryFn: async () => unwrap(await ipc().settings.getTelemetry()).telemetry_enabled,
+    queryFn: async () => unwrap(await ipc().settings.getTelemetry()),
   });
 }
 

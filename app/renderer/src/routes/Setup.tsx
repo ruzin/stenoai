@@ -1,9 +1,11 @@
 import * as React from 'react';
 import { Check, Mic, MessageSquare, Zap, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Switch } from '@/components/ui/switch';
 import { Display, Lead, Muted } from '@/components/ui/typography';
 import { useNavigate } from '@/lib/router';
 import { useCheckMicPermission, useRequestMicPermission, useSetupStep } from '@/hooks/useSetup';
+import { useSetTelemetry, useTelemetrySetting } from '@/hooks/useSettings';
 import { ipc } from '@/lib/ipc';
 
 type StepStatus = 'waiting' | 'running' | 'done' | 'failed';
@@ -95,6 +97,13 @@ export function Setup() {
   const whisperStep = useSetupStep('whisper');
   const ollamaStep = useSetupStep('ollamaAndModel');
 
+  // Telemetry choice surfaced here so users opt in/out during onboarding
+  // instead of having to find Settings → Advanced afterwards. Persists
+  // immediately via the same backend used by the Settings page.
+  const telemetry = useTelemetrySetting();
+  const setTelemetry = useSetTelemetry();
+  const telemetryEnabled = telemetry.data?.telemetry_enabled ?? true;
+
   const setStatus = (id: Step['id'], s: StepStatus, detail?: string) => {
     setStatuses((prev) => ({ ...prev, [id]: s }));
     if (detail !== undefined) setDetails((prev) => ({ ...prev, [id]: detail }));
@@ -180,6 +189,27 @@ export function Setup() {
           {steps.map((step) => (
             <StepCard key={step.id} step={step} />
           ))}
+        </div>
+
+        <div
+          className="mt-6 flex items-start gap-4 rounded-md border border-border p-4"
+          data-setup-telemetry
+        >
+          <div className="min-w-0 flex-1">
+            <div className="text-sm font-medium text-foreground">
+              Anonymous usage analytics
+            </div>
+            <Muted className="mt-0.5">
+              Help improve StenoAI — meeting content is never sent. You can
+              change this any time in Settings → Advanced.
+            </Muted>
+          </div>
+          <Switch
+            checked={telemetryEnabled}
+            onCheckedChange={(v) => setTelemetry.mutate(v)}
+            disabled={telemetry.data === undefined}
+            aria-label="Anonymous usage analytics"
+          />
         </div>
 
         <div className="mt-8 flex justify-center gap-3">

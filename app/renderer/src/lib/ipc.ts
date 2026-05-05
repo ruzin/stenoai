@@ -173,7 +173,10 @@ export type ListModelsResponse = Result<{
 export type GetCurrentModelResponse = Result<{ model: string }>;
 
 export type GetNotificationsResponse = Result<{ notifications_enabled: boolean }>;
-export type GetTelemetryResponse = Result<{ telemetry_enabled: boolean }>;
+export type GetTelemetryResponse = Result<{
+  telemetry_enabled: boolean;
+  anonymous_id?: string;
+}>;
 export type GetDockIconResponse = Result<{ hide_dock_icon: boolean }>;
 export type GetSystemAudioResponse = Result<{ system_audio_enabled: boolean }>;
 export type GetLanguageResponse = Result<{ language: string }>;
