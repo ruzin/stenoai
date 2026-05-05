@@ -5,8 +5,9 @@ import {
   Inbox,
   Plus,
   Search,
+  Settings as SettingsIcon,
 } from 'lucide-react';
-import { navigate } from '@/lib/router';
+import { navigate, toggleSettings } from '@/lib/router';
 import { cn, shortcut } from '@/lib/utils';
 import { LucideIcon, IconPicker } from '@/components/IconPicker';
 import { useUpdateFolderIcon } from '@/hooks/useFolders';
@@ -41,36 +42,83 @@ const DEFAULT_WIDTH = 270;
 const MIN_WIDTH = 220;
 const MAX_WIDTH = 480;
 
+// Module-level singleton store. useState hooks on these values are not enough:
+// MeetingsShell and BottomDockSlot need to share a single source of truth, or
+// the dock and the main pane drift out of sync (one collapses, the other still
+// thinks the sidebar is open) and the chat bar stops aligning with the notes.
+type Listener = () => void;
+
+const collapsedStore = (() => {
+  let value =
+    typeof sessionStorage !== 'undefined' &&
+    sessionStorage.getItem(COLLAPSED_KEY) === 'true';
+  const listeners = new Set<Listener>();
+  return {
+    get: () => value,
+    set: (next: boolean) => {
+      if (value === next) return;
+      value = next;
+      try {
+        sessionStorage.setItem(COLLAPSED_KEY, String(next));
+      } catch (_) {}
+      listeners.forEach((l) => l());
+    },
+    subscribe: (l: Listener) => {
+      listeners.add(l);
+      return () => listeners.delete(l);
+    },
+  };
+})();
+
+const widthStore = (() => {
+  let value = DEFAULT_WIDTH;
+  if (typeof localStorage !== 'undefined') {
+    const stored = localStorage.getItem(WIDTH_KEY);
+    if (stored) {
+      const parsed = parseInt(stored, 10);
+      if (!isNaN(parsed)) {
+        value = Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, parsed));
+      }
+    }
+  }
+  const listeners = new Set<Listener>();
+  return {
+    get: () => value,
+    set: (next: number) => {
+      const clamped = Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, next));
+      if (value === clamped) return;
+      value = clamped;
+      try {
+        localStorage.setItem(WIDTH_KEY, String(clamped));
+      } catch (_) {}
+      listeners.forEach((l) => l());
+    },
+    subscribe: (l: Listener) => {
+      listeners.add(l);
+      return () => listeners.delete(l);
+    },
+  };
+})();
+
 export function useSidebarCollapsed() {
-  const [sidebarCollapsed, setSidebarCollapsed] = React.useState(
-    () => sessionStorage.getItem(COLLAPSED_KEY) === 'true',
+  const sidebarCollapsed = React.useSyncExternalStore(
+    collapsedStore.subscribe,
+    collapsedStore.get,
+    collapsedStore.get,
   );
-
   const toggleSidebar = React.useCallback(() => {
-    setSidebarCollapsed((prev) => {
-      const next = !prev;
-      sessionStorage.setItem(COLLAPSED_KEY, String(next));
-      return next;
-    });
+    collapsedStore.set(!collapsedStore.get());
   }, []);
-
   return { sidebarCollapsed, toggleSidebar };
 }
 
 export function useSidebarWidth() {
-  const [width, setWidthState] = React.useState<number>(() => {
-    const stored = localStorage.getItem(WIDTH_KEY);
-    if (!stored) return DEFAULT_WIDTH;
-    const parsed = parseInt(stored, 10);
-    return isNaN(parsed) ? DEFAULT_WIDTH : Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, parsed));
-  });
-
-  const setWidth = React.useCallback((w: number) => {
-    const clamped = Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, w));
-    setWidthState(clamped);
-    localStorage.setItem(WIDTH_KEY, String(clamped));
-  }, []);
-
+  const width = React.useSyncExternalStore(
+    widthStore.subscribe,
+    widthStore.get,
+    widthStore.get,
+  );
+  const setWidth = React.useCallback((w: number) => widthStore.set(w), []);
   return { width, setWidth };
 }
 
@@ -246,7 +294,7 @@ export function Sidebar({
             className="text-[18px] font-normal"
             style={{ fontFamily: 'var(--font-serif)', letterSpacing: '-0.02em', color: 'var(--fg-1)' }}
           >
-            Steno<span style={{ color: 'var(--fg-muted)' }}>.</span>
+            Dragonfly<span style={{ color: 'var(--fg-muted)' }}>.</span>
           </span>
         </div>
 
@@ -293,6 +341,7 @@ export function Sidebar({
             onDragOver={(e) => {
               if (e.dataTransfer.types.includes('application/x-steno-meeting')) {
                 e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
                 setDragOverAllMeetings(true);
               }
             }}
@@ -350,6 +399,7 @@ export function Sidebar({
                     onDragOver={(e) => {
                       if (e.dataTransfer.types.includes('application/x-steno-meeting')) {
                         e.preventDefault();
+                        e.dataTransfer.dropEffect = 'move';
                         setDragOverFolder(folder.id);
                       }
                     }}
@@ -397,6 +447,28 @@ export function Sidebar({
               })}
           </div>
         </nav>
+
+        {/* Pinned to the bottom of the sidebar — small icon button like it
+            was in the toolbar, not a full nav row. Toggles open/closed: a
+            second click while already on /settings returns the user to the
+            route they were viewing before. */}
+        <div className="px-3 py-2">
+          <button
+            type="button"
+            onClick={() => toggleSettings(currentRoute)}
+            aria-label="Settings"
+            title="Settings"
+            aria-pressed={currentRoute === '/settings'}
+            className={cn(
+              'inline-flex h-[26px] w-7 items-center justify-center rounded-md transition-colors hover:bg-[color:var(--surface-hover)] hover:text-[color:var(--fg-1)]',
+              currentRoute === '/settings'
+                ? 'bg-[color:var(--surface-active)] text-[color:var(--fg-1)]'
+                : 'text-[color:var(--fg-2)]',
+            )}
+          >
+            <SettingsIcon className="size-[15px]" />
+          </button>
+        </div>
 
         {iconPicker && (
           <IconPicker

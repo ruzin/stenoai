@@ -99,7 +99,6 @@ export function MeetingDetail({ summaryFile }: MeetingDetailProps) {
       ) : (
         <DetailContent key={summaryFile} meeting={meeting.data} />
       )}
-      <div aria-hidden className="h-[220px]" />
     </MeetingsShell>
   );
 }

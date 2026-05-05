@@ -13,8 +13,9 @@ import { LiveDock } from '@/components/LiveDock';
 import { QuitDialog } from '@/components/QuitDialog';
 import { AskBarProvider } from '@/lib/askBarContext';
 import { useRecording, useRecordingEvents } from '@/hooks/useRecording';
-import { navigate, useRoute } from '@/lib/router';
+import { navigate, useRoute, rememberNonSettingsRoute } from '@/lib/router';
 import { ipc } from '@/lib/ipc';
+import { primeDebugLogs } from '@/lib/debugLogs';
 
 export function App() {
   const route = useRoute();
@@ -30,11 +31,21 @@ export function App() {
     const off = [
       ipc().on.trayOpenSettings(() => navigate('/settings')),
       ipc().on.setupFlowTriggered(() => navigate('/setup')),
+      // Capture backend debug-log lines from app start (not just when Settings
+      // → Developer is open) so the console always has the full session.
+      primeDebugLogs((cb) => ipc().on.debugLog(cb)),
     ];
     return () => off.forEach((fn) => fn());
   }, []);
 
   useRecordingEvents();
+
+  // Track the last non-settings route so the sidebar Settings toggle and the
+  // Settings page's Back button can return the user to where they came from
+  // (e.g. a meeting they were viewing) instead of dropping them on Home.
+  React.useEffect(() => {
+    rememberNonSettingsRoute(route);
+  }, [route]);
 
   // Cold-reload mid-processing: if we restart the app while the backend is
   // still summarizing, drop the user on /meetings/processing so they don't

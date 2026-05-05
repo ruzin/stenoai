@@ -27,7 +27,12 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { MeetingsShell } from '@/components/MeetingsShell';
-import { useNavigate } from '@/lib/router';
+import { useNavigate, getLastNonSettingsRoute } from '@/lib/router';
+import {
+  clearDebugLogs,
+  getDebugLogs,
+  subscribeDebugLogs,
+} from '@/lib/debugLogs';
 import { cn } from '@/lib/utils';
 import { useTheme } from '@/hooks/useTheme';
 import {
@@ -351,7 +356,7 @@ export function Settings() {
           <div className="mb-6 flex items-center gap-3">
             <button
               type="button"
-              onClick={() => navigate('/')}
+              onClick={() => navigate(getLastNonSettingsRoute() || '/')}
               aria-label="Back"
               className="flex size-7 cursor-pointer items-center justify-center rounded-[6px] border-0 bg-transparent transition-colors hover:text-[color:var(--fg-1)]"
               style={{ color: 'var(--fg-2)' }}
@@ -1140,17 +1145,20 @@ function AdvancedTab() {
 // ---------------------------------------------------------------------------
 
 function DeveloperTab() {
-  const [logs, setLogs] = React.useState<string[]>([]);
+  // Read from the global store so we get the full session backlog, not just
+  // lines emitted after this tab mounted.
+  const logs = React.useSyncExternalStore(
+    subscribeDebugLogs,
+    getDebugLogs,
+    getDebugLogs,
+  );
 
+  const textareaRef = React.useRef<HTMLTextAreaElement>(null);
+  // Keep the textarea pinned to the most recent line whenever new logs arrive.
   React.useEffect(() => {
-    if (typeof window === 'undefined' || !window.stenoai) return;
-    return window.stenoai.on.debugLog((line) => {
-      setLogs((prev) => {
-        const next = [...prev, line];
-        return next.length > 500 ? next.slice(-500) : next;
-      });
-    });
-  }, []);
+    const el = textareaRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [logs]);
 
   const copyLogs = () => {
     void navigator.clipboard.writeText(logs.join('\n'));
@@ -1178,7 +1186,7 @@ function DeveloperTab() {
             variant="ghost"
             size="sm"
             className="h-7 px-2.5 text-[13px]"
-            onClick={() => setLogs([])}
+            onClick={clearDebugLogs}
           >
             Clear
           </Button>
@@ -1194,6 +1202,7 @@ function DeveloperTab() {
         </div>
       </div>
       <textarea
+        ref={textareaRef}
         readOnly
         value={logs.length === 0 ? placeholder : logs.join('\n')}
         className="block w-full font-mono text-[12px]"

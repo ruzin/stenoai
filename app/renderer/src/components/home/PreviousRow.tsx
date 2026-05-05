@@ -1,4 +1,4 @@
-import { Folder as FolderIcon, Loader2, Mic } from 'lucide-react';
+import { Folder as FolderIcon, Loader2 } from 'lucide-react';
 import type { Meeting } from '@/lib/ipc';
 import { navigate } from '@/lib/router';
 import { useMeetingsList } from '@/lib/meetingsListContext';
@@ -77,35 +77,30 @@ export function PreviousRow({ meeting, folderName }: PreviousRowProps) {
             {preview}
           </div>
         )}
-        <div
-          className="mt-0.5 flex items-center gap-2.5 text-xs"
-          style={{ color: 'var(--fg-muted)' }}
-        >
-          <span
-            className="inline-flex items-center gap-1.5 rounded px-1.5 py-0.5 text-[11.5px]"
-            style={{ background: 'var(--surface-hover)', color: 'var(--fg-2)' }}
+        {(folderName || participants > 0) && (
+          <div
+            className="mt-0.5 flex items-center gap-2.5 text-xs"
+            style={{ color: 'var(--fg-muted)' }}
           >
-            {folderName ? (
-              <>
+            {folderName && (
+              <span
+                className="inline-flex items-center gap-1.5 rounded px-1.5 py-0.5 text-[11.5px]"
+                style={{ background: 'var(--surface-hover)', color: 'var(--fg-2)' }}
+              >
                 <FolderIcon className="size-[11px]" />
                 {folderName}
-              </>
-            ) : (
+              </span>
+            )}
+            {participants > 0 && (
               <>
-                <Mic className="size-[11px]" />
-                Voice memo
+                {folderName && <span className="opacity-50">·</span>}
+                <span>
+                  {participants} {participants === 1 ? 'person' : 'people'}
+                </span>
               </>
             )}
-          </span>
-          {participants > 0 && (
-            <>
-              <span className="opacity-50">·</span>
-              <span>
-                {participants} {participants === 1 ? 'person' : 'people'}
-              </span>
-            </>
-          )}
-        </div>
+          </div>
+        )}
       </div>
       <div
         className="flex flex-col items-end gap-1.5 pt-0.5 text-xs tabular-nums"

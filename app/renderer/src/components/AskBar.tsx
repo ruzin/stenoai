@@ -40,27 +40,40 @@ export function TranscriptBar() {
   if (!transcriptOpen || !activeSummaryFile) return null;
 
   return (
-    <div className="mv-transcript open" style={{ pointerEvents: 'auto', boxShadow: 'var(--shadow-lg)' }}>
-      <button
-        className="mv-transcript-head"
-        type="button"
-        onClick={() => setTranscriptOpen(false)}
-      >
-        <span className="mv-transcript-wave" aria-hidden="true">
+    <div
+      data-transcript-bar
+      className="mv-transcript open"
+      style={{ pointerEvents: 'auto', boxShadow: 'var(--shadow-lg)' }}
+      // Stop mousedown bubbling so the AskBar click-outside listener treats
+      // interactions inside this panel (search input, copy button, scroll)
+      // as in-bounds. Without this, the panel closes the instant you click
+      // anywhere inside it.
+      onMouseDown={(e) => e.stopPropagation()}
+    >
+      <div className="mv-transcript-head">
+        <span className="mv-transcript-wave mv-transcript-wave-static" aria-hidden="true">
           <span /><span /><span /><span /><span /><span /><span />
         </span>
         <span className="mv-transcript-label">Transcript</span>
         <button
           type="button"
           className="mv-chat-tool"
-          onClick={(e) => { e.stopPropagation(); void copyTranscript(); }}
+          onClick={() => void copyTranscript()}
           aria-label="Copy transcript"
           title="Copy transcript"
         >
           {copied ? <Check size={13} /> : <Copy size={13} />}
         </button>
-        <ChevronUp size={13} style={{ color: 'var(--fg-2)', flexShrink: 0 }} />
-      </button>
+        <button
+          type="button"
+          className="mv-chat-tool"
+          onClick={() => setTranscriptOpen(false)}
+          aria-label="Hide transcript"
+          title="Hide transcript"
+        >
+          <ChevronUp size={13} style={{ color: 'var(--fg-2)', flexShrink: 0 }} />
+        </button>
+      </div>
       <div style={{ height: 260, display: 'flex', flexDirection: 'column', borderTop: '1px solid var(--border-subtle)' }}>
         <TranscriptPanelContent summaryFile={activeSummaryFile} />
       </div>
@@ -108,7 +121,14 @@ export function AskBar() {
   React.useEffect(() => {
     if (!expanded && !transcriptOpen) return;
     const handler = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+      const target = e.target as Element | null;
+      // Treat the AskBar container AND the floating TranscriptBar as in-bounds.
+      // Without the transcript check, clicks inside the transcript's search
+      // input or copy button would close the panel before the click resolves.
+      const inside =
+        (containerRef.current && containerRef.current.contains(target as Node)) ||
+        (target && target.closest?.('[data-transcript-bar]'));
+      if (!inside) {
         setExpanded(false);
         setSessionMenuOpen(false);
         setTranscriptOpen(false);

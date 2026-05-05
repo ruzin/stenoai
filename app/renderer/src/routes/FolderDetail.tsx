@@ -78,10 +78,7 @@ export function FolderDetail({ folderId }: FolderDetailProps) {
           </div>
 
           <section>
-            <div
-              className="mb-3.5 flex items-baseline justify-between pb-2.5"
-              style={{ borderBottom: '1px solid var(--border-subtle)' }}
-            >
+            <div className="mb-3.5 flex items-baseline justify-between pb-2.5">
               <div className="flex items-baseline gap-2.5">
                 <h2
                   className="text-sm font-medium tracking-[-0.005em]"

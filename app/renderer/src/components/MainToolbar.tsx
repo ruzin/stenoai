@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { MoreHorizontal, Monitor, PanelLeftClose, PanelLeftOpen, PencilLine, Settings as SettingsIcon } from 'lucide-react';
+import { Moon, MoreHorizontal, Monitor, PanelLeftClose, PanelLeftOpen, PencilLine, Sun } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { AudioWave } from '@/components/AudioWave';
@@ -13,7 +13,7 @@ import {
   useSystemAudioSetting,
 } from '@/hooks/useSettings';
 import type { RecordingStatus } from '@/hooks/useRecording';
-import { navigate } from '@/lib/router';
+import { useTheme } from '@/hooks/useTheme';
 import { cn } from '@/lib/utils';
 
 interface MainToolbarProps {
@@ -34,6 +34,7 @@ export function MainToolbar({
   const isRecording =
     recordingStatus === 'recording' || recordingStatus === 'paused';
   const isPaused = recordingStatus === 'paused';
+  const { resolved: resolvedTheme, setTheme } = useTheme();
 
   // Matches sb-top padding-left (82px clears macOS traffic lights)
   const toggleLeft = 82;
@@ -71,16 +72,24 @@ export function MainToolbar({
             <PanelLeftClose className="size-[15px]" />
           )}
         </button>
+        <RecordingOptionsPopover />
         <button
           type="button"
-          onClick={() => navigate('/settings')}
-          aria-label="Settings"
-          title="Settings"
+          onClick={() => setTheme(resolvedTheme === 'dark' ? 'light' : 'dark')}
+          aria-label={
+            resolvedTheme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'
+          }
+          title={
+            resolvedTheme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'
+          }
           className="inline-flex h-[26px] w-7 items-center justify-center rounded-md text-[color:var(--fg-2)] transition-colors hover:bg-[color:var(--surface-hover)] hover:text-[color:var(--fg-1)]"
         >
-          <SettingsIcon className="size-[15px]" />
+          {resolvedTheme === 'dark' ? (
+            <Sun className="size-[15px]" />
+          ) : (
+            <Moon className="size-[15px]" />
+          )}
         </button>
-        <RecordingOptionsPopover />
         <button
           type="button"
           onClick={onToggleRecording}

@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Filter, PencilLine, RefreshCw, Square } from 'lucide-react';
+import { PencilLine, RefreshCw, Search, Square, X } from 'lucide-react';
 import { MeetingsShell } from '@/components/MeetingsShell';
 import { UpcomingCard } from '@/components/home/UpcomingCard';
 import { PreviousRow } from '@/components/home/PreviousRow';
@@ -45,7 +45,22 @@ export function Home({ mode }: HomeProps) {
     calendar.data && !calendar.data.needsAuth ? calendar.data.events.slice(0, 3) : [];
 
   const previous = meetings.data ?? [];
-  const groups = React.useMemo(() => groupPrevious(previous), [previous]);
+
+  // Search applies only to /meetings (the All meetings list). Home keeps the
+  // unfiltered Previous list since it's already chronologically grouped.
+  const [search, setSearch] = React.useState('');
+  const searchInputRef = React.useRef<HTMLInputElement>(null);
+  const filtered = React.useMemo(() => {
+    if (mode !== 'meetings') return previous;
+    const needle = search.trim().toLowerCase();
+    if (!needle) return previous;
+    return previous.filter((m) => {
+      const name = m.session_info.name?.toLowerCase() ?? '';
+      const summary = m.summary?.toLowerCase() ?? '';
+      return name.includes(needle) || summary.includes(needle);
+    });
+  }, [mode, previous, search]);
+  const groups = React.useMemo(() => groupPrevious(filtered), [filtered]);
 
   const greeting = `Ready to capture beautiful notes`;
   const dateStr = new Date().toLocaleDateString(undefined, {
@@ -164,37 +179,74 @@ export function Home({ mode }: HomeProps) {
           <section>
             <SectionHead
               title={mode === 'meetings' ? 'All meetings' : 'Previous'}
-              count={previous.length}
+              count={mode === 'meetings' ? filtered.length : previous.length}
               action={
-                <button
-                  type="button"
-                  className="inline-flex items-center gap-1.5 rounded px-1.5 py-0.5 text-[12.5px] transition-colors hover:bg-[color:var(--surface-hover)]"
-                  style={{ color: 'var(--fg-2)' }}
-                >
-                  <Filter className="size-3" />
-                  Filter
-                </button>
+                mode === 'meetings' ? (
+                  <div className="relative">
+                    <Search
+                      className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 size-[12px]"
+                      style={{ color: 'var(--fg-muted)' }}
+                    />
+                    <input
+                      ref={searchInputRef}
+                      type="text"
+                      value={search}
+                      onChange={(e) => setSearch(e.target.value)}
+                      placeholder="Search meetings"
+                      aria-label="Search meetings"
+                      className="h-[26px] w-[180px] rounded-md border-0 pl-7 pr-7 text-[12.5px] outline-none transition-colors focus:shadow-[inset_0_0_0_1px_hsl(var(--border))]"
+                      style={{
+                        background: 'rgba(27,27,25,0.04)',
+                        color: 'var(--fg-1)',
+                        fontFamily: 'var(--font-sans)',
+                      }}
+                    />
+                    {search && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSearch('');
+                          searchInputRef.current?.focus();
+                        }}
+                        aria-label="Clear search"
+                        className="absolute right-1.5 top-1/2 -translate-y-1/2 inline-flex size-4 items-center justify-center rounded transition-colors hover:bg-[color:var(--surface-hover)]"
+                        style={{ color: 'var(--fg-muted)' }}
+                      >
+                        <X className="size-[11px]" />
+                      </button>
+                    )}
+                  </div>
+                ) : undefined
               }
             />
-            {groups.map((g) => (
-              <div key={g.label}>
-                <div
-                  className="pb-2 pt-4 text-[11.5px] font-medium tracking-[0.02em]"
-                  style={{ color: 'var(--fg-2)' }}
-                >
-                  {g.label}
-                </div>
-                <div>
-                  {g.items.map((m) => (
-                    <PreviousRow
-                      key={m.session_info.summary_file}
-                      meeting={m}
-                      folderName={firstFolderName(m, folderName)}
-                    />
-                  ))}
-                </div>
+            {groups.length === 0 && mode === 'meetings' && search.trim() ? (
+              <div
+                className="px-6 py-12 text-center text-[13px]"
+                style={{ color: 'var(--fg-2)' }}
+              >
+                No meetings match &ldquo;{search.trim()}&rdquo;.
               </div>
-            ))}
+            ) : (
+              groups.map((g) => (
+                <div key={g.label}>
+                  <div
+                    className="pb-2 pt-4 text-[11.5px] font-medium tracking-[0.02em]"
+                    style={{ color: 'var(--fg-2)' }}
+                  >
+                    {g.label}
+                  </div>
+                  <div>
+                    {g.items.map((m) => (
+                      <PreviousRow
+                        key={m.session_info.summary_file}
+                        meeting={m}
+                        folderName={firstFolderName(m, folderName)}
+                      />
+                    ))}
+                  </div>
+                </div>
+              ))
+            )}
           </section>
         </>
       )}

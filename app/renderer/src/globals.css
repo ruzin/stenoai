@@ -544,6 +544,11 @@
     border-radius: 2px;
     animation: dock-wave 1.4s ease-in-out infinite;
   }
+  /* Static variant — used in the meeting transcript panel header where the
+     animation reads as "currently recording" and confuses users. */
+  .mv-transcript-wave-static span {
+    animation: none;
+  }
   .mv-transcript-wave span:nth-child(1) { height: 40%; animation-delay: 0s; }
   .mv-transcript-wave span:nth-child(2) { height: 70%; animation-delay: 0.1s; }
   .mv-transcript-wave span:nth-child(3) { height: 100%; animation-delay: 0.2s; }
@@ -608,10 +613,11 @@
     background: transparent;
     color: var(--fg-1);
     font-size: 14px;
+    font-weight: 500;
     font-family: var(--font-sans);
     outline: none;
   }
-  .mv-chat-input::placeholder { color: var(--fg-muted); }
+  .mv-chat-input::placeholder { color: var(--fg-2); font-weight: 500; }
 
   .mv-chat-tool {
     width: 30px; height: 30px;

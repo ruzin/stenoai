@@ -73,8 +73,14 @@ export function AppShell({
               'scrollbar-clean flex-1 min-h-0 overflow-auto',
               contentAlign === 'center' && 'flex items-center justify-center',
             )}
+            /* scrollbar-gutter: stable reserves space for the scrollbar even
+               when content fits, so the notes column's centerline is the same
+               whether or not the scrollbar is visible. The dock below mirrors
+               this (no asymmetric padding needed) and stays aligned with the
+               notes column. */
+            style={{ scrollbarGutter: 'stable' }}
           >
-            <div className="mx-auto w-full max-w-[820px] px-14 pb-36 pt-7">
+            <div className="mx-auto w-full max-w-[720px] px-10 pb-36 pt-7">
               {children}
             </div>
           </div>
@@ -84,15 +90,16 @@ export function AppShell({
           <div
             id="ask-bar-slot"
             className="mv-dock"
-            /* The scroll container above reserves a vertical scrollbar on the
-               right, shifting its centered children left by ~scrollbar-width/2.
-               Mirror that offset on the dock so the chat composer aligns with
-               the notes column instead of sitting visibly right of it. */
-            style={{ paddingRight: 15 }}
+            /* Mirror the 10px scrollbar gutter reserved by the sibling scroll
+               container so the dock's centerline matches the notes column's
+               centerline. Without this, the dock sits 5px right of the notes. */
+            style={{ paddingRight: 10 }}
           >
             <div
               className="mv-dock-inner"
-              style={{ maxWidth: 820, width: '100%', margin: '0 auto', padding: '0 56px' }}
+              /* Match the notes column: same max-width and side padding so the
+                 composer pill is centered to the notes content. */
+              style={{ maxWidth: 720, width: '100%', margin: '0 auto', padding: '0 40px' }}
             >
               {askBarSlot}
             </div>
