@@ -2,7 +2,11 @@ const path = require('node:path');
 const fs = require('node:fs');
 
 const SCHEMA_KEYS = ['newRenderer'];
-const DEFAULTS = { newRenderer: false };
+// New renderer is now the default. The toggle remains in the tray menu so
+// users can fall back to the legacy UI if they hit a regression. Plan to
+// remove the toggle + legacy renderer in a follow-up cleanup PR once the
+// new renderer has had a release cycle in the wild.
+const DEFAULTS = { newRenderer: true };
 
 let filePath = null;
 let cache = { ...DEFAULTS };
