@@ -393,7 +393,7 @@ export interface StenoaiBridge {
     setCloudApiKey: RequestFn<[key: string], Result<Record<string, never>>>;
     setCloudProvider: RequestFn<[p: CloudProvider], Result<Record<string, never>>>;
     setCloudModel: RequestFn<[m: string], Result<Record<string, never>>>;
-    testCloudApi: RequestFn<[], Result<{ ok: boolean; message?: string }>>;
+    testCloudApi: RequestFn<[], Result<{ models?: string[] }>>;
   };
 
   calendar: {

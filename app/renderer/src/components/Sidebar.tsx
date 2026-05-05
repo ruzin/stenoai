@@ -294,7 +294,7 @@ export function Sidebar({
             className="text-[18px] font-normal"
             style={{ fontFamily: 'var(--font-serif)', letterSpacing: '-0.02em', color: 'var(--fg-1)' }}
           >
-            Dragonfly<span style={{ color: 'var(--fg-muted)' }}>.</span>
+            Steno<span style={{ color: 'var(--fg-muted)' }}>.</span>
           </span>
         </div>
 
@@ -357,7 +357,7 @@ export function Sidebar({
               onClick={() => navigate('/meetings')}
             >
               <Inbox className="size-[14px]" />
-              <span className="flex-1 truncate">All meetings</span>
+              <span className="flex-1 truncate">All notes</span>
               {totalMeetings > 0 && (
                 <span className="text-xs tabular-nums" style={{ color: 'var(--fg-muted)' }}>
                   {totalMeetings}

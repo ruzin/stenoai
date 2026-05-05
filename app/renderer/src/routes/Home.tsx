@@ -178,7 +178,7 @@ export function Home({ mode }: HomeProps) {
 
           <section>
             <SectionHead
-              title={mode === 'meetings' ? 'All meetings' : 'Previous'}
+              title={mode === 'meetings' ? 'All notes' : 'Previous'}
               count={mode === 'meetings' ? filtered.length : previous.length}
               action={
                 mode === 'meetings' ? (

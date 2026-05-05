@@ -142,25 +142,38 @@ export function Setup() {
   const runSetup = async () => {
     setRunning(true);
     setDone(false);
+    // Capture the snapshot so we can branch on what's already done. Skipping
+    // completed steps keeps retries fast (no re-prompting for mic permission,
+    // no re-initialising Whisper) when the user is just fixing a bad API key.
+    const snapshot = statuses;
     try {
-      setStatus('microphone', 'running', 'Checking permission...');
-      const existing = await checkMic.mutateAsync();
-      if (existing === 'granted') {
-        setStatus('microphone', 'done', 'Permission granted');
-      } else {
-        setStatus('microphone', 'running', 'Requesting permission...');
-        const granted = await requestMic.mutateAsync();
-        if (granted) setStatus('microphone', 'done', 'Permission granted');
-        else {
-          setStatus('microphone', 'failed', 'Permission denied. Grant it in System Settings.');
-          setRunning(false);
-          return;
+      if (snapshot.microphone !== 'done') {
+        setStatus('microphone', 'running', 'Checking permission...');
+        const existing = await checkMic.mutateAsync();
+        if (existing === 'granted') {
+          setStatus('microphone', 'done', 'Permission granted');
+        } else {
+          setStatus('microphone', 'running', 'Requesting permission...');
+          const granted = await requestMic.mutateAsync();
+          if (granted) setStatus('microphone', 'done', 'Permission granted');
+          else {
+            setStatus('microphone', 'failed', 'Permission denied. Grant it in System Settings.');
+            setRunning(false);
+            return;
+          }
         }
       }
 
-      setStatus('whisper', 'running', 'Installing transcription engine...');
-      await whisperStep.mutateAsync();
-      setStatus('whisper', 'done', 'Transcription engine ready');
+      if (snapshot.whisper !== 'done') {
+        setStatus('whisper', 'running', 'Installing transcription engine...');
+        await whisperStep.mutateAsync();
+        setStatus('whisper', 'done', 'Transcription engine ready');
+      }
+
+      // Always re-run the summarization step on retry (the choice or key may
+      // have changed). Reset its status from 'failed' so the chooser hides
+      // while we run.
+      setStatus('ollama', 'running', '');
 
       if (summaryMode === 'cloud') {
         setStatus('ollama', 'running', 'Saving cloud credentials...');
@@ -170,10 +183,9 @@ export function Setup() {
         await setCloudProviderMut.mutateAsync(cloudProvider);
         await setCloudKeyMut.mutateAsync(cloudApiKey.trim());
         setStatus('ollama', 'running', 'Testing connection...');
-        const result = await testCloudApi.mutateAsync();
-        if (!result.ok) {
-          throw new Error(result.message || 'Cloud API test failed');
-        }
+        // unwrap throws on { success: false } so reaching this line means the
+        // provider responded successfully — no extra check needed.
+        await testCloudApi.mutateAsync();
         setStatus('ollama', 'done', `Connected to ${cloudProvider}`);
       } else {
         // Make sure provider is local in case the user previously had cloud
@@ -228,16 +240,18 @@ export function Setup() {
     },
   ];
 
-  // Show the Local/Cloud chooser only before the third step has run. Once the
-  // wizard kicks off (running) or completes, we hide the chooser to avoid
-  // looking interactive after the choice is committed.
-  const showSummaryChooser = !running && statuses.ollama === 'waiting';
+  // Show the Local/Cloud chooser before the third step has run AND after a
+  // failure, so the user can correct a bad API key (or pick the other path
+  // entirely) and retry without exiting the wizard. Hidden while running and
+  // when the step has succeeded.
+  const showSummaryChooser =
+    !running && (statuses.ollama === 'waiting' || statuses.ollama === 'failed');
 
   return (
     <div className="min-h-screen bg-background text-foreground">
       <div className="mx-auto max-w-[560px] px-8 py-16">
         <div className="mb-8 text-center">
-          <Display className="mb-3">Welcome to StenoAI</Display>
+          <Display className="mb-3">Welcome to Steno</Display>
           <Lead>We'll help you set up everything needed for meeting intelligence.</Lead>
         </div>
 

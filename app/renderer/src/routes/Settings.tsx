@@ -744,7 +744,16 @@ function RemoteProviderConfig() {
         >
           {testConnection.isPending ? 'Testing…' : 'Test connection'}
         </Button>
-        <ConnectionStatus result={testConnection.data} />
+        <ConnectionStatus
+          ok={testConnection.isSuccess ? testConnection.data?.ok ?? true : testConnection.isError ? false : undefined}
+          message={
+            testConnection.isError
+              ? testConnection.error instanceof Error
+                ? testConnection.error.message
+                : 'Failed'
+              : testConnection.data?.message
+          }
+        />
       </div>
     </div>
   );
@@ -762,13 +771,47 @@ function CloudProviderConfig() {
   const [apiUrl, setApiUrl] = React.useState('');
   const [apiKey, setApiKey] = React.useState('');
   const [model, setModel] = React.useState('gpt-4o-mini');
+  // When provider changes, the available-models cache is provider-specific
+  // and the persisted model name swaps. Track which provider the model list
+  // belongs to so we don't show OpenAI models against an Anthropic key.
+  const [modelListFor, setModelListFor] = React.useState<CloudProvider | null>(null);
+  const [customModelMode, setCustomModelMode] = React.useState(false);
 
   React.useEffect(() => {
     if (provider.data) {
       setApiUrl(provider.data.cloud_api_url);
       setModel(provider.data.cloud_model);
+      // Reset model-list cache when provider changes — last fetch was for a
+      // different provider and would be misleading.
+      setModelListFor((prev) =>
+        prev === provider.data!.cloud_provider ? prev : null,
+      );
+      setCustomModelMode(false);
+      testConnection.reset();
     }
-  }, [provider.data]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [provider.data?.cloud_provider, provider.data?.cloud_model]);
+
+  const onTest = () => {
+    setModelListFor(cloudProvider);
+    testConnection.mutate();
+  };
+
+  const availableModels =
+    modelListFor === cloudProvider && testConnection.isSuccess
+      ? testConnection.data?.models ?? []
+      : [];
+  const showModelDropdown = availableModels.length > 0 && !customModelMode;
+  // Persist the selected model immediately on change (Select doesn't fire
+  // onBlur, so the previous "save on blur" pattern would lose the choice).
+  const onModelSelect = (next: string) => {
+    if (next === '__custom__') {
+      setCustomModelMode(true);
+      return;
+    }
+    setModel(next);
+    setCloudModel.mutate(next);
+  };
 
   return (
     <div
@@ -836,25 +879,75 @@ function CloudProviderConfig() {
         >
           Model
         </label>
-        <Input
-          value={model}
-          onChange={(e) => setModel(e.target.value)}
-          placeholder="gpt-4o-mini"
-          onBlur={() => model && setCloudModel.mutate(model)}
-          className="h-[30px] text-[13px]"
-        />
+        {showModelDropdown ? (
+          <Select value={model} onValueChange={onModelSelect}>
+            <SelectTrigger className="h-[30px] text-[13px]">
+              <SelectValue placeholder="Select a model" />
+            </SelectTrigger>
+            <SelectContent>
+              {/* If the persisted model isn't in the fetched list (e.g. a
+                  user-typed custom name from before), still show it so the
+                  Trigger doesn't render blank. */}
+              {!availableModels.includes(model) && model && (
+                <SelectItem value={model}>{model}</SelectItem>
+              )}
+              {availableModels.map((m) => (
+                <SelectItem key={m} value={m}>
+                  {m}
+                </SelectItem>
+              ))}
+              <SelectItem value="__custom__">Custom…</SelectItem>
+            </SelectContent>
+          </Select>
+        ) : (
+          <div className="flex items-center gap-2">
+            <Input
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+              placeholder={cloudProvider === 'anthropic' ? 'claude-…' : 'gpt-…'}
+              onBlur={() => model && setCloudModel.mutate(model)}
+              className="h-[30px] text-[13px]"
+            />
+            {availableModels.length > 0 && customModelMode && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className={COMPACT_BTN}
+                onClick={() => setCustomModelMode(false)}
+              >
+                Pick from list
+              </Button>
+            )}
+          </div>
+        )}
+        {availableModels.length === 0 && (
+          <div className="mt-1 text-[11.5px]" style={{ color: 'var(--fg-muted)' }}>
+            Test connection to load the list of available models.
+          </div>
+        )}
       </div>
       <div className="flex items-center gap-3">
         <Button
           variant="outline"
           size="sm"
           className={COMPACT_BTN}
-          onClick={() => testConnection.mutate()}
+          onClick={onTest}
           disabled={testConnection.isPending}
         >
           {testConnection.isPending ? 'Testing…' : 'Test connection'}
         </Button>
-        <ConnectionStatus result={testConnection.data} />
+        <ConnectionStatus
+          ok={testConnection.isSuccess ? true : testConnection.isError ? false : undefined}
+          message={
+            testConnection.isError
+              ? testConnection.error instanceof Error
+                ? testConnection.error.message
+                : 'Failed'
+              : testConnection.isSuccess && testConnection.data?.models
+                ? `${testConnection.data.models.length} models available`
+                : undefined
+          }
+        />
       </div>
       <div className="text-[12px]" style={{ color: 'var(--fg-2)' }}>
         Transcripts will be sent to a third-party cloud service. No audio files
@@ -865,18 +958,20 @@ function CloudProviderConfig() {
 }
 
 function ConnectionStatus({
-  result,
+  ok,
+  message,
 }: {
-  result: { ok: boolean; message?: string } | undefined;
+  ok: boolean | undefined;
+  message?: string;
 }) {
-  if (!result) return null;
+  if (ok === undefined) return null;
   return (
     <span
       className="flex items-center gap-1.5 text-[12px]"
-      style={{ color: result.ok ? 'var(--fg-1)' : 'var(--danger)' }}
+      style={{ color: ok ? 'var(--fg-1)' : 'var(--danger)' }}
     >
-      {result.ok ? <Check className="size-3.5" /> : <X className="size-3.5" />}
-      {result.message ?? (result.ok ? 'Connected' : 'Failed')}
+      {ok ? <Check className="size-3.5" /> : <X className="size-3.5" />}
+      {message ?? (ok ? 'Connected' : 'Failed')}
     </span>
   );
 }
