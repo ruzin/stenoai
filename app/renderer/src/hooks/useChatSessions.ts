@@ -41,6 +41,28 @@ function migrateLegacyBlob(legacy: LegacyBlob): ChatSessionsBlob {
   return { sessions };
 }
 
+/**
+ * Returns the full chat blob (every session across every meeting). Used by
+ * the Chat tab's Recents list and any future global chat-history view.
+ * Shares the same query key as useChatSessions so a save in one place is
+ * reflected everywhere.
+ */
+export function useAllChatSessions() {
+  return useQuery<ChatSessionsBlob>({
+    queryKey: CHAT_KEY,
+    queryFn: async () => {
+      const res = await ipc().chat.load();
+      if (!res.success) throw new Error(res.error);
+      const data = res.data;
+      if (!data) return emptyBlob();
+      if (Array.isArray(data.sessions)) return data;
+      if (Array.isArray(data)) return migrateLegacyBlob(data as unknown as LegacyBlob);
+      return emptyBlob();
+    },
+    staleTime: Infinity,
+  });
+}
+
 export function useChatSessions(summaryFile: string | null, meetingName?: string | null) {
   const queryClient = useQueryClient();
   const [activeId, setActiveId] = React.useState<string | null>(null);

@@ -596,6 +596,12 @@
     flex: 1;
   }
 
+  /* Chat bubble — trim leading/trailing margins from rendered markdown so
+     the inner padding stays balanced regardless of which block element
+     starts/ends the response (paragraph, heading, list…). */
+  .chat-bubble > :first-child { margin-top: 0; }
+  .chat-bubble > :last-child { margin-bottom: 0; }
+
   /* Chat composer */
   .mv-chat {
     display: flex;

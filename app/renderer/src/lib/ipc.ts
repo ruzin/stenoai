@@ -180,6 +180,7 @@ export type GetTelemetryResponse = Result<{
 export type GetDockIconResponse = Result<{ hide_dock_icon: boolean }>;
 export type GetSystemAudioResponse = Result<{ system_audio_enabled: boolean }>;
 export type GetLanguageResponse = Result<{ language: string }>;
+export type GetUserNameResponse = Result<{ user_name: string }>;
 export type StoragePathResponse = Result<{
   storage_path: string | null;
   custom_path: string | null;
@@ -333,6 +334,7 @@ export interface StenoaiBridge {
   query: {
     ask: RequestFn<[file: string, q: string], QueryResponse>;
     askStream: SendFn<[id: string, file: string, q: string]>;
+    chatGlobalStream: SendFn<[id: string, q: string, folderId?: string | null]>;
     cancel: SendFn<[id: string]>;
   };
 
@@ -378,6 +380,8 @@ export interface StenoaiBridge {
     setSystemAudio: RequestFn<[v: boolean], Result<Record<string, never>>>;
     getLanguage: RequestFn<[], GetLanguageResponse>;
     setLanguage: RequestFn<[code: string], Result<Record<string, never>>>;
+    getUserName: RequestFn<[], GetUserNameResponse>;
+    setUserName: RequestFn<[name: string], Result<Record<string, never>>>;
     getStoragePath: RequestFn<[], StoragePathResponse>;
     setStoragePath: RequestFn<[p: string], Result<Record<string, never>>>;
     pickStorageFolder: RequestFn<[], PickStorageFolderResponse>;

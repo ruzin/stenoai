@@ -452,7 +452,7 @@ function RenamePopover({
 
 interface BuildArgs {
   meetings: Meeting[];
-  folders: Array<{ id: string; name: string; icon?: string; order: number }>;
+  folders: Array<{ id: string; name: string; icon?: string; color?: string; order: number }>;
   search: string;
   activeSummaryFile: string | null;
 }
@@ -472,6 +472,7 @@ function buildSidebar({ meetings, folders, search, activeSummaryFile }: BuildArg
         id: f.id,
         name: f.name,
         icon: f.icon,
+        color: f.color,
         meetings: folderMeetings
           .filter(match)
           .map((m) => meetingToSidebar(m, activeSummaryFile)),

@@ -2,6 +2,9 @@ import * as React from 'react';
 import { Sandbox } from '@/routes/Sandbox';
 import { Settings } from '@/routes/Settings';
 import { Setup } from '@/routes/Setup';
+import { Chat } from '@/routes/Chat';
+import { ChatConversation } from '@/routes/ChatConversation';
+import { StreamingProvider } from '@/hooks/useStreamingQuery';
 import { Home } from '@/routes/Home';
 import { MeetingDetail } from '@/routes/MeetingDetail';
 import { FolderDetail } from '@/routes/FolderDetail';
@@ -95,26 +98,33 @@ export function App() {
 
   const isRecordingRoute = route === '/recording';
   const isProcessingRoute = route === '/meetings/processing';
+  // The /chat page has its own large composer, so the floating AskBar dock
+  // would just stack a second redundant input below the same page. The
+  // sub-route /chat/<id> (conversation view) also owns its own composer.
+  const isChatRoute = route === '/chat' || route.startsWith('/chat/');
+  const showAskBar = !isRecordingRoute && !isProcessingRoute && !isChatRoute;
 
   return (
-    <AskBarProvider>
-      <RouteView route={route} />
-      <QuitDialog />
+    <StreamingProvider>
+      <AskBarProvider>
+        <RouteView route={route} />
+        <QuitDialog />
 
-      {/* Bottom dock — shared anchor across recording → processing → meeting. */}
-      <BottomDockSlot>
-        {isRecordingRoute && <LiveDock />}
-        {isProcessingRoute && <ProcessingDock />}
-        {!isRecordingRoute && !isProcessingRoute && <AskBar />}
-      </BottomDockSlot>
-
-      {/* Transcript — floats above the chat bar (only on real meeting routes). */}
-      {!isRecordingRoute && !isProcessingRoute && (
-        <BottomDockSlot bottomOffset={72}>
-          <TranscriptBar />
+        {/* Bottom dock — shared anchor across recording → processing → meeting. */}
+        <BottomDockSlot>
+          {isRecordingRoute && <LiveDock />}
+          {isProcessingRoute && <ProcessingDock />}
+          {showAskBar && <AskBar />}
         </BottomDockSlot>
-      )}
-    </AskBarProvider>
+
+        {/* Transcript — floats above the chat bar (only on real meeting routes). */}
+        {showAskBar && (
+          <BottomDockSlot bottomOffset={72}>
+            <TranscriptBar />
+          </BottomDockSlot>
+        )}
+      </AskBarProvider>
+    </StreamingProvider>
   );
 }
 
@@ -123,6 +133,11 @@ function RouteView({ route }: { route: string }) {
   if (route === '/settings') return <Settings />;
   if (route === '/setup') return <Setup />;
   if (route === '/recording') return <Recording />;
+  if (route === '/chat') return <Chat />;
+  if (route.startsWith('/chat/')) {
+    const sessionId = safeDecode(route.slice('/chat/'.length));
+    return <ChatConversation sessionId={sessionId} />;
+  }
   if (route === '/meetings/processing') return <Processing />;
   if (route.startsWith('/meetings/')) {
     const summaryFile = safeDecode(route.slice('/meetings/'.length));

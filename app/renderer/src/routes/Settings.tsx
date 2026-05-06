@@ -49,9 +49,11 @@ import {
   useSetStoragePath,
   useSetSystemAudio,
   useSetTelemetry,
+  useSetUserName,
   useStoragePath,
   useSystemAudioSetting,
   useTelemetrySetting,
+  useUserName,
 } from '@/hooks/useSettings';
 import {
   useAiProvider,
@@ -470,6 +472,26 @@ function GeneralTab() {
   const setDockIcon = useSetDockIcon();
   const google = useGoogleCalendarAuth();
   const outlook = useOutlookCalendarAuth();
+  const userName = useUserName();
+  const setUserName = useSetUserName();
+  const [nameDraft, setNameDraft] = React.useState('');
+  const nameSeededRef = React.useRef(false);
+  // Wait for the real query (not the sessionStorage placeholder) before
+  // seeding — otherwise we lock onto a stale empty string and ignore the
+  // canonical value when it arrives from disk.
+  React.useEffect(() => {
+    if (nameSeededRef.current) return;
+    if (userName.isPending || userName.isPlaceholderData) return;
+    if (userName.data !== undefined) {
+      setNameDraft(userName.data);
+      nameSeededRef.current = true;
+    }
+  }, [userName.data, userName.isPending, userName.isPlaceholderData]);
+  const persistName = () => {
+    const trimmed = nameDraft.trim();
+    if (trimmed === (userName.data ?? '')) return;
+    setUserName.mutate(trimmed);
+  };
 
   const calendarConnected =
     google.status.data?.connected || outlook.status.data?.connected;
@@ -514,6 +536,29 @@ function GeneralTab() {
 
   return (
     <section data-settings-tab="general">
+      <SettingRow
+        label="Your name"
+        description="First name only — used for in-app greetings. Stored locally."
+      >
+        <Input
+          value={nameDraft}
+          onChange={(e) => setNameDraft(e.target.value)}
+          onBlur={persistName}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              // Just blur — onBlur runs persistName, so calling it directly
+              // here would queue a duplicate setUserName mutation.
+              (e.target as HTMLInputElement).blur();
+            }
+          }}
+          placeholder="Ruzin"
+          autoComplete="given-name"
+          className="h-[30px] w-[180px] rounded-[6px] text-[13px]"
+          data-testid="user-name-input"
+        />
+      </SettingRow>
+
       <SettingRow
         label="Appearance"
         description="Choose light, dark, or match your system"

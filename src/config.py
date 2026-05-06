@@ -514,6 +514,24 @@ class Config:
         self._config["cloud_model"] = model.strip()
         return self._save()
 
+    def get_user_name(self) -> str:
+        """Get the user's first name (for greetings). Empty string when unset."""
+        value = self._config.get("user_name")
+        if not isinstance(value, str):
+            return ""
+        return value.strip()
+
+    def set_user_name(self, name: str) -> bool:
+        """Persist the user's first name. Trims whitespace; an empty name
+        clears the field."""
+        cleaned = (name or "").strip()
+        # Cap to a sane length so a paste of someone's whole bio doesn't end
+        # up in the greeting.
+        if len(cleaned) > 60:
+            cleaned = cleaned[:60]
+        self._config["user_name"] = cleaned
+        return self._save()
+
     def get_anonymous_id(self) -> str:
         """Get the anonymous telemetry ID, generating one if missing."""
         anon_id = self._config.get("anonymous_id")

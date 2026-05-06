@@ -9,13 +9,14 @@ import {
   X,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { renderMarkdown } from '@/lib/markdown';
 import { useAskBar } from '@/lib/askBarContext';
 import {
   useChatSessions,
   type ChatMessage,
   type ChatSession,
 } from '@/hooks/useChatSessions';
-import { useStreamingQuery } from '@/hooks/useStreamingQuery';
+import { useGlobalStreaming } from '@/hooks/useStreamingQuery';
 import { TranscriptPanelContent } from '@/components/TranscriptPanel';
 import { useMeeting } from '@/hooks/useMeetings';
 
@@ -84,7 +85,7 @@ export function TranscriptBar() {
 export function AskBar() {
   const { activeSummaryFile, activeMeetingName, transcriptOpen, setTranscriptOpen } = useAskBar();
   const chat = useChatSessions(activeSummaryFile, activeMeetingName);
-  const streaming = useStreamingQuery();
+  const streaming = useGlobalStreaming();
 
   const [expanded, setExpanded] = React.useState(false);
   const [sessionMenuOpen, setSessionMenuOpen] = React.useState(false);
@@ -573,75 +574,7 @@ function MessageBubble({ message }: { message: ChatMessage }) {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Minimal markdown renderer (lists + bold)
-// ---------------------------------------------------------------------------
-
-function renderMarkdown(text: string): React.ReactNode {
-  const lines = text.split('\n');
-  const nodes: React.ReactNode[] = [];
-  let listItems: string[] = [];
-  let listType: 'ul' | 'ol' | null = null;
-  let key = 0;
-
-  const flushList = () => {
-    if (!listItems.length) return;
-    const Tag = listType ?? 'ul';
-    nodes.push(
-      <Tag
-        key={key++}
-        className={cn('my-1 space-y-0.5 pl-5', Tag === 'ul' ? 'list-disc' : 'list-decimal')}
-      >
-        {listItems.map((item, i) => (
-          <li key={i}>{renderInline(item)}</li>
-        ))}
-      </Tag>,
-    );
-    listItems = [];
-    listType = null;
-  };
-
-  for (const line of lines) {
-    const ulMatch = line.match(/^[-*]\s+(.+)/);
-    const olMatch = line.match(/^\d+\.\s+(.+)/);
-
-    if (ulMatch) {
-      if (listType === 'ol') flushList();
-      listType = 'ul';
-      listItems.push(ulMatch[1]);
-    } else if (olMatch) {
-      if (listType === 'ul') flushList();
-      listType = 'ol';
-      listItems.push(olMatch[1]);
-    } else {
-      flushList();
-      if (line.trim()) {
-        nodes.push(<p key={key++}>{renderInline(line)}</p>);
-      } else if (nodes.length > 0) {
-        nodes.push(<br key={key++} />);
-      }
-    }
-  }
-  flushList();
-
-  return <>{nodes}</>;
-}
-
-function renderInline(text: string): React.ReactNode {
-  const parts = text.split(/(\*\*[^*]+\*\*)/g);
-  if (parts.length === 1) return text;
-  return (
-    <>
-      {parts.map((part, i) =>
-        part.startsWith('**') && part.endsWith('**') ? (
-          <strong key={i}>{part.slice(2, -2)}</strong>
-        ) : (
-          part || null
-        ),
-      )}
-    </>
-  );
-}
+// Markdown rendering moved to lib/markdown.tsx so the Chat tab can share it.
 
 const SUGGESTION_CHIPS: { label: string; prompt: string }[] = [
   { label: 'Summarize key decisions', prompt: 'Summarize the key decisions made' },

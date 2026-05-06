@@ -3,6 +3,7 @@ import {
   ChevronDown,
   Home as HomeIcon,
   Inbox,
+  MessageSquare,
   Plus,
   Search,
   Settings as SettingsIcon,
@@ -24,6 +25,9 @@ export interface SidebarFolder {
   id: string;
   name: string;
   icon?: string;
+  /** User-chosen folder color. Used to tint the sidebar icon so it
+   *  matches the chip in the FolderScopePicker / FolderDetail header. */
+  color?: string;
   meetings: SidebarMeeting[];
 }
 
@@ -160,6 +164,9 @@ export function Sidebar({
 
   const isHomeActive = currentRoute === '/' || currentRoute === '';
   const isAllMeetingsActive = currentRoute === '/meetings';
+  // Match /chat as well as any /chat/<id> conversation route — the same Chat
+  // tab item should stay highlighted when drilling into a session.
+  const isChatActive = currentRoute === '/chat' || currentRoute.startsWith('/chat/');
   // Malformed % escapes throw URIError. Guard so a bad route can't crash
   // the entire sidebar render.
   const activeFolderId = React.useMemo<string | null>(() => {
@@ -373,6 +380,15 @@ export function Sidebar({
               )}
             </button>
           </div>
+
+          <button
+            type="button"
+            className={cn('sb-row', isChatActive && 'active')}
+            onClick={() => navigate('/chat')}
+          >
+            <MessageSquare className="size-[14px]" />
+            <span className="flex-1 truncate">Chat</span>
+          </button>
 
           {/* Folders group */}
           <div className="mt-3.5">

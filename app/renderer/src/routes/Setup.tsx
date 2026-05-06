@@ -13,7 +13,12 @@ import {
 import { Display, Lead, Muted } from '@/components/ui/typography';
 import { useNavigate } from '@/lib/router';
 import { useCheckMicPermission, useRequestMicPermission, useSetupStep } from '@/hooks/useSetup';
-import { useSetTelemetry, useTelemetrySetting } from '@/hooks/useSettings';
+import {
+  useSetTelemetry,
+  useSetUserName,
+  useTelemetrySetting,
+  useUserName,
+} from '@/hooks/useSettings';
 import {
   useSetAiProvider,
   useSetCloudApiKey,
@@ -118,6 +123,31 @@ export function Setup() {
   const telemetry = useTelemetrySetting();
   const setTelemetry = useSetTelemetry();
   const telemetryEnabled = telemetry.data?.telemetry_enabled ?? true;
+
+  // First name powers the in-app greeting ("Hi <name>, ask anything"). Stored
+  // locally only — never sent anywhere. Persisted on blur to avoid a write
+  // per keystroke.
+  const userName = useUserName();
+  const setUserName = useSetUserName();
+  const [name, setName] = React.useState('');
+  // Sync once when the initial fetch resolves so we don't clobber user input.
+  // Wait for the real query to settle — placeholderData (sessionStorage cache)
+  // could be stale or empty, and we don't want to seed from it and then ignore
+  // the canonical value when it arrives from disk.
+  const seededRef = React.useRef(false);
+  React.useEffect(() => {
+    if (seededRef.current) return;
+    if (userName.isPending || userName.isPlaceholderData) return;
+    if (userName.data !== undefined) {
+      setName(userName.data);
+      seededRef.current = true;
+    }
+  }, [userName.data, userName.isPending, userName.isPlaceholderData]);
+  const persistName = () => {
+    const trimmed = name.trim();
+    if (trimmed === (userName.data ?? '')) return;
+    setUserName.mutate(trimmed);
+  };
 
   // Summarization-engine choice. 'local' downloads the bundled model
   // (privacy + free, slower); 'cloud' wires up an API key (no download,
@@ -253,6 +283,36 @@ export function Setup() {
         <div className="mb-8 text-center">
           <Display className="mb-3">Welcome to Steno</Display>
           <Lead>We'll help you set up everything needed for meeting intelligence.</Lead>
+        </div>
+
+        <div
+          className="mb-6 flex items-center gap-4 rounded-md border border-border p-4"
+          data-setup-name
+        >
+          <div className="min-w-0 flex-1">
+            <label htmlFor="setup-name-input" className="text-sm font-medium text-foreground">
+              What should we call you?
+            </label>
+            <Muted className="mt-0.5">
+              First name only — used for in-app greetings. Stored locally.
+            </Muted>
+          </div>
+          <Input
+            id="setup-name-input"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onBlur={persistName}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                persistName();
+                (e.target as HTMLInputElement).blur();
+              }
+            }}
+            placeholder="Ruzin"
+            autoComplete="given-name"
+            className="w-[160px]"
+          />
         </div>
 
         <div className="space-y-3" data-setup-steps>

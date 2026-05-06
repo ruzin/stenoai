@@ -3,6 +3,7 @@ import { Video } from 'lucide-react';
 import type { CalendarEvent } from '@/lib/ipc';
 import { ipc } from '@/lib/ipc';
 import { cn } from '@/lib/utils';
+import { useRecording } from '@/hooks/useRecording';
 
 interface UpcomingCardProps {
   event: CalendarEvent;
@@ -12,11 +13,31 @@ export function UpcomingCard({ event }: UpcomingCardProps) {
   const relative = relativeLabel(event.start);
   const { dayLabel, clock, end } = formatStartEnd(event.start, event.end);
   const meetingUrl = event.meeting_url?.trim();
+  const recording = useRecording();
 
+  // Click the card → start a new recording titled after this event. The
+  // event title becomes the note's session name (instead of the auto
+  // 'Note' placeholder), so the AI rename step skips it and the user
+  // gets the meeting they expected. Doesn't open the join URL — the
+  // Join / Start now buttons on the right own that action.
+  const onStart = () => {
+    if (recording.status !== 'idle') return;
+    void recording.startRecording(event.title);
+  };
+
+  // Open the meeting URL externally. Used by the inner Join button only.
   const onJoin = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (!meetingUrl) return;
     void ipc().shell.openExternal(meetingUrl);
+  };
+
+  // Start recording AND open the URL — used by the urgent "Start now"
+  // button when the meeting is imminent.
+  const onStartAndJoin = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onStart();
+    if (meetingUrl) void ipc().shell.openExternal(meetingUrl);
   };
 
   return (
@@ -24,11 +45,15 @@ export function UpcomingCard({ event }: UpcomingCardProps) {
       className={cn('upcoming-card', relative.urgent && 'upcoming-card-live')}
       role="button"
       tabIndex={0}
-      onClick={meetingUrl ? onJoin : undefined}
+      onClick={onStart}
       onKeyDown={(e) => {
-        if ((e.key === 'Enter' || e.key === ' ') && meetingUrl) {
+        // Only handle Enter/Space when the card itself has focus — inner
+        // buttons (Join, Start now) own their own keyboard activation, and
+        // we don't want to double-fire them.
+        if (e.target !== e.currentTarget) return;
+        if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
-          onJoin(e as unknown as React.MouseEvent);
+          onStart();
         }
       }}
     >
@@ -82,7 +107,7 @@ export function UpcomingCard({ event }: UpcomingCardProps) {
           relative.urgent ? (
             <button
               type="button"
-              onClick={onJoin}
+              onClick={onStartAndJoin}
               className="inline-flex h-7 items-center gap-[7px] rounded-full px-3 text-xs font-medium"
               style={{
                 background: 'var(--fg-1)',
