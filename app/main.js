@@ -1572,40 +1572,80 @@ ipcMain.handle('update-meeting', async (event, summaryFilePath, updates) => {
 
     if (isMarkdown) {
       const raw = fs.readFileSync(absolutePath, 'utf8');
-      let frontmatter = {};
+      // Escape a string for a YAML double-quoted scalar. Backslash MUST be
+      // escaped before the quote, and embedded newlines must become literal
+      // \n so they don't end the scalar mid-line.
+      const yamlQuote = (s) =>
+        '"' + String(s)
+          .replace(/\\/g, '\\\\')
+          .replace(/"/g, '\\"')
+          .replace(/\n/g, '\\n')
+          .replace(/\r/g, '')
+        + '"';
+
+      // Strip the outer quotes only — the simple frontmatter we read here is
+      // for the response shape (data.session_info.name) and doesn't need to
+      // reverse YAML escapes for its sole consumer (the renderer).
+      const readTitle = (rawValue) => rawValue.trim().replace(/^"|"$/g, '');
+
+      // Line-based rewrite: only mutate the keys we're updating, leave every
+      // other line (including non-string values like arrays/booleans) byte-
+      // identical so we don't corrupt structured fields like `folders: [...]`.
+      let title = '';
+      let updatedAt = new Date().toISOString();
       let body = raw;
+      let updatedRaw = raw;
 
       if (raw.startsWith('---')) {
         const parts = raw.split('---', 3);
         if (parts.length >= 3) {
-          for (const line of parts[1].trim().split('\n')) {
-            const colon = line.indexOf(':');
-            if (colon !== -1) {
-              const key = line.slice(0, colon).trim();
-              const val = line.slice(colon + 1).trim().replace(/^"|"$/g, '');
-              frontmatter[key] = val;
-            }
-          }
+          const fmText = parts[1];
           body = parts[2];
+          const lines = fmText.split('\n');
+          let titleSeen = false;
+          let updatedAtSeen = false;
+          const newLines = lines.map((line) => {
+            const colon = line.indexOf(':');
+            if (colon === -1) return line;
+            const key = line.slice(0, colon).trim();
+            if (key === 'title') {
+              titleSeen = true;
+              const original = line.slice(colon + 1);
+              if (updates.name !== undefined) {
+                return `title: ${yamlQuote(updates.name)}`;
+              }
+              title = readTitle(original);
+              return line;
+            }
+            if (key === 'updated_at') {
+              updatedAtSeen = true;
+              return `updated_at: ${yamlQuote(updatedAt)}`;
+            }
+            return line;
+          });
+          if (!titleSeen && updates.name !== undefined) {
+            // Insert before the trailing blank line (if any) for readability.
+            const insertIdx = newLines[newLines.length - 1] === '' ? newLines.length - 1 : newLines.length;
+            newLines.splice(insertIdx, 0, `title: ${yamlQuote(updates.name)}`);
+            title = updates.name;
+          } else if (updates.name !== undefined) {
+            title = updates.name;
+          }
+          if (!updatedAtSeen) {
+            const insertIdx = newLines[newLines.length - 1] === '' ? newLines.length - 1 : newLines.length;
+            newLines.splice(insertIdx, 0, `updated_at: ${yamlQuote(updatedAt)}`);
+          }
+          updatedRaw = `---${newLines.join('\n')}---${body}`;
         }
       }
 
-      if (updates.name !== undefined) {
-        frontmatter.title = updates.name;
-      }
-      frontmatter.updated_at = new Date().toISOString();
-
-      const fmLines = Object.entries(frontmatter)
-        .map(([k, v]) => `${k}: "${v}"`)
-        .join('\n');
-      const updated = `---\n${fmLines}\n---${body}`;
-      fs.writeFileSync(absolutePath, updated, 'utf8');
+      fs.writeFileSync(absolutePath, updatedRaw, 'utf8');
 
       data = {
         session_info: {
-          name: frontmatter.title ?? '',
+          name: updates.name !== undefined ? updates.name : title,
           summary_file: absolutePath,
-          updated_at: frontmatter.updated_at,
+          updated_at: updatedAt,
         },
       };
     } else {
