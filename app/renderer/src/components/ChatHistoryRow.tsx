@@ -22,6 +22,9 @@ interface ChatHistoryRowProps {
   /** Show a relative-time chip on the right. Used on the /chat entry page;
    *  the dropdown variant hides it because group headers carry the time. */
   showTime?: boolean;
+  /** Fires after a successful navigate so the parent (e.g. a History
+   *  popover) can close itself. No-op for non-dismissible parents. */
+  onSelect?: () => void;
   onRename: (name: string) => void;
   onDelete: () => void | Promise<void>;
 }
@@ -39,6 +42,7 @@ export function ChatHistoryRow({
   session,
   activeId,
   showTime = false,
+  onSelect,
   onRename,
   onDelete,
 }: ChatHistoryRowProps) {
@@ -66,8 +70,10 @@ export function ChatHistoryRow({
   };
 
   const isActive = activeId === session.id;
-  const navigateToChat = () =>
+  const navigateToChat = () => {
     navigate(`/chat/${encodeURIComponent(session.id)}`);
+    onSelect?.();
+  };
 
   return (
     <div

@@ -11,9 +11,11 @@ import { ChatHistoryRow } from '@/components/ChatHistoryRow';
 import { MeetingsShell } from '@/components/MeetingsShell';
 import {
   Popover,
+  PopoverAnchor,
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover';
+import { PRESETS, PresetGlyph } from '@/lib/chatPresets';
 import {
   useAllChatSessions,
   useChatSessions,
@@ -43,6 +45,8 @@ export function ChatConversation({ sessionId }: ChatConversationProps) {
 
   const [input, setInput] = React.useState('');
   const [activeStreamId, setActiveStreamId] = React.useState<string | null>(null);
+  const [historyOpen, setHistoryOpen] = React.useState(false);
+  const [presetsOpen, setPresetsOpen] = React.useState(false);
   const pendingPersistRef = React.useRef<string | null>(null);
   const submittingRef = React.useRef(false);
   const inputRef = React.useRef<HTMLInputElement>(null);
@@ -210,7 +214,7 @@ export function ChatConversation({ sessionId }: ChatConversationProps) {
               <ArrowLeft className="size-[15px]" />
             </button>
 
-            <Popover>
+            <Popover open={historyOpen} onOpenChange={setHistoryOpen}>
               <PopoverTrigger asChild>
                 <button
                   type="button"
@@ -242,6 +246,7 @@ export function ChatConversation({ sessionId }: ChatConversationProps) {
                           key={s.id}
                           session={s}
                           activeId={sessionId}
+                          onSelect={() => setHistoryOpen(false)}
                           onRename={(name) => void chat.renameSession(s.id, name)}
                           onDelete={async () => {
                             const wasActive = s.id === sessionId;
@@ -306,6 +311,8 @@ export function ChatConversation({ sessionId }: ChatConversationProps) {
         {/* Composer pinned at the visual bottom — out of the scroll
             container, in the flex column. No leftover padding underneath. */}
         <div className="mx-auto w-full max-w-[760px] px-10 pb-6 pt-2">
+          <Popover open={presetsOpen} onOpenChange={setPresetsOpen}>
+            <PopoverAnchor asChild>
           <form
             onSubmit={onSubmit}
             className="rounded-2xl border p-3 transition-shadow focus-within:shadow-[var(--shadow-md)]"
@@ -320,13 +327,21 @@ export function ChatConversation({ sessionId }: ChatConversationProps) {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {
+              // Same '/' shortcut as the entry page — opens the preset
+              // picker when the input is empty so a literal slash typed
+              // mid-sentence doesn't surprise the user.
+              if (e.key === '/' && input === '' && ready && !isStreaming) {
+                e.preventDefault();
+                setPresetsOpen(true);
+                return;
+              }
               if (e.key === 'Enter' && !e.shiftKey && !isStreaming) {
                 e.preventDefault();
                 void submit(input);
               }
             }}
             disabled={!ready || isStreaming}
-            placeholder="Ask anything"
+            placeholder="Ask anything  /"
             className="block w-full bg-transparent px-2 pb-3 pt-1 outline-none disabled:cursor-not-allowed"
             style={{ fontSize: 15, color: 'var(--fg-1)', fontFamily: 'var(--font-sans)' }}
           />
@@ -369,6 +384,47 @@ export function ChatConversation({ sessionId }: ChatConversationProps) {
             </div>
           </div>
           </form>
+            </PopoverAnchor>
+            <PopoverContent
+              align="start"
+              side="top"
+              sideOffset={8}
+              className="w-[var(--radix-popover-trigger-width)] max-w-none p-1"
+              onOpenAutoFocus={(e) => e.preventDefault()}
+            >
+              <div
+                className="px-2 pb-1 pt-0.5 text-[11px] font-medium"
+                style={{ color: 'var(--fg-muted)' }}
+              >
+                Presets
+              </div>
+              <div className="flex flex-col">
+                {PRESETS.map((p) => (
+                  <button
+                    key={p.label}
+                    type="button"
+                    onClick={() => {
+                      setInput(p.prompt);
+                      setPresetsOpen(false);
+                      inputRef.current?.focus();
+                    }}
+                    className="flex flex-col items-start gap-0.5 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-[color:var(--surface-hover)]"
+                  >
+                    <div
+                      className="flex items-center gap-2 text-[13px]"
+                      style={{ color: 'var(--fg-1)' }}
+                    >
+                      <PresetGlyph />
+                      {p.label}
+                    </div>
+                    <div className="pl-[26px] text-[12px]" style={{ color: 'var(--fg-2)' }}>
+                      {p.description}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </PopoverContent>
+          </Popover>
         </div>
       </div>
     </MeetingsShell>

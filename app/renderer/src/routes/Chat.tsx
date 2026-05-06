@@ -1,13 +1,17 @@
 import * as React from 'react';
 import {
   ArrowUp,
-  ChefHat,
   ChevronRight,
   Mic,
   Paperclip,
   Sparkles,
 } from 'lucide-react';
 import { ChatHistoryRow } from '@/components/ChatHistoryRow';
+import {
+  Popover,
+  PopoverAnchor,
+  PopoverContent,
+} from '@/components/ui/popover';
 import { MeetingsShell } from '@/components/MeetingsShell';
 import {
   useAllChatSessions,
@@ -18,17 +22,7 @@ import { useAiProvider } from '@/hooks/useAi';
 import { useUserName } from '@/hooks/useSettings';
 import { navigate } from '@/lib/router';
 import { GLOBAL_SCOPE, bucketKey, deriveSessionName, toBucketLabel } from '@/lib/chat';
-
-// Templated prompts ("Meals" — Steno's playful name for what other apps call
-// recipes/suggestions). Keep this list small at the top level; "See all"
-// can reveal the full library in a follow-up.
-const MEALS: { label: string; prompt: string }[] = [
-  { label: 'List recent todos', prompt: 'List my action items from the last week.' },
-  { label: 'Coach me', prompt: 'Coach me on my recent meetings — patterns, blind spots, things to work on.' },
-  { label: 'Write weekly recap', prompt: 'Write a recap of this week based on my notes.' },
-  { label: 'Streamline my calendar', prompt: 'Look at my upcoming meetings and suggest which ones I could skip or combine.' },
-  { label: 'Blind spots', prompt: 'What blind spots have come up across my recent meetings?' },
-];
+import { PRESETS, PresetGlyph } from '@/lib/chatPresets';
 
 export function Chat() {
   const allSessions = useAllChatSessions();
@@ -40,6 +34,7 @@ export function Chat() {
   const userName = useUserName();
 
   const [input, setInput] = React.useState('');
+  const [presetsOpen, setPresetsOpen] = React.useState(false);
   const submittingRef = React.useRef(false);
   const inputRef = React.useRef<HTMLInputElement>(null);
 
@@ -103,8 +98,9 @@ export function Chat() {
     }
   };
 
-  const onPickMeal = (prompt: string) => {
+  const onPickPreset = (prompt: string) => {
     setInput(prompt);
+    setPresetsOpen(false);
     inputRef.current?.focus();
   };
 
@@ -131,31 +127,41 @@ export function Chat() {
 
         {!ready && provider.isFetched && <CloudRequiredBanner />}
 
-        <form
-          onSubmit={onSubmit}
-          className="mb-8 rounded-2xl border p-3 transition-shadow focus-within:shadow-[var(--shadow-md)]"
-          style={{
-            borderColor: 'var(--border-subtle)',
-            background: 'var(--surface-raised)',
-            opacity: ready ? 1 : 0.6,
-          }}
-        >
-          <input
-            ref={inputRef}
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                void submit(input);
-              }
-            }}
-            disabled={!ready}
-            placeholder={ready ? 'What topics came up?' : 'Connect a cloud provider in Settings to ask across notes'}
-            className="block w-full bg-transparent px-2 pb-3 pt-1 outline-none disabled:cursor-not-allowed"
-            style={{ fontSize: 15, color: 'var(--fg-1)', fontFamily: 'var(--font-sans)' }}
-          />
+        <Popover open={presetsOpen} onOpenChange={setPresetsOpen}>
+          <PopoverAnchor asChild>
+            <form
+              onSubmit={onSubmit}
+              className="mb-8 rounded-2xl border p-3 transition-shadow focus-within:shadow-[var(--shadow-md)]"
+              style={{
+                borderColor: 'var(--border-subtle)',
+                background: 'var(--surface-raised)',
+                opacity: ready ? 1 : 0.6,
+              }}
+            >
+              <input
+                ref={inputRef}
+                type="text"
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => {
+                  // Type "/" with an empty input → open the presets picker
+                  // (matches the Granola pattern). Don't insert the slash —
+                  // it's a shortcut character, not part of the prompt.
+                  if (e.key === '/' && input === '' && ready) {
+                    e.preventDefault();
+                    setPresetsOpen(true);
+                    return;
+                  }
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    void submit(input);
+                  }
+                }}
+                disabled={!ready}
+                placeholder={ready ? 'Summarise my meetings this week  /' : 'Connect a cloud provider in Settings to ask across notes'}
+                className="block w-full bg-transparent px-2 pb-3 pt-1 outline-none disabled:cursor-not-allowed"
+                style={{ fontSize: 15, color: 'var(--fg-1)', fontFamily: 'var(--font-sans)' }}
+              />
           <div className="flex items-center justify-between gap-2 px-1">
             <div className="flex items-center gap-1">
               <button
@@ -197,6 +203,38 @@ export function Chat() {
             </div>
           </div>
         </form>
+          </PopoverAnchor>
+          <PopoverContent
+            align="start"
+            sideOffset={8}
+            className="w-[var(--radix-popover-trigger-width)] max-w-none p-1"
+            // Don't yank focus from the input when the popover opens — the
+            // user is mid-typing and Enter/Esc need to keep working there.
+            onOpenAutoFocus={(e) => e.preventDefault()}
+          >
+            <div className="px-2 pb-1 pt-0.5 text-[11px] font-medium" style={{ color: 'var(--fg-muted)' }}>
+              Presets
+            </div>
+            <div className="flex flex-col">
+              {PRESETS.map((p) => (
+                <button
+                  key={p.label}
+                  type="button"
+                  onClick={() => onPickPreset(p.prompt)}
+                  className="flex flex-col items-start gap-0.5 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-[color:var(--surface-hover)]"
+                >
+                  <div className="flex items-center gap-2 text-[13px]" style={{ color: 'var(--fg-1)' }}>
+                    <PresetGlyph />
+                    {p.label}
+                  </div>
+                  <div className="pl-[26px] text-[12px]" style={{ color: 'var(--fg-2)' }}>
+                    {p.description}
+                  </div>
+                </button>
+              ))}
+            </div>
+          </PopoverContent>
+        </Popover>
 
         <section className="mb-10">
           <SectionHead
@@ -266,13 +304,13 @@ export function Chat() {
         </section>
 
         <section className="pb-12">
-          <SectionHead title="Meals" />
+          <SectionHead title="Presets" />
           <div className="flex flex-wrap gap-2">
-            {MEALS.map((m) => (
+            {PRESETS.map((m) => (
               <button
                 key={m.label}
                 type="button"
-                onClick={() => onPickMeal(m.prompt)}
+                onClick={() => onPickPreset(m.prompt)}
                 className="inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-[13px] transition-colors hover:bg-[color:var(--surface-hover)]"
                 style={{
                   borderColor: 'var(--border-subtle)',
@@ -280,20 +318,10 @@ export function Chat() {
                   background: 'var(--surface-raised)',
                 }}
               >
-                <ChefHat className="size-[13px]" style={{ color: 'var(--fg-2)' }} />
+                <PresetGlyph />
                 {m.label}
               </button>
             ))}
-            <button
-              type="button"
-              className="inline-flex items-center gap-1 rounded-full px-3 py-1.5 text-[13px] transition-colors hover:bg-[color:var(--surface-hover)]"
-              style={{ color: 'var(--fg-2)' }}
-              aria-label="See all preset prompts"
-              title="See all (coming soon)"
-            >
-              See all
-              <ChevronRight className="size-[12px]" />
-            </button>
           </div>
         </section>
       </div>
