@@ -9,8 +9,15 @@
     "url": "https://github.com/ruzin/stenoai.git"
   },
   "scripts": {
-    "start": "electron .",
+    "start": "npm run build:renderer && electron .",
+    "start:legacy": "electron .",
+    "dev:renderer": "vite",
+    "build:renderer": "vite build",
+    "typecheck:renderer": "tsc -p renderer/tsconfig.json --noEmit",
+    "lint:renderer": "eslint renderer/src --ext .ts,.tsx",
+    "format:renderer": "prettier --write renderer/src",
     "build": "electron-builder",
+    "pack:unsigned": "electron-builder --dir --config electron-builder.ci.yml",
     "build-mac": "electron-builder --mac",
     "build:intel": "electron-builder --mac --x64",
     "build:arm64": "electron-builder --mac --arm64",
@@ -22,7 +29,9 @@
     "version:major": "npm version major && git push && git push --tags",
     "release:patch": "npm run version:patch && npm run build",
     "release:minor": "npm run version:minor && npm run build",
-    "release:major": "npm run version:major && npm run build"
+    "release:major": "npm run version:major && npm run build",
+    "test:e2e": "playwright test --config ../e2e/playwright.config.ts",
+    "test:e2e:update": "playwright test --config ../e2e/playwright.config.ts --update-snapshots"
   },
   "keywords": [
     "audio",
@@ -37,15 +46,51 @@
   "license": "MIT",
   "devDependencies": {
     "@electron/notarize": "^3.1.1",
+    "@playwright/test": "^1.48.0",
+    "@types/node": "^20.12.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@typescript-eslint/eslint-plugin": "^8.59.0",
+    "@typescript-eslint/parser": "^8.59.0",
+    "@vitejs/plugin-react": "^4.7.0",
+    "autoprefixer": "^10.5.0",
     "electron": "^31.0.1",
     "electron-builder": "^24.0.0",
-    "puppeteer-core": "^24.37.3"
+    "eslint": "^9.39.4",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-react": "^7.37.5",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "playwright": "^1.48.0",
+    "postcss": "^8.5.10",
+    "prettier": "^3.8.3",
+    "puppeteer-core": "^24.37.3",
+    "tailwindcss": "^3.4.19",
+    "tailwindcss-animate": "^1.0.7",
+    "typescript": "^5.5.0",
+    "vite": "^5.4.21"
   },
   "dependencies": {
+    "@radix-ui/react-dialog": "^1.1.15",
+    "@radix-ui/react-popover": "^1.1.15",
+    "@radix-ui/react-select": "^2.2.6",
+    "@radix-ui/react-slot": "^1.2.4",
+    "@radix-ui/react-switch": "^1.2.6",
+    "@radix-ui/react-tabs": "^1.1.13",
+    "@radix-ui/react-tooltip": "^1.2.8",
+    "@tanstack/react-query": "^5.99.2",
+    "@tanstack/react-virtual": "^3.13.24",
     "axios": "^1.6.0",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
     "electron-audio-loopback": "^1.0.0",
     "electron-updater": "^6.8.3",
-    "posthog-node": "^4.18.0"
+    "lucide-react": "^1.8.0",
+    "posthog-node": "^4.18.0",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5",
+    "react-router-dom": "^7.14.2",
+    "tailwind-merge": "^3.5.0",
+    "zustand": "^5.0.12"
   },
   "build": {
     "appId": "com.stenoai.recorder",
@@ -67,7 +112,9 @@
       "!dist/**/*",
       "!build/**/*",
       "!assets/**/*",
-      "!.git/**/*"
+      "!.git/**/*",
+      "renderer/dist/**",
+      "preload.js"
     ],
     "extraResources": [
       {

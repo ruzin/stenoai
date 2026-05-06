@@ -153,6 +153,28 @@ class Config:
             self.config_path = config_path
 
         self._config: Dict[str, Any] = self._load()
+        self._migrate_cloud_model_map()
+
+    def _migrate_cloud_model_map(self) -> None:
+        """One-shot migration from legacy single 'cloud_model' to per-provider
+        'cloud_models' map. Runs at load time (before any setters can change
+        the provider) so the legacy value is correctly attributed to whichever
+        provider was active when it was last saved."""
+        if isinstance(self._config.get("cloud_models"), dict):
+            return  # Already migrated.
+        legacy = self._config.get("cloud_model")
+        has_legacy_value = isinstance(legacy, str) and legacy.strip()
+        if not has_legacy_value:
+            # Nothing to migrate. Don't write — if _load() returned defaults
+            # because the existing file was corrupt/unreadable, persisting an
+            # empty cloud_models map would overwrite the recoverable file.
+            self._config["cloud_models"] = {}
+            return
+        current_provider = self._config.get("cloud_provider", "openai")
+        if current_provider not in self.VALID_CLOUD_PROVIDERS:
+            current_provider = "openai"
+        self._config["cloud_models"] = {current_provider: legacy.strip()}
+        self._save()
 
     def _load(self) -> Dict[str, Any]:
         """Load configuration from file."""
@@ -439,8 +461,16 @@ class Config:
         import os
         return os.environ.get("STENOAI_CLOUD_API_KEY", "")
 
+    # Per-provider sensible defaults. Used when the user switches provider for
+    # the first time and we have no remembered model for that provider yet.
+    CLOUD_MODEL_DEFAULTS = {
+        "openai": "gpt-4o-mini",
+        "anthropic": "claude-haiku-4-5-20251001",
+        "custom": "gpt-4o-mini",
+    }
+
     def get_cloud_provider(self) -> str:
-        """Get the cloud provider type ('openai' or 'custom')."""
+        """Get the cloud provider type ('openai', 'anthropic', or 'custom')."""
         value = self._config.get("cloud_provider", "openai")
         return value if value in self.VALID_CLOUD_PROVIDERS else "openai"
 
@@ -452,12 +482,35 @@ class Config:
         self._config["cloud_provider"] = provider
         return self._save()
 
+    def _get_cloud_models_map(self) -> dict:
+        """Per-provider model store. Migration is handled in __init__ so this
+        just returns the dict (or empty)."""
+        models = self._config.get("cloud_models")
+        if not isinstance(models, dict):
+            models = {}
+            self._config["cloud_models"] = models
+        return models
+
     def get_cloud_model(self) -> str:
-        """Get the cloud model name."""
-        return self._config.get("cloud_model", "gpt-4o-mini")
+        """Get the cloud model for the currently selected provider. Each
+        provider has its own remembered model so switching providers doesn't
+        carry an incompatible model name across (e.g. a Claude model into
+        OpenAI). Falls back to the per-provider default on first use."""
+        provider = self.get_cloud_provider()
+        models = self._get_cloud_models_map()
+        if provider in models and isinstance(models[provider], str) and models[provider].strip():
+            return models[provider]
+        return self.CLOUD_MODEL_DEFAULTS.get(provider, "gpt-4o-mini")
 
     def set_cloud_model(self, model: str) -> bool:
-        """Set the cloud model name."""
+        """Set the cloud model for the currently selected provider."""
+        provider = self.get_cloud_provider()
+        models = self._get_cloud_models_map()
+        models[provider] = model.strip()
+        self._config["cloud_models"] = models
+        # Mirror to legacy 'cloud_model' so any code still reading the flat
+        # field sees the active provider's choice. Safe to remove once no
+        # consumers reference it.
         self._config["cloud_model"] = model.strip()
         return self._save()
 

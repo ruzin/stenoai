@@ -49,6 +49,7 @@ class FoldersManager:
             "id": str(uuid.uuid4())[:8],
             "name": name,
             "color": color,
+            "icon": "folder",
             "created_at": datetime.now().isoformat(),
             "order": len(self._data["folders"]),
         }
@@ -56,6 +57,13 @@ class FoldersManager:
         if self._save():
             return folder
         return None
+
+    def update_icon(self, folder_id: str, icon: str) -> bool:
+        for folder in self._data["folders"]:
+            if folder["id"] == folder_id:
+                folder["icon"] = icon
+                return self._save()
+        return False
 
     def rename_folder(self, folder_id: str, name: str) -> bool:
         for folder in self._data["folders"]:
@@ -86,8 +94,47 @@ class FoldersManager:
         self._data["folders"] = reordered
         return self._save()
 
+    def _update_md_folders(self, summary_path: Path, update_fn) -> bool:
+        """Update the folders list in a .md file's YAML frontmatter."""
+        import re as _re
+        try:
+            content = summary_path.read_text(encoding='utf-8')
+            frontmatter = ''
+            body = content
+            if content.startswith('---'):
+                parts = content.split('---', 2)
+                if len(parts) >= 3:
+                    frontmatter = parts[1]
+                    body = parts[2]
+
+            current: List[str] = []
+            m = _re.search(r'^folders:\s*(.+)$', frontmatter, _re.MULTILINE)
+            if m:
+                try:
+                    current = json.loads(m.group(1))
+                except (ValueError, TypeError):
+                    current = []
+
+            updated = update_fn(current)
+            folders_line = f'folders: {json.dumps(updated)}'
+
+            if m:
+                frontmatter = _re.sub(r'^folders:.*$', folders_line, frontmatter, flags=_re.MULTILINE)
+            else:
+                frontmatter = frontmatter.rstrip('\n') + f'\n{folders_line}\n'
+
+            summary_path.write_text(f'---{frontmatter}---{body}', encoding='utf-8')
+            return True
+        except Exception as e:
+            logger.error(f"Error updating md folders: {e}")
+            return False
+
     def add_meeting_to_folder(self, summary_path: Path, folder_id: str) -> bool:
-        """Add a folder reference to a meeting's summary JSON."""
+        """Add a folder reference to a meeting's summary file."""
+        if summary_path.suffix == '.md':
+            return self._update_md_folders(
+                summary_path, lambda f: list({*f, folder_id})
+            )
         try:
             with open(summary_path, "r") as f:
                 data = json.load(f)
@@ -103,7 +150,11 @@ class FoldersManager:
             return False
 
     def remove_meeting_from_folder(self, summary_path: Path, folder_id: str) -> bool:
-        """Remove a folder reference from a meeting's summary JSON."""
+        """Remove a folder reference from a meeting's summary file."""
+        if summary_path.suffix == '.md':
+            return self._update_md_folders(
+                summary_path, lambda f: [x for x in f if x != folder_id]
+            )
         try:
             with open(summary_path, "r") as f:
                 data = json.load(f)
