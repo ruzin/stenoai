@@ -57,8 +57,12 @@ export function useStreamingQuery() {
   }, []);
 
   // Cross-note variant of startStream — same wire shape, no summaryFile.
-  // Used by the Chat tab to ask questions across every meeting summary.
-  const startGlobalStream = React.useCallback((question: string): string => {
+  // Used by the Chat tab to ask questions across every meeting summary,
+  // optionally scoped to a single folder.
+  const startGlobalStream = React.useCallback((
+    question: string,
+    folderId?: string | null,
+  ): string => {
     const id = newId();
     setStreams((prev) => ({
       ...prev,
@@ -92,7 +96,7 @@ export function useStreamingQuery() {
       },
     });
     unsubsRef.current.set(id, off);
-    ipc().query.chatGlobalStream(id, question);
+    ipc().query.chatGlobalStream(id, question, folderId ?? null);
     return id;
   }, []);
 

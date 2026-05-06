@@ -334,7 +334,7 @@ export interface StenoaiBridge {
   query: {
     ask: RequestFn<[file: string, q: string], QueryResponse>;
     askStream: SendFn<[id: string, file: string, q: string]>;
-    chatGlobalStream: SendFn<[id: string, q: string]>;
+    chatGlobalStream: SendFn<[id: string, q: string, folderId?: string | null]>;
     cancel: SendFn<[id: string]>;
   };
 

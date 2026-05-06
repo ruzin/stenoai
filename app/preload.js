@@ -117,7 +117,7 @@ const stenoai = {
   query: {
     ask: (file, q) => invoke('query-transcript', file, q),
     askStream: (id, file, q) => send('query-transcript-stream', id, file, q),
-    chatGlobalStream: (id, q) => send('chat-global-stream', id, q),
+    chatGlobalStream: (id, q, folderId) => send('chat-global-stream', id, q, folderId ?? null),
     cancel: (id) => send('query-cancel', id),
   },
 

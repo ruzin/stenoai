@@ -1464,16 +1464,21 @@ ipcMain.on('query-transcript-stream', (event, queryId, summaryFile, question) =>
 // query-done) so the renderer can reuse useStreamingQuery. Cloud-only —
 // the Python CLI rejects local providers because we don't have retrieval
 // yet and a full-corpus prompt blows local context windows.
-ipcMain.on('chat-global-stream', (event, queryId, question) => {
-  sendDebugLog(`💬 Global chat query: ${String(question || '').slice(0, 80)}...`);
+ipcMain.on('chat-global-stream', (event, queryId, question, folderId) => {
+  sendDebugLog(`💬 Global chat query: ${String(question || '').slice(0, 80)}... (folder: ${folderId || 'all'})`);
   const cloudKey = loadCloudApiKey();
   const env = cloudKey ? { ...process.env, STENOAI_CLOUD_API_KEY: cloudKey } : process.env;
+
+  const args = ['chat-global-streaming', '-q', question];
+  if (folderId && typeof folderId === 'string' && folderId !== 'all') {
+    args.push('-f', folderId);
+  }
 
   let proc;
   try {
     proc = require('child_process').spawn(
       getBackendPath(),
-      ['chat-global-streaming', '-q', question],
+      args,
       { env, cwd: getBackendCwd() },
     );
   } catch (err) {

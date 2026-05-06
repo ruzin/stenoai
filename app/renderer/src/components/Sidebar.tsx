@@ -25,6 +25,9 @@ export interface SidebarFolder {
   id: string;
   name: string;
   icon?: string;
+  /** User-chosen folder color. Used to tint the sidebar icon so it
+   *  matches the chip in the FolderScopePicker / FolderDetail header. */
+  color?: string;
   meetings: SidebarMeeting[];
 }
 

@@ -3,10 +3,9 @@ import {
   ArrowLeft,
   ArrowUp,
   ChevronDown,
-  Mic,
-  Paperclip,
   Square,
 } from 'lucide-react';
+import { FolderScopePicker } from '@/components/FolderScopePicker';
 import { ChatHistoryRow } from '@/components/ChatHistoryRow';
 import { MeetingsShell } from '@/components/MeetingsShell';
 import {
@@ -47,6 +46,10 @@ export function ChatConversation({ sessionId }: ChatConversationProps) {
   const [activeStreamId, setActiveStreamId] = React.useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = React.useState(false);
   const [presetsOpen, setPresetsOpen] = React.useState(false);
+  // Folder scope persists for the lifetime of the conversation page mount.
+  // The entry page's scope is handed off via consumePendingNewChat; later
+  // turns in the same conversation can be re-scoped from this composer.
+  const [scopeFolderId, setScopeFolderId] = React.useState<string | null>(null);
   const pendingPersistRef = React.useRef<string | null>(null);
   const submittingRef = React.useRef(false);
   const inputRef = React.useRef<HTMLInputElement>(null);
@@ -65,11 +68,14 @@ export function ChatConversation({ sessionId }: ChatConversationProps) {
 
   // Pick up an in-flight stream the entry page kicked off right before
   // navigating, so we don't lose its tokens during the route change.
+  // The entry page's chosen scope rides along with the handoff so the
+  // composer here starts with the same folder context.
   React.useEffect(() => {
     const pending = consumePendingNewChat(sessionId);
     if (pending) {
       pendingPersistRef.current = pending.sessionId;
       setActiveStreamId(pending.streamId);
+      setScopeFolderId(pending.folderId);
     }
   }, [sessionId]);
 
@@ -148,7 +154,7 @@ export function ChatConversation({ sessionId }: ChatConversationProps) {
         ts: Date.now(),
       });
       setInput('');
-      const streamId = streaming.startGlobalStream(q);
+      const streamId = streaming.startGlobalStream(q, scopeFolderId);
       pendingPersistRef.current = session.id;
       setActiveStreamId(streamId);
     } finally {
@@ -347,9 +353,7 @@ export function ChatConversation({ sessionId }: ChatConversationProps) {
           />
           <div className="flex items-center justify-between gap-2 px-1">
             <div className="flex items-center gap-1">
-              <button type="button" disabled className="inline-flex size-7 items-center justify-center rounded-md disabled:opacity-50" style={{ color: 'var(--fg-2)' }} aria-label="Attach (coming soon)">
-                <Paperclip className="size-[14px]" />
-              </button>
+              <FolderScopePicker value={scopeFolderId} onChange={setScopeFolderId} />
               <span className="text-[12px]" style={{ color: 'var(--fg-muted)' }}>
                 {provider.data?.cloud_provider
                   ? `${provider.data.cloud_provider} · ${provider.data.cloud_model}`
@@ -357,9 +361,6 @@ export function ChatConversation({ sessionId }: ChatConversationProps) {
               </span>
             </div>
             <div className="flex items-center gap-1">
-              <button type="button" disabled className="inline-flex size-7 items-center justify-center rounded-md disabled:opacity-50" style={{ color: 'var(--fg-2)' }} aria-label="Voice (coming soon)">
-                <Mic className="size-[14px]" />
-              </button>
               {isStreaming ? (
                 <button
                   type="button"

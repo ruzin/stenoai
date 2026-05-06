@@ -2,11 +2,10 @@ import * as React from 'react';
 import {
   ArrowUp,
   ChevronRight,
-  Mic,
-  Paperclip,
   Sparkles,
 } from 'lucide-react';
 import { ChatHistoryRow } from '@/components/ChatHistoryRow';
+import { FolderScopePicker } from '@/components/FolderScopePicker';
 import {
   Popover,
   PopoverAnchor,
@@ -35,6 +34,10 @@ export function Chat() {
 
   const [input, setInput] = React.useState('');
   const [presetsOpen, setPresetsOpen] = React.useState(false);
+  // Scope: null = ask across every note. Folder ID limits the corpus
+  // server-side. Default null so first-time users get the broadest
+  // possible answer.
+  const [scopeFolderId, setScopeFolderId] = React.useState<string | null>(null);
   const submittingRef = React.useRef(false);
   const inputRef = React.useRef<HTMLInputElement>(null);
 
@@ -87,11 +90,11 @@ export function Chat() {
         ts: Date.now(),
       });
       setInput('');
-      const streamId = streaming.startGlobalStream(q);
-      // Stash the stream id + session id on a module-level pending map so
-      // the conversation page can pick them up after navigation. Avoids
-      // having to thread them through the URL.
-      pendingNewChat = { sessionId, streamId };
+      const streamId = streaming.startGlobalStream(q, scopeFolderId);
+      // Stash the stream id + session id + scope on a module-level pending
+      // map so the conversation page can pick them up after navigation.
+      // Avoids having to thread them through the URL.
+      pendingNewChat = { sessionId, streamId, folderId: scopeFolderId };
       navigate(`/chat/${encodeURIComponent(sessionId)}`);
     } finally {
       submittingRef.current = false;
@@ -164,16 +167,7 @@ export function Chat() {
               />
           <div className="flex items-center justify-between gap-2 px-1">
             <div className="flex items-center gap-1">
-              <button
-                type="button"
-                disabled
-                className="inline-flex size-7 items-center justify-center rounded-md disabled:opacity-50"
-                style={{ color: 'var(--fg-2)' }}
-                aria-label="Attach a note (coming soon)"
-                title="Attach a note (coming soon)"
-              >
-                <Paperclip className="size-[14px]" />
-              </button>
+              <FolderScopePicker value={scopeFolderId} onChange={setScopeFolderId} />
               <span className="text-[12px]" style={{ color: 'var(--fg-muted)' }}>
                 {provider.data?.cloud_provider
                   ? `${provider.data.cloud_provider} · ${provider.data.cloud_model}`
@@ -181,16 +175,6 @@ export function Chat() {
               </span>
             </div>
             <div className="flex items-center gap-1">
-              <button
-                type="button"
-                disabled
-                className="inline-flex size-7 items-center justify-center rounded-md disabled:opacity-50"
-                style={{ color: 'var(--fg-2)' }}
-                aria-label="Voice input (coming soon)"
-                title="Voice input (coming soon)"
-              >
-                <Mic className="size-[14px]" />
-              </button>
               <button
                 type="submit"
                 disabled={!input.trim() || !ready}
@@ -335,6 +319,7 @@ export function Chat() {
 export interface PendingNewChat {
   sessionId: string;
   streamId: string;
+  folderId: string | null;
 }
 let pendingNewChat: PendingNewChat | null = null;
 

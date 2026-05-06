@@ -1833,10 +1833,12 @@ def query_streaming(transcript_file, question):
 
 
 @cli.command(name='chat-global-streaming')
-@click.option('--question', '-q', required=True, help='Question to ask across all notes')
-def chat_global_streaming(question):
-    """Cross-note chat: gather every meeting's title + summary + key points,
-    feed as context to the cloud LLM, stream the answer.
+@click.option('--question', '-q', required=True, help='Question to ask across notes')
+@click.option('--folder', '-f', default=None, help='Folder ID to scope the corpus to (default: all notes)')
+def chat_global_streaming(question, folder):
+    """Cross-note chat: gather meeting title + summary + key points, feed as
+    context to the cloud LLM, stream the answer. Optionally scope to a single
+    folder; default queries every note.
 
     Cloud-only. Local models can't fit a full corpus of summaries reliably,
     and we don't have retrieval (RAG) yet — caller (main.js) is responsible
@@ -1874,8 +1876,20 @@ def chat_global_streaming(question):
         except Exception:
             continue
 
+    # Folder scoping. Each meeting record carries a 'folders' array of IDs;
+    # filter to only those that include the requested ID. Empty folder ID
+    # or 'all' explicitly means no filter.
+    if folder and folder != 'all':
+        summaries = [
+            (path, data) for (path, data) in summaries
+            if isinstance(data.get('folders'), list) and folder in data['folders']
+        ]
+
     if not summaries:
-        print("CHAT_STREAM_ERROR:No notes found yet. Record a meeting first.", flush=True)
+        if folder and folder != 'all':
+            print("CHAT_STREAM_ERROR:No notes in this folder yet. Pick another or remove the filter.", flush=True)
+        else:
+            print("CHAT_STREAM_ERROR:No notes found yet. Record a meeting first.", flush=True)
         return
 
     # Most-recent first so the model weights newer context higher when token
