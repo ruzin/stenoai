@@ -84,7 +84,7 @@ export function MeetingDetail({ summaryFile }: MeetingDetailProps) {
         </div>
       ) : !meeting.data ? (
         <div className="space-y-4 text-center">
-          <h1 className="mv-title">Meeting not found.</h1>
+          <h1 className="mv-title">Note not found.</h1>
           <p className="text-[17px] leading-[1.55]" style={{ color: 'var(--fg-2)' }}>
             This recording may have been deleted. Pick another from the sidebar.
           </p>
@@ -318,7 +318,7 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
                   onClick={() => setDeleteOpen(true)}
                 >
                   <Trash2 className="size-[13px] shrink-0" />
-                  Delete meeting
+                  Delete note
                 </button>
               </PopoverContent>
             </Popover>

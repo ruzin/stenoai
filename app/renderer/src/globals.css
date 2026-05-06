@@ -208,10 +208,13 @@
 
   code, pre, .mono { font-family: var(--font-mono); }
 
-  ::selection { background: var(--paper-2); color: var(--fg-1); }
+  /* Tinted accent so the selection is visible against subtle surface tints
+     like the search bars (which sit on a near-paper background where the
+     previous --paper-2 highlight blended in invisibly). */
+  ::selection { background: rgba(99, 102, 241, 0.22); color: var(--fg-1); }
   .dark ::selection,
   [data-theme="dark"] ::selection {
-    background: var(--surface-active);
+    background: rgba(129, 140, 248, 0.32);
     color: var(--fg-1);
   }
 }

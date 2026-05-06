@@ -88,7 +88,7 @@ export function Processing() {
   }, [activeSession, updateMeeting]);
 
   const displayTitle =
-    streamedTitle ?? draft?.title ?? activeSession ?? 'Meeting';
+    streamedTitle ?? draft?.title ?? activeSession ?? 'Note';
 
   return (
     <MeetingsShell activeSummaryFile={null}>

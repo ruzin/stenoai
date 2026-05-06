@@ -436,7 +436,7 @@ Transcript:
         )
 
         # Step 2b: Auto-generate title for auto-named meetings
-        if re.match(r'^(Meeting|Note)-[A-Z0-9]{6}$', session_name):
+        if re.match(r'^(Meeting|Note)(-[A-Z0-9]{6})?$', session_name):
             try:
                 language = transcript_data.get("output_language")
                 generated_title = self.summarizer.generate_title(
@@ -556,7 +556,7 @@ Transcript:
         print("STREAM_COMPLETE", flush=True)
 
         # Step 3: Generate title
-        if re.match(r'^(Meeting|Note)-[A-Z0-9]{6}$', session_name):
+        if re.match(r'^(Meeting|Note)(-[A-Z0-9]{6})?$', session_name):
             try:
                 generated_title = self.summarizer.generate_title(
                     streamed_md, transcript_text, language=output_language
@@ -889,7 +889,7 @@ def process_streaming(audio_file, name, notes):
 
         # Step 3: Generate title
         session_name = name
-        if re.match(r'^(Meeting|Note)-[A-Z0-9]{6}$', name):
+        if re.match(r'^(Meeting|Note)(-[A-Z0-9]{6})?$', name):
             try:
                 generated_title = recorder.summarizer.generate_title(
                     streamed_md, transcript_text, language=output_language

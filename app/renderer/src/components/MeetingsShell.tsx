@@ -249,7 +249,7 @@ export function MeetingsShell({
           deleteTarget?.type === 'folder'
             ? `Delete folder "${deleteTarget.name}"?`
             : deleteTarget
-              ? `Delete meeting "${deleteTarget.name}"?`
+              ? `Delete note "${deleteTarget.name}"?`
               : ''
         }
         description={

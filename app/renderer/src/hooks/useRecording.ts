@@ -60,7 +60,10 @@ export function useRecording() {
       // Optimistic cache write so the UI flips to status='recording'
       // instantly. The backend's start-recording-ui has a 2s warm-up and
       // the next queue poll (1s) will reconcile sessionName + elapsed.
-      const optimisticName = name && name.trim() ? name.trim() : 'Meeting';
+      // 'Note' is the placeholder that the Python post-processor recognises
+      // (regex ^(Meeting|Note)(-[A-Z0-9]{6})?$) and replaces with an AI-
+      // generated title from the summary + transcript.
+      const optimisticName = name && name.trim() ? name.trim() : 'Note';
       qc.setQueryData(queueKey, {
         success: true,
         isProcessing: false,

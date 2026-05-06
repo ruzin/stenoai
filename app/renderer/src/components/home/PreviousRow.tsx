@@ -64,7 +64,7 @@ export function PreviousRow({ meeting, folderName }: PreviousRowProps) {
             className="truncate text-sm font-medium tracking-[-0.005em]"
             style={{ color: 'var(--fg-1)' }}
           >
-            {info.name || 'Untitled meeting'}
+            {info.name || 'Untitled note'}
           </div>
           {isLive && <LiveBadge />}
           {isProcessing && <ProcessingBadge />}

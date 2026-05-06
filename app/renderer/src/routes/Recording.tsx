@@ -52,7 +52,7 @@ export function Recording() {
               <EditableTitle
                 value={live.title}
                 onChange={live.setTitle}
-                placeholder="New meeting"
+                placeholder="New note"
               />
 
               <div className="mt-3 flex flex-wrap items-center gap-2">

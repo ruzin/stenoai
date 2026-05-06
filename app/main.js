@@ -1977,6 +1977,10 @@ ipcMain.handle('start-recording-ui', async (_, sessionName) => {
     let hasStarted = false;
     let processingSucceeded = false;
     let recordedAudioFile = null;
+    // Authoritative pointer to the final summary file once Python finishes
+    // auto-renaming + writing it (emitted as `SAVED:<path>`). Use this in
+    // preference to the name/audio fallbacks since it can't drift.
+    let savedSummaryFile = null;
 
     currentRecordingProcess.stdout.on('data', (data) => {
       const output = data.toString();
@@ -2007,6 +2011,8 @@ ipcMain.handle('start-recording-ui', async (_, sessionName) => {
           if (mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.webContents.send('summary-complete', { success: true, sessionName: actualSessionName });
           }
+        } else if (line.startsWith('SAVED:')) {
+          savedSummaryFile = line.slice(6).trim();
         } else if (line.trim()) {
           sendDebugLog(line.trim());
         }
@@ -2022,11 +2028,20 @@ ipcMain.handle('start-recording-ui', async (_, sessionName) => {
           runPythonScript('simple_recorder.py', ['list-meetings'], true)
             .then(meetingsResult => {
               const allMeetings = JSON.parse(meetingsResult);
-              // Try matching by name first, then by audio file (name may have been
-              // auto-generated from the transcript)
-              let processedMeeting = allMeetings.find(m => m.session_info?.name === actualSessionName);
+              // Prefer the SAVED:<path> pointer Python emits — that's the
+              // exact summary file written this session and survives the
+              // auto-rename. Fall back to name match (only if user kept the
+              // placeholder), then to audio-file basename.
+              let processedMeeting = null;
+              if (savedSummaryFile) {
+                processedMeeting = allMeetings.find(
+                  m => m.session_info?.summary_file === savedSummaryFile,
+                );
+              }
+              if (!processedMeeting) {
+                processedMeeting = allMeetings.find(m => m.session_info?.name === actualSessionName);
+              }
               if (!processedMeeting && recordedAudioFile) {
-                // Name may have been auto-generated from transcript; match by audio file basename
                 const audioBasename = path.basename(recordedAudioFile);
                 processedMeeting = allMeetings.find(m =>
                   m.session_info?.audio_file && path.basename(m.session_info.audio_file) === audioBasename

@@ -192,8 +192,8 @@ export function Home({ mode }: HomeProps) {
                       type="text"
                       value={search}
                       onChange={(e) => setSearch(e.target.value)}
-                      placeholder="Search meetings"
-                      aria-label="Search meetings"
+                      placeholder="Search notes"
+                      aria-label="Search notes"
                       className="h-[26px] w-[180px] rounded-md border-0 pl-7 pr-7 text-[12.5px] outline-none transition-colors focus:shadow-[inset_0_0_0_1px_hsl(var(--border))]"
                       style={{
                         background: 'rgba(27,27,25,0.04)',
