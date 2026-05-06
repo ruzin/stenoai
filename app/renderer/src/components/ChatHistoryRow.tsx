@@ -50,6 +50,9 @@ export function ChatHistoryRow({
   const [renaming, setRenaming] = React.useState(false);
   const [draft, setDraft] = React.useState(session.name);
   const inputRef = React.useRef<HTMLInputElement>(null);
+  // Tracks whether the user pressed Escape so the imminent blur cancels
+  // instead of committing the (possibly edited) draft.
+  const cancelRef = React.useRef(false);
 
   React.useEffect(() => {
     if (!renaming) return;
@@ -98,10 +101,17 @@ export function ChatHistoryRow({
               commitRename();
             } else if (e.key === 'Escape') {
               e.preventDefault();
+              cancelRef.current = true;
               setRenaming(false);
             }
           }}
-          onBlur={commitRename}
+          onBlur={() => {
+            if (cancelRef.current) {
+              cancelRef.current = false;
+              return;
+            }
+            commitRename();
+          }}
           className="flex-1 min-w-0 rounded border-0 bg-transparent px-1 py-0 text-[13px] outline-none focus:shadow-[inset_0_0_0_1px_hsl(var(--border))]"
           style={{ color: 'var(--fg-1)' }}
         />

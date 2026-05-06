@@ -476,13 +476,17 @@ function GeneralTab() {
   const setUserName = useSetUserName();
   const [nameDraft, setNameDraft] = React.useState('');
   const nameSeededRef = React.useRef(false);
+  // Wait for the real query (not the sessionStorage placeholder) before
+  // seeding — otherwise we lock onto a stale empty string and ignore the
+  // canonical value when it arrives from disk.
   React.useEffect(() => {
     if (nameSeededRef.current) return;
+    if (userName.isPending || userName.isPlaceholderData) return;
     if (userName.data !== undefined) {
       setNameDraft(userName.data);
       nameSeededRef.current = true;
     }
-  }, [userName.data]);
+  }, [userName.data, userName.isPending, userName.isPlaceholderData]);
   const persistName = () => {
     const trimmed = nameDraft.trim();
     if (trimmed === (userName.data ?? '')) return;
@@ -543,7 +547,8 @@ function GeneralTab() {
           onKeyDown={(e) => {
             if (e.key === 'Enter') {
               e.preventDefault();
-              persistName();
+              // Just blur — onBlur runs persistName, so calling it directly
+              // here would queue a duplicate setUserName mutation.
               (e.target as HTMLInputElement).blur();
             }
           }}

@@ -1901,7 +1901,14 @@ def chat_global_streaming(question, folder):
 
     summaries.sort(key=sort_key, reverse=True)
 
+    # Cap the assembled corpus so a user with hundreds of meetings can't blow
+    # past the cloud model's context window. ~400k chars ≈ 100k tokens, well
+    # under both Anthropic (200k) and recent OpenAI (128k+) limits while
+    # leaving headroom for the prompt scaffold and the model's reply.
+    CORPUS_CHAR_BUDGET = 400_000
     blocks = []
+    used_chars = 0
+    truncated = 0
     for _, data in summaries:
         info = data.get("session_info", {}) or {}
         name = info.get("name") or "Untitled"
@@ -1916,9 +1923,21 @@ def chat_global_streaming(question, folder):
             block.append("Key points:\n" + "\n".join(f"- {p}" for p in key_points))
         if action_items:
             block.append("Action items:\n" + "\n".join(f"- {a}" for a in action_items))
-        blocks.append("\n".join(block))
+        block_text = "\n".join(block)
+        # +5 accounts for the "\n\n---\n\n" separator added later.
+        if used_chars + len(block_text) + 5 > CORPUS_CHAR_BUDGET and blocks:
+            truncated = len(summaries) - len(blocks)
+            break
+        blocks.append(block_text)
+        used_chars += len(block_text) + 5
 
     corpus = "\n\n---\n\n".join(blocks)
+    if truncated:
+        corpus += (
+            f"\n\n---\n\n_Note: {truncated} older note(s) omitted to stay within"
+            " the model's context window. Ask about a specific older meeting"
+            " to pull it in directly._"
+        )
 
     language = config.get_language()
     if language == "auto":

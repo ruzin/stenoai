@@ -11,13 +11,16 @@ import { cn } from '@/lib/utils';
 export function renderMarkdown(text: string): React.ReactNode {
   if (!text) return null;
 
-  const lines = text.split('\n');
+  // Strip trailing \r so CRLF input doesn't leave ghost characters at the end
+  // of every line — that breaks regex anchors and table cell parsing.
+  const lines = text.split('\n').map((l) => l.replace(/\r$/, ''));
   const nodes: React.ReactNode[] = [];
   let listItems: string[] = [];
   let listType: 'ul' | 'ol' | null = null;
   let codeLines: string[] = [];
   let codeLang: string | null = null;
   let inCode = false;
+  let lastWasGap = false;
   let key = 0;
 
   // Detect a markdown table starting at index i. Returns the table's row
@@ -38,11 +41,18 @@ export function renderMarkdown(text: string): React.ReactNode {
     const header = splitRow(headerRaw);
     const align = parseAlign(sepRaw);
     if (header.length === 0 || align.length === 0) return null;
+    // Header and separator must agree on column count, otherwise the alignment
+    // array would have undefined slots and the table would be malformed.
+    if (header.length !== align.length) return null;
 
     const rows: string[][] = [];
     let j = i + 2;
     while (j < lines.length && isTableRow(lines[j])) {
-      rows.push(splitRow(lines[j]));
+      const cells = splitRow(lines[j]);
+      // Pad/truncate to header width so React doesn't render undefined cells.
+      while (cells.length < header.length) cells.push('');
+      if (cells.length > header.length) cells.length = header.length;
+      rows.push(cells);
       j++;
     }
     // Require at least one data row — otherwise it's likely just two
@@ -69,6 +79,7 @@ export function renderMarkdown(text: string): React.ReactNode {
     );
     listItems = [];
     listType = null;
+    lastWasGap = false;
   };
 
   const flushCode = () => {
@@ -90,6 +101,7 @@ export function renderMarkdown(text: string): React.ReactNode {
     codeLines = [];
     codeLang = null;
     inCode = false;
+    lastWasGap = false;
   };
 
   for (let i = 0; i < lines.length; i++) {
@@ -163,6 +175,7 @@ export function renderMarkdown(text: string): React.ReactNode {
             </table>
           </div>,
         );
+        lastWasGap = false;
         i = tbl.end;
         continue;
       }
@@ -187,6 +200,7 @@ export function renderMarkdown(text: string): React.ReactNode {
           {renderInline(content)}
         </div>,
       );
+      lastWasGap = false;
       continue;
     }
 
@@ -214,12 +228,11 @@ export function renderMarkdown(text: string): React.ReactNode {
           {renderInline(line)}
         </p>,
       );
-    } else if (nodes.length > 0) {
+      lastWasGap = false;
+    } else if (nodes.length > 0 && !lastWasGap) {
       // Blank line between blocks — collapse runs, but preserve one as a gap.
-      const last = nodes[nodes.length - 1];
-      if (typeof last === 'object' && last && 'type' in (last as object) && (last as { type?: unknown }).type !== 'br') {
-        nodes.push(<div key={key++} className="h-2" aria-hidden />);
-      }
+      nodes.push(<div key={key++} className="h-2" aria-hidden />);
+      lastWasGap = true;
     }
   }
   flushList();
@@ -253,11 +266,30 @@ function isTableSeparator(line: string): boolean {
 }
 
 function splitRow(line: string): string[] {
-  // Strip the outer pipes then split. Trim each cell. Empty trailing cells
-  // (when the row ends with `|`) are dropped — we don't want to render a
-  // ghost column.
+  // Walk the row character-by-character so we can treat `\|` as a literal
+  // pipe inside cell content rather than a column boundary. Strip the
+  // outer pipes and any trailing empty cells (a row of `| a | b |` should
+  // not render a phantom third column).
   const trimmed = line.trim().replace(/^\|/, '').replace(/\|$/, '');
-  return trimmed.split('|').map((c) => c.trim());
+  const cells: string[] = [];
+  let buf = '';
+  for (let i = 0; i < trimmed.length; i++) {
+    const ch = trimmed[i];
+    if (ch === '\\' && trimmed[i + 1] === '|') {
+      buf += '|';
+      i++;
+      continue;
+    }
+    if (ch === '|') {
+      cells.push(buf.trim());
+      buf = '';
+      continue;
+    }
+    buf += ch;
+  }
+  cells.push(buf.trim());
+  while (cells.length > 0 && cells[cells.length - 1] === '') cells.pop();
+  return cells;
 }
 
 function parseAlign(separator: string): ('left' | 'center' | 'right' | null)[] {

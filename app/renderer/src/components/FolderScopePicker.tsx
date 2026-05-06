@@ -29,6 +29,15 @@ export function FolderScopePicker({ value, onChange }: FolderScopePickerProps) {
     return folders.data?.find((f) => f.id === value) ?? null;
   }, [folders.data, value]);
 
+  // If the scoped folder was deleted out from under us, drop the scope so we
+  // don't keep filtering against a dead id (and so the chip stops lying about
+  // what's selected).
+  React.useEffect(() => {
+    if (value && folders.data && !folder) {
+      onChange(null);
+    }
+  }, [value, folders.data, folder, onChange]);
+
   const label = folder ? folder.name : 'All notes';
 
   return (

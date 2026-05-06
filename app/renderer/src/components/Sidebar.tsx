@@ -164,7 +164,9 @@ export function Sidebar({
 
   const isHomeActive = currentRoute === '/' || currentRoute === '';
   const isAllMeetingsActive = currentRoute === '/meetings';
-  const isChatActive = currentRoute === '/chat';
+  // Match /chat as well as any /chat/<id> conversation route — the same Chat
+  // tab item should stay highlighted when drilling into a session.
+  const isChatActive = currentRoute === '/chat' || currentRoute.startsWith('/chat/');
   // Malformed % escapes throw URIError. Guard so a bad route can't crash
   // the entire sidebar render.
   const activeFolderId = React.useMemo<string | null>(() => {

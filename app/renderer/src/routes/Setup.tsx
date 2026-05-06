@@ -131,14 +131,18 @@ export function Setup() {
   const setUserName = useSetUserName();
   const [name, setName] = React.useState('');
   // Sync once when the initial fetch resolves so we don't clobber user input.
+  // Wait for the real query to settle — placeholderData (sessionStorage cache)
+  // could be stale or empty, and we don't want to seed from it and then ignore
+  // the canonical value when it arrives from disk.
   const seededRef = React.useRef(false);
   React.useEffect(() => {
     if (seededRef.current) return;
+    if (userName.isPending || userName.isPlaceholderData) return;
     if (userName.data !== undefined) {
       setName(userName.data);
       seededRef.current = true;
     }
-  }, [userName.data]);
+  }, [userName.data, userName.isPending, userName.isPlaceholderData]);
   const persistName = () => {
     const trimmed = name.trim();
     if (trimmed === (userName.data ?? '')) return;

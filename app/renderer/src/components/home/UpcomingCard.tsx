@@ -47,6 +47,10 @@ export function UpcomingCard({ event }: UpcomingCardProps) {
       tabIndex={0}
       onClick={onStart}
       onKeyDown={(e) => {
+        // Only handle Enter/Space when the card itself has focus — inner
+        // buttons (Join, Start now) own their own keyboard activation, and
+        // we don't want to double-fire them.
+        if (e.target !== e.currentTarget) return;
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
           onStart();

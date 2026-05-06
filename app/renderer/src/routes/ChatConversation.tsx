@@ -143,10 +143,12 @@ export function ChatConversation({ sessionId }: ChatConversationProps) {
     if (el) el.scrollTop = el.scrollHeight;
   }, [session?.messages.length, activeStream?.text]);
 
+  const [submitError, setSubmitError] = React.useState<string | null>(null);
   const submit = async (raw: string) => {
     const q = raw.trim();
     if (!q || isStreaming || submittingRef.current || !ready || !session) return;
     submittingRef.current = true;
+    setSubmitError(null);
     try {
       await chat.appendMessage(session.id, {
         role: 'user',
@@ -157,6 +159,12 @@ export function ChatConversation({ sessionId }: ChatConversationProps) {
       const streamId = streaming.startGlobalStream(q, scopeFolderId);
       pendingPersistRef.current = session.id;
       setActiveStreamId(streamId);
+    } catch (err) {
+      // Disk write / IPC / streaming setup can all fail. Restore the
+      // user's text so they don't lose it, surface the error.
+      const message = err instanceof Error ? err.message : 'Failed to send';
+      setSubmitError(message);
+      setInput(q);
     } finally {
       submittingRef.current = false;
     }
@@ -275,6 +283,7 @@ export function ChatConversation({ sessionId }: ChatConversationProps) {
                               key={s.id}
                               session={s}
                               activeId={sessionId}
+                              onSelect={() => setHistoryOpen(false)}
                               onRename={(name) => void chat.renameSession(s.id, name)}
                               onDelete={async () => {
                                 const wasActive = s.id === sessionId;
@@ -317,6 +326,19 @@ export function ChatConversation({ sessionId }: ChatConversationProps) {
         {/* Composer pinned at the visual bottom — out of the scroll
             container, in the flex column. No leftover padding underneath. */}
         <div className="mx-auto w-full max-w-[760px] px-10 pb-6 pt-2">
+          {submitError && (
+            <div
+              role="alert"
+              className="mb-3 rounded-md border px-3 py-2 text-[13px]"
+              style={{
+                borderColor: 'var(--border-subtle)',
+                background: 'var(--danger-bg)',
+                color: 'var(--danger)',
+              }}
+            >
+              {submitError}
+            </div>
+          )}
           <Popover open={presetsOpen} onOpenChange={setPresetsOpen}>
             <PopoverAnchor asChild>
           <form

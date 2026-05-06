@@ -78,24 +78,42 @@ export function Chat() {
     }));
   }, [recentsExpanded, allRecents]);
 
+  const [submitError, setSubmitError] = React.useState<string | null>(null);
   const submit = async (raw: string) => {
     const q = raw.trim();
     if (!q || submittingRef.current || !ready) return;
     submittingRef.current = true;
+    setSubmitError(null);
+    let createdSessionId: string | null = null;
     try {
-      const sessionId = await chat.createSession(deriveSessionName(q));
-      await chat.appendMessage(sessionId, {
+      createdSessionId = await chat.createSession(deriveSessionName(q));
+      await chat.appendMessage(createdSessionId, {
         role: 'user',
         content: q,
         ts: Date.now(),
       });
       setInput('');
       const streamId = streaming.startGlobalStream(q, scopeFolderId);
-      // Stash the stream id + session id + scope on a module-level pending
-      // map so the conversation page can pick them up after navigation.
-      // Avoids having to thread them through the URL.
-      pendingNewChat = { sessionId, streamId, folderId: scopeFolderId };
-      navigate(`/chat/${encodeURIComponent(sessionId)}`);
+      // Record the handoff under THIS sessionId so a fast double-submit
+      // can't clobber an earlier in-flight stream before the conversation
+      // page mounts and claims it.
+      recordPendingNewChat({ sessionId: createdSessionId, streamId, folderId: scopeFolderId });
+      navigate(`/chat/${encodeURIComponent(createdSessionId)}`);
+    } catch (err) {
+      // appendMessage / startGlobalStream / createSession can all fail
+      // (disk full, IPC error, cloud-key revoked). Surface the error,
+      // restore the user's text so they don't have to retype, and roll
+      // back the empty session so it doesn't appear in History/Recents.
+      const message = err instanceof Error ? err.message : 'Failed to send';
+      setSubmitError(message);
+      setInput(q);
+      if (createdSessionId) {
+        try {
+          await chat.deleteSession(createdSessionId);
+        } catch {
+          // best-effort cleanup
+        }
+      }
     } finally {
       submittingRef.current = false;
     }
@@ -129,6 +147,19 @@ export function Chat() {
         </h1>
 
         {!ready && provider.isFetched && <CloudRequiredBanner />}
+        {submitError && (
+          <div
+            role="alert"
+            className="mb-4 rounded-md border px-3 py-2 text-[13px]"
+            style={{
+              borderColor: 'var(--border-subtle)',
+              background: 'var(--danger-bg)',
+              color: 'var(--danger)',
+            }}
+          >
+            {submitError}
+          </div>
+        )}
 
         <Popover open={presetsOpen} onOpenChange={setPresetsOpen}>
           <PopoverAnchor asChild>
@@ -316,18 +347,24 @@ export function Chat() {
 // Module-level handoff between the entry page (kicks off the stream right
 // before navigating) and the conversation page (picks up the stream id +
 // session id on mount). Avoids stuffing them in the URL.
+//
+// Keyed by sessionId so a fast double-submit can't clobber an earlier
+// in-flight handoff before the conversation page mounts to claim it.
 export interface PendingNewChat {
   sessionId: string;
   streamId: string;
   folderId: string | null;
 }
-let pendingNewChat: PendingNewChat | null = null;
+const pendingNewChats = new Map<string, PendingNewChat>();
+
+export function recordPendingNewChat(pending: PendingNewChat) {
+  pendingNewChats.set(pending.sessionId, pending);
+}
 
 export function consumePendingNewChat(sessionId: string): PendingNewChat | null {
-  if (!pendingNewChat) return null;
-  if (pendingNewChat.sessionId !== sessionId) return null;
-  const out = pendingNewChat;
-  pendingNewChat = null;
+  const out = pendingNewChats.get(sessionId);
+  if (!out) return null;
+  pendingNewChats.delete(sessionId);
   return out;
 }
 

@@ -22,12 +22,17 @@ export function bucketKey(ts: number, now: number = Date.now()): string {
   today.setHours(0, 0, 0, 0);
   const startOfDay = today.getTime();
   if (ts >= startOfDay) return 'today';
-  // Yesterday: ts >= startOfDay - 1 day
-  if (ts >= startOfDay - 86_400_000) return 'yesterday';
-  // Within the last 7 days
-  if (ts >= startOfDay - 7 * 86_400_000) return 'this-week';
-  // Within the last 14 days
-  if (ts >= startOfDay - 14 * 86_400_000) return 'last-2-weeks';
+  // Day-difference comparisons. Subtracting fixed 24h offsets breaks across
+  // DST boundaries (a Sunday morning shift means "yesterday" really started
+  // 23h ago, not 24h), so step back by calendar day instead.
+  const dayBefore = (n: number): number => {
+    const t = new Date(today);
+    t.setDate(t.getDate() - n);
+    return t.getTime();
+  };
+  if (ts >= dayBefore(1)) return 'yesterday';
+  if (ts >= dayBefore(7)) return 'this-week';
+  if (ts >= dayBefore(14)) return 'last-2-weeks';
   // Same calendar month
   if (
     d.getFullYear() === today.getFullYear() &&
