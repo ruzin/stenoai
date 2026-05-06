@@ -45,13 +45,17 @@ export function subscribeDebugLogs(l: Listener): () => void {
 
 /**
  * Wire the IPC channel into the store. Idempotent — safe to call from any
- * mount point; subsequent calls are no-ops. Returns the underlying IPC
- * unsubscribe so the app's effect can clean up on tear-down.
+ * mount point; subsequent calls are no-ops. The returned cleanup unsubscribes
+ * the IPC listener AND resets the primed flag, so a later mount can rebind.
  */
 export function primeDebugLogs(
   bind: (cb: (line: string) => void) => () => void,
 ): () => void {
   if (primed) return () => {};
   primed = true;
-  return bind((line) => appendDebugLog(line));
+  const unsubscribe = bind((line) => appendDebugLog(line));
+  return () => {
+    unsubscribe();
+    primed = false;
+  };
 }

@@ -12,7 +12,11 @@ import { BottomDockSlot } from '@/components/BottomDockSlot';
 import { LiveDock } from '@/components/LiveDock';
 import { QuitDialog } from '@/components/QuitDialog';
 import { AskBarProvider } from '@/lib/askBarContext';
-import { useRecording, useRecordingEvents } from '@/hooks/useRecording';
+import {
+  useRecording,
+  useRecordingEvents,
+  useRecordingProcessingEffects,
+} from '@/hooks/useRecording';
 import { navigate, useRoute, rememberNonSettingsRoute } from '@/lib/router';
 import { ipc } from '@/lib/ipc';
 import { primeDebugLogs } from '@/lib/debugLogs';
@@ -39,6 +43,7 @@ export function App() {
   }, []);
 
   useRecordingEvents();
+  useRecordingProcessingEffects();
 
   // Track the last non-settings route so the sidebar Settings toggle and the
   // Settings page's Back button can return the user to where they came from
@@ -120,13 +125,22 @@ function RouteView({ route }: { route: string }) {
   if (route === '/recording') return <Recording />;
   if (route === '/meetings/processing') return <Processing />;
   if (route.startsWith('/meetings/')) {
-    const summaryFile = decodeURIComponent(route.slice('/meetings/'.length));
+    const summaryFile = safeDecode(route.slice('/meetings/'.length));
     return <MeetingDetail summaryFile={summaryFile} />;
   }
   if (route.startsWith('/folders/')) {
-    const folderId = decodeURIComponent(route.slice('/folders/'.length));
+    const folderId = safeDecode(route.slice('/folders/'.length));
     return <FolderDetail folderId={folderId} />;
   }
   if (route === '/meetings') return <Home mode="meetings" />;
   return <Home mode="home" />;
+}
+
+// Tolerate malformed % escapes — a bad route shouldn't crash the renderer.
+function safeDecode(s: string): string {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return s;
+  }
 }

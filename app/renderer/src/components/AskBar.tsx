@@ -163,25 +163,36 @@ export function AskBar() {
     setActiveStreamId(null);
   }, [activeStreamId, streaming, chat]);
 
+  // Re-entrancy guard. submitPrompt awaits createSession/appendMessage; rapid
+  // suggestion-chip clicks (or Enter) before those resolve would otherwise
+  // create duplicate sessions and clobber the persistence ref.
+  const submittingRef = React.useRef(false);
+
   const submitPrompt = async (raw: string) => {
     const q = raw.trim();
     if (!q || !activeSummaryFile || isStreaming) return;
+    if (submittingRef.current) return;
+    submittingRef.current = true;
 
-    let sessionId = session?.id ?? null;
-    if (!sessionId) {
-      sessionId = await chat.createSession(deriveSessionName(q));
+    try {
+      let sessionId = session?.id ?? null;
+      if (!sessionId) {
+        sessionId = await chat.createSession(deriveSessionName(q));
+      }
+
+      const userMsg: ChatMessage = { role: 'user', content: q, ts: Date.now() };
+      await chat.appendMessage(sessionId, userMsg);
+      setInput('');
+
+      const streamId = streaming.startStream(activeSummaryFile, q);
+      pendingPersistRef.current = sessionId;
+      setActiveStreamId(streamId);
+
+      setExpanded(true);
+      setTranscriptOpen(false);
+    } finally {
+      submittingRef.current = false;
     }
-
-    const userMsg: ChatMessage = { role: 'user', content: q, ts: Date.now() };
-    await chat.appendMessage(sessionId, userMsg);
-    setInput('');
-
-    const streamId = streaming.startStream(activeSummaryFile, q);
-    pendingPersistRef.current = sessionId;
-    setActiveStreamId(streamId);
-
-    setExpanded(true);
-    setTranscriptOpen(false);
   };
 
   const submit = () => submitPrompt(input);

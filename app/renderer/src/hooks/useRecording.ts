@@ -30,30 +30,10 @@ export function useRecording() {
     return 'idle';
   }, [queue.data]);
 
-  React.useEffect(() => {
-    const off = ipc().on.processingComplete((data) => {
-      // Pre-seed the meetings list cache with the freshly processed meeting
-      // so MeetingDetail can find it on first render -- otherwise the brief
-      // window between navigation and the refetch landing shows "not found".
-      if (data.success && data.meetingData?.session_info.summary_file) {
-        const newMeeting = data.meetingData as Meeting;
-        const newSummaryFile = newMeeting.session_info.summary_file;
-        qc.setQueryData<Meeting[]>(meetingsKeys.list(), (prev) => {
-          if (!prev) return [newMeeting];
-          const filtered = prev.filter(
-            (m) => m.session_info.summary_file !== newSummaryFile,
-          );
-          return [newMeeting, ...filtered];
-        });
-      }
-      qc.invalidateQueries({ queryKey: meetingsKeys.all });
-      qc.invalidateQueries({ queryKey: queueKey });
-      if (data.success && data.meetingData?.session_info.summary_file) {
-        navigate(`/meetings/${encodeURIComponent(data.meetingData.session_info.summary_file)}`);
-      }
-    });
-    return off;
-  }, [qc]);
+  // NOTE: processing-complete handling lives in useRecordingProcessingEffects
+  // below, mounted ONCE at App level. Putting it here would attach a fresh
+  // listener for every consumer of useRecording (12+ at last count), causing
+  // duplicate cache invalidations and N navigations per recording.
 
   const startRecording = React.useCallback(
     async (name?: string) => {
@@ -170,4 +150,35 @@ export function useRecordingEvents() {
     bridge.shortcuts.rendererReady();
     return () => offs.forEach((off) => off());
   }, [status, startRecording, stopRecording]);
+}
+
+/**
+ * Mount once at App level. The processing-complete listener does cache
+ * pre-seeding + invalidation + post-recording navigation. Splitting this out
+ * of useRecording keeps the side-effect singleton even though useRecording
+ * itself is consumed by many components.
+ */
+export function useRecordingProcessingEffects() {
+  const qc = useQueryClient();
+  React.useEffect(() => {
+    const off = ipc().on.processingComplete((data) => {
+      if (data.success && data.meetingData?.session_info.summary_file) {
+        const newMeeting = data.meetingData as Meeting;
+        const newSummaryFile = newMeeting.session_info.summary_file;
+        qc.setQueryData<Meeting[]>(meetingsKeys.list(), (prev) => {
+          if (!prev) return [newMeeting];
+          const filtered = prev.filter(
+            (m) => m.session_info.summary_file !== newSummaryFile,
+          );
+          return [newMeeting, ...filtered];
+        });
+      }
+      qc.invalidateQueries({ queryKey: meetingsKeys.all });
+      qc.invalidateQueries({ queryKey: queueKey });
+      if (data.success && data.meetingData?.session_info.summary_file) {
+        navigate(`/meetings/${encodeURIComponent(data.meetingData.session_info.summary_file)}`);
+      }
+    });
+    return off;
+  }, [qc]);
 }

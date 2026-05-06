@@ -3,40 +3,45 @@ import { cn } from '@/lib/utils';
 
 type HProps = React.HTMLAttributes<HTMLHeadingElement>;
 
-export function Display({ className, ...props }: HProps) {
+// Merge default fontVariationSettings with caller-supplied style so a
+// downstream style={{ color: 'red' }} doesn't drop the variation defaults.
+const DISPLAY_VAR = "'opsz' 144, 'SOFT' 30";
+const H2_VAR = "'opsz' 96";
+
+export function Display({ className, style, ...props }: HProps) {
   return (
     <h1
       className={cn(
         'font-serif text-3xl leading-[1.05] tracking-[-0.02em]',
         className
       )}
-      style={{ fontVariationSettings: "'opsz' 144, 'SOFT' 30" }}
+      style={{ fontVariationSettings: DISPLAY_VAR, ...style }}
       {...props}
     />
   );
 }
 
-export function H1({ className, ...props }: HProps) {
+export function H1({ className, style, ...props }: HProps) {
   return (
     <h1
       className={cn(
         'font-serif text-2xl leading-[1.1] tracking-[-0.02em]',
         className
       )}
-      style={{ fontVariationSettings: "'opsz' 144, 'SOFT' 30" }}
+      style={{ fontVariationSettings: DISPLAY_VAR, ...style }}
       {...props}
     />
   );
 }
 
-export function H2({ className, ...props }: HProps) {
+export function H2({ className, style, ...props }: HProps) {
   return (
     <h2
       className={cn(
         'font-serif text-xl leading-[1.25] tracking-[-0.01em]',
         className
       )}
-      style={{ fontVariationSettings: "'opsz' 96" }}
+      style={{ fontVariationSettings: H2_VAR, ...style }}
       {...props}
     />
   );

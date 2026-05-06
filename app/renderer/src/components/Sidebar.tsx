@@ -160,9 +160,17 @@ export function Sidebar({
 
   const isHomeActive = currentRoute === '/' || currentRoute === '';
   const isAllMeetingsActive = currentRoute === '/meetings';
-  const activeFolderId = currentRoute.startsWith('/folders/')
-    ? decodeURIComponent(currentRoute.slice('/folders/'.length))
-    : null;
+  // Malformed % escapes throw URIError. Guard so a bad route can't crash
+  // the entire sidebar render.
+  const activeFolderId = React.useMemo<string | null>(() => {
+    if (!currentRoute.startsWith('/folders/')) return null;
+    const raw = currentRoute.slice('/folders/'.length);
+    try {
+      return decodeURIComponent(raw);
+    } catch {
+      return raw;
+    }
+  }, [currentRoute]);
 
   const handleFolderDrop = (e: React.DragEvent, folderId: string | null) => {
     e.preventDefault();

@@ -777,12 +777,21 @@ function CloudProviderConfig() {
   const [modelListFor, setModelListFor] = React.useState<CloudProvider | null>(null);
   const [customModelMode, setCustomModelMode] = React.useState(false);
 
+  // Sync apiUrl/model from server-side state (separate effect: runs on any
+  // provider.data change so the model name stays in sync after a successful
+  // setCloudModel mutation).
   React.useEffect(() => {
     if (provider.data) {
       setApiUrl(provider.data.cloud_api_url);
       setModel(provider.data.cloud_model);
-      // Reset model-list cache when provider changes — last fetch was for a
-      // different provider and would be misleading.
+    }
+  }, [provider.data?.cloud_api_url, provider.data?.cloud_model]);
+
+  // Reset the cached model list ONLY when the provider changes — otherwise
+  // selecting a model triggers a model-name change which would dump the
+  // dropdown the user just picked from.
+  React.useEffect(() => {
+    if (provider.data) {
       setModelListFor((prev) =>
         prev === provider.data!.cloud_provider ? prev : null,
       );
@@ -790,7 +799,7 @@ function CloudProviderConfig() {
       testConnection.reset();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [provider.data?.cloud_provider, provider.data?.cloud_model]);
+  }, [provider.data?.cloud_provider]);
 
   const onTest = () => {
     setModelListFor(cloudProvider);

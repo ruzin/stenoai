@@ -32,13 +32,25 @@ export interface ChipProps
 export const Chip = React.forwardRef<HTMLSpanElement, ChipProps>(
   ({ className, variant, interactive, asButton, onClick, ...props }, ref) => {
     const clickable = !!onClick || !!interactive || !!asButton;
-    const Comp = (asButton ? 'button' : 'span') as 'span';
+    if (asButton) {
+      // Explicit type="button" — defaulting to submit silently breaks chips
+      // rendered inside <form> (e.g. the chat composer's suggestion chips).
+      return (
+        <button
+          ref={ref as unknown as React.Ref<HTMLButtonElement>}
+          type="button"
+          onClick={onClick as React.MouseEventHandler<HTMLButtonElement>}
+          className={cn(chipVariants({ variant, interactive: clickable, className }))}
+          {...(props as React.ButtonHTMLAttributes<HTMLButtonElement>)}
+        />
+      );
+    }
     return (
-      <Comp
-        ref={ref as never}
+      <span
+        ref={ref}
         onClick={onClick}
-        role={asButton ? undefined : clickable ? 'button' : undefined}
-        tabIndex={asButton ? undefined : clickable ? 0 : undefined}
+        role={clickable ? 'button' : undefined}
+        tabIndex={clickable ? 0 : undefined}
         className={cn(chipVariants({ variant, interactive: clickable, className }))}
         {...props}
       />

@@ -34,6 +34,7 @@ export function MainToolbar({
   const isRecording =
     recordingStatus === 'recording' || recordingStatus === 'paused';
   const isPaused = recordingStatus === 'paused';
+  const isProcessing = recordingStatus === 'processing';
   const { resolved: resolvedTheme, setTheme } = useTheme();
 
   // Matches sb-top padding-left (82px clears macOS traffic lights)
@@ -93,15 +94,31 @@ export function MainToolbar({
         <button
           type="button"
           onClick={onToggleRecording}
+          disabled={isProcessing}
           className={cn('record-btn', isRecording && 'is-recording')}
           aria-label={
-            isRecording ? 'Open recording in progress' : 'New note'
+            isProcessing
+              ? 'Processing previous recording'
+              : isRecording
+                ? 'Open recording in progress'
+                : 'New note'
           }
           title={
-            isRecording ? 'Open recording in progress' : 'New note'
+            isProcessing
+              ? 'Processing previous recording'
+              : isRecording
+                ? 'Open recording in progress'
+                : 'New note'
           }
         >
-          {isRecording ? (
+          {isProcessing ? (
+            <>
+              <span style={{ color: '#FFFFFF', display: 'inline-flex' }}>
+                <AudioWave active={false} paused bars={5} height={12} barWidth={2} gap={2} />
+              </span>
+              <span>Processing</span>
+            </>
+          ) : isRecording ? (
             <>
               <span style={{ color: '#FFFFFF', display: 'inline-flex' }}>
                 <AudioWave

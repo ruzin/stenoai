@@ -38,12 +38,26 @@ export function useUpdateFolderIcon() {
   return useMutation({
     mutationFn: async (args: { id: string; icon: string }) =>
       unwrap(await ipc().folders.updateIcon(args.id, args.icon)),
-    onMutate: ({ id, icon }) => {
+    onMutate: async ({ id, icon }) => {
+      // Cancel in-flight folder fetches so a refetch landing during the
+      // optimistic write doesn't overwrite our prediction.
+      await qc.cancelQueries({ queryKey: foldersKeys.list() });
+      const previous = qc.getQueryData<import('@/lib/ipc').Folder[]>(
+        foldersKeys.list(),
+      );
       qc.setQueryData(
         foldersKeys.list(),
         (old: import('@/lib/ipc').Folder[] | undefined) =>
           old?.map((f) => (f.id === id ? { ...f, icon } : f)),
       );
+      return { previous };
+    },
+    onError: (_err, _args, ctx) => {
+      // Restore the cache so the UI doesn't silently keep an icon that
+      // never made it to disk.
+      if (ctx?.previous !== undefined) {
+        qc.setQueryData(foldersKeys.list(), ctx.previous);
+      }
     },
     onSettled: () => qc.invalidateQueries({ queryKey: foldersKeys.all }),
   });

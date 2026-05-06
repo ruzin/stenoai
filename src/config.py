@@ -159,14 +159,18 @@ class Config:
         provider was active when it was last saved."""
         if isinstance(self._config.get("cloud_models"), dict):
             return  # Already migrated.
-        models: dict = {}
         legacy = self._config.get("cloud_model")
-        if isinstance(legacy, str) and legacy.strip():
-            current_provider = self._config.get("cloud_provider", "openai")
-            if current_provider not in self.VALID_CLOUD_PROVIDERS:
-                current_provider = "openai"
-            models[current_provider] = legacy.strip()
-        self._config["cloud_models"] = models
+        has_legacy_value = isinstance(legacy, str) and legacy.strip()
+        if not has_legacy_value:
+            # Nothing to migrate. Don't write — if _load() returned defaults
+            # because the existing file was corrupt/unreadable, persisting an
+            # empty cloud_models map would overwrite the recoverable file.
+            self._config["cloud_models"] = {}
+            return
+        current_provider = self._config.get("cloud_provider", "openai")
+        if current_provider not in self.VALID_CLOUD_PROVIDERS:
+            current_provider = "openai"
+        self._config["cloud_models"] = {current_provider: legacy.strip()}
         self._save()
 
     def _load(self) -> Dict[str, Any]:
