@@ -6,8 +6,8 @@ import {
   Mic,
   Paperclip,
   Square,
-  Trash2,
 } from 'lucide-react';
+import { ChatHistoryRow } from '@/components/ChatHistoryRow';
 import { MeetingsShell } from '@/components/MeetingsShell';
 import {
   Popover,
@@ -24,8 +24,9 @@ import { useAiProvider } from '@/hooks/useAi';
 import { navigate } from '@/lib/router';
 import {
   GLOBAL_SCOPE,
+  bucketKey,
   deriveSessionName,
-  relativeTime,
+  toBucketLabel,
 } from '@/lib/chat';
 import { consumePendingNewChat } from '@/routes/Chat';
 import { renderMarkdown } from '@/lib/markdown';
@@ -79,6 +80,26 @@ export function ChatConversation({ sessionId }: ChatConversationProps) {
       .filter((s) => s.summaryFile === GLOBAL_SCOPE)
       .sort((a, b) => b.updatedAt - a.updatedAt);
   }, [allSessions.data?.sessions]);
+
+  // Group sessions into time buckets for the History dropdown ("Today",
+  // "Last 2 weeks", "April", etc.) — same pattern Granola uses. Order is
+  // determined by the highest updatedAt in each group, so a stale "April"
+  // group sinks below a fresh "Today" automatically.
+  const groupedSessions = React.useMemo(() => {
+    const groups = new Map<string, typeof otherSessions>();
+    const now = Date.now();
+    for (const s of otherSessions) {
+      const k = bucketKey(s.updatedAt, now);
+      const arr = groups.get(k) ?? [];
+      arr.push(s);
+      groups.set(k, arr);
+    }
+    return Array.from(groups.entries()).map(([key, sessions]) => ({
+      key,
+      label: toBucketLabel(key),
+      sessions,
+    }));
+  }, [otherSessions]);
 
   const activeStream = activeStreamId ? streaming.streams[activeStreamId] : null;
   const isStreaming = activeStream?.status === 'streaming';
@@ -205,52 +226,55 @@ export function ChatConversation({ sessionId }: ChatConversationProps) {
                   <ChevronDown className="size-[12px]" style={{ color: 'var(--fg-2)' }} />
                 </button>
               </PopoverTrigger>
-              <PopoverContent align="start" className="w-[280px] p-1">
+              <PopoverContent align="start" className="w-[320px] p-1">
                 {otherSessions.length === 0 ? (
                   <div className="px-3 py-3 text-[13px]" style={{ color: 'var(--fg-2)' }}>
                     No other chats yet.
                   </div>
                 ) : (
-                  <div className="max-h-[320px] overflow-y-auto">
-                    {otherSessions.map((s) => (
-                      <div
-                        key={s.id}
-                        className="group flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[13px] transition-colors hover:bg-[color:var(--surface-hover)]"
-                        style={{
-                          color: s.id === sessionId ? 'var(--fg-1)' : 'var(--fg-2)',
-                          background: s.id === sessionId ? 'var(--surface-active)' : undefined,
-                        }}
-                      >
-                        <button
-                          type="button"
-                          onClick={() => navigate(`/chat/${encodeURIComponent(s.id)}`)}
-                          className="flex flex-1 items-center justify-between gap-2 text-left"
-                        >
-                          <span className="flex-1 truncate">{s.name || 'Untitled chat'}</span>
-                          <span className="text-[11px] tabular-nums" style={{ color: 'var(--fg-muted)' }}>
-                            {relativeTime(s.updatedAt)}
-                          </span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={async (e) => {
-                            e.stopPropagation();
-                            // If the user just nuked the chat they're
-                            // actively viewing, bounce back to /chat so we
-                            // don't leave them on a "Chat not found" page.
+                  <div className="max-h-[420px] overflow-y-auto py-1">
+                    {/* Few chats → flat list, no group headers (less visual
+                        noise). Many chats → grouped by time bucket so old
+                        ones are findable. */}
+                    {otherSessions.length <= 5 ? (
+                      otherSessions.map((s) => (
+                        <ChatHistoryRow
+                          key={s.id}
+                          session={s}
+                          activeId={sessionId}
+                          onRename={(name) => void chat.renameSession(s.id, name)}
+                          onDelete={async () => {
                             const wasActive = s.id === sessionId;
                             await chat.deleteSession(s.id);
                             if (wasActive) navigate('/chat');
                           }}
-                          aria-label={`Delete chat ${s.name || 'Untitled'}`}
-                          title="Delete chat"
-                          className="inline-flex size-6 shrink-0 items-center justify-center rounded opacity-0 transition-opacity hover:bg-[color:var(--surface-active)] group-hover:opacity-100 focus:opacity-100"
-                          style={{ color: 'var(--fg-2)' }}
-                        >
-                          <Trash2 className="size-[12px]" />
-                        </button>
-                      </div>
-                    ))}
+                        />
+                      ))
+                    ) : (
+                      groupedSessions.map((group) => (
+                        <div key={group.key} className="mb-1.5 last:mb-0">
+                          <div
+                            className="px-2 pb-0.5 pt-1 text-[11px] font-medium"
+                            style={{ color: 'var(--fg-muted)' }}
+                          >
+                            {group.label}
+                          </div>
+                          {group.sessions.map((s) => (
+                            <ChatHistoryRow
+                              key={s.id}
+                              session={s}
+                              activeId={sessionId}
+                              onRename={(name) => void chat.renameSession(s.id, name)}
+                              onDelete={async () => {
+                                const wasActive = s.id === sessionId;
+                                await chat.deleteSession(s.id);
+                                if (wasActive) navigate('/chat');
+                              }}
+                            />
+                          ))}
+                        </div>
+                      ))
+                    )}
                   </div>
                 )}
               </PopoverContent>
@@ -350,6 +374,7 @@ export function ChatConversation({ sessionId }: ChatConversationProps) {
     </MeetingsShell>
   );
 }
+
 
 function Bubble({
   role,

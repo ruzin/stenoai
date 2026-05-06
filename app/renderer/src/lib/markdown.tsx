@@ -20,6 +20,37 @@ export function renderMarkdown(text: string): React.ReactNode {
   let inCode = false;
   let key = 0;
 
+  // Detect a markdown table starting at index i. Returns the table's row
+  // index range and the parsed rows + alignment, or null if it isn't one.
+  // Expected shape:
+  //   | h1 | h2 |
+  //   |----|:---:|
+  //   | a  | b  |
+  // The separator row distinguishes a real table from a bunch of pipes
+  // in regular text.
+  const detectTable = (
+    i: number,
+  ): { end: number; header: string[]; rows: string[][]; align: ('left' | 'center' | 'right' | null)[] } | null => {
+    if (i + 1 >= lines.length) return null;
+    const headerRaw = lines[i];
+    const sepRaw = lines[i + 1];
+    if (!isTableRow(headerRaw) || !isTableSeparator(sepRaw)) return null;
+    const header = splitRow(headerRaw);
+    const align = parseAlign(sepRaw);
+    if (header.length === 0 || align.length === 0) return null;
+
+    const rows: string[][] = [];
+    let j = i + 2;
+    while (j < lines.length && isTableRow(lines[j])) {
+      rows.push(splitRow(lines[j]));
+      j++;
+    }
+    // Require at least one data row — otherwise it's likely just two
+    // adjacent pipe-containing lines that aren't actually a table.
+    if (rows.length === 0) return null;
+    return { end: j - 1, header, rows, align };
+  };
+
   const flushList = () => {
     if (!listItems.length) return;
     const Tag = listType ?? 'ul';
@@ -61,7 +92,8 @@ export function renderMarkdown(text: string): React.ReactNode {
     inCode = false;
   };
 
-  for (const line of lines) {
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
     // Fenced code block: ```lang ... ```
     const fence = line.match(/^```(\w*)\s*$/);
     if (fence) {
@@ -77,6 +109,63 @@ export function renderMarkdown(text: string): React.ReactNode {
     if (inCode) {
       codeLines.push(line);
       continue;
+    }
+
+    // Markdown table. Detect on the header row, consume through the last
+    // data row, render as a real <table>. Tested before headings/lists
+    // so a leading-pipe table row never gets mistaken for something else.
+    if (line.trimStart().startsWith('|')) {
+      const tbl = detectTable(i);
+      if (tbl) {
+        flushList();
+        nodes.push(
+          <div key={key++} className="my-2 overflow-x-auto">
+            <table
+              className="w-full border-collapse text-[13px]"
+              style={{ fontFamily: 'var(--font-sans)' }}
+            >
+              <thead>
+                <tr>
+                  {tbl.header.map((cell, ci) => (
+                    <th
+                      key={ci}
+                      className="border-b px-2.5 py-1.5 text-left font-semibold"
+                      style={{
+                        borderColor: 'var(--border-subtle)',
+                        color: 'var(--fg-1)',
+                        textAlign: tbl.align[ci] ?? 'left',
+                      }}
+                    >
+                      {renderInline(cell)}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {tbl.rows.map((row, ri) => (
+                  <tr key={ri}>
+                    {row.map((cell, ci) => (
+                      <td
+                        key={ci}
+                        className="border-b px-2.5 py-1.5 align-top"
+                        style={{
+                          borderColor: 'var(--border-subtle)',
+                          color: 'var(--fg-1)',
+                          textAlign: tbl.align[ci] ?? 'left',
+                        }}
+                      >
+                        {renderInline(cell)}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>,
+        );
+        i = tbl.end;
+        continue;
+      }
     }
 
     // Heading (# / ## / ###). h1 is reserved for page titles, so the LLM's
@@ -137,6 +226,50 @@ export function renderMarkdown(text: string): React.ReactNode {
   flushCode();
 
   return <>{nodes}</>;
+}
+
+// ---------------------------------------------------------------------------
+// Table helpers
+// ---------------------------------------------------------------------------
+
+function isTableRow(line: string): boolean {
+  // A row starts with `|` (after optional whitespace) and contains at least
+  // one more `|`. Pure separator runs are excluded — those go through
+  // isTableSeparator.
+  const trimmed = line.trim();
+  if (!trimmed.startsWith('|')) return false;
+  // Need at least 2 pipes to delimit a single cell.
+  return (trimmed.match(/\|/g) || []).length >= 2;
+}
+
+function isTableSeparator(line: string): boolean {
+  // Each cell is dashes with optional leading/trailing colons for alignment.
+  // Examples: |---|---|, | :--- | :---: | ---: |
+  const trimmed = line.trim();
+  if (!trimmed.startsWith('|')) return false;
+  const cells = splitRow(trimmed);
+  if (cells.length === 0) return false;
+  return cells.every((c) => /^:?-{3,}:?$/.test(c.trim()));
+}
+
+function splitRow(line: string): string[] {
+  // Strip the outer pipes then split. Trim each cell. Empty trailing cells
+  // (when the row ends with `|`) are dropped — we don't want to render a
+  // ghost column.
+  const trimmed = line.trim().replace(/^\|/, '').replace(/\|$/, '');
+  return trimmed.split('|').map((c) => c.trim());
+}
+
+function parseAlign(separator: string): ('left' | 'center' | 'right' | null)[] {
+  return splitRow(separator).map((cell) => {
+    const t = cell.trim();
+    const startsColon = t.startsWith(':');
+    const endsColon = t.endsWith(':');
+    if (startsColon && endsColon) return 'center';
+    if (endsColon) return 'right';
+    if (startsColon) return 'left';
+    return null;
+  });
 }
 
 // Inline markdown: **bold**, *italic*/_italic_, `code`. Order matters —

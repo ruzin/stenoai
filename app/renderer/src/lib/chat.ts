@@ -12,6 +12,50 @@ export function deriveSessionName(question: string): string {
   return trimmed.slice(0, 40) + '…';
 }
 
+// Bucket label for grouped chat-history lists (matches the Granola
+// History dropdown's "Today / Last 2 weeks / April" pattern). Returns a
+// stable key (not localized) so consumers can sort/group; format the key
+// with toBucketLabel() before display.
+export function bucketKey(ts: number, now: number = Date.now()): string {
+  const d = new Date(ts);
+  const today = new Date(now);
+  today.setHours(0, 0, 0, 0);
+  const startOfDay = today.getTime();
+  if (ts >= startOfDay) return 'today';
+  // Yesterday: ts >= startOfDay - 1 day
+  if (ts >= startOfDay - 86_400_000) return 'yesterday';
+  // Within the last 7 days
+  if (ts >= startOfDay - 7 * 86_400_000) return 'this-week';
+  // Within the last 14 days
+  if (ts >= startOfDay - 14 * 86_400_000) return 'last-2-weeks';
+  // Same calendar month
+  if (
+    d.getFullYear() === today.getFullYear() &&
+    d.getMonth() === today.getMonth()
+  ) {
+    return 'this-month';
+  }
+  // Same calendar year — return month name as the key
+  if (d.getFullYear() === today.getFullYear()) {
+    return `month-${d.getMonth()}`;
+  }
+  return `year-${d.getFullYear()}`;
+}
+
+export function toBucketLabel(key: string): string {
+  if (key === 'today') return 'Today';
+  if (key === 'yesterday') return 'Yesterday';
+  if (key === 'this-week') return 'This week';
+  if (key === 'last-2-weeks') return 'Last 2 weeks';
+  if (key === 'this-month') return 'This month';
+  if (key.startsWith('month-')) {
+    const m = parseInt(key.slice(6), 10);
+    return new Date(2000, m, 1).toLocaleString(undefined, { month: 'long' });
+  }
+  if (key.startsWith('year-')) return key.slice(5);
+  return key;
+}
+
 export function relativeTime(ts: number): string {
   const now = Date.now();
   const diff = Math.max(0, now - ts);

@@ -124,10 +124,44 @@ export function useClearSystemState() {
   });
 }
 
+// Mirror the persisted user name into sessionStorage so the next mount in
+// the same session has the value synchronously and the chat greeting
+// doesn't flash 'Ask anything' before flipping to 'Hi <name>, ...'.
+const USER_NAME_CACHE_KEY = 'steno-user-name';
+
+function readCachedUserName(): string {
+  try {
+    return sessionStorage.getItem(USER_NAME_CACHE_KEY) ?? '';
+  } catch {
+    return '';
+  }
+}
+
+function writeCachedUserName(name: string) {
+  try {
+    sessionStorage.setItem(USER_NAME_CACHE_KEY, name);
+  } catch {
+    // Storage may be unavailable in private mode — graceful degradation.
+  }
+}
+
 export function useUserName() {
   return useQuery({
     queryKey: settingsKeys.userName(),
-    queryFn: async () => unwrap(await ipc().settings.getUserName()).user_name,
+    queryFn: async () => {
+      const name = unwrap(await ipc().settings.getUserName()).user_name;
+      writeCachedUserName(name);
+      return name;
+    },
+    // The name only changes via useSetUserName (which invalidates this
+    // key), so once we have it there's no reason to refetch on remount.
+    staleTime: Infinity,
+    // placeholderData (NOT initialData) so the query still fetches the
+    // canonical value from disk on first mount. initialData was marking
+    // the query as already-fresh — combined with staleTime: Infinity that
+    // suppressed the queryFn entirely, so the greeting was stuck on the
+    // empty sessionStorage default forever.
+    placeholderData: readCachedUserName(),
   });
 }
 
@@ -136,6 +170,9 @@ export function useSetUserName() {
   return useMutation({
     mutationFn: async (name: string) =>
       unwrap(await ipc().settings.setUserName(name)),
-    onSuccess: () => qc.invalidateQueries({ queryKey: settingsKeys.userName() }),
+    onSuccess: (_data, name) => {
+      writeCachedUserName(name.trim());
+      qc.invalidateQueries({ queryKey: settingsKeys.userName() });
+    },
   });
 }

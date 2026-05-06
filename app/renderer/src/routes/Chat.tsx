@@ -3,12 +3,11 @@ import {
   ArrowUp,
   ChefHat,
   ChevronRight,
-  MessageSquare,
   Mic,
   Paperclip,
   Sparkles,
-  Trash2,
 } from 'lucide-react';
+import { ChatHistoryRow } from '@/components/ChatHistoryRow';
 import { MeetingsShell } from '@/components/MeetingsShell';
 import {
   useAllChatSessions,
@@ -18,7 +17,7 @@ import { useGlobalStreaming } from '@/hooks/useStreamingQuery';
 import { useAiProvider } from '@/hooks/useAi';
 import { useUserName } from '@/hooks/useSettings';
 import { navigate } from '@/lib/router';
-import { GLOBAL_SCOPE, deriveSessionName, relativeTime } from '@/lib/chat';
+import { GLOBAL_SCOPE, bucketKey, deriveSessionName, toBucketLabel } from '@/lib/chat';
 
 // Templated prompts ("Meals" — Steno's playful name for what other apps call
 // recipes/suggestions). Keep this list small at the top level; "See all"
@@ -50,13 +49,36 @@ export function Chat() {
 
   // Recents = global-scope chats only (sessions started from THIS tab),
   // never the in-meeting AskBar history.
-  const recents = React.useMemo(() => {
+  const allRecents = React.useMemo(() => {
     const list = allSessions.data?.sessions ?? [];
     return list
       .filter((s) => s.summaryFile === GLOBAL_SCOPE)
-      .sort((a, b) => b.updatedAt - a.updatedAt)
-      .slice(0, 8);
+      .sort((a, b) => b.updatedAt - a.updatedAt);
   }, [allSessions.data?.sessions]);
+
+  // Default view shows the 8 most-recent chats; "See all" expands to the
+  // full list grouped by time bucket (Today / Last 2 weeks / April / …).
+  // Hide the toggle entirely when the list already fits.
+  const COLLAPSED_LIMIT = 8;
+  const [recentsExpanded, setRecentsExpanded] = React.useState(false);
+  const canExpand = allRecents.length > COLLAPSED_LIMIT;
+  const recents = recentsExpanded ? allRecents : allRecents.slice(0, COLLAPSED_LIMIT);
+  const groupedRecents = React.useMemo(() => {
+    if (!recentsExpanded) return null;
+    const groups = new Map<string, typeof allRecents>();
+    const now = Date.now();
+    for (const s of allRecents) {
+      const k = bucketKey(s.updatedAt, now);
+      const arr = groups.get(k) ?? [];
+      arr.push(s);
+      groups.set(k, arr);
+    }
+    return Array.from(groups.entries()).map(([key, sessions]) => ({
+      key,
+      label: toBucketLabel(key),
+      sessions,
+    }));
+  }, [recentsExpanded, allRecents]);
 
   const submit = async (raw: string) => {
     const q = raw.trim();
@@ -177,8 +199,25 @@ export function Chat() {
         </form>
 
         <section className="mb-10">
-          <SectionHead title="Recents" action={<SeeAll />} />
-          {recents.length === 0 ? (
+          <SectionHead
+            title="Recents"
+            action={
+              canExpand ? (
+                <button
+                  type="button"
+                  onClick={() => setRecentsExpanded((v) => !v)}
+                  className="inline-flex items-center gap-0.5 text-[12px] transition-colors hover:text-[color:var(--fg-1)]"
+                  style={{ color: 'var(--fg-2)' }}
+                >
+                  {recentsExpanded ? 'Show less' : 'See all'}
+                  <ChevronRight
+                    className={`size-[12px] transition-transform ${recentsExpanded ? 'rotate-90' : ''}`}
+                  />
+                </button>
+              ) : undefined
+            }
+          />
+          {allRecents.length === 0 ? (
             <div
               className="rounded-md border px-4 py-6 text-center text-[13px]"
               style={{
@@ -189,40 +228,38 @@ export function Chat() {
             >
               Your past chats will show up here.
             </div>
+          ) : recentsExpanded && groupedRecents ? (
+            <div className="flex flex-col">
+              {groupedRecents.map((group) => (
+                <div key={group.key} className="mb-2 last:mb-0">
+                  <div
+                    className="px-1 pb-1 pt-2 text-[11px] font-medium"
+                    style={{ color: 'var(--fg-muted)' }}
+                  >
+                    {group.label}
+                  </div>
+                  {group.sessions.map((s) => (
+                    <ChatHistoryRow
+                      key={s.id}
+                      session={s}
+                      showTime
+                      onRename={(name) => void chat.renameSession(s.id, name)}
+                      onDelete={() => void chat.deleteSession(s.id)}
+                    />
+                  ))}
+                </div>
+              ))}
+            </div>
           ) : (
             <div className="flex flex-col">
               {recents.map((s) => (
-                <div
+                <ChatHistoryRow
                   key={s.id}
-                  className="group flex items-center gap-3 rounded-md px-1 py-2 transition-colors hover:bg-[color:var(--surface-hover)]"
-                >
-                  <button
-                    type="button"
-                    onClick={() => navigate(`/chat/${encodeURIComponent(s.id)}`)}
-                    className="flex flex-1 items-center gap-3 text-left"
-                  >
-                    <MessageSquare className="size-[14px] flex-shrink-0" style={{ color: 'var(--fg-2)' }} />
-                    <span className="flex-1 truncate text-[13.5px]" style={{ color: 'var(--fg-1)' }}>
-                      {s.name || 'Untitled chat'}
-                    </span>
-                    <span className="text-[11.5px] tabular-nums" style={{ color: 'var(--fg-muted)' }}>
-                      {relativeTime(s.updatedAt)}
-                    </span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      void chat.deleteSession(s.id);
-                    }}
-                    aria-label={`Delete chat ${s.name || 'Untitled'}`}
-                    title="Delete chat"
-                    className="inline-flex size-6 shrink-0 items-center justify-center rounded opacity-0 transition-opacity hover:bg-[color:var(--surface-active)] group-hover:opacity-100 focus:opacity-100"
-                    style={{ color: 'var(--fg-2)' }}
-                  >
-                    <Trash2 className="size-[12px]" />
-                  </button>
-                </div>
+                  session={s}
+                  showTime
+                  onRename={(name) => void chat.renameSession(s.id, name)}
+                  onDelete={() => void chat.deleteSession(s.id)}
+                />
               ))}
             </div>
           )}
@@ -326,17 +363,3 @@ function SectionHead({
   );
 }
 
-function SeeAll() {
-  return (
-    <button
-      type="button"
-      className="inline-flex items-center gap-0.5 text-[12px] transition-colors hover:text-[color:var(--fg-1)]"
-      style={{ color: 'var(--fg-2)' }}
-      aria-label="See all chats"
-      title="See all (coming soon)"
-    >
-      See all
-      <ChevronRight className="size-[12px]" />
-    </button>
-  );
-}
