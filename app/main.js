@@ -14,7 +14,6 @@ const crypto = require('crypto');
 const { PostHog } = require('posthog-node');
 const { initMain } = require('electron-audio-loopback');
 const { autoUpdater } = require('electron-updater');
-const settingsStore = require('./src/settings-store');
 
 // E2E test-harness hooks. Set via env vars; production sees none of these.
 //   STENOAI_USER_DATA_DIR — per-test temp userData dir (must be set before app.whenReady)
@@ -27,14 +26,6 @@ const IS_E2E = process.env.STENOAI_E2E === '1';
 const IS_E2E_MOCK_IPC = process.env.STENOAI_E2E_MOCK_IPC === '1';
 if (IS_E2E_MOCK_IPC) {
   require('./e2e-mock-ipc').install({ ipcMain, BrowserWindow });
-}
-
-// Load the persisted renderer preference synchronously, before any window is
-// created. STENOAI_NEW_UI=1 env var overrides the file for E2E / dogfooding.
-settingsStore.load(app);
-function resolveUseNewRenderer() {
-  if (process.env.STENOAI_NEW_UI === '1') return true;
-  return settingsStore.get('newRenderer');
 }
 
 // Initialize electron-audio-loopback before app is ready
@@ -482,54 +473,40 @@ function validateSafeFilePath(filepath, allowedBaseDirs) {
 
 function createWindow(options = {}) {
   rendererShortcutReady = false;
-  const useNew = resolveUseNewRenderer();
-  const legacyPrefs = { nodeIntegration: true, contextIsolation: false };
-  const newPrefs = {
-    nodeIntegration: false,
-    contextIsolation: true,
-    sandbox: false,
-    preload: path.join(__dirname, 'preload.js'),
-    scrollBounce: true,
-  };
 
   const windowOpts = {
     width: 1200,
     height: 800,
     minWidth: 1000,
     minHeight: 600,
-    webPreferences: useNew ? newPrefs : legacyPrefs,
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: false,
+      preload: path.join(__dirname, 'preload.js'),
+      scrollBounce: true,
+    },
     titleBarStyle: 'hiddenInset',
     show: false,
-    backgroundColor: useNew ? '#FAF9F5' : '#ffffff',
+    backgroundColor: '#FAF9F5',
+    // React UI renders the macOS traffic lights inside the sidebar's top
+    // band rather than floating above a fixed titlebar.
+    trafficLightPosition: { x: 18, y: 18 },
   };
-  // The new React UI renders the macOS traffic lights inside the sidebar's
-  // top band rather than floating above a fixed titlebar.
-  if (useNew) {
-    windowOpts.trafficLightPosition = { x: 18, y: 18 };
-  }
   if (options.bounds && typeof options.bounds.x === 'number') {
     Object.assign(windowOpts, options.bounds);
   }
 
   mainWindow = new BrowserWindow(windowOpts);
 
-  if (useNew) {
-    const rendererDist = path.join(__dirname, 'renderer', 'dist', 'index.html');
-    if (fs.existsSync(rendererDist)) {
-      const hash = process.env.STENOAI_RENDERER_HASH;
-      if (hash) {
-        mainWindow.loadFile(rendererDist, { hash });
-      } else {
-        mainWindow.loadFile(rendererDist);
-      }
-    } else {
-      console.warn('[renderer] new renderer requested but dist missing — falling back to legacy');
-      mainWindow.loadFile('index.html');
-    }
+  const rendererDist = path.join(__dirname, 'renderer', 'dist', 'index.html');
+  const hash = process.env.STENOAI_RENDERER_HASH;
+  if (hash) {
+    mainWindow.loadFile(rendererDist, { hash });
   } else {
-    mainWindow.loadFile('index.html');
+    mainWindow.loadFile(rendererDist);
   }
-  
+
   windowReadyToShow = false;
 
   const showWhenReady = () => {
@@ -543,12 +520,8 @@ function createWindow(options = {}) {
     if (launchedByShortcut) {
       return;
     }
-    if (!useNew) {
-      showWhenReady();
-      return;
-    }
-    // For the new React renderer, wait until React signals it has mounted.
-    // Fall back to showing after 4 s in case the signal never arrives.
+    // Wait until React signals it has mounted. Fall back to showing after
+    // 4s in case the signal never arrives.
     const fallback = setTimeout(showWhenReady, 4000);
     ipcMain.once('renderer-ready-to-show', () => {
       clearTimeout(fallback);
@@ -573,23 +546,6 @@ function createWindow(options = {}) {
       pythonProcess.kill();
     }
   });
-}
-
-// Destroy and re-create the main window with fresh webPreferences (needed
-// when flipping the renderer feature flag — reload() cannot change the
-// preload path or contextIsolation setting). Window bounds are preserved.
-function rebuildMainWindow() {
-  let bounds = null;
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    try { bounds = mainWindow.getBounds(); } catch (e) { bounds = null; }
-    mainWindow.removeAllListeners('close');
-    mainWindow.destroy();
-  }
-  mainWindow = null;
-  createWindow({ bounds });
-  if (tray) {
-    updateTrayMenu();
-  }
 }
 
 function getTrayIconPath(recording) {
@@ -661,14 +617,6 @@ function updateTrayMenu() {
     },
     { type: 'separator' },
     {
-      label: resolveUseNewRenderer() ? 'Switch to legacy UI' : 'Switch to new UI (beta)',
-      click: () => {
-        const next = !resolveUseNewRenderer();
-        settingsStore.set('newRenderer', next);
-        rebuildMainWindow();
-      }
-    },
-    {
       label: `StenoAI v${appVersion}`,
       enabled: false
     },
@@ -714,14 +662,11 @@ if (!gotSingleInstanceLock) {
   });
 
   // Sends the custom in-app quit dialog to the renderer and waits for a response.
-  // Falls back to true (allow quit) if the window is unavailable. The legacy
-  // renderer doesn't implement the quit-dialog-response channel, so we skip the
-  // custom dialog there and preserve prior legacy behavior. For the new renderer
-  // a 5s timeout guards against a wedged React tree -- on timeout we resolve
-  // false to preserve any active recording rather than killing it silently.
+  // Falls back to true (allow quit) if the window is unavailable. A 5s timeout
+  // guards against a wedged React tree — on timeout we resolve false to
+  // preserve any active recording rather than killing it silently.
   async function showCustomQuitDialog(type, jobCount) {
     if (!mainWindow || mainWindow.isDestroyed()) return true;
-    if (!resolveUseNewRenderer()) return true;
     mainWindow.show();
     mainWindow.focus();
     mainWindow.webContents.send('show-quit-dialog', { type, jobCount });
