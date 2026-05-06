@@ -149,22 +149,26 @@ export function ChatConversation({ sessionId }: ChatConversationProps) {
     if (!q || isStreaming || submittingRef.current || !ready || !session) return;
     submittingRef.current = true;
     setSubmitError(null);
+    let appended = false;
     try {
       await chat.appendMessage(session.id, {
         role: 'user',
         content: q,
         ts: Date.now(),
       });
+      appended = true;
       setInput('');
       const streamId = streaming.startGlobalStream(q, scopeFolderId);
       pendingPersistRef.current = session.id;
       setActiveStreamId(streamId);
     } catch (err) {
-      // Disk write / IPC / streaming setup can all fail. Restore the
-      // user's text so they don't lose it, surface the error.
+      // Disk write / IPC / streaming setup can all fail. Surface the error.
+      // Only restore the input if nothing made it to disk — once the user
+      // message is persisted it's already visible in the thread, and
+      // re-populating the box would duplicate it on the next submit.
       const message = err instanceof Error ? err.message : 'Failed to send';
       setSubmitError(message);
-      setInput(q);
+      if (!appended) setInput(q);
     } finally {
       submittingRef.current = false;
     }

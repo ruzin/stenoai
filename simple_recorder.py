@@ -1925,7 +1925,16 @@ def chat_global_streaming(question, folder):
             block.append("Action items:\n" + "\n".join(f"- {a}" for a in action_items))
         block_text = "\n".join(block)
         # +5 accounts for the "\n\n---\n\n" separator added later.
-        if used_chars + len(block_text) + 5 > CORPUS_CHAR_BUDGET and blocks:
+        if used_chars + len(block_text) + 5 > CORPUS_CHAR_BUDGET:
+            # If the very first block is already larger than the budget,
+            # truncate it so we still send something representative rather
+            # than blasting the model with an oversized prompt.
+            if not blocks:
+                budget_left = max(0, CORPUS_CHAR_BUDGET - used_chars - 80)
+                if budget_left > 0:
+                    truncated_block = block_text[:budget_left].rstrip() + "\n…(truncated)"
+                    blocks.append(truncated_block)
+                    used_chars += len(truncated_block) + 5
             truncated = len(summaries) - len(blocks)
             break
         blocks.append(block_text)
