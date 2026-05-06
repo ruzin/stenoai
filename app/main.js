@@ -1459,6 +1459,93 @@ ipcMain.on('query-transcript-stream', (event, queryId, summaryFile, question) =>
   });
 });
 
+// Cross-note chat (Chat tab). Same wire protocol as query-transcript-stream
+// (CHAT_CHUNK / CHAT_STREAM_COMPLETE / CHAT_STREAM_ERROR -> query-chunk /
+// query-done) so the renderer can reuse useStreamingQuery. Cloud-only —
+// the Python CLI rejects local providers because we don't have retrieval
+// yet and a full-corpus prompt blows local context windows.
+ipcMain.on('chat-global-stream', (event, queryId, question) => {
+  sendDebugLog(`💬 Global chat query: ${String(question || '').slice(0, 80)}...`);
+  const cloudKey = loadCloudApiKey();
+  const env = cloudKey ? { ...process.env, STENOAI_CLOUD_API_KEY: cloudKey } : process.env;
+
+  let proc;
+  try {
+    proc = require('child_process').spawn(
+      getBackendPath(),
+      ['chat-global-streaming', '-q', question],
+      { env, cwd: getBackendCwd() },
+    );
+  } catch (err) {
+    event.sender.send('query-done', { queryId, success: false, error: err.message });
+    return;
+  }
+
+  activeQueryProcs.set(queryId, proc);
+  const onSenderDestroyed = () => {
+    if (activeQueryProcs.has(queryId)) {
+      proc.kill();
+      activeQueryProcs.delete(queryId);
+    }
+  };
+  event.sender.once('destroyed', onSenderDestroyed);
+
+  let buf = '';
+  let chunkCount = 0;
+  proc.stdout.on('data', (data) => {
+    buf += data.toString();
+    const lines = buf.split('\n');
+    buf = lines.pop();
+    for (const line of lines) {
+      if (line.startsWith('CHAT_CHUNK:')) {
+        try {
+          const chunk = Buffer.from(line.slice(11), 'base64').toString('utf-8');
+          chunkCount++;
+          if (!event.sender.isDestroyed()) {
+            event.sender.send('query-chunk', { queryId, chunk });
+          } else {
+            proc.kill();
+            activeQueryProcs.delete(queryId);
+          }
+        } catch (e) { /* ignore decode errors */ }
+      } else if (line === 'CHAT_STREAM_COMPLETE') {
+        if (!event.sender.isDestroyed()) {
+          event.sender.send('query-done', { queryId, success: true });
+        }
+      } else if (line.startsWith('CHAT_STREAM_ERROR:')) {
+        const errMsg = line.slice(18);
+        if (!event.sender.isDestroyed()) {
+          event.sender.send('query-done', { queryId, success: false, error: errMsg });
+        }
+      }
+    }
+  });
+
+  proc.stderr.on('data', (data) => {
+    const msg = data.toString().trim();
+    if (msg) sendDebugLog(`[chat-global stderr] ${msg.slice(0, 200)}`);
+  });
+
+  proc.on('close', (code) => {
+    activeQueryProcs.delete(queryId);
+    if (!event.sender.isDestroyed()) {
+      event.sender.removeListener('destroyed', onSenderDestroyed);
+    }
+    if (buf.trim() === 'CHAT_STREAM_COMPLETE') {
+      if (!event.sender.isDestroyed()) event.sender.send('query-done', { queryId, success: true });
+    } else if (code !== 0 && code !== null && !event.sender.isDestroyed()) {
+      event.sender.send('query-done', { queryId, success: false, error: `Process exited with code ${code}` });
+    }
+  });
+
+  proc.on('error', (err) => {
+    activeQueryProcs.delete(queryId);
+    if (!event.sender.isDestroyed()) {
+      event.sender.send('query-done', { queryId, success: false, error: err.message });
+    }
+  });
+});
+
 // Chat sessions persistence.
 //
 // The legacy renderer reads/writes `chat_sessions.json` as a flat array.
@@ -3527,6 +3614,27 @@ ipcMain.handle('set-language', async (event, languageCode) => {
     return { success: true, language: languageCode };
   } catch (error) {
     sendDebugLog(`Error setting language: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('get-user-name', async () => {
+  try {
+    const result = await runPythonScript('simple_recorder.py', ['get-user-name'], true);
+    const jsonData = JSON.parse(result.trim());
+    return { success: true, ...jsonData };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('set-user-name', async (event, name) => {
+  try {
+    const result = await runPythonScript('simple_recorder.py', ['set-user-name', String(name ?? '')]);
+    const jsonMatch = result.match(/\{.*\}/s);
+    if (jsonMatch) return JSON.parse(jsonMatch[0]);
+    return { success: true, user_name: String(name ?? '').trim() };
+  } catch (error) {
     return { success: false, error: error.message };
   }
 });

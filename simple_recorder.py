@@ -1832,6 +1832,95 @@ def query_streaming(transcript_file, question):
         print(f"CHAT_STREAM_ERROR:{e}", flush=True)
 
 
+@cli.command(name='chat-global-streaming')
+@click.option('--question', '-q', required=True, help='Question to ask across all notes')
+def chat_global_streaming(question):
+    """Cross-note chat: gather every meeting's title + summary + key points,
+    feed as context to the cloud LLM, stream the answer.
+
+    Cloud-only. Local models can't fit a full corpus of summaries reliably,
+    and we don't have retrieval (RAG) yet — caller (main.js) is responsible
+    for gating this on ai_provider === 'cloud'."""
+    import sys
+    import base64
+    from pathlib import Path
+    from src.config import get_config, get_data_dirs
+
+    config = get_config()
+    if config.get_ai_provider() != "cloud":
+        print("CHAT_STREAM_ERROR:Cross-note chat requires a cloud AI provider. Switch in Settings → AI.", flush=True)
+        return
+
+    dirs = get_data_dirs()
+    output_dir = dirs["output"]
+
+    # Collect every summary file, preferring .md (the new format) but reading
+    # legacy .json too so users with old recordings aren't excluded.
+    summaries: list[tuple[Path, dict]] = []
+    seen = set()
+    for f in sorted(output_dir.glob("*_summary.md")):
+        try:
+            data = _parse_meeting_markdown(f)
+            summaries.append((f, data))
+            seen.add(f.stem.replace('_summary', ''))
+        except Exception:
+            continue
+    for f in sorted(output_dir.glob("*_summary.json")):
+        if f.stem.replace('_summary', '') in seen:
+            continue
+        try:
+            with open(f, 'r', encoding='utf-8') as fh:
+                summaries.append((f, json.load(fh)))
+        except Exception:
+            continue
+
+    if not summaries:
+        print("CHAT_STREAM_ERROR:No notes found yet. Record a meeting first.", flush=True)
+        return
+
+    # Most-recent first so the model weights newer context higher when token
+    # budget is tight. Each block is kept compact (title + summary + key
+    # points + action items) — full transcripts would blow even a 200k window.
+    def sort_key(item):
+        _, data = item
+        return data.get("session_info", {}).get("processed_at") or ""
+
+    summaries.sort(key=sort_key, reverse=True)
+
+    blocks = []
+    for _, data in summaries:
+        info = data.get("session_info", {}) or {}
+        name = info.get("name") or "Untitled"
+        date = (info.get("processed_at") or "")[:10]
+        summary = (data.get("summary") or "").strip()
+        key_points = data.get("key_points") or []
+        action_items = data.get("action_items") or []
+        block = [f"## {name}" + (f" — {date}" if date else "")]
+        if summary:
+            block.append(summary)
+        if key_points:
+            block.append("Key points:\n" + "\n".join(f"- {p}" for p in key_points))
+        if action_items:
+            block.append("Action items:\n" + "\n".join(f"- {a}" for a in action_items))
+        blocks.append("\n".join(block))
+
+    corpus = "\n\n---\n\n".join(blocks)
+
+    language = config.get_language()
+    if language == "auto":
+        language = "en"
+
+    try:
+        summarizer = OllamaSummarizer()
+        for chunk in summarizer.query_transcript_streaming(corpus, question, language=language):
+            encoded = base64.b64encode(chunk.encode('utf-8')).decode('ascii')
+            sys.stdout.write(f"CHAT_CHUNK:{encoded}\n")
+            sys.stdout.flush()
+        print("CHAT_STREAM_COMPLETE", flush=True)
+    except Exception as e:
+        print(f"CHAT_STREAM_ERROR:{e}", flush=True)
+
+
 @cli.command()
 def list_failed():
     """List summary files that failed processing (have fallback summaries)"""
@@ -2360,6 +2449,25 @@ def set_language(language_code):
         }))
     else:
         print(json.dumps({"success": False, "error": "Failed to save language setting"}))
+
+
+@cli.command(name='get-user-name')
+def get_user_name_cmd():
+    """Get the user's first name (for in-app greetings)."""
+    from src.config import get_config
+    print(json.dumps({"user_name": get_config().get_user_name()}))
+
+
+@cli.command(name='set-user-name')
+@click.argument('name', default='')
+def set_user_name_cmd(name):
+    """Set the user's first name. Empty string clears it."""
+    from src.config import get_config
+    success = get_config().set_user_name(name)
+    if success:
+        print(json.dumps({"success": True, "user_name": name.strip()}))
+    else:
+        print(json.dumps({"success": False, "error": "Failed to save user name"}))
 
 
 @cli.command()

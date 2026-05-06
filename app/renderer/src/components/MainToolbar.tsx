@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Moon, MoreHorizontal, Monitor, PanelLeftClose, PanelLeftOpen, PencilLine, Sun } from 'lucide-react';
+import { MessageSquare, Moon, MoreHorizontal, Monitor, PanelLeftClose, PanelLeftOpen, PencilLine, Sun } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { AudioWave } from '@/components/AudioWave';
@@ -14,6 +14,7 @@ import {
 } from '@/hooks/useSettings';
 import type { RecordingStatus } from '@/hooks/useRecording';
 import { useTheme } from '@/hooks/useTheme';
+import { useRoute, navigate } from '@/lib/router';
 import { cn } from '@/lib/utils';
 
 interface MainToolbarProps {
@@ -36,6 +37,13 @@ export function MainToolbar({
   const isPaused = recordingStatus === 'paused';
   const isProcessing = recordingStatus === 'processing';
   const { resolved: resolvedTheme, setTheme } = useTheme();
+  // Route-aware primary action. On chat routes the "+ New" affordance maps
+  // to a new chat (navigates back to /chat entry). Everywhere else it's
+  // the recording button. Recording always wins if a session is active —
+  // we don't want a navigation to silently swallow a stop-recording click.
+  const route = useRoute();
+  const isChatRoute = route === '/chat' || route.startsWith('/chat/');
+  const showChatPrimary = isChatRoute && !isRecording && !isProcessing;
 
   // Matches sb-top padding-left (82px clears macOS traffic lights)
   const toggleLeft = 82;
@@ -93,7 +101,7 @@ export function MainToolbar({
         </button>
         <button
           type="button"
-          onClick={onToggleRecording}
+          onClick={showChatPrimary ? () => navigate('/chat') : onToggleRecording}
           disabled={isProcessing}
           className={cn('record-btn', isRecording && 'is-recording')}
           aria-label={
@@ -101,14 +109,18 @@ export function MainToolbar({
               ? 'Processing previous recording'
               : isRecording
                 ? 'Open recording in progress'
-                : 'New note'
+                : showChatPrimary
+                  ? 'New chat'
+                  : 'New note'
           }
           title={
             isProcessing
               ? 'Processing previous recording'
               : isRecording
                 ? 'Open recording in progress'
-                : 'New note'
+                : showChatPrimary
+                  ? 'New chat'
+                  : 'New note'
           }
         >
           {isProcessing ? (
@@ -137,6 +149,11 @@ export function MainToolbar({
                 {formatElapsed(elapsedSeconds)}
               </span>
               <span>{isPaused ? 'Paused' : 'Recording'}</span>
+            </>
+          ) : showChatPrimary ? (
+            <>
+              <MessageSquare className="size-[13px]" />
+              New chat
             </>
           ) : (
             <>

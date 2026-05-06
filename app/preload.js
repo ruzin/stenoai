@@ -117,6 +117,7 @@ const stenoai = {
   query: {
     ask: (file, q) => invoke('query-transcript', file, q),
     askStream: (id, file, q) => send('query-transcript-stream', id, file, q),
+    chatGlobalStream: (id, q) => send('chat-global-stream', id, q),
     cancel: (id) => send('query-cancel', id),
   },
 
@@ -156,6 +157,8 @@ const stenoai = {
     setSystemAudio: (v) => invoke('set-system-audio', v),
     getLanguage: () => invoke('get-language'),
     setLanguage: (code) => invoke('set-language', code),
+    getUserName: () => invoke('get-user-name'),
+    setUserName: (name) => invoke('set-user-name', name),
     getStoragePath: () => invoke('get-storage-path'),
     setStoragePath: (p) => invoke('set-storage-path', p),
     pickStorageFolder: () => invoke('select-storage-folder'),

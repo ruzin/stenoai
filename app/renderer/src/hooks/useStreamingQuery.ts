@@ -56,6 +56,46 @@ export function useStreamingQuery() {
     return id;
   }, []);
 
+  // Cross-note variant of startStream — same wire shape, no summaryFile.
+  // Used by the Chat tab to ask questions across every meeting summary.
+  const startGlobalStream = React.useCallback((question: string): string => {
+    const id = newId();
+    setStreams((prev) => ({
+      ...prev,
+      [id]: { text: '', status: 'streaming', error: null },
+    }));
+    activeRef.current.add(id);
+
+    const off = ipc().subscribeQueryStream(id, {
+      onChunk: (chunk) => {
+        setStreams((prev) => {
+          const current = prev[id];
+          if (!current) return prev;
+          return { ...prev, [id]: { ...current, text: current.text + chunk } };
+        });
+      },
+      onDone: () => {
+        setStreams((prev) => {
+          const current = prev[id];
+          if (!current) return prev;
+          return { ...prev, [id]: { ...current, status: 'done' } };
+        });
+        activeRef.current.delete(id);
+      },
+      onError: (err) => {
+        setStreams((prev) => {
+          const current = prev[id];
+          if (!current) return prev;
+          return { ...prev, [id]: { ...current, status: 'error', error: err.message } };
+        });
+        activeRef.current.delete(id);
+      },
+    });
+    unsubsRef.current.set(id, off);
+    ipc().query.chatGlobalStream(id, question);
+    return id;
+  }, []);
+
   const cancelStream = React.useCallback((id: string) => {
     const off = unsubsRef.current.get(id);
     off?.();
@@ -92,5 +132,26 @@ export function useStreamingQuery() {
     };
   }, []);
 
-  return { streams, startStream, cancelStream, clearStream };
+  return { streams, startStream, startGlobalStream, cancelStream, clearStream };
+}
+
+export type StreamingQueryApi = ReturnType<typeof useStreamingQuery>;
+
+// Context-shared streaming state. Mounted at App level so streams survive
+// route changes (e.g. submitting on /chat then navigating to /chat/<id>
+// without losing the in-flight response). Consumers should prefer
+// useGlobalStreaming() over calling useStreamingQuery() directly.
+const StreamingContext = React.createContext<StreamingQueryApi | null>(null);
+
+export function StreamingProvider({ children }: { children: React.ReactNode }) {
+  const value = useStreamingQuery();
+  return React.createElement(StreamingContext.Provider, { value }, children);
+}
+
+export function useGlobalStreaming(): StreamingQueryApi {
+  const ctx = React.useContext(StreamingContext);
+  if (!ctx) {
+    throw new Error('useGlobalStreaming must be used inside <StreamingProvider>');
+  }
+  return ctx;
 }

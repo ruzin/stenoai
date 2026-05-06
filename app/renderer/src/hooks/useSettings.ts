@@ -11,6 +11,7 @@ export const settingsKeys = {
   language: () => [...settingsKeys.all, 'language'] as const,
   storagePath: () => [...settingsKeys.all, 'storagePath'] as const,
   appVersion: () => [...settingsKeys.all, 'appVersion'] as const,
+  userName: () => [...settingsKeys.all, 'userName'] as const,
 };
 
 export function useNotificationsSetting() {
@@ -120,5 +121,21 @@ export function useAppVersion() {
 export function useClearSystemState() {
   return useMutation({
     mutationFn: async () => unwrap(await ipc().system.clearState()),
+  });
+}
+
+export function useUserName() {
+  return useQuery({
+    queryKey: settingsKeys.userName(),
+    queryFn: async () => unwrap(await ipc().settings.getUserName()).user_name,
+  });
+}
+
+export function useSetUserName() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (name: string) =>
+      unwrap(await ipc().settings.setUserName(name)),
+    onSuccess: () => qc.invalidateQueries({ queryKey: settingsKeys.userName() }),
   });
 }

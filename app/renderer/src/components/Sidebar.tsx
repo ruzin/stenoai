@@ -3,6 +3,7 @@ import {
   ChevronDown,
   Home as HomeIcon,
   Inbox,
+  MessageSquare,
   Plus,
   Search,
   Settings as SettingsIcon,
@@ -160,6 +161,7 @@ export function Sidebar({
 
   const isHomeActive = currentRoute === '/' || currentRoute === '';
   const isAllMeetingsActive = currentRoute === '/meetings';
+  const isChatActive = currentRoute === '/chat';
   // Malformed % escapes throw URIError. Guard so a bad route can't crash
   // the entire sidebar render.
   const activeFolderId = React.useMemo<string | null>(() => {
@@ -373,6 +375,15 @@ export function Sidebar({
               )}
             </button>
           </div>
+
+          <button
+            type="button"
+            className={cn('sb-row', isChatActive && 'active')}
+            onClick={() => navigate('/chat')}
+          >
+            <MessageSquare className="size-[14px]" />
+            <span className="flex-1 truncate">Chat</span>
+          </button>
 
           {/* Folders group */}
           <div className="mt-3.5">
