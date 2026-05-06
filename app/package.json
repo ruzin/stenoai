@@ -10,7 +10,7 @@
   },
   "scripts": {
     "start": "npm run build:renderer && electron .",
-    "start:legacy": "electron .",
+    "start:nobuild": "electron .",
     "dev:renderer": "vite",
     "build:renderer": "vite build",
     "typecheck:renderer": "tsc -p renderer/tsconfig.json --noEmit",
