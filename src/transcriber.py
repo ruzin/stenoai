@@ -318,15 +318,28 @@ class WhisperTranscriber:
             if not segments:
                 return {
                     "text": None,
+                    "segments": [],
                     "duration_seconds": duration_seconds,
                     "detected_language": detected_language,
                     "detected_language_probability": detected_language_probability,
                 }
 
-            # Combine all segment texts
+            # Combine all segment texts and surface per-segment timing so
+            # callers like transcribe_diarised can chronologically interleave
+            # turns from multiple channels. pywhispercpp reports t0/t1 in
+            # centiseconds (1/100s), so divide by 100 to get seconds.
             transcript = " ".join(segment.text.strip() for segment in segments)
             return {
                 "text": transcript.strip(),
+                "segments": [
+                    {
+                        "text": segment.text.strip(),
+                        "start": segment.t0 / 100.0,
+                        "end": segment.t1 / 100.0,
+                    }
+                    for segment in segments
+                    if segment.text.strip()
+                ],
                 "duration_seconds": duration_seconds,
                 "detected_language": detected_language,
                 "detected_language_probability": detected_language_probability,
@@ -354,12 +367,26 @@ class WhisperTranscriber:
         if not result or "text" not in result:
             return {
                 "text": None,
+                "segments": [],
                 "detected_language": None,
                 "detected_language_probability": None,
             }
 
+        # openai-whisper returns segments with start/end in seconds and
+        # additional fields we don't need; normalise the shape so the
+        # whisper.cpp and openai paths are interchangeable downstream.
+        raw_segments = result.get("segments") or []
         return {
             "text": result["text"].strip(),
+            "segments": [
+                {
+                    "text": (s.get("text") or "").strip(),
+                    "start": float(s.get("start") or 0.0),
+                    "end": float(s.get("end") or 0.0),
+                }
+                for s in raw_segments
+                if (s.get("text") or "").strip()
+            ],
             "detected_language": result.get("language"),
             "detected_language_probability": None,
         }
@@ -501,8 +528,8 @@ class WhisperTranscriber:
             mic_has_audio = self._check_rms_energy(mic_path)
             system_has_audio = self._check_rms_energy(system_path)
 
-            mic_text = ""
-            system_text = ""
+            mic_segments: list[dict] = []
+            system_segments: list[dict] = []
             detected_language = None
             detected_language_probability = None
 
@@ -510,7 +537,7 @@ class WhisperTranscriber:
                 logger.info("Transcribing mic channel (You)...")
                 mic_result = self.transcribe_audio(mic_path, language)
                 if mic_result and mic_result.get("text"):
-                    mic_text = mic_result["text"]
+                    mic_segments = mic_result.get("segments") or []
                     # Propagate detected language from the first channel with speech
                     if not detected_language and mic_result.get("detected_language"):
                         detected_language = mic_result["detected_language"]
@@ -522,27 +549,55 @@ class WhisperTranscriber:
                 logger.info("Transcribing system channel (Others)...")
                 sys_result = self.transcribe_audio(system_path, language)
                 if sys_result and sys_result.get("text"):
-                    system_text = sys_result["text"]
+                    system_segments = sys_result.get("segments") or []
                     if not detected_language and sys_result.get("detected_language"):
                         detected_language = sys_result["detected_language"]
                         detected_language_probability = sys_result.get("detected_language_probability")
             else:
                 logger.info("System channel is silent, skipping")
 
-            # Build combined plain text and labelled text
-            plain_parts = []
-            labelled_parts = []
+            # Chronologically interleave segments from both channels and
+            # collapse runs of consecutive same-speaker segments into a
+            # single labelled turn so the rendered transcript reads as a
+            # natural back-and-forth (Granola-style) instead of two
+            # block-concatenated monologues.
+            tagged: list[tuple[float, str, str]] = []
+            for s in mic_segments:
+                text = (s.get("text") or "").strip()
+                if text:
+                    tagged.append((float(s.get("start") or 0.0), "You", text))
+            for s in system_segments:
+                text = (s.get("text") or "").strip()
+                if text:
+                    tagged.append((float(s.get("start") or 0.0), "Others", text))
+            # Stable sort: equal-start segments (overlapping speech) keep
+            # the order they were appended in (mic first, then system),
+            # which keeps the user as the "first speaker" in tied cases.
+            tagged.sort(key=lambda t: t[0])
 
-            if mic_text:
-                plain_parts.append(mic_text)
-                labelled_parts.append(f"[You] {mic_text}")
-            if system_text:
-                plain_parts.append(system_text)
-                labelled_parts.append(f"[Others] {system_text}")
+            turns: list[tuple[str, list[str]]] = []
+            for _start, speaker, text in tagged:
+                if turns and turns[-1][0] == speaker:
+                    turns[-1][1].append(text)
+                else:
+                    turns.append((speaker, [text]))
 
+            plain_parts = [' '.join(parts) for _speaker, parts in turns]
             plain_text = "\n\n".join(plain_parts) if plain_parts else "No speech detected in audio"
-            diarised_text = "\n\n".join(labelled_parts) if labelled_parts else None
-            is_diarised = bool(diarised_text)
+
+            # Only emit a labelled diarised_text when we actually had speech
+            # on BOTH channels. A single-speaker run shouldn't pretend to be
+            # a multi-party transcript — and leaking a stray `[You]` prefix
+            # into the saved transcript file (which the meeting list shows
+            # as plain text when is_diarised=false) looks broken in the UI.
+            is_diarised = bool(mic_segments) and bool(system_segments)
+            if is_diarised:
+                labelled_parts = [
+                    f"[{speaker}] {' '.join(parts)}" for speaker, parts in turns
+                ]
+                diarised_text = "\n\n".join(labelled_parts)
+            else:
+                diarised_text = None
 
             return {
                 "text": plain_text,

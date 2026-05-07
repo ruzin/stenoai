@@ -6,6 +6,7 @@ import {
   Loader2,
   PencilLine,
 } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
 import { MeetingsShell } from '@/components/MeetingsShell';
 import { useNavigate } from '@/lib/router';
 import { useRecording } from '@/hooks/useRecording';
@@ -51,12 +52,34 @@ export function Processing() {
   const [streamText, setStreamText] = React.useState('');
   const [streamedTitle, setStreamedTitle] = React.useState<string | null>(null);
 
+  // Buffer streamed chunks and flush at most every 50ms (~20fps). At a
+  // typical token rate of 30-60 tokens/sec, this batches ~3 tokens per
+  // commit which keeps the UI smooth without re-parsing the entire markdown
+  // string on every single chunk.
+  const pendingChunkRef = React.useRef('');
+  const flushTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   React.useEffect(() => {
+    return () => {
+      if (flushTimerRef.current) clearTimeout(flushTimerRef.current);
+    };
+  }, []);
+
+  React.useEffect(() => {
+    const flushPending = () => {
+      flushTimerRef.current = null;
+      if (!pendingChunkRef.current) return;
+      const buffered = pendingChunkRef.current;
+      pendingChunkRef.current = '';
+      setStreamText((t) => t + buffered);
+    };
     const offs = [
       ipc().on.summaryChunk((e) => {
         if (activeSession && e.sessionName !== activeSession) return;
-        setStreamText((t) => t + e.chunk);
+        pendingChunkRef.current += e.chunk;
         setStage((s) => (s === 'transcribing' ? 'summarizing' : s));
+        if (!flushTimerRef.current) {
+          flushTimerRef.current = setTimeout(flushPending, 50);
+        }
       }),
       ipc().on.summaryTitle((e) => {
         if (activeSession && e.sessionName !== activeSession) return;
@@ -163,6 +186,13 @@ export function Processing() {
   );
 }
 
+// Memoized so it only re-parses when streamText actually changes — without
+// this it'd re-render on every parent re-render (stage transitions, draft
+// updates, etc.) and re-walk the markdown tree unnecessarily.
+const StreamMarkdown = React.memo(function StreamMarkdown({ text }: { text: string }) {
+  return <ReactMarkdown>{text}</ReactMarkdown>;
+});
+
 function StageCard({
   stage,
   streamText,
@@ -174,14 +204,14 @@ function StageCard({
     <div className="relative" style={{ maxWidth: '72ch' }}>
       {streamText && (
         <div
-          className="mb-3 whitespace-pre-wrap text-[15px]"
+          className="stream-markdown mb-3 text-[15px]"
           style={{
             color: 'var(--fg-1)',
             fontFamily: 'var(--font-sans)',
             lineHeight: 1.6,
           }}
         >
-          {streamText}
+          <StreamMarkdown text={streamText} />
         </div>
       )}
 
