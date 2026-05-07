@@ -3760,6 +3760,25 @@ ipcMain.handle('get-recordings-dir', async () => {
   }
 });
 
+// Renderer-driven system audio capture writes its WebM/Opus blob here so it
+// lands inside an allowedBaseDir for validateSafeFilePath downstream. The
+// blob comes over IPC as a Uint8Array (structured-clone friendly).
+ipcMain.handle('write-system-audio-blob', async (_event, payload, sessionName) => {
+  try {
+    const dir = path.join(os.homedir(), 'Library', 'Application Support', 'stenoai', 'system_audio_tmp');
+    fs.mkdirSync(dir, { recursive: true });
+    const safeName = String(sessionName || 'Meeting').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 64);
+    const filename = `sysaudio-${Date.now()}-${safeName}.webm`;
+    const filePath = path.join(dir, filename);
+    const buf = Buffer.isBuffer(payload) ? payload : Buffer.from(payload);
+    fs.writeFileSync(filePath, buf);
+    return { success: true, filePath };
+  } catch (error) {
+    sendDebugLog(`Error writing system audio blob: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+});
+
 ipcMain.handle('process-system-audio-recording', async (event, audioFilePath, sessionName) => {
   try {
     sendDebugLog(`Queuing system audio recording for processing: ${audioFilePath}`);

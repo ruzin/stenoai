@@ -311,6 +311,12 @@ export interface StenoaiBridge {
     pause: RequestFn<[], PauseRecordingResponse>;
     resume: RequestFn<[], ResumeRecordingResponse>;
     reportSystemAudioState: SendFn<[active: boolean]>;
+    enableLoopbackAudio: RequestFn<[], void>;
+    disableLoopbackAudio: RequestFn<[], void>;
+    writeSystemAudioBlob: RequestFn<
+      [bytes: Uint8Array, name: string],
+      Result<{ filePath: string }>
+    >;
     processSystemAudio: RequestFn<[filePath: string, name: string], Result<{ message: string }>>;
     processFile: RequestFn<[filePath: string, name: string], Result<{ message: string }>>;
     pickAudioFile: RequestFn<[], PickAudioFileResponse>;
