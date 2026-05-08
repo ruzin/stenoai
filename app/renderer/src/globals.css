@@ -123,7 +123,10 @@
     --border: 60 4% 10% / 0.10;
     --input: 60 4% 10% / 0.10;
     --ring: 60 4% 10% / 0.35;
-    --accent-primary: 239 84% 67%;
+    /* Accent = foreground ink. No chromatic brand accent; focus rings,
+     * active tabs, toggles, and stream-markdown links all use the same
+     * neutral ink tone so the interface reads as one paper+ink palette. */
+    --accent-primary: 60 4% 10%;
   }
 
   .dark,
@@ -178,7 +181,9 @@
     --border: 48 20% 90% / 0.10;
     --input: 48 20% 90% / 0.10;
     --ring: 48 20% 90% / 0.45;
-    --accent-primary: 239 84% 75%;
+    /* Accent = foreground ink (light variant for dark mode). Matches the
+     * light-mode pattern of accent == foreground for an all-neutral UI. */
+    --accent-primary: 48 20% 90%;
   }
 }
 
