@@ -1881,14 +1881,24 @@ ipcMain.handle('get-queue-status', async () => {
 // Synchronously read system_audio_enabled from the user config so
 // start-recording-ui can decide whether to spawn the Python `record`
 // subprocess (off) or let the renderer drive the dual-stream capture (on).
-// Returns false on any error so we never surprise the user with renderer-only
-// mode if their config is broken.
+//
+// Always returns false on macOS without CoreAudio Process Tap support
+// (< 14.4 or non-darwin), regardless of the user's config setting — the
+// Python pipeline is the only working capture path there. Without this
+// gate, a user on older macOS with the new default `true` config would
+// produce no audio at all (Python skipped by main.js, renderer skipped
+// by useSystemAudioCapture's own OS check). Falls through to the config
+// default (currently true on a missing/empty config) when the OS does
+// support CoreAudio Tap so new installs get system audio out of the box.
 function loadSystemAudioEnabled() {
+  if (!isCoreAudioTapSupported()) return false;
   try {
     const cfgPath = path.join(os.homedir(), 'Library', 'Application Support', 'stenoai', 'config.json');
-    if (!fs.existsSync(cfgPath)) return false;
+    if (!fs.existsSync(cfgPath)) return true; // new install → CoreAudio default
     const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf-8'));
-    return cfg.system_audio_enabled === true;
+    // `false` only when the user has explicitly opted out; an absent key
+    // means "haven't been asked yet" → treat as the new default.
+    return cfg.system_audio_enabled !== false;
   } catch (_) {
     return false;
   }

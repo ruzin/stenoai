@@ -208,7 +208,10 @@ class Config:
             "model": self.DEFAULT_MODEL,
             "notifications_enabled": True,
             "telemetry_enabled": True,
-            "system_audio_enabled": False,
+            # Default ON — CoreAudio Process Tap captures system audio
+            # alongside the mic on macOS 14.4+. Older macOS auto-falls back
+            # to mic-only via main.js's loadSystemAudioEnabled() OS gate.
+            "system_audio_enabled": True,
             "language": "en",
             "ai_provider": "local",
             "remote_ollama_url": "",
@@ -374,7 +377,7 @@ class Config:
 
     def get_system_audio_enabled(self) -> bool:
         """Get whether system audio capture is enabled."""
-        return self._config.get("system_audio_enabled", False)
+        return self._config.get("system_audio_enabled", True)
 
     def set_system_audio_enabled(self, enabled: bool) -> bool:
         """
