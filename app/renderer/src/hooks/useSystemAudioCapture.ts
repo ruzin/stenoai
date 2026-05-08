@@ -41,13 +41,16 @@ export function useSystemAudioCapture() {
   const chunksRef = React.useRef<Blob[]>([]);
   const sessionNameRef = React.useRef<string | null>(null);
   const activeRef = React.useRef(false);
+  // Bumped by stopCapture so any in-flight startCapture awaiting
+  // getUserMedia/getDisplayMedia knows it's been cancelled and aborts
+  // before installing the streams it just acquired.
+  const startTokenRef = React.useRef(0);
 
   React.useEffect(() => {
     sessionNameRef.current = sessionName;
   }, [sessionName]);
 
   React.useEffect(() => {
-    if (!enabled) return;
     const bridge = ipc();
 
     const teardownStreams = () => {
@@ -68,18 +71,33 @@ export function useSystemAudioCapture() {
     const startCapture = async () => {
       if (activeRef.current) return;
       activeRef.current = true;
+      // Capture the start-token so async aborts can detect cancellation:
+      // stopCapture (or the unmount cleanup) bumps startTokenRef and we
+      // bail at the next checkpoint after stopping any tracks we already
+      // acquired.
+      const token = ++startTokenRef.current;
+      const cancelled = () => token !== startTokenRef.current;
+
+      let micStream: MediaStream | null = null;
+      let sysStream: MediaStream | null = null;
+      const stopAcquired = () => {
+        micStream?.getTracks().forEach((t) => t.stop());
+        sysStream?.getTracks().forEach((t) => t.stop());
+      };
+
       try {
         // 1. Mic stream. Echo cancellation ON so speaker bleed (when not
         //    using headphones) doesn't double-up the remote audio in the
         //    mix. Noise suppression and AGC OFF — whisper handles ambient
         //    noise, and AGC squashes quiet system audio when ducking.
-        const micStream = await navigator.mediaDevices.getUserMedia({
+        micStream = await navigator.mediaDevices.getUserMedia({
           audio: {
             echoCancellation: true,
             noiseSuppression: false,
             autoGainControl: false,
           },
         });
+        if (cancelled()) { stopAcquired(); return; }
         micStreamRef.current = micStream;
 
         // 2. System audio loopback. With `forceCoreAudioTap: true` in
@@ -88,13 +106,15 @@ export function useSystemAudioCapture() {
         //    served via CoreAudio Process Taps (macOS 14.4+). video:true
         //    is required by the API; we drop the track immediately.
         await bridge.recording.enableLoopbackAudio();
-        const sysStream = await navigator.mediaDevices.getDisplayMedia({
+        if (cancelled()) { stopAcquired(); return; }
+        sysStream = await navigator.mediaDevices.getDisplayMedia({
           video: true,
           audio: true,
         });
+        if (cancelled()) { stopAcquired(); return; }
         sysStream.getVideoTracks().forEach((t) => {
           t.stop();
-          sysStream.removeTrack(t);
+          sysStream!.removeTrack(t);
         });
         if (sysStream.getAudioTracks().length === 0) {
           throw new Error('No audio track in loopback stream');
@@ -175,6 +195,10 @@ export function useSystemAudioCapture() {
     };
 
     const stopCapture = async () => {
+      // Invalidate any in-flight startCapture awaiting media APIs — its
+      // next cancelled() check will see the token has moved and it'll
+      // tear down the streams it acquired without installing them.
+      startTokenRef.current++;
       if (!activeRef.current) return;
       activeRef.current = false;
       const recorder = recorderRef.current;
@@ -210,6 +234,16 @@ export function useSystemAudioCapture() {
         recorder.stop();
       });
     };
+
+    // If support resolved false or the user toggled system audio off
+    // during an active recording, gracefully stop the capture rather
+    // than leaving streams unmanaged. The stop path tears down the
+    // mic/system streams, hands off the recorded blob for processing,
+    // and resets the tray state.
+    if (!enabled) {
+      if (activeRef.current) void stopCapture();
+      return;
+    }
 
     if (status === 'recording' && !activeRef.current) {
       void startCapture();

@@ -193,6 +193,20 @@ class CheckRmsEnergyTests(unittest.TestCase):
             wf.writeframes(b'')
         self.assertFalse(self.transcriber._check_rms_energy(path))
 
+    def test_sub_one_second_clip_with_audio_is_not_silent(self):
+        # Regression: the windowed scan used to require a full 1 s window
+        # before it would compute any RMS. A 0.4 s loud clip would never
+        # enter the loop and was falsely returned as silent — disabling
+        # diarisation on short recordings.
+        path = self.tmpdir / 'short_loud.wav'
+        _write_wav_with_segments(path, [(0.4, 'loud')])
+        self.assertTrue(self.transcriber._check_rms_energy(path))
+
+    def test_sub_one_second_silent_clip_is_silent(self):
+        path = self.tmpdir / 'short_silent.wav'
+        _write_wav_with_segments(path, [(0.4, 'silent')])
+        self.assertFalse(self.transcriber._check_rms_energy(path))
+
     def test_explicit_high_threshold_skips_quiet_audio(self):
         path = self.tmpdir / 'loud.wav'
         _write_wav_with_segments(path, [(5, 'loud')])

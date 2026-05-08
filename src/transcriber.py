@@ -112,6 +112,21 @@ except ImportError:
     _NUMPY_AVAILABLE = False
 
 
+def _rms_of_pcm16(raw: bytes, n_samples: int) -> float:
+    """RMS amplitude of an int16 little-endian PCM buffer, normalised to [0, 1]."""
+    import struct
+    import math
+
+    if n_samples == 0:
+        return 0.0
+    if _NUMPY_AVAILABLE:
+        samples = _np.frombuffer(raw, dtype=_np.int16).astype(_np.float32)
+        samples /= 32768.0
+        return float(_np.sqrt(_np.mean(samples * samples)))
+    unpacked = struct.unpack(f'<{n_samples}h', raw)
+    return math.sqrt(sum((s / 32768.0) ** 2 for s in unpacked) / len(unpacked))
+
+
 def _scan_max_rms(wf, window: int, step: int, early_exit_threshold: float) -> float:
     """Return the maximum RMS amplitude found across stepped 1-second windows.
 
@@ -122,22 +137,25 @@ def _scan_max_rms(wf, window: int, step: int, early_exit_threshold: float) -> fl
     Python on long recordings); falls back to struct/math otherwise so
     transcriber doesn't hard-require numpy.
     """
-    import struct
-    import math
-
     n_frames = wf.getnframes()
+    if n_frames == 0:
+        return 0.0
+
+    # Short clip: file is shorter than one window. Scan the whole thing
+    # as a single window so a sub-window-length recording isn't falsely
+    # classified as silent just because the windowed loop's `pos +
+    # window <= n_frames` guard would never enter.
+    if n_frames < window:
+        wf.setpos(0)
+        raw = wf.readframes(n_frames)
+        return _rms_of_pcm16(raw, n_frames)
+
     max_rms = 0.0
     pos = 0
     while pos + window <= n_frames:
         wf.setpos(pos)
         raw = wf.readframes(window)
-        if _NUMPY_AVAILABLE:
-            samples = _np.frombuffer(raw, dtype=_np.int16).astype(_np.float32)
-            samples /= 32768.0
-            rms = float(_np.sqrt(_np.mean(samples * samples)))
-        else:
-            unpacked = struct.unpack(f'<{window}h', raw)
-            rms = math.sqrt(sum((s / 32768.0) ** 2 for s in unpacked) / len(unpacked))
+        rms = _rms_of_pcm16(raw, window)
         if rms > max_rms:
             max_rms = rms
         if max_rms >= early_exit_threshold:
