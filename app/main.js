@@ -28,8 +28,27 @@ if (IS_E2E_MOCK_IPC) {
   require('./e2e-mock-ipc').install({ ipcMain, BrowserWindow });
 }
 
-// Initialize electron-audio-loopback before app is ready
-initMain();
+// Initialize electron-audio-loopback before app is ready.
+// forceCoreAudioTap drives Chromium to use macOS 14.4+ CoreAudio Process Taps
+// (NSAudioCaptureUsageDescription) rather than ScreenCaptureKit. SCK was
+// returning silent right channels in our tests on macOS 26; CoreAudio Tap
+// matches Meetily's default and is the path our Info.plist + entitlements
+// are prepared for. Older macOS (< 14.4) is gated out at the UI layer.
+initMain({ forceCoreAudioTap: true });
+
+// CoreAudio Process Taps require macOS 14.4+. Returns false on non-macOS or
+// older versions so the renderer can disable the system-audio toggle rather
+// than silently producing dead-channel recordings.
+function isCoreAudioTapSupported() {
+  if (process.platform !== 'darwin') return false;
+  try {
+    const v = process.getSystemVersion();
+    const [maj, min = 0] = v.split('.').map((n) => parseInt(n, 10) || 0);
+    return maj > 14 || (maj === 14 && min >= 4);
+  } catch (_) {
+    return false;
+  }
+}
 
 let mainWindow;
 let pythonProcess;
@@ -768,6 +787,17 @@ if (!gotSingleInstanceLock) {
     ]);
     Menu.setApplicationMenu(appMenu);
 
+    if (process.platform === 'darwin') {
+      try {
+        const osVer = process.getSystemVersion();
+        const screenPerm = systemPreferences.getMediaAccessStatus('screen');
+        const tapOk = isCoreAudioTapSupported();
+        sendDebugLog(`[sysaudio] macOS ${osVer} — CoreAudio Tap supported=${tapOk}, screen permission=${screenPerm}`);
+      } catch (e) {
+        sendDebugLog(`[sysaudio] startup probe failed: ${e.message}`);
+      }
+    }
+
     createWindow();
     if (!IS_E2E) createTray();
     setupAutoUpdater();
@@ -935,6 +965,25 @@ ipcMain.handle('request-microphone-permission', async () => {
     return { success: true, granted };
   } catch (error) {
     console.error('Error requesting microphone permission:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Reports whether system-audio capture is available on this OS and what the
+// current Screen Recording permission state is. Used by Settings to disable
+// the toggle on unsupported macOS, and to surface "permission denied" rather
+// than letting the user produce silent recordings.
+ipcMain.handle('get-system-audio-support', async () => {
+  try {
+    const supported = isCoreAudioTapSupported();
+    let screenPermission = 'unknown';
+    let osVersion = '';
+    if (process.platform === 'darwin') {
+      try { osVersion = process.getSystemVersion(); } catch (_) {}
+      try { screenPermission = systemPreferences.getMediaAccessStatus('screen'); } catch (_) {}
+    }
+    return { success: true, supported, osVersion, screenPermission };
+  } catch (error) {
     return { success: false, error: error.message };
   }
 });

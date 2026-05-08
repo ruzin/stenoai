@@ -10,12 +10,68 @@ whisper.cpp is preferred as it's 10x smaller and 2-4x faster.
 
 import logging
 import os
+import re
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 from typing import Optional, Tuple
 
 logger = logging.getLogger(__name__)
+
+
+# Resolve a usable ffmpeg binary. Electron-spawned subprocesses don't inherit
+# the user's shell PATH (no /opt/homebrew/bin), so a bare `ffmpeg` string fails
+# silently and breaks the stereo-channel split downstream. Look in PyInstaller
+# bundle locations first, then PATH, then standard install paths. Cached on
+# first successful resolve.
+_FFMPEG_PATH_CACHE: Optional[str] = None
+
+
+def _resolve_ffmpeg() -> Optional[str]:
+    global _FFMPEG_PATH_CACHE
+    if _FFMPEG_PATH_CACHE is not None:
+        return _FFMPEG_PATH_CACHE
+    candidates: list[str] = []
+    if getattr(sys, 'frozen', False):
+        exe_dir = Path(sys.executable).parent
+        candidates.extend([
+            str(exe_dir / 'ffmpeg'),
+            str(exe_dir / '_internal' / 'ffmpeg'),
+        ])
+    candidates.extend([
+        'ffmpeg',
+        '/opt/homebrew/bin/ffmpeg',
+        '/usr/local/bin/ffmpeg',
+        '/usr/bin/ffmpeg',
+    ])
+    for cand in candidates:
+        try:
+            r = subprocess.run([cand, '-version'], capture_output=True, timeout=5)
+            if r.returncode == 0:
+                _FFMPEG_PATH_CACHE = cand
+                logger.info(f"ffmpeg resolved at: {cand}")
+                return cand
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            continue
+    logger.warning("ffmpeg not found in any candidate location")
+    return None
+
+
+def _token_jaccard(a: str, b: str) -> float:
+    """Jaccard similarity over normalised word tokens.
+
+    Used to detect speaker-bleed: when mic and system channel transcripts
+    contain nearly the same words (regardless of order or whitespace), it
+    means both microphones heard the same audio. Threshold ~0.6 cleanly
+    separates true bleed (>0.8 in practice) from a real two-party call
+    (typically <0.2).
+    """
+    tokens_a = set(re.findall(r"\w+", a.lower()))
+    tokens_b = set(re.findall(r"\w+", b.lower()))
+    if not tokens_a or not tokens_b:
+        return 0.0
+    return len(tokens_a & tokens_b) / len(tokens_a | tokens_b)
 
 # Try whisper.cpp first (preferred - smaller, faster)
 try:
@@ -398,27 +454,39 @@ class WhisperTranscriber:
             (mic_path, system_path, duration_seconds) if stereo,
             (None, None, None) if mono or detection fails.
         """
-        # Detect channel count via ffprobe
+        ffmpeg = _resolve_ffmpeg()
+        if not ffmpeg:
+            logger.warning("ffmpeg unavailable; cannot split stereo channels")
+            return None, None, None
+
+        # Detect channel count via `ffmpeg -i FILE -f null -`. ffmpeg writes
+        # stream info to stderr; we parse "Audio: ..., stereo|mono|N channels".
+        # We avoid ffprobe so the bundled ffmpeg alone is enough — ffprobe is
+        # not shipped with our PyInstaller bundle.
         try:
             probe = subprocess.run(
-                ['ffprobe', '-v', 'error', '-select_streams', 'a:0',
-                 '-show_entries', 'stream=channels,duration',
-                 '-of', 'csv=p=0', str(audio_filepath)],
-                capture_output=True, timeout=15, text=True
+                [ffmpeg, '-hide_banner', '-i', str(audio_filepath), '-f', 'null', '-'],
+                capture_output=True, timeout=30, text=True
             )
-            if probe.returncode != 0:
-                logger.warning(f"ffprobe failed: {probe.stderr}")
+            stderr = probe.stderr or ''
+            channels = None
+            m = re.search(r'Audio: [^\n]*?(stereo|mono|(\d+) channels)', stderr)
+            if m:
+                token = m.group(1)
+                if token == 'stereo':
+                    channels = 2
+                elif token == 'mono':
+                    channels = 1
+                else:
+                    channels = int(m.group(2))
+            if channels is None:
+                logger.warning(f"Could not parse channel count from ffmpeg output: {stderr[:300]}")
                 return None, None, None
 
-            parts = probe.stdout.strip().split(',')
-            channels = int(parts[0])
-            # Duration may be 'N/A' for container formats like WebM
             duration = None
-            if len(parts) > 1 and parts[1] and parts[1].strip() != 'N/A':
-                try:
-                    duration = float(parts[1])
-                except ValueError:
-                    pass
+            dur_m = re.search(r'Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)', stderr)
+            if dur_m:
+                duration = int(dur_m.group(1)) * 3600 + int(dur_m.group(2)) * 60 + float(dur_m.group(3))
 
             if channels < 2:
                 logger.info("Audio is mono, skipping stereo split")
@@ -437,7 +505,7 @@ class WhisperTranscriber:
         try:
             for ch_idx, out_path in [(0, mic_path), (1, system_path)]:
                 result = subprocess.run(
-                    ['ffmpeg', '-y', '-i', str(audio_filepath),
+                    [ffmpeg, '-y', '-i', str(audio_filepath),
                      '-af', f'pan=mono|c0=c{ch_idx}',
                      '-ar', '16000', '-ac', '1', '-c:a', 'pcm_s16le',
                      str(out_path)],
@@ -464,15 +532,22 @@ class WhisperTranscriber:
             logger.error(f"Channel splitting error: {e}")
             return None, None, None
 
-    def _check_rms_energy(self, audio_path: Path, threshold: float = 0.005) -> bool:
-        """Check if an audio file has enough energy to contain speech.
+    def _check_rms_energy(self, audio_path: Path, threshold: float = 0.0003) -> bool:
+        """Check if an audio file has speech-level energy in any 1-second window.
 
-        Args:
-            audio_path: Path to 16kHz mono WAV file
-            threshold: RMS energy threshold below which the channel is silent
+        Uses sliding 1-second windows sampled across the entire file rather
+        than only the first 5 seconds. System audio captured via CoreAudio
+        Tap may not start until the user plays a clip mid-recording, and a
+        head-only check averages those leading-silence seconds and falsely
+        declares the channel silent — disabling diarisation for the whole
+        meeting.
 
-        Returns:
-            True if the audio has speech-level energy
+        Threshold is intentionally low (-70 dB) so headphones-mode recordings,
+        where the mic input is captured at a fraction of speakers-mode levels,
+        still pass. Whisper handles low-amplitude speech fine; the gate's
+        only job is to skip channels with effectively zero audio (≤ -inf
+        digital silence from a stalled CoreAudio tap, etc.) so we don't burn
+        time transcribing nothing or invite hallucinations on dead air.
         """
         try:
             import wave
@@ -481,21 +556,31 @@ class WhisperTranscriber:
 
             with wave.open(str(audio_path), 'rb') as wf:
                 n_frames = wf.getnframes()
+                sr = wf.getframerate()
                 if n_frames == 0:
                     return False
-                # Read up to 5 seconds of audio for the check
-                sample_frames = min(n_frames, 16000 * 5)
-                raw = wf.readframes(sample_frames)
-
-            samples = struct.unpack(f'<{sample_frames}h', raw)
-            # Normalise int16 to [-1, 1]
-            float_samples = [s / 32768.0 for s in samples]
-            rms = math.sqrt(sum(s * s for s in float_samples) / len(float_samples))
-            logger.info(f"RMS energy for {audio_path.name}: {rms:.6f} (threshold {threshold})")
-            return rms >= threshold
+                window = sr  # 1 second
+                # Sample at most ~60 windows so a 30-min file doesn't pull
+                # the whole thing into memory; for shorter files step is 1s.
+                step = max(window, n_frames // 60)
+                max_rms = 0.0
+                pos = 0
+                while pos + window <= n_frames:
+                    wf.setpos(pos)
+                    raw = wf.readframes(window)
+                    samples = struct.unpack(f'<{window}h', raw)
+                    rms = math.sqrt(sum((s / 32768.0) ** 2 for s in samples) / len(samples))
+                    if rms > max_rms:
+                        max_rms = rms
+                    if max_rms >= threshold:
+                        logger.info(f"RMS energy for {audio_path.name}: max={max_rms:.6f} (threshold {threshold}, early exit)")
+                        return True
+                    pos += step
+                logger.info(f"RMS energy for {audio_path.name}: max={max_rms:.6f} (threshold {threshold})")
+                return max_rms >= threshold
         except Exception as e:
             logger.warning(f"RMS check failed for {audio_path}: {e}")
-            # If we can't check, assume it has audio
+            # If we can't check, assume it has audio so we don't drop diarisation.
             return True
 
     def transcribe_diarised(self, audio_filepath: Path, language: str = "en") -> Optional[dict]:
@@ -555,6 +640,26 @@ class WhisperTranscriber:
                         detected_language_probability = sys_result.get("detected_language_probability")
             else:
                 logger.info("System channel is silent, skipping")
+
+            # Speaker-bleed collapse. Without headphones, the mic captures
+            # both the user AND the system audio echoing through speakers,
+            # while the CoreAudio Tap captures the same system audio
+            # cleanly. Both channels end up containing nearly identical
+            # text and labelled bubbles would just repeat the same content
+            # twice (once green, once grey). When the two transcripts
+            # overlap above this Jaccard threshold, we drop the system
+            # channel and present the recording as mic-only — honest UX,
+            # matches what Granola does when no headphones are detected.
+            if mic_segments and system_segments:
+                mic_text = ' '.join(s.get('text', '') for s in mic_segments)
+                sys_text = ' '.join(s.get('text', '') for s in system_segments)
+                similarity = _token_jaccard(mic_text, sys_text)
+                if similarity >= 0.6:
+                    logger.info(
+                        f"Channel bleed detected (Jaccard={similarity:.2f}); "
+                        f"collapsing to mic-only"
+                    )
+                    system_segments = []
 
             # Chronologically interleave segments from both channels and
             # collapse runs of consecutive same-speaker segments into a

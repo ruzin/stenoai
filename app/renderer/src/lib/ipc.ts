@@ -313,6 +313,10 @@ export interface StenoaiBridge {
     reportSystemAudioState: SendFn<[active: boolean]>;
     enableLoopbackAudio: RequestFn<[], void>;
     disableLoopbackAudio: RequestFn<[], void>;
+    getSystemAudioSupport: RequestFn<
+      [],
+      Result<{ supported: boolean; osVersion: string; screenPermission: string }>
+    >;
     writeSystemAudioBlob: RequestFn<
       [bytes: Uint8Array, name: string],
       Result<{ filePath: string }>

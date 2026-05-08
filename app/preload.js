@@ -99,6 +99,7 @@ const stenoai = {
     reportSystemAudioState: (active) => send('system-audio-recording-state', active),
     enableLoopbackAudio: () => invoke('enable-loopback-audio'),
     disableLoopbackAudio: () => invoke('disable-loopback-audio'),
+    getSystemAudioSupport: () => invoke('get-system-audio-support'),
     writeSystemAudioBlob: (bytes, name) => invoke('write-system-audio-blob', bytes, name),
     processSystemAudio: (filePath, name) => invoke('process-system-audio-recording', filePath, name),
     processFile: (filePath, name) => invoke('process-recording', filePath, name),

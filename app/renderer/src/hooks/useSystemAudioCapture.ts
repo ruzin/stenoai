@@ -1,18 +1,23 @@
 import * as React from 'react';
 import { ipc } from '@/lib/ipc';
 import { useRecording } from './useRecording';
-import { useSystemAudioSetting } from './useSettings';
+import { useSystemAudioSetting, useSystemAudioSupport } from './useSettings';
 
 /**
  * Mounts ONCE at App level. When system audio is enabled and the user starts
  * recording, captures BOTH mic (getUserMedia) and system loopback
- * (getDisplayMedia → CoreAudio Process Taps on macOS 14.4+) and emits a
- * single STEREO WebM/Opus blob with **mic in channel 0 (L), system in
- * channel 1 (R)**. The backend's `transcribe_diarised` (src/transcriber.py)
- * detects the stereo layout, splits the channels, transcribes each
- * separately with per-segment timestamps, and emits a chronologically
- * interleaved `[You]` / `[Others]` transcript that the existing
- * TranscriptPanel renders as alternating speaker bubbles.
+ * (getDisplayMedia routed through CoreAudio Process Taps via
+ * `electron-audio-loopback` with forceCoreAudioTap) and emits a single
+ * STEREO WebM/Opus blob with **mic in channel 0 (L), system in channel 1
+ * (R)**. The backend's `transcribe_diarised` (src/transcriber.py) detects
+ * the stereo layout, splits the channels, transcribes each separately with
+ * per-segment timestamps, and emits a chronologically interleaved
+ * `[You]` / `[Others]` transcript that TranscriptPanel renders as
+ * alternating speaker bubbles.
+ *
+ * macOS 14.4+ only — older versions are gated out at the Settings toggle.
+ * This hook also short-circuits if support reports false, so an older
+ * machine never reaches getDisplayMedia.
  *
  * The Python `record` subprocess is bypassed in this mode (main.js skips
  * spawning it on start-recording-ui) so we don't end up with two parallel
@@ -21,7 +26,8 @@ import { useSystemAudioSetting } from './useSettings';
 export function useSystemAudioCapture() {
   const { status, sessionName } = useRecording();
   const systemAudio = useSystemAudioSetting();
-  const enabled = systemAudio.data ?? false;
+  const systemAudioSupport = useSystemAudioSupport();
+  const enabled = (systemAudio.data ?? false) && (systemAudioSupport.data?.supported ?? false);
 
   const recorderRef = React.useRef<MediaRecorder | null>(null);
   const micStreamRef = React.useRef<MediaStream | null>(null);
@@ -72,10 +78,11 @@ export function useSystemAudioCapture() {
         });
         micStreamRef.current = micStream;
 
-        // 2. System audio loopback. Electron 42 routes getDisplayMedia
-        //    through CoreAudio Process Taps on macOS 14.4+, ScreenCaptureKit
-        //    on older versions. video:true is required by the API; we drop
-        //    the track immediately.
+        // 2. System audio loopback. With `forceCoreAudioTap: true` in
+        //    main.js's initMain(), getDisplayMedia is intercepted by
+        //    electron-audio-loopback's setDisplayMediaRequestHandler and
+        //    served via CoreAudio Process Taps (macOS 14.4+). video:true
+        //    is required by the API; we drop the track immediately.
         await bridge.recording.enableLoopbackAudio();
         const sysStream = await navigator.mediaDevices.getDisplayMedia({
           video: true,

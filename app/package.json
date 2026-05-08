@@ -145,9 +145,7 @@
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
       "identity": "Skrape Limited (HSDX294RG4)",
-      "notarize": {
-        "teamId": "HSDX294RG4"
-      },
+      "notarize": true,
       "extendInfo": {
         "NSMicrophoneUsageDescription": "StenoAI needs microphone access to record and transcribe meetings.",
         "NSAudioCaptureUsageDescription": "StenoAI needs audio capture access to record system audio from virtual meetings.",
