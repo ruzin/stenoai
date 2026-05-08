@@ -8,6 +8,7 @@ export const settingsKeys = {
   telemetry: () => [...settingsKeys.all, 'telemetry'] as const,
   dockIcon: () => [...settingsKeys.all, 'dockIcon'] as const,
   systemAudio: () => [...settingsKeys.all, 'systemAudio'] as const,
+  systemAudioSupport: () => [...settingsKeys.all, 'systemAudioSupport'] as const,
   language: () => [...settingsKeys.all, 'language'] as const,
   storagePath: () => [...settingsKeys.all, 'storagePath'] as const,
   appVersion: () => [...settingsKeys.all, 'appVersion'] as const,
@@ -71,6 +72,14 @@ export function useSetSystemAudio() {
   return useMutation({
     mutationFn: async (v: boolean) => unwrap(await ipc().settings.setSystemAudio(v)),
     onSuccess: () => qc.invalidateQueries({ queryKey: settingsKeys.systemAudio() }),
+  });
+}
+
+export function useSystemAudioSupport() {
+  return useQuery({
+    queryKey: settingsKeys.systemAudioSupport(),
+    queryFn: async () => unwrap(await ipc().recording.getSystemAudioSupport()),
+    staleTime: Infinity,
   });
 }
 

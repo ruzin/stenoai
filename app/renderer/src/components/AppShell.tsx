@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { MainToolbar } from '@/components/MainToolbar';
+import { UpdateToast } from '@/components/UpdateToast';
 import { cn } from '@/lib/utils';
 import type { RecordingStatus } from '@/hooks/useRecording';
 
@@ -112,6 +113,11 @@ export function AppShell({
         id="toast-host"
         className="pointer-events-none fixed bottom-4 right-4 z-50 flex flex-col gap-2"
       />
+      {/* Top-right pill that announces a downloaded update and lets the
+          user restart-to-install. Self-contained: subscribes to the
+          electron-updater IPC events and renders only when there's a
+          pending version. */}
+      <UpdateToast />
     </div>
   );
 }

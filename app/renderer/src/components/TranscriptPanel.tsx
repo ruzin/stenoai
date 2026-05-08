@@ -97,29 +97,36 @@ function TranscriptBody({ meeting }: { meeting: Meeting }) {
 }
 
 function TranscriptRow({ segment, highlight }: { segment: Segment; highlight: string }) {
-  return (
-    <div
-      className={cn(
-        'flex gap-3 rounded-md px-2 py-1.5',
-        segment.speaker === 'You' && 'border-l-2 border-accent-primary/40 bg-accent-primary/5 pl-3',
-        segment.speaker === 'Others' && 'border-l-2 border-border bg-muted/20 pl-3',
-      )}
-    >
-      {segment.speaker && (
-        <span
-          className={cn(
-            'inline-flex h-5 flex-shrink-0 items-center rounded px-1.5 text-[11px] font-semibold uppercase tracking-wide',
-            segment.speaker === 'You'
-              ? 'bg-accent-primary/10 text-accent-primary'
-              : 'bg-muted text-muted-foreground',
-          )}
-        >
-          {segment.speaker}
-        </span>
-      )}
-      <p className="text-sm leading-[1.65] text-foreground/90">
+  // Non-diarised (mono / mic-only) — render as a single full-width line
+  // without bubbles. The chat metaphor only makes sense when there are
+  // actual sides to alternate between.
+  if (!segment.speaker) {
+    return (
+      <p className="px-2 py-1 text-sm leading-[1.65] text-foreground/90">
         {renderHighlighted(segment.text, highlight)}
       </p>
+    );
+  }
+
+  // Diarised — Granola-style chat bubbles. Position (right vs left) and
+  // tint do the speaker-attribution work; explicit "You" / "Others" pill
+  // labels are redundant once the visual cue is there. Max-width keeps
+  // long monologues readable rather than spanning the whole panel.
+  const isYou = segment.speaker === 'You';
+  return (
+    <div className={cn('flex px-1 py-0.5', isYou ? 'justify-end' : 'justify-start')}>
+      <div
+        className={cn(
+          'max-w-[78%] rounded-2xl px-3 py-1.5 text-sm leading-[1.5]',
+          // Granola-style: olive/sage green for self, neutral grey for
+          // others. Light/dark variants keep contrast in either theme.
+          isYou
+            ? 'bg-green-100 text-green-950 rounded-br-md dark:bg-green-900/40 dark:text-green-100'
+            : 'bg-neutral-200/80 text-neutral-900 rounded-bl-md dark:bg-neutral-700/60 dark:text-neutral-100',
+        )}
+      >
+        {renderHighlighted(segment.text, highlight)}
+      </div>
     </div>
   );
 }

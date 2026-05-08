@@ -20,6 +20,7 @@ import {
   useRecordingEvents,
   useRecordingProcessingEffects,
 } from '@/hooks/useRecording';
+import { useSystemAudioCapture } from '@/hooks/useSystemAudioCapture';
 import { navigate, useRoute, rememberNonSettingsRoute } from '@/lib/router';
 import { ipc } from '@/lib/ipc';
 import { primeDebugLogs } from '@/lib/debugLogs';
@@ -47,6 +48,7 @@ export function App() {
 
   useRecordingEvents();
   useRecordingProcessingEffects();
+  useSystemAudioCapture();
 
   // Track the last non-settings route so the sidebar Settings toggle and the
   // Settings page's Back button can return the user to where they came from

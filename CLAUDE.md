@@ -40,13 +40,27 @@ This app ships as a signed DMG to real users. Before considering any change comp
 - **No bare `exit()` in Python code**. PyInstaller bundles don't have `exit` as a builtin. Always use `sys.exit()`.
 
 ## Brand Colors
-StenoAI logo gradient (used in website logo SVG and app header):
-- Indigo: `#6366f1`
-- Sky blue: `#0ea5e9`
-- Cyan: `#06b6d4`
-- CSS: `linear-gradient(135deg, #6366f1, #0ea5e9, #06b6d4)`
+Paper + ink — a cream page with deep ink text. The logo
+(`website/public/stenoai-logo.svg`) is `#1B1B19` ink on `#FAF9F5` paper.
+There is no chromatic brand accent; UI accents (focus rings, active
+states, links) use the foreground ink itself, so the whole interface
+reads as one neutral palette.
 
-App UI accent: `--accent-primary: #818cf8` (lighter indigo, used for focus states, active tabs, toggles)
+**Light mode**
+- Page / surface: `#FAF9F5` (paper-0)
+- Sunken / hover: `#F5F3EC` (paper-1)
+- Primary text + accent: `#1B1B19` (ink-900)
+- Secondary text: `#6B6B66` (ink-500)
+
+**Dark mode**
+- Page / surface: `#1A1A18`
+- Raised: `#24241F`
+- Primary text + accent: `#EDEAE0`
+- Secondary text: `#9A968A`
+
+Tokens live in `app/renderer/src/globals.css` under `:root` (light) and
+`.dark, [data-theme="dark"]` (dark). Prefer the semantic tokens
+(`--fg-1`, `--surface-raised`, `--accent-primary`) over raw hex.
 
 ## Git Workflow
 - Always create a branch for changes unless explicitly told otherwise

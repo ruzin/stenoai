@@ -28,8 +28,27 @@ if (IS_E2E_MOCK_IPC) {
   require('./e2e-mock-ipc').install({ ipcMain, BrowserWindow });
 }
 
-// Initialize electron-audio-loopback before app is ready
-initMain();
+// Initialize electron-audio-loopback before app is ready.
+// forceCoreAudioTap drives Chromium to use macOS 14.4+ CoreAudio Process Taps
+// (NSAudioCaptureUsageDescription) rather than ScreenCaptureKit. SCK was
+// returning silent right channels in our tests on macOS 26; CoreAudio Tap
+// matches Meetily's default and is the path our Info.plist + entitlements
+// are prepared for. Older macOS (< 14.4) is gated out at the UI layer.
+initMain({ forceCoreAudioTap: true });
+
+// CoreAudio Process Taps require macOS 14.4+. Returns false on non-macOS or
+// older versions so the renderer can disable the system-audio toggle rather
+// than silently producing dead-channel recordings.
+function isCoreAudioTapSupported() {
+  if (process.platform !== 'darwin') return false;
+  try {
+    const v = process.getSystemVersion();
+    const [maj, min = 0] = v.split('.').map((n) => parseInt(n, 10) || 0);
+    return maj > 14 || (maj === 14 && min >= 4);
+  } catch (_) {
+    return false;
+  }
+}
 
 let mainWindow;
 let pythonProcess;
@@ -768,6 +787,17 @@ if (!gotSingleInstanceLock) {
     ]);
     Menu.setApplicationMenu(appMenu);
 
+    if (process.platform === 'darwin') {
+      try {
+        const osVer = process.getSystemVersion();
+        const screenPerm = systemPreferences.getMediaAccessStatus('screen');
+        const tapOk = isCoreAudioTapSupported();
+        sendDebugLog(`[sysaudio] macOS ${osVer} — CoreAudio Tap supported=${tapOk}, screen permission=${screenPerm}`);
+      } catch (e) {
+        sendDebugLog(`[sysaudio] startup probe failed: ${e.message}`);
+      }
+    }
+
     createWindow();
     if (!IS_E2E) createTray();
     setupAutoUpdater();
@@ -935,6 +965,25 @@ ipcMain.handle('request-microphone-permission', async () => {
     return { success: true, granted };
   } catch (error) {
     console.error('Error requesting microphone permission:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Reports whether system-audio capture is available on this OS and what the
+// current Screen Recording permission state is. Used by Settings to disable
+// the toggle on unsupported macOS, and to surface "permission denied" rather
+// than letting the user produce silent recordings.
+ipcMain.handle('get-system-audio-support', async () => {
+  try {
+    const supported = isCoreAudioTapSupported();
+    let screenPermission = 'unknown';
+    let osVersion = '';
+    if (process.platform === 'darwin') {
+      try { osVersion = process.getSystemVersion(); } catch (_) {}
+      try { screenPermission = systemPreferences.getMediaAccessStatus('screen'); } catch (_) {}
+    }
+    return { success: true, supported, osVersion, screenPermission };
+  } catch (error) {
     return { success: false, error: error.message };
   }
 });
@@ -1823,11 +1872,37 @@ ipcMain.handle('get-queue-status', async () => {
     queueSize: processingQueue.length,
     currentJob: currentProcessingJob?.sessionName || null,
     hasRecording: currentRecordingProcess !== null || systemAudioRecordingActive,
-    isPaused: currentRecordingProcess !== null && recordingRuntimeState.isPaused,
-    elapsedSeconds: currentRecordingProcess !== null ? getRecordingElapsedSeconds() : 0,
+    isPaused: recordingRuntimeState.isPaused,
+    elapsedSeconds: (currentRecordingProcess !== null || systemAudioRecordingActive) ? getRecordingElapsedSeconds() : 0,
     sessionName: currentRecordingSessionName
   };
 });
+
+// Synchronously read system_audio_enabled from the user config so
+// start-recording-ui can decide whether to spawn the Python `record`
+// subprocess (off) or let the renderer drive the dual-stream capture (on).
+//
+// Always returns false on macOS without CoreAudio Process Tap support
+// (< 14.4 or non-darwin), regardless of the user's config setting — the
+// Python pipeline is the only working capture path there. Without this
+// gate, a user on older macOS with the new default `true` config would
+// produce no audio at all (Python skipped by main.js, renderer skipped
+// by useSystemAudioCapture's own OS check). Falls through to the config
+// default (currently true on a missing/empty config) when the OS does
+// support CoreAudio Tap so new installs get system audio out of the box.
+function loadSystemAudioEnabled() {
+  if (!isCoreAudioTapSupported()) return false;
+  try {
+    const cfgPath = path.join(os.homedir(), 'Library', 'Application Support', 'stenoai', 'config.json');
+    if (!fs.existsSync(cfgPath)) return true; // new install → CoreAudio default
+    const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf-8'));
+    // `false` only when the user has explicitly opted out; an absent key
+    // means "haven't been asked yet" → treat as the new default.
+    return cfg.system_audio_enabled !== false;
+  } catch (_) {
+    return false;
+  }
+}
 
 // Global recording state management
 let systemAudioRecordingActive = false;  // Track system audio recording for tray/quit
@@ -1925,6 +2000,11 @@ async function processNextInQueue() {
       });
 
       let stderrBuf = '';
+      // Captured from `SAVED:<path>` so processing-complete can include
+      // meetingData and the renderer can auto-navigate to the new note.
+      // Without this the renderer-driven (system audio) flow leaves the
+      // user stranded on /meetings/processing after the summary streams in.
+      let savedSummaryFile = null;
 
       // Timeout: kill process if it runs longer than 30 minutes
       const procTimeout = setTimeout(() => {
@@ -1960,7 +2040,8 @@ async function processNextInQueue() {
           } else if (line === 'STREAM_COMPLETE') {
             trackEvent('summarization_completed', { success: true });
           } else if (line.startsWith('SAVED:')) {
-            sendDebugLog(`Summary saved: ${line.slice(6)}`);
+            savedSummaryFile = line.slice(6).trim();
+            sendDebugLog(`Summary saved: ${savedSummaryFile}`);
           } else if (line.trim()) {
             sendDebugLog(line.trim());
           }
@@ -1979,19 +2060,54 @@ async function processNextInQueue() {
         clearTimeout(procTimeout);
         if (code === 0) {
           console.log(`✅ Completed streaming processing: ${currentProcessingJob.sessionName}`);
+          const sessionNameAtClose = currentProcessingJob.sessionName;
           // Notify frontend that streaming is done and meeting is saved
           if (mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.webContents.send('summary-complete', {
               success: true,
-              sessionName: currentProcessingJob.sessionName
-            });
-            // Also send processing-complete for backward compat (reloads meeting list)
-            mainWindow.webContents.send('processing-complete', {
-              success: true,
-              sessionName: currentProcessingJob.sessionName,
-              message: 'Processing completed successfully'
+              sessionName: sessionNameAtClose
             });
           }
+          // Look up the saved meeting so we can include meetingData in the
+          // processing-complete event. The renderer's processing-complete
+          // handler navigates to /meetings/<file> only when meetingData is
+          // present — without this the user gets stuck on the processing
+          // page after the summary streams in.
+          runPythonScript('simple_recorder.py', ['list-meetings'], true)
+            .then(meetingsResult => {
+              const allMeetings = JSON.parse(meetingsResult);
+              let processedMeeting = null;
+              if (savedSummaryFile) {
+                processedMeeting = allMeetings.find(
+                  m => m.session_info?.summary_file === savedSummaryFile
+                );
+              }
+              if (!processedMeeting) {
+                processedMeeting = allMeetings.find(
+                  m => m.session_info?.name === sessionNameAtClose
+                );
+              }
+              if (mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.webContents.send('processing-complete', {
+                  success: true,
+                  sessionName: sessionNameAtClose,
+                  message: 'Processing completed successfully',
+                  meetingData: processedMeeting
+                });
+              }
+            })
+            .catch(error => {
+              console.error('Error fetching processed meeting:', error);
+              // Fall back to firing without meetingData — frontend will
+              // refresh the list but skip the auto-navigation.
+              if (mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.webContents.send('processing-complete', {
+                  success: true,
+                  sessionName: sessionNameAtClose,
+                  message: 'Processing completed successfully'
+                });
+              }
+            });
           resolve();
         } else {
           reject(new Error(`process-streaming exited with code ${code}: ${stderrBuf.slice(-500)}`));
@@ -2029,14 +2145,42 @@ ipcMain.handle('start-recording-ui', async (_, sessionName) => {
     if (currentRecordingProcess) {
       return { success: false, error: 'Recording already in progress' };
     }
-
-    // Start recording (removed clear-state to prevent race conditions)
-
-    console.log('Starting long recording process...');
-    sendDebugLog(`Starting recording process: ${sessionName || 'Meeting'}`);
-    sendDebugLog('$ stenoai record 7200');
+    if (systemAudioRecordingActive) {
+      return { success: false, error: 'Recording already in progress' };
+    }
 
     const actualSessionName = sessionName || 'Meeting';
+
+    // Renderer-driven dual-stream path: when system audio is enabled the
+    // renderer (useSystemAudioCapture) captures mic + system loopback and
+    // mixes them in Web Audio. We MUST NOT spawn the Python `record`
+    // subprocess here or we'd produce two parallel recordings → two notes.
+    // The renderer will write its mixed WebM and queue it through the
+    // existing process-system-audio-recording IPC.
+    if (loadSystemAudioEnabled()) {
+      sendDebugLog(`Starting renderer-driven recording (system audio mode): ${actualSessionName}`);
+      currentRecordingSessionName = actualSessionName;
+      startRecordingRuntimeState();
+      // Flip the active flag immediately so the queue handler reports
+      // hasRecording=true on the very next poll. Without this the renderer
+      // hook would see status='idle' (queue says no recording) at the
+      // moment we want it to fire startCapture, and the dual-stream
+      // capture would never start. The renderer's reportSystemAudioState
+      // IPC is then idempotent on success and clears the flag on failure.
+      systemAudioRecordingActive = true;
+      updateTrayIcon(true);
+      trackEvent('recording_started', { recording_mode: 'system_audio' });
+      return {
+        success: true,
+        sessionName: actualSessionName,
+        message: 'Renderer-driven recording started'
+      };
+    }
+
+    // Legacy mic-only path: spawn Python `record` subprocess.
+    console.log('Starting long recording process...');
+    sendDebugLog(`Starting recording process: ${actualSessionName}`);
+    sendDebugLog('$ stenoai record 7200');
 
     // Start background recording with 2-hour limit
     // Pass cloud API key via env var for cloud summarization
@@ -2268,8 +2412,20 @@ ipcMain.handle('resume-recording-ui', async () => {
 
 ipcMain.handle('stop-recording-ui', async () => {
   try {
+    // Always clear system-audio active state. The renderer's stopCapture flow
+    // also reports false, but races (renderer already torn down, recorder
+    // errored before reportSystemAudioState) can leave this stuck true and
+    // the UI thinks a recording is still in progress.
+    systemAudioRecordingActive = false;
+
     if (!currentRecordingProcess) {
-      return { success: false, error: 'No recording in progress' };
+      // Idempotent: clicking stop with no active recording is not an error
+      // (it's a stale-state race). Reset everything and report success so
+      // the renderer can finish its own cleanup.
+      currentRecordingSessionName = null;
+      resetRecordingRuntimeState();
+      updateTrayIcon(false);
+      return { success: true, message: 'No active recording to stop' };
     }
 
     console.log('Stopping recording process...');
@@ -3760,6 +3916,26 @@ ipcMain.handle('get-recordings-dir', async () => {
   }
 });
 
+// Renderer-driven system audio capture writes its WebM/Opus blob here so it
+// lands inside an allowedBaseDir for validateSafeFilePath downstream. The
+// blob comes over IPC as a Uint8Array (structured-clone friendly).
+ipcMain.handle('write-system-audio-blob', async (_event, payload, sessionName) => {
+  try {
+    const dir = path.join(os.homedir(), 'Library', 'Application Support', 'stenoai', 'system_audio_tmp');
+    fs.mkdirSync(dir, { recursive: true });
+    const safeName = String(sessionName || 'Meeting').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 64);
+    const filename = `sysaudio-${Date.now()}-${safeName}.webm`;
+    const filePath = path.join(dir, filename);
+    const buf = Buffer.isBuffer(payload) ? payload : Buffer.from(payload);
+    fs.writeFileSync(filePath, buf);
+    sendDebugLog(`[sysaudio] wrote blob ${filename} (${buf.length} bytes)`);
+    return { success: true, filePath };
+  } catch (error) {
+    sendDebugLog(`Error writing system audio blob: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+});
+
 ipcMain.handle('process-system-audio-recording', async (event, audioFilePath, sessionName) => {
   try {
     sendDebugLog(`Queuing system audio recording for processing: ${audioFilePath}`);
@@ -3793,9 +3969,17 @@ ipcMain.handle('process-system-audio-recording', async (event, audioFilePath, se
   }
 });
 
-// Track system audio recording state for tray icon
+// Track system audio recording state for tray icon. Also resets the elapsed
+// counter when the renderer reports inactive without a Python process —
+// covers the case where startCapture failed (permission denied) and we'd
+// otherwise leak recordingRuntimeState.startedAtMs.
 ipcMain.on('system-audio-recording-state', (event, isRecording) => {
+  sendDebugLog(`[sysaudio] state -> ${isRecording ? 'true' : 'false'} (was ${systemAudioRecordingActive})`);
   systemAudioRecordingActive = isRecording;
+  if (!isRecording && !currentRecordingProcess) {
+    resetRecordingRuntimeState();
+    currentRecordingSessionName = null;
+  }
   updateTrayIcon(isRecording);
   updateTrayMenu();
 });

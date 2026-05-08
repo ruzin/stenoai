@@ -52,6 +52,7 @@ import {
   useSetUserName,
   useStoragePath,
   useSystemAudioSetting,
+  useSystemAudioSupport,
   useTelemetrySetting,
   useUserName,
 } from '@/hooks/useSettings';
@@ -468,6 +469,7 @@ function GeneralTab() {
   const setNotifications = useSetNotifications();
   const systemAudio = useSystemAudioSetting();
   const setSystemAudio = useSetSystemAudio();
+  const systemAudioSupport = useSystemAudioSupport();
   const dockIcon = useDockIconSetting();
   const setDockIcon = useSetDockIcon();
   const google = useGoogleCalendarAuth();
@@ -664,12 +666,16 @@ function GeneralTab() {
 
       <SettingRow
         label="Record system audio"
-        description="Capture audio from virtual meetings (requires macOS 12.3+)"
+        description={
+          systemAudioSupport.data && !systemAudioSupport.data.supported
+            ? `Capture audio from virtual meetings (requires macOS 14.4+, you're on ${systemAudioSupport.data.osVersion || 'an older version'})`
+            : 'Capture audio from virtual meetings (requires macOS 14.4+)'
+        }
       >
         <Switch
-          checked={systemAudio.data ?? false}
+          checked={(systemAudio.data ?? false) && (systemAudioSupport.data?.supported ?? true)}
           onCheckedChange={(v) => setSystemAudio.mutate(v)}
-          disabled={systemAudio.data === undefined}
+          disabled={systemAudio.data === undefined || systemAudioSupport.data?.supported === false}
         />
       </SettingRow>
 

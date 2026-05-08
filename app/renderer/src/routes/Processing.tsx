@@ -6,6 +6,7 @@ import {
   Loader2,
   PencilLine,
 } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
 import { MeetingsShell } from '@/components/MeetingsShell';
 import { useNavigate } from '@/lib/router';
 import { useRecording } from '@/hooks/useRecording';
@@ -51,12 +52,34 @@ export function Processing() {
   const [streamText, setStreamText] = React.useState('');
   const [streamedTitle, setStreamedTitle] = React.useState<string | null>(null);
 
+  // Buffer streamed chunks and flush at most every 50ms (~20fps). At a
+  // typical token rate of 30-60 tokens/sec, this batches ~3 tokens per
+  // commit which keeps the UI smooth without re-parsing the entire markdown
+  // string on every single chunk.
+  const pendingChunkRef = React.useRef('');
+  const flushTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   React.useEffect(() => {
+    return () => {
+      if (flushTimerRef.current) clearTimeout(flushTimerRef.current);
+    };
+  }, []);
+
+  React.useEffect(() => {
+    const flushPending = () => {
+      flushTimerRef.current = null;
+      if (!pendingChunkRef.current) return;
+      const buffered = pendingChunkRef.current;
+      pendingChunkRef.current = '';
+      setStreamText((t) => t + buffered);
+    };
     const offs = [
       ipc().on.summaryChunk((e) => {
         if (activeSession && e.sessionName !== activeSession) return;
-        setStreamText((t) => t + e.chunk);
+        pendingChunkRef.current += e.chunk;
         setStage((s) => (s === 'transcribing' ? 'summarizing' : s));
+        if (!flushTimerRef.current) {
+          flushTimerRef.current = setTimeout(flushPending, 50);
+        }
       }),
       ipc().on.summaryTitle((e) => {
         if (activeSession && e.sessionName !== activeSession) return;
@@ -163,6 +186,13 @@ export function Processing() {
   );
 }
 
+// Memoized so it only re-parses when streamText actually changes — without
+// this it'd re-render on every parent re-render (stage transitions, draft
+// updates, etc.) and re-walk the markdown tree unnecessarily.
+const StreamMarkdown = React.memo(function StreamMarkdown({ text }: { text: string }) {
+  return <ReactMarkdown>{text}</ReactMarkdown>;
+});
+
 function StageCard({
   stage,
   streamText,
@@ -170,30 +200,71 @@ function StageCard({
   stage: ProcessingStage;
   streamText: string;
 }) {
+  // FLIP animation for the scanner bar. The bar is in normal flow under the
+  // streaming markdown, so each token batch shifts it down by a discrete
+  // amount — jerky if rendered as-is. On every layout we measure the bar's
+  // new top, apply an inverse translateY (so visually it stays in the old
+  // position), force a reflow, then animate transform back to 0 — giving a
+  // smooth glide between positions even though the underlying layout is
+  // stepwise. Cheaper than animating a transform driven by a ResizeObserver
+  // on the markdown body.
+  const barRef = React.useRef<HTMLDivElement>(null);
+  const lastTopRef = React.useRef<number | null>(null);
+  const willChangeTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  React.useEffect(() => {
+    return () => {
+      if (willChangeTimerRef.current) clearTimeout(willChangeTimerRef.current);
+    };
+  }, []);
+  React.useLayoutEffect(() => {
+    const el = barRef.current;
+    if (!el) return;
+    const newTop = el.getBoundingClientRect().top;
+    const last = lastTopRef.current;
+    lastTopRef.current = newTop;
+    if (last === null || last === newTop) return;
+    const delta = last - newTop;
+    // Promote to its own compositor layer just for the duration of the
+    // animation, then clear. Leaving will-change on permanently keeps a
+    // layer alive when nothing's animating, costing memory.
+    el.style.willChange = 'transform';
+    el.style.transition = 'none';
+    el.style.transform = `translateY(${delta}px)`;
+    // Force a reflow so the inverse transform is committed before we kick
+    // off the animation back to 0.
+    void el.getBoundingClientRect();
+    el.style.transition = 'transform 0.32s cubic-bezier(0.33, 1, 0.68, 1)';
+    el.style.transform = 'translateY(0)';
+    if (willChangeTimerRef.current) clearTimeout(willChangeTimerRef.current);
+    willChangeTimerRef.current = setTimeout(() => {
+      if (barRef.current) barRef.current.style.willChange = 'auto';
+    }, 360);
+  }, [streamText]);
+
   return (
     <div className="relative" style={{ maxWidth: '72ch' }}>
       {streamText && (
         <div
-          className="mb-3 whitespace-pre-wrap text-[15px]"
+          className="stream-markdown mb-3 text-[15px]"
           style={{
             color: 'var(--fg-1)',
             fontFamily: 'var(--font-sans)',
             lineHeight: 1.6,
           }}
         >
-          {streamText}
+          <StreamMarkdown text={streamText} />
         </div>
       )}
 
-      {/* Scanner bar — rides at the bottom of streamed text, slides down as
-          more tokens arrive, matching the legacy generation-scanner. */}
+      {/* Scanner bar — rides at the bottom of streamed text, slides down
+          smoothly via FLIP as more tokens arrive. */}
       <div
+        ref={barRef}
         className="flex items-center gap-2.5 rounded-lg px-3.5 py-2.5"
         style={{
           background: 'var(--surface-raised)',
           border: '1px solid var(--border-subtle)',
           boxShadow: 'var(--shadow-md)',
-          transition: 'all 0.45s cubic-bezier(0.33, 1, 0.68, 1)',
         }}
       >
         <Loader2

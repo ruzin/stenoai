@@ -123,7 +123,10 @@
     --border: 60 4% 10% / 0.10;
     --input: 60 4% 10% / 0.10;
     --ring: 60 4% 10% / 0.35;
-    --accent-primary: 239 84% 67%;
+    /* Accent = foreground ink. No chromatic brand accent; focus rings,
+     * active tabs, toggles, and stream-markdown links all use the same
+     * neutral ink tone so the interface reads as one paper+ink palette. */
+    --accent-primary: 60 4% 10%;
   }
 
   .dark,
@@ -178,7 +181,9 @@
     --border: 48 20% 90% / 0.10;
     --input: 48 20% 90% / 0.10;
     --ring: 48 20% 90% / 0.45;
-    --accent-primary: 239 84% 75%;
+    /* Accent = foreground ink (light variant for dark mode). Matches the
+     * light-mode pattern of accent == foreground for an all-neutral UI. */
+    --accent-primary: 48 20% 90%;
   }
 }
 
@@ -662,4 +667,59 @@
     color: var(--primary-fg);
   }
   .mv-chat-send:disabled { cursor: default; }
+
+  /* Streamed markdown summary on /meetings/processing. Tailwind's preflight
+     strips list bullets and heading sizes; restore just enough to make
+     react-markdown's default semantic output readable while it streams. */
+  .stream-markdown h1,
+  .stream-markdown h2,
+  .stream-markdown h3,
+  .stream-markdown h4 {
+    font-family: var(--font-serif, var(--font-sans));
+    color: var(--fg-1);
+    font-weight: 500;
+    letter-spacing: -0.01em;
+    line-height: 1.25;
+    margin-top: 1.25em;
+    margin-bottom: 0.4em;
+  }
+  .stream-markdown h1:first-child,
+  .stream-markdown h2:first-child,
+  .stream-markdown h3:first-child { margin-top: 0; }
+  .stream-markdown h1 { font-size: 1.4em; }
+  .stream-markdown h2 { font-size: 1.2em; }
+  .stream-markdown h3 { font-size: 1.05em; }
+  .stream-markdown p { margin: 0.5em 0; }
+  .stream-markdown ul,
+  .stream-markdown ol {
+    margin: 0.5em 0;
+    padding-left: 1.4em;
+  }
+  .stream-markdown ul { list-style: disc; }
+  .stream-markdown ol { list-style: decimal; }
+  .stream-markdown li { margin: 0.2em 0; }
+  .stream-markdown li > p { margin: 0; }
+  .stream-markdown strong { font-weight: 600; color: var(--fg-1); }
+  .stream-markdown em { font-style: italic; }
+  .stream-markdown code {
+    font-family: var(--font-mono);
+    font-size: 0.9em;
+    background: var(--surface-raised);
+    padding: 0.1em 0.35em;
+    border-radius: 4px;
+  }
+  .stream-markdown pre {
+    background: var(--surface-raised);
+    padding: 0.8em 1em;
+    border-radius: 6px;
+    overflow-x: auto;
+    margin: 0.6em 0;
+  }
+  .stream-markdown pre code { background: transparent; padding: 0; }
+  .stream-markdown a { color: var(--accent-primary); text-decoration: underline; }
+  .stream-markdown hr {
+    border: 0;
+    border-top: 1px solid var(--border-subtle);
+    margin: 1em 0;
+  }
 }
