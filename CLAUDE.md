@@ -27,8 +27,15 @@ The app is a thin Electron shell over a PyInstaller-bundled Python CLI. There is
 - Run a single test: `python -m unittest tests.test_config.ConfigStoragePathTests.test_set_storage_path_handles_permission_errors`
 
 ### Desktop App (Electron)
-- Start app (dev): `cd app && npm start`
+- Start app (dev): `cd app && npm start` — rebuilds the renderer (`vite build`), then launches Electron
+- Start without rebuilding renderer: `cd app && npm run start:nobuild` — fast relaunch when only `main.js` / `preload.js` changed
+- Renderer dev server (HMR, no Electron): `cd app && npm run dev:renderer`
+- Typecheck renderer: `cd app && npm run typecheck:renderer`
+- Lint renderer: `cd app && npm run lint:renderer`
+- Format renderer: `cd app && npm run format:renderer`
 - Build DMG (local, for testing): `cd app && npm run build`
+
+The Electron build pulls the bundled backend from `../dist/stenoai` via `extraResources`, so the PyInstaller step (`pyinstaller stenoai.spec --noconfirm`) must succeed *before* `npm run build` — otherwise the packaged app will be missing `stenoai`, `ollama`, and `ffmpeg`. The same applies in dev: `getBackendPath()` falls back to `dist/stenoai/stenoai`, so a fresh checkout needs the backend built once before the app can record or transcribe.
 
 For setup from a clean checkout, see `CONTRIBUTING.md` and `README.md`.
 
