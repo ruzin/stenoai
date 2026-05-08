@@ -210,6 +210,12 @@ function StageCard({
   // on the markdown body.
   const barRef = React.useRef<HTMLDivElement>(null);
   const lastTopRef = React.useRef<number | null>(null);
+  const willChangeTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  React.useEffect(() => {
+    return () => {
+      if (willChangeTimerRef.current) clearTimeout(willChangeTimerRef.current);
+    };
+  }, []);
   React.useLayoutEffect(() => {
     const el = barRef.current;
     if (!el) return;
@@ -218,6 +224,10 @@ function StageCard({
     lastTopRef.current = newTop;
     if (last === null || last === newTop) return;
     const delta = last - newTop;
+    // Promote to its own compositor layer just for the duration of the
+    // animation, then clear. Leaving will-change on permanently keeps a
+    // layer alive when nothing's animating, costing memory.
+    el.style.willChange = 'transform';
     el.style.transition = 'none';
     el.style.transform = `translateY(${delta}px)`;
     // Force a reflow so the inverse transform is committed before we kick
@@ -225,6 +235,10 @@ function StageCard({
     void el.getBoundingClientRect();
     el.style.transition = 'transform 0.32s cubic-bezier(0.33, 1, 0.68, 1)';
     el.style.transform = 'translateY(0)';
+    if (willChangeTimerRef.current) clearTimeout(willChangeTimerRef.current);
+    willChangeTimerRef.current = setTimeout(() => {
+      if (barRef.current) barRef.current.style.willChange = 'auto';
+    }, 360);
   }, [streamText]);
 
   return (
@@ -251,7 +265,6 @@ function StageCard({
           background: 'var(--surface-raised)',
           border: '1px solid var(--border-subtle)',
           boxShadow: 'var(--shadow-md)',
-          willChange: 'transform',
         }}
       >
         <Loader2

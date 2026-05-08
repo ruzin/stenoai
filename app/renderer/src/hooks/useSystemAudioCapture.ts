@@ -27,7 +27,11 @@ export function useSystemAudioCapture() {
   const { status, sessionName } = useRecording();
   const systemAudio = useSystemAudioSetting();
   const systemAudioSupport = useSystemAudioSupport();
-  const enabled = (systemAudio.data ?? false) && (systemAudioSupport.data?.supported ?? false);
+  // While the support query is still loading (data === undefined), assume
+  // supported so a fast user who hits record before the IPC resolves still
+  // gets system audio. The result-aware false case only fires after the
+  // query has confirmed the OS is unsupported.
+  const enabled = (systemAudio.data ?? false) && (systemAudioSupport.data?.supported ?? true);
 
   const recorderRef = React.useRef<MediaRecorder | null>(null);
   const micStreamRef = React.useRef<MediaStream | null>(null);
