@@ -200,6 +200,33 @@ function StageCard({
   stage: ProcessingStage;
   streamText: string;
 }) {
+  // FLIP animation for the scanner bar. The bar is in normal flow under the
+  // streaming markdown, so each token batch shifts it down by a discrete
+  // amount — jerky if rendered as-is. On every layout we measure the bar's
+  // new top, apply an inverse translateY (so visually it stays in the old
+  // position), force a reflow, then animate transform back to 0 — giving a
+  // smooth glide between positions even though the underlying layout is
+  // stepwise. Cheaper than animating a transform driven by a ResizeObserver
+  // on the markdown body.
+  const barRef = React.useRef<HTMLDivElement>(null);
+  const lastTopRef = React.useRef<number | null>(null);
+  React.useLayoutEffect(() => {
+    const el = barRef.current;
+    if (!el) return;
+    const newTop = el.getBoundingClientRect().top;
+    const last = lastTopRef.current;
+    lastTopRef.current = newTop;
+    if (last === null || last === newTop) return;
+    const delta = last - newTop;
+    el.style.transition = 'none';
+    el.style.transform = `translateY(${delta}px)`;
+    // Force a reflow so the inverse transform is committed before we kick
+    // off the animation back to 0.
+    void el.getBoundingClientRect();
+    el.style.transition = 'transform 0.32s cubic-bezier(0.33, 1, 0.68, 1)';
+    el.style.transform = 'translateY(0)';
+  }, [streamText]);
+
   return (
     <div className="relative" style={{ maxWidth: '72ch' }}>
       {streamText && (
@@ -215,15 +242,16 @@ function StageCard({
         </div>
       )}
 
-      {/* Scanner bar — rides at the bottom of streamed text, slides down as
-          more tokens arrive, matching the legacy generation-scanner. */}
+      {/* Scanner bar — rides at the bottom of streamed text, slides down
+          smoothly via FLIP as more tokens arrive. */}
       <div
+        ref={barRef}
         className="flex items-center gap-2.5 rounded-lg px-3.5 py-2.5"
         style={{
           background: 'var(--surface-raised)',
           border: '1px solid var(--border-subtle)',
           boxShadow: 'var(--shadow-md)',
-          transition: 'all 0.45s cubic-bezier(0.33, 1, 0.68, 1)',
+          willChange: 'transform',
         }}
       >
         <Loader2
