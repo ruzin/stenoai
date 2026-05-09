@@ -1,0 +1,11 @@
+# Build-isolation constraints for source-built wheels.
+#
+# Pip honors PIP_CONSTRAINT for the isolated build environments used when
+# building wheels from sdists (e.g. pywhispercpp on the Intel runner, since
+# pywhispercpp ships only arm64 macOS wheels on PyPI).
+#
+# repairwheel 0.4.0 / 0.4.1 (released 2026-05-08) regressed on x86_64-only
+# builds: `_calculate_minimum_wheel_name` raises `KeyError: 'arm64'` when
+# the produced wheel doesn't carry an arm64 slice. The 0.3.x line works.
+# Re-evaluate when repairwheel publishes a 0.4.x with the fix.
+repairwheel<0.4
