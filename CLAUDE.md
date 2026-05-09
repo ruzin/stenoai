@@ -85,28 +85,30 @@ Tokens live in `app/renderer/src/globals.css` under `:root` (light) and
 - Use conventional commit format when appropriate (feat:, fix:, docs:, etc.)
 
 ## Release Process
-Releases are automated via `.github/workflows/build-release.yml`. Never create releases manually.
+Releases are automated via `.github/workflows/build-release.yml`. Never create releases manually. The full checklist for shipping a new version (do all of this before pushing the tag — the tag push is the public release trigger):
 
-1. Bump version in `app/package.json` (on the branch, before merging)
-2. After PR is merged to `main`, create an **annotated tag** on main with the release notes in the tag message:
+1. **Survey what's shipping** — `git log v<previous>..HEAD --oneline` and `gh pr list --state merged --limit 20` to confirm the changeset.
+2. **Update the README** to reflect what's shipping:
+   - Add bullet entries to the "📢 What's New" section for each notable user-facing change. Format: `- **YYYY-MM-DD** <emoji> <Title> — <one-sentence description>`. Most recent entries at the top.
+   - Remove "What's New" entries older than ~2 months to keep the section fresh.
+   - Update the "Features" list if any new user-facing capability is being added (or an existing one materially changed).
+   - Update "Models & Performance" if the bundled Whisper or Ollama model lineup changed.
+3. **Bump version** in `app/package.json`.
+4. **Commit and merge** the README + version bump to `main` (or push directly if explicitly authorised).
+5. **Draft release notes** as markdown — they become the GitHub Release body verbatim:
+   - One-line summary at the top.
+   - Headline features grouped under `### Section` headers (e.g., "System audio", "UX polish", "Under the hood", "Fixes").
+   - Migration/upgrade notes if anything changed paths, identifiers, defaults, or requires user action.
+6. **Create an annotated tag** on `main` with the release notes as the tag message:
    ```
-   git tag -a v0.2.5 -m "Release notes here..."
-   git push origin v0.2.5
+   git tag -a v0.3.0 -m "Release notes here..."
+   git push origin v0.3.0
    ```
-3. The tag push triggers the workflow which:
+7. The tag push triggers the workflow which:
    - Builds signed + notarized DMGs for both arm64 and x64
-   - Creates a GitHub Release with the tag message as the "What's New" section
+   - Creates a GitHub Release with the tag message as the body
    - Uploads both DMGs as release assets
-4. The tag message becomes the release notes body — write it as markdown with a summary of changes
-5. Do NOT build DMGs locally for releases, do NOT use `gh release create` manually
-
-## README "What's New" Section
-The README has a "What's New" table that should be updated every ~2 weeks. When asked to update it (or when shipping a notable feature):
-1. Check recently merged PRs: `gh pr list --state merged --limit 10`
-2. For each notable PR, add a row to the table with the merge date and a one-sentence summary
-3. Keep "Coming soon" items for features that are planned but not yet shipped
-4. Remove entries older than ~2 months to keep the section fresh
-5. Most recent entries go at the top of the table
+8. Do NOT build DMGs locally for releases, do NOT use `gh release create` manually.
 
 ## Session Logging
 When the user says "log session" or similar (e.g., "update session log", "document this session"):

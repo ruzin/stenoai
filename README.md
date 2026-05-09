@@ -39,6 +39,11 @@
 If you're looking for a hosted desktop recording API, consider checking out [Recall.ai](https://www.recall.ai/product/desktop-recording-sdk?utm_source=github&utm_medium=sponsorship&utm_campaign=ruzin-stenoai), an API that records Zoom, Google Meet, Microsoft Teams, in-person meetings, and more.
 
 ## 📢 What's New
+- **2026-05-09** 🎙️ Native system audio (Core Audio Tap) — On macOS 14.4+, system audio now records natively with no shell-out, with an automatic fallback for older versions. Default ON.
+- **2026-05-09** 💬 Cross-note Chat tab — Ask natural-language questions across your entire note library, not just one note at a time
+- **2026-05-09** 🎚️ Whisper model picker — Choose `small` / `base` / `medium` from Settings to trade accuracy for speed
+- **2026-05-09** 🔔 Auto-update toast — A top-right notification appears when an update is ready to install
+- **2026-05-09** 🪶 Brand refresh — Paper-and-ink palette and the app display name is now "Steno"
 - **2026-04-19** 🔄 In-app auto-updates — Updates download in the background and install on next quit; no more manual DMG downloads
 - **2026-04-19** 💬 Inline ask bar — Query your meetings from a floating bar at the bottom of every note
 - **2026-04-19** 📂 Ask against saved markdown — The ask bar now reads your saved `.md` notes directly (summary, topics, and full transcript)
@@ -46,14 +51,13 @@ If you're looking for a hosted desktop recording API, consider checking out [Rec
 - **2026-03-25** ✍️ In-app note-taking — Jot notes during a recording and they're folded into the AI summary
 - **2026-03-23** 🗣️ Speaker diarisation — [You] vs [Others] labels for system audio recordings
 - **2026-03-23** 🌍 Auto-detect language — 99 languages supported out of the box
-- **2026-03-04** 🏷️ Auto-generated meeting titles — AI creates short titles from your transcripts
 
 ## Features
 
 - **Privacy-first** — 100% on-device; your recordings, transcripts, and summaries never leave your Mac
 - **In-app note-taking** — Jot notes while you record; they're folded straight into the AI summary
-- **Ask your meetings** — Natural-language Q&A across any saved note, including summary, key topics, and full transcript
-- **System audio capture** — Record both sides of virtual meetings, headphones on, no extra setup
+- **Ask your meetings** — Natural-language Q&A across a single note or your entire library via the Chat tab (summary, key topics, full transcript)
+- **System audio capture** — Record both sides of virtual meetings, headphones on, no extra setup. Native Core Audio Tap on macOS 14.4+ with automatic fallback on older versions
 - **Speaker diarisation** — `[You]` vs `[Others]` labels on system-audio recordings
 - **Multi-language** — Auto-detect and transcribe in 99 languages
 - **Markdown notes** — Summaries and transcripts saved as clean Markdown you can edit, search, or sync
