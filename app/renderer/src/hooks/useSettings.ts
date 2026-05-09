@@ -185,3 +185,33 @@ export function useSetUserName() {
     },
   });
 }
+
+export function useWhisperModelSetting() {
+  return useQuery({
+    queryKey: [...settingsKeys.all, 'whisperModel'] as const,
+    queryFn: async () => unwrap(await ipc().settings.getWhisperModel()),
+  });
+}
+
+export function useSetWhisperModel() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (model: string) => unwrap(await ipc().settings.setWhisperModel(model)),
+    onSuccess: () => qc.invalidateQueries({ queryKey: [...settingsKeys.all, 'whisperModel'] }),
+  });
+}
+
+export function useKeepRecordingsSetting() {
+  return useQuery({
+    queryKey: [...settingsKeys.all, 'keepRecordings'] as const,
+    queryFn: async () => unwrap(await ipc().settings.getKeepRecordings()).keep_recordings,
+  });
+}
+
+export function useSetKeepRecordings() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (v: boolean) => unwrap(await ipc().settings.setKeepRecordings(v)),
+    onSuccess: () => qc.invalidateQueries({ queryKey: [...settingsKeys.all, 'keepRecordings'] }),
+  });
+}

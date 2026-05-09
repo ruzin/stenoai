@@ -53,6 +53,10 @@ import {
   useStoragePath,
   useSystemAudioSetting,
   useSystemAudioSupport,
+  useWhisperModelSetting,
+  useSetWhisperModel,
+  useKeepRecordingsSetting,
+  useSetKeepRecordings,
   useTelemetrySetting,
   useUserName,
 } from '@/hooks/useSettings';
@@ -505,6 +509,10 @@ function GeneralTab() {
   const systemAudio = useSystemAudioSetting();
   const setSystemAudio = useSetSystemAudio();
   const systemAudioSupport = useSystemAudioSupport();
+  const whisperModel = useWhisperModelSetting();
+  const setWhisperModel = useSetWhisperModel();
+  const keepRecordings = useKeepRecordingsSetting();
+  const setKeepRecordings = useSetKeepRecordings();
   const dockIcon = useDockIconSetting();
   const setDockIcon = useSetDockIcon();
   const google = useGoogleCalendarAuth();
@@ -700,6 +708,16 @@ function GeneralTab() {
       </SettingRow>
 
       <SettingRow
+        label="Keep recordings"
+        description="Save audio files after processing for reuse or reprocessing"
+      >
+        <Switch
+          checked={keepRecordings.data ?? false}
+          onCheckedChange={(v) => setKeepRecordings.mutate(v)}
+          disabled={keepRecordings.data === undefined}
+        />
+      </SettingRow>
+      <SettingRow
         label="Record system audio"
         description={
           systemAudioSupport.data && !systemAudioSupport.data.supported
@@ -780,7 +798,9 @@ function AiTab() {
 
       {current !== 'cloud' && (
         <>
-          <SectionHeading>Model</SectionHeading>
+          <SectionHeading>Transcription Model</SectionHeading>
+          <WhisperModelSelector />
+          <SectionHeading>Summarisation Model</SectionHeading>
           <ModelList />
         </>
       )}
@@ -1126,6 +1146,44 @@ function OAuthPrompt({ state, onClose, onRetry }: OAuthPromptProps) {
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+
+const WHISPER_MODELS = [
+  { value: 'tiny', label: 'Tiny', description: 'Fastest, least accurate (~75MB)' },
+  { value: 'base', label: 'Base', description: 'Fast and lightweight (~142MB)' },
+  { value: 'small', label: 'Small', description: 'Balanced speed and accuracy (~466MB)' },
+  { value: 'medium', label: 'Medium', description: 'More accurate, slower (~1.5GB)' },
+  { value: 'large', label: 'Large', description: 'Most accurate, slowest (~2.9GB)' },
+  { value: 'large-v3-turbo', label: 'Large v3 Turbo', description: 'Best accuracy, optimised speed (~1.6GB)' },
+];
+
+function WhisperModelSelector() {
+  const whisperModel = useWhisperModelSetting();
+  const setWhisperModel = useSetWhisperModel();
+  return (
+    <SettingRow
+      label="Whisper model size"
+      description="Larger models are more accurate but slower to load. Models are downloaded on first use."
+    >
+      <Select
+        value={whisperModel.data?.whisper_model ?? 'small'}
+        onValueChange={(v) => setWhisperModel.mutate(v)}
+        disabled={!whisperModel.data}
+      >
+        <SelectTrigger className={cn(COMPACT_TRIGGER, 'min-w-[200px]')}>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent className="w-72">
+          {WHISPER_MODELS.map((m) => (
+            <SelectItem key={m.value} value={m.value} description={m.description}>
+              {m.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </SettingRow>
   );
 }
 
