@@ -20,7 +20,10 @@
 <p align="center"><sub>Trusted by users at <b>AWS</b>, <b>Deliveroo</b>, <b>Tesco</b> & <b>HashiCorp</b>.</sub></p>
 
 <div align="center">
-  <img src="website/public/readme.png" alt="StenoAI Interface" width="800">
+  <picture>
+    <source srcset="website/public/demo.gif" type="image/gif">
+    <img src="website/public/readme.png" alt="StenoAI" width="800">
+  </picture>
 
   <br>
 
