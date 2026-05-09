@@ -34,7 +34,7 @@ export function Industries() {
           </h2>
           <p className="text-fg-2 text-lg leading-[1.55]">
             If your meetings contain confidential data, you can't send audio to a third party.
-            stenoAI is built for people who understand this.
+            Steno is built for people who understand this.
           </p>
           <blockquote
             className="mt-10 text-fg-2"

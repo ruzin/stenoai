@@ -1,7 +1,7 @@
 <div align="center">
-  <img src="website/public/dragonfly-logo-512.png" alt="StenoAI Logo" width="120" height="120">
+  <img src="website/public/dragonfly-logo-512.png" alt="Steno Logo" width="120" height="120">
 
-  # StenoAI
+  # Steno
 
   *Your private stenographer*
 </div>
@@ -22,7 +22,7 @@
 <div align="center">
   <picture>
     <source srcset="website/public/demo.gif" type="image/gif">
-    <img src="website/public/readme.png" alt="StenoAI" width="800">
+    <img src="website/public/readme.png" alt="Steno" width="800">
   </picture>
 
   <br>
@@ -66,7 +66,7 @@ If you're looking for a hosted desktop recording API, consider checking out [Rec
 <details>
 <summary>Expand setup and calendar automation guide</summary>
 
-StenoAI supports Apple Shortcuts via deep links using the `stenoai://` URL scheme.
+Steno supports Apple Shortcuts via deep links using the `stenoai://` URL scheme.
 
 - Start recording: `stenoai://record/start?name=Daily%20Standup`
 - Stop recording: `stenoai://record/stop`
@@ -74,7 +74,7 @@ StenoAI supports Apple Shortcuts via deep links using the `stenoai://` URL schem
 ### How to set it up
 
 1. Open the **Shortcuts** app on macOS.
-2. Create a new shortcut (for example: "Start StenoAI Recording").
+2. Create a new shortcut (for example: "Start Steno Recording").
 3. Add the **Open URLs** action.
 4. Use one of the URLs above.
 5. (Optional) Add a keyboard shortcut from the shortcut settings.
@@ -104,12 +104,12 @@ This addon uses:
 3. If matched, Rules runs a Shortcut.
 4. The Shortcut gets the next event title and opens:
    - `stenoai://record/start?name={calendar_event_title}`
-5. StenoAI receives the URL and starts recording with that name.
+5. Steno receives the URL and starts recording with that name.
 
 #### Step-by-step setup
 
 1. Install **Rules – Calendar Automation** on macOS.
-2. Create a Shortcut in Apple Shortcuts (example name: `StenoAI Start From Calendar Event`).
+2. Create a Shortcut in Apple Shortcuts (example name: `Steno Start From Calendar Event`).
 3. In that Shortcut, add actions in this order:
    - `Find Calendar Events` (limit to `1`, sorted by start date ascending, upcoming only)
    - Extract the event title from the found event
@@ -120,12 +120,12 @@ This addon uses:
    - Source: your target calendar(s)
    - Trigger window: event start (or preferred offset)
    - Condition: event note contains `stenoai`
-   - Action: run Shortcut `StenoAI Start From Calendar`
+   - Action: run Shortcut `Steno Start From Calendar`
 5. In your Calendar event notes, add the word `stenoai` for meetings that should auto-start recording.
 6. Test with a near-future event:
    - create event with `stenoai` in notes,
    - wait for trigger,
-   - confirm StenoAI starts and uses the event title as session name.
+   - confirm Steno starts and uses the event title as session name.
 
 #### Notes
 
@@ -173,8 +173,8 @@ Download the latest release for your Mac (**requires macOS 14 Sonoma or later**)
    - Go to **System Settings > Privacy & Security** and click **"Open Anyway"**
 
    **Alternatively:**
-   - Right-click StenoAI in Applications and select **"Open"**
-   - Or run in Terminal: `xattr -cr /Applications/StenoAI.app`
+   - Right-click Steno in Applications and select **"Open"**
+   - Or run in Terminal: `xattr -cr /Applications/Steno.app`
 5. **The app will work normally on subsequent launches**
 
 You can run it locally as well (see below) if you don't want to install a DMG.
@@ -236,23 +236,23 @@ stenoai/
 
 **Terminal logging (recommended for runtime issues):** launch the app from a terminal to stream all logs (Python subprocess output, Whisper transcription, Ollama API traffic, error stack traces):
 ```bash
-/Applications/StenoAI.app/Contents/MacOS/StenoAI
+/Applications/Steno.app/Contents/MacOS/Steno
 ```
 
 **System Console:**
 ```bash
-# View recent StenoAI-related logs
-log show --last 10m --predicate 'process CONTAINS "StenoAI" OR eventMessage CONTAINS "ollama"' --info
+# View recent Steno-related logs
+log show --last 10m --predicate 'process CONTAINS "Steno" OR eventMessage CONTAINS "ollama"' --info
 
 # Monitor live logs
-log stream --predicate 'eventMessage CONTAINS "ollama" OR process CONTAINS "StenoAI"' --level info
+log stream --predicate 'eventMessage CONTAINS "ollama" OR process CONTAINS "Steno"' --level info
 ```
 
 ### Common Issues
 
-- **Update didn't install**: Auto-updates are applied on next quit. Quit via the **StenoAI → Quit** menu (not just closing the window), then reopen.
-- **No system audio / no `[Others]` speaker labels**: macOS needs **Screen Recording** permission. Go to **System Settings → Privacy & Security → Screen & System Audio Recording**, enable StenoAI, and relaunch the app.
-- **`stenoai://` deep link doesn't start recording**: Make sure StenoAI has launched at least once after install so the URL scheme is registered. If it still fails, check the terminal log for `Protocol handler registration` output.
+- **Update didn't install**: Auto-updates are applied on next quit. Quit via the **Steno → Quit** menu (not just closing the window), then reopen.
+- **No system audio / no `[Others]` speaker labels**: macOS needs **Screen Recording** permission. Go to **System Settings → Privacy & Security → Screen & System Audio Recording**, enable Steno, and relaunch the app.
+- **`stenoai://` deep link doesn't start recording**: Make sure Steno has launched at least once after install so the URL scheme is registered. If it still fails, check the terminal log for `Protocol handler registration` output.
 - **Recording stops early**: Check microphone permissions, Screen Recording permission (if using system audio), and available disk space.
 - **"Processing failed"**: Usually an Ollama service or model issue — check the terminal logs.
 - **Empty transcripts**: Whisper couldn't detect speech — verify audio input levels.

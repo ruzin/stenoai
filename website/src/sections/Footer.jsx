@@ -17,7 +17,7 @@ export function Footer() {
             <a href="/privacy.html" className="text-fg-2 text-sm no-underline hover:text-fg-1 transition-colors">Privacy</a>
             <a href="/terms.html" className="text-fg-2 text-sm no-underline hover:text-fg-1 transition-colors">Terms</a>
           </div>
-          <div className="text-fg-2 text-[13px]">© 2026 stenoAI</div>
+          <div className="text-fg-2 text-[13px]">© 2026 Steno</div>
         </div>
         <p className="mt-14 text-fg-muted text-[13px] leading-[1.55]" style={{ maxWidth: "70ch" }}>
           Independent open-source project for private meeting notes. Not affiliated with any similarly named company.

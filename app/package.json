@@ -42,7 +42,7 @@
     "ai",
     "meetings"
   ],
-  "author": "StenoAI Team",
+  "author": "Steno Team",
   "license": "MIT",
   "devDependencies": {
     "@electron/notarize": "^3.1.1",
@@ -95,10 +95,10 @@
   },
   "build": {
     "appId": "com.stenoai.recorder",
-    "productName": "StenoAI",
+    "productName": "Steno",
     "protocols": [
       {
-        "name": "StenoAI Shortcut Links",
+        "name": "Steno Shortcut Links",
         "schemes": [
           "stenoai"
         ]
@@ -147,14 +147,14 @@
       "identity": "Skrape Limited (HSDX294RG4)",
       "notarize": true,
       "extendInfo": {
-        "NSMicrophoneUsageDescription": "StenoAI needs microphone access to record and transcribe meetings.",
-        "NSAudioCaptureUsageDescription": "StenoAI needs audio capture access to record system audio from virtual meetings.",
-        "NSScreenCaptureUsageDescription": "StenoAI needs screen capture access to record system audio on macOS versions older than 14.4.",
+        "NSMicrophoneUsageDescription": "Steno needs microphone access to record and transcribe meetings.",
+        "NSAudioCaptureUsageDescription": "Steno needs audio capture access to record system audio from virtual meetings.",
+        "NSScreenCaptureUsageDescription": "Steno needs screen capture access to record system audio on macOS versions older than 14.4.",
         "LSMinimumSystemVersion": "12.3.0"
       }
     },
     "dmg": {
-      "title": "StenoAI Installer",
+      "title": "Steno Installer",
       "contents": [
         {
           "x": 130,
