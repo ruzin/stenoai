@@ -5159,3 +5159,179 @@ ipcMain.handle('outlook-auth-disconnect', async () => {
     return { success: false, error: error.message };
   }
 });
+
+// ─── Organisation adapter (enterprise mode) ──────────────────────────────────
+// Talks to the customer's self-hosted Steno adapter for shared notes, AI
+// proxying, and S3-backed artifacts. Session token + adapter URL are
+// persisted with safeStorage; the renderer never sees the JWT directly,
+// it goes through these IPC handlers.
+
+function getOrgSessionPath() {
+  return path.join(os.homedir(), 'Library', 'Application Support', 'stenoai', '.org-session');
+}
+
+function saveOrgSession(session) {
+  try {
+    const dir = path.dirname(getOrgSessionPath());
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    const encrypted = safeStorage.encryptString(JSON.stringify(session));
+    fs.writeFileSync(getOrgSessionPath(), encrypted);
+    return true;
+  } catch (e) {
+    console.error('Failed to save org session:', e.message);
+    return false;
+  }
+}
+
+function loadOrgSession() {
+  try {
+    const p = getOrgSessionPath();
+    if (!fs.existsSync(p)) return null;
+    const encrypted = fs.readFileSync(p);
+    return JSON.parse(safeStorage.decryptString(encrypted));
+  } catch (e) {
+    console.error('Failed to load org session:', e.message);
+    return null;
+  }
+}
+
+function clearOrgSession() {
+  try {
+    const p = getOrgSessionPath();
+    if (fs.existsSync(p)) fs.unlinkSync(p);
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+function normaliseAdapterUrl(url) {
+  let u = String(url || '').trim();
+  if (!u) return '';
+  if (!/^https?:\/\//i.test(u)) u = 'http://' + u;
+  return u.replace(/\/+$/, '');
+}
+
+async function adapterFetch(pathname, opts = {}) {
+  const session = loadOrgSession();
+  if (!session) throw new Error('not signed in to org adapter');
+  const headers = {
+    'content-type': 'application/json',
+    authorization: 'Bearer ' + session.token,
+    ...(opts.headers || {}),
+  };
+  const res = await fetch(session.adapterUrl + pathname, { ...opts, headers });
+  const text = await res.text();
+  let body;
+  try {
+    body = text ? JSON.parse(text) : {};
+  } catch {
+    body = { detail: text };
+  }
+  if (!res.ok) {
+    if (res.status === 401) clearOrgSession();
+    const err = new Error(body.detail || ('HTTP ' + res.status));
+    err.status = res.status;
+    throw err;
+  }
+  return body;
+}
+
+ipcMain.handle('org-status', async () => {
+  const session = loadOrgSession();
+  if (!session) return { signedIn: false };
+  return {
+    signedIn: true,
+    adapterUrl: session.adapterUrl,
+    email: session.email,
+    name: session.name,
+    orgId: session.orgId,
+  };
+});
+
+ipcMain.handle('org-login', async (_event, payload) => {
+  try {
+    const { adapterUrl, email, password } = payload || {};
+    const url = normaliseAdapterUrl(adapterUrl);
+    if (!url) return { success: false, error: 'adapter URL is required' };
+    if (!email || !password) return { success: false, error: 'email and password are required' };
+    const res = await fetch(url + '/auth/login', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    });
+    const text = await res.text();
+    let body;
+    try {
+      body = text ? JSON.parse(text) : {};
+    } catch {
+      body = { detail: text };
+    }
+    if (!res.ok) return { success: false, error: body.detail || ('HTTP ' + res.status) };
+    const session = {
+      adapterUrl: url,
+      token: body.token,
+      email: body.email,
+      name: body.name,
+      orgId: body.org_id,
+    };
+    if (!saveOrgSession(session)) return { success: false, error: 'failed to persist session' };
+    return {
+      success: true,
+      signedIn: true,
+      adapterUrl: url,
+      email: body.email,
+      name: body.name,
+      orgId: body.org_id,
+    };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('org-logout', async () => {
+  clearOrgSession();
+  return { success: true };
+});
+
+ipcMain.handle('org-list-meetings', async () => {
+  try {
+    const body = await adapterFetch('/meetings');
+    return { success: true, meetings: body.meetings || [] };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('org-get-meeting', async (_event, id) => {
+  try {
+    const meeting = await adapterFetch('/meetings/' + encodeURIComponent(String(id)));
+    return { success: true, meeting };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('org-create-meeting', async (_event, payload) => {
+  try {
+    const meeting = await adapterFetch('/meetings', {
+      method: 'POST',
+      body: JSON.stringify(payload || {}),
+    });
+    return { success: true, meeting };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('org-ai-chat', async (_event, payload) => {
+  try {
+    const body = await adapterFetch('/ai/chat', {
+      method: 'POST',
+      body: JSON.stringify(payload || {}),
+    });
+    return { success: true, ...body };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});

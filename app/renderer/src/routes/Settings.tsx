@@ -77,7 +77,8 @@ import {
   useGoogleCalendarAuth,
   useOutlookCalendarAuth,
 } from '@/hooks/useCalendarEvents';
-import type { AiProvider, CloudProvider } from '@/lib/ipc';
+import type { AiProvider, CloudProvider, OrgStatusResponse } from '@/lib/ipc';
+import { ipc } from '@/lib/ipc';
 
 // ---------------------------------------------------------------------------
 // Local style helpers — values come straight from the new design (Pencil
@@ -107,6 +108,7 @@ const LANGUAGES: Array<{ value: string; label: string }> = [
 const TABS = [
   { id: 'general', label: 'General' },
   { id: 'ai', label: 'AI' },
+  { id: 'organisation', label: 'Organisation' },
   { id: 'advanced', label: 'Advanced' },
   { id: 'developer', label: 'Developer' },
 ] as const;
@@ -440,6 +442,7 @@ export function Settings() {
           <div style={{ maxWidth: 600, paddingTop: 8 }}>
             {tab === 'general' && <GeneralTab />}
             {tab === 'ai' && <AiTab />}
+            {tab === 'organisation' && <OrganisationTab />}
             {tab === 'advanced' && <AdvancedTab />}
             {tab === 'developer' && <DeveloperTab />}
           </div>
@@ -1204,6 +1207,186 @@ function ModelList() {
         </>
       )}
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Organisation tab — connect to a self-hosted Steno enterprise adapter.
+// ---------------------------------------------------------------------------
+
+const DEFAULT_ADAPTER_URL = 'http://localhost:8000';
+
+function OrganisationTab() {
+  const [status, setStatus] = React.useState<OrgStatusResponse | null>(null);
+  const [adapterUrl, setAdapterUrl] = React.useState(DEFAULT_ADAPTER_URL);
+  const [email, setEmail] = React.useState('');
+  const [password, setPassword] = React.useState('');
+  const [busy, setBusy] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+
+  const refresh = React.useCallback(async () => {
+    try {
+      const s = await ipc().org.status();
+      setStatus(s);
+      if (s.adapterUrl) setAdapterUrl(s.adapterUrl);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }, []);
+
+  React.useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  const onSignIn = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await ipc().org.login(adapterUrl, email, password);
+      if (!r.success) {
+        setError(r.error);
+      } else {
+        setPassword('');
+        await refresh();
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onSignOut = async () => {
+    setBusy(true);
+    try {
+      await ipc().org.logout();
+      await refresh();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section data-settings-tab="organisation">
+      <SectionHeading>Organisation adapter</SectionHeading>
+      <p
+        className="mb-5 text-[13px] leading-[1.55]"
+        style={{ color: 'var(--fg-2)', maxWidth: '60ch' }}
+      >
+        Connect to a self-hosted Steno adapter for your organisation. Once
+        signed in, notes you mark as <em>Shared</em> are stored in your
+        organisation's S3 bucket and visible to your colleagues. AI requests
+        are proxied through the adapter using a centrally-managed key —
+        Steno on this Mac never sees the provider key directly.
+      </p>
+
+      {status?.signedIn ? (
+        <div
+          className="mb-5 rounded-[10px] p-4"
+          style={{
+            background: 'var(--surface-raised)',
+            border: '1px solid var(--border-subtle)',
+          }}
+          data-testid="org-signed-in-card"
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="text-[14px] font-medium" style={{ color: 'var(--fg-1)' }}>
+                Signed in as {status.name}
+              </div>
+              <div className="mt-0.5 text-[12px]" style={{ color: 'var(--fg-2)' }}>
+                {status.email} · org <span style={{ fontFamily: 'var(--font-mono)' }}>{status.orgId}</span>
+              </div>
+              <div
+                className="mt-2 text-[11px]"
+                style={{ color: 'var(--fg-muted)', fontFamily: 'var(--font-mono)' }}
+              >
+                {status.adapterUrl}
+              </div>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onSignOut}
+              disabled={busy}
+              className="h-[28px] px-3 text-[12px]"
+            >
+              Sign out
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <div
+          className="mb-5 rounded-[10px] p-4"
+          style={{
+            background: 'var(--surface-raised)',
+            border: '1px solid var(--border-subtle)',
+          }}
+          data-testid="org-sign-in-card"
+        >
+          <div className="flex flex-col gap-3">
+            <div>
+              <label className="mb-1 block text-[12px]" style={{ color: 'var(--fg-2)' }}>
+                Adapter URL
+              </label>
+              <Input
+                value={adapterUrl}
+                onChange={(e) => setAdapterUrl(e.target.value)}
+                placeholder="http://localhost:8000"
+                className="h-[30px] rounded-[6px] text-[13px]"
+                disabled={busy}
+              />
+            </div>
+            <div className="flex gap-3">
+              <div className="flex-1">
+                <label className="mb-1 block text-[12px]" style={{ color: 'var(--fg-2)' }}>
+                  Email
+                </label>
+                <Input
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="alice@enam.co"
+                  autoComplete="email"
+                  className="h-[30px] rounded-[6px] text-[13px]"
+                  disabled={busy}
+                />
+              </div>
+              <div className="flex-1">
+                <label className="mb-1 block text-[12px]" style={{ color: 'var(--fg-2)' }}>
+                  Password
+                </label>
+                <Input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••"
+                  autoComplete="current-password"
+                  className="h-[30px] rounded-[6px] text-[13px]"
+                  disabled={busy}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') void onSignIn();
+                  }}
+                />
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <Button
+                onClick={onSignIn}
+                disabled={busy || !adapterUrl || !email || !password}
+                className={COMPACT_BTN}
+              >
+                {busy ? 'Signing in…' : 'Sign in'}
+              </Button>
+              {error && (
+                <span className="text-[12px]" style={{ color: 'var(--danger, #b3261e)' }}>
+                  {error}
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </section>
   );
 }
 

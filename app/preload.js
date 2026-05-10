@@ -206,6 +206,16 @@ const stenoai = {
     rendererReady: () => send('shortcut-renderer-ready'),
   },
 
+  org: {
+    status: () => invoke('org-status'),
+    login: (adapterUrl, email, password) => invoke('org-login', { adapterUrl, email, password }),
+    logout: () => invoke('org-logout'),
+    listMeetings: () => invoke('org-list-meetings'),
+    getMeeting: (id) => invoke('org-get-meeting', id),
+    createMeeting: (payload) => invoke('org-create-meeting', payload),
+    aiChat: (payload) => invoke('org-ai-chat', payload),
+  },
+
   dialog: {
     respondQuit: (confirmed) => send('quit-dialog-response', { confirmed }),
   },
