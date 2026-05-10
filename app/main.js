@@ -5324,6 +5324,59 @@ ipcMain.handle('org-create-meeting', async (_event, payload) => {
   }
 });
 
+// Three-step share: presign → PUT bytes to S3 → register meeting metadata
+// with the s3_key. Centralised in main so the renderer doesn't have to do
+// raw PUT (and so we can keep the bytes off the renderer when the bucket
+// has stricter CORS).
+ipcMain.handle('org-share-meeting', async (_event, payload) => {
+  try {
+    const { title, body, visibility = 'org' } = payload || {};
+    if (!title) return { success: false, error: 'title is required' };
+    if (typeof body !== 'string') return { success: false, error: 'body is required' };
+
+    const safeTitle = String(title)
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 60) || 'note';
+    const filename = `${safeTitle}.md`;
+
+    // Step 1: presign — adapter returns a 15-minute PUT URL + s3_key
+    const presign = await adapterFetch('/uploads/presign', {
+      method: 'POST',
+      body: JSON.stringify({ filename, content_type: 'text/markdown' }),
+    });
+
+    // Step 2: PUT the markdown bytes straight to S3. Bucket has SSE-AES256
+    // by default; the upload inherits that.
+    const putRes = await fetch(presign.upload_url, {
+      method: 'PUT',
+      headers: { 'content-type': 'text/markdown' },
+      body,
+    });
+    if (!putRes.ok) {
+      const detail = await putRes.text().catch(() => '');
+      return { success: false, error: `s3 upload failed (${putRes.status}): ${detail.slice(0, 200)}` };
+    }
+
+    // Step 3: register metadata in the adapter. The body field is empty —
+    // the adapter holds only the s3_key and serves a presigned GET when
+    // someone in the org opens the note.
+    const meeting = await adapterFetch('/meetings', {
+      method: 'POST',
+      body: JSON.stringify({
+        title,
+        body: '',
+        visibility,
+        s3_key: presign.s3_key,
+      }),
+    });
+    return { success: true, meeting, s3_key: presign.s3_key };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
 ipcMain.handle('org-ai-chat', async (_event, payload) => {
   try {
     const body = await adapterFetch('/ai/chat', {

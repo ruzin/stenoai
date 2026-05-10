@@ -481,7 +481,13 @@ handlers, which add the bearer header in main.
 | `org-list-meetings` | R→M invoke | yes | `stenoai.org.listMeetings()` |
 | `org-get-meeting` | R→M invoke | yes | `stenoai.org.getMeeting(id)` |
 | `org-create-meeting` | R→M invoke | yes | `stenoai.org.createMeeting(payload)` |
+| `org-share-meeting` | R→M invoke | yes | `stenoai.org.shareMeeting(payload)` |
 | `org-ai-chat` | R→M invoke | yes | `stenoai.org.aiChat(payload)` |
+
+`org-share-meeting` is the canonical share path: main does presign → PUT
+to S3 → register metadata in one step, so the renderer never sees the
+presigned URL or the bytes-in-flight. `org-create-meeting` is kept for
+inline-body fallbacks (legacy or test).
 
 ```ts
 interface OrgStatusResponse {

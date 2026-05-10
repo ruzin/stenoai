@@ -5,7 +5,8 @@ import {
   ChevronDown,
   Square,
 } from 'lucide-react';
-import { FolderScopePicker } from '@/components/FolderScopePicker';
+import { FolderScopePicker, ORG_SHARED_SCOPE } from '@/components/FolderScopePicker';
+import { askOrgChat } from '@/lib/orgChat';
 import { ChatHistoryRow } from '@/components/ChatHistoryRow';
 import { MeetingsShell } from '@/components/MeetingsShell';
 import {
@@ -57,7 +58,11 @@ export function ChatConversation({ sessionId }: ChatConversationProps) {
 
   const isCloud = provider.data?.ai_provider === 'cloud';
   const cloudKeySet = provider.data?.cloud_api_key_set ?? false;
-  const ready = isCloud && cloudKeySet;
+  const localReady = isCloud && cloudKeySet;
+  // Org-scoped follow-ups go through the adapter and don't need the local
+  // cloud provider configured — the cloud-key gate becomes irrelevant.
+  const isOrgScope = (s: string | null | undefined) => s === ORG_SHARED_SCOPE;
+  const ready = localReady || isOrgScope(scopeFolderId);
 
   // Make THIS session the active one as soon as the route mounts so
   // chat.activeSession / chat.appendMessage operate on the right record
@@ -144,9 +149,10 @@ export function ChatConversation({ sessionId }: ChatConversationProps) {
   }, [session?.messages.length, activeStream?.text]);
 
   const [submitError, setSubmitError] = React.useState<string | null>(null);
+  const [orgPending, setOrgPending] = React.useState(false);
   const submit = async (raw: string) => {
     const q = raw.trim();
-    if (!q || isStreaming || submittingRef.current || !ready || !session) return;
+    if (!q || isStreaming || orgPending || submittingRef.current || !ready || !session) return;
     submittingRef.current = true;
     setSubmitError(null);
     let appended = false;
@@ -158,6 +164,35 @@ export function ChatConversation({ sessionId }: ChatConversationProps) {
       });
       appended = true;
       setInput('');
+
+      if (isOrgScope(scopeFolderId)) {
+        // Route follow-ups through the adapter using the running session
+        // history (excluding the just-appended user msg, which askOrgChat
+        // adds itself).
+        setOrgPending(true);
+        try {
+          const history = (session.messages ?? []).map((m) => ({
+            role: m.role,
+            content: m.content,
+          }));
+          const reply = await askOrgChat(history, q);
+          await chat.appendMessage(session.id, {
+            role: 'assistant',
+            content: reply,
+            ts: Date.now(),
+          });
+        } catch (err) {
+          await chat.appendMessage(session.id, {
+            role: 'assistant',
+            content: `(adapter error: ${(err as Error).message})`,
+            ts: Date.now(),
+          });
+        } finally {
+          setOrgPending(false);
+        }
+        return;
+      }
+
       const streamId = streaming.startGlobalStream(q, scopeFolderId);
       pendingPersistRef.current = session.id;
       setActiveStreamId(streamId);
@@ -324,6 +359,9 @@ export function ChatConversation({ sessionId }: ChatConversationProps) {
             {isStreaming && (
               <Bubble role="assistant" content={liveText || 'Thinking…'} live />
             )}
+            {orgPending && (
+              <Bubble role="assistant" content="Asking the adapter…" live />
+            )}
           </div>
         </div>
 
@@ -372,7 +410,7 @@ export function ChatConversation({ sessionId }: ChatConversationProps) {
                 void submit(input);
               }
             }}
-            disabled={!ready || isStreaming}
+            disabled={!ready || isStreaming || orgPending}
             placeholder="Ask anything  /"
             className="block w-full bg-transparent px-2 pb-3 pt-1 outline-none disabled:cursor-not-allowed"
             style={{ fontSize: 15, color: 'var(--fg-1)', fontFamily: 'var(--font-sans)' }}
@@ -400,7 +438,7 @@ export function ChatConversation({ sessionId }: ChatConversationProps) {
               ) : (
                 <button
                   type="submit"
-                  disabled={!input.trim() || !ready}
+                  disabled={!input.trim() || !ready || orgPending}
                   className="inline-flex size-7 items-center justify-center rounded-full transition-colors hover:bg-[color:var(--surface-hover)] disabled:opacity-40"
                   style={{ color: 'var(--fg-1)' }}
                   aria-label="Send"

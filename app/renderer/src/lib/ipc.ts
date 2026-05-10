@@ -149,6 +149,14 @@ export interface OrgCreateMeetingPayload {
   s3_key?: string | null;
 }
 
+export interface OrgShareMeetingPayload {
+  title: string;
+  body: string;
+  visibility?: 'private' | 'org';
+}
+
+export type OrgShareMeetingResponse = Result<{ meeting: OrgMeeting; s3_key: string }>;
+
 export interface OrgChatPayload {
   messages: Array<{ role: 'user' | 'assistant'; content: string }>;
   system?: string;
@@ -529,6 +537,7 @@ export interface StenoaiBridge {
     listMeetings: RequestFn<[], OrgListMeetingsResponse>;
     getMeeting: RequestFn<[id: string], OrgGetMeetingResponse>;
     createMeeting: RequestFn<[payload: OrgCreateMeetingPayload], OrgGetMeetingResponse>;
+    shareMeeting: RequestFn<[payload: OrgShareMeetingPayload], OrgShareMeetingResponse>;
     aiChat: RequestFn<[payload: OrgChatPayload], OrgChatResponse>;
   };
 

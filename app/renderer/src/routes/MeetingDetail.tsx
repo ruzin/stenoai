@@ -6,6 +6,7 @@ import {
   Clock,
   Copy,
   Folder as FolderIcon,
+  Globe,
   MoreHorizontal,
   RefreshCw,
   Trash2,
@@ -27,6 +28,7 @@ import {
   SelectSeparator,
 } from '@/components/ui/select';
 import { useMeeting, useReprocessMeeting, useDeleteMeeting, meetingsKeys } from '@/hooks/useMeetings';
+import { useOrgSession, useShareToOrg } from '@/hooks/useOrg';
 import {
   Dialog,
   DialogContent,
@@ -112,6 +114,27 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
   const [deleteOpen, setDeleteOpen] = React.useState(false);
   const deleteMeeting = useDeleteMeeting();
   const reprocess = useReprocessMeeting();
+  const orgSession = useOrgSession();
+  const shareToOrg = useShareToOrg();
+  const [shareState, setShareState] = React.useState<'idle' | 'sharing' | 'shared' | 'error'>('idle');
+  const [shareError, setShareError] = React.useState<string | null>(null);
+
+  const onShareToOrg = async () => {
+    setShareState('sharing');
+    setShareError(null);
+    const title = meeting.session_info.name || 'Untitled note';
+    // Body: prefer the rendered summary; fall back to transcript so the
+    // shared note is never empty.
+    const body = (meeting.summary?.trim() || meeting.transcript?.trim() || '') as string;
+    try {
+      await shareToOrg.mutateAsync({ title, body, visibility: 'org' });
+      setShareState('shared');
+      setTimeout(() => setShareState('idle'), 2500);
+    } catch (e) {
+      setShareState('error');
+      setShareError(e instanceof Error ? e.message : String(e));
+    }
+  };
   const [titleRegening, setTitleRegening] = React.useState(() =>
     pendingTitleRegens.has(summaryFile),
   );
@@ -298,7 +321,7 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
                   <MoreHorizontal className="size-[14px]" />
                 </button>
               </PopoverTrigger>
-              <PopoverContent align="end" className="w-52 p-1">
+              <PopoverContent align="end" className="w-56 p-1">
                 <button
                   type="button"
                   className="flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-sm transition-colors hover:bg-[color:var(--surface-hover)]"
@@ -311,6 +334,25 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
                   <FolderIcon className="size-[13px] shrink-0" style={{ color: 'var(--fg-2)' }} />
                   View containing folder
                 </button>
+                {orgSession.data?.signedIn && (
+                  <button
+                    type="button"
+                    className="flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-sm transition-colors hover:bg-[color:var(--surface-hover)] disabled:opacity-50"
+                    style={{ color: 'var(--fg-1)' }}
+                    onClick={() => void onShareToOrg()}
+                    disabled={shareState === 'sharing' || shareState === 'shared'}
+                    title={`Share with ${orgSession.data.orgId}`}
+                  >
+                    <Globe className="size-[13px] shrink-0" style={{ color: 'var(--fg-2)' }} />
+                    {shareState === 'sharing'
+                      ? 'Sharing…'
+                      : shareState === 'shared'
+                        ? 'Shared with org ✓'
+                        : shareState === 'error'
+                          ? `Share failed${shareError ? ': ' + shareError : ''}`
+                          : `Share with ${orgSession.data.orgId}`}
+                  </button>
+                )}
                 <button
                   type="button"
                   className="flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-sm transition-colors hover:bg-[color:var(--surface-hover)]"

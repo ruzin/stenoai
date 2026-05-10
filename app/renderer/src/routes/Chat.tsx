@@ -5,7 +5,8 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { ChatHistoryRow } from '@/components/ChatHistoryRow';
-import { FolderScopePicker } from '@/components/FolderScopePicker';
+import { FolderScopePicker, ORG_SHARED_SCOPE } from '@/components/FolderScopePicker';
+import { askOrgChat } from '@/lib/orgChat';
 import {
   Popover,
   PopoverAnchor,
@@ -43,7 +44,11 @@ export function Chat() {
 
   const isCloud = provider.data?.ai_provider === 'cloud';
   const cloudKeySet = provider.data?.cloud_api_key_set ?? false;
-  const ready = isCloud && cloudKeySet;
+  // Org chat goes through the adapter's central key, so it doesn't need
+  // the local cloud provider configured.
+  const localReady = isCloud && cloudKeySet;
+  const orgScopeActive = scopeFolderId === ORG_SHARED_SCOPE;
+  const ready = localReady || orgScopeActive;
 
   // Recents = global-scope chats only (sessions started from THIS tab),
   // never the in-meeting AskBar history.
@@ -81,7 +86,11 @@ export function Chat() {
   const [submitError, setSubmitError] = React.useState<string | null>(null);
   const submit = async (raw: string) => {
     const q = raw.trim();
-    if (!q || submittingRef.current || !ready) return;
+    // Org-scoped chat doesn't depend on the cloud-key gate (it goes through
+    // the adapter's centrally-managed key). Local chat still does.
+    const isOrgScope = scopeFolderId === ORG_SHARED_SCOPE;
+    if (!q || submittingRef.current) return;
+    if (!isOrgScope && !localReady) return;
     submittingRef.current = true;
     setSubmitError(null);
     let createdSessionId: string | null = null;
@@ -93,6 +102,36 @@ export function Chat() {
         ts: Date.now(),
       });
       setInput('');
+
+      if (isOrgScope) {
+        // Route through the adapter — no streaming for the MVP, but the
+        // session lives in the same Recents list so follow-ups feel native.
+        // Mark the handoff with the org sentinel so ChatConversation keeps
+        // routing its own follow-ups through the adapter.
+        recordPendingNewChat({
+          sessionId: createdSessionId,
+          streamId: '',
+          folderId: ORG_SHARED_SCOPE,
+        });
+        navigate(`/chat/${encodeURIComponent(createdSessionId)}`);
+        // Fire-and-forget — ChatConversation surfaces in-flight state.
+        try {
+          const reply = await askOrgChat([], q);
+          await chat.appendMessage(createdSessionId, {
+            role: 'assistant',
+            content: reply,
+            ts: Date.now(),
+          });
+        } catch (err) {
+          await chat.appendMessage(createdSessionId, {
+            role: 'assistant',
+            content: `(adapter error: ${(err as Error).message})`,
+            ts: Date.now(),
+          });
+        }
+        return;
+      }
+
       const streamId = streaming.startGlobalStream(q, scopeFolderId);
       // Record the handoff under THIS sessionId so a fast double-submit
       // can't clobber an earlier in-flight stream before the conversation
@@ -146,7 +185,7 @@ export function Chat() {
           {userName.data ? `Hi ${userName.data}, ask anything` : 'Ask anything'}
         </h1>
 
-        {!ready && provider.isFetched && <CloudRequiredBanner />}
+        {!localReady && !orgScopeActive && provider.isFetched && <CloudRequiredBanner />}
         {submitError && (
           <div
             role="alert"
