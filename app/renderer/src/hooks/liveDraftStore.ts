@@ -21,6 +21,9 @@ interface LiveDraftStore {
   ensure: (sessionName: string, defaults: { startedAtMs: number }) => void;
   setTitle: (sessionName: string, title: string) => void;
   setNotes: (sessionName: string, notes: string) => void;
+  /** Drop the draft for a finished session so the next "New note" with the
+   *  same sessionName (e.g. the default 'Meeting' / 'Note') starts clean. */
+  clear: (sessionName: string) => void;
 }
 
 export const useLiveDraftStore = create<LiveDraftStore>((set) => ({
@@ -54,6 +57,12 @@ export const useLiveDraftStore = create<LiveDraftStore>((set) => ({
       return {
         drafts: { ...state.drafts, [sessionName]: { ...existing, notes } },
       };
+    }),
+  clear: (sessionName) =>
+    set((state) => {
+      if (!state.drafts[sessionName]) return state;
+      const { [sessionName]: _drop, ...rest } = state.drafts;
+      return { drafts: rest };
     }),
 }));
 
