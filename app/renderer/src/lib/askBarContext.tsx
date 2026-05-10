@@ -1,9 +1,20 @@
 import * as React from 'react';
 
+export interface ActiveOrgMeeting {
+  id: string;
+  title: string;
+  body: string;
+  ownerEmail: string;
+}
+
 interface AskBarContextValue {
   activeSummaryFile: string | null;
   activeMeetingName: string | null;
   setActiveMeeting: (summaryFile: string | null, name: string | null) => void;
+  /** Set when the user is viewing a shared note (`/org/shared/:id`).
+   *  Mutually exclusive with activeSummaryFile in practice. */
+  activeOrgMeeting: ActiveOrgMeeting | null;
+  setActiveOrgMeeting: (meeting: ActiveOrgMeeting | null) => void;
   transcriptOpen: boolean;
   setTranscriptOpen: (open: boolean) => void;
 }
@@ -15,6 +26,7 @@ export function AskBarProvider({ children }: { children: React.ReactNode }) {
     summaryFile: string | null;
     name: string | null;
   }>({ summaryFile: null, name: null });
+  const [activeOrgMeeting, setActiveOrgMeetingState] = React.useState<ActiveOrgMeeting | null>(null);
   const [transcriptOpen, setTranscriptOpen] = React.useState(false);
 
   React.useEffect(() => {
@@ -29,15 +41,25 @@ export function AskBarProvider({ children }: { children: React.ReactNode }) {
     [],
   );
 
+  const setActiveOrgMeeting = React.useCallback((meeting: ActiveOrgMeeting | null) => {
+    setActiveOrgMeetingState((prev) => {
+      if (!prev && !meeting) return prev;
+      if (prev && meeting && prev.id === meeting.id && prev.body === meeting.body) return prev;
+      return meeting;
+    });
+  }, []);
+
   const value = React.useMemo<AskBarContextValue>(
     () => ({
       activeSummaryFile: active.summaryFile,
       activeMeetingName: active.name,
       setActiveMeeting,
+      activeOrgMeeting,
+      setActiveOrgMeeting,
       transcriptOpen,
       setTranscriptOpen,
     }),
-    [active, transcriptOpen, setActiveMeeting],
+    [active, transcriptOpen, setActiveMeeting, activeOrgMeeting, setActiveOrgMeeting],
   );
 
   return <AskBarContext.Provider value={value}>{children}</AskBarContext.Provider>;
@@ -58,4 +80,15 @@ export function useActiveMeeting(
     setActiveMeeting(summaryFile, name);
     return () => setActiveMeeting(null, null);
   }, [summaryFile, name, setActiveMeeting]);
+}
+
+/** Register the currently-viewed shared note with AskBar, so its composer
+ *  can route questions through the org adapter against this note's body.
+ *  Pass null to clear (e.g. when leaving the route). */
+export function useActiveOrgMeeting(meeting: ActiveOrgMeeting | null) {
+  const { setActiveOrgMeeting } = useAskBar();
+  React.useEffect(() => {
+    setActiveOrgMeeting(meeting);
+    return () => setActiveOrgMeeting(null);
+  }, [meeting, setActiveOrgMeeting]);
 }

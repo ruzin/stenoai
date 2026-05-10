@@ -143,6 +143,56 @@ export function useStreamingQuery() {
     return id;
   }, []);
 
+  /** Stream a question against a single shared note's body, via the org
+   *  adapter. Mirrors startStream's API but takes the note's system prompt
+   *  directly instead of a local file path. */
+  const startOrgNoteStream = React.useCallback((
+    system: string,
+    question: string,
+    history?: Array<{ role: 'user' | 'assistant'; content: string }>,
+  ): string => {
+    const id = newId();
+    setStreams((prev) => ({
+      ...prev,
+      [id]: { text: '', status: 'streaming', error: null },
+    }));
+    activeRef.current.add(id);
+
+    const off = ipc().subscribeQueryStream(id, {
+      onChunk: (chunk) => {
+        setStreams((prev) => {
+          const current = prev[id];
+          if (!current) return prev;
+          return { ...prev, [id]: { ...current, text: current.text + chunk } };
+        });
+      },
+      onDone: () => {
+        setStreams((prev) => {
+          const current = prev[id];
+          if (!current) return prev;
+          return { ...prev, [id]: { ...current, status: 'done' } };
+        });
+        detachStream(id);
+      },
+      onError: (err) => {
+        setStreams((prev) => {
+          const current = prev[id];
+          if (!current) return prev;
+          return { ...prev, [id]: { ...current, status: 'error', error: err.message } };
+        });
+        detachStream(id);
+      },
+    });
+    unsubsRef.current.set(id, off);
+
+    const messages = [
+      ...(history ?? []),
+      { role: 'user' as const, content: question },
+    ];
+    ipc().org.chatStream(id, { system, messages });
+    return id;
+  }, []);
+
   const cancelStream = React.useCallback((id: string) => {
     const off = unsubsRef.current.get(id);
     off?.();
@@ -179,7 +229,14 @@ export function useStreamingQuery() {
     };
   }, []);
 
-  return { streams, startStream, startGlobalStream, cancelStream, clearStream };
+  return {
+    streams,
+    startStream,
+    startGlobalStream,
+    startOrgNoteStream,
+    cancelStream,
+    clearStream,
+  };
 }
 
 export type StreamingQueryApi = ReturnType<typeof useStreamingQuery>;

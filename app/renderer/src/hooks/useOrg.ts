@@ -71,6 +71,16 @@ export function useShareToOrg() {
   });
 }
 
+/** Unshare a note. Adapter deletes the metadata + the S3 object atomically.
+ *  Owner-only; the adapter 403s otherwise. */
+export function useUnshareOrgMeeting() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => unwrap(await ipc().org.deleteMeeting(id)),
+    onSuccess: () => qc.invalidateQueries({ queryKey: orgKeys.meetings() }),
+  });
+}
+
 /** Inline-body create — kept for cases where we genuinely don't want to
  *  hit S3 (legacy / fallback). The default share path uses useShareToOrg. */
 export function useCreateOrgMeeting() {

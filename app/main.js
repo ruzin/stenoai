@@ -5333,6 +5333,17 @@ ipcMain.handle('org-create-meeting', async (_event, payload) => {
   }
 });
 
+ipcMain.handle('org-delete-meeting', async (_event, id) => {
+  try {
+    const body = await adapterFetch('/meetings/' + encodeURIComponent(String(id)), {
+      method: 'DELETE',
+    });
+    return { success: true, id: body.id };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
 // Three-step share: presign → PUT bytes to S3 → register meeting metadata
 // with the s3_key. Centralised in main so the renderer doesn't have to do
 // raw PUT (and so we can keep the bytes off the renderer when the bucket

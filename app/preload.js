@@ -213,6 +213,7 @@ const stenoai = {
     listMeetings: () => invoke('org-list-meetings'),
     getMeeting: (id) => invoke('org-get-meeting', id),
     createMeeting: (payload) => invoke('org-create-meeting', payload),
+    deleteMeeting: (id) => invoke('org-delete-meeting', id),
     shareMeeting: (payload) => invoke('org-share-meeting', payload),
     aiChat: (payload) => invoke('org-ai-chat', payload),
     /** Fire-and-forget streaming start. Chunks arrive via query-chunk +

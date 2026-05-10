@@ -537,6 +537,7 @@ export interface StenoaiBridge {
     listMeetings: RequestFn<[], OrgListMeetingsResponse>;
     getMeeting: RequestFn<[id: string], OrgGetMeetingResponse>;
     createMeeting: RequestFn<[payload: OrgCreateMeetingPayload], OrgGetMeetingResponse>;
+    deleteMeeting: RequestFn<[id: string], Result<{ id: string }>>;
     shareMeeting: RequestFn<[payload: OrgShareMeetingPayload], OrgShareMeetingResponse>;
     aiChat: RequestFn<[payload: OrgChatPayload], OrgChatResponse>;
     chatStream: SendFn<[streamId: string, payload: OrgChatPayload]>;

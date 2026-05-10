@@ -27,11 +27,11 @@ async function loadOrgCorpus(): Promise<string> {
         const body = meeting.body ?? '';
         return [
           `### ${meeting.title}`,
-          `[id: ${meeting.id}, shared by ${meeting.owner_email}]`,
+          `_shared by ${meeting.owner_email}_`,
           body || '(empty)',
         ].join('\n');
       } catch (e) {
-        return `### ${m.title}\n[id: ${m.id}] (could not load: ${(e as Error).message})`;
+        return `### ${m.title}\n(could not load: ${(e as Error).message})`;
       }
     }),
   );
@@ -40,7 +40,8 @@ async function loadOrgCorpus(): Promise<string> {
 
 const SYSTEM_PREFIX =
   `You answer questions across an organisation's shared meeting notes. ` +
-  `Cite the note title (or its [id: ...]) when an answer comes from a specific note. ` +
+  `When an answer comes from a specific note, cite it by its title only (e.g. "from Pricing Units"). ` +
+  `Never invent or mention internal identifiers. ` +
   `If the corpus doesn't contain enough information to answer confidently, say so.`;
 
 /** Builds a streaming-ready payload (system + messages) for org chat.

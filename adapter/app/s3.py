@@ -54,6 +54,21 @@ def presigned_get(key: str) -> str | None:
     )
 
 
+def delete_object(key: str) -> bool:
+    """Best-effort S3 delete. Returns True if the call succeeded (or the
+    bucket isn't configured — caller treats that as a no-op). False on
+    boto3 errors. Missing keys still return True (S3 delete is idempotent).
+    """
+    b = bucket()
+    if not b:
+        return True
+    try:
+        _client().delete_object(Bucket=b, Key=key)
+        return True
+    except Exception:
+        return False
+
+
 def get_object_text(key: str) -> str | None:
     """Read an object's bytes server-side and return as text.
 

@@ -78,7 +78,7 @@ import {
   useOutlookCalendarAuth,
 } from '@/hooks/useCalendarEvents';
 import type { AiProvider, CloudProvider, OrgStatusResponse } from '@/lib/ipc';
-import { ipc } from '@/lib/ipc';
+import { useOrgLogin, useOrgLogout, useOrgSession } from '@/hooks/useOrg';
 
 // ---------------------------------------------------------------------------
 // Local style helpers — values come straight from the new design (Pencil
@@ -1217,52 +1217,41 @@ function ModelList() {
 const DEFAULT_ADAPTER_URL = 'http://localhost:8000';
 
 function OrganisationTab() {
-  const [status, setStatus] = React.useState<OrgStatusResponse | null>(null);
+  // useOrgSession + the login/logout mutations all share the same TanStack
+  // Query key, so every other consumer (sidebar 'Shared notes' row, profile
+  // chip, AskBar gating) reacts immediately to a sign-in or sign-out here.
+  const sessionQuery = useOrgSession();
+  const loginMutation = useOrgLogin();
+  const logoutMutation = useOrgLogout();
+  const status: OrgStatusResponse | null = sessionQuery.data ?? null;
+
   const [adapterUrl, setAdapterUrl] = React.useState(DEFAULT_ADAPTER_URL);
   const [email, setEmail] = React.useState('');
   const [password, setPassword] = React.useState('');
-  const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
-  const refresh = React.useCallback(async () => {
-    try {
-      const s = await ipc().org.status();
-      setStatus(s);
-      if (s.adapterUrl) setAdapterUrl(s.adapterUrl);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    }
-  }, []);
-
+  // Seed the form's adapter URL from the persisted session, once we know it.
   React.useEffect(() => {
-    void refresh();
-  }, [refresh]);
+    if (status?.adapterUrl) setAdapterUrl(status.adapterUrl);
+  }, [status?.adapterUrl]);
+
+  const busy = loginMutation.isPending || logoutMutation.isPending;
 
   const onSignIn = async () => {
-    setBusy(true);
     setError(null);
     try {
-      const r = await ipc().org.login(adapterUrl, email, password);
-      if (!r.success) {
-        setError(r.error);
-      } else {
-        setPassword('');
-        await refresh();
-      }
+      await loginMutation.mutateAsync({ adapterUrl, email, password });
+      setPassword('');
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
     }
   };
 
   const onSignOut = async () => {
-    setBusy(true);
     try {
-      await ipc().org.logout();
-      await refresh();
-    } finally {
-      setBusy(false);
+      await logoutMutation.mutateAsync();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
     }
   };
 

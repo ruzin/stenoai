@@ -123,9 +123,10 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
     setShareState('sharing');
     setShareError(null);
     const title = meeting.session_info.name || 'Untitled note';
-    // Body: prefer the rendered summary; fall back to transcript so the
-    // shared note is never empty.
-    const body = (meeting.summary?.trim() || meeting.transcript?.trim() || '') as string;
+    // Compose the full structured note as markdown — same content the
+    // local detail page renders, minus the raw transcript (kept off the
+    // shared corpus to limit blast radius if the bucket is ever leaked).
+    const body = composeShareBody(meeting);
     try {
       await shareToOrg.mutateAsync({ title, body, visibility: 'org' });
       setShareState('shared');
@@ -1141,4 +1142,45 @@ function getErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message) return error.message;
   if (typeof error === 'string' && error.trim()) return error;
   return 'Something went wrong.';
+}
+
+/** Builds the markdown body shipped to the org adapter when the user shares
+ *  a local note. Mirrors what the local note view renders (minus the raw
+ *  transcript) so colleagues see the same structured summary. */
+function composeShareBody(meeting: Meeting): string {
+  const sections: string[] = [];
+
+  const summary = meeting.summary?.trim();
+  if (summary) {
+    sections.push(`## Summary\n\n${summary}`);
+  }
+
+  const topics = asDiscussionAreas(meeting.discussion_areas);
+  if (topics.length) {
+    const block = topics
+      .map((t) => {
+        const title = (t.title || '').trim();
+        const analysis = (t.analysis || '').trim();
+        if (title && analysis) return `### ${title}\n\n${analysis}`;
+        return `### ${title || analysis}`;
+      })
+      .join('\n\n');
+    sections.push(`## Key topics\n\n${block}`);
+  }
+
+  const keyPoints = (meeting.key_points ?? []).filter(Boolean);
+  if (keyPoints.length) {
+    sections.push(
+      `## Key points\n\n${keyPoints.map((kp) => `- ${kp}`).join('\n')}`,
+    );
+  }
+
+  const actionItems = asStringArray(meeting.action_items);
+  if (actionItems.length) {
+    sections.push(
+      `## Action items\n\n${actionItems.map((ai) => `- ${ai}`).join('\n')}`,
+    );
+  }
+
+  return sections.join('\n\n') || (meeting.transcript?.trim() || '');
 }

@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from .. import store
-from ..s3 import get_object_text, presigned_get
+from ..s3 import delete_object, get_object_text, presigned_get
 from ..security import current_user
 
 router = APIRouter(prefix="/meetings", tags=["meetings"])
@@ -91,3 +91,18 @@ def patch_visibility(
             status_code=404, detail="not found or not owned by caller"
         )
     return _serialize(m, include_body=True, include_url=True)
+
+
+@router.delete("/{meeting_id}")
+def delete_meeting(meeting_id: str, user=Depends(current_user)):
+    """Unshare (delete) a meeting. Only the owner can call this. The S3
+    artifact, if any, is deleted alongside the metadata."""
+    removed = store.delete(meeting_id, user["email"])
+    if not removed:
+        raise HTTPException(
+            status_code=404, detail="not found or not owned by caller"
+        )
+    s3_key = removed.get("s3_key")
+    if s3_key:
+        delete_object(s3_key)
+    return {"id": removed["id"], "deleted": True}

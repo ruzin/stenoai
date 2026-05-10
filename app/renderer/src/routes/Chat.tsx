@@ -19,6 +19,7 @@ import {
 import { useGlobalStreaming } from '@/hooks/useStreamingQuery';
 import { useAiProvider } from '@/hooks/useAi';
 import { useUserName } from '@/hooks/useSettings';
+import { useOrgSession } from '@/hooks/useOrg';
 import { navigate } from '@/lib/router';
 import { GLOBAL_SCOPE, bucketKey, deriveSessionName, toBucketLabel } from '@/lib/chat';
 import { PRESETS, PresetGlyph } from '@/lib/chatPresets';
@@ -31,6 +32,14 @@ export function Chat() {
   const streaming = useGlobalStreaming();
   const provider = useAiProvider();
   const userName = useUserName();
+  const orgSession = useOrgSession();
+  // When signed in to an org adapter, the greeting reflects the org identity
+  // (first name from "Alice Chen") so the demo feels like switching users.
+  // Falls back to the local user-name setting when no org session is active.
+  const greetingName =
+    orgSession.data?.signedIn && orgSession.data?.name
+      ? orgSession.data.name.split(' ')[0]
+      : userName.data;
 
   const [input, setInput] = React.useState('');
   const [presetsOpen, setPresetsOpen] = React.useState(false);
@@ -154,7 +163,7 @@ export function Chat() {
             color: 'var(--fg-1)',
           }}
         >
-          {userName.data ? `Hi ${userName.data}, ask anything` : 'Ask anything'}
+          {greetingName ? `Hi ${greetingName}, ask anything` : 'Ask anything'}
         </h1>
 
         {!localReady && !orgScopeActive && provider.isFetched && <CloudRequiredBanner />}

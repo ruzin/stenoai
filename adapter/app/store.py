@@ -97,3 +97,19 @@ def update_visibility(
                 _write(meetings)
                 return m
     return None
+
+
+def delete(meeting_id: str, owner_email: str) -> dict | None:
+    """Remove a meeting from the store. Only the owner can delete.
+
+    Returns the removed meeting record (so the caller can clean up S3),
+    or None if the meeting wasn't found / wasn't owned by the caller.
+    """
+    with _LOCK:
+        meetings = _read()
+        for i, m in enumerate(meetings):
+            if m["id"] == meeting_id and m["owner_email"] == owner_email:
+                removed = meetings.pop(i)
+                _write(meetings)
+                return removed
+    return None
