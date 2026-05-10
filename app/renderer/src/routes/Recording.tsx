@@ -20,10 +20,24 @@ export function Recording() {
   // it stopped), bounce back home so we don't leave the user on a dead page.
   // Status 'processing' is handled by the global listener which redirects to
   // /meetings/processing.
+  //
+  // 500ms grace period: during a normal stop, the optimistic cache write
+  // briefly transitions status (idle ↔ processing) and live.active flips off
+  // BEFORE navigate('/meetings/processing') completes its render. Without the
+  // delay this effect raced the optimistic flow and bounced the user back
+  // home — visible most reliably when the user had been typing notes (queue
+  // poll cadence + cache updates landed in a different order). The delay
+  // lets the transition settle before we make any bouncing decision.
   React.useEffect(() => {
-    if (!recording.isLoading && !live.active && recording.status !== 'processing') {
-      navigate('/');
-    }
+    if (recording.isLoading) return;
+    if (live.active) return;
+    if (recording.status === 'processing') return;
+    const t = setTimeout(() => {
+      if (!recording.isLoading && !live.active && recording.status !== 'processing') {
+        navigate('/');
+      }
+    }, 500);
+    return () => clearTimeout(t);
   }, [recording.isLoading, live.active, recording.status, navigate]);
 
   const startedAt = live.startedAt ?? new Date();
