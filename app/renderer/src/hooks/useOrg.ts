@@ -4,7 +4,6 @@ import { unwrap } from '@/lib/result';
 import type {
   OrgCreateMeetingPayload,
   OrgChatPayload,
-  OrgMeeting,
   OrgShareMeetingPayload,
 } from '@/lib/ipc';
 
@@ -83,27 +82,6 @@ export function useCreateOrgMeeting() {
   });
 }
 
-/** Fetches the body of a shared note. If the meeting was registered with
- *  an inline body (legacy), returns that. Otherwise GETs the presigned S3
- *  URL the adapter handed back. Cached in memory only — never written to
- *  disk, which is the security pitch. */
-export function useOrgMeetingBody(meeting: OrgMeeting | undefined) {
-  return useQuery({
-    queryKey: ['org', 'meeting-body', meeting?.id, meeting?.download_url],
-    enabled: !!meeting,
-    staleTime: 60_000,
-    queryFn: async () => {
-      if (!meeting) return '';
-      if (meeting.body && meeting.body.length > 0) return meeting.body;
-      if (meeting.download_url) {
-        const r = await fetch(meeting.download_url);
-        if (!r.ok) throw new Error(`s3 fetch failed: ${r.status}`);
-        return r.text();
-      }
-      return '';
-    },
-  });
-}
 
 export function useOrgAiChat() {
   return useMutation({

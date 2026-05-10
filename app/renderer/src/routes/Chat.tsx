@@ -6,7 +6,6 @@ import {
 } from 'lucide-react';
 import { ChatHistoryRow } from '@/components/ChatHistoryRow';
 import { FolderScopePicker, ORG_SHARED_SCOPE } from '@/components/FolderScopePicker';
-import { askOrgChat } from '@/lib/orgChat';
 import {
   Popover,
   PopoverAnchor,
@@ -103,35 +102,8 @@ export function Chat() {
       });
       setInput('');
 
-      if (isOrgScope) {
-        // Route through the adapter — no streaming for the MVP, but the
-        // session lives in the same Recents list so follow-ups feel native.
-        // Mark the handoff with the org sentinel so ChatConversation keeps
-        // routing its own follow-ups through the adapter.
-        recordPendingNewChat({
-          sessionId: createdSessionId,
-          streamId: '',
-          folderId: ORG_SHARED_SCOPE,
-        });
-        navigate(`/chat/${encodeURIComponent(createdSessionId)}`);
-        // Fire-and-forget — ChatConversation surfaces in-flight state.
-        try {
-          const reply = await askOrgChat([], q);
-          await chat.appendMessage(createdSessionId, {
-            role: 'assistant',
-            content: reply,
-            ts: Date.now(),
-          });
-        } catch (err) {
-          await chat.appendMessage(createdSessionId, {
-            role: 'assistant',
-            content: `(adapter error: ${(err as Error).message})`,
-            ts: Date.now(),
-          });
-        }
-        return;
-      }
-
+      // Streaming for both local AND org scope — startGlobalStream picks
+      // the right backend internally based on folderId.
       const streamId = streaming.startGlobalStream(q, scopeFolderId);
       // Record the handoff under THIS sessionId so a fast double-submit
       // can't clobber an earlier in-flight stream before the conversation

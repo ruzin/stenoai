@@ -215,6 +215,11 @@ const stenoai = {
     createMeeting: (payload) => invoke('org-create-meeting', payload),
     shareMeeting: (payload) => invoke('org-share-meeting', payload),
     aiChat: (payload) => invoke('org-ai-chat', payload),
+    /** Fire-and-forget streaming start. Chunks arrive via query-chunk +
+     *  query-done events on the existing channel — same wire as
+     *  chatGlobalStream, so useStreamingQuery's subscribeQueryStream
+     *  works unchanged. */
+    chatStream: (streamId, payload) => send('org-chat-stream', streamId, payload),
   },
 
   dialog: {

@@ -1364,6 +1364,15 @@ ipcMain.on('query-cancel', (_event, queryId) => {
     proc.kill();
     activeQueryProcs.delete(queryId);
   }
+  // Org-chat streams use AbortController instead of a child process; share
+  // the same query-cancel channel so the renderer doesn't have to know which
+  // backend a given streamId belongs to.
+  const ctrl = orgStreamAborters.get(queryId);
+  if (ctrl) {
+    console.log(`[ORG] Cancelling streamId=${queryId}`);
+    try { ctrl.abort(); } catch (_) {}
+    orgStreamAborters.delete(queryId);
+  }
 });
 
 ipcMain.on('query-transcript-stream', (event, queryId, summaryFile, question) => {
@@ -5386,5 +5395,73 @@ ipcMain.handle('org-ai-chat', async (_event, payload) => {
     return { success: true, ...body };
   } catch (e) {
     return { success: false, error: e.message };
+  }
+});
+
+// Streaming variant of /ai/chat. Renderer hands us a streamId; we forward
+// chunks via the same query-chunk / query-done events the local Python
+// stream uses, so the existing useStreamingQuery infra works unchanged.
+const orgStreamAborters = new Map();
+
+ipcMain.on('org-chat-stream', async (event, streamId, payload) => {
+  const session = loadOrgSession();
+  if (!session) {
+    event.sender.send('query-done', { queryId: streamId, success: false, error: 'not signed in to org adapter' });
+    return;
+  }
+  const controller = new AbortController();
+  orgStreamAborters.set(streamId, controller);
+  try {
+    const res = await fetch(session.adapterUrl + '/ai/chat/stream', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: 'Bearer ' + session.token,
+      },
+      body: JSON.stringify(payload || {}),
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      let detail = '';
+      try { detail = await res.text(); } catch (_) {}
+      if (res.status === 401) clearOrgSession();
+      event.sender.send('query-done', { queryId: streamId, success: false, error: `HTTP ${res.status}: ${detail.slice(0, 200)}` });
+      return;
+    }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let success = true;
+    let errorMsg = null;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let nl;
+      while ((nl = buffer.indexOf('\n')) !== -1) {
+        const line = buffer.slice(0, nl);
+        buffer = buffer.slice(nl + 1);
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        let obj;
+        try { obj = JSON.parse(trimmed); } catch (_) { continue; }
+        if (obj.type === 'chunk' && obj.text) {
+          event.sender.send('query-chunk', { queryId: streamId, chunk: obj.text });
+        } else if (obj.type === 'error') {
+          success = false;
+          errorMsg = obj.error;
+        }
+        // 'done' lines carry usage info; we don't surface it for now.
+      }
+    }
+    event.sender.send('query-done', { queryId: streamId, success, error: errorMsg });
+  } catch (e) {
+    if (e.name === 'AbortError') {
+      event.sender.send('query-done', { queryId: streamId, success: false, error: 'cancelled' });
+    } else {
+      event.sender.send('query-done', { queryId: streamId, success: false, error: e.message });
+    }
+  } finally {
+    orgStreamAborters.delete(streamId);
   }
 });

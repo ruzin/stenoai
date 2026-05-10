@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from .. import store
-from ..s3 import presigned_get
+from ..s3 import get_object_text, presigned_get
 from ..security import current_user
 
 router = APIRouter(prefix="/meetings", tags=["meetings"])
@@ -34,7 +34,13 @@ def _serialize(m: dict, *, include_body: bool, include_url: bool) -> dict:
         "has_artifact": bool(m.get("s3_key")),
     }
     if include_body:
-        out["body"] = m.get("body", "")
+        body = m.get("body") or ""
+        # Server-side fetch from S3 when the metadata only carries a key.
+        # Keeps the renderer out of the AWS path entirely.
+        if not body and m.get("s3_key"):
+            fetched = get_object_text(m["s3_key"])
+            body = fetched if fetched is not None else ""
+        out["body"] = body
     if include_url and m.get("s3_key"):
         out["download_url"] = presigned_get(m["s3_key"])
     return out

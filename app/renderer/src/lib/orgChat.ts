@@ -13,7 +13,8 @@ interface OrgChatTurn {
 }
 
 /**
- * Fetches every visible org meeting and inlines its body (from S3 if needed).
+ * Fetches every visible org meeting. The adapter inlines bodies (S3-fetched
+ * server-side when needed), so we just collect them and concatenate.
  * Cheap with a handful of demo notes; once corpora grow, swap for retrieval.
  */
 async function loadOrgCorpus(): Promise<string> {
@@ -23,18 +24,14 @@ async function loadOrgCorpus(): Promise<string> {
     list.map(async (m): Promise<string> => {
       try {
         const meeting = unwrap(await ipc().org.getMeeting(m.id)).meeting as OrgMeeting;
-        let body = meeting.body ?? '';
-        if (!body && meeting.download_url) {
-          const r = await fetch(meeting.download_url);
-          if (r.ok) body = await r.text();
-        }
+        const body = meeting.body ?? '';
         return [
           `### ${meeting.title}`,
           `[id: ${meeting.id}, shared by ${meeting.owner_email}]`,
           body || '(empty)',
         ].join('\n');
       } catch (e) {
-        return `### ${m.title}\n[id: ${m.id}] (could not load body: ${(e as Error).message})`;
+        return `### ${m.title}\n[id: ${m.id}] (could not load: ${(e as Error).message})`;
       }
     }),
   );
@@ -46,17 +43,27 @@ const SYSTEM_PREFIX =
   `Cite the note title (or its [id: ...]) when an answer comes from a specific note. ` +
   `If the corpus doesn't contain enough information to answer confidently, say so.`;
 
-/** Sends one turn through org.aiChat, returning the assistant reply. */
-export async function askOrgChat(
+/** Builds a streaming-ready payload (system + messages) for org chat.
+ *  Used by useStreamingQuery to dispatch through ipc().org.chatStream. */
+export async function buildOrgChatPayload(
   history: OrgChatTurn[],
   question: string,
-): Promise<string> {
+) {
   const corpus = await loadOrgCorpus();
   const system = `${SYSTEM_PREFIX}\n\n--- SHARED NOTES ---\n${corpus}`;
   const messages: OrgChatTurn[] = [
     ...history,
     { role: 'user', content: question },
   ];
+  return { system, messages };
+}
+
+/** One-shot org chat. Kept for callers that don't need streaming. */
+export async function askOrgChat(
+  history: OrgChatTurn[],
+  question: string,
+): Promise<string> {
+  const { system, messages } = await buildOrgChatPayload(history, question);
   const res = unwrap(await ipc().org.aiChat({ system, messages }));
   return res.reply;
 }

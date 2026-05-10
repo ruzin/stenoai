@@ -1,10 +1,11 @@
 import * as React from 'react';
-import { ArrowLeft, Globe, Lock, Send, Users } from 'lucide-react';
+import { ArrowUp, ArrowLeft, Globe, Lock, Square, Users } from 'lucide-react';
 import { MeetingsShell } from '@/components/MeetingsShell';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { navigate } from '@/lib/router';
-import { useOrgAiChat, useOrgMeeting, useOrgMeetingBody, useOrgMeetings, useOrgSession } from '@/hooks/useOrg';
+import { ipc } from '@/lib/ipc';
+import { useOrgMeeting, useOrgMeetings, useOrgSession } from '@/hooks/useOrg';
 
 function formatDate(epoch: number): string {
   const d = new Date(epoch * 1000);
@@ -130,12 +131,12 @@ export function OrgShared() {
 export function OrgSharedDetail({ id }: { id: string }) {
   const session = useOrgSession();
   const meeting = useOrgMeeting(id);
-  // Body comes back from S3 via the presigned download URL the adapter
-  // hands us. Memory-cached only — nothing written to disk.
-  const body = useOrgMeetingBody(meeting.data);
   if (!session.data?.signedIn) return <NotSignedIn />;
 
-  const bodyText = body.data ?? '';
+  // Body is inlined by the adapter (it server-side fetches from S3 if the
+  // note has an s3_key). Renderer never talks to S3 directly — keeps creds
+  // in one place and avoids CORS surprises.
+  const bodyText = meeting.data?.body ?? '';
 
   return (
     <MeetingsShell activeSummaryFile={null}>
@@ -171,7 +172,7 @@ export function OrgSharedDetail({ id }: { id: string }) {
                 {meeting.data.has_artifact && (
                   <>
                     <span>·</span>
-                    <span title="Body retrieved from your org's S3 bucket via a 15-minute presigned URL — never written to this Mac.">
+                    <span title="Body lives in your org's S3 bucket; the adapter fetched it server-side. Never written to this Mac.">
                       from S3
                     </span>
                   </>
@@ -187,11 +188,7 @@ export function OrgSharedDetail({ id }: { id: string }) {
                 fontFamily: 'var(--font-sans)',
               }}
             >
-              {body.isLoading
-                ? 'Loading from S3…'
-                : body.error
-                  ? `(could not load body: ${(body.error as Error).message})`
-                  : bodyText || '(no body)'}
+              {bodyText || '(no body)'}
             </article>
 
             <NoteChat
@@ -213,69 +210,92 @@ export function OrgSharedDetail({ id }: { id: string }) {
 // the main Chat tab under the "Shared notes" scope.
 // ----------------------------------------------------------------------------
 
-function NoteChat({ system, placeholder }: { system: string; placeholder: string }) {
-  const chat = useOrgAiChat();
-  const [messages, setMessages] = React.useState<
-    Array<{ role: 'user' | 'assistant'; content: string }>
-  >([]);
+interface NoteChatProps {
+  system: string;
+  placeholder: string;
+}
+
+interface ChatTurn { role: 'user' | 'assistant'; content: string }
+
+/**
+ * Streaming chat panel for a single shared note. Subscribes to the same
+ * query-chunk / query-done events the local AskBar uses, so chunks arrive
+ * the same way regardless of backend. Visually this matches the local
+ * AskBar's rounded surface + composer at the bottom of its own card.
+ */
+function NoteChat({ system, placeholder }: NoteChatProps) {
+  const [messages, setMessages] = React.useState<ChatTurn[]>([]);
   const [draft, setDraft] = React.useState('');
+  const [streamingText, setStreamingText] = React.useState('');
+  const [streamingId, setStreamingId] = React.useState<string | null>(null);
+  const [error, setError] = React.useState<string | null>(null);
   const logRef = React.useRef<HTMLDivElement>(null);
+  const isStreaming = streamingId !== null;
 
   React.useEffect(() => {
     logRef.current?.scrollTo({ top: logRef.current.scrollHeight });
-  }, [messages, chat.isPending]);
+  }, [messages, streamingText]);
 
-  const send = async () => {
+  const send = () => {
     const q = draft.trim();
-    if (!q || chat.isPending) return;
+    if (!q || isStreaming) return;
     setDraft('');
-    const next = [...messages, { role: 'user' as const, content: q }];
+    setError(null);
+    const history = [...messages];
+    const next: ChatTurn[] = [...history, { role: 'user', content: q }];
     setMessages(next);
-    try {
-      const res = await chat.mutateAsync({ system, messages: next });
-      setMessages([...next, { role: 'assistant', content: res.reply }]);
-    } catch (e) {
-      setMessages([
-        ...next,
-        { role: 'assistant', content: `(error: ${(e as Error).message})` },
-      ]);
-    }
+    setStreamingText('');
+
+    const id = `q-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    let acc = '';
+    const off = ipc().subscribeQueryStream(id, {
+      onChunk: (chunk) => {
+        acc += chunk;
+        setStreamingText(acc);
+      },
+      onDone: () => {
+        setMessages((prev) => [...prev, { role: 'assistant', content: acc || '(empty response)' }]);
+        setStreamingText('');
+        setStreamingId(null);
+        off();
+      },
+      onError: (err) => {
+        setError(err.message);
+        setStreamingText('');
+        setStreamingId(null);
+        off();
+      },
+    });
+    setStreamingId(id);
+    ipc().org.chatStream(id, { system, messages: next });
+  };
+
+  const cancel = () => {
+    if (!streamingId) return;
+    ipc().query.cancel(streamingId);
   };
 
   return (
     <section
-      className="rounded-[10px]"
+      className="overflow-hidden rounded-[10px]"
       style={{ background: 'var(--surface-raised)', border: '1px solid var(--border-subtle)' }}
     >
       <div className="border-b border-[color:var(--border-subtle)] px-4 py-2.5 text-[12px] font-medium" style={{ color: 'var(--fg-2)' }}>
         Ask · proxied through org adapter
       </div>
       <div ref={logRef} className="flex max-h-[360px] flex-col gap-2 overflow-y-auto px-4 py-3">
-        {messages.length === 0 && (
+        {messages.length === 0 && !isStreaming && (
           <div className="py-3 text-center text-[12px]" style={{ color: 'var(--fg-muted)' }}>
             no messages yet
           </div>
         )}
         {messages.map((m, i) => (
-          <div
-            key={i}
-            className={
-              m.role === 'user'
-                ? 'self-end max-w-[88%] rounded-[10px] px-3 py-2 text-[13.5px]'
-                : 'self-start max-w-[88%] rounded-[10px] px-3 py-2 text-[13.5px] whitespace-pre-wrap'
-            }
-            style={
-              m.role === 'user'
-                ? { background: 'var(--fg-1)', color: 'var(--surface-raised)' }
-                : { background: 'var(--surface-sunken)', color: 'var(--fg-1)' }
-            }
-          >
-            {m.content}
-          </div>
+          <Bubble key={i} role={m.role} content={m.content} />
         ))}
-        {chat.isPending && (
-          <div className="self-start text-[12px]" style={{ color: 'var(--fg-muted)' }}>
-            thinking…
+        {isStreaming && <Bubble role="assistant" content={streamingText || 'Thinking…'} live />}
+        {error && (
+          <div className="text-[12px]" style={{ color: 'var(--danger, #b3261e)' }}>
+            {error}
           </div>
         )}
       </div>
@@ -286,21 +306,54 @@ function NoteChat({ system, placeholder }: { system: string; placeholder: string
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
               e.preventDefault();
-              void send();
+              send();
             }
           }}
           placeholder={placeholder}
           className="h-[32px] rounded-[8px] text-[13px]"
-          disabled={chat.isPending}
+          disabled={isStreaming}
         />
-        <Button
-          onClick={() => void send()}
-          disabled={chat.isPending || !draft.trim()}
-          className="h-[32px] gap-1.5 px-3 text-[12px]"
-        >
-          <Send size={12} /> Send
-        </Button>
+        {isStreaming ? (
+          <Button
+            type="button"
+            onClick={cancel}
+            className="h-[32px] gap-1.5 px-3 text-[12px]"
+            variant="outline"
+          >
+            <Square size={12} /> Stop
+          </Button>
+        ) : (
+          <Button
+            onClick={send}
+            disabled={!draft.trim()}
+            className="h-[32px] gap-1.5 px-3 text-[12px]"
+          >
+            <ArrowUp size={12} /> Send
+          </Button>
+        )}
       </div>
     </section>
+  );
+}
+
+function Bubble({ role, content, live }: { role: 'user' | 'assistant'; content: string; live?: boolean }) {
+  const base = 'max-w-[88%] rounded-[10px] px-3 py-2 text-[13.5px]';
+  if (role === 'user') {
+    return (
+      <div
+        className={`self-end ${base}`}
+        style={{ background: 'var(--fg-1)', color: 'var(--surface-raised)' }}
+      >
+        {content}
+      </div>
+    );
+  }
+  return (
+    <div
+      className={`self-start whitespace-pre-wrap ${base}`}
+      style={{ background: 'var(--surface-sunken)', color: 'var(--fg-1)', opacity: live && !content.trim() ? 0.6 : 1 }}
+    >
+      {content}
+    </div>
   );
 }

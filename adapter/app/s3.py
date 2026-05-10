@@ -52,3 +52,20 @@ def presigned_get(key: str) -> str | None:
         Params={"Bucket": b, "Key": key},
         ExpiresIn=PRESIGN_TTL_SECONDS,
     )
+
+
+def get_object_text(key: str) -> str | None:
+    """Read an object's bytes server-side and return as text.
+
+    Used so shared-note bodies don't have to round-trip through the
+    desktop's renderer — the adapter is the only thing that needs S3
+    credentials, and we keep the renderer's CORS surface clean.
+    """
+    b = bucket()
+    if not b:
+        return None
+    try:
+        resp = _client().get_object(Bucket=b, Key=key)
+        return resp["Body"].read().decode("utf-8", errors="replace")
+    except _client().exceptions.NoSuchKey:
+        return None

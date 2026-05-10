@@ -1,5 +1,7 @@
 import * as React from 'react';
 import { ipc } from '@/lib/ipc';
+import { ORG_SHARED_SCOPE } from '@/components/FolderScopePicker';
+import { buildOrgChatPayload } from '@/lib/orgChat';
 
 export type StreamStatus = 'streaming' | 'done' | 'error';
 
@@ -71,10 +73,16 @@ export function useStreamingQuery() {
 
   // Cross-note variant of startStream — same wire shape, no summaryFile.
   // Used by the Chat tab to ask questions across every meeting summary,
-  // optionally scoped to a single folder.
+  // optionally scoped to a single folder OR to the org-shared corpus
+  // (folderId === ORG_SHARED_SCOPE).
+  //
+  // For org scope, we asynchronously build the corpus then dispatch through
+  // ipc().org.chatStream — chunks land on the same query-chunk channel as
+  // local chat so the renderer doesn't need a parallel subscription.
   const startGlobalStream = React.useCallback((
     question: string,
     folderId?: string | null,
+    orgHistory?: Array<{ role: 'user' | 'assistant'; content: string }>,
   ): string => {
     const id = newId();
     setStreams((prev) => ({
@@ -109,7 +117,29 @@ export function useStreamingQuery() {
       },
     });
     unsubsRef.current.set(id, off);
-    ipc().query.chatGlobalStream(id, question, folderId ?? null);
+
+    if (folderId === ORG_SHARED_SCOPE) {
+      // Build the corpus + dispatch through the org adapter. The fetch is
+      // async; once it resolves we fire chatStream on the same streamId.
+      void (async () => {
+        try {
+          const payload = await buildOrgChatPayload(orgHistory ?? [], question);
+          ipc().org.chatStream(id, payload);
+        } catch (e) {
+          setStreams((prev) => {
+            const current = prev[id];
+            if (!current) return prev;
+            return {
+              ...prev,
+              [id]: { ...current, status: 'error', error: (e as Error).message },
+            };
+          });
+          detachStream(id);
+        }
+      })();
+    } else {
+      ipc().query.chatGlobalStream(id, question, folderId ?? null);
+    }
     return id;
   }, []);
 
