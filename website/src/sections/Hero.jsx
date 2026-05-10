@@ -40,7 +40,7 @@ export function Hero() {
               maxWidth: "14ch",
             }}
           >
-            AI that runs privately on your Mac.
+            AI for your confidential conversations.
           </Motion.h1>
 
           <Motion.p

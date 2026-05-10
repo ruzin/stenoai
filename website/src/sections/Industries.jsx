@@ -4,7 +4,7 @@ const inds = [
   { title: "Government", body: "Sensitive briefings, policy discussions, and internal reviews stay within your perimeter. No cloud dependencies, no third-party processors, no records leaving the device." },
   { title: "Defense", body: "Operational planning and classified discussions run entirely on-device. Works offline, on air-gapped networks, with nothing transiting an external server." },
   { title: "Legal", body: "Client calls and case discussions remain privileged. Enforced by architecture, not policy or a privacy checkbox." },
-  { title: "Finance", body: "Earnings prep, board meetings, deal discussions. None of it touches a third-party server." },
+  { title: "CXOs", body: "Board prep, M&A discussions, exec offsites. The conversations that decide the company's direction never leave the device they're held on." },
 ];
 
 export function Industries() {
@@ -36,21 +36,6 @@ export function Industries() {
             If your meetings contain confidential data, you can't send audio to a third party.
             Steno is built for people who understand this.
           </p>
-          <blockquote
-            className="mt-10 text-fg-2"
-            style={{
-              fontFamily: "var(--font-serif)",
-              fontSize: "clamp(18px, 3vw, 22px)",
-              fontStyle: "italic",
-              fontWeight: 400,
-              lineHeight: 1.4,
-              borderLeft: "2px solid var(--border-strong)",
-              paddingLeft: 20,
-              margin: "40px 0 0",
-            }}
-          >
-            "Your data never leaves your Mac."
-          </blockquote>
         </Motion.div>
 
         <div className="flex flex-col">
