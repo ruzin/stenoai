@@ -15,7 +15,7 @@
   <a href="#sponsors"><img src="https://img.shields.io/badge/Sponsors-%E2%9D%A4-EA4AAA?style=for-the-badge" alt="Sponsors"></a>
 </p>
 
-<p align="center">AI-powered meeting intelligence that runs entirely on your device, your private data never leaves anywhere. Record, transcribe, summarize, and query your meetings using local AI models. Perfect for healthcare, legal and finance professionals with confidential data needs.</p>
+<p align="center">Steno is the AI powered intelligence layer for all your confidential conversations, your private data never leaves anywhere. Record, transcribe, summarize, and query your meetings using local AI models. Perfect for government, defence, legal and C-suite professionals with confidential data needs.</p>
 
 <p align="center"><sub>Trusted by users at <b>AWS</b>, <b>Deliveroo</b>, <b>Tesco</b> & <b>HashiCorp</b>.</sub></p>
 
