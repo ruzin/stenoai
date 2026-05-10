@@ -1,0 +1,470 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>steno · enam.co adapter demo</title>
+  <style>
+    :root {
+      --paper-0: #FAF9F5;
+      --paper-1: #F5F3EC;
+      --paper-2: #ECEAE0;
+      --ink-900: #1B1B19;
+      --ink-700: #3a3a36;
+      --ink-500: #6B6B66;
+      --ink-300: #b2afa4;
+      --border: #e6e3d8;
+      --accent: #1B1B19;
+      --danger: #b3261e;
+      --ok: #2f7a3f;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Inter', sans-serif;
+      background: var(--paper-1);
+      color: var(--ink-900);
+      font-size: 14px;
+      line-height: 1.5;
+    }
+    header.top {
+      padding: 16px 24px;
+      background: var(--paper-0);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    header.top h1 {
+      font-family: Georgia, 'Times New Roman', serif;
+      font-weight: 400;
+      font-size: 18px;
+      margin: 0;
+      letter-spacing: -0.01em;
+    }
+    header.top .pill {
+      font-family: ui-monospace, 'JetBrains Mono', monospace;
+      font-size: 11px;
+      color: var(--ink-500);
+      padding: 4px 8px;
+      background: var(--paper-1);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+    }
+    main {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1px;
+      background: var(--border);
+      min-height: calc(100vh - 53px);
+    }
+    .pane {
+      background: var(--paper-0);
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      overflow-y: auto;
+    }
+    .pane h2 {
+      font-family: Georgia, serif;
+      font-weight: 400;
+      font-size: 22px;
+      margin: 0;
+      letter-spacing: -0.015em;
+    }
+    .pane .who {
+      color: var(--ink-500);
+      font-size: 13px;
+    }
+    .card {
+      background: var(--paper-0);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px 16px;
+    }
+    .card h3 {
+      margin: 0 0 8px;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--ink-700);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .meeting {
+      cursor: pointer;
+      transition: background 80ms ease;
+    }
+    .meeting:hover { background: var(--paper-1); }
+    .meeting + .meeting { margin-top: 6px; }
+    .meeting .title {
+      font-weight: 500;
+      font-size: 14px;
+      color: var(--ink-900);
+    }
+    .meeting .meta {
+      font-size: 12px;
+      color: var(--ink-500);
+      margin-top: 2px;
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+    .badge {
+      font-family: ui-monospace, 'JetBrains Mono', monospace;
+      font-size: 10px;
+      padding: 2px 6px;
+      border-radius: 3px;
+      background: var(--paper-2);
+      color: var(--ink-700);
+      letter-spacing: 0.03em;
+    }
+    .badge.org { background: #1B1B19; color: var(--paper-0); }
+    .badge.private { background: var(--paper-2); color: var(--ink-500); }
+    input, textarea, select {
+      font-family: inherit;
+      font-size: 13px;
+      width: 100%;
+      padding: 8px 10px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--paper-0);
+      color: var(--ink-900);
+      outline: none;
+    }
+    input:focus, textarea:focus, select:focus { border-color: var(--ink-700); }
+    textarea { resize: vertical; min-height: 70px; }
+    label {
+      display: block;
+      font-size: 12px;
+      color: var(--ink-500);
+      margin-bottom: 4px;
+    }
+    .row { display: flex; gap: 8px; }
+    .row > * { flex: 1; }
+    button {
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 500;
+      padding: 8px 14px;
+      border-radius: 6px;
+      border: 1px solid var(--ink-900);
+      background: var(--ink-900);
+      color: var(--paper-0);
+      cursor: pointer;
+    }
+    button.ghost {
+      background: transparent;
+      color: var(--ink-900);
+    }
+    button.small { padding: 4px 10px; font-size: 12px; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .status {
+      font-size: 12px;
+      color: var(--ink-500);
+    }
+    .status.err { color: var(--danger); }
+    .status.ok { color: var(--ok); }
+    .body {
+      white-space: pre-wrap;
+      font-size: 13px;
+      line-height: 1.6;
+      color: var(--ink-700);
+      background: var(--paper-1);
+      padding: 12px 14px;
+      border-radius: 6px;
+      max-height: 200px;
+      overflow-y: auto;
+    }
+    .chat-log {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      max-height: 240px;
+      overflow-y: auto;
+    }
+    .chat-msg {
+      padding: 8px 12px;
+      border-radius: 8px;
+      font-size: 13px;
+    }
+    .chat-msg.user {
+      background: var(--ink-900);
+      color: var(--paper-0);
+      align-self: flex-end;
+      max-width: 90%;
+    }
+    .chat-msg.assistant {
+      background: var(--paper-1);
+      color: var(--ink-900);
+      align-self: flex-start;
+      max-width: 90%;
+    }
+    .hidden { display: none !important; }
+    .footer {
+      font-size: 11px;
+      color: var(--ink-500);
+      font-family: ui-monospace, 'JetBrains Mono', monospace;
+    }
+  </style>
+</head>
+<body>
+  <header class="top">
+    <h1>steno · enterprise adapter — enam.co</h1>
+    <div class="pill" id="health">checking adapter…</div>
+  </header>
+  <main>
+    <section class="pane" data-as="alice"></section>
+    <section class="pane" data-as="bob"></section>
+  </main>
+
+  <template id="pane-tpl">
+    <div class="login-block">
+      <h2 data-name>—</h2>
+      <p class="who" data-email>—</p>
+      <div class="card">
+        <h3>Sign in</h3>
+        <div class="row" style="margin-top: 8px;">
+          <input class="pw" type="password" placeholder="password" value="demo" />
+          <button class="signin">Sign in</button>
+        </div>
+        <p class="status signin-status" style="margin-top: 8px;"></p>
+      </div>
+    </div>
+
+    <div class="app-block hidden">
+      <div class="card">
+        <h3>Shared notes — visible across enam.co</h3>
+        <div class="meetings-list">
+          <p class="status">loading…</p>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Create &amp; share a new note</h3>
+        <label>Title</label>
+        <input class="new-title" placeholder="Q1 board prep notes" />
+        <label style="margin-top: 8px;">Body (Markdown)</label>
+        <textarea class="new-body" placeholder="## Decisions&#10;- ...">## Decisions
+- Approve the Series B term sheet by Friday.
+- Hold the EU rollout until after the security review.
+
+## Action items
+- @alice: send updated forecast to the board pack.
+- @bob: prepare the M&amp;A pipeline summary.</textarea>
+        <div class="row" style="margin-top: 10px; align-items: center;">
+          <select class="new-vis" style="flex: 0 0 110px;">
+            <option value="org" selected>org-shared</option>
+            <option value="private">private</option>
+          </select>
+          <button class="create" style="flex: 0 0 auto;">Create note</button>
+          <span class="status create-status" style="flex: 1;"></span>
+        </div>
+      </div>
+
+      <div class="card detail hidden">
+        <h3 class="detail-title">—</h3>
+        <p class="status detail-meta"></p>
+        <div class="body detail-body"></div>
+        <div style="margin-top: 14px;">
+          <h3>Ask this note (via adapter → Claude)</h3>
+          <div class="chat-log"></div>
+          <div class="row" style="margin-top: 8px;">
+            <input class="chat-input" placeholder="What was decided?" />
+            <button class="chat-send" style="flex: 0 0 auto;">Ask</button>
+          </div>
+          <p class="status chat-status"></p>
+        </div>
+      </div>
+
+      <p class="footer">
+        token: <span class="token-snippet">—</span>
+      </p>
+    </div>
+  </template>
+
+  <script>
+    const API = (location.protocol === 'file:' ? 'http://localhost:8000' : '') || 'http://localhost:8000';
+    const PEOPLE = {
+      alice: { email: 'alice@enam.co', name: 'Alice Chen' },
+      bob:   { email: 'bob@enam.co',   name: 'Bob Patel' },
+    };
+
+    async function checkHealth() {
+      const el = document.getElementById('health');
+      try {
+        const r = await fetch(`${API}/health`);
+        const j = await r.json();
+        el.textContent = `adapter ok · s3:${j.s3_configured ? 'on' : 'off'} · ai:${j.anthropic_configured ? 'on' : 'off'}`;
+      } catch (e) {
+        el.textContent = `adapter unreachable @ ${API}`;
+      }
+    }
+    checkHealth();
+
+    function fmtDate(t) {
+      const d = new Date(t * 1000);
+      return d.toLocaleString();
+    }
+
+    function renderPane(root) {
+      const as = root.dataset.as;
+      const person = PEOPLE[as];
+      const tpl = document.getElementById('pane-tpl').content.cloneNode(true);
+      tpl.querySelector('[data-name]').textContent = person.name;
+      tpl.querySelector('[data-email]').textContent = person.email;
+      root.append(tpl);
+
+      const $ = (sel) => root.querySelector(sel);
+      let token = null;
+      let currentMeetingId = null;
+
+      async function api(path, opts = {}) {
+        const headers = { 'content-type': 'application/json', ...(opts.headers || {}) };
+        if (token) headers['authorization'] = `Bearer ${token}`;
+        const r = await fetch(`${API}${path}`, { ...opts, headers });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(j.detail || `HTTP ${r.status}`);
+        return j;
+      }
+
+      $('.signin').onclick = async () => {
+        const status = $('.signin-status');
+        status.className = 'status signin-status';
+        status.textContent = 'signing in…';
+        try {
+          const j = await fetch(`${API}/auth/login`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ email: person.email, password: $('.pw').value }),
+          }).then(r => r.json().then(j => ({ ok: r.ok, j })));
+          if (!j.ok) throw new Error(j.j.detail || 'login failed');
+          token = j.j.token;
+          $('.token-snippet').textContent = token.slice(0, 24) + '…';
+          $('.login-block').classList.add('hidden');
+          $('.app-block').classList.remove('hidden');
+          await refresh();
+        } catch (e) {
+          status.classList.add('err');
+          status.textContent = e.message;
+        }
+      };
+
+      async function refresh() {
+        const list = $('.meetings-list');
+        list.innerHTML = '<p class="status">loading…</p>';
+        try {
+          const j = await api('/meetings');
+          if (!j.meetings.length) {
+            list.innerHTML = '<p class="status">no shared notes yet — create one →</p>';
+            return;
+          }
+          list.innerHTML = '';
+          for (const m of j.meetings) {
+            const div = document.createElement('div');
+            div.className = 'meeting';
+            div.style.padding = '8px 0';
+            div.style.borderTop = '1px solid var(--border)';
+            div.innerHTML = `
+              <div class="title">${escapeHtml(m.title)}</div>
+              <div class="meta">
+                <span class="badge ${m.visibility}">${m.visibility}</span>
+                <span>${escapeHtml(m.owner_email)}</span>
+                <span>·</span>
+                <span>${fmtDate(m.created_at)}</span>
+              </div>`;
+            div.onclick = () => openMeeting(m.id);
+            list.append(div);
+          }
+        } catch (e) {
+          list.innerHTML = `<p class="status err">${e.message}</p>`;
+        }
+      }
+
+      $('.create').onclick = async () => {
+        const status = $('.create-status');
+        status.className = 'status create-status';
+        status.textContent = 'creating…';
+        try {
+          const j = await api('/meetings', {
+            method: 'POST',
+            body: JSON.stringify({
+              title: $('.new-title').value || 'Untitled note',
+              body: $('.new-body').value,
+              visibility: $('.new-vis').value,
+            }),
+          });
+          status.classList.add('ok');
+          status.textContent = `created ${j.id}`;
+          $('.new-title').value = '';
+          await refresh();
+        } catch (e) {
+          status.classList.add('err');
+          status.textContent = e.message;
+        }
+      };
+
+      async function openMeeting(id) {
+        currentMeetingId = id;
+        const detail = $('.detail');
+        detail.classList.remove('hidden');
+        $('.detail-title').textContent = 'loading…';
+        $('.detail-body').textContent = '';
+        $('.chat-log').innerHTML = '';
+        try {
+          const j = await api(`/meetings/${id}`);
+          $('.detail-title').textContent = j.title;
+          $('.detail-meta').textContent = `${j.owner_email} · ${j.visibility} · ${fmtDate(j.created_at)}`;
+          $('.detail-body').textContent = j.body || '(no body — fetched from S3 in real flow)';
+        } catch (e) {
+          $('.detail-title').textContent = 'error';
+          $('.detail-body').textContent = e.message;
+        }
+      }
+
+      $('.chat-send').onclick = async () => {
+        const input = $('.chat-input');
+        const q = input.value.trim();
+        if (!q || !currentMeetingId) return;
+        input.value = '';
+        const log = $('.chat-log');
+        appendMsg(log, 'user', q);
+        const status = $('.chat-status');
+        status.className = 'status chat-status';
+        status.textContent = 'asking Claude via adapter…';
+        try {
+          const meeting = await api(`/meetings/${currentMeetingId}`);
+          const j = await api('/ai/chat', {
+            method: 'POST',
+            body: JSON.stringify({
+              system: `You answer questions about a meeting note. Be concise.\n\n--- NOTE: ${meeting.title} ---\n${meeting.body || ''}`,
+              messages: [{ role: 'user', content: q }],
+            }),
+          });
+          appendMsg(log, 'assistant', j.reply);
+          status.textContent = `${j.input_tokens} in / ${j.output_tokens} out · ${j.model}`;
+        } catch (e) {
+          status.classList.add('err');
+          status.textContent = e.message;
+        }
+      };
+    }
+
+    function appendMsg(log, role, text) {
+      const div = document.createElement('div');
+      div.className = `chat-msg ${role}`;
+      div.textContent = text;
+      log.append(div);
+      log.scrollTop = log.scrollHeight;
+    }
+
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"']/g, (c) => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+      }[c]));
+    }
+
+    document.querySelectorAll('.pane').forEach(renderPane);
+  </script>
+</body>
+</html>
