@@ -17,10 +17,14 @@ PRESIGN_TTL_SECONDS = 15 * 60
 @lru_cache(maxsize=1)
 def _client():
     region = os.environ.get("AWS_REGION", "us-east-1")
+    # Force region-specific endpoint so presigned URLs go straight to
+    # bucket.s3.<region>.amazonaws.com instead of the global hostname
+    # (which 307-redirects PUTs and breaks the upload).
     return boto3.client(
         "s3",
         region_name=region,
-        config=Config(signature_version="s3v4"),
+        endpoint_url=f"https://s3.{region}.amazonaws.com",
+        config=Config(signature_version="s3v4", s3={"addressing_style": "virtual"}),
     )
 
 

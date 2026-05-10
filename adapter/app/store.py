@@ -2,13 +2,14 @@
 from __future__ import annotations
 
 import json
+import os
 import threading
 import time
 import uuid
 from pathlib import Path
 from typing import Literal, TypedDict
 
-_DATA_DIR = Path("/app/data")
+_DATA_DIR = Path(os.environ.get("DATA_DIR", "/app/data"))
 _DATA_DIR.mkdir(parents=True, exist_ok=True)
 _STORE_PATH = _DATA_DIR / "meetings.json"
 _LOCK = threading.Lock()
