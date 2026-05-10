@@ -4,7 +4,7 @@ import { AnimatePresence, motion as Motion } from "framer-motion";
 
 const faqs = [
   { q: "What's included for free?", a: "Unlimited local transcription and summarization. No account, no tier, no upsell. Steno is open source. You can build and run it yourself if you prefer." },
-  { q: "Which AI models can I use?", a: "Five open-weight models: Llama 3.2 3B, Gemma 3 4B, Qwen 3.5 9B, DeepSeek-R1 14B, and GPT-OSS 20B. All run locally on your Mac." },
+  { q: "Which AI models can I use?", a: "Five open-weight models: Llama 3.2 3B, Gemma 3 4B, Qwen 3.5 9B, DeepSeek-R1 14B, and GPT-OSS 20B. All run locally, on device." },
   { q: "Is my data really private?", a: "Yes. Steno makes no network requests after install. The source is open, so you can verify it yourself, or have your security team do so." },
   { q: "How accurate is the transcription?", a: "Steno uses Whisper. Results depend on audio clarity. Quiet rooms and good microphones produce the best outcomes. Whisper performs well across 99 languages." },
   { q: "What Mac do I need?", a: "macOS only, on Apple Silicon or Intel. Apple Silicon is recommended for speed. The app runs comfortably on an M1 MacBook Air." },

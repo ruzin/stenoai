@@ -12,7 +12,7 @@ const steps = [
     n: "02",
     icon: <FileText size={18} aria-hidden="true" />,
     title: "Transcribe",
-    body: "Whisper.cpp converts audio to text entirely on your Mac. Ninety-nine languages, auto-detected. Apple Silicon runs it fast.",
+    body: "Whisper.cpp converts audio to text entirely on device. Ninety-nine languages, auto-detected. Apple Silicon runs it fast.",
   },
   {
     n: "03",
