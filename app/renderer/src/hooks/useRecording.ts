@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ipc } from '@/lib/ipc';
 import { unwrap } from '@/lib/result';
 import { meetingsKeys } from './meetingKeys';
+import { useLiveDraftStore } from './liveDraftStore';
 import { navigate } from '@/lib/router';
 import type { Meeting, QueueStatus } from '@/lib/ipc';
 
@@ -175,6 +176,12 @@ export function useRecordingProcessingEffects() {
       }
       qc.invalidateQueries({ queryKey: meetingsKeys.all });
       qc.invalidateQueries({ queryKey: queueKey });
+      // Clear the live-draft entry for this finished session so the next
+      // "New note" with the same default sessionName ('Meeting' / 'Note')
+      // doesn't inherit the previous title or notes.
+      if (data.sessionName) {
+        useLiveDraftStore.getState().clear(data.sessionName);
+      }
       if (data.success && data.meetingData?.session_info.summary_file) {
         navigate(`/meetings/${encodeURIComponent(data.meetingData.session_info.summary_file)}`);
       }
