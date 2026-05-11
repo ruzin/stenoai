@@ -154,7 +154,23 @@ jobs:
         mkdir -p release
         find artifacts -name "*.dmg" -exec cp {} release/ \;
         find artifacts -name "*.zip" -exec cp {} release/ \;
-        find artifacts -name "*.yml" -o -name "*.yaml" | xargs -I {} cp {} release/ 2>/dev/null || true
+        # Merge per-arch latest-mac.yml files into a single yml whose `files:`
+        # array lists both the x64 and arm64 zips. Without this, electron-updater
+        # on Apple Silicon downloads the x64 zip and runs the whole app under
+        # Rosetta — slow launch and slow runtime. The two build jobs run on
+        # different runners (macos-15-intel + macos-14) and each writes its own
+        # `latest-mac.yml`; a plain `cp` would let one overwrite the other.
+        # x64 is kept as the base so top-level `path`/`sha512` stay unchanged.
+        yq eval-all '
+          (select(fileIndex == 0)) as $x64 |
+          (select(fileIndex == 1)) as $arm64 |
+          $x64
+          | .files = ($x64.files + $arm64.files | unique_by(.url))
+          | .releaseDate = ([$x64.releaseDate, $arm64.releaseDate] | sort | reverse | .[0])
+        ' artifacts/build-x64/latest-mac.yml artifacts/build-arm64/latest-mac.yml \
+          > release/latest-mac.yml
+        echo "Merged latest-mac.yml:"
+        cat release/latest-mac.yml
         ls -la release/
         # Create website-friendly aliases for DMGs
         version="${{ github.event.inputs.version || steps.package_version.outputs.version }}"
