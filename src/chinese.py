@@ -22,11 +22,19 @@ def _get_converter(direction: str):
         return None
     if direction == "s2t":
         if _converter_s2t is None:
-            _converter_s2t = OpenCC("s2t")
+            try:
+                _converter_s2t = OpenCC("s2t")
+            except Exception as e:
+                logger.warning(f"OpenCC s2t converter unavailable: {e}")
+                return None
         return _converter_s2t
     if direction == "t2s":
         if _converter_t2s is None:
-            _converter_t2s = OpenCC("t2s")
+            try:
+                _converter_t2s = OpenCC("t2s")
+            except Exception as e:
+                logger.warning(f"OpenCC t2s converter unavailable: {e}")
+                return None
         return _converter_t2s
     return None
 

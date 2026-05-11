@@ -40,7 +40,7 @@ export function Hero() {
               maxWidth: "14ch",
             }}
           >
-            AI that runs privately on your Mac.
+            AI for your confidential conversations.
           </Motion.h1>
 
           <Motion.p
@@ -50,7 +50,7 @@ export function Hero() {
             className="text-fg-2 text-lg leading-[1.55] mt-7 mb-9"
             style={{ maxWidth: "44ch" }}
           >
-            stenoAI records, transcribes, and summarizes every confidential interaction on-device.
+            Steno is the AI powered intelligence layer for all your confidential conversations.
             No cloud, no usage limits and no bots joining your calls.
           </Motion.p>
 

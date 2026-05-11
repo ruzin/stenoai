@@ -80,6 +80,9 @@ class Config:
         }
     }
 
+
+    SUPPORTED_WHISPER_MODELS = ["tiny", "base", "small", "medium", "large", "large-v3-turbo"]
+
     # Languages shown in the settings dropdown (curated/tested)
     SUPPORTED_LANGUAGES = {
         "auto": "Auto (detect)",
@@ -151,6 +154,35 @@ class Config:
             self.config_path = config_path
 
         self._config: Dict[str, Any] = self._load()
+        self._migrate_legacy_config()
+
+    def _migrate_legacy_config(self) -> None:
+        """Apply one-shot config migrations after loading from disk."""
+        if self._config.get("language") == "zh":
+            self._config["language"] = "zh-Hans"
+            self._save()
+        self._migrate_cloud_model_map()
+
+    def _migrate_cloud_model_map(self) -> None:
+        """One-shot migration from legacy single 'cloud_model' to per-provider
+        'cloud_models' map. Runs at load time (before any setters can change
+        the provider) so the legacy value is correctly attributed to whichever
+        provider was active when it was last saved."""
+        if isinstance(self._config.get("cloud_models"), dict):
+            return  # Already migrated.
+        legacy = self._config.get("cloud_model")
+        has_legacy_value = isinstance(legacy, str) and legacy.strip()
+        if not has_legacy_value:
+            # Nothing to migrate. Don't write — if _load() returned defaults
+            # because the existing file was corrupt/unreadable, persisting an
+            # empty cloud_models map would overwrite the recoverable file.
+            self._config["cloud_models"] = {}
+            return
+        current_provider = self._config.get("cloud_provider", "openai")
+        if current_provider not in self.VALID_CLOUD_PROVIDERS:
+            current_provider = "openai"
+        self._config["cloud_models"] = {current_provider: legacy.strip()}
+        self._save()
 
     def _load(self) -> Dict[str, Any]:
         """Load configuration from file."""
@@ -184,7 +216,10 @@ class Config:
             "model": self.DEFAULT_MODEL,
             "notifications_enabled": True,
             "telemetry_enabled": True,
-            "system_audio_enabled": False,
+            # Default ON — CoreAudio Process Tap captures system audio
+            # alongside the mic on macOS 14.4+. Older macOS auto-falls back
+            # to mic-only via main.js's loadSystemAudioEnabled() OS gate.
+            "system_audio_enabled": True,
             "language": "en",
             "ai_provider": "local",
             "remote_ollama_url": "",
@@ -193,6 +228,8 @@ class Config:
             "cloud_model": "gpt-4o-mini",
             "anonymous_id": str(uuid.uuid4()),
             "storage_path": "",
+            "keep_recordings": False,
+            "whisper_model": "small",
             "version": "1.0"
         }
 
@@ -319,9 +356,36 @@ class Config:
         self._config["hide_dock_icon"] = enabled
         return self._save()
 
+
+    def get_keep_recordings(self) -> bool:
+        """Get whether audio recordings should be kept after processing."""
+        return self._config.get("keep_recordings", False)
+
+    def set_keep_recordings(self, enabled: bool) -> bool:
+        """Set whether audio recordings should be kept after processing."""
+        self._config["keep_recordings"] = enabled
+        return self._save()
+
+
+    def get_whisper_model(self) -> str:
+        """Get the configured Whisper model size."""
+        model = self._config.get("whisper_model", "small")
+        if model not in self.SUPPORTED_WHISPER_MODELS:
+            logger.warning(f"Invalid Whisper model in config: {model}; falling back to small")
+            return "small"
+        return model
+
+    def set_whisper_model(self, model_size: str) -> bool:
+        """Set the Whisper model size."""
+        if model_size not in self.SUPPORTED_WHISPER_MODELS:
+            logger.error(f"Unsupported Whisper model: {model_size}")
+            return False
+        self._config["whisper_model"] = model_size
+        return self._save()
+
     def get_system_audio_enabled(self) -> bool:
         """Get whether system audio capture is enabled."""
-        return self._config.get("system_audio_enabled", False)
+        return self._config.get("system_audio_enabled", True)
 
     def set_system_audio_enabled(self, enabled: bool) -> bool:
         """
@@ -338,11 +402,7 @@ class Config:
 
     def get_language(self) -> str:
         """Get the configured language code for transcription and summarization."""
-        code = self._config.get("language", "en")
-        # Migrate legacy "zh" → "zh-Hans" (pre-traditional-Chinese release)
-        if code == "zh":
-            return "zh-Hans"
-        return code
+        return self._config.get("language", "en")
 
     def get_whisper_language(self) -> str:
         """Map UI language code to whisper.cpp language code (whisper only knows 'zh')."""
@@ -428,8 +488,16 @@ class Config:
         import os
         return os.environ.get("STENOAI_CLOUD_API_KEY", "")
 
+    # Per-provider sensible defaults. Used when the user switches provider for
+    # the first time and we have no remembered model for that provider yet.
+    CLOUD_MODEL_DEFAULTS = {
+        "openai": "gpt-4o-mini",
+        "anthropic": "claude-haiku-4-5-20251001",
+        "custom": "gpt-4o-mini",
+    }
+
     def get_cloud_provider(self) -> str:
-        """Get the cloud provider type ('openai' or 'custom')."""
+        """Get the cloud provider type ('openai', 'anthropic', or 'custom')."""
         value = self._config.get("cloud_provider", "openai")
         return value if value in self.VALID_CLOUD_PROVIDERS else "openai"
 
@@ -441,13 +509,54 @@ class Config:
         self._config["cloud_provider"] = provider
         return self._save()
 
+    def _get_cloud_models_map(self) -> dict:
+        """Per-provider model store. Migration is handled in __init__ so this
+        just returns the dict (or empty)."""
+        models = self._config.get("cloud_models")
+        if not isinstance(models, dict):
+            models = {}
+            self._config["cloud_models"] = models
+        return models
+
     def get_cloud_model(self) -> str:
-        """Get the cloud model name."""
-        return self._config.get("cloud_model", "gpt-4o-mini")
+        """Get the cloud model for the currently selected provider. Each
+        provider has its own remembered model so switching providers doesn't
+        carry an incompatible model name across (e.g. a Claude model into
+        OpenAI). Falls back to the per-provider default on first use."""
+        provider = self.get_cloud_provider()
+        models = self._get_cloud_models_map()
+        if provider in models and isinstance(models[provider], str) and models[provider].strip():
+            return models[provider]
+        return self.CLOUD_MODEL_DEFAULTS.get(provider, "gpt-4o-mini")
 
     def set_cloud_model(self, model: str) -> bool:
-        """Set the cloud model name."""
+        """Set the cloud model for the currently selected provider."""
+        provider = self.get_cloud_provider()
+        models = self._get_cloud_models_map()
+        models[provider] = model.strip()
+        self._config["cloud_models"] = models
+        # Mirror to legacy 'cloud_model' so any code still reading the flat
+        # field sees the active provider's choice. Safe to remove once no
+        # consumers reference it.
         self._config["cloud_model"] = model.strip()
+        return self._save()
+
+    def get_user_name(self) -> str:
+        """Get the user's first name (for greetings). Empty string when unset."""
+        value = self._config.get("user_name")
+        if not isinstance(value, str):
+            return ""
+        return value.strip()
+
+    def set_user_name(self, name: str) -> bool:
+        """Persist the user's first name. Trims whitespace; an empty name
+        clears the field."""
+        cleaned = (name or "").strip()
+        # Cap to a sane length so a paste of someone's whole bio doesn't end
+        # up in the greeting.
+        if len(cleaned) > 60:
+            cleaned = cleaned[:60]
+        self._config["user_name"] = cleaned
         return self._save()
 
     def get_anonymous_id(self) -> str:

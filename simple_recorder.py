@@ -38,9 +38,10 @@ except ImportError:
     WhisperTranscriber = None
     
 try:
-    from src.summarizer import OllamaSummarizer
+    from src.summarizer import OllamaSummarizer, normalize_markdown
 except ImportError:
     OllamaSummarizer = None
+    normalize_markdown = lambda text: text
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -251,14 +252,15 @@ class SimpleRecorder:
 
         print(f"📝 Transcribing: {audio_path.name}")
 
-        # Initialize transcriber only when needed
-        if self.transcriber is None:
-            self.transcriber = WhisperTranscriber()
-
-        # Get configured language
         from src.config import get_config
         from src.chinese import apply_variant
         config = get_config()
+
+        # Initialize transcriber only when needed
+        if self.transcriber is None:
+            self.transcriber = WhisperTranscriber(model_size=config.get_whisper_model())
+
+        # Get configured language
         configured_language = config.get_language()
         # whisper.cpp only knows "zh"; map zh-Hans/zh-Hant before invoking
         whisper_language = config.get_whisper_language()
@@ -387,8 +389,8 @@ Transcript:
                 for k in ("summary", "title", "text"):
                     if summary_result.get(k):
                         summary_result[k] = apply_variant(summary_result[k], variant)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"Chinese variant conversion failed: {e}")
         
         if summary_result is None:
             return {
@@ -465,7 +467,7 @@ Transcript:
         )
 
         # Step 2b: Auto-generate title for auto-named meetings
-        if re.match(r'^(Meeting|Note)-[A-Z0-9]{6}$', session_name):
+        if re.match(r'^(Meeting|Note)(-[A-Z0-9]{6})?$', session_name):
             try:
                 language = transcript_data.get("output_language")
                 generated_title = self.summarizer.generate_title(
@@ -512,11 +514,13 @@ Transcript:
         print(f"✅ Complete processing saved: {summary_path}")
         
         # Clean up WAV file after successful processing
-        try:
-            audio_path.unlink()
-            print(f"🗑️ Cleaned up audio file: {audio_path}")
-        except Exception as e:
-            print(f"⚠️ Could not delete audio file: {e}")
+        from src.config import get_config
+        if not get_config().get_keep_recordings():
+            try:
+                audio_path.unlink()
+                print(f"🗑️ Cleaned up audio file: {audio_path}")
+            except Exception as e:
+                print(f"⚠️ Could not delete audio file: {e}")
         
         # Clear any recording state after successful processing
         state_file = Path("recorder_state.json")
@@ -580,13 +584,12 @@ Transcript:
             sys.stdout.write(f"CHUNK:{encoded}\n")
             sys.stdout.flush()
             streamed_chunks.append(chunk)
-        from src.summarizer import normalize_markdown
         streamed_md = normalize_markdown(''.join(streamed_chunks)) or ''
 
         print("STREAM_COMPLETE", flush=True)
 
         # Step 3: Generate title
-        if re.match(r'^(Meeting|Note)-[A-Z0-9]{6}$', session_name):
+        if re.match(r'^(Meeting|Note)(-[A-Z0-9]{6})?$', session_name):
             try:
                 generated_title = self.summarizer.generate_title(
                     streamed_md, transcript_text, language=output_language
@@ -637,11 +640,13 @@ Transcript:
         summary_path.write_text('\n'.join(md_lines), encoding='utf-8')
 
         # Clean up
-        try:
-            audio_path.unlink()
-            print(f"🗑️ Cleaned up audio file: {audio_path}")
-        except Exception:
-            pass
+        from src.config import get_config
+        if not get_config().get_keep_recordings():
+            try:
+                audio_path.unlink()
+                print(f"🗑️ Cleaned up audio file: {audio_path}")
+            except Exception:
+                pass
 
         state_file = Path("recorder_state.json")
         if state_file.exists():
@@ -913,14 +918,13 @@ def process_streaming(audio_file, name, notes):
             sys.stdout.write(f"CHUNK:{encoded}\n")
             sys.stdout.flush()
             streamed_chunks.append(chunk)
-        from src.summarizer import normalize_markdown
         streamed_md = normalize_markdown(''.join(streamed_chunks)) or ''
 
         print("STREAM_COMPLETE", flush=True)
 
         # Step 3: Generate title
         session_name = name
-        if re.match(r'^(Meeting|Note)-[A-Z0-9]{6}$', name):
+        if re.match(r'^(Meeting|Note)(-[A-Z0-9]{6})?$', name):
             try:
                 generated_title = recorder.summarizer.generate_title(
                     streamed_md, transcript_text, language=output_language
@@ -974,14 +978,65 @@ def process_streaming(audio_file, name, notes):
         summary_path.write_text('\n'.join(md_lines), encoding='utf-8')
 
         # Clean up audio
-        try:
-            audio_path.unlink()
-        except Exception:
-            pass
+        from src.config import get_config
+        if not get_config().get_keep_recordings():
+            try:
+                audio_path.unlink()
+            except Exception:
+                pass
 
         print(f"SAVED:{summary_path}", flush=True)
 
     asyncio.run(run())
+
+
+
+
+@cli.command(name='get-whisper-model')
+def get_whisper_model_cmd():
+    """Get the configured Whisper model size."""
+    from src.config import get_config
+    config = get_config()
+    print(json.dumps({
+        "whisper_model": config.get_whisper_model(),
+        "supported_models": list(config.SUPPORTED_WHISPER_MODELS),
+    }))
+
+
+@cli.command(name='set-whisper-model')
+@click.argument('model_size')
+def set_whisper_model_cmd(model_size: str):
+    """Set the Whisper model size."""
+    from src.config import get_config
+    config = get_config()
+    if config.set_whisper_model(model_size):
+        print(json.dumps({"success": True, "whisper_model": model_size}))
+    else:
+        print(json.dumps({
+            "success": False,
+            "error": f"Unsupported model: {model_size}",
+            "supported_models": list(config.SUPPORTED_WHISPER_MODELS),
+        }))
+
+
+@cli.command(name='get-keep-recordings')
+def get_keep_recordings_cmd():
+    """Get whether recordings are kept after processing."""
+    from src.config import get_config
+    config = get_config()
+    print(json.dumps({"keep_recordings": config.get_keep_recordings()}))
+
+
+@cli.command(name='set-keep-recordings')
+@click.argument('enabled', type=bool)
+def set_keep_recordings_cmd(enabled: bool):
+    """Set whether recordings are kept after processing."""
+    from src.config import get_config
+    config = get_config()
+    if config.set_keep_recordings(enabled):
+        print(json.dumps({"success": True, "keep_recordings": enabled}))
+    else:
+        print(json.dumps({"success": False, "error": "Failed to persist setting"}))
 
 
 @cli.command()
@@ -1208,7 +1263,8 @@ def test():
             return
             
         try:
-            transcriber = WhisperTranscriber()
+            from src.config import get_config
+            transcriber = WhisperTranscriber(model_size=get_config().get_whisper_model())
             print("✅ Whisper transcriber ready")
         except Exception as e:
             print(f"❌ Whisper initialization failed: {e}")
@@ -1257,7 +1313,12 @@ def _parse_meeting_markdown(md_path):
                     if value.startswith('"') and value.endswith('"'):
                         import re as _re
                         value = _re.sub(r'\\(.)', lambda m: m.group(1), value[1:-1])
-                    if value == 'null':
+                    elif value.startswith('['):
+                        try:
+                            value = json.loads(value)
+                        except (ValueError, TypeError):
+                            value = []
+                    elif value == 'null':
                         value = None
                     elif value == 'true':
                         value = True
@@ -1344,7 +1405,7 @@ def _parse_meeting_markdown(md_path):
         'is_diarised': meta.get('is_diarised', False),
         'diarised_text': sections.get('transcript', '') if meta.get('is_diarised') else None,
         'user_notes': sections.get('user notes'),
-        'folders': [],
+        'folders': meta.get('folders', []),
     }
 
 
@@ -1496,7 +1557,6 @@ def reprocess(summary_file, regenerate_title):
             sys.stdout.write(f"CHUNK:{encoded}\n")
             sys.stdout.flush()
             streamed_chunks.append(chunk)
-        from src.summarizer import normalize_markdown
         streamed_md = normalize_markdown(''.join(streamed_chunks)) or ''
 
         print("STREAM_COMPLETE", flush=True)
@@ -1570,6 +1630,66 @@ def reprocess(summary_file, regenerate_title):
 
     except Exception as e:
         print(f"ERROR: Failed to reprocess summary: {e}")
+        sys.exit(1)
+
+
+@cli.command('regen-title')
+@click.argument('summary_file', required=True)
+def regen_title(summary_file):
+    """Regenerate only the title for an existing meeting."""
+    import json
+    from pathlib import Path
+
+    recorder = SimpleRecorder()
+    summary_path = Path(summary_file)
+
+    if not summary_path.exists():
+        print(f"ERROR: Summary file not found: {summary_file}")
+        sys.exit(1)
+
+    try:
+        if summary_path.suffix == '.md':
+            existing_data = _parse_meeting_markdown(summary_path)
+        else:
+            with open(summary_path, 'r') as f:
+                existing_data = json.load(f)
+
+        transcript = existing_data.get('transcript', '')
+        summary = existing_data.get('summary', '')
+        session_info = existing_data.get('session_info', {})
+        output_language = session_info.get('output_language') or session_info.get('configured_language') or 'en'
+
+        if not transcript and not summary:
+            print("ERROR: No transcript or summary found in file")
+            sys.exit(1)
+
+        if recorder.summarizer is None:
+            from src.summarizer import OllamaSummarizer
+            recorder.summarizer = OllamaSummarizer()
+
+        generated_title = recorder.summarizer.generate_title(summary, transcript, language=output_language)
+        if not generated_title:
+            print("ERROR: Title generation returned empty result")
+            sys.exit(1)
+
+        # Update and save
+        existing_data['session_info']['name'] = generated_title
+        if summary_path.suffix == '.md':
+            # Rewrite the title in the YAML front matter only
+            text = summary_path.read_text(encoding='utf-8')
+            import re
+            escaped = generated_title.replace('\\', '\\\\').replace('"', '\\"')
+            text = re.sub(r'^title:.*$', f'title: "{escaped}"', text, flags=re.MULTILINE)
+            summary_path.write_text(text, encoding='utf-8')
+        else:
+            with open(summary_path, 'w') as f:
+                json.dump(existing_data, f, indent=2)
+
+        print(f"TITLE:{generated_title}", flush=True)
+        print(f"Title updated: {generated_title}")
+
+    except Exception as e:
+        print(f"ERROR: Failed to regenerate title: {e}")
         sys.exit(1)
 
 
@@ -1734,6 +1854,137 @@ def query_streaming(transcript_file, question):
     try:
         summarizer = OllamaSummarizer()
         for chunk in summarizer.query_transcript_streaming(transcript_text, question, language=language):
+            encoded = base64.b64encode(chunk.encode('utf-8')).decode('ascii')
+            sys.stdout.write(f"CHAT_CHUNK:{encoded}\n")
+            sys.stdout.flush()
+        print("CHAT_STREAM_COMPLETE", flush=True)
+    except Exception as e:
+        print(f"CHAT_STREAM_ERROR:{e}", flush=True)
+
+
+@cli.command(name='chat-global-streaming')
+@click.option('--question', '-q', required=True, help='Question to ask across notes')
+@click.option('--folder', '-f', default=None, help='Folder ID to scope the corpus to (default: all notes)')
+def chat_global_streaming(question, folder):
+    """Cross-note chat: gather meeting title + summary + key points, feed as
+    context to the cloud LLM, stream the answer. Optionally scope to a single
+    folder; default queries every note.
+
+    Cloud-only. Local models can't fit a full corpus of summaries reliably,
+    and we don't have retrieval (RAG) yet — caller (main.js) is responsible
+    for gating this on ai_provider === 'cloud'."""
+    import sys
+    import base64
+    from pathlib import Path
+    from src.config import get_config, get_data_dirs
+
+    config = get_config()
+    if config.get_ai_provider() != "cloud":
+        print("CHAT_STREAM_ERROR:Cross-note chat requires a cloud AI provider. Switch in Settings → AI.", flush=True)
+        return
+
+    dirs = get_data_dirs()
+    output_dir = dirs["output"]
+
+    # Collect every summary file, preferring .md (the new format) but reading
+    # legacy .json too so users with old recordings aren't excluded.
+    summaries: list[tuple[Path, dict]] = []
+    seen = set()
+    for f in sorted(output_dir.glob("*_summary.md")):
+        try:
+            data = _parse_meeting_markdown(f)
+            summaries.append((f, data))
+            seen.add(f.stem.replace('_summary', ''))
+        except Exception:
+            continue
+    for f in sorted(output_dir.glob("*_summary.json")):
+        if f.stem.replace('_summary', '') in seen:
+            continue
+        try:
+            with open(f, 'r', encoding='utf-8') as fh:
+                summaries.append((f, json.load(fh)))
+        except Exception:
+            continue
+
+    # Folder scoping. Each meeting record carries a 'folders' array of IDs;
+    # filter to only those that include the requested ID. Empty folder ID
+    # or 'all' explicitly means no filter.
+    if folder and folder != 'all':
+        summaries = [
+            (path, data) for (path, data) in summaries
+            if isinstance(data.get('folders'), list) and folder in data['folders']
+        ]
+
+    if not summaries:
+        if folder and folder != 'all':
+            print("CHAT_STREAM_ERROR:No notes in this folder yet. Pick another or remove the filter.", flush=True)
+        else:
+            print("CHAT_STREAM_ERROR:No notes found yet. Record a meeting first.", flush=True)
+        return
+
+    # Most-recent first so the model weights newer context higher when token
+    # budget is tight. Each block is kept compact (title + summary + key
+    # points + action items) — full transcripts would blow even a 200k window.
+    def sort_key(item):
+        _, data = item
+        return data.get("session_info", {}).get("processed_at") or ""
+
+    summaries.sort(key=sort_key, reverse=True)
+
+    # Cap the assembled corpus so a user with hundreds of meetings can't blow
+    # past the cloud model's context window. ~400k chars ≈ 100k tokens, well
+    # under both Anthropic (200k) and recent OpenAI (128k+) limits while
+    # leaving headroom for the prompt scaffold and the model's reply.
+    CORPUS_CHAR_BUDGET = 400_000
+    blocks = []
+    used_chars = 0
+    truncated = 0
+    for _, data in summaries:
+        info = data.get("session_info", {}) or {}
+        name = info.get("name") or "Untitled"
+        date = (info.get("processed_at") or "")[:10]
+        summary = (data.get("summary") or "").strip()
+        key_points = data.get("key_points") or []
+        action_items = data.get("action_items") or []
+        block = [f"## {name}" + (f" — {date}" if date else "")]
+        if summary:
+            block.append(summary)
+        if key_points:
+            block.append("Key points:\n" + "\n".join(f"- {p}" for p in key_points))
+        if action_items:
+            block.append("Action items:\n" + "\n".join(f"- {a}" for a in action_items))
+        block_text = "\n".join(block)
+        # +5 accounts for the "\n\n---\n\n" separator added later.
+        if used_chars + len(block_text) + 5 > CORPUS_CHAR_BUDGET:
+            # If the very first block is already larger than the budget,
+            # truncate it so we still send something representative rather
+            # than blasting the model with an oversized prompt.
+            if not blocks:
+                budget_left = max(0, CORPUS_CHAR_BUDGET - used_chars - 80)
+                if budget_left > 0:
+                    truncated_block = block_text[:budget_left].rstrip() + "\n…(truncated)"
+                    blocks.append(truncated_block)
+                    used_chars += len(truncated_block) + 5
+            truncated = len(summaries) - len(blocks)
+            break
+        blocks.append(block_text)
+        used_chars += len(block_text) + 5
+
+    corpus = "\n\n---\n\n".join(blocks)
+    if truncated:
+        corpus += (
+            f"\n\n---\n\n_Note: {truncated} older note(s) omitted to stay within"
+            " the model's context window. Ask about a specific older meeting"
+            " to pull it in directly._"
+        )
+
+    language = config.get_language()
+    if language == "auto":
+        language = "en"
+
+    try:
+        summarizer = OllamaSummarizer()
+        for chunk in summarizer.query_transcript_streaming(corpus, question, language=language):
             encoded = base64.b64encode(chunk.encode('utf-8')).decode('ascii')
             sys.stdout.write(f"CHAT_CHUNK:{encoded}\n")
             sys.stdout.flush()
@@ -2026,7 +2277,8 @@ def list_models():
 
                 models[name] = {
                     "size": size_str,
-                    "description": " / ".join(detail_parts) if detail_parts else ""
+                    "description": " / ".join(detail_parts) if detail_parts else "",
+                    "installed": True
                 }
 
             result = {
@@ -2048,6 +2300,18 @@ def list_models():
             }
     else:
         models = config.list_supported_models()
+        try:
+            import ollama as ollama_pkg
+            installed_names = {getattr(m, 'model', '') for m in (getattr(ollama_pkg.list(), 'models', []) or [])}
+        except Exception:
+            installed_names = set()
+        for model_id, info in models.items():
+            # Match exactly, or where Ollama appended extra detail after the tag
+            # e.g. "deepseek-r1:14b" matches "deepseek-r1:14b-qwen-distill-q4_K_M"
+            info['installed'] = any(
+                name == model_id or name.startswith(model_id + '-')
+                for name in installed_names
+            )
         result = {
             "current_model": current_model,
             "supported_models": models,
@@ -2259,6 +2523,25 @@ def set_language(language_code):
         print(json.dumps({"success": False, "error": "Failed to save language setting"}))
 
 
+@cli.command(name='get-user-name')
+def get_user_name_cmd():
+    """Get the user's first name (for in-app greetings)."""
+    from src.config import get_config
+    print(json.dumps({"user_name": get_config().get_user_name()}))
+
+
+@cli.command(name='set-user-name')
+@click.argument('name', default='')
+def set_user_name_cmd(name):
+    """Set the user's first name. Empty string clears it."""
+    from src.config import get_config
+    success = get_config().set_user_name(name)
+    if success:
+        print(json.dumps({"success": True, "user_name": name.strip()}))
+    else:
+        print(json.dumps({"success": False, "error": "Failed to save user name"}))
+
+
 @cli.command()
 def get_storage_path():
     """Get the current custom storage path"""
@@ -2301,6 +2584,17 @@ def create_folder(name, color):
         print(json.dumps({"success": True, "folder": folder}))
     else:
         print(json.dumps({"success": False, "error": "Failed to create folder"}))
+
+
+@cli.command()
+@click.argument('folder_id')
+@click.argument('icon')
+def update_folder_icon(folder_id, icon):
+    """Update a folder's icon"""
+    from src.folders import get_folders_manager
+    mgr = get_folders_manager()
+    success = mgr.update_icon(folder_id, icon)
+    print(json.dumps({"success": success}))
 
 
 @cli.command()
@@ -2512,7 +2806,9 @@ def download_whisper_model():
 
         # This will trigger the model download if not present
         print("Initializing Whisper model (will download if needed)...")
-        model = WhisperCppModel("small")
+        from src.config import get_config
+        model_size = get_config().get_whisper_model()
+        model = WhisperCppModel(model_size)
         print("SUCCESS: Whisper model ready")
 
     except Exception as e:

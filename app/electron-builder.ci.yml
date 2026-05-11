@@ -1,0 +1,24 @@
+# electron-builder config for CI dry-runs (pack:unsigned).
+#
+# Inherits the base "build" config from package.json, but strips:
+#   - extraResources (../dist/stenoai is not built in CI — no PyInstaller)
+#   - afterSign hook (no notarization in unsigned packs)
+#   - DMG signing (no cert in CI)
+#
+# The resulting .app is NOT runnable: it has no Python backend, is unsigned,
+# and is not notarized. This config exists solely to prove the Vite output +
+# preload.js + main.js package correctly on every PR, before release time.
+# Release builds continue to use the package.json config unchanged.
+
+extraResources:
+  - from: assets
+    to: assets
+    filter:
+      - trayIcon*.png
+
+dmg:
+  sign: false
+
+mac:
+  identity: null
+  notarize: false

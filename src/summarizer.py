@@ -28,8 +28,10 @@ def normalize_markdown(text: Optional[str]) -> Optional[str]:
         return text
     # Heading: ###text -> ### text
     text = re.sub(r'(?m)^(#{1,6})(?=\S)', r'\1 ', text)
-    # Bullet: -text or *text at line start -> - text / * text
-    text = re.sub(r'(?m)^([-*])(?=\S)', r'\1 ', text)
+    # Bullet: -text or *text at line start -> - text / * text.
+    # Avoid treating emphasis markers like **bold** or *italic* as bullets.
+    text = re.sub(r'(?m)^-(?=\S)(?!--)', r'- ', text)
+    text = re.sub(r'(?m)^\*(?!\*)(?=\S)(?![^\n]*\*$)', r'* ', text)
     # Collapse excess blank lines
     text = re.sub(r'\n{3,}', '\n\n', text)
     return text

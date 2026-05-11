@@ -43,7 +43,7 @@ export function Wordmark({ size = 19 }) {
         lineHeight: 1,
       }}
     >
-      stenoAI.
+      steno.
     </span>
   );
 }

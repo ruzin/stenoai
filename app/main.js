@@ -15,13 +15,48 @@ const { PostHog } = require('posthog-node');
 const { initMain } = require('electron-audio-loopback');
 const { autoUpdater } = require('electron-updater');
 
-// Initialize electron-audio-loopback before app is ready
-initMain();
+// E2E test-harness hooks. Set via env vars; production sees none of these.
+//   STENOAI_USER_DATA_DIR — per-test temp userData dir (must be set before app.whenReady)
+//   STENOAI_E2E=1         — skip tray, auto-updater, PostHog telemetry
+//   STENOAI_E2E_MOCK_IPC=1 — install deterministic mock IPC handlers
+if (process.env.STENOAI_USER_DATA_DIR) {
+  app.setPath('userData', process.env.STENOAI_USER_DATA_DIR);
+}
+const IS_E2E = process.env.STENOAI_E2E === '1';
+const IS_E2E_MOCK_IPC = process.env.STENOAI_E2E_MOCK_IPC === '1';
+if (IS_E2E_MOCK_IPC) {
+  require('./e2e-mock-ipc').install({ ipcMain, BrowserWindow });
+}
+
+// Initialize electron-audio-loopback before app is ready.
+// forceCoreAudioTap drives Chromium to use macOS 14.4+ CoreAudio Process Taps
+// (NSAudioCaptureUsageDescription) rather than ScreenCaptureKit. SCK was
+// returning silent right channels in our tests on macOS 26; CoreAudio Tap
+// matches Meetily's default and is the path our Info.plist + entitlements
+// are prepared for. Older macOS (< 14.4) is gated out at the UI layer.
+initMain({ forceCoreAudioTap: true });
+
+// CoreAudio Process Taps require macOS 14.4+. Returns false on non-macOS or
+// older versions so the renderer can disable the system-audio toggle rather
+// than silently producing dead-channel recordings.
+function isCoreAudioTapSupported() {
+  if (process.platform !== 'darwin') return false;
+  try {
+    const v = process.getSystemVersion();
+    const [maj, min = 0] = v.split('.').map((n) => parseInt(n, 10) || 0);
+    return maj > 14 || (maj === 14 && min >= 4);
+  } catch (_) {
+    return false;
+  }
+}
 
 let mainWindow;
 let pythonProcess;
 let tray = null;
 let isQuitting = false;
+// true once the window has been shown for the first time (React mounted).
+// Prevents activate/focus handlers from showing the window before it's ready.
+let windowReadyToShow = false;
 let shortcutQueue = [];
 let pendingShortcutUrls = [];
 let rendererShortcutReady = false;
@@ -330,6 +365,10 @@ function durationBucket(seconds) {
  * Initialize PostHog telemetry by reading config from Python backend.
  */
 async function initTelemetry() {
+  if (IS_E2E) {
+    telemetryEnabled = false;
+    return;
+  }
   try {
     const result = await new Promise((resolve, reject) => {
       const proc = spawn(getBackendPath(), ['get-telemetry'], {
@@ -451,29 +490,65 @@ function validateSafeFilePath(filepath, allowedBaseDirs) {
   }
 }
 
-function createWindow() {
+function createWindow(options = {}) {
   rendererShortcutReady = false;
-  mainWindow = new BrowserWindow({
+
+  const windowOpts = {
     width: 1200,
     height: 800,
     minWidth: 1000,
     minHeight: 600,
     webPreferences: {
-      nodeIntegration: true,
-      contextIsolation: false
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: false,
+      preload: path.join(__dirname, 'preload.js'),
+      scrollBounce: true,
     },
     titleBarStyle: 'hiddenInset',
-    show: false
-  });
+    show: false,
+    backgroundColor: '#FAF9F5',
+    // React UI renders the macOS traffic lights inside the sidebar's top
+    // band rather than floating above a fixed titlebar.
+    trafficLightPosition: { x: 18, y: 18 },
+  };
+  if (options.bounds && typeof options.bounds.x === 'number') {
+    Object.assign(windowOpts, options.bounds);
+  }
 
-  mainWindow.loadFile('index.html');
-  
+  mainWindow = new BrowserWindow(windowOpts);
+
+  const rendererDist = path.join(__dirname, 'renderer', 'dist', 'index.html');
+  const hash = process.env.STENOAI_RENDERER_HASH;
+  if (hash) {
+    mainWindow.loadFile(rendererDist, { hash });
+  } else {
+    mainWindow.loadFile(rendererDist);
+  }
+
+  windowReadyToShow = false;
+
+  const showWhenReady = () => {
+    windowReadyToShow = true;
+    if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isVisible()) {
+      mainWindow.show();
+    }
+  };
+
   mainWindow.once('ready-to-show', () => {
     if (launchedByShortcut) {
       return;
     }
-    mainWindow.show();
+    // Wait until React signals it has mounted. Fall back to showing after
+    // 4s in case the signal never arrives.
+    const fallback = setTimeout(showWhenReady, 4000);
+    ipcMain.once('renderer-ready-to-show', () => {
+      clearTimeout(fallback);
+      showWhenReady();
+    });
   });
+
+
 
   // On macOS, hide to tray instead of destroying (like Slack, Spotify)
   mainWindow.on('close', (event) => {
@@ -559,6 +634,7 @@ function updateTrayMenu() {
         if (mainWindow) mainWindow.hide();
       }
     },
+    { type: 'separator' },
     {
       label: `StenoAI v${appVersion}`,
       enabled: false
@@ -604,24 +680,40 @@ if (!gotSingleInstanceLock) {
     }
   });
 
+  // Sends the custom in-app quit dialog to the renderer and waits for a response.
+  // Falls back to true (allow quit) if the window is unavailable. A 5s timeout
+  // guards against a wedged React tree — on timeout we resolve false to
+  // preserve any active recording rather than killing it silently.
+  async function showCustomQuitDialog(type, jobCount) {
+    if (!mainWindow || mainWindow.isDestroyed()) return true;
+    mainWindow.show();
+    mainWindow.focus();
+    mainWindow.webContents.send('show-quit-dialog', { type, jobCount });
+    return new Promise((resolve) => {
+      const handler = (_event, data) => {
+        clearTimeout(timer);
+        resolve(data && data.confirmed === true);
+      };
+      const timer = setTimeout(() => {
+        ipcMain.removeListener('quit-dialog-response', handler);
+        resolve(false);
+      }, 5000);
+      ipcMain.once('quit-dialog-response', handler);
+    });
+  }
+
   app.on('before-quit', async (event) => {
     if (isQuitting) return;
 
     // Use synchronous flag -- systemAudioRecordingActive is updated via IPC on each state change
     if (currentRecordingProcess || systemAudioRecordingActive) {
       event.preventDefault();
-      const { response } = await dialog.showMessageBox(mainWindow || null, {
-        type: 'warning',
-        buttons: ['Cancel', 'Stop & Quit'],
-        defaultId: 0,
-        cancelId: 0,
-        title: 'Recording in Progress',
-        message: 'A recording is still in progress. Quitting will stop and save the recording.',
-      });
-      if (response === 1) {
+      const confirmed = await showCustomQuitDialog('recording');
+      if (confirmed) {
         if (currentRecordingProcess) {
           currentRecordingProcess.kill('SIGTERM');
           currentRecordingProcess = null;
+          currentRecordingSessionName = null;
         }
         if (systemAudioRecordingActive && mainWindow && !mainWindow.isDestroyed()) {
           try {
@@ -638,15 +730,8 @@ if (!gotSingleInstanceLock) {
     } else if (isProcessing || processingQueue.length > 0) {
       event.preventDefault();
       const jobCount = processingQueue.length + (isProcessing ? 1 : 0);
-      const { response } = await dialog.showMessageBox(mainWindow || null, {
-        type: 'warning',
-        buttons: ['Cancel', 'Quit Anyway'],
-        defaultId: 0,
-        cancelId: 0,
-        title: 'Processing in Progress',
-        message: `${jobCount} recording${jobCount > 1 ? 's are' : ' is'} still being processed. Quitting will cancel processing.`,
-      });
-      if (response === 1) {
+      const confirmed = await showCustomQuitDialog('processing', jobCount);
+      if (confirmed) {
         isQuitting = true;
         app.quit();
       }
@@ -702,8 +787,19 @@ if (!gotSingleInstanceLock) {
     ]);
     Menu.setApplicationMenu(appMenu);
 
+    if (process.platform === 'darwin') {
+      try {
+        const osVer = process.getSystemVersion();
+        const screenPerm = systemPreferences.getMediaAccessStatus('screen');
+        const tapOk = isCoreAudioTapSupported();
+        sendDebugLog(`[sysaudio] macOS ${osVer} — CoreAudio Tap supported=${tapOk}, screen permission=${screenPerm}`);
+      } catch (e) {
+        sendDebugLog(`[sysaudio] startup probe failed: ${e.message}`);
+      }
+    }
+
     createWindow();
-    createTray();
+    if (!IS_E2E) createTray();
     setupAutoUpdater();
     const protocolRegistered = registerShortcutProtocolClient();
     sendDebugLog(`Protocol handler registration (${SHORTCUT_PROTOCOL}): ${protocolRegistered}`);
@@ -821,8 +917,12 @@ if (!gotSingleInstanceLock) {
   app.on('activate', () => {
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore();
-      mainWindow.show();
-      mainWindow.focus();
+      // Only show if the window has finished its initial load.
+      // On first launch, windowReadyToShow is false until React mounts.
+      if (windowReadyToShow) {
+        mainWindow.show();
+        mainWindow.focus();
+      }
       launchedByShortcut = false;
     } else {
       launchedByShortcut = false;
@@ -865,6 +965,25 @@ ipcMain.handle('request-microphone-permission', async () => {
     return { success: true, granted };
   } catch (error) {
     console.error('Error requesting microphone permission:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Reports whether system-audio capture is available on this OS and what the
+// current Screen Recording permission state is. Used by Settings to disable
+// the toggle on unsupported macOS, and to surface "permission denied" rather
+// than letting the user produce silent recordings.
+ipcMain.handle('get-system-audio-support', async () => {
+  try {
+    const supported = isCoreAudioTapSupported();
+    let screenPermission = 'unknown';
+    let osVersion = '';
+    if (process.platform === 'darwin') {
+      try { osVersion = process.getSystemVersion(); } catch (_) {}
+      try { screenPermission = systemPreferences.getMediaAccessStatus('screen'); } catch (_) {}
+    }
+    return { success: true, supported, osVersion, screenPermission };
+  } catch (error) {
     return { success: false, error: error.message };
   }
 });
@@ -1149,6 +1268,48 @@ ipcMain.handle('reprocess-meeting', async (event, summaryFile, regenerateTitle, 
   }
 });
 
+ipcMain.handle('regen-meeting-title', async (event, summaryFile, sessionName) => {
+  try {
+    const cloudKey = loadCloudApiKey();
+    const regenEnv = cloudKey ? { ...require('process').env, STENOAI_CLOUD_API_KEY: cloudKey } : undefined;
+
+    await new Promise((resolve, reject) => {
+      const proc = spawn(getBackendPath(), ['regen-title', summaryFile], {
+        cwd: getBackendCwd(),
+        env: regenEnv,
+      });
+
+      let stderrBuf = '';
+      const procTimeout = setTimeout(() => { proc.kill(); }, 2 * 60 * 1000);
+
+      proc.on('error', (err) => { clearTimeout(procTimeout); reject(new Error(err.message)); });
+
+      proc.stdout.on('data', (data) => {
+        data.toString().split('\n').forEach((line) => {
+          if (line.startsWith('TITLE:')) {
+            const title = line.slice(6);
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('summary-title', { title, sessionName });
+            }
+          }
+        });
+      });
+
+      proc.stderr.on('data', (data) => { stderrBuf += data.toString(); });
+
+      proc.on('close', (code) => {
+        clearTimeout(procTimeout);
+        if (code === 0) resolve();
+        else reject(new Error(`regen-title exited with code ${code}: ${stderrBuf.slice(-300)}`));
+      });
+    });
+
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
 ipcMain.handle('query-transcript', async (event, summaryFile, question) => {
   try {
     sendDebugLog(`🤖 Querying transcript: ${question.substring(0, 50)}...`);
@@ -1292,25 +1453,161 @@ ipcMain.on('query-transcript-stream', (event, queryId, summaryFile, question) =>
   });
 });
 
-ipcMain.handle('save-chat-sessions', async (event, data) => {
+// Cross-note chat (Chat tab). Same wire protocol as query-transcript-stream
+// (CHAT_CHUNK / CHAT_STREAM_COMPLETE / CHAT_STREAM_ERROR -> query-chunk /
+// query-done) so the renderer can reuse useStreamingQuery. Cloud-only —
+// the Python CLI rejects local providers because we don't have retrieval
+// yet and a full-corpus prompt blows local context windows.
+ipcMain.on('chat-global-stream', (event, queryId, question, folderId) => {
+  sendDebugLog(`💬 Global chat query: ${String(question || '').slice(0, 80)}... (folder: ${folderId || 'all'})`);
+  const cloudKey = loadCloudApiKey();
+  const env = cloudKey ? { ...process.env, STENOAI_CLOUD_API_KEY: cloudKey } : process.env;
+
+  const args = ['chat-global-streaming', '-q', question];
+  if (folderId && typeof folderId === 'string' && folderId !== 'all') {
+    args.push('-f', folderId);
+  }
+
+  let proc;
   try {
-    const filePath = path.join(app.getPath('userData'), 'chat_sessions.json');
-    fs.writeFileSync(filePath, JSON.stringify(data), 'utf-8');
+    proc = require('child_process').spawn(
+      getBackendPath(),
+      args,
+      { env, cwd: getBackendCwd() },
+    );
+  } catch (err) {
+    event.sender.send('query-done', { queryId, success: false, error: err.message });
+    return;
+  }
+
+  activeQueryProcs.set(queryId, proc);
+  const onSenderDestroyed = () => {
+    if (activeQueryProcs.has(queryId)) {
+      proc.kill();
+      activeQueryProcs.delete(queryId);
+    }
+  };
+  event.sender.once('destroyed', onSenderDestroyed);
+
+  let buf = '';
+  let chunkCount = 0;
+  proc.stdout.on('data', (data) => {
+    buf += data.toString();
+    const lines = buf.split('\n');
+    buf = lines.pop();
+    for (const line of lines) {
+      if (line.startsWith('CHAT_CHUNK:')) {
+        try {
+          const chunk = Buffer.from(line.slice(11), 'base64').toString('utf-8');
+          chunkCount++;
+          if (!event.sender.isDestroyed()) {
+            event.sender.send('query-chunk', { queryId, chunk });
+          } else {
+            proc.kill();
+            activeQueryProcs.delete(queryId);
+          }
+        } catch (e) { /* ignore decode errors */ }
+      } else if (line === 'CHAT_STREAM_COMPLETE') {
+        if (!event.sender.isDestroyed()) {
+          event.sender.send('query-done', { queryId, success: true });
+        }
+      } else if (line.startsWith('CHAT_STREAM_ERROR:')) {
+        const errMsg = line.slice(18);
+        if (!event.sender.isDestroyed()) {
+          event.sender.send('query-done', { queryId, success: false, error: errMsg });
+        }
+      }
+    }
+  });
+
+  proc.stderr.on('data', (data) => {
+    const msg = data.toString().trim();
+    if (msg) sendDebugLog(`[chat-global stderr] ${msg.slice(0, 200)}`);
+  });
+
+  proc.on('close', (code) => {
+    activeQueryProcs.delete(queryId);
+    if (!event.sender.isDestroyed()) {
+      event.sender.removeListener('destroyed', onSenderDestroyed);
+    }
+    if (buf.trim() === 'CHAT_STREAM_COMPLETE') {
+      if (!event.sender.isDestroyed()) event.sender.send('query-done', { queryId, success: true });
+    } else if (code !== 0 && code !== null && !event.sender.isDestroyed()) {
+      event.sender.send('query-done', { queryId, success: false, error: `Process exited with code ${code}` });
+    }
+  });
+
+  proc.on('error', (err) => {
+    activeQueryProcs.delete(queryId);
+    if (!event.sender.isDestroyed()) {
+      event.sender.send('query-done', { queryId, success: false, error: err.message });
+    }
+  });
+});
+
+// Chat sessions persistence.
+//
+// The legacy renderer reads/writes `chat_sessions.json` as a flat array.
+// The new renderer uses an enriched `{ sessions: [...] }` shape. To avoid
+// silently breaking the legacy UI when a user toggles between renderers, we
+// store the new shape in a separate file (`chat_sessions_v2.json`) and never
+// modify the legacy file. On first load, if v2 is absent we read the legacy
+// file once for migration; subsequent saves only touch v2.
+//
+// Writes use tmp+rename to keep the file atomic across crashes / power loss
+// (a truncated chat_sessions file is hard to recover and would lose all
+// chat history on next launch).
+const CHAT_SESSIONS_V2_FILENAME = 'chat_sessions_v2.json';
+const CHAT_SESSIONS_LEGACY_FILENAME = 'chat_sessions.json';
+
+function chatSessionsV2Path() {
+  return path.join(app.getPath('userData'), CHAT_SESSIONS_V2_FILENAME);
+}
+
+function chatSessionsLegacyPath() {
+  return path.join(app.getPath('userData'), CHAT_SESSIONS_LEGACY_FILENAME);
+}
+
+ipcMain.handle('save-chat-sessions', async (event, data) => {
+  const filePath = chatSessionsV2Path();
+  const tmpPath = `${filePath}.tmp`;
+  try {
+    fs.writeFileSync(tmpPath, JSON.stringify(data), 'utf-8');
+    fs.renameSync(tmpPath, filePath);
     return { success: true };
   } catch (err) {
+    try { if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath); } catch (_) {}
     return { success: false, error: err.message };
   }
 });
 
 ipcMain.handle('load-chat-sessions', async () => {
-  try {
-    const filePath = path.join(app.getPath('userData'), 'chat_sessions.json');
-    if (!fs.existsSync(filePath)) return { success: true, data: null };
-    const raw = fs.readFileSync(filePath, 'utf-8');
-    return { success: true, data: JSON.parse(raw) };
-  } catch (err) {
-    return { success: false, error: err.message };
+  const v2Path = chatSessionsV2Path();
+  // Prefer v2 file when present
+  if (fs.existsSync(v2Path)) {
+    try {
+      const raw = fs.readFileSync(v2Path, 'utf-8');
+      return { success: true, data: JSON.parse(raw) };
+    } catch (err) {
+      // Corrupt v2 file — quarantine it so we don't keep failing on every load,
+      // then fall through to legacy migration / empty state.
+      const corruptPath = `${v2Path}.corrupt-${Date.now()}`;
+      try { fs.renameSync(v2Path, corruptPath); } catch (_) {}
+      console.error(`[chat-sessions] v2 file unreadable, quarantined to ${corruptPath}:`, err.message);
+    }
   }
+  // First run on the new renderer: try to migrate from the legacy file.
+  // Legacy file is read but never modified, so legacy renderer remains intact.
+  const legacyPath = chatSessionsLegacyPath();
+  if (fs.existsSync(legacyPath)) {
+    try {
+      const raw = fs.readFileSync(legacyPath, 'utf-8');
+      return { success: true, data: JSON.parse(raw), migratedFromLegacy: true };
+    } catch (err) {
+      console.error('[chat-sessions] legacy file unreadable:', err.message);
+    }
+  }
+  return { success: true, data: null };
 });
 
 ipcMain.handle('save-meeting-notes', async (event, sessionName, notes) => {
@@ -1356,30 +1653,106 @@ ipcMain.handle('update-meeting', async (event, summaryFilePath, updates) => {
       };
     }
 
-    const fileContent = fs.readFileSync(absolutePath, 'utf8');
+    const isMarkdown = absolutePath.endsWith('.md');
+    let data;
 
-    if (absolutePath.endsWith('.md')) {
-      // .md format: update YAML frontmatter fields
-      let updatedContent = fileContent;
-      if (updates.name !== undefined) {
-        if (updates.name.includes('\n') || updates.name.includes('\r')) {
-          return { success: false, error: 'Title cannot contain newlines' };
+    if (isMarkdown) {
+      const raw = fs.readFileSync(absolutePath, 'utf8');
+      // Escape a string for a YAML double-quoted scalar. Backslash MUST be
+      // escaped before the quote, and embedded newlines must become literal
+      // \n so they don't end the scalar mid-line.
+      const yamlQuote = (s) =>
+        '"' + String(s)
+          .replace(/\\/g, '\\\\')
+          .replace(/"/g, '\\"')
+          .replace(/\n/g, '\\n')
+          .replace(/\r/g, '')
+        + '"';
+
+      // Strip the outer quotes only — the simple frontmatter we read here is
+      // for the response shape (data.session_info.name) and doesn't need to
+      // reverse YAML escapes for its sole consumer (the renderer).
+      const readTitle = (rawValue) => rawValue.trim().replace(/^"|"$/g, '');
+
+      // Line-based rewrite: only mutate the keys we're updating, leave every
+      // other line (including non-string values like arrays/booleans) byte-
+      // identical so we don't corrupt structured fields like `folders: [...]`.
+      let title = '';
+      let updatedAt = new Date().toISOString();
+      let body = raw;
+      let updatedRaw = raw;
+
+      if (raw.startsWith('---')) {
+        const parts = raw.split('---', 3);
+        if (parts.length >= 3) {
+          const fmText = parts[1];
+          body = parts[2];
+          const lines = fmText.split('\n');
+          let titleSeen = false;
+          let updatedAtSeen = false;
+          const newLines = lines.map((line) => {
+            const colon = line.indexOf(':');
+            if (colon === -1) return line;
+            const key = line.slice(0, colon).trim();
+            if (key === 'title') {
+              titleSeen = true;
+              const original = line.slice(colon + 1);
+              if (updates.name !== undefined) {
+                return `title: ${yamlQuote(updates.name)}`;
+              }
+              title = readTitle(original);
+              return line;
+            }
+            if (key === 'updated_at') {
+              updatedAtSeen = true;
+              return `updated_at: ${yamlQuote(updatedAt)}`;
+            }
+            return line;
+          });
+          if (!titleSeen && updates.name !== undefined) {
+            // Insert before the trailing blank line (if any) for readability.
+            const insertIdx = newLines[newLines.length - 1] === '' ? newLines.length - 1 : newLines.length;
+            newLines.splice(insertIdx, 0, `title: ${yamlQuote(updates.name)}`);
+            title = updates.name;
+          } else if (updates.name !== undefined) {
+            title = updates.name;
+          }
+          if (!updatedAtSeen) {
+            const insertIdx = newLines[newLines.length - 1] === '' ? newLines.length - 1 : newLines.length;
+            newLines.splice(insertIdx, 0, `updated_at: ${yamlQuote(updatedAt)}`);
+          }
+          updatedRaw = `---${newLines.join('\n')}---${body}`;
         }
-        const escapedName = updates.name.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-        updatedContent = updatedContent.replace(
-          /^title:\s*".*"$/m,
-          `title: "${escapedName}"`
-        );
       }
-      fs.writeFileSync(absolutePath, updatedContent, 'utf8');
+
+      fs.writeFileSync(absolutePath, updatedRaw, 'utf8');
+
+      data = {
+        session_info: {
+          name: updates.name !== undefined ? updates.name : title,
+          summary_file: absolutePath,
+          updated_at: updatedAt,
+        },
+      };
     } else {
-      // .json format: update structured fields
-      const data = JSON.parse(fileContent);
-      if (updates.name !== undefined) data.session_info.name = updates.name;
-      if (updates.summary !== undefined) data.summary = updates.summary;
-      if (updates.participants !== undefined) data.participants = updates.participants;
-      if (updates.key_points !== undefined) data.key_points = updates.key_points;
-      if (updates.action_items !== undefined) data.action_items = updates.action_items;
+      data = JSON.parse(fs.readFileSync(absolutePath, 'utf8'));
+
+      if (updates.name !== undefined) {
+        data.session_info.name = updates.name;
+      }
+      if (updates.summary !== undefined) {
+        data.summary = updates.summary;
+      }
+      if (updates.participants !== undefined) {
+        data.participants = updates.participants;
+      }
+      if (updates.key_points !== undefined) {
+        data.key_points = updates.key_points;
+      }
+      if (updates.action_items !== undefined) {
+        data.action_items = updates.action_items;
+      }
+
       data.session_info.updated_at = new Date().toISOString();
       fs.writeFileSync(absolutePath, JSON.stringify(data, null, 2), 'utf8');
     }
@@ -1392,6 +1765,21 @@ ipcMain.handle('update-meeting', async (event, summaryFilePath, updates) => {
     };
   } catch (error) {
     console.error('Update meeting error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('reveal-meeting-folder', async (event, filePath) => {
+  try {
+    const projectRoot = path.join(__dirname, '..');
+    const allowedBaseDirs = getAllowedBaseDirs();
+    const absolutePath = path.isAbsolute(filePath) ? filePath : path.join(projectRoot, filePath);
+    if (!validateSafeFilePath(absolutePath, allowedBaseDirs)) {
+      return { success: false, error: 'Invalid file path: outside allowed directories' };
+    }
+    shell.showItemInFolder(absolutePath);
+    return { success: true };
+  } catch (error) {
     return { success: false, error: error.message };
   }
 });
@@ -1412,6 +1800,8 @@ ipcMain.handle('delete-meeting', async (event, meetingData) => {
 
     const summaryFile = meeting.session_info?.summary_file;
     const transcriptFile = meeting.session_info?.transcript_file;
+    const audioFile = meeting.session_info?.audio_file;
+    const sessionName = meeting.session_info?.name;
 
     // Convert relative paths to absolute paths
     const absolutePaths = [];
@@ -1420,6 +1810,14 @@ ipcMain.handle('delete-meeting', async (event, meetingData) => {
     }
     if (transcriptFile) {
       absolutePaths.push(path.isAbsolute(transcriptFile) ? transcriptFile : path.join(projectRoot, transcriptFile));
+    }
+    if (audioFile) {
+      absolutePaths.push(path.isAbsolute(audioFile) ? audioFile : path.join(projectRoot, audioFile));
+    }
+    if (summaryFile && sessionName) {
+      const outputDir = path.dirname(path.isAbsolute(summaryFile) ? summaryFile : path.join(projectRoot, summaryFile));
+      const safeName = sessionName.replace(/[^a-zA-Z0-9_-]/g, '_');
+      absolutePaths.push(path.join(outputDir, `${safeName}_notes.txt`));
     }
 
     console.log('Attempting to delete files:', absolutePaths);
@@ -1473,19 +1871,108 @@ ipcMain.handle('get-queue-status', async () => {
     isProcessing,
     queueSize: processingQueue.length,
     currentJob: currentProcessingJob?.sessionName || null,
-    hasRecording: currentRecordingProcess !== null || systemAudioRecordingActive
+    hasRecording: currentRecordingProcess !== null || systemAudioRecordingActive,
+    isPaused: recordingRuntimeState.isPaused,
+    elapsedSeconds: (currentRecordingProcess !== null || systemAudioRecordingActive) ? getRecordingElapsedSeconds() : 0,
+    sessionName: currentRecordingSessionName
   };
 });
+
+// Synchronously read system_audio_enabled from the user config so
+// start-recording-ui can decide whether to spawn the Python `record`
+// subprocess (off) or let the renderer drive the dual-stream capture (on).
+//
+// Always returns false on macOS without CoreAudio Process Tap support
+// (< 14.4 or non-darwin), regardless of the user's config setting — the
+// Python pipeline is the only working capture path there. Without this
+// gate, a user on older macOS with the new default `true` config would
+// produce no audio at all (Python skipped by main.js, renderer skipped
+// by useSystemAudioCapture's own OS check). Falls through to the config
+// default (currently true on a missing/empty config) when the OS does
+// support CoreAudio Tap so new installs get system audio out of the box.
+function loadSystemAudioEnabled() {
+  if (!isCoreAudioTapSupported()) return false;
+  try {
+    const cfgPath = path.join(os.homedir(), 'Library', 'Application Support', 'stenoai', 'config.json');
+    if (!fs.existsSync(cfgPath)) return true; // new install → CoreAudio default
+    const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf-8'));
+    // `false` only when the user has explicitly opted out; an absent key
+    // means "haven't been asked yet" → treat as the new default.
+    return cfg.system_audio_enabled !== false;
+  } catch (_) {
+    return false;
+  }
+}
 
 // Global recording state management
 let systemAudioRecordingActive = false;  // Track system audio recording for tray/quit
 let currentRecordingProcess = null;
+let currentRecordingSessionName = null;  // Surfaced in get-queue-status so renderer knows which meeting is live
 let processingQueue = [];
 let isProcessing = false;
 let currentProcessingJob = null;
+let recordingRuntimeState = {
+  startedAtMs: null,
+  pausedAtMs: null,
+  pausedTotalMs: 0,
+  isPaused: false
+};
 let ollamaProcess = null;  // Track spawned Ollama process for cleanup on quit
 let ollamaPid = null;      // Store PID separately since unref() disconnects the process
 let ollamaStartedByUs = false;
+
+function resetRecordingRuntimeState() {
+  recordingRuntimeState = {
+    startedAtMs: null,
+    pausedAtMs: null,
+    pausedTotalMs: 0,
+    isPaused: false
+  };
+}
+
+function startRecordingRuntimeState() {
+  recordingRuntimeState = {
+    startedAtMs: Date.now(),
+    pausedAtMs: null,
+    pausedTotalMs: 0,
+    isPaused: false
+  };
+}
+
+function markRecordingPaused() {
+  if (!recordingRuntimeState.startedAtMs || recordingRuntimeState.isPaused) {
+    return;
+  }
+  recordingRuntimeState.isPaused = true;
+  recordingRuntimeState.pausedAtMs = Date.now();
+}
+
+function markRecordingResumed() {
+  if (!recordingRuntimeState.isPaused) {
+    return;
+  }
+  if (recordingRuntimeState.pausedAtMs) {
+    recordingRuntimeState.pausedTotalMs += Date.now() - recordingRuntimeState.pausedAtMs;
+  }
+  recordingRuntimeState.isPaused = false;
+  recordingRuntimeState.pausedAtMs = null;
+}
+
+function getRecordingElapsedSeconds() {
+  if (!recordingRuntimeState.startedAtMs) {
+    return 0;
+  }
+
+  let pausedMs = recordingRuntimeState.pausedTotalMs;
+  if (recordingRuntimeState.isPaused && recordingRuntimeState.pausedAtMs) {
+    pausedMs += Date.now() - recordingRuntimeState.pausedAtMs;
+  }
+
+  return Math.max(
+    0,
+    Math.floor((Date.now() - recordingRuntimeState.startedAtMs - pausedMs) / 1000)
+  );
+}
 
 // Processing queue management
 async function processNextInQueue() {
@@ -1513,6 +2000,11 @@ async function processNextInQueue() {
       });
 
       let stderrBuf = '';
+      // Captured from `SAVED:<path>` so processing-complete can include
+      // meetingData and the renderer can auto-navigate to the new note.
+      // Without this the renderer-driven (system audio) flow leaves the
+      // user stranded on /meetings/processing after the summary streams in.
+      let savedSummaryFile = null;
 
       // Timeout: kill process if it runs longer than 30 minutes
       const procTimeout = setTimeout(() => {
@@ -1548,7 +2040,8 @@ async function processNextInQueue() {
           } else if (line === 'STREAM_COMPLETE') {
             trackEvent('summarization_completed', { success: true });
           } else if (line.startsWith('SAVED:')) {
-            sendDebugLog(`Summary saved: ${line.slice(6)}`);
+            savedSummaryFile = line.slice(6).trim();
+            sendDebugLog(`Summary saved: ${savedSummaryFile}`);
           } else if (line.trim()) {
             sendDebugLog(line.trim());
           }
@@ -1567,19 +2060,54 @@ async function processNextInQueue() {
         clearTimeout(procTimeout);
         if (code === 0) {
           console.log(`✅ Completed streaming processing: ${currentProcessingJob.sessionName}`);
+          const sessionNameAtClose = currentProcessingJob.sessionName;
           // Notify frontend that streaming is done and meeting is saved
           if (mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.webContents.send('summary-complete', {
               success: true,
-              sessionName: currentProcessingJob.sessionName
-            });
-            // Also send processing-complete for backward compat (reloads meeting list)
-            mainWindow.webContents.send('processing-complete', {
-              success: true,
-              sessionName: currentProcessingJob.sessionName,
-              message: 'Processing completed successfully'
+              sessionName: sessionNameAtClose
             });
           }
+          // Look up the saved meeting so we can include meetingData in the
+          // processing-complete event. The renderer's processing-complete
+          // handler navigates to /meetings/<file> only when meetingData is
+          // present — without this the user gets stuck on the processing
+          // page after the summary streams in.
+          runPythonScript('simple_recorder.py', ['list-meetings'], true)
+            .then(meetingsResult => {
+              const allMeetings = JSON.parse(meetingsResult);
+              let processedMeeting = null;
+              if (savedSummaryFile) {
+                processedMeeting = allMeetings.find(
+                  m => m.session_info?.summary_file === savedSummaryFile
+                );
+              }
+              if (!processedMeeting) {
+                processedMeeting = allMeetings.find(
+                  m => m.session_info?.name === sessionNameAtClose
+                );
+              }
+              if (mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.webContents.send('processing-complete', {
+                  success: true,
+                  sessionName: sessionNameAtClose,
+                  message: 'Processing completed successfully',
+                  meetingData: processedMeeting
+                });
+              }
+            })
+            .catch(error => {
+              console.error('Error fetching processed meeting:', error);
+              // Fall back to firing without meetingData — frontend will
+              // refresh the list but skip the auto-navigation.
+              if (mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.webContents.send('processing-complete', {
+                  success: true,
+                  sessionName: sessionNameAtClose,
+                  message: 'Processing completed successfully'
+                });
+              }
+            });
           resolve();
         } else {
           reject(new Error(`process-streaming exited with code ${code}: ${stderrBuf.slice(-500)}`));
@@ -1617,14 +2145,42 @@ ipcMain.handle('start-recording-ui', async (_, sessionName) => {
     if (currentRecordingProcess) {
       return { success: false, error: 'Recording already in progress' };
     }
-
-    // Start recording (removed clear-state to prevent race conditions)
-
-    console.log('Starting long recording process...');
-    sendDebugLog(`Starting recording process: ${sessionName || 'Meeting'}`);
-    sendDebugLog('$ stenoai record 7200');
+    if (systemAudioRecordingActive) {
+      return { success: false, error: 'Recording already in progress' };
+    }
 
     const actualSessionName = sessionName || 'Meeting';
+
+    // Renderer-driven dual-stream path: when system audio is enabled the
+    // renderer (useSystemAudioCapture) captures mic + system loopback and
+    // mixes them in Web Audio. We MUST NOT spawn the Python `record`
+    // subprocess here or we'd produce two parallel recordings → two notes.
+    // The renderer will write its mixed WebM and queue it through the
+    // existing process-system-audio-recording IPC.
+    if (loadSystemAudioEnabled()) {
+      sendDebugLog(`Starting renderer-driven recording (system audio mode): ${actualSessionName}`);
+      currentRecordingSessionName = actualSessionName;
+      startRecordingRuntimeState();
+      // Flip the active flag immediately so the queue handler reports
+      // hasRecording=true on the very next poll. Without this the renderer
+      // hook would see status='idle' (queue says no recording) at the
+      // moment we want it to fire startCapture, and the dual-stream
+      // capture would never start. The renderer's reportSystemAudioState
+      // IPC is then idempotent on success and clears the flag on failure.
+      systemAudioRecordingActive = true;
+      updateTrayIcon(true);
+      trackEvent('recording_started', { recording_mode: 'system_audio' });
+      return {
+        success: true,
+        sessionName: actualSessionName,
+        message: 'Renderer-driven recording started'
+      };
+    }
+
+    // Legacy mic-only path: spawn Python `record` subprocess.
+    console.log('Starting long recording process...');
+    sendDebugLog(`Starting recording process: ${actualSessionName}`);
+    sendDebugLog('$ stenoai record 7200');
 
     // Start background recording with 2-hour limit
     // Pass cloud API key via env var for cloud summarization
@@ -1636,10 +2192,16 @@ ipcMain.handle('start-recording-ui', async (_, sessionName) => {
       cwd: getBackendCwd(),
       env: Object.keys(recordEnv).length > 0 ? { ...require('process').env, ...recordEnv } : undefined
     });
+    currentRecordingSessionName = actualSessionName;
+    startRecordingRuntimeState();
 
     let hasStarted = false;
     let processingSucceeded = false;
     let recordedAudioFile = null;
+    // Authoritative pointer to the final summary file once Python finishes
+    // auto-renaming + writing it (emitted as `SAVED:<path>`). Use this in
+    // preference to the name/audio fallbacks since it can't drift.
+    let savedSummaryFile = null;
 
     currentRecordingProcess.stdout.on('data', (data) => {
       const output = data.toString();
@@ -1670,6 +2232,8 @@ ipcMain.handle('start-recording-ui', async (_, sessionName) => {
           if (mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.webContents.send('summary-complete', { success: true, sessionName: actualSessionName });
           }
+        } else if (line.startsWith('SAVED:')) {
+          savedSummaryFile = line.slice(6).trim();
         } else if (line.trim()) {
           sendDebugLog(line.trim());
         }
@@ -1685,11 +2249,20 @@ ipcMain.handle('start-recording-ui', async (_, sessionName) => {
           runPythonScript('simple_recorder.py', ['list-meetings'], true)
             .then(meetingsResult => {
               const allMeetings = JSON.parse(meetingsResult);
-              // Try matching by name first, then by audio file (name may have been
-              // auto-generated from the transcript)
-              let processedMeeting = allMeetings.find(m => m.session_info?.name === actualSessionName);
+              // Prefer the SAVED:<path> pointer Python emits — that's the
+              // exact summary file written this session and survives the
+              // auto-rename. Fall back to name match (only if user kept the
+              // placeholder), then to audio-file basename.
+              let processedMeeting = null;
+              if (savedSummaryFile) {
+                processedMeeting = allMeetings.find(
+                  m => m.session_info?.summary_file === savedSummaryFile,
+                );
+              }
+              if (!processedMeeting) {
+                processedMeeting = allMeetings.find(m => m.session_info?.name === actualSessionName);
+              }
               if (!processedMeeting && recordedAudioFile) {
-                // Name may have been auto-generated from transcript; match by audio file basename
                 const audioBasename = path.basename(recordedAudioFile);
                 processedMeeting = allMeetings.find(m =>
                   m.session_info?.audio_file && path.basename(m.session_info.audio_file) === audioBasename
@@ -1749,6 +2322,8 @@ ipcMain.handle('start-recording-ui', async (_, sessionName) => {
       console.log(`Recording process closed with code ${code}`);
       sendDebugLog(`Recording process completed with exit code: ${code}`);
       currentRecordingProcess = null;
+      currentRecordingSessionName = null;
+      resetRecordingRuntimeState();
       updateTrayIcon(false);
 
       // If process exited without a success or failure message, notify the user
@@ -1775,6 +2350,8 @@ ipcMain.handle('start-recording-ui', async (_, sessionName) => {
   } catch (error) {
     console.error('Start recording UI error:', error.message);
     currentRecordingProcess = null;
+    currentRecordingSessionName = null;
+    resetRecordingRuntimeState();
     updateTrayIcon(false);
     trackEvent('error_occurred', { error_type: 'start_recording_ui' });
     return { success: false, error: error.message };
@@ -1794,6 +2371,7 @@ ipcMain.handle('pause-recording-ui', async () => {
     // Send SIGUSR1 to pause recording (Unix only)
     if (process.platform !== 'win32') {
       currentRecordingProcess.kill('SIGUSR1');
+      markRecordingPaused();
       sendDebugLog('SIGUSR1 sent successfully');
       return { success: true, message: 'Recording paused' };
     } else {
@@ -1819,6 +2397,7 @@ ipcMain.handle('resume-recording-ui', async () => {
     // Send SIGUSR2 to resume recording (Unix only)
     if (process.platform !== 'win32') {
       currentRecordingProcess.kill('SIGUSR2');
+      markRecordingResumed();
       sendDebugLog('SIGUSR2 sent successfully');
       return { success: true, message: 'Recording resumed' };
     } else {
@@ -1833,8 +2412,20 @@ ipcMain.handle('resume-recording-ui', async () => {
 
 ipcMain.handle('stop-recording-ui', async () => {
   try {
+    // Always clear system-audio active state. The renderer's stopCapture flow
+    // also reports false, but races (renderer already torn down, recorder
+    // errored before reportSystemAudioState) can leave this stuck true and
+    // the UI thinks a recording is still in progress.
+    systemAudioRecordingActive = false;
+
     if (!currentRecordingProcess) {
-      return { success: false, error: 'No recording in progress' };
+      // Idempotent: clicking stop with no active recording is not an error
+      // (it's a stale-state race). Reset everything and report success so
+      // the renderer can finish its own cleanup.
+      currentRecordingSessionName = null;
+      resetRecordingRuntimeState();
+      updateTrayIcon(false);
+      return { success: true, message: 'No active recording to stop' };
     }
 
     console.log('Stopping recording process...');
@@ -1845,6 +2436,8 @@ ipcMain.handle('stop-recording-ui', async () => {
     // Don't wait - let the process complete independently
     // The process will handle: stop recording → transcribe → summarize → exit
     currentRecordingProcess = null;
+    currentRecordingSessionName = null;
+    resetRecordingRuntimeState();
     updateTrayIcon(false);
 
     trackEvent('recording_stopped');
@@ -1855,6 +2448,8 @@ ipcMain.handle('stop-recording-ui', async () => {
   } catch (error) {
     console.error('Stop recording UI error:', error.message);
     currentRecordingProcess = null;
+    currentRecordingSessionName = null;
+    resetRecordingRuntimeState();
     updateTrayIcon(false);
     trackEvent('error_occurred', { error_type: 'stop_recording_ui' });
     return { success: false, error: error.message };
@@ -2215,6 +2810,10 @@ ipcMain.handle('setup-python', async () => {
 
 // ── Auto-updater ──
 function setupAutoUpdater() {
+  if (IS_E2E) {
+    sendDebugLog('Auto-updater: skipped (E2E mode)');
+    return;
+  }
   // Don't check for updates in dev mode
   if (!app.isPackaged) {
     sendDebugLog('Auto-updater: skipped (dev mode)');
@@ -2317,7 +2916,8 @@ ipcMain.handle('setup-ollama-and-model', async () => {
     sendDebugLog(`Found bundled Ollama at: ${finalOllamaPath}`);
 
     // Reuse already-running Ollama if its API is reachable on 11434.
-    // Avoids "address already in use" on retries when a previous spawn is still alive.
+    // Avoids "address already in use" when the user (or a previous launch)
+    // already has Ollama up.
     const httpProbe = require('http');
     const ollamaAlreadyRunning = await new Promise((resolve) => {
       const req = httpProbe.get('http://127.0.0.1:11434/api/tags', { timeout: 1500 }, (res) => {
@@ -2330,12 +2930,11 @@ ipcMain.handle('setup-ollama-and-model', async () => {
       sendDebugLog('Ollama already running on 127.0.0.1:11434 — reusing existing instance');
     }
 
-    // Start Ollama service with stderr capture for diagnostics
-    if (!ollamaAlreadyRunning) sendDebugLog('Starting Ollama service...');
     let ollamaExited = false;
     let ollamaExitCode = null;
     let ollamaDyldError = false;
     if (!ollamaAlreadyRunning) {
+      sendDebugLog('Starting Ollama service...');
       sendDebugLog(`$ ${finalOllamaPath} serve`);
       ollamaProcess = spawn(finalOllamaPath, ['serve'], { detached: true, stdio: ['ignore', 'ignore', 'pipe'], env: getOllamaEnv() });
       ollamaPid = ollamaProcess.pid;
@@ -2358,7 +2957,8 @@ ipcMain.handle('setup-ollama-and-model', async () => {
       ollamaStartedByUs = true;
     }
 
-    // Wait for Ollama to be ready (poll with early exit detection)
+    // Wait for Ollama to be ready (poll with early exit detection).
+    // When we reused an existing instance, skip the wait — it's already up.
     sendDebugLog('Waiting for Ollama service to be ready...');
     const maxAttempts = ollamaAlreadyRunning ? 1 : 30;
     let ready = ollamaAlreadyRunning;
@@ -2633,7 +3233,20 @@ ipcMain.handle('get-storage-path', async () => {
   try {
     const result = await runPythonScript('simple_recorder.py', ['get-storage-path'], true);
     const jsonData = JSON.parse(result.trim());
-    return { success: true, ...jsonData };
+    // Python only returns the user's custom path (empty string when not set).
+    // Augment with the platform default so the renderer can show "where your
+    // data actually lives" without hardcoding the path. custom_path mirrors
+    // storage_path but is null when empty for cleaner conditionals.
+    const customPath = jsonData.storage_path && jsonData.storage_path.trim()
+      ? jsonData.storage_path
+      : null;
+    const defaultPath = path.join(os.homedir(), 'Library', 'Application Support', 'stenoai');
+    return {
+      success: true,
+      storage_path: customPath || defaultPath,
+      custom_path: customPath,
+      default_path: defaultPath,
+    };
   } catch (error) {
     return { success: false, error: error.message };
   }
@@ -2700,6 +3313,16 @@ ipcMain.handle('create-folder', async (event, name, color) => {
 ipcMain.handle('rename-folder', async (event, folderId, name) => {
   try {
     const result = await runPythonScript('simple_recorder.py', ['rename-folder', folderId, name]);
+    const jsonMatch = result.match(/\{.*\}/s);
+    return jsonMatch ? JSON.parse(jsonMatch[0]) : { success: true };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('update-folder-icon', async (event, folderId, icon) => {
+  try {
+    const result = await runPythonScript('simple_recorder.py', ['update-folder-icon', folderId, icon]);
     const jsonMatch = result.match(/\{.*\}/s);
     return jsonMatch ? JSON.parse(jsonMatch[0]) : { success: true };
   } catch (error) {
@@ -2907,6 +3530,36 @@ ipcMain.handle('set-model', async (event, modelName) => {
   }
 });
 
+
+
+ipcMain.handle('get-whisper-model', async () => {
+  try {
+    const result = await runPythonScript('simple_recorder.py', ['get-whisper-model'], true);
+    return JSON.parse(result.trim());
+  } catch (e) { return { success: false, error: e.message }; }
+});
+
+ipcMain.handle('set-whisper-model', async (event, modelSize) => {
+  try {
+    const result = await runPythonScript('simple_recorder.py', ['set-whisper-model', modelSize]);
+    return JSON.parse(result.trim());
+  } catch (e) { return { success: false, error: e.message }; }
+});
+
+ipcMain.handle('get-keep-recordings', async () => {
+  try {
+    const result = await runPythonScript('simple_recorder.py', ['get-keep-recordings'], true);
+    return JSON.parse(result.trim());
+  } catch (e) { return { success: false, error: e.message }; }
+});
+
+ipcMain.handle('set-keep-recordings', async (event, enabled) => {
+  try {
+    const result = await runPythonScript('simple_recorder.py', ['set-keep-recordings', enabled.toString()]);
+    return JSON.parse(result.trim());
+  } catch (e) { return { success: false, error: e.message }; }
+});
+
 ipcMain.handle('get-notifications', handleGetNotifications);
 
 ipcMain.handle('set-notifications', async (event, enabled) => {
@@ -3067,6 +3720,27 @@ ipcMain.handle('set-language', async (event, languageCode) => {
     return { success: true, language: languageCode };
   } catch (error) {
     sendDebugLog(`Error setting language: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('get-user-name', async () => {
+  try {
+    const result = await runPythonScript('simple_recorder.py', ['get-user-name'], true);
+    const jsonData = JSON.parse(result.trim());
+    return { success: true, ...jsonData };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('set-user-name', async (event, name) => {
+  try {
+    const result = await runPythonScript('simple_recorder.py', ['set-user-name', String(name ?? '')]);
+    const jsonMatch = result.match(/\{.*\}/s);
+    if (jsonMatch) return JSON.parse(jsonMatch[0]);
+    return { success: true, user_name: String(name ?? '').trim() };
+  } catch (error) {
     return { success: false, error: error.message };
   }
 });
@@ -3242,6 +3916,26 @@ ipcMain.handle('get-recordings-dir', async () => {
   }
 });
 
+// Renderer-driven system audio capture writes its WebM/Opus blob here so it
+// lands inside an allowedBaseDir for validateSafeFilePath downstream. The
+// blob comes over IPC as a Uint8Array (structured-clone friendly).
+ipcMain.handle('write-system-audio-blob', async (_event, payload, sessionName) => {
+  try {
+    const dir = path.join(os.homedir(), 'Library', 'Application Support', 'stenoai', 'system_audio_tmp');
+    fs.mkdirSync(dir, { recursive: true });
+    const safeName = String(sessionName || 'Meeting').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 64);
+    const filename = `sysaudio-${Date.now()}-${safeName}.webm`;
+    const filePath = path.join(dir, filename);
+    const buf = Buffer.isBuffer(payload) ? payload : Buffer.from(payload);
+    fs.writeFileSync(filePath, buf);
+    sendDebugLog(`[sysaudio] wrote blob ${filename} (${buf.length} bytes)`);
+    return { success: true, filePath };
+  } catch (error) {
+    sendDebugLog(`Error writing system audio blob: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+});
+
 ipcMain.handle('process-system-audio-recording', async (event, audioFilePath, sessionName) => {
   try {
     sendDebugLog(`Queuing system audio recording for processing: ${audioFilePath}`);
@@ -3275,9 +3969,17 @@ ipcMain.handle('process-system-audio-recording', async (event, audioFilePath, se
   }
 });
 
-// Track system audio recording state for tray icon
+// Track system audio recording state for tray icon. Also resets the elapsed
+// counter when the renderer reports inactive without a Python process —
+// covers the case where startCapture failed (permission denied) and we'd
+// otherwise leak recordingRuntimeState.startedAtMs.
 ipcMain.on('system-audio-recording-state', (event, isRecording) => {
+  sendDebugLog(`[sysaudio] state -> ${isRecording ? 'true' : 'false'} (was ${systemAudioRecordingActive})`);
   systemAudioRecordingActive = isRecording;
+  if (!isRecording && !currentRecordingProcess) {
+    resetRecordingRuntimeState();
+    currentRecordingSessionName = null;
+  }
   updateTrayIcon(isRecording);
   updateTrayMenu();
 });
@@ -3587,6 +4289,41 @@ ipcMain.handle('check-announcements', async () => {
 
 ipcMain.handle('open-release-page', async (event, url) => {
   try {
+    if (typeof url !== 'string' || !url) {
+      return { success: false, error: 'invalid url' };
+    }
+    let parsed;
+    try { parsed = new URL(url); } catch {
+      return { success: false, error: 'invalid url' };
+    }
+    // Release pages live on github.com -- restrict to that origin so a
+    // compromised renderer cannot launch arbitrary external URLs through
+    // this channel.
+    if (parsed.protocol !== 'https:' || parsed.hostname !== 'github.com') {
+      return { success: false, error: 'unsupported url' };
+    }
+    await shell.openExternal(url);
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+// Generic external-URL opener for renderer-triggered links (e.g. meeting
+// join URLs on Home). Http/https only — rejects custom schemes so a
+// compromised renderer cannot launch arbitrary protocol handlers.
+ipcMain.handle('open-external', async (event, url) => {
+  try {
+    if (typeof url !== 'string' || !url) {
+      return { success: false, error: 'invalid url' };
+    }
+    let parsed;
+    try { parsed = new URL(url); } catch {
+      return { success: false, error: 'invalid url' };
+    }
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return { success: false, error: 'unsupported scheme' };
+    }
     await shell.openExternal(url);
     return { success: true };
   } catch (error) {
@@ -4342,19 +5079,41 @@ ipcMain.handle('google-auth-disconnect', async () => {
   }
 });
 
+function normalizeCalendarEvent(event) {
+  const start =
+    event.start?.dateTime ||
+    event.start?.date ||
+    (typeof event.start === 'string' ? event.start : '');
+  const end =
+    event.end?.dateTime ||
+    event.end?.date ||
+    (typeof event.end === 'string' ? event.end : '');
+  return {
+    id: event.id,
+    title: event.summary || event.title || 'No title',
+    start,
+    end,
+    meeting_url:
+      event.hangoutLink ||
+      event.onlineMeeting?.joinUrl ||
+      event.meeting_url ||
+      undefined,
+  };
+}
+
 ipcMain.handle('get-calendar-events', async () => {
   try {
     // Check which provider is connected (only one at a time)
     const googleToken = await getValidAccessToken();
     if (googleToken) {
-      const events = await fetchCalendarEvents(googleToken);
-      return { success: true, events };
+      const raw = await fetchCalendarEvents(googleToken);
+      return { success: true, events: raw.map(normalizeCalendarEvent) };
     }
 
     const outlookToken = await getValidOutlookAccessToken();
     if (outlookToken) {
-      const events = await fetchOutlookCalendarEvents(outlookToken);
-      return { success: true, events };
+      const raw = await fetchOutlookCalendarEvents(outlookToken);
+      return { success: true, events: raw.map(normalizeCalendarEvent) };
     }
 
     return { success: false, needsAuth: true };

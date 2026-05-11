@@ -18,6 +18,11 @@ class WhisperTranscriberAutoLanguageTests(unittest.TestCase):
         model = Mock()
         model.auto_detect_language.return_value = (("nl", 0.97), {"nl": 0.97})
         segment = Mock()
+        # transcribe_diarised needs numeric t0/t1 (centiseconds) to build
+        # the per-segment timing array — Mock auto-attribute returns aren't
+        # numeric and would TypeError on division.
+        segment.t0 = 0
+        segment.t1 = 100
         segment.text = " Hallo "
         model.transcribe.return_value = [segment]
 
@@ -32,6 +37,11 @@ class WhisperTranscriberAutoLanguageTests(unittest.TestCase):
         model = Mock()
         model.auto_detect_language.side_effect = RuntimeError("detection failed")
         segment = Mock()
+        # transcribe_diarised needs numeric t0/t1 (centiseconds) to build
+        # the per-segment timing array — Mock auto-attribute returns aren't
+        # numeric and would TypeError on division.
+        segment.t0 = 0
+        segment.t1 = 100
         segment.text = " Hello "
         model.transcribe.return_value = [segment]
 
@@ -45,6 +55,11 @@ class WhisperTranscriberAutoLanguageTests(unittest.TestCase):
     def test_explicit_language_skips_auto_detection(self):
         model = Mock()
         segment = Mock()
+        # transcribe_diarised needs numeric t0/t1 (centiseconds) to build
+        # the per-segment timing array — Mock auto-attribute returns aren't
+        # numeric and would TypeError on division.
+        segment.t0 = 0
+        segment.t1 = 100
         segment.text = " Bonjour "
         model.transcribe.return_value = [segment]
 

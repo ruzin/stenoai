@@ -9,7 +9,7 @@ Do not use excessive emojis anywhere.
 The app is a thin Electron shell over a PyInstaller-bundled Python CLI. There is no long-running Python service — every operation is a subprocess invocation.
 
 - **Electron main (`app/main.js`, ~4.3k lines)** owns the UI window, tray, deep-link protocol, and orchestrates everything via `ipcMain.handle(...)`. Handlers shell out to the bundled backend through `getBackendPath()` → `process.resourcesPath/stenoai/stenoai` (or `dist/stenoai/stenoai` in dev) using `child_process.spawn`.
-- **Renderer (`app/index.html`, ~9.7k lines)** is a single-page HTML/JS UI; no framework. All cross-process work goes through IPC.
+- **Renderer (`app/renderer/`)** is a Vite-built React + TypeScript SPA. Runs with `contextIsolation: true` and talks to the main process exclusively through the typed bridge in `app/preload.js` → `ipc()` (`app/renderer/src/lib/ipc.ts`). Built output lives at `app/renderer/dist/index.html` and is what Electron loads at runtime.
 - **Python CLI (`simple_recorder.py`, ~2.5k lines, ~46 click commands)** is the single entry point bundled by `stenoai.spec`. Sub-modules in `src/`: `audio_recorder` (sounddevice), `transcriber` (pywhispercpp), `summarizer` (Ollama HTTP client), `ollama_manager` (lifecycle of the bundled `ollama serve`), `config` (JSON-backed user settings + model registry), `folders`, `models`.
 - **State across CLI invocations** is persisted to `recorder_state.json` and similar small JSON files — there is no daemon. Long-running recordings are a `record` subprocess kept alive by the Electron main process.
 - **User data lives in `~/Library/Application Support/stenoai/`** (`recordings/`, `transcripts/`, `output/`), resolved via `src.config.get_data_dirs()`. Repo-root `recordings/`/`transcripts/`/`output/` dirs are dev-only scratch.
@@ -27,8 +27,15 @@ The app is a thin Electron shell over a PyInstaller-bundled Python CLI. There is
 - Run a single test: `python -m unittest tests.test_config.ConfigStoragePathTests.test_set_storage_path_handles_permission_errors`
 
 ### Desktop App (Electron)
-- Start app (dev): `cd app && npm start`
+- Start app (dev): `cd app && npm start` — rebuilds the renderer (`vite build`), then launches Electron
+- Start without rebuilding renderer: `cd app && npm run start:nobuild` — fast relaunch when only `main.js` / `preload.js` changed
+- Renderer dev server (HMR, no Electron): `cd app && npm run dev:renderer`
+- Typecheck renderer: `cd app && npm run typecheck:renderer`
+- Lint renderer: `cd app && npm run lint:renderer`
+- Format renderer: `cd app && npm run format:renderer`
 - Build DMG (local, for testing): `cd app && npm run build`
+
+The Electron build pulls the bundled backend from `../dist/stenoai` via `extraResources`, so the PyInstaller step (`pyinstaller stenoai.spec --noconfirm`) must succeed *before* `npm run build` — otherwise the packaged app will be missing `stenoai`, `ollama`, and `ffmpeg`. The same applies in dev: `getBackendPath()` falls back to `dist/stenoai/stenoai`, so a fresh checkout needs the backend built once before the app can record or transcribe.
 
 For setup from a clean checkout, see `CONTRIBUTING.md` and `README.md`.
 
@@ -40,13 +47,27 @@ This app ships as a signed DMG to real users. Before considering any change comp
 - **No bare `exit()` in Python code**. PyInstaller bundles don't have `exit` as a builtin. Always use `sys.exit()`.
 
 ## Brand Colors
-StenoAI logo gradient (used in website logo SVG and app header):
-- Indigo: `#6366f1`
-- Sky blue: `#0ea5e9`
-- Cyan: `#06b6d4`
-- CSS: `linear-gradient(135deg, #6366f1, #0ea5e9, #06b6d4)`
+Paper + ink — a cream page with deep ink text. The logo
+(`website/public/stenoai-logo.svg`) is `#1B1B19` ink on `#FAF9F5` paper.
+There is no chromatic brand accent; UI accents (focus rings, active
+states, links) use the foreground ink itself, so the whole interface
+reads as one neutral palette.
 
-App UI accent: `--accent-primary: #818cf8` (lighter indigo, used for focus states, active tabs, toggles)
+**Light mode**
+- Page / surface: `#FAF9F5` (paper-0)
+- Sunken / hover: `#F5F3EC` (paper-1)
+- Primary text + accent: `#1B1B19` (ink-900)
+- Secondary text: `#6B6B66` (ink-500)
+
+**Dark mode**
+- Page / surface: `#1A1A18`
+- Raised: `#24241F`
+- Primary text + accent: `#EDEAE0`
+- Secondary text: `#9A968A`
+
+Tokens live in `app/renderer/src/globals.css` under `:root` (light) and
+`.dark, [data-theme="dark"]` (dark). Prefer the semantic tokens
+(`--fg-1`, `--surface-raised`, `--accent-primary`) over raw hex.
 
 ## Git Workflow
 - Always create a branch for changes unless explicitly told otherwise
@@ -64,28 +85,30 @@ App UI accent: `--accent-primary: #818cf8` (lighter indigo, used for focus state
 - Use conventional commit format when appropriate (feat:, fix:, docs:, etc.)
 
 ## Release Process
-Releases are automated via `.github/workflows/build-release.yml`. Never create releases manually.
+Releases are automated via `.github/workflows/build-release.yml`. Never create releases manually. The full checklist for shipping a new version (do all of this before pushing the tag — the tag push is the public release trigger):
 
-1. Bump version in `app/package.json` (on the branch, before merging)
-2. After PR is merged to `main`, create an **annotated tag** on main with the release notes in the tag message:
+1. **Survey what's shipping** — `git log v<previous>..HEAD --oneline` and `gh pr list --state merged --limit 20` to confirm the changeset.
+2. **Update the README** to reflect what's shipping:
+   - Add bullet entries to the "📢 What's New" section for each notable user-facing change. Format: `- **YYYY-MM-DD** <emoji> <Title> — <one-sentence description>`. Most recent entries at the top.
+   - Remove "What's New" entries older than ~2 months to keep the section fresh.
+   - Update the "Features" list if any new user-facing capability is being added (or an existing one materially changed).
+   - Update "Models & Performance" if the bundled Whisper or Ollama model lineup changed.
+3. **Bump version** in `app/package.json`.
+4. **Commit and merge** the README + version bump to `main` (or push directly if explicitly authorised).
+5. **Draft release notes** as markdown — they become the GitHub Release body verbatim:
+   - One-line summary at the top.
+   - Headline features grouped under `### Section` headers (e.g., "System audio", "UX polish", "Under the hood", "Fixes").
+   - Migration/upgrade notes if anything changed paths, identifiers, defaults, or requires user action.
+6. **Create an annotated tag** on `main` with the release notes as the tag message:
    ```
-   git tag -a v0.2.5 -m "Release notes here..."
-   git push origin v0.2.5
+   git tag -a v0.3.0 -m "Release notes here..."
+   git push origin v0.3.0
    ```
-3. The tag push triggers the workflow which:
+7. The tag push triggers the workflow which:
    - Builds signed + notarized DMGs for both arm64 and x64
-   - Creates a GitHub Release with the tag message as the "What's New" section
+   - Creates a GitHub Release with the tag message as the body
    - Uploads both DMGs as release assets
-4. The tag message becomes the release notes body — write it as markdown with a summary of changes
-5. Do NOT build DMGs locally for releases, do NOT use `gh release create` manually
-
-## README "What's New" Section
-The README has a "What's New" table that should be updated every ~2 weeks. When asked to update it (or when shipping a notable feature):
-1. Check recently merged PRs: `gh pr list --state merged --limit 10`
-2. For each notable PR, add a row to the table with the merge date and a one-sentence summary
-3. Keep "Coming soon" items for features that are planned but not yet shipped
-4. Remove entries older than ~2 months to keep the section fresh
-5. Most recent entries go at the top of the table
+8. Do NOT build DMGs locally for releases, do NOT use `gh release create` manually.
 
 ## Session Logging
 When the user says "log session" or similar (e.g., "update session log", "document this session"):

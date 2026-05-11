@@ -159,7 +159,8 @@ Help improve our documentation:
 stenoai/
 ├── app/                  # Electron desktop app
 │   ├── main.js          # Main process
-│   ├── index.html       # Renderer process
+│   ├── preload.js       # Context-isolated IPC bridge
+│   ├── renderer/        # React + Vite renderer (TypeScript)
 │   └── package.json     # App dependencies
 ├── src/                  # Python backend
 │   ├── audio_recorder.py    # Audio recording

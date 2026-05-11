@@ -20,6 +20,10 @@ downloads/
 eggs/
 .eggs/
 lib/
+!app/renderer/src/lib/
+
+# Superpowers skill scratch — agent working notes, not project content.
+docs/
 lib64/
 parts/
 sdist/
@@ -137,6 +141,11 @@ audio_buffer.npy
 # Node.js
 node_modules/
 app/node_modules/
+e2e/node_modules
+
+# Playwright
+e2e/test-results/
+e2e/playwright-report/
 
 # IDE
 .vscode/
