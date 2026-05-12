@@ -39,6 +39,7 @@
 If you're looking for a hosted desktop recording API, consider checking out [Recall.ai](https://www.recall.ai/product/desktop-recording-sdk?utm_source=github&utm_medium=sponsorship&utm_campaign=ruzin-stenoai), an API that records Zoom, Google Meet, Microsoft Teams, in-person meetings, and more.
 
 ## 📢 What's New
+- **2026-05-12** 🐛 Non-English summaries no longer disappear — Fixed a bug where summaries in non-English (or auto-detected) languages briefly appeared then flipped to "No summary available" once processing finished. Existing affected meetings can be recovered with the regenerate-notes button.
 - **2026-05-11** 🐛 Smoother stop → Processing handoff — Fixed a race where typing notes during a recording could bounce you to Home on Stop instead of showing the analyser bar; the next *New note* now also starts with empty title and notes.
 - **2026-05-09** 🎙️ Native system audio (Core Audio Tap) — On macOS 14.4+, system audio now records natively with no shell-out, with an automatic fallback for older versions. Default ON.
 - **2026-05-09** 💬 Cross-note Chat tab — Ask natural-language questions across your entire note library, not just one note at a time
