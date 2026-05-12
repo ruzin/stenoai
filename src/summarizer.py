@@ -663,12 +663,20 @@ Return ONLY the response in this exact JSON format:
     
     def _create_markdown_prompt(self, transcript: str, language: str = "en", notes: str = None) -> str:
         """Create a prompt that asks the LLM to output markdown directly."""
-        # Language instruction
+        # Language instruction. The four ## section headers must stay in English
+        # because simple_recorder._parse_streamed_markdown matches on them
+        # literally; the body content is what gets translated.
         if language and language not in ("en", "auto"):
             from .config import get_config
             language_name = get_config().get_language_name(language)
             if language_name != "Unknown":
-                language_instruction = f"\n\nCRITICAL: Write the entire output in {language_name}."
+                language_instruction = (
+                    f"\n\nCRITICAL: Write all content (summary text, topic titles, "
+                    f"topic analysis, key points, action items) in {language_name}. "
+                    f"However, keep the markdown section headers exactly as shown in "
+                    f"English: '## Summary', '## Key Topics', '## Key Points', "
+                    f"'## Action Items'. Do not translate these four headers."
+                )
             else:
                 language_instruction = ""
         else:
