@@ -101,6 +101,76 @@ export interface ChatSessionsBlob {
   }>;
 }
 
+// ---------- Org adapter types ----------
+export interface OrgUser {
+  email: string;
+  name: string;
+  orgId: string;
+}
+
+export interface OrgStatusResponse {
+  signedIn: boolean;
+  adapterUrl?: string;
+  email?: string;
+  name?: string;
+  orgId?: string;
+}
+
+export type OrgLoginResponse = Result<{
+  signedIn: true;
+  adapterUrl: string;
+  email: string;
+  name: string;
+  orgId: string;
+}>;
+
+export interface OrgMeetingSummary {
+  id: string;
+  title: string;
+  owner_email: string;
+  org_id: string;
+  visibility: 'private' | 'org';
+  created_at: number;
+  has_artifact: boolean;
+}
+
+export interface OrgMeeting extends OrgMeetingSummary {
+  body: string;
+  download_url?: string;
+}
+
+export type OrgListMeetingsResponse = Result<{ meetings: OrgMeetingSummary[] }>;
+export type OrgGetMeetingResponse = Result<{ meeting: OrgMeeting }>;
+
+export interface OrgCreateMeetingPayload {
+  title: string;
+  body?: string;
+  visibility?: 'private' | 'org';
+  s3_key?: string | null;
+}
+
+export interface OrgShareMeetingPayload {
+  title: string;
+  body: string;
+  visibility?: 'private' | 'org';
+}
+
+export type OrgShareMeetingResponse = Result<{ meeting: OrgMeeting; s3_key: string }>;
+
+export interface OrgChatPayload {
+  messages: Array<{ role: 'user' | 'assistant'; content: string }>;
+  system?: string;
+  model?: string;
+  max_tokens?: number;
+}
+
+export type OrgChatResponse = Result<{
+  reply: string;
+  model: string;
+  input_tokens: number;
+  output_tokens: number;
+}>;
+
 export type MicPermissionStatus =
   | 'granted'
   | 'denied'
@@ -458,6 +528,20 @@ export interface StenoaiBridge {
     trayStopRecording: Subscribe<void>;
     trayOpenSettings: Subscribe<void>;
     showQuitDialog: Subscribe<{ type: 'recording' | 'processing'; jobCount?: number }>;
+  };
+
+  org: {
+    status: RequestFn<[], OrgStatusResponse>;
+    login: RequestFn<[adapterUrl: string, email: string, password: string], OrgLoginResponse>;
+    ssoGoogleStart: RequestFn<[adapterUrl: string], OrgLoginResponse>;
+    logout: RequestFn<[], Result<Record<string, never>>>;
+    listMeetings: RequestFn<[], OrgListMeetingsResponse>;
+    getMeeting: RequestFn<[id: string], OrgGetMeetingResponse>;
+    createMeeting: RequestFn<[payload: OrgCreateMeetingPayload], OrgGetMeetingResponse>;
+    deleteMeeting: RequestFn<[id: string], Result<{ id: string }>>;
+    shareMeeting: RequestFn<[payload: OrgShareMeetingPayload], OrgShareMeetingResponse>;
+    aiChat: RequestFn<[payload: OrgChatPayload], OrgChatResponse>;
+    chatStream: SendFn<[streamId: string, payload: OrgChatPayload]>;
   };
 
   dialog: {

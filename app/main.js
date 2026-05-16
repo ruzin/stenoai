@@ -561,6 +561,14 @@ function createWindow(options = {}) {
   mainWindow.on('closed', () => {
     mainWindow = null;
     rendererShortcutReady = false;
+    // Abort any in-flight org SSE streams so they don't keep consuming
+    // network/CPU after the renderer is gone.
+    if (typeof orgStreamAborters !== 'undefined') {
+      for (const ctrl of orgStreamAborters.values()) {
+        try { ctrl.abort(); } catch (_) {}
+      }
+      orgStreamAborters.clear();
+    }
     if (pythonProcess) {
       pythonProcess.kill();
     }
@@ -1363,6 +1371,15 @@ ipcMain.on('query-cancel', (_event, queryId) => {
     console.log(`[QUERY] Cancelling queryId=${queryId}`);
     proc.kill();
     activeQueryProcs.delete(queryId);
+  }
+  // Org-chat streams use AbortController instead of a child process; share
+  // the same query-cancel channel so the renderer doesn't have to know which
+  // backend a given streamId belongs to.
+  const ctrl = orgStreamAborters.get(queryId);
+  if (ctrl) {
+    console.log(`[ORG] Cancelling streamId=${queryId}`);
+    try { ctrl.abort(); } catch (_) {}
+    orgStreamAborters.delete(queryId);
   }
 });
 
@@ -5157,5 +5174,530 @@ ipcMain.handle('outlook-auth-disconnect', async () => {
     return { success: true };
   } catch (error) {
     return { success: false, error: error.message };
+  }
+});
+
+// ─── Organisation adapter (enterprise mode) ──────────────────────────────────
+// Talks to the customer's self-hosted Steno adapter for shared notes, AI
+// proxying, and S3-backed artifacts. Session token + adapter URL are
+// persisted with safeStorage; the renderer never sees the JWT directly,
+// it goes through these IPC handlers.
+
+function getOrgSessionPath() {
+  return path.join(os.homedir(), 'Library', 'Application Support', 'stenoai', '.org-session');
+}
+
+function saveOrgSession(session) {
+  try {
+    const dir = path.dirname(getOrgSessionPath());
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    const encrypted = safeStorage.encryptString(JSON.stringify(session));
+    fs.writeFileSync(getOrgSessionPath(), encrypted);
+    return true;
+  } catch (e) {
+    console.error('Failed to save org session:', e.message);
+    return false;
+  }
+}
+
+function loadOrgSession() {
+  try {
+    const p = getOrgSessionPath();
+    if (!fs.existsSync(p)) return null;
+    const encrypted = fs.readFileSync(p);
+    return JSON.parse(safeStorage.decryptString(encrypted));
+  } catch (e) {
+    console.error('Failed to load org session:', e.message);
+    return null;
+  }
+}
+
+function clearOrgSession() {
+  try {
+    const p = getOrgSessionPath();
+    if (fs.existsSync(p)) fs.unlinkSync(p);
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+// Matches anything that looks like a loopback authority — covers
+// `localhost`, `127.0.0.1`, IPv6 `::1` (bare or bracketed), with or
+// without a port and/or path. Used to pick the right default scheme
+// when the user types a hostname without one.
+const _LOOPBACK_HOST_RE = /^(localhost|127\.0\.0\.1|\[::1\]|::1)(?::\d+)?(?:\/|$)/i;
+
+function normaliseAdapterUrl(url) {
+  let u = String(url || '').trim();
+  if (!u) return '';
+  if (!/^https?:\/\//i.test(u)) {
+    // No scheme provided. Default to https — the adapter is the holder of
+    // org JWTs, AWS credentials, and the AI provider key; sending its
+    // bearer tokens over plain http would expose them on the wire to any
+    // network observer. Loopback addresses are the one documented dev
+    // exception where http is fine because the traffic never leaves the
+    // machine.
+    const isLoopback = _LOOPBACK_HOST_RE.test(u);
+    u = (isLoopback ? 'http://' : 'https://') + u;
+  }
+  return u.replace(/\/+$/, '');
+}
+
+async function adapterFetch(pathname, opts = {}) {
+  const session = loadOrgSession();
+  if (!session) throw new Error('not signed in to org adapter');
+  const headers = {
+    'content-type': 'application/json',
+    authorization: 'Bearer ' + session.token,
+    ...(opts.headers || {}),
+  };
+  const res = await fetch(session.adapterUrl + pathname, { ...opts, headers });
+  const text = await res.text();
+  let body;
+  try {
+    body = text ? JSON.parse(text) : {};
+  } catch {
+    body = { detail: text };
+  }
+  if (!res.ok) {
+    if (res.status === 401) clearOrgSession();
+    const err = new Error(body.detail || ('HTTP ' + res.status));
+    err.status = res.status;
+    throw err;
+  }
+  return body;
+}
+
+ipcMain.handle('org-status', async () => {
+  const session = loadOrgSession();
+  if (!session) return { signedIn: false };
+  return {
+    signedIn: true,
+    adapterUrl: session.adapterUrl,
+    email: session.email,
+    name: session.name,
+    orgId: session.orgId,
+  };
+});
+
+ipcMain.handle('org-login', async (_event, payload) => {
+  try {
+    const { adapterUrl, email, password } = payload || {};
+    const url = normaliseAdapterUrl(adapterUrl);
+    if (!url) return { success: false, error: 'adapter URL is required' };
+    if (!email || !password) return { success: false, error: 'email and password are required' };
+    const res = await fetch(url + '/auth/login', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    });
+    const text = await res.text();
+    let body;
+    try {
+      body = text ? JSON.parse(text) : {};
+    } catch {
+      body = { detail: text };
+    }
+    if (!res.ok) return { success: false, error: body.detail || ('HTTP ' + res.status) };
+    const session = {
+      adapterUrl: url,
+      token: body.token,
+      email: body.email,
+      name: body.name,
+      orgId: body.org_id,
+    };
+    if (!saveOrgSession(session)) return { success: false, error: 'failed to persist session' };
+    return {
+      success: true,
+      signedIn: true,
+      adapterUrl: url,
+      email: body.email,
+      name: body.name,
+      orgId: body.org_id,
+    };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('org-logout', async () => {
+  clearOrgSession();
+  return { success: true };
+});
+
+// ─── Google OIDC sign-in ─────────────────────────────────────────────────────
+// Loopback-redirect OAuth flow for installed apps (RFC 8252):
+//   1. Generate state + PKCE code_verifier locally.
+//   2. Start a one-shot HTTP server on a random localhost port.
+//   3. Ask the adapter to mint the Google authorize_url (it knows the
+//      client_id; the client_secret never leaves the adapter).
+//   4. Open the user's system browser. They sign in with Google; Google
+//      redirects back to http://127.0.0.1:<port>/callback?code=...&state=...
+//   5. Capture code + state, verify state, send (code, code_verifier,
+//      redirect_uri) to the adapter's /callback. The adapter exchanges +
+//      verifies the ID token + mints a session JWT in the same shape as
+//      /auth/login.
+//   6. Persist the session via the existing saveOrgSession path.
+//
+// Times out after 5 minutes of inactivity to avoid stranded servers.
+
+function _ssoRandUrlSafe(bytes) {
+  return crypto.randomBytes(bytes).toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '');
+}
+
+function _ssoCodeChallenge(verifier) {
+  return crypto.createHash('sha256').update(verifier).digest('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '');
+}
+
+async function _ssoOpenLoopback() {
+  // Returns { server, port, waitForCallback(state, timeoutMs) }. The callback
+  // promise resolves with the validated `code`, or rejects on state mismatch /
+  // user denial / timeout. Always closes the server on resolution.
+  return new Promise((resolve, reject) => {
+    const server = http.createServer();
+    server.on('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const { port } = server.address();
+      let resolved = false;
+      const waitForCallback = (state, timeoutMs = 5 * 60 * 1000) =>
+        new Promise((res, rej) => {
+          const timer = setTimeout(() => {
+            cleanup();
+            rej(new Error('SSO timed out waiting for browser callback'));
+          }, timeoutMs);
+          const cleanup = () => {
+            clearTimeout(timer);
+            if (!resolved) {
+              resolved = true;
+              try { server.close(); } catch (_) {}
+            }
+          };
+          server.on('request', (req, sres) => {
+            // We only care about the /callback path; ignore favicon etc.
+            const u = new URL(req.url, `http://127.0.0.1:${port}`);
+            if (u.pathname !== '/callback') {
+              sres.writeHead(404).end('not found');
+              return;
+            }
+            const code = u.searchParams.get('code');
+            const cbState = u.searchParams.get('state');
+            const error = u.searchParams.get('error');
+            sres.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+            if (error) {
+              sres.end(
+                `<html><body style="font:14px -apple-system;padding:40px">` +
+                `Sign-in failed: <code>${String(error).slice(0, 80)}</code>. ` +
+                `You can close this window.</body></html>`,
+              );
+              cleanup();
+              rej(new Error(`Google returned error: ${error}`));
+              return;
+            }
+            if (!code || cbState !== state) {
+              sres.end(
+                `<html><body style="font:14px -apple-system;padding:40px">` +
+                `Sign-in failed: bad state or missing code. Close this window and retry.` +
+                `</body></html>`,
+              );
+              cleanup();
+              rej(new Error('Bad state or missing code on callback'));
+              return;
+            }
+            sres.end(
+              `<html><body style="font:14px -apple-system;padding:40px;color:#1B1B19;background:#FAF9F5">` +
+              `<h2 style="font-family:Georgia,serif;font-weight:400;margin:0 0 8px">Signed in.</h2>` +
+              `You can close this window and return to Steno.</body></html>`,
+            );
+            cleanup();
+            res(code);
+          });
+        });
+      resolve({ server, port, waitForCallback });
+    });
+  });
+}
+
+ipcMain.handle('org-sso-google-start', async (_event, payload) => {
+  let loopback = null;
+  try {
+    const adapterUrl = normaliseAdapterUrl(payload && payload.adapterUrl);
+    if (!adapterUrl) return { success: false, error: 'adapter URL is required' };
+
+    // 1. PKCE + state.
+    const codeVerifier = _ssoRandUrlSafe(64);
+    const codeChallenge = _ssoCodeChallenge(codeVerifier);
+    const state = _ssoRandUrlSafe(16);
+
+    // 2. Open the loopback server. Keep the handle so any pre-callback
+    //    failure (adapter /start 4xx, openExternal throws) can close it
+    //    immediately instead of waiting for the 5-minute timeout to fire.
+    loopback = await _ssoOpenLoopback();
+    const { port, waitForCallback } = loopback;
+    const redirectUri = `http://127.0.0.1:${port}/callback`;
+
+    // 3. Ask the adapter to mint the authorize URL.
+    const startRes = await fetch(adapterUrl + '/auth/sso/google/start', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        redirect_uri: redirectUri,
+        code_challenge: codeChallenge,
+        state,
+      }),
+    });
+    const startBody = await startRes.json().catch(() => ({}));
+    if (!startRes.ok) {
+      try { loopback.server.close(); } catch (_) {}
+      return { success: false, error: startBody.detail || `HTTP ${startRes.status}` };
+    }
+
+    // 4. Open browser.
+    await shell.openExternal(startBody.authorize_url);
+
+    // 5. Wait for the callback (5-minute hard cap). waitForCallback closes
+    //    the server itself on resolve/reject.
+    const code = await waitForCallback(state, 5 * 60 * 1000);
+
+    // 6. Exchange via the adapter.
+    const cbRes = await fetch(adapterUrl + '/auth/sso/google/callback', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        code,
+        code_verifier: codeVerifier,
+        redirect_uri: redirectUri,
+      }),
+    });
+    const cbBody = await cbRes.json().catch(() => ({}));
+    if (!cbRes.ok) {
+      return { success: false, error: cbBody.detail || `HTTP ${cbRes.status}` };
+    }
+
+    // 7. Persist + return same envelope as /org-login.
+    const session = {
+      adapterUrl,
+      token: cbBody.token,
+      email: cbBody.email,
+      name: cbBody.name,
+      orgId: cbBody.org_id,
+    };
+    if (!saveOrgSession(session)) return { success: false, error: 'failed to persist session' };
+    return {
+      success: true,
+      signedIn: true,
+      adapterUrl,
+      email: cbBody.email,
+      name: cbBody.name,
+      orgId: cbBody.org_id,
+    };
+  } catch (e) {
+    // Any other throw (openExternal failed, etc.) — make sure the loopback
+    // server isn't orphaned.
+    if (loopback && loopback.server && loopback.server.listening) {
+      try { loopback.server.close(); } catch (_) {}
+    }
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('org-list-meetings', async () => {
+  try {
+    const body = await adapterFetch('/meetings');
+    return { success: true, meetings: body.meetings || [] };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('org-get-meeting', async (_event, id) => {
+  try {
+    const meeting = await adapterFetch('/meetings/' + encodeURIComponent(String(id)));
+    return { success: true, meeting };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('org-create-meeting', async (_event, payload) => {
+  try {
+    const meeting = await adapterFetch('/meetings', {
+      method: 'POST',
+      body: JSON.stringify(payload || {}),
+    });
+    return { success: true, meeting };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('org-delete-meeting', async (_event, id) => {
+  try {
+    const body = await adapterFetch('/meetings/' + encodeURIComponent(String(id)), {
+      method: 'DELETE',
+    });
+    return { success: true, id: body.id };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+// Three-step share: presign → PUT bytes to S3 → register meeting metadata
+// with the s3_key. Centralised in main so the renderer doesn't have to do
+// raw PUT (and so we can keep the bytes off the renderer when the bucket
+// has stricter CORS).
+ipcMain.handle('org-share-meeting', async (_event, payload) => {
+  try {
+    const { title, body, visibility = 'org' } = payload || {};
+    if (!title) return { success: false, error: 'title is required' };
+    if (typeof body !== 'string') return { success: false, error: 'body is required' };
+
+    const safeTitle = String(title)
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 60) || 'note';
+    const filename = `${safeTitle}.md`;
+
+    // Step 1: presign — adapter returns a 15-minute PUT URL + s3_key
+    const presign = await adapterFetch('/uploads/presign', {
+      method: 'POST',
+      body: JSON.stringify({ filename, content_type: 'text/markdown' }),
+    });
+
+    // Step 2: PUT the markdown bytes straight to S3. Bucket has SSE-AES256
+    // by default; the upload inherits that.
+    const putRes = await fetch(presign.upload_url, {
+      method: 'PUT',
+      headers: { 'content-type': 'text/markdown' },
+      body,
+    });
+    if (!putRes.ok) {
+      const detail = await putRes.text().catch(() => '');
+      return { success: false, error: `s3 upload failed (${putRes.status}): ${detail.slice(0, 200)}` };
+    }
+
+    // Step 3: register metadata in the adapter. The body field is empty —
+    // the adapter holds only the s3_key and serves a presigned GET when
+    // someone in the org opens the note.
+    const meeting = await adapterFetch('/meetings', {
+      method: 'POST',
+      body: JSON.stringify({
+        title,
+        body: '',
+        visibility,
+        s3_key: presign.s3_key,
+      }),
+    });
+    return { success: true, meeting, s3_key: presign.s3_key };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('org-ai-chat', async (_event, payload) => {
+  try {
+    const body = await adapterFetch('/ai/chat', {
+      method: 'POST',
+      body: JSON.stringify(payload || {}),
+    });
+    return { success: true, ...body };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+// Streaming variant of /ai/chat. Renderer hands us a streamId; we forward
+// chunks via the same query-chunk / query-done events the local Python
+// stream uses, so the existing useStreamingQuery infra works unchanged.
+const orgStreamAborters = new Map();
+
+ipcMain.on('org-chat-stream', async (event, streamId, payload) => {
+  const sender = event.sender;
+  // Wrap every send through this guard — the renderer can be destroyed
+  // (window close, hard reload) mid-stream, after which sender.send() will
+  // throw "Object has been destroyed". We also abort the upstream HTTP
+  // stream when the sender goes away so we stop pulling bytes from the
+  // adapter for a renderer that no longer exists.
+  const safeSend = (channel, payload) => {
+    if (sender.isDestroyed()) return;
+    try { sender.send(channel, payload); } catch (_) { /* destroyed mid-send */ }
+  };
+
+  const session = loadOrgSession();
+  if (!session) {
+    safeSend('query-done', { queryId: streamId, success: false, error: 'not signed in to org adapter' });
+    return;
+  }
+  const controller = new AbortController();
+  orgStreamAborters.set(streamId, controller);
+  const onDestroyed = () => {
+    try { controller.abort(); } catch (_) {}
+  };
+  sender.once('destroyed', onDestroyed);
+
+  try {
+    const res = await fetch(session.adapterUrl + '/ai/chat/stream', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: 'Bearer ' + session.token,
+      },
+      body: JSON.stringify(payload || {}),
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      let detail = '';
+      try { detail = await res.text(); } catch (_) {}
+      if (res.status === 401) clearOrgSession();
+      safeSend('query-done', { queryId: streamId, success: false, error: `HTTP ${res.status}: ${detail.slice(0, 200)}` });
+      return;
+    }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let success = true;
+    let errorMsg = null;
+    while (true) {
+      if (sender.isDestroyed()) {
+        try { controller.abort(); } catch (_) {}
+        return;
+      }
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let nl;
+      while ((nl = buffer.indexOf('\n')) !== -1) {
+        const line = buffer.slice(0, nl);
+        buffer = buffer.slice(nl + 1);
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        let obj;
+        try { obj = JSON.parse(trimmed); } catch (_) { continue; }
+        if (obj.type === 'chunk' && obj.text) {
+          safeSend('query-chunk', { queryId: streamId, chunk: obj.text });
+        } else if (obj.type === 'error') {
+          success = false;
+          errorMsg = obj.error;
+        }
+        // 'done' lines carry usage info; we don't surface it for now.
+      }
+    }
+    safeSend('query-done', { queryId: streamId, success, error: errorMsg });
+  } catch (e) {
+    if (e.name === 'AbortError') {
+      safeSend('query-done', { queryId: streamId, success: false, error: 'cancelled' });
+    } else {
+      safeSend('query-done', { queryId: streamId, success: false, error: e.message });
+    }
+  } finally {
+    orgStreamAborters.delete(streamId);
+    try { sender.removeListener('destroyed', onDestroyed); } catch (_) {}
   }
 });

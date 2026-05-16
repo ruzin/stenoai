@@ -1,8 +1,10 @@
 import * as React from 'react';
 import {
   ChevronDown,
+  Globe,
   Home as HomeIcon,
   Inbox,
+  LogOut,
   MessageSquare,
   Plus,
   Search,
@@ -12,6 +14,7 @@ import { navigate, toggleSettings } from '@/lib/router';
 import { cn, shortcut } from '@/lib/utils';
 import { LucideIcon, IconPicker } from '@/components/IconPicker';
 import { useUpdateFolderIcon } from '@/hooks/useFolders';
+import { useOrgLogout, useOrgSession } from '@/hooks/useOrg';
 
 export interface SidebarMeeting {
   summaryFile: string;
@@ -167,6 +170,11 @@ export function Sidebar({
   // Match /chat as well as any /chat/<id> conversation route — the same Chat
   // tab item should stay highlighted when drilling into a session.
   const isChatActive = currentRoute === '/chat' || currentRoute.startsWith('/chat/');
+  const isOrgSharedActive = currentRoute.startsWith('/org/');
+
+  const orgSession = useOrgSession();
+  const orgLogout = useOrgLogout();
+  const orgSignedIn = orgSession.data?.signedIn ?? false;
   // Malformed % escapes throw URIError. Guard so a bad route can't crash
   // the entire sidebar render.
   const activeFolderId = React.useMemo<string | null>(() => {
@@ -390,6 +398,18 @@ export function Sidebar({
             <span className="flex-1 truncate">Chat</span>
           </button>
 
+          {orgSignedIn && (
+            <button
+              type="button"
+              className={cn('sb-row', isOrgSharedActive && 'active')}
+              onClick={() => navigate('/org/shared')}
+              title={`Shared across ${orgSession.data?.orgId ?? 'your org'}`}
+            >
+              <Globe className="size-[14px]" />
+              <span className="flex-1 truncate">Shared notes</span>
+            </button>
+          )}
+
           {/* Folders group */}
           <div className="mt-3.5">
             <div
@@ -472,11 +492,24 @@ export function Sidebar({
           </div>
         </nav>
 
-        {/* Pinned to the bottom of the sidebar — small icon button like it
-            was in the toolbar, not a full nav row. Toggles open/closed: a
-            second click while already on /settings returns the user to the
-            route they were viewing before. */}
-        <div className="px-3 py-2">
+        {/* Profile chip + Settings cog. When the user is signed in to an org
+            adapter, the chip sits on the left and the cog moves to the right
+            (justify-between). When signed out the chip is gone and the cog
+            falls back to the left where it originally lived. */}
+        <div
+          className={cn(
+            'flex items-center gap-2 px-3 py-2',
+            orgSignedIn && 'justify-between',
+          )}
+        >
+          {orgSignedIn && (
+            <ProfileChip
+              email={orgSession.data?.email ?? ''}
+              name={orgSession.data?.name ?? ''}
+              orgId={orgSession.data?.orgId ?? ''}
+              onSignOut={() => orgLogout.mutate()}
+            />
+          )}
           <button
             type="button"
             onClick={() => toggleSettings(currentRoute)}
@@ -513,5 +546,110 @@ export function Sidebar({
         />
       )}
     </aside>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ProfileChip — shown bottom-left when signed in to an org adapter. Click
+// opens a small popover with the full identity + sign-out button. The avatar
+// is an emoji per email so we don't need a real photo backend for the demo.
+// ---------------------------------------------------------------------------
+
+const AVATAR_BY_LOCAL_PART: Record<string, string> = {
+  alice: '👩‍💼',
+  bob: '👨‍💼',
+  carol: '🧑‍💼',
+  dan: '👨‍💻',
+};
+
+function avatarFor(email: string): string {
+  const local = (email.split('@')[0] || '').toLowerCase();
+  return AVATAR_BY_LOCAL_PART[local] || '🧑';
+}
+
+interface ProfileChipProps {
+  email: string;
+  name: string;
+  orgId: string;
+  onSignOut: () => void;
+}
+
+function ProfileChip({ email, name, orgId, onSignOut }: ProfileChipProps) {
+  const [open, setOpen] = React.useState(false);
+  const ref = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    if (!open) return;
+    const onClick = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onClick);
+    return () => document.removeEventListener('mousedown', onClick);
+  }, [open]);
+
+  const initial = (name || email).slice(0, 1).toUpperCase();
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-2 rounded-md px-1.5 py-1 transition-colors hover:bg-[color:var(--surface-hover)]"
+        title={`${name || email} · ${orgId}`}
+        aria-haspopup="menu"
+        aria-expanded={open}
+      >
+        <span
+          aria-hidden
+          className="inline-flex size-[22px] items-center justify-center rounded-full text-[13px]"
+          style={{ background: 'var(--surface-raised)', color: 'var(--fg-1)' }}
+        >
+          {avatarFor(email) || initial}
+        </span>
+        <span
+          className="max-w-[120px] truncate text-[12.5px]"
+          style={{ color: 'var(--fg-1)' }}
+        >
+          {(name || email).split(' ')[0]}
+        </span>
+      </button>
+
+      {open && (
+        <div
+          role="menu"
+          className="absolute bottom-[110%] left-0 z-30 min-w-[200px] overflow-hidden rounded-[8px] shadow-md"
+          style={{
+            background: 'var(--surface-raised)',
+            border: '1px solid var(--border-subtle)',
+          }}
+        >
+          <div className="px-3 py-2.5">
+            <div className="text-[12.5px] font-medium" style={{ color: 'var(--fg-1)' }}>
+              {name || email}
+            </div>
+            <div className="mt-0.5 text-[11px]" style={{ color: 'var(--fg-2)' }}>
+              {email}
+            </div>
+            <div className="mt-1 text-[10.5px]" style={{ color: 'var(--fg-muted)', fontFamily: 'var(--font-mono)' }}>
+              org · {orgId}
+            </div>
+          </div>
+          <div className="border-t border-[color:var(--border-subtle)]">
+            <button
+              type="button"
+              role="menuitem"
+              className="flex w-full items-center gap-2 px-3 py-2 text-left text-[12.5px] transition-colors hover:bg-[color:var(--surface-hover)]"
+              style={{ color: 'var(--fg-1)' }}
+              onClick={() => {
+                setOpen(false);
+                onSignOut();
+              }}
+            >
+              <LogOut className="size-[12px]" /> Sign out
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }

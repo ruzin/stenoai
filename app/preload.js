@@ -206,6 +206,24 @@ const stenoai = {
     rendererReady: () => send('shortcut-renderer-ready'),
   },
 
+  org: {
+    status: () => invoke('org-status'),
+    login: (adapterUrl, email, password) => invoke('org-login', { adapterUrl, email, password }),
+    logout: () => invoke('org-logout'),
+    ssoGoogleStart: (adapterUrl) => invoke('org-sso-google-start', { adapterUrl }),
+    listMeetings: () => invoke('org-list-meetings'),
+    getMeeting: (id) => invoke('org-get-meeting', id),
+    createMeeting: (payload) => invoke('org-create-meeting', payload),
+    deleteMeeting: (id) => invoke('org-delete-meeting', id),
+    shareMeeting: (payload) => invoke('org-share-meeting', payload),
+    aiChat: (payload) => invoke('org-ai-chat', payload),
+    /** Fire-and-forget streaming start. Chunks arrive via query-chunk +
+     *  query-done events on the existing channel — same wire as
+     *  chatGlobalStream, so useStreamingQuery's subscribeQueryStream
+     *  works unchanged. */
+    chatStream: (streamId, payload) => send('org-chat-stream', streamId, payload),
+  },
+
   dialog: {
     respondQuit: (confirmed) => send('quit-dialog-response', { confirmed }),
   },

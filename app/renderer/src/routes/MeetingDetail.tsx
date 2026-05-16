@@ -6,6 +6,7 @@ import {
   Clock,
   Copy,
   Folder as FolderIcon,
+  Globe,
   MoreHorizontal,
   RefreshCw,
   Trash2,
@@ -27,6 +28,7 @@ import {
   SelectSeparator,
 } from '@/components/ui/select';
 import { useMeeting, useReprocessMeeting, useDeleteMeeting, meetingsKeys } from '@/hooks/useMeetings';
+import { useOrgSession, useShareToOrg } from '@/hooks/useOrg';
 import {
   Dialog,
   DialogContent,
@@ -112,6 +114,28 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
   const [deleteOpen, setDeleteOpen] = React.useState(false);
   const deleteMeeting = useDeleteMeeting();
   const reprocess = useReprocessMeeting();
+  const orgSession = useOrgSession();
+  const shareToOrg = useShareToOrg();
+  const [shareState, setShareState] = React.useState<'idle' | 'sharing' | 'shared' | 'error'>('idle');
+  const [shareError, setShareError] = React.useState<string | null>(null);
+
+  const onShareToOrg = async () => {
+    setShareState('sharing');
+    setShareError(null);
+    const title = meeting.session_info.name || 'Untitled note';
+    // Compose the full structured note as markdown — same content the
+    // local detail page renders, minus the raw transcript (kept off the
+    // shared corpus to limit blast radius if the bucket is ever leaked).
+    const body = composeShareBody(meeting);
+    try {
+      await shareToOrg.mutateAsync({ title, body, visibility: 'org' });
+      setShareState('shared');
+      setTimeout(() => setShareState('idle'), 2500);
+    } catch (e) {
+      setShareState('error');
+      setShareError(e instanceof Error ? e.message : String(e));
+    }
+  };
   const [titleRegening, setTitleRegening] = React.useState(() =>
     pendingTitleRegens.has(summaryFile),
   );
@@ -298,7 +322,7 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
                   <MoreHorizontal className="size-[14px]" />
                 </button>
               </PopoverTrigger>
-              <PopoverContent align="end" className="w-52 p-1">
+              <PopoverContent align="end" className="w-56 p-1">
                 <button
                   type="button"
                   className="flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-sm transition-colors hover:bg-[color:var(--surface-hover)]"
@@ -311,6 +335,25 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
                   <FolderIcon className="size-[13px] shrink-0" style={{ color: 'var(--fg-2)' }} />
                   View containing folder
                 </button>
+                {orgSession.data?.signedIn && (
+                  <button
+                    type="button"
+                    className="flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-sm transition-colors hover:bg-[color:var(--surface-hover)] disabled:opacity-50"
+                    style={{ color: 'var(--fg-1)' }}
+                    onClick={() => void onShareToOrg()}
+                    disabled={shareState === 'sharing' || shareState === 'shared'}
+                    title={`Share with ${orgSession.data.orgId}`}
+                  >
+                    <Globe className="size-[13px] shrink-0" style={{ color: 'var(--fg-2)' }} />
+                    {shareState === 'sharing'
+                      ? 'Sharing…'
+                      : shareState === 'shared'
+                        ? 'Shared with org ✓'
+                        : shareState === 'error'
+                          ? `Share failed${shareError ? ': ' + shareError : ''}`
+                          : `Share with ${orgSession.data.orgId}`}
+                  </button>
+                )}
                 <button
                   type="button"
                   className="flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-sm transition-colors hover:bg-[color:var(--surface-hover)]"
@@ -1099,4 +1142,50 @@ function getErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message) return error.message;
   if (typeof error === 'string' && error.trim()) return error;
   return 'Something went wrong.';
+}
+
+/** Builds the markdown body shipped to the org adapter when the user shares
+ *  a local note. Mirrors what the local note view renders (minus the raw
+ *  transcript) so colleagues see the same structured summary. */
+function composeShareBody(meeting: Meeting): string {
+  const sections: string[] = [];
+
+  const summary = meeting.summary?.trim();
+  if (summary) {
+    sections.push(`## Summary\n\n${summary}`);
+  }
+
+  const topics = asDiscussionAreas(meeting.discussion_areas);
+  if (topics.length) {
+    const block = topics
+      .map((t) => {
+        const title = (t.title || '').trim();
+        const analysis = (t.analysis || '').trim();
+        if (title && analysis) return `### ${title}\n\n${analysis}`;
+        return `### ${title || analysis}`;
+      })
+      .join('\n\n');
+    sections.push(`## Key topics\n\n${block}`);
+  }
+
+  const keyPoints = (meeting.key_points ?? []).filter(Boolean);
+  if (keyPoints.length) {
+    sections.push(
+      `## Key points\n\n${keyPoints.map((kp) => `- ${kp}`).join('\n')}`,
+    );
+  }
+
+  const actionItems = asStringArray(meeting.action_items);
+  if (actionItems.length) {
+    sections.push(
+      `## Action items\n\n${actionItems.map((ai) => `- ${ai}`).join('\n')}`,
+    );
+  }
+
+  // Deliberately do NOT fall back to meeting.transcript here: the raw
+  // transcript is excluded from shared notes by design (limits blast radius
+  // if the bucket is ever leaked, and matches what local meeting views
+  // already show in the body — summary, not transcript). If every structured
+  // field is empty, return empty rather than secretly upload the transcript.
+  return sections.join('\n\n');
 }

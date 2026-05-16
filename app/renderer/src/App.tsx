@@ -8,6 +8,7 @@ import { StreamingProvider } from '@/hooks/useStreamingQuery';
 import { Home } from '@/routes/Home';
 import { MeetingDetail } from '@/routes/MeetingDetail';
 import { FolderDetail } from '@/routes/FolderDetail';
+import { OrgShared, OrgSharedDetail } from '@/routes/OrgShared';
 import { Recording } from '@/routes/Recording';
 import { Processing, ProcessingDock } from '@/routes/Processing';
 import { AskBar, TranscriptBar } from '@/components/AskBar';
@@ -148,6 +149,11 @@ function RouteView({ route }: { route: string }) {
   if (route.startsWith('/folders/')) {
     const folderId = safeDecode(route.slice('/folders/'.length));
     return <FolderDetail folderId={folderId} />;
+  }
+  if (route === '/org/shared') return <OrgShared />;
+  if (route.startsWith('/org/shared/')) {
+    const id = safeDecode(route.slice('/org/shared/'.length));
+    return <OrgSharedDetail id={id} />;
   }
   if (route === '/meetings') return <Home mode="meetings" />;
   return <Home mode="home" />;

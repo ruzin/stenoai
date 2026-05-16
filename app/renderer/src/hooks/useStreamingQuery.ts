@@ -1,5 +1,7 @@
 import * as React from 'react';
 import { ipc } from '@/lib/ipc';
+import { ORG_SHARED_SCOPE } from '@/components/FolderScopePicker';
+import { buildOrgChatPayload } from '@/lib/orgChat';
 
 export type StreamStatus = 'streaming' | 'done' | 'error';
 
@@ -71,10 +73,16 @@ export function useStreamingQuery() {
 
   // Cross-note variant of startStream — same wire shape, no summaryFile.
   // Used by the Chat tab to ask questions across every meeting summary,
-  // optionally scoped to a single folder.
+  // optionally scoped to a single folder OR to the org-shared corpus
+  // (folderId === ORG_SHARED_SCOPE).
+  //
+  // For org scope, we asynchronously build the corpus then dispatch through
+  // ipc().org.chatStream — chunks land on the same query-chunk channel as
+  // local chat so the renderer doesn't need a parallel subscription.
   const startGlobalStream = React.useCallback((
     question: string,
     folderId?: string | null,
+    orgHistory?: Array<{ role: 'user' | 'assistant'; content: string }>,
   ): string => {
     const id = newId();
     setStreams((prev) => ({
@@ -109,7 +117,83 @@ export function useStreamingQuery() {
       },
     });
     unsubsRef.current.set(id, off);
-    ipc().query.chatGlobalStream(id, question, folderId ?? null);
+
+    if (folderId === ORG_SHARED_SCOPE) {
+      // Build the corpus + dispatch through the org adapter. The fetch is
+      // async; the user can cancel before payload-build completes, so we
+      // re-check activeRef before firing the actual stream to avoid kicking
+      // off a request the renderer no longer cares about.
+      void (async () => {
+        try {
+          const payload = await buildOrgChatPayload(orgHistory ?? [], question);
+          if (!activeRef.current.has(id)) return; // cancelled while building
+          ipc().org.chatStream(id, payload);
+        } catch (e) {
+          if (!activeRef.current.has(id)) return; // cancelled while building
+          setStreams((prev) => {
+            const current = prev[id];
+            if (!current) return prev;
+            return {
+              ...prev,
+              [id]: { ...current, status: 'error', error: (e as Error).message },
+            };
+          });
+          detachStream(id);
+        }
+      })();
+    } else {
+      ipc().query.chatGlobalStream(id, question, folderId ?? null);
+    }
+    return id;
+  }, []);
+
+  /** Stream a question against a single shared note's body, via the org
+   *  adapter. Mirrors startStream's API but takes the note's system prompt
+   *  directly instead of a local file path. */
+  const startOrgNoteStream = React.useCallback((
+    system: string,
+    question: string,
+    history?: Array<{ role: 'user' | 'assistant'; content: string }>,
+  ): string => {
+    const id = newId();
+    setStreams((prev) => ({
+      ...prev,
+      [id]: { text: '', status: 'streaming', error: null },
+    }));
+    activeRef.current.add(id);
+
+    const off = ipc().subscribeQueryStream(id, {
+      onChunk: (chunk) => {
+        setStreams((prev) => {
+          const current = prev[id];
+          if (!current) return prev;
+          return { ...prev, [id]: { ...current, text: current.text + chunk } };
+        });
+      },
+      onDone: () => {
+        setStreams((prev) => {
+          const current = prev[id];
+          if (!current) return prev;
+          return { ...prev, [id]: { ...current, status: 'done' } };
+        });
+        detachStream(id);
+      },
+      onError: (err) => {
+        setStreams((prev) => {
+          const current = prev[id];
+          if (!current) return prev;
+          return { ...prev, [id]: { ...current, status: 'error', error: err.message } };
+        });
+        detachStream(id);
+      },
+    });
+    unsubsRef.current.set(id, off);
+
+    const messages = [
+      ...(history ?? []),
+      { role: 'user' as const, content: question },
+    ];
+    ipc().org.chatStream(id, { system, messages });
     return id;
   }, []);
 
@@ -149,7 +233,14 @@ export function useStreamingQuery() {
     };
   }, []);
 
-  return { streams, startStream, startGlobalStream, cancelStream, clearStream };
+  return {
+    streams,
+    startStream,
+    startGlobalStream,
+    startOrgNoteStream,
+    cancelStream,
+    clearStream,
+  };
 }
 
 export type StreamingQueryApi = ReturnType<typeof useStreamingQuery>;

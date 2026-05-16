@@ -83,8 +83,20 @@ export function TranscriptBar() {
 }
 
 export function AskBar() {
-  const { activeSummaryFile, activeMeetingName, transcriptOpen, setTranscriptOpen } = useAskBar();
-  const chat = useChatSessions(activeSummaryFile, activeMeetingName);
+  const {
+    activeSummaryFile,
+    activeMeetingName,
+    activeOrgMeeting,
+    transcriptOpen,
+    setTranscriptOpen,
+  } = useAskBar();
+  // For shared notes, persist sessions under a synthetic summaryFile key so
+  // they don't collide with local meetings. Same useChatSessions plumbing.
+  const sessionKey = activeOrgMeeting
+    ? `org:${activeOrgMeeting.id}`
+    : activeSummaryFile;
+  const sessionLabel = activeOrgMeeting?.title ?? activeMeetingName;
+  const chat = useChatSessions(sessionKey, sessionLabel);
   const streaming = useGlobalStreaming();
 
   const [expanded, setExpanded] = React.useState(false);
@@ -100,7 +112,7 @@ export function AskBar() {
   const isStreaming = activeStream?.status === 'streaming';
   const session = chat.activeSession;
   const hasMessages = (session?.messages.length ?? 0) > 0;
-  const hidden = !activeSummaryFile;
+  const hidden = !activeSummaryFile && !activeOrgMeeting;
   const canSend = input.trim().length > 0 && !isStreaming;
 
   const cancelStreamRef = React.useRef(streaming.cancelStream);
@@ -117,7 +129,7 @@ export function AskBar() {
       }
       return null;
     });
-  }, [activeSummaryFile, setTranscriptOpen]);
+  }, [activeSummaryFile, activeOrgMeeting?.id, setTranscriptOpen]);
 
   React.useEffect(() => {
     if (!expanded && !transcriptOpen) return;
@@ -171,7 +183,8 @@ export function AskBar() {
 
   const submitPrompt = async (raw: string) => {
     const q = raw.trim();
-    if (!q || !activeSummaryFile || isStreaming) return;
+    if (!q || isStreaming) return;
+    if (!activeSummaryFile && !activeOrgMeeting) return;
     if (submittingRef.current) return;
     submittingRef.current = true;
 
@@ -185,7 +198,21 @@ export function AskBar() {
       await chat.appendMessage(sessionId, userMsg);
       setInput('');
 
-      const streamId = streaming.startStream(activeSummaryFile, q);
+      let streamId: string;
+      if (activeOrgMeeting) {
+        // Org route — system prompt is built from the shared note's body so
+        // the model has the same context the user sees on screen.
+        const system =
+          `You answer questions about a single shared meeting note titled "${activeOrgMeeting.title}". ` +
+          `Be concise and cite content from the note when relevant.\n\n--- NOTE ---\n${activeOrgMeeting.body}`;
+        const history = (session?.messages ?? []).map((m) => ({
+          role: m.role,
+          content: m.content,
+        }));
+        streamId = streaming.startOrgNoteStream(system, q, history);
+      } else {
+        streamId = streaming.startStream(activeSummaryFile!, q);
+      }
       pendingPersistRef.current = sessionId;
       setActiveStreamId(streamId);
 
@@ -300,7 +327,10 @@ export function AskBar() {
         className="mv-chat"
         onSubmit={(e) => { e.preventDefault(); void submit(); }}
       >
-        {/* Transcript toggle */}
+        {/* Transcript toggle — local-meeting only. Shared (org) notes have
+            no transcript to display, so hide the toggle in that mode rather
+            than expose a button that opens an empty panel. */}
+        {!activeOrgMeeting && (
         <button
           type="button"
           className={cn('mv-chat-tool', transcriptOpen && 'active')}
@@ -325,6 +355,7 @@ export function AskBar() {
             </span>
           )}
         </button>
+        )}
 
         {/* Text input */}
         <input

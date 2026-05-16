@@ -185,6 +185,16 @@ export function useRecordingProcessingEffects() {
       if (data.success && data.meetingData?.session_info.summary_file) {
         navigate(`/meetings/${encodeURIComponent(data.meetingData.session_info.summary_file)}`);
       }
+      // Clear the live-draft entry AFTER any other processing-complete
+      // listeners (notably Processing.tsx's, which reads draft.title to
+      // apply a custom rename). Deferring to the next microtask gives
+      // those listeners a tick to consume the draft before we drop it.
+      if (data.sessionName) {
+        const sessionName = data.sessionName;
+        queueMicrotask(() => {
+          useLiveDraftStore.getState().clear(sessionName);
+        });
+      }
     });
     return off;
   }, [qc]);

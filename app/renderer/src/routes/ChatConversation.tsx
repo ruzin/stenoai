@@ -5,7 +5,7 @@ import {
   ChevronDown,
   Square,
 } from 'lucide-react';
-import { FolderScopePicker } from '@/components/FolderScopePicker';
+import { FolderScopePicker, ORG_SHARED_SCOPE } from '@/components/FolderScopePicker';
 import { ChatHistoryRow } from '@/components/ChatHistoryRow';
 import { MeetingsShell } from '@/components/MeetingsShell';
 import {
@@ -57,7 +57,11 @@ export function ChatConversation({ sessionId }: ChatConversationProps) {
 
   const isCloud = provider.data?.ai_provider === 'cloud';
   const cloudKeySet = provider.data?.cloud_api_key_set ?? false;
-  const ready = isCloud && cloudKeySet;
+  const localReady = isCloud && cloudKeySet;
+  // Org-scoped follow-ups go through the adapter and don't need the local
+  // cloud provider configured — the cloud-key gate becomes irrelevant.
+  const isOrgScope = (s: string | null | undefined) => s === ORG_SHARED_SCOPE;
+  const ready = localReady || isOrgScope(scopeFolderId);
 
   // Make THIS session the active one as soon as the route mounts so
   // chat.activeSession / chat.appendMessage operate on the right record
@@ -158,7 +162,16 @@ export function ChatConversation({ sessionId }: ChatConversationProps) {
       });
       appended = true;
       setInput('');
-      const streamId = streaming.startGlobalStream(q, scopeFolderId);
+
+      // Hand the running history to the org backend so follow-ups have
+      // context. For local scope this third arg is ignored.
+      const history = isOrgScope(scopeFolderId)
+        ? (session.messages ?? []).map((m) => ({
+            role: m.role,
+            content: m.content,
+          }))
+        : undefined;
+      const streamId = streaming.startGlobalStream(q, scopeFolderId, history);
       pendingPersistRef.current = session.id;
       setActiveStreamId(streamId);
     } catch (err) {

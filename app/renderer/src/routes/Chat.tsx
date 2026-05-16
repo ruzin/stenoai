@@ -5,7 +5,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { ChatHistoryRow } from '@/components/ChatHistoryRow';
-import { FolderScopePicker } from '@/components/FolderScopePicker';
+import { FolderScopePicker, ORG_SHARED_SCOPE } from '@/components/FolderScopePicker';
 import {
   Popover,
   PopoverAnchor,
@@ -19,6 +19,7 @@ import {
 import { useGlobalStreaming } from '@/hooks/useStreamingQuery';
 import { useAiProvider } from '@/hooks/useAi';
 import { useUserName } from '@/hooks/useSettings';
+import { useOrgSession } from '@/hooks/useOrg';
 import { navigate } from '@/lib/router';
 import { GLOBAL_SCOPE, bucketKey, deriveSessionName, toBucketLabel } from '@/lib/chat';
 import { PRESETS, PresetGlyph } from '@/lib/chatPresets';
@@ -31,6 +32,14 @@ export function Chat() {
   const streaming = useGlobalStreaming();
   const provider = useAiProvider();
   const userName = useUserName();
+  const orgSession = useOrgSession();
+  // When signed in to an org adapter, the greeting reflects the org identity
+  // (first name from "Alice Chen") so the demo feels like switching users.
+  // Falls back to the local user-name setting when no org session is active.
+  const greetingName =
+    orgSession.data?.signedIn && orgSession.data?.name
+      ? orgSession.data.name.split(' ')[0]
+      : userName.data;
 
   const [input, setInput] = React.useState('');
   const [presetsOpen, setPresetsOpen] = React.useState(false);
@@ -43,7 +52,11 @@ export function Chat() {
 
   const isCloud = provider.data?.ai_provider === 'cloud';
   const cloudKeySet = provider.data?.cloud_api_key_set ?? false;
-  const ready = isCloud && cloudKeySet;
+  // Org chat goes through the adapter's central key, so it doesn't need
+  // the local cloud provider configured.
+  const localReady = isCloud && cloudKeySet;
+  const orgScopeActive = scopeFolderId === ORG_SHARED_SCOPE;
+  const ready = localReady || orgScopeActive;
 
   // Recents = global-scope chats only (sessions started from THIS tab),
   // never the in-meeting AskBar history.
@@ -81,7 +94,11 @@ export function Chat() {
   const [submitError, setSubmitError] = React.useState<string | null>(null);
   const submit = async (raw: string) => {
     const q = raw.trim();
-    if (!q || submittingRef.current || !ready) return;
+    // Org-scoped chat doesn't depend on the cloud-key gate (it goes through
+    // the adapter's centrally-managed key). Local chat still does.
+    const isOrgScope = scopeFolderId === ORG_SHARED_SCOPE;
+    if (!q || submittingRef.current) return;
+    if (!isOrgScope && !localReady) return;
     submittingRef.current = true;
     setSubmitError(null);
     let createdSessionId: string | null = null;
@@ -93,6 +110,9 @@ export function Chat() {
         ts: Date.now(),
       });
       setInput('');
+
+      // Streaming for both local AND org scope — startGlobalStream picks
+      // the right backend internally based on folderId.
       const streamId = streaming.startGlobalStream(q, scopeFolderId);
       // Record the handoff under THIS sessionId so a fast double-submit
       // can't clobber an earlier in-flight stream before the conversation
@@ -143,10 +163,10 @@ export function Chat() {
             color: 'var(--fg-1)',
           }}
         >
-          {userName.data ? `Hi ${userName.data}, ask anything` : 'Ask anything'}
+          {greetingName ? `Hi ${greetingName}, ask anything` : 'Ask anything'}
         </h1>
 
-        {!ready && provider.isFetched && <CloudRequiredBanner />}
+        {!localReady && !orgScopeActive && provider.isFetched && <CloudRequiredBanner />}
         {submitError && (
           <div
             role="alert"

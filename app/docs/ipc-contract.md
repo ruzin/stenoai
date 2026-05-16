@@ -466,6 +466,83 @@ interface ShortcutStartRecordingEvent { sessionName: string | null }
 
 ---
 
+## 11a. Organisation adapter (enterprise mode)
+
+Talks to a self-hosted Steno adapter for shared notes, AI proxying, and S3
+artifacts. Session token + adapter URL persisted via `safeStorage`. The
+renderer never sees the JWT directly — every call goes through these
+handlers, which add the bearer header in main.
+
+| Channel | Direction | Needed | Preload API |
+| --- | --- | --- | --- |
+| `org-status` | R→M invoke | yes | `stenoai.org.status()` |
+| `org-login` | R→M invoke | yes | `stenoai.org.login(adapterUrl, email, password)` |
+| `org-sso-google-start` | R→M invoke | yes | `stenoai.org.ssoGoogleStart(adapterUrl)` |
+| `org-logout` | R→M invoke | yes | `stenoai.org.logout()` |
+| `org-list-meetings` | R→M invoke | yes | `stenoai.org.listMeetings()` |
+| `org-get-meeting` | R→M invoke | yes | `stenoai.org.getMeeting(id)` |
+| `org-create-meeting` | R→M invoke | yes | `stenoai.org.createMeeting(payload)` |
+| `org-delete-meeting` | R→M invoke | yes | `stenoai.org.deleteMeeting(id)` |
+| `org-share-meeting` | R→M invoke | yes | `stenoai.org.shareMeeting(payload)` |
+| `org-ai-chat` | R→M invoke | yes | `stenoai.org.aiChat(payload)` |
+| `org-chat-stream` | R→M send | yes | `stenoai.org.chatStream(streamId, payload)` |
+
+`org-sso-google-start` runs the loopback-redirect OAuth flow against the
+customer's Google client (the adapter does the code exchange so the
+client_secret never leaves the adapter). `org-chat-stream` mirrors the
+local `chat-global-stream` wire shape — chunks land on the existing
+`query-chunk` / `query-done` events so the renderer's streaming infra
+doesn't need a parallel subscription.
+
+`org-share-meeting` is the canonical share path: main does presign → PUT
+to S3 → register metadata in one step, so the renderer never sees the
+presigned URL or the bytes-in-flight. `org-create-meeting` is kept for
+inline-body fallbacks (legacy or test).
+
+```ts
+interface OrgStatusResponse {
+  signedIn: boolean;
+  adapterUrl?: string;
+  email?: string;
+  name?: string;
+  orgId?: string;
+}
+
+type OrgLoginResponse = Result<{
+  signedIn: true;
+  adapterUrl: string;
+  email: string;
+  name: string;
+  orgId: string;
+}>;
+
+interface OrgMeetingSummary {
+  id: string;
+  title: string;
+  owner_email: string;
+  org_id: string;
+  visibility: 'private' | 'org';
+  created_at: number;
+  has_artifact: boolean;
+}
+
+interface OrgMeeting extends OrgMeetingSummary {
+  body: string;
+  download_url?: string;
+}
+
+interface OrgChatPayload {
+  messages: Array<{ role: 'user' | 'assistant'; content: string }>;
+  system?: string;
+  model?: string;
+  max_tokens?: number;
+}
+```
+
+A 401 from the adapter clears the persisted session, forcing a re-login.
+
+---
+
 ## 12. Preload surface (summary)
 
 Every `stenoai.*` function is either a typed async request that returns a
