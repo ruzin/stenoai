@@ -1214,6 +1214,9 @@ function ModelList() {
 // Organisation tab — connect to a self-hosted Steno enterprise adapter.
 // ---------------------------------------------------------------------------
 
+const ORG_ADAPTER_URL_KEY = 'steno-org-adapter-url';
+const ORG_ADAPTER_URL_DEFAULT = 'http://localhost:8000';
+
 function OrganisationTab() {
   // useOrgSession + the login/logout mutations all share the same TanStack
   // Query key, so every other consumer (sidebar 'Shared notes' row, profile
@@ -1224,16 +1227,34 @@ function OrganisationTab() {
   const logoutMutation = useOrgLogout();
   const status: OrgStatusResponse | null = sessionQuery.data ?? null;
 
-  const [adapterUrl, setAdapterUrl] = React.useState('');
+  // Remember the last adapter URL the user typed/signed-in-against so they
+  // don't have to retype on every sign-out. Falls back to localhost for
+  // first-time / dev usage. The session itself stores its own copy, so this
+  // is only consulted when the user is *not* currently signed in.
+  const initialAdapterUrl = React.useMemo(() => {
+    try {
+      return localStorage.getItem(ORG_ADAPTER_URL_KEY) || ORG_ADAPTER_URL_DEFAULT;
+    } catch {
+      return ORG_ADAPTER_URL_DEFAULT;
+    }
+  }, []);
+  const [adapterUrl, setAdapterUrl] = React.useState(initialAdapterUrl);
   const [email, setEmail] = React.useState('');
   const [password, setPassword] = React.useState('');
   const [error, setError] = React.useState<string | null>(null);
 
   // Seed the form's adapter URL from the persisted session, once we know it.
-  // First-time users see an empty field and have to type their org's URL.
   React.useEffect(() => {
     if (status?.adapterUrl) setAdapterUrl(status.adapterUrl);
   }, [status?.adapterUrl]);
+
+  // Mirror the field into localStorage so the next sign-in lands with the
+  // same URL pre-filled even if the user has signed out (which clears the
+  // session record entirely).
+  React.useEffect(() => {
+    if (!adapterUrl) return;
+    try { localStorage.setItem(ORG_ADAPTER_URL_KEY, adapterUrl); } catch (_) { /* private mode */ }
+  }, [adapterUrl]);
 
   const busy =
     loginMutation.isPending ||
@@ -1269,16 +1290,12 @@ function OrganisationTab() {
 
   return (
     <section data-settings-tab="organisation">
-      <SectionHeading>Organisation adapter</SectionHeading>
+      <SectionHeading>Organisation</SectionHeading>
       <p
         className="mb-5 text-[13px] leading-[1.55]"
         style={{ color: 'var(--fg-2)', maxWidth: '60ch' }}
       >
-        Connect to a self-hosted Steno adapter for your organisation. Once
-        signed in, notes you mark as <em>Shared</em> are stored in your
-        organisation's S3 bucket and visible to your colleagues. AI requests
-        are proxied through the adapter using a centrally-managed key —
-        Steno on this Mac never sees the provider key directly.
+        Connect to Steno Enterprise for your organisation.
       </p>
 
       {status?.signedIn ? (
