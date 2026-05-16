@@ -1,7 +1,8 @@
 fastapi==0.115.0
 uvicorn[standard]==0.30.6
 pydantic==2.9.2
-pyjwt==2.9.0
+pyjwt[crypto]==2.9.0
 boto3==1.35.36
 anthropic>=0.49.0,<1.0
 python-multipart==0.0.12
+httpx==0.28.1

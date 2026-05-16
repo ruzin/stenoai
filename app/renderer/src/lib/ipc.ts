@@ -533,6 +533,7 @@ export interface StenoaiBridge {
   org: {
     status: RequestFn<[], OrgStatusResponse>;
     login: RequestFn<[adapterUrl: string, email: string, password: string], OrgLoginResponse>;
+    ssoGoogleStart: RequestFn<[adapterUrl: string], OrgLoginResponse>;
     logout: RequestFn<[], Result<Record<string, never>>>;
     listMeetings: RequestFn<[], OrgListMeetingsResponse>;
     getMeeting: RequestFn<[id: string], OrgGetMeetingResponse>;

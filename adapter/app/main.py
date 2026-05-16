@@ -12,7 +12,7 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .routes import auth, meetings, uploads, ai
+from .routes import ai, auth, meetings, sso, uploads
 
 app = FastAPI(
     title="Steno Adapter",
@@ -29,6 +29,7 @@ app.add_middleware(
 )
 
 app.include_router(auth.router)
+app.include_router(sso.router)
 app.include_router(meetings.router)
 app.include_router(uploads.router)
 app.include_router(ai.router)
@@ -36,10 +37,15 @@ app.include_router(ai.router)
 
 @app.get("/health")
 def health():
+    allowlist_raw = os.environ.get("ORG_ID_ALLOWLIST", "").strip()
     return {
         "status": "ok",
         "service": "steno-adapter",
-        "org": "enam.co",
+        "org_id_allowlist": [s.strip() for s in allowlist_raw.split(",") if s.strip()],
         "s3_configured": bool(os.environ.get("S3_BUCKET")),
         "anthropic_configured": bool(os.environ.get("ANTHROPIC_API_KEY")),
+        "google_oidc_configured": bool(
+            os.environ.get("GOOGLE_OIDC_CLIENT_ID")
+            and os.environ.get("GOOGLE_OIDC_CLIENT_SECRET"),
+        ),
     }

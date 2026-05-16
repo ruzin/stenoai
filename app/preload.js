@@ -210,6 +210,7 @@ const stenoai = {
     status: () => invoke('org-status'),
     login: (adapterUrl, email, password) => invoke('org-login', { adapterUrl, email, password }),
     logout: () => invoke('org-logout'),
+    ssoGoogleStart: (adapterUrl) => invoke('org-sso-google-start', { adapterUrl }),
     listMeetings: () => invoke('org-list-meetings'),
     getMeeting: (id) => invoke('org-get-meeting', id),
     createMeeting: (payload) => invoke('org-create-meeting', payload),

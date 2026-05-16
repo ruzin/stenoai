@@ -78,7 +78,7 @@ import {
   useOutlookCalendarAuth,
 } from '@/hooks/useCalendarEvents';
 import type { AiProvider, CloudProvider, OrgStatusResponse } from '@/lib/ipc';
-import { useOrgLogin, useOrgLogout, useOrgSession } from '@/hooks/useOrg';
+import { useOrgLogin, useOrgLogout, useOrgSession, useOrgSsoGoogle } from '@/hooks/useOrg';
 
 // ---------------------------------------------------------------------------
 // Local style helpers — values come straight from the new design (Pencil
@@ -1214,34 +1214,46 @@ function ModelList() {
 // Organisation tab — connect to a self-hosted Steno enterprise adapter.
 // ---------------------------------------------------------------------------
 
-const DEFAULT_ADAPTER_URL = 'http://localhost:8000';
-
 function OrganisationTab() {
   // useOrgSession + the login/logout mutations all share the same TanStack
   // Query key, so every other consumer (sidebar 'Shared notes' row, profile
   // chip, AskBar gating) reacts immediately to a sign-in or sign-out here.
   const sessionQuery = useOrgSession();
   const loginMutation = useOrgLogin();
+  const ssoGoogleMutation = useOrgSsoGoogle();
   const logoutMutation = useOrgLogout();
   const status: OrgStatusResponse | null = sessionQuery.data ?? null;
 
-  const [adapterUrl, setAdapterUrl] = React.useState(DEFAULT_ADAPTER_URL);
+  const [adapterUrl, setAdapterUrl] = React.useState('');
   const [email, setEmail] = React.useState('');
   const [password, setPassword] = React.useState('');
   const [error, setError] = React.useState<string | null>(null);
 
   // Seed the form's adapter URL from the persisted session, once we know it.
+  // First-time users see an empty field and have to type their org's URL.
   React.useEffect(() => {
     if (status?.adapterUrl) setAdapterUrl(status.adapterUrl);
   }, [status?.adapterUrl]);
 
-  const busy = loginMutation.isPending || logoutMutation.isPending;
+  const busy =
+    loginMutation.isPending ||
+    logoutMutation.isPending ||
+    ssoGoogleMutation.isPending;
 
   const onSignIn = async () => {
     setError(null);
     try {
       await loginMutation.mutateAsync({ adapterUrl, email, password });
       setPassword('');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const onGoogleSignIn = async () => {
+    setError(null);
+    try {
+      await ssoGoogleMutation.mutateAsync(adapterUrl);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -1321,11 +1333,38 @@ function OrganisationTab() {
               <Input
                 value={adapterUrl}
                 onChange={(e) => setAdapterUrl(e.target.value)}
-                placeholder="http://localhost:8000"
+                placeholder="https://steno-adapter.yourcompany.com"
                 className="h-[30px] rounded-[6px] text-[13px]"
                 disabled={busy}
               />
             </div>
+
+            {/* SSO — primary path for customer deployments. The button opens
+                the system browser, waits for the Google sign-in to redirect
+                back to a loopback port, and exchanges the code through the
+                adapter (client_secret never touches this Mac). */}
+            <div className="flex items-center gap-3">
+              <Button
+                onClick={onGoogleSignIn}
+                disabled={busy || !adapterUrl}
+                variant="outline"
+                className={COMPACT_BTN}
+              >
+                {ssoGoogleMutation.isPending ? 'Waiting for browser…' : 'Sign in with Google'}
+              </Button>
+              <span className="text-[12px]" style={{ color: 'var(--fg-2)' }}>
+                Single sign-on via your organisation's Google Workspace.
+              </span>
+            </div>
+
+            <div className="relative my-1 flex items-center gap-2">
+              <span className="h-px flex-1" style={{ background: 'var(--border-subtle)' }} />
+              <span className="text-[11px]" style={{ color: 'var(--fg-muted)' }}>
+                or
+              </span>
+              <span className="h-px flex-1" style={{ background: 'var(--border-subtle)' }} />
+            </div>
+
             <div className="flex gap-3">
               <div className="flex-1">
                 <label className="mb-1 block text-[12px]" style={{ color: 'var(--fg-2)' }}>
@@ -1334,7 +1373,7 @@ function OrganisationTab() {
                 <Input
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="alice@enam.co"
+                  placeholder="you@yourcompany.com"
                   autoComplete="email"
                   className="h-[30px] rounded-[6px] text-[13px]"
                   disabled={busy}
@@ -1362,9 +1401,10 @@ function OrganisationTab() {
               <Button
                 onClick={onSignIn}
                 disabled={busy || !adapterUrl || !email || !password}
+                variant="ghost"
                 className={COMPACT_BTN}
               >
-                {busy ? 'Signing in…' : 'Sign in'}
+                {loginMutation.isPending ? 'Signing in…' : 'Sign in with password'}
               </Button>
               {error && (
                 <span className="text-[12px]" style={{ color: 'var(--danger, #b3261e)' }}>

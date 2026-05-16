@@ -5303,6 +5303,176 @@ ipcMain.handle('org-logout', async () => {
   return { success: true };
 });
 
+// ─── Google OIDC sign-in ─────────────────────────────────────────────────────
+// Loopback-redirect OAuth flow for installed apps (RFC 8252):
+//   1. Generate state + PKCE code_verifier locally.
+//   2. Start a one-shot HTTP server on a random localhost port.
+//   3. Ask the adapter to mint the Google authorize_url (it knows the
+//      client_id; the client_secret never leaves the adapter).
+//   4. Open the user's system browser. They sign in with Google; Google
+//      redirects back to http://127.0.0.1:<port>/callback?code=...&state=...
+//   5. Capture code + state, verify state, send (code, code_verifier,
+//      redirect_uri) to the adapter's /callback. The adapter exchanges +
+//      verifies the ID token + mints a session JWT in the same shape as
+//      /auth/login.
+//   6. Persist the session via the existing saveOrgSession path.
+//
+// Times out after 5 minutes of inactivity to avoid stranded servers.
+
+function _ssoRandUrlSafe(bytes) {
+  return crypto.randomBytes(bytes).toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '');
+}
+
+function _ssoCodeChallenge(verifier) {
+  return crypto.createHash('sha256').update(verifier).digest('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '');
+}
+
+async function _ssoOpenLoopback() {
+  // Returns { server, port, waitForCallback(state, timeoutMs) }. The callback
+  // promise resolves with the validated `code`, or rejects on state mismatch /
+  // user denial / timeout. Always closes the server on resolution.
+  return new Promise((resolve, reject) => {
+    const server = http.createServer();
+    server.on('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const { port } = server.address();
+      let resolved = false;
+      const waitForCallback = (state, timeoutMs = 5 * 60 * 1000) =>
+        new Promise((res, rej) => {
+          const timer = setTimeout(() => {
+            cleanup();
+            rej(new Error('SSO timed out waiting for browser callback'));
+          }, timeoutMs);
+          const cleanup = () => {
+            clearTimeout(timer);
+            if (!resolved) {
+              resolved = true;
+              try { server.close(); } catch (_) {}
+            }
+          };
+          server.on('request', (req, sres) => {
+            // We only care about the /callback path; ignore favicon etc.
+            const u = new URL(req.url, `http://127.0.0.1:${port}`);
+            if (u.pathname !== '/callback') {
+              sres.writeHead(404).end('not found');
+              return;
+            }
+            const code = u.searchParams.get('code');
+            const cbState = u.searchParams.get('state');
+            const error = u.searchParams.get('error');
+            sres.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+            if (error) {
+              sres.end(
+                `<html><body style="font:14px -apple-system;padding:40px">` +
+                `Sign-in failed: <code>${String(error).slice(0, 80)}</code>. ` +
+                `You can close this window.</body></html>`,
+              );
+              cleanup();
+              rej(new Error(`Google returned error: ${error}`));
+              return;
+            }
+            if (!code || cbState !== state) {
+              sres.end(
+                `<html><body style="font:14px -apple-system;padding:40px">` +
+                `Sign-in failed: bad state or missing code. Close this window and retry.` +
+                `</body></html>`,
+              );
+              cleanup();
+              rej(new Error('Bad state or missing code on callback'));
+              return;
+            }
+            sres.end(
+              `<html><body style="font:14px -apple-system;padding:40px;color:#1B1B19;background:#FAF9F5">` +
+              `<h2 style="font-family:Georgia,serif;font-weight:400;margin:0 0 8px">Signed in.</h2>` +
+              `You can close this window and return to Steno.</body></html>`,
+            );
+            cleanup();
+            res(code);
+          });
+        });
+      resolve({ server, port, waitForCallback });
+    });
+  });
+}
+
+ipcMain.handle('org-sso-google-start', async (_event, payload) => {
+  try {
+    const adapterUrl = normaliseAdapterUrl(payload && payload.adapterUrl);
+    if (!adapterUrl) return { success: false, error: 'adapter URL is required' };
+
+    // 1. PKCE + state.
+    const codeVerifier = _ssoRandUrlSafe(64);
+    const codeChallenge = _ssoCodeChallenge(codeVerifier);
+    const state = _ssoRandUrlSafe(16);
+
+    // 2. Open the loopback server.
+    const { port, waitForCallback } = await _ssoOpenLoopback();
+    const redirectUri = `http://127.0.0.1:${port}/callback`;
+
+    // 3. Ask the adapter to mint the authorize URL.
+    const startRes = await fetch(adapterUrl + '/auth/sso/google/start', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        redirect_uri: redirectUri,
+        code_challenge: codeChallenge,
+        state,
+      }),
+    });
+    const startBody = await startRes.json().catch(() => ({}));
+    if (!startRes.ok) {
+      return { success: false, error: startBody.detail || `HTTP ${startRes.status}` };
+    }
+
+    // 4. Open browser.
+    await shell.openExternal(startBody.authorize_url);
+
+    // 5. Wait for the callback (5-minute hard cap).
+    const code = await waitForCallback(state, 5 * 60 * 1000);
+
+    // 6. Exchange via the adapter.
+    const cbRes = await fetch(adapterUrl + '/auth/sso/google/callback', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        code,
+        code_verifier: codeVerifier,
+        redirect_uri: redirectUri,
+      }),
+    });
+    const cbBody = await cbRes.json().catch(() => ({}));
+    if (!cbRes.ok) {
+      return { success: false, error: cbBody.detail || `HTTP ${cbRes.status}` };
+    }
+
+    // 7. Persist + return same envelope as /org-login.
+    const session = {
+      adapterUrl,
+      token: cbBody.token,
+      email: cbBody.email,
+      name: cbBody.name,
+      orgId: cbBody.org_id,
+    };
+    if (!saveOrgSession(session)) return { success: false, error: 'failed to persist session' };
+    return {
+      success: true,
+      signedIn: true,
+      adapterUrl,
+      email: cbBody.email,
+      name: cbBody.name,
+      orgId: cbBody.org_id,
+    };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
 ipcMain.handle('org-list-meetings', async () => {
   try {
     const body = await adapterFetch('/meetings');

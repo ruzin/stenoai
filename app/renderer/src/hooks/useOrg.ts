@@ -34,6 +34,19 @@ export function useOrgLogin() {
   });
 }
 
+/** Google OIDC sign-in. Opens the system browser, waits for the loopback
+ *  callback, exchanges the code via the adapter, and persists the resulting
+ *  session — same shape as useOrgLogin so all downstream consumers (sidebar,
+ *  profile chip, AskBar gating) react identically. */
+export function useOrgSsoGoogle() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (adapterUrl: string) =>
+      unwrap(await ipc().org.ssoGoogleStart(adapterUrl)),
+    onSuccess: () => qc.invalidateQueries({ queryKey: orgKeys.all }),
+  });
+}
+
 export function useOrgLogout() {
   const qc = useQueryClient();
   return useMutation({

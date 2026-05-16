@@ -1,5 +1,12 @@
 # Steno × enam.co — demo runbook
 
+> **Heads up.** This is the original two-user enam.co demo runbook (the
+> internal demo we built before productisation). For real customer
+> deployments — Workspace OIDC, customer-owned S3 bucket, hardening
+> checklist — see **`adapter/customer-setup.md`**. The two docs target
+> different audiences: this one is internal-demo / quick-look, the other
+> is what a customer's IT lead would follow to install for real.
+
 What's in this branch: the Steno desktop app, an enterprise adapter
 service, and the wiring between them. Use this doc to stand up a working
 two-user demo on a single Mac.
@@ -58,13 +65,34 @@ After that, it launches normally.
 
 ## 3. Sign in to the demo org
 
-Open Steno → **Settings → Organisation**:
+Open Steno → **Settings → Organisation** → set **Adapter URL** to
+`http://localhost:8000`. Then pick one of two sign-in paths:
+
+### Option A — Google sign-in (the real flow)
+
+Click **Sign in with Google**, complete the consent in your browser. The
+adapter exchanges the code via Google's OIDC endpoints, verifies the ID
+token against Google's JWKS, and mints a session JWT. This is the path
+real customers use.
+
+Requirements: `GOOGLE_OIDC_CLIENT_ID` + `GOOGLE_OIDC_CLIENT_SECRET` set
+in `adapter/.env` and (in *Testing* mode) your Gmail listed as a test
+user in the Google Cloud project. The dev `.env` has
+`OIDC_ALLOW_NON_WORKSPACE=true` so personal Gmail accounts are accepted
+and the org_id is derived from the email-domain after `@`. Turn that
+flag off in any real deployment.
+
+### Option B — Password sign-in (dev fallback)
+
+For when you don't want to set up Google Cloud:
 
 | Field | Value |
 |---|---|
-| Adapter URL | `http://localhost:8000` |
 | Email | `alice@enam.co` *(or `bob@enam.co`)* |
 | Password | `demo` |
+
+These are the two hardcoded users in `adapter/app/users.json`. In a
+production deployment this route is disabled.
 
 After sign-in you should see:
 - A **Shared notes** row in the sidebar
