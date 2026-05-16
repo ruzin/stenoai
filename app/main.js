@@ -5225,7 +5225,17 @@ function clearOrgSession() {
 function normaliseAdapterUrl(url) {
   let u = String(url || '').trim();
   if (!u) return '';
-  if (!/^https?:\/\//i.test(u)) u = 'http://' + u;
+  if (!/^https?:\/\//i.test(u)) {
+    // No scheme provided. Default to https — the adapter is the holder of
+    // org JWTs, AWS credentials, and the AI provider key; sending its
+    // bearer tokens over plain http would expose them on the wire to any
+    // network observer. Loopback (localhost / 127.0.0.1 / ::1) is the one
+    // documented dev exception where http is fine because the traffic
+    // never leaves the machine.
+    const host = u.split('/', 1)[0].split(':', 1)[0].toLowerCase();
+    const isLoopback = host === 'localhost' || host === '127.0.0.1' || host === '::1';
+    u = (isLoopback ? 'http://' : 'https://') + u;
+  }
   return u.replace(/\/+$/, '');
 }
 
@@ -5604,13 +5614,29 @@ ipcMain.handle('org-ai-chat', async (_event, payload) => {
 const orgStreamAborters = new Map();
 
 ipcMain.on('org-chat-stream', async (event, streamId, payload) => {
+  const sender = event.sender;
+  // Wrap every send through this guard — the renderer can be destroyed
+  // (window close, hard reload) mid-stream, after which sender.send() will
+  // throw "Object has been destroyed". We also abort the upstream HTTP
+  // stream when the sender goes away so we stop pulling bytes from the
+  // adapter for a renderer that no longer exists.
+  const safeSend = (channel, payload) => {
+    if (sender.isDestroyed()) return;
+    try { sender.send(channel, payload); } catch (_) { /* destroyed mid-send */ }
+  };
+
   const session = loadOrgSession();
   if (!session) {
-    event.sender.send('query-done', { queryId: streamId, success: false, error: 'not signed in to org adapter' });
+    safeSend('query-done', { queryId: streamId, success: false, error: 'not signed in to org adapter' });
     return;
   }
   const controller = new AbortController();
   orgStreamAborters.set(streamId, controller);
+  const onDestroyed = () => {
+    try { controller.abort(); } catch (_) {}
+  };
+  sender.once('destroyed', onDestroyed);
+
   try {
     const res = await fetch(session.adapterUrl + '/ai/chat/stream', {
       method: 'POST',
@@ -5625,7 +5651,7 @@ ipcMain.on('org-chat-stream', async (event, streamId, payload) => {
       let detail = '';
       try { detail = await res.text(); } catch (_) {}
       if (res.status === 401) clearOrgSession();
-      event.sender.send('query-done', { queryId: streamId, success: false, error: `HTTP ${res.status}: ${detail.slice(0, 200)}` });
+      safeSend('query-done', { queryId: streamId, success: false, error: `HTTP ${res.status}: ${detail.slice(0, 200)}` });
       return;
     }
     const reader = res.body.getReader();
@@ -5634,6 +5660,10 @@ ipcMain.on('org-chat-stream', async (event, streamId, payload) => {
     let success = true;
     let errorMsg = null;
     while (true) {
+      if (sender.isDestroyed()) {
+        try { controller.abort(); } catch (_) {}
+        return;
+      }
       const { done, value } = await reader.read();
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
@@ -5646,7 +5676,7 @@ ipcMain.on('org-chat-stream', async (event, streamId, payload) => {
         let obj;
         try { obj = JSON.parse(trimmed); } catch (_) { continue; }
         if (obj.type === 'chunk' && obj.text) {
-          event.sender.send('query-chunk', { queryId: streamId, chunk: obj.text });
+          safeSend('query-chunk', { queryId: streamId, chunk: obj.text });
         } else if (obj.type === 'error') {
           success = false;
           errorMsg = obj.error;
@@ -5654,14 +5684,15 @@ ipcMain.on('org-chat-stream', async (event, streamId, payload) => {
         // 'done' lines carry usage info; we don't surface it for now.
       }
     }
-    event.sender.send('query-done', { queryId: streamId, success, error: errorMsg });
+    safeSend('query-done', { queryId: streamId, success, error: errorMsg });
   } catch (e) {
     if (e.name === 'AbortError') {
-      event.sender.send('query-done', { queryId: streamId, success: false, error: 'cancelled' });
+      safeSend('query-done', { queryId: streamId, success: false, error: 'cancelled' });
     } else {
-      event.sender.send('query-done', { queryId: streamId, success: false, error: e.message });
+      safeSend('query-done', { queryId: streamId, success: false, error: e.message });
     }
   } finally {
     orgStreamAborters.delete(streamId);
+    try { sender.removeListener('destroyed', onDestroyed); } catch (_) {}
   }
 });
