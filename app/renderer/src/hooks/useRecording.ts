@@ -176,14 +176,18 @@ export function useRecordingProcessingEffects() {
       }
       qc.invalidateQueries({ queryKey: meetingsKeys.all });
       qc.invalidateQueries({ queryKey: queueKey });
-      // Clear the live-draft entry for this finished session so the next
-      // "New note" with the same default sessionName ('Meeting' / 'Note')
-      // doesn't inherit the previous title or notes.
-      if (data.sessionName) {
-        useLiveDraftStore.getState().clear(data.sessionName);
-      }
       if (data.success && data.meetingData?.session_info.summary_file) {
         navigate(`/meetings/${encodeURIComponent(data.meetingData.session_info.summary_file)}`);
+      }
+      // Clear the live-draft entry AFTER any other processing-complete
+      // listeners (notably Processing.tsx's, which reads draft.title to
+      // apply a custom rename). Deferring to the next microtask gives
+      // those listeners a tick to consume the draft before we drop it.
+      if (data.sessionName) {
+        const sessionName = data.sessionName;
+        queueMicrotask(() => {
+          useLiveDraftStore.getState().clear(sessionName);
+        });
       }
     });
     return off;

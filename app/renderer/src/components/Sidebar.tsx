@@ -492,19 +492,23 @@ export function Sidebar({
           </div>
         </nav>
 
-        {/* Profile chip — only when signed in to an org adapter. Shows the
-            current user with an emoji avatar and a small popover for sign-out.
-            The Settings cog stays inline next to it on the same row. */}
-        <div className="flex items-center justify-between gap-2 px-3 py-2">
-          {orgSignedIn ? (
+        {/* Profile chip + Settings cog. When the user is signed in to an org
+            adapter, the chip sits on the left and the cog moves to the right
+            (justify-between). When signed out the chip is gone and the cog
+            falls back to the left where it originally lived. */}
+        <div
+          className={cn(
+            'flex items-center gap-2 px-3 py-2',
+            orgSignedIn && 'justify-between',
+          )}
+        >
+          {orgSignedIn && (
             <ProfileChip
               email={orgSession.data?.email ?? ''}
               name={orgSession.data?.name ?? ''}
               orgId={orgSession.data?.orgId ?? ''}
               onSignOut={() => orgLogout.mutate()}
             />
-          ) : (
-            <span aria-hidden />
           )}
           <button
             type="button"

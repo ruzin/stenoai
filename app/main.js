@@ -561,6 +561,14 @@ function createWindow(options = {}) {
   mainWindow.on('closed', () => {
     mainWindow = null;
     rendererShortcutReady = false;
+    // Abort any in-flight org SSE streams so they don't keep consuming
+    // network/CPU after the renderer is gone.
+    if (typeof orgStreamAborters !== 'undefined') {
+      for (const ctrl of orgStreamAborters.values()) {
+        try { ctrl.abort(); } catch (_) {}
+      }
+      orgStreamAborters.clear();
+    }
     if (pythonProcess) {
       pythonProcess.kill();
     }
@@ -5402,6 +5410,7 @@ async function _ssoOpenLoopback() {
 }
 
 ipcMain.handle('org-sso-google-start', async (_event, payload) => {
+  let loopback = null;
   try {
     const adapterUrl = normaliseAdapterUrl(payload && payload.adapterUrl);
     if (!adapterUrl) return { success: false, error: 'adapter URL is required' };
@@ -5411,8 +5420,11 @@ ipcMain.handle('org-sso-google-start', async (_event, payload) => {
     const codeChallenge = _ssoCodeChallenge(codeVerifier);
     const state = _ssoRandUrlSafe(16);
 
-    // 2. Open the loopback server.
-    const { port, waitForCallback } = await _ssoOpenLoopback();
+    // 2. Open the loopback server. Keep the handle so any pre-callback
+    //    failure (adapter /start 4xx, openExternal throws) can close it
+    //    immediately instead of waiting for the 5-minute timeout to fire.
+    loopback = await _ssoOpenLoopback();
+    const { port, waitForCallback } = loopback;
     const redirectUri = `http://127.0.0.1:${port}/callback`;
 
     // 3. Ask the adapter to mint the authorize URL.
@@ -5427,13 +5439,15 @@ ipcMain.handle('org-sso-google-start', async (_event, payload) => {
     });
     const startBody = await startRes.json().catch(() => ({}));
     if (!startRes.ok) {
+      try { loopback.server.close(); } catch (_) {}
       return { success: false, error: startBody.detail || `HTTP ${startRes.status}` };
     }
 
     // 4. Open browser.
     await shell.openExternal(startBody.authorize_url);
 
-    // 5. Wait for the callback (5-minute hard cap).
+    // 5. Wait for the callback (5-minute hard cap). waitForCallback closes
+    //    the server itself on resolve/reject.
     const code = await waitForCallback(state, 5 * 60 * 1000);
 
     // 6. Exchange via the adapter.
@@ -5469,6 +5483,11 @@ ipcMain.handle('org-sso-google-start', async (_event, payload) => {
       orgId: cbBody.org_id,
     };
   } catch (e) {
+    // Any other throw (openExternal failed, etc.) — make sure the loopback
+    // server isn't orphaned.
+    if (loopback && loopback.server && loopback.server.listening) {
+      try { loopback.server.close(); } catch (_) {}
+    }
     return { success: false, error: e.message };
   }
 });

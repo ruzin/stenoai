@@ -120,12 +120,16 @@ export function useStreamingQuery() {
 
     if (folderId === ORG_SHARED_SCOPE) {
       // Build the corpus + dispatch through the org adapter. The fetch is
-      // async; once it resolves we fire chatStream on the same streamId.
+      // async; the user can cancel before payload-build completes, so we
+      // re-check activeRef before firing the actual stream to avoid kicking
+      // off a request the renderer no longer cares about.
       void (async () => {
         try {
           const payload = await buildOrgChatPayload(orgHistory ?? [], question);
+          if (!activeRef.current.has(id)) return; // cancelled while building
           ipc().org.chatStream(id, payload);
         } catch (e) {
+          if (!activeRef.current.has(id)) return; // cancelled while building
           setStreams((prev) => {
             const current = prev[id];
             if (!current) return prev;

@@ -44,7 +44,16 @@ export function AskBarProvider({ children }: { children: React.ReactNode }) {
   const setActiveOrgMeeting = React.useCallback((meeting: ActiveOrgMeeting | null) => {
     setActiveOrgMeetingState((prev) => {
       if (!prev && !meeting) return prev;
-      if (prev && meeting && prev.id === meeting.id && prev.body === meeting.body) return prev;
+      if (
+        prev &&
+        meeting &&
+        prev.id === meeting.id &&
+        prev.title === meeting.title &&
+        prev.body === meeting.body &&
+        prev.ownerEmail === meeting.ownerEmail
+      ) {
+        return prev;
+      }
       return meeting;
     });
   }, []);

@@ -1182,5 +1182,10 @@ function composeShareBody(meeting: Meeting): string {
     );
   }
 
-  return sections.join('\n\n') || (meeting.transcript?.trim() || '');
+  // Deliberately do NOT fall back to meeting.transcript here: the raw
+  // transcript is excluded from shared notes by design (limits blast radius
+  // if the bucket is ever leaked, and matches what local meeting views
+  // already show in the body — summary, not transcript). If every structured
+  // field is empty, return empty rather than secretly upload the transcript.
+  return sections.join('\n\n');
 }

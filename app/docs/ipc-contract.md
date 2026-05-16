@@ -477,12 +477,22 @@ handlers, which add the bearer header in main.
 | --- | --- | --- | --- |
 | `org-status` | R→M invoke | yes | `stenoai.org.status()` |
 | `org-login` | R→M invoke | yes | `stenoai.org.login(adapterUrl, email, password)` |
+| `org-sso-google-start` | R→M invoke | yes | `stenoai.org.ssoGoogleStart(adapterUrl)` |
 | `org-logout` | R→M invoke | yes | `stenoai.org.logout()` |
 | `org-list-meetings` | R→M invoke | yes | `stenoai.org.listMeetings()` |
 | `org-get-meeting` | R→M invoke | yes | `stenoai.org.getMeeting(id)` |
 | `org-create-meeting` | R→M invoke | yes | `stenoai.org.createMeeting(payload)` |
+| `org-delete-meeting` | R→M invoke | yes | `stenoai.org.deleteMeeting(id)` |
 | `org-share-meeting` | R→M invoke | yes | `stenoai.org.shareMeeting(payload)` |
 | `org-ai-chat` | R→M invoke | yes | `stenoai.org.aiChat(payload)` |
+| `org-chat-stream` | R→M send | yes | `stenoai.org.chatStream(streamId, payload)` |
+
+`org-sso-google-start` runs the loopback-redirect OAuth flow against the
+customer's Google client (the adapter does the code exchange so the
+client_secret never leaves the adapter). `org-chat-stream` mirrors the
+local `chat-global-stream` wire shape — chunks land on the existing
+`query-chunk` / `query-done` events so the renderer's streaming infra
+doesn't need a parallel subscription.
 
 `org-share-meeting` is the canonical share path: main does presign → PUT
 to S3 → register metadata in one step, so the renderer never sees the

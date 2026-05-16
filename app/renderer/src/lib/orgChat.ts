@@ -15,7 +15,12 @@ interface OrgChatTurn {
 /**
  * Fetches every visible org meeting. The adapter inlines bodies (S3-fetched
  * server-side when needed), so we just collect them and concatenate.
- * Cheap with a handful of demo notes; once corpora grow, swap for retrieval.
+ *
+ * TODO(retrieval): this naive "inline everything" approach scales to roughly
+ * a few hundred shared notes before token cost / latency / context window
+ * become real problems. Replace with: embed each note at share time, top-k
+ * retrieve at query time, inline only the relevant slice into the system
+ * prompt. See the "Retrieval for org chat" issue in the OSS tracker.
  */
 async function loadOrgCorpus(): Promise<string> {
   const list = unwrap(await ipc().org.listMeetings()).meetings as OrgMeetingSummary[];

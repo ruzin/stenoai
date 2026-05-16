@@ -131,7 +131,10 @@ export function OrgShared() {
 
 export function OrgSharedDetail({ id }: { id: string }) {
   const session = useOrgSession();
-  const meeting = useOrgMeeting(id);
+  // Don't fire the GET /meetings/:id call until we know the user is
+  // signed in — otherwise the query will 401 (and clear the session)
+  // before the route's NotSignedIn guard has a chance to render.
+  const meeting = useOrgMeeting(session.data?.signedIn ? id : null);
 
   // Register with the global AskBar so its composer routes questions
   // through the org adapter against this note's body. Same shape as a

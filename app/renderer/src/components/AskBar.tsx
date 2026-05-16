@@ -327,7 +327,10 @@ export function AskBar() {
         className="mv-chat"
         onSubmit={(e) => { e.preventDefault(); void submit(); }}
       >
-        {/* Transcript toggle */}
+        {/* Transcript toggle — local-meeting only. Shared (org) notes have
+            no transcript to display, so hide the toggle in that mode rather
+            than expose a button that opens an empty panel. */}
+        {!activeOrgMeeting && (
         <button
           type="button"
           className={cn('mv-chat-tool', transcriptOpen && 'active')}
@@ -352,6 +355,7 @@ export function AskBar() {
             </span>
           )}
         </button>
+        )}
 
         {/* Text input */}
         <input
