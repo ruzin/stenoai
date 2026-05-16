@@ -5222,6 +5222,12 @@ function clearOrgSession() {
   }
 }
 
+// Matches anything that looks like a loopback authority — covers
+// `localhost`, `127.0.0.1`, IPv6 `::1` (bare or bracketed), with or
+// without a port and/or path. Used to pick the right default scheme
+// when the user types a hostname without one.
+const _LOOPBACK_HOST_RE = /^(localhost|127\.0\.0\.1|\[::1\]|::1)(?::\d+)?(?:\/|$)/i;
+
 function normaliseAdapterUrl(url) {
   let u = String(url || '').trim();
   if (!u) return '';
@@ -5229,11 +5235,10 @@ function normaliseAdapterUrl(url) {
     // No scheme provided. Default to https — the adapter is the holder of
     // org JWTs, AWS credentials, and the AI provider key; sending its
     // bearer tokens over plain http would expose them on the wire to any
-    // network observer. Loopback (localhost / 127.0.0.1 / ::1) is the one
-    // documented dev exception where http is fine because the traffic
-    // never leaves the machine.
-    const host = u.split('/', 1)[0].split(':', 1)[0].toLowerCase();
-    const isLoopback = host === 'localhost' || host === '127.0.0.1' || host === '::1';
+    // network observer. Loopback addresses are the one documented dev
+    // exception where http is fine because the traffic never leaves the
+    // machine.
+    const isLoopback = _LOOPBACK_HOST_RE.test(u);
     u = (isLoopback ? 'http://' : 'https://') + u;
   }
   return u.replace(/\/+$/, '');

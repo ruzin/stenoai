@@ -41,14 +41,20 @@ export function FolderScopePicker({ value, onChange }: FolderScopePickerProps) {
   // don't keep filtering against a dead id (and so the chip stops lying about
   // what's selected). Same goes for the org sentinel — if the user signs out
   // mid-session, we shouldn't keep claiming an org scope.
+  //
+  // Critically: gate the org clear on `orgSession.isSuccess`. Otherwise the
+  // initial render — before useOrgSession() has settled — sees
+  // `orgSignedIn === false` and would wipe a freshly-selected ORG_SHARED_SCOPE
+  // before the auth status has actually loaded.
+  const orgSessionSettled = orgSession.isSuccess;
   React.useEffect(() => {
     if (value && value !== ORG_SHARED_SCOPE && folders.data && !folder) {
       onChange(null);
     }
-    if (value === ORG_SHARED_SCOPE && !orgSignedIn) {
+    if (value === ORG_SHARED_SCOPE && orgSessionSettled && !orgSignedIn) {
       onChange(null);
     }
-  }, [value, folders.data, folder, orgSignedIn, onChange]);
+  }, [value, folders.data, folder, orgSessionSettled, orgSignedIn, onChange]);
 
   const isOrg = value === ORG_SHARED_SCOPE;
   const label = isOrg ? 'Shared notes' : folder ? folder.name : 'All notes';

@@ -137,18 +137,28 @@ export function OrgSharedDetail({ id }: { id: string }) {
   const meeting = useOrgMeeting(session.data?.signedIn ? id : null);
 
   // Register with the global AskBar so its composer routes questions
-  // through the org adapter against this note's body. Same shape as a
-  // local meeting's `useActiveMeeting` registration.
-  useActiveOrgMeeting(
-    meeting.data
-      ? {
-          id: meeting.data.id,
-          title: meeting.data.title,
-          body: meeting.data.body ?? '',
-          ownerEmail: meeting.data.owner_email,
-        }
-      : null,
+  // through the org adapter against this note's body. Memoized so a fresh
+  // object isn't synthesised on every render — without this the AskBar
+  // context's effect would tear down + re-register every time React
+  // re-rendered the route for any unrelated reason.
+  const activeOrgMeeting = React.useMemo(
+    () =>
+      meeting.data
+        ? {
+            id: meeting.data.id,
+            title: meeting.data.title,
+            body: meeting.data.body ?? '',
+            ownerEmail: meeting.data.owner_email,
+          }
+        : null,
+    [
+      meeting.data?.id,
+      meeting.data?.title,
+      meeting.data?.body,
+      meeting.data?.owner_email,
+    ],
   );
+  useActiveOrgMeeting(activeOrgMeeting);
 
   if (!session.data?.signedIn) return <NotSignedIn />;
 
