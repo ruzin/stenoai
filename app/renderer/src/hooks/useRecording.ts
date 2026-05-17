@@ -125,7 +125,7 @@ export function useRecording() {
  * flushed.
  */
 export function useRecordingEvents() {
-  const { status, startRecording, stopRecording } = useRecording();
+  const { status, startRecording, stopRecording, pauseRecording, resumeRecording } = useRecording();
 
   React.useEffect(() => {
     const bridge = ipc();
@@ -147,10 +147,36 @@ export function useRecordingEvents() {
       bridge.on.shortcutStopRecording(() => {
         void stopRecording();
       }),
+      bridge.on.autoRecordRequested(({ sessionName }) => {
+        // Suggested by the mic-monitor auto-detect notification ("Take Notes").
+        // Only fire if we're idle — user may have already manually started.
+        if (status === 'idle') void startRecording(sessionName ?? undefined);
+      }),
+      bridge.on.autoPauseRequested(() => {
+        // Mic stopped on the meeting app — pause so we don't keep recording
+        // ambient silence while waiting for user to confirm summarise.
+        // No status guard: `status` is polled and can lag the main-side state
+        // machine by up to a poll interval. If pause then resume fire back-to-
+        // back, a stale 'recording' read here would skip the resume on the
+        // companion handler below. Trust main (it already gates on its own
+        // autoStartedSession state) and let pauseRecording's IPC validate.
+        void pauseRecording();
+      }),
+      bridge.on.autoResumeRequested(() => {
+        // Meeting came back before user clicked Summarise — keep capturing.
+        // Same stale-status reason as autoPauseRequested above: don't gate
+        // on the polled status, just trust that main only fires this when
+        // its own state says we're paused.
+        void resumeRecording();
+      }),
+      bridge.on.autoSummariseRequested(() => {
+        // User clicked "Summarise" on the Meeting ended notification.
+        if (status === 'recording' || status === 'paused') void stopRecording();
+      }),
     ];
     bridge.shortcuts.rendererReady();
     return () => offs.forEach((off) => off());
-  }, [status, startRecording, stopRecording]);
+  }, [status, startRecording, stopRecording, pauseRecording, resumeRecording]);
 }
 
 /**

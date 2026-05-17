@@ -131,6 +131,10 @@
         "filter": [
           "trayIcon*.png"
         ]
+      },
+      {
+        "from": "../bin/mic-monitor",
+        "to": "mic-monitor"
       }
     ],
     "mac": {
