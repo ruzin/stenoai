@@ -555,6 +555,10 @@ export interface StenoaiBridge {
     shortcutStopRecording: Subscribe<void>;
     trayStartRecording: Subscribe<void>;
     trayStopRecording: Subscribe<void>;
+    autoRecordRequested: Subscribe<{ sessionName?: string; appName?: string }>;
+    autoPauseRequested: Subscribe<void>;
+    autoResumeRequested: Subscribe<void>;
+    autoSummariseRequested: Subscribe<void>;
     trayOpenSettings: Subscribe<void>;
     showQuitDialog: Subscribe<{ type: 'recording' | 'processing'; jobCount?: number }>;
   };

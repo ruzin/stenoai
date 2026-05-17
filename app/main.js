@@ -132,6 +132,18 @@ function getBackendCwd() {
   }
 }
 
+// Path to the mic-in-use helper. Keeps the .exe suffix branch ready for a
+// future Windows port — the JSON-line stdout contract is platform-agnostic,
+// so swapping in a Windows binary at this path is the only required change.
+function getMicMonitorPath() {
+  const binName = process.platform === 'win32' ? 'mic-monitor.exe' : 'mic-monitor';
+  if (app.isPackaged) {
+    return path.join(process.resourcesPath, binName);
+  } else {
+    return path.join(__dirname, '..', 'bin', binName);
+  }
+}
+
 function parseShortcutUrl(incomingUrl) {
   try {
     const parsed = new URL(incomingUrl);
@@ -826,6 +838,7 @@ if (!gotSingleInstanceLock) {
     createWindow();
     if (!IS_E2E) createTray();
     setupAutoUpdater();
+    setupAutoMeetingDetector();
     const protocolRegistered = registerShortcutProtocolClient();
     sendDebugLog(`Protocol handler registration (${SHORTCUT_PROTOCOL}): ${protocolRegistered}`);
 
@@ -2409,23 +2422,27 @@ ipcMain.handle('start-recording-ui', async (_, sessionName) => {
 
 ipcMain.handle('pause-recording-ui', async () => {
   try {
-    if (!currentRecordingProcess) {
-      sendDebugLog('Pause failed: No recording process found');
-      return { success: false, error: 'No recording in progress' };
-    }
-
-    console.log('Pausing recording process...');
-    sendDebugLog('Sending SIGUSR1 to pause recording...');
-
-    // Send SIGUSR1 to pause recording (Unix only)
-    if (process.platform !== 'win32') {
+    // Mic-only mode: signal the Python `record` subprocess directly.
+    if (currentRecordingProcess) {
+      if (process.platform === 'win32') {
+        return { success: false, error: 'Pause not supported on Windows' };
+      }
+      sendDebugLog('Sending SIGUSR1 to pause recording...');
       currentRecordingProcess.kill('SIGUSR1');
       markRecordingPaused();
-      sendDebugLog('SIGUSR1 sent successfully');
       return { success: true, message: 'Recording paused' };
-    } else {
-      return { success: false, error: 'Pause not supported on Windows' };
     }
+    // System-audio mode: capture is renderer-driven (MediaRecorder via
+    // useSystemAudioCapture). Just flip the runtime-state flag — the queue
+    // endpoint reports isPaused=true, status becomes 'paused', and the
+    // renderer effect pauses the MediaRecorder.
+    if (systemAudioRecordingActive) {
+      sendDebugLog('Pause (system-audio mode): marking paused, renderer will pause MediaRecorder');
+      markRecordingPaused();
+      return { success: true, message: 'Recording paused' };
+    }
+    sendDebugLog('Pause failed: No recording in progress');
+    return { success: false, error: 'No recording in progress' };
   } catch (error) {
     console.error('Pause recording UI error:', error.message);
     sendDebugLog(`Pause error: ${error.message}`);
@@ -2435,23 +2452,22 @@ ipcMain.handle('pause-recording-ui', async () => {
 
 ipcMain.handle('resume-recording-ui', async () => {
   try {
-    if (!currentRecordingProcess) {
-      sendDebugLog('Resume failed: No recording process found');
-      return { success: false, error: 'No recording in progress' };
-    }
-
-    console.log('Resuming recording process...');
-    sendDebugLog('Sending SIGUSR2 to resume recording...');
-
-    // Send SIGUSR2 to resume recording (Unix only)
-    if (process.platform !== 'win32') {
+    if (currentRecordingProcess) {
+      if (process.platform === 'win32') {
+        return { success: false, error: 'Resume not supported on Windows' };
+      }
+      sendDebugLog('Sending SIGUSR2 to resume recording...');
       currentRecordingProcess.kill('SIGUSR2');
       markRecordingResumed();
-      sendDebugLog('SIGUSR2 sent successfully');
       return { success: true, message: 'Recording resumed' };
-    } else {
-      return { success: false, error: 'Resume not supported on Windows' };
     }
+    if (systemAudioRecordingActive) {
+      sendDebugLog('Resume (system-audio mode): marking resumed, renderer will resume MediaRecorder');
+      markRecordingResumed();
+      return { success: true, message: 'Recording resumed' };
+    }
+    sendDebugLog('Resume failed: No recording in progress');
+    return { success: false, error: 'No recording in progress' };
   } catch (error) {
     console.error('Resume recording UI error:', error.message);
     sendDebugLog(`Resume error: ${error.message}`);
@@ -2922,6 +2938,288 @@ ipcMain.on('install-update', () => {
   // the app just minimises and Squirrel never gets to apply the update.
   isQuitting = true;
   autoUpdater.quitAndInstall(false, true);
+});
+
+// ── Auto-detect meetings (mic-monitor) ──
+// Spawns the bundled mic-monitor helper and reacts to its JSON-line events.
+// When any non-Steno app starts capturing the microphone, we surface a native
+// macOS notification ("Meeting detected — App") with a Take Notes action.
+// The actual recording start is delegated back to the renderer's existing
+// startRecording flow via the auto-record-requested event, so we don't have
+// to duplicate any of the recording lifecycle code.
+const STENO_BUNDLE_ID = 'com.stenoai.recorder';
+const AUTO_DETECT_ENV = 'STENOAI_AUTO_DETECT';
+const MIC_NOTIFICATION_DEBOUNCE_MS = 60_000;
+const MIC_MONITOR_BACKOFF_BASE_MS = 1000;
+const MIC_MONITOR_BACKOFF_MAX_MS = 30_000;
+const MIC_MONITOR_HEALTHY_RESET_MS = 30_000;
+
+// Browsers route media capture through helper sub-processes (Safari →
+// com.apple.WebKit.GPU, Chrome → com.google.Chrome.helper, etc.), so the raw
+// app_name reads as "Safari Graphics and Media" / "Google Chrome Helper".
+// Translate those back to the user-recognisable parent app name.
+const APP_NAME_OVERRIDES = [
+  { match: /^com\.apple\.WebKit/, name: 'Safari' },
+  { match: /^com\.google\.Chrome/, name: 'Google Chrome' },
+  { match: /^org\.chromium\./, name: 'Chromium' },
+  { match: /^com\.microsoft\.edgemac/, name: 'Microsoft Edge' },
+  { match: /^company\.thebrowser\.Browser/, name: 'Arc' },
+  { match: /^com\.brave\.Browser/, name: 'Brave' },
+  { match: /^org\.mozilla\./, name: 'Firefox' },
+];
+
+const MEETING_END_DEBOUNCE_MS = 15_000; // wait this long after mic stops before pausing
+
+let micMonitorProc = null;
+let micMonitorRespawnTimer = null;
+let micMonitorRespawnDelay = MIC_MONITOR_BACKOFF_BASE_MS;
+const lastNotifiedAt = new Map();
+// When the user accepts a "Meeting detected" notification we remember the
+// originating app so we can pair its subsequent mic-stop with the recording
+// and offer a "Summarise" prompt.
+let autoStartedSession = null; // { pid, app_id, appName, paused, pauseTimer, endNotif }
+
+function humanizeAppName(evt) {
+  for (const o of APP_NAME_OVERRIDES) {
+    if (evt.app_id && o.match.test(evt.app_id)) return o.name;
+  }
+  return evt.app_name || 'an app';
+}
+
+function startMicMonitor() {
+  if (micMonitorProc) return;
+  if (micMonitorRespawnTimer) {
+    clearTimeout(micMonitorRespawnTimer);
+    micMonitorRespawnTimer = null;
+  }
+  const binPath = getMicMonitorPath();
+  if (!fs.existsSync(binPath)) {
+    sendDebugLog(`[auto-detect] mic-monitor missing at ${binPath}; auto-detect disabled`);
+    return;
+  }
+  sendDebugLog(`[auto-detect] spawning ${binPath}`);
+  const proc = spawn(binPath, [], { stdio: ['ignore', 'pipe', 'pipe'] });
+  micMonitorProc = proc;
+
+  // Reset backoff once the process has stayed alive for a while.
+  const healthyTimer = setTimeout(() => {
+    if (micMonitorProc === proc) micMonitorRespawnDelay = MIC_MONITOR_BACKOFF_BASE_MS;
+  }, MIC_MONITOR_HEALTHY_RESET_MS);
+
+  let buf = '';
+  proc.stdout.setEncoding('utf8');
+  proc.stdout.on('data', (chunk) => {
+    buf += chunk;
+    let nl;
+    while ((nl = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, nl).trim();
+      buf = buf.slice(nl + 1);
+      if (line) handleMicEvent(line);
+    }
+  });
+  proc.stderr.on('data', (chunk) => {
+    sendDebugLog(`[auto-detect] stderr: ${String(chunk).trim()}`);
+  });
+  proc.on('exit', (code, signal) => {
+    clearTimeout(healthyTimer);
+    sendDebugLog(`[auto-detect] mic-monitor exited (code=${code}, signal=${signal})`);
+    if (micMonitorProc === proc) {
+      micMonitorProc = null;
+      micMonitorRespawnTimer = setTimeout(() => {
+        micMonitorRespawnTimer = null;
+        startMicMonitor();
+      }, micMonitorRespawnDelay);
+      micMonitorRespawnDelay = Math.min(micMonitorRespawnDelay * 2, MIC_MONITOR_BACKOFF_MAX_MS);
+    }
+  });
+  proc.on('error', (err) => {
+    sendDebugLog(`[auto-detect] spawn error: ${err.message}`);
+  });
+}
+
+function stopMicMonitor() {
+  if (micMonitorRespawnTimer) {
+    clearTimeout(micMonitorRespawnTimer);
+    micMonitorRespawnTimer = null;
+  }
+  if (micMonitorProc) {
+    sendDebugLog('[auto-detect] stopping mic-monitor');
+    const proc = micMonitorProc;
+    micMonitorProc = null;
+    try { proc.kill(); } catch (_) {}
+  }
+  lastNotifiedAt.clear();
+  clearAutoStartedSession();
+}
+
+function handleMicEvent(line) {
+  let evt;
+  try {
+    evt = JSON.parse(line);
+  } catch (_) {
+    sendDebugLog(`[auto-detect] bad json: ${line.slice(0, 200)}`);
+    return;
+  }
+  if (evt.app_id === STENO_BUNDLE_ID) return; // never react to our own recording
+
+  if (evt.event === 'stop') {
+    handleMicStop(evt);
+    return;
+  }
+  if (evt.event !== 'start') return;
+
+  // Meeting briefly went silent then came back — same app resuming. Cancel
+  // any pending pause / dismiss the "Meeting ended" prompt / auto-resume the
+  // recording so the user doesn't have to do anything.
+  if (autoStartedSession && evt.app_id === autoStartedSession.app_id) {
+    if (autoStartedSession.pauseTimer) {
+      clearTimeout(autoStartedSession.pauseTimer);
+      autoStartedSession.pauseTimer = null;
+      sendDebugLog(`[auto-detect] meeting resumed before pause fired: ${autoStartedSession.appName}`);
+    }
+    if (autoStartedSession.paused) {
+      autoStartedSession.paused = false;
+      if (autoStartedSession.endNotif) {
+        try { autoStartedSession.endNotif.close(); } catch (_) {}
+        autoStartedSession.endNotif = null;
+      }
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('auto-resume-requested');
+      }
+      sendDebugLog(`[auto-detect] auto-resumed: ${autoStartedSession.appName}`);
+    }
+    return;
+  }
+
+  if (currentRecordingProcess || systemAudioRecordingActive) {
+    sendDebugLog(`[auto-detect] ignoring start (${evt.app_name || evt.app_id || 'unknown'}) — already recording`);
+    return;
+  }
+
+  const debounceKey = evt.app_id || `pid:${evt.pid || 'unknown'}`;
+  const lastAt = lastNotifiedAt.get(debounceKey) || 0;
+  if (Date.now() - lastAt < MIC_NOTIFICATION_DEBOUNCE_MS) return;
+  lastNotifiedAt.set(debounceKey, Date.now());
+
+  const appName = humanizeAppName(evt);
+  sendDebugLog(`[auto-detect] meeting detected: ${appName} (${evt.app_id || 'no-bundle-id'})`);
+  showMeetingDetectedNotification(appName, evt);
+}
+
+function handleMicStop(evt) {
+  if (!autoStartedSession) return;
+  const matches = evt.pid === autoStartedSession.pid || evt.app_id === autoStartedSession.app_id;
+  if (!matches) return;
+
+  if (autoStartedSession.pauseTimer) clearTimeout(autoStartedSession.pauseTimer);
+  autoStartedSession.pauseTimer = setTimeout(() => {
+    autoStartedSession.pauseTimer = null;
+    autoStartedSession.paused = true;
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('auto-pause-requested');
+    }
+    sendDebugLog(`[auto-detect] meeting ended (paused): ${autoStartedSession.appName}`);
+    autoStartedSession.endNotif = showMeetingEndedNotification(autoStartedSession.appName);
+  }, MEETING_END_DEBOUNCE_MS);
+}
+
+function showMeetingDetectedNotification(appName, originatingEvt) {
+  // Notification rendering quirk: setting `closeButtonText` alongside a single
+  // `actions` entry causes macOS to collapse everything into an "Options"
+  // dropdown instead of showing the action inline. Leaving closeButtonText
+  // unset gives us Granola's layout — single inline button to the right.
+  const notif = new Notification({
+    title: 'Meeting detected',
+    body: appName,
+    actions: [{ type: 'button', text: 'Take Notes' }],
+  });
+  const trigger = () => requestAutoRecord(appName, originatingEvt);
+  notif.on('action', (_evt, _index) => trigger()); // shown when banner style = Alerts
+  notif.on('click', trigger);                       // body tap (always available)
+  notif.show();
+}
+
+function showMeetingEndedNotification(appName) {
+  const notif = new Notification({
+    title: 'Meeting ended',
+    body: appName,
+    actions: [{ type: 'button', text: 'Summarise' }],
+  });
+  // Only the explicit Summarise button commits — body click just opens
+  // Steno so the user can decide (summarise / resume / leave paused) from
+  // the in-app UI. Once summarised the meeting is finalised and AI
+  // processing has begun, so a stray body tap shouldn't trigger it.
+  notif.on('action', (_evt, _index) => requestAutoSummarise());
+  notif.on('click', () => {
+    sendDebugLog('[auto-detect] Meeting ended notif body clicked — opening Steno (no commit)');
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      if (!mainWindow.isVisible()) mainWindow.show();
+      mainWindow.focus();
+    }
+  });
+  notif.show();
+  return notif;
+}
+
+function requestAutoRecord(appName, originatingEvt) {
+  // Match the existing "session" naming style: "<App> — YYYY-MM-DD HH:MM".
+  const now = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  const stamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
+  const sessionName = `${appName} — ${stamp}`;
+  sendDebugLog(`[auto-detect] user requested record: ${sessionName}`);
+
+  // Track the originating app so we can pair its mic-stop with this recording
+  // and offer a "Summarise" prompt when the meeting ends.
+  autoStartedSession = {
+    pid: originatingEvt?.pid ?? null,
+    app_id: originatingEvt?.app_id ?? null,
+    appName,
+    paused: false,
+    pauseTimer: null,
+    endNotif: null,
+  };
+
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    if (!mainWindow.isVisible()) mainWindow.show();
+    mainWindow.focus();
+    mainWindow.webContents.send('auto-record-requested', { sessionName, appName });
+  }
+}
+
+function requestAutoSummarise() {
+  sendDebugLog('[auto-detect] user requested summarise from end notification');
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    if (!mainWindow.isVisible()) mainWindow.show();
+    mainWindow.focus();
+    mainWindow.webContents.send('auto-summarise-requested');
+  }
+  clearAutoStartedSession();
+}
+
+function clearAutoStartedSession() {
+  if (!autoStartedSession) return;
+  if (autoStartedSession.pauseTimer) clearTimeout(autoStartedSession.pauseTimer);
+  if (autoStartedSession.endNotif) {
+    try { autoStartedSession.endNotif.close(); } catch (_) {}
+  }
+  autoStartedSession = null;
+}
+
+function setupAutoMeetingDetector() {
+  if (IS_E2E) return;
+  // Until the settings UI lands (phase 4), dev mode requires the env var so
+  // we don't surprise developers with notifications. Packaged builds will be
+  // gated by the persisted user setting instead.
+  if (!app.isPackaged && !process.env[AUTO_DETECT_ENV]) {
+    sendDebugLog(`[auto-detect] dev mode without ${AUTO_DETECT_ENV}=1; not starting`);
+    return;
+  }
+  startMicMonitor();
+}
+
+app.on('before-quit', () => {
+  stopMicMonitor();
 });
 
 // Add IPC handler for sending debug logs to frontend
