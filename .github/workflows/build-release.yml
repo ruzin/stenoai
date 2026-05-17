@@ -72,6 +72,24 @@ jobs:
           -name "*.dylib" -exec codesign --remove-signature {} \; 2>/dev/null || true
         echo "Stripped ad-hoc signatures from pywhispercpp dylibs"
 
+    - name: Build mic-monitor helper (Swift)
+      run: |
+        chmod +x scripts/build-mic-monitor.sh
+        # Matrix uses electron-builder's "x64"/"arm64" naming. swiftc wants
+        # "x86_64"/"arm64", so translate when invoking the build script.
+        if [ "${{ matrix.arch }}" = "x64" ]; then
+          ./scripts/build-mic-monitor.sh x86_64
+        else
+          ./scripts/build-mic-monitor.sh arm64
+        fi
+        file bin/mic-monitor
+        # Fail loudly if the binary doesn't match the matrix arch — silent
+        # mismatches would ship users a Rosetta'd helper.
+        case "${{ matrix.arch }}" in
+          arm64)  file bin/mic-monitor | grep -q "arm64" ;;
+          x64)    file bin/mic-monitor | grep -q "x86_64" ;;
+        esac
+
     - name: Build Python backend with PyInstaller
       run: |
         pyinstaller stenoai.spec --noconfirm
