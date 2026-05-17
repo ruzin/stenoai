@@ -4207,12 +4207,15 @@ ipcMain.handle('set-auto-detect-meetings', async (_event, enabled) => {
     const jsonMatch = result.match(/\{.*\}/s);
     const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : { success: true, auto_detect_meetings_enabled: enabled };
     // Apply the change live — spin the mic-monitor up or kill it without
-    // making the user restart. Honour the dev-mode gate so a developer
-    // turning the toggle on while running `npm start` doesn't accidentally
-    // get notifications without the env var.
+    // making the user restart. Mirror all the same gates as
+    // setupAutoMeetingDetector(): E2E mode and dev-without-env-var both
+    // skip the spawn so toggling the setting during tests / dev work
+    // doesn't accidentally start the watcher.
     if (parsed.success) {
       if (enabled) {
-        if (!app.isPackaged && !process.env[AUTO_DETECT_ENV]) {
+        if (IS_E2E) {
+          sendDebugLog('[auto-detect] E2E mode; setting saved but watcher not started');
+        } else if (!app.isPackaged && !process.env[AUTO_DETECT_ENV]) {
           sendDebugLog(`[auto-detect] dev mode without ${AUTO_DETECT_ENV}=1; setting saved but watcher not started`);
         } else {
           startMicMonitor();
