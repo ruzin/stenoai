@@ -2983,7 +2983,13 @@ const APP_NAME_OVERRIDES = [
   { match: /^org\.mozilla\./, name: 'Firefox' },
 ];
 
-const MEETING_END_DEBOUNCE_MS = 15_000; // wait this long after mic stops before pausing
+// Wait this long after the meeting app releases the mic before triggering
+// auto-pause + "Meeting ended" prompt. Verified empirically that Zoom/Meet/
+// Teams use software-mute (keep the OS-level stream open while muted), so
+// muting in-meeting does NOT emit a stop event and won't trip this debounce
+// — the only remaining false-positive source is a brief device switch.
+// 5s is responsive after a real meeting end while still safe.
+const MEETING_END_DEBOUNCE_MS = 5_000;
 
 let micMonitorProc = null;
 let micMonitorRespawnTimer = null;
