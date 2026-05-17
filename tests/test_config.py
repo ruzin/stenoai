@@ -116,6 +116,24 @@ class ConfigWhisperModelMigrationTests(unittest.TestCase):
             )
 
 
+class ConfigAutoDetectMeetingsTests(unittest.TestCase):
+    def test_default_auto_detect_meetings_is_true(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config = Config(config_path=Path(tmp_dir) / "config.json")
+            self.assertTrue(config.get_auto_detect_meetings_enabled())
+
+    def test_auto_detect_meetings_round_trip(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "config.json"
+            config = Config(config_path=path)
+            self.assertTrue(config.set_auto_detect_meetings_enabled(False))
+            self.assertFalse(config.get_auto_detect_meetings_enabled())
+            reloaded = Config(config_path=path)
+            self.assertFalse(reloaded.get_auto_detect_meetings_enabled())
+            self.assertTrue(reloaded.set_auto_detect_meetings_enabled(True))
+            self.assertTrue(reloaded.get_auto_detect_meetings_enabled())
+
+
 class ConfigKeepRecordingsTests(unittest.TestCase):
     def test_default_keep_recordings_is_false(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

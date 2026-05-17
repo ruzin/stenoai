@@ -255,6 +255,7 @@ export type GetTelemetryResponse = Result<{
 }>;
 export type GetDockIconResponse = Result<{ hide_dock_icon: boolean }>;
 export type GetSystemAudioResponse = Result<{ system_audio_enabled: boolean }>;
+export type GetAutoDetectMeetingsResponse = Result<{ auto_detect_meetings_enabled: boolean }>;
 export type GetWhisperModelResponse = Result<{ whisper_model: string; supported_models: string[] }>;
 export type GetKeepRecordingsResponse = Result<{ keep_recordings: boolean }>;
 export type GetLanguageResponse = Result<{ language: string }>;
@@ -481,6 +482,8 @@ export interface StenoaiBridge {
     setDockIcon: RequestFn<[v: boolean], Result<Record<string, never>>>;
     getSystemAudio: RequestFn<[], GetSystemAudioResponse>;
     setSystemAudio: RequestFn<[v: boolean], Result<Record<string, never>>>;
+    getAutoDetectMeetings: RequestFn<[], GetAutoDetectMeetingsResponse>;
+    setAutoDetectMeetings: RequestFn<[v: boolean], Result<Record<string, never>>>;
     getWhisperModel: RequestFn<[], GetWhisperModelResponse>;
     setWhisperModel: RequestFn<[model: string], Result<Record<string, never>>>;
     getKeepRecordings: RequestFn<[], GetKeepRecordingsResponse>;

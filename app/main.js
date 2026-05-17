@@ -1951,6 +1951,21 @@ function loadSystemAudioEnabled() {
   }
 }
 
+// Sync read of the auto-detect-meetings setting; default ON. Mirrors
+// loadSystemAudioEnabled — we avoid spawning Python during startup just
+// to read a boolean. Wire any new defaults through the Python config so
+// the truth lives in one place.
+function loadAutoDetectMeetingsEnabled() {
+  try {
+    const cfgPath = path.join(os.homedir(), 'Library', 'Application Support', 'stenoai', 'config.json');
+    if (!fs.existsSync(cfgPath)) return true;
+    const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf-8'));
+    return cfg.auto_detect_meetings_enabled !== false;
+  } catch (_) {
+    return true;
+  }
+}
+
 // Global recording state management
 let systemAudioRecordingActive = false;  // Track system audio recording for tray/quit
 let currentRecordingProcess = null;
@@ -3217,11 +3232,15 @@ function clearAutoStartedSession() {
 
 function setupAutoMeetingDetector() {
   if (IS_E2E) return;
-  // Until the settings UI lands (phase 4), dev mode requires the env var so
-  // we don't surprise developers with notifications. Packaged builds will be
-  // gated by the persisted user setting instead.
+  // Dev mode still requires the env var so a developer running `npm start`
+  // doesn't get notification spam — they have to opt in. Packaged builds
+  // honour the persisted user setting.
   if (!app.isPackaged && !process.env[AUTO_DETECT_ENV]) {
     sendDebugLog(`[auto-detect] dev mode without ${AUTO_DETECT_ENV}=1; not starting`);
+    return;
+  }
+  if (!loadAutoDetectMeetingsEnabled()) {
+    sendDebugLog('[auto-detect] disabled in settings; not starting');
     return;
   }
   startMicMonitor();
@@ -4166,6 +4185,45 @@ ipcMain.handle('set-system-audio', async (event, enabled) => {
     return { success: true, system_audio_enabled: enabled };
   } catch (error) {
     sendDebugLog(`Error setting system audio: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('get-auto-detect-meetings', async () => {
+  try {
+    const result = await runPythonScript('simple_recorder.py', ['get-auto-detect-meetings'], true);
+    const jsonData = JSON.parse(result);
+    return { success: true, ...jsonData };
+  } catch (error) {
+    sendDebugLog(`Error getting auto-detect setting: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('set-auto-detect-meetings', async (_event, enabled) => {
+  try {
+    sendDebugLog(`Setting auto-detect to: ${enabled}`);
+    const result = await runPythonScript('simple_recorder.py', ['set-auto-detect-meetings', enabled ? 'True' : 'False']);
+    const jsonMatch = result.match(/\{.*\}/s);
+    const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : { success: true, auto_detect_meetings_enabled: enabled };
+    // Apply the change live — spin the mic-monitor up or kill it without
+    // making the user restart. Honour the dev-mode gate so a developer
+    // turning the toggle on while running `npm start` doesn't accidentally
+    // get notifications without the env var.
+    if (parsed.success) {
+      if (enabled) {
+        if (!app.isPackaged && !process.env[AUTO_DETECT_ENV]) {
+          sendDebugLog(`[auto-detect] dev mode without ${AUTO_DETECT_ENV}=1; setting saved but watcher not started`);
+        } else {
+          startMicMonitor();
+        }
+      } else {
+        stopMicMonitor();
+      }
+    }
+    return parsed;
+  } catch (error) {
+    sendDebugLog(`Error setting auto-detect: ${error.message}`);
     return { success: false, error: error.message };
   }
 });
