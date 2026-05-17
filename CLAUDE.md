@@ -99,11 +99,12 @@ Releases are automated via `.github/workflows/build-release.yml`. Never create r
    - One-line summary at the top.
    - Headline features grouped under `### Section` headers (e.g., "System audio", "UX polish", "Under the hood", "Fixes").
    - Migration/upgrade notes if anything changed paths, identifiers, defaults, or requires user action.
-6. **Create an annotated tag** on `main` with the release notes as the tag message:
+6. **Create an annotated tag** on `main` with the release notes as the tag message. **Always pass `--cleanup=whitespace`** — without it, `git tag -F` strips every line starting with `#`, which silently deletes Markdown `### Section` headers from the release body:
    ```
-   git tag -a v0.3.0 -m "Release notes here..."
+   git tag -a v0.3.0 --cleanup=whitespace -F /path/to/notes.md
    git push origin v0.3.0
    ```
+   (If using `-m` instead of `-F`, pass `--cleanup=whitespace` anyway — the comment-stripping default applies to both.)
 7. The tag push triggers the workflow which:
    - Builds signed + notarized DMGs for both arm64 and x64
    - Creates a GitHub Release with the tag message as the body
