@@ -3614,14 +3614,50 @@ ipcMain.handle('pull-whisper-model', async (event, modelName) => {
       });
       let lastStdoutLine = '';
       let timedOut = false;
+      // Single settle-gate so SIGKILL-escalation / 'close' / 'error' /
+      // force-settle can all race without double-resolving or double-sending
+      // whisper-pull-complete. Critical for the timeout path: if the child
+      // ignores SIGTERM we must still resolve the Promise eventually,
+      // otherwise the renderer spinner hangs forever.
+      let settled = false;
+      let sigkillTimer = null;
+      let forceSettleTimer = null;
+      const finishOnce = (result, completeEvent) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(procTimeout);
+        if (sigkillTimer) clearTimeout(sigkillTimer);
+        if (forceSettleTimer) clearTimeout(forceSettleTimer);
+        if (mainWindow && !mainWindow.isDestroyed() && completeEvent) {
+          mainWindow.webContents.send('whisper-pull-complete', completeEvent);
+        }
+        resolve(result);
+      };
+
       // The 3.1 GB large-v3 weights take 5-10 min on a typical home
       // connection. 30 min covers everything short of a stalled socket,
       // matching the process-streaming timeout. Without this, a hung HF
       // download leaves the spinner spinning indefinitely with no recovery.
       const procTimeout = setTimeout(() => {
         timedOut = true;
-        sendDebugLog(`pull-whisper-model timed out after 30 minutes, killing`);
-        try { proc.kill(); } catch (_) { /* already exited */ }
+        sendDebugLog('pull-whisper-model timed out after 30 minutes, killing');
+        try { proc.kill('SIGTERM'); } catch (_) { /* already exited */ }
+        // SIGTERM can be ignored (signal handler, uninterruptible syscall).
+        // Escalate to SIGKILL which the kernel cannot block.
+        sigkillTimer = setTimeout(() => {
+          sendDebugLog('SIGTERM unresponsive, escalating to SIGKILL');
+          try { proc.kill('SIGKILL'); } catch (_) { /* already exited */ }
+        }, 5000);
+        // Final guarantee: even if 'close' never fires (zombie / uninterruptible
+        // wait), settle the Promise so the renderer's whisper-pull-complete
+        // listener flushes the progress map and the spinner clears.
+        forceSettleTimer = setTimeout(() => {
+          sendDebugLog('Force-settling pull-whisper-model Promise after kill grace');
+          finishOnce(
+            { success: false, error: 'Download timed out after 30 minutes' },
+            { model: modelName, success: false, error: 'Download timed out after 30 minutes' },
+          );
+        }, 15000);
       }, 30 * 60 * 1000);
       const relayProgress = (output) => {
         if (!output) return;
@@ -3644,42 +3680,29 @@ ipcMain.handle('pull-whisper-model', async (event, modelName) => {
         relayProgress(output);
       });
       proc.on('close', (code) => {
-        clearTimeout(procTimeout);
         let pullResult = null;
         try { pullResult = JSON.parse(lastStdoutLine); } catch (_) { /* not JSON */ }
         const succeeded = !timedOut && code === 0 && (!pullResult || pullResult.success !== false);
         if (succeeded) {
-          if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send('whisper-pull-complete', {
-              model: modelName,
-              success: true,
-            });
-          }
-          resolve({ success: true, model: modelName });
+          finishOnce(
+            { success: true, model: modelName },
+            { model: modelName, success: true },
+          );
         } else {
           const errorMsg = timedOut
             ? 'Download timed out after 30 minutes'
             : (pullResult && pullResult.error) || `Process exited with code ${code}`;
-          if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send('whisper-pull-complete', {
-              model: modelName,
-              success: false,
-              error: errorMsg,
-            });
-          }
-          resolve({ success: false, error: errorMsg });
+          finishOnce(
+            { success: false, error: errorMsg },
+            { model: modelName, success: false, error: errorMsg },
+          );
         }
       });
       proc.on('error', (error) => {
-        clearTimeout(procTimeout);
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.webContents.send('whisper-pull-complete', {
-            model: modelName,
-            success: false,
-            error: error.message,
-          });
-        }
-        resolve({ success: false, error: error.message });
+        finishOnce(
+          { success: false, error: error.message },
+          { model: modelName, success: false, error: error.message },
+        );
       });
     });
   } catch (e) {
