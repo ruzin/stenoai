@@ -12,6 +12,8 @@ native loader segfaults on the resulting NULL path).
 from __future__ import annotations
 
 import logging
+import os
+import secrets
 from pathlib import Path
 from typing import Callable
 
@@ -85,7 +87,12 @@ def download_with_progress(
         "https://huggingface.co/ggerganov/whisper.cpp/"
         f"resolve/main/ggml-{model_name}.bin"
     )
-    tmp = dest.with_suffix(dest.suffix + ".part")
+    # Per-process unique temp file so two concurrent downloads of the same
+    # model (rare — second app instance, or a double-click before the first
+    # request has registered) can't clobber each other's bytes. The losing
+    # writer's tmp is cleaned up by its own exception path; whoever renames
+    # first wins, the other rename overwrites atomically with identical bytes.
+    tmp = dest.with_suffix(dest.suffix + f".part-{os.getpid()}-{secrets.token_hex(4)}")
 
     try:
         with requests.get(url, stream=True, timeout=30) as resp:

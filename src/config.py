@@ -10,6 +10,8 @@ import uuid
 from pathlib import Path
 from typing import Optional, Dict, Any
 
+from src.whisper_models import SUPPORTED_WHISPER_MODELS as _WHISPER_REGISTRY
+
 logger = logging.getLogger(__name__)
 
 
@@ -81,11 +83,13 @@ class Config:
     }
 
 
-    # Curated to the two tiers we expose in the UI. The full pywhispercpp
-    # AVAILABLE_MODELS set is larger but most variants are either
-    # English-only (.en) or too low-quality for meeting notes. Plain "large"
-    # is *not* a valid pywhispercpp name — use "large-v3" / "large-v3-turbo".
-    SUPPORTED_WHISPER_MODELS = ["small", "large-v3-turbo"]
+    # Single source of truth for the curated Whisper model lineup is
+    # src/whisper_models.py — that module owns display names, sizes,
+    # descriptions, and the installed-status check the UI cards consume.
+    # The list form here is what the validation paths (set_whisper_model,
+    # get_whisper_model fallback) compare against. Re-derive on import so
+    # adding a model in whisper_models.py automatically widens validation.
+    SUPPORTED_WHISPER_MODELS = list(_WHISPER_REGISTRY.keys())
 
     # Languages shown in the settings dropdown (curated/tested)
     SUPPORTED_LANGUAGES = {

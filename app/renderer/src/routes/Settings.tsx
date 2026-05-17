@@ -293,6 +293,22 @@ function TabButton({ active, onClick, children }: TabButtonProps) {
   );
 }
 
+// Shared formatters used by both ModelList (Ollama) and WhisperModelList.
+// Without these the two lists drift on cosmetic details (size units,
+// default-label heuristic) and any future UX tweak has to be hand-applied
+// to each component. The actual list components stay separate because
+// ModelList has surface area Whisper doesn't need (deprecated section,
+// remote/local provider split).
+function formatModelSize(size_gb: number | undefined): string | undefined {
+  if (size_gb === undefined) return undefined;
+  if (size_gb < 1) return `${Math.round(size_gb * 1024)} MB`;
+  return `${size_gb.toFixed(1)} GB`;
+}
+
+function isDefaultModel(description: string | undefined): boolean {
+  return /\((default|recommended)\)/i.test(description ?? '');
+}
+
 interface ModelCardProps {
   name: string;
   sizeLabel?: string;
@@ -1201,7 +1217,7 @@ function WhisperModelList() {
         const isCurrent = m.name === models.data.current;
         const isDownloading = Boolean(pull.progress[m.name]);
         const downloadProgress = pull.progress[m.name];
-        const isDefault = /default/i.test(m.displayName ?? '');
+        const isDefault = isDefaultModel(m.description);
 
         const parts: string[] = [];
         if (m.description) parts.push(m.description);
@@ -1209,12 +1225,7 @@ function WhisperModelList() {
         if (m.quality) parts.push(`${m.quality} quality`);
         const note = parts.length ? parts.join(' · ') : undefined;
 
-        const sizeLabel =
-          m.size_gb !== undefined
-            ? m.size_gb < 1
-              ? `${Math.round(m.size_gb * 1024)} MB`
-              : `${m.size_gb.toFixed(1)} GB`
-            : undefined;
+        const sizeLabel = formatModelSize(m.size_gb);
 
         const onSelect = () => {
           if (m.installed) {
@@ -1286,8 +1297,7 @@ function ModelList() {
     const isCurrent = m.name === current.data;
     const isDownloading = Boolean(pull.progress[m.name]);
     const downloadProgress = pull.progress[m.name];
-    const isDefault =
-      !isRemote && /\((default|recommended)\)/i.test(m.description ?? '');
+    const isDefault = !isRemote && isDefaultModel(m.description);
 
     let note: string | undefined;
     if (isRemote && m.description) {
@@ -1299,8 +1309,7 @@ function ModelList() {
       note = parts.length ? parts.join(' · ') : undefined;
     }
 
-    const sizeLabel =
-      m.size_gb !== undefined ? `${m.size_gb.toFixed(1)} GB` : undefined;
+    const sizeLabel = formatModelSize(m.size_gb);
 
     const onSelect = () => {
       if (m.installed) {
