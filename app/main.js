@@ -3108,6 +3108,15 @@ function handleMicEvent(line) {
 
 function handleMicStop(evt) {
   if (!autoStartedSession) return;
+  // Recording may have been stopped manually (Stop button, hotkey, shortcut)
+  // since we accepted the auto-start. The autoStartedSession isn't notified
+  // of that today, so without this guard the mic-stop event would schedule
+  // a phantom pause + "Meeting ended" notification for a recording that's
+  // already gone. Drop the session here so the next start is clean.
+  if (!currentRecordingProcess && !systemAudioRecordingActive) {
+    clearAutoStartedSession();
+    return;
+  }
   const matches = evt.pid === autoStartedSession.pid || evt.app_id === autoStartedSession.app_id;
   if (!matches) return;
 

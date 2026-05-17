@@ -155,11 +155,19 @@ export function useRecordingEvents() {
       bridge.on.autoPauseRequested(() => {
         // Mic stopped on the meeting app — pause so we don't keep recording
         // ambient silence while waiting for user to confirm summarise.
-        if (status === 'recording') void pauseRecording();
+        // No status guard: `status` is polled and can lag the main-side state
+        // machine by up to a poll interval. If pause then resume fire back-to-
+        // back, a stale 'recording' read here would skip the resume on the
+        // companion handler below. Trust main (it already gates on its own
+        // autoStartedSession state) and let pauseRecording's IPC validate.
+        void pauseRecording();
       }),
       bridge.on.autoResumeRequested(() => {
         // Meeting came back before user clicked Summarise — keep capturing.
-        if (status === 'paused') void resumeRecording();
+        // Same stale-status reason as autoPauseRequested above: don't gate
+        // on the polled status, just trust that main only fires this when
+        // its own state says we're paused.
+        void resumeRecording();
       }),
       bridge.on.autoSummariseRequested(() => {
         // User clicked "Summarise" on the Meeting ended notification.
