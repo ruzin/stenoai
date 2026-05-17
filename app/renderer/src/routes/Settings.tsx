@@ -53,6 +53,8 @@ import {
   useStoragePath,
   useSystemAudioSetting,
   useSystemAudioSupport,
+  useKeepRecordingsSetting,
+  useSetKeepRecordings,
   useTelemetrySetting,
   useUserName,
 } from '@/hooks/useSettings';
@@ -71,7 +73,10 @@ import {
   useCurrentModel,
   useModels,
   usePullModel,
+  usePullWhisperModel,
   useSetCurrentModel,
+  useSetWhisperModel,
+  useWhisperModels,
 } from '@/hooks/useModels';
 import {
   useGoogleCalendarAuth,
@@ -107,6 +112,7 @@ const LANGUAGES: Array<{ value: string; label: string }> = [
 
 const TABS = [
   { id: 'general', label: 'General' },
+  { id: 'transcription', label: 'Transcribe' },
   { id: 'ai', label: 'AI' },
   { id: 'organisation', label: 'Organisation' },
   { id: 'advanced', label: 'Advanced' },
@@ -285,6 +291,22 @@ function TabButton({ active, onClick, children }: TabButtonProps) {
       {children}
     </button>
   );
+}
+
+// Shared formatters used by both ModelList (Ollama) and WhisperModelList.
+// Without these the two lists drift on cosmetic details (size units,
+// default-label heuristic) and any future UX tweak has to be hand-applied
+// to each component. The actual list components stay separate because
+// ModelList has surface area Whisper doesn't need (deprecated section,
+// remote/local provider split).
+function formatModelSize(size_gb: number | undefined): string | undefined {
+  if (size_gb === undefined) return undefined;
+  if (size_gb < 1) return `${Math.round(size_gb * 1024)} MB`;
+  return `${size_gb.toFixed(1)} GB`;
+}
+
+function isDefaultModel(description: string | undefined): boolean {
+  return /\((default|recommended)\)/i.test(description ?? '');
 }
 
 interface ModelCardProps {
@@ -473,6 +495,7 @@ export function Settings() {
         >
           <div style={{ maxWidth: 600, paddingTop: 8 }}>
             {tab === 'general' && <GeneralTab />}
+            {tab === 'transcription' && <TranscriptionTab />}
             {tab === 'ai' && <AiTab />}
             {tab === 'organisation' && <OrganisationTab />}
             {tab === 'advanced' && <AdvancedTab />}
@@ -498,8 +521,6 @@ export function Settings() {
 
 function GeneralTab() {
   const { theme, setTheme } = useTheme();
-  const language = useLanguageSetting();
-  const setLanguage = useSetLanguage();
   const notifications = useNotificationsSetting();
   const setNotifications = useSetNotifications();
   const systemAudio = useSystemAudioSetting();
@@ -619,28 +640,6 @@ function GeneralTab() {
       </SettingRow>
 
       <SettingRow
-        label="Language"
-        description="Language for transcription and summaries"
-      >
-        <Select
-          value={language.data ?? 'en'}
-          onValueChange={(v) => setLanguage.mutate(v)}
-          disabled={!language.data}
-        >
-          <SelectTrigger className={COMPACT_TRIGGER}>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {LANGUAGES.map((l) => (
-              <SelectItem key={l.value} value={l.value}>
-                {l.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </SettingRow>
-
-      <SettingRow
         label="Calendar"
         description={
           calendarConnected
@@ -725,6 +724,64 @@ function GeneralTab() {
           disabled={dockIcon.data === undefined}
         />
       </SettingRow>
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Transcription tab
+// ---------------------------------------------------------------------------
+
+function TranscriptionTab() {
+  const language = useLanguageSetting();
+  const setLanguage = useSetLanguage();
+  const keepRecordings = useKeepRecordingsSetting();
+  const setKeepRecordings = useSetKeepRecordings();
+
+  return (
+    <section data-settings-tab="transcription">
+      <SettingRow
+        label="Language"
+        description="Language for transcription and summaries"
+      >
+        <Select
+          value={language.data ?? 'en'}
+          onValueChange={(v) => setLanguage.mutate(v)}
+          disabled={!language.data}
+        >
+          <SelectTrigger className={COMPACT_TRIGGER}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {LANGUAGES.map((l) => (
+              <SelectItem key={l.value} value={l.value}>
+                {l.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </SettingRow>
+
+      <SettingRow
+        label="Keep recordings"
+        description="Save audio files after processing. Uses 1–10 MB per minute depending on capture mode."
+      >
+        <Switch
+          checked={keepRecordings.data ?? false}
+          onCheckedChange={(v) => setKeepRecordings.mutate(v)}
+          disabled={keepRecordings.data === undefined}
+        />
+      </SettingRow>
+
+      <SectionHeading>Model</SectionHeading>
+      <p
+        className="mb-3 text-[13px]"
+        style={{ color: 'var(--fg-2)' }}
+      >
+        Larger models are more accurate but slower. Models download on first
+        use and are kept on disk for reuse.
+      </p>
+      <WhisperModelList />
     </section>
   );
 }
@@ -1129,6 +1186,73 @@ function OAuthPrompt({ state, onClose, onRetry }: OAuthPromptProps) {
   );
 }
 
+
+function WhisperModelList() {
+  const models = useWhisperModels();
+  const setCurrent = useSetWhisperModel();
+  const pull = usePullWhisperModel();
+
+  if (models.isLoading) {
+    return (
+      <div
+        className="flex items-center gap-2 text-[13px]"
+        style={{ color: 'var(--fg-2)' }}
+      >
+        <Loader2 className="size-3.5 animate-spin" />
+        Loading models…
+      </div>
+    );
+  }
+  if (models.isError || !models.data?.models?.length) {
+    return (
+      <div className="text-[13px]" style={{ color: 'var(--fg-2)' }}>
+        Could not load Whisper models.
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      {models.data.models.map((m) => {
+        const isCurrent = m.name === models.data.current;
+        const isDownloading = Boolean(pull.progress[m.name]);
+        const downloadProgress = pull.progress[m.name];
+        const isDefault = isDefaultModel(m.description);
+
+        const parts: string[] = [];
+        if (m.description) parts.push(m.description);
+        if (m.speed) parts.push(`${m.speed} speed`);
+        if (m.quality) parts.push(`${m.quality} quality`);
+        const note = parts.length ? parts.join(' · ') : undefined;
+
+        const sizeLabel = formatModelSize(m.size_gb);
+
+        const onSelect = () => {
+          if (m.installed) {
+            setCurrent.mutate(m.name);
+          } else {
+            pull.mutate(m.name);
+          }
+        };
+
+        return (
+          <ModelCard
+            key={m.name}
+            name={m.displayName ?? m.name}
+            sizeLabel={sizeLabel}
+            note={note}
+            isCurrent={isCurrent}
+            isDefault={isDefault}
+            isDownloading={isDownloading}
+            downloadProgress={downloadProgress}
+            onSelect={onSelect}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
 function ModelList() {
   const models = useModels();
   const current = useCurrentModel();
@@ -1173,8 +1297,7 @@ function ModelList() {
     const isCurrent = m.name === current.data;
     const isDownloading = Boolean(pull.progress[m.name]);
     const downloadProgress = pull.progress[m.name];
-    const isDefault =
-      !isRemote && /\((default|recommended)\)/i.test(m.description ?? '');
+    const isDefault = !isRemote && isDefaultModel(m.description);
 
     let note: string | undefined;
     if (isRemote && m.description) {
@@ -1186,8 +1309,7 @@ function ModelList() {
       note = parts.length ? parts.join(' · ') : undefined;
     }
 
-    const sizeLabel =
-      m.size_gb !== undefined ? `${m.size_gb.toFixed(1)} GB` : undefined;
+    const sizeLabel = formatModelSize(m.size_gb);
 
     const onSelect = () => {
       if (m.installed) {

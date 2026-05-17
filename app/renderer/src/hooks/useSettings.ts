@@ -185,3 +185,18 @@ export function useSetUserName() {
     },
   });
 }
+
+export function useKeepRecordingsSetting() {
+  return useQuery({
+    queryKey: [...settingsKeys.all, 'keepRecordings'] as const,
+    queryFn: async () => unwrap(await ipc().settings.getKeepRecordings()).keep_recordings,
+  });
+}
+
+export function useSetKeepRecordings() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (v: boolean) => unwrap(await ipc().settings.setKeepRecordings(v)),
+    onSuccess: () => qc.invalidateQueries({ queryKey: [...settingsKeys.all, 'keepRecordings'] }),
+  });
+}

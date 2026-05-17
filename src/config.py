@@ -10,6 +10,8 @@ import uuid
 from pathlib import Path
 from typing import Optional, Dict, Any
 
+from src.whisper_models import SUPPORTED_WHISPER_MODELS as _WHISPER_REGISTRY
+
 logger = logging.getLogger(__name__)
 
 
@@ -81,7 +83,13 @@ class Config:
     }
 
 
-    SUPPORTED_WHISPER_MODELS = ["tiny", "base", "small", "medium", "large", "large-v3-turbo"]
+    # Single source of truth for the curated Whisper model lineup is
+    # src/whisper_models.py — that module owns display names, sizes,
+    # descriptions, and the installed-status check the UI cards consume.
+    # The list form here is what the validation paths (set_whisper_model,
+    # get_whisper_model fallback) compare against. Re-derive on import so
+    # adding a model in whisper_models.py automatically widens validation.
+    SUPPORTED_WHISPER_MODELS = list(_WHISPER_REGISTRY.keys())
 
     # Languages shown in the settings dropdown (curated/tested)
     SUPPORTED_LANGUAGES = {
@@ -154,6 +162,24 @@ class Config:
 
         self._config: Dict[str, Any] = self._load()
         self._migrate_cloud_model_map()
+        self._migrate_whisper_model()
+
+    def _migrate_whisper_model(self) -> None:
+        """Map any out-of-current-list whisper model to a supported one.
+
+        - 'large' (invalid pywhispercpp name — crashes the native loader) →
+          'large-v3-turbo' (closest current-list match).
+        - Any other previously-supported but now-retired tier
+          (tiny/base/medium/large-v3) → 'small' (the safe default).
+        """
+        current = self._config.get("whisper_model")
+        if current is None or current in self.SUPPORTED_WHISPER_MODELS:
+            return
+        if current == "large":
+            self._config["whisper_model"] = "large-v3-turbo"
+        else:
+            self._config["whisper_model"] = "small"
+        self._save()
 
     def _migrate_cloud_model_map(self) -> None:
         """One-shot migration from legacy single 'cloud_model' to per-provider

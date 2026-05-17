@@ -463,6 +463,23 @@ function getAllowedBaseDirs() {
   return dirs;
 }
 
+// Sync resolver for the audio recordings folder. Mirrors the path order used
+// by the async `get-recordings-dir` handler (custom storage > packaged data
+// dir > dev scratch). Use this anywhere we need the path inside an IPC
+// handler that can't `await runPythonScript`.
+function resolveRecordingsDir() {
+  let dir;
+  if (_cachedCustomStoragePath) {
+    dir = path.join(_cachedCustomStoragePath, 'recordings');
+  } else if (app.isPackaged) {
+    dir = path.join(os.homedir(), 'Library', 'Application Support', 'stenoai', 'recordings');
+  } else {
+    dir = path.join(__dirname, '..', 'recordings');
+  }
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
 /**
  * Validate that a file path is within allowed directories (security)
  * Prevents path traversal attacks by ensuring files are only accessed
@@ -2136,6 +2153,21 @@ async function processNextInQueue() {
     console.error(`❌ Processing failed for ${currentProcessingJob.sessionName}:`, error);
     trackEvent('error_occurred', { error_type: 'processing_queue' });
 
+    // The Python success path unlinks the source audio when keep_recordings
+    // is OFF. A processing crash never reaches that branch, so without this
+    // cleanup the failed .webm/.wav lingers forever even though the user
+    // opted not to keep recordings. Mirror the same gate here.
+    try {
+      const keepResult = await runPythonScript('simple_recorder.py', ['get-keep-recordings'], true);
+      const keep = JSON.parse(keepResult.trim())?.keep_recordings === true;
+      if (!keep && currentProcessingJob.audioFile && fs.existsSync(currentProcessingJob.audioFile)) {
+        fs.unlinkSync(currentProcessingJob.audioFile);
+        sendDebugLog(`Cleaned up failed-processing audio: ${currentProcessingJob.audioFile}`);
+      }
+    } catch (cleanupErr) {
+      sendDebugLog(`Failed-processing cleanup error: ${cleanupErr.message}`);
+    }
+
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('processing-complete', {
         success: false,
@@ -3552,28 +3584,145 @@ ipcMain.handle('set-model', async (event, modelName) => {
 ipcMain.handle('get-whisper-model', async () => {
   try {
     const result = await runPythonScript('simple_recorder.py', ['get-whisper-model'], true);
-    return JSON.parse(result.trim());
+    const jsonData = JSON.parse(result.trim());
+    return { success: true, ...jsonData };
   } catch (e) { return { success: false, error: e.message }; }
 });
 
 ipcMain.handle('set-whisper-model', async (event, modelSize) => {
   try {
     const result = await runPythonScript('simple_recorder.py', ['set-whisper-model', modelSize]);
-    return JSON.parse(result.trim());
+    const jsonData = JSON.parse(result.trim());
+    return { success: true, ...jsonData };
   } catch (e) { return { success: false, error: e.message }; }
+});
+
+ipcMain.handle('list-whisper-models', async () => {
+  try {
+    const result = await runPythonScript('simple_recorder.py', ['list-whisper-models'], true);
+    const jsonData = JSON.parse(result.trim());
+    return { success: true, ...jsonData };
+  } catch (e) { return { success: false, error: e.message }; }
+});
+
+ipcMain.handle('pull-whisper-model', async (event, modelName) => {
+  try {
+    sendDebugLog(`Pulling whisper model: ${modelName}`);
+    return new Promise((resolve) => {
+      const proc = spawn(getBackendPath(), ['pull-whisper-model', modelName], {
+        cwd: getBackendCwd(),
+      });
+      let lastStdoutLine = '';
+      let timedOut = false;
+      // Single settle-gate so SIGKILL-escalation / 'close' / 'error' /
+      // force-settle can all race without double-resolving or double-sending
+      // whisper-pull-complete. Critical for the timeout path: if the child
+      // ignores SIGTERM we must still resolve the Promise eventually,
+      // otherwise the renderer spinner hangs forever.
+      let settled = false;
+      let sigkillTimer = null;
+      let forceSettleTimer = null;
+      const finishOnce = (result, completeEvent) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(procTimeout);
+        if (sigkillTimer) clearTimeout(sigkillTimer);
+        if (forceSettleTimer) clearTimeout(forceSettleTimer);
+        if (mainWindow && !mainWindow.isDestroyed() && completeEvent) {
+          mainWindow.webContents.send('whisper-pull-complete', completeEvent);
+        }
+        resolve(result);
+      };
+
+      // The 3.1 GB large-v3 weights take 5-10 min on a typical home
+      // connection. 30 min covers everything short of a stalled socket,
+      // matching the process-streaming timeout. Without this, a hung HF
+      // download leaves the spinner spinning indefinitely with no recovery.
+      const procTimeout = setTimeout(() => {
+        timedOut = true;
+        sendDebugLog('pull-whisper-model timed out after 30 minutes, killing');
+        try { proc.kill('SIGTERM'); } catch (_) { /* already exited */ }
+        // SIGTERM can be ignored (signal handler, uninterruptible syscall).
+        // Escalate to SIGKILL which the kernel cannot block.
+        sigkillTimer = setTimeout(() => {
+          sendDebugLog('SIGTERM unresponsive, escalating to SIGKILL');
+          try { proc.kill('SIGKILL'); } catch (_) { /* already exited */ }
+        }, 5000);
+        // Final guarantee: even if 'close' never fires (zombie / uninterruptible
+        // wait), settle the Promise so the renderer's whisper-pull-complete
+        // listener flushes the progress map and the spinner clears.
+        forceSettleTimer = setTimeout(() => {
+          sendDebugLog('Force-settling pull-whisper-model Promise after kill grace');
+          finishOnce(
+            { success: false, error: 'Download timed out after 30 minutes' },
+            { model: modelName, success: false, error: 'Download timed out after 30 minutes' },
+          );
+        }, 15000);
+      }, 30 * 60 * 1000);
+      const relayProgress = (output) => {
+        if (!output) return;
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('whisper-pull-progress', {
+            model: modelName,
+            progress: output,
+          });
+        }
+      };
+      proc.stdout.on('data', (data) => {
+        const output = data.toString().trim();
+        sendDebugLog(output);
+        if (output) lastStdoutLine = output;
+        relayProgress(output);
+      });
+      proc.stderr.on('data', (data) => {
+        const output = data.toString().trim();
+        if (output) sendDebugLog(`STDERR: ${output}`);
+        relayProgress(output);
+      });
+      proc.on('close', (code) => {
+        let pullResult = null;
+        try { pullResult = JSON.parse(lastStdoutLine); } catch (_) { /* not JSON */ }
+        const succeeded = !timedOut && code === 0 && (!pullResult || pullResult.success !== false);
+        if (succeeded) {
+          finishOnce(
+            { success: true, model: modelName },
+            { model: modelName, success: true },
+          );
+        } else {
+          const errorMsg = timedOut
+            ? 'Download timed out after 30 minutes'
+            : (pullResult && pullResult.error) || `Process exited with code ${code}`;
+          finishOnce(
+            { success: false, error: errorMsg },
+            { model: modelName, success: false, error: errorMsg },
+          );
+        }
+      });
+      proc.on('error', (error) => {
+        finishOnce(
+          { success: false, error: error.message },
+          { model: modelName, success: false, error: error.message },
+        );
+      });
+    });
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
 });
 
 ipcMain.handle('get-keep-recordings', async () => {
   try {
     const result = await runPythonScript('simple_recorder.py', ['get-keep-recordings'], true);
-    return JSON.parse(result.trim());
+    const jsonData = JSON.parse(result.trim());
+    return { success: true, ...jsonData };
   } catch (e) { return { success: false, error: e.message }; }
 });
 
 ipcMain.handle('set-keep-recordings', async (event, enabled) => {
   try {
     const result = await runPythonScript('simple_recorder.py', ['set-keep-recordings', enabled.toString()]);
-    return JSON.parse(result.trim());
+    const jsonData = JSON.parse(result.trim());
+    return { success: true, ...jsonData };
   } catch (e) { return { success: false, error: e.message }; }
 });
 
@@ -3933,13 +4082,13 @@ ipcMain.handle('get-recordings-dir', async () => {
   }
 });
 
-// Renderer-driven system audio capture writes its WebM/Opus blob here so it
-// lands inside an allowedBaseDir for validateSafeFilePath downstream. The
-// blob comes over IPC as a Uint8Array (structured-clone friendly).
+// Renderer-driven system audio capture writes its WebM/Opus blob into the
+// same recordings/ folder the mic path uses. Keeping both capture paths in
+// one folder means `keep_recordings` semantics + cleanup are symmetric, and
+// users have a single canonical place to find saved audio.
 ipcMain.handle('write-system-audio-blob', async (_event, payload, sessionName) => {
   try {
-    const dir = path.join(os.homedir(), 'Library', 'Application Support', 'stenoai', 'system_audio_tmp');
-    fs.mkdirSync(dir, { recursive: true });
+    const dir = resolveRecordingsDir();
     const safeName = String(sessionName || 'Meeting').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 64);
     const filename = `sysaudio-${Date.now()}-${safeName}.webm`;
     const filePath = path.join(dir, filename);

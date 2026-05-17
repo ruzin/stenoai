@@ -219,6 +219,13 @@ function StageCard({
   React.useLayoutEffect(() => {
     const el = barRef.current;
     if (!el) return;
+    // Snap any in-flight FLIP animation to its rest position before measuring.
+    // Otherwise getBoundingClientRect() returns "layout top + current transform
+    // offset", lastTopRef stores that contaminated value, and the next delta
+    // ends up with the wrong sign — the bar oscillates instead of gliding
+    // down monotonically as new chunks land.
+    el.style.transition = 'none';
+    el.style.transform = 'none';
     const newTop = el.getBoundingClientRect().top;
     const last = lastTopRef.current;
     lastTopRef.current = newTop;
@@ -228,7 +235,6 @@ function StageCard({
     // animation, then clear. Leaving will-change on permanently keeps a
     // layer alive when nothing's animating, costing memory.
     el.style.willChange = 'transform';
-    el.style.transition = 'none';
     el.style.transform = `translateY(${delta}px)`;
     // Force a reflow so the inverse transform is committed before we kick
     // off the animation back to 0.

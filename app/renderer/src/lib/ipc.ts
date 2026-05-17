@@ -242,6 +242,12 @@ export type ListModelsResponse = Result<{
 }>;
 export type GetCurrentModelResponse = Result<{ model: string }>;
 
+export type ListWhisperModelsResponse = Result<{
+  supported_models: Record<string, RawSupportedModel>;
+  current_model: string;
+  provider: string;
+}>;
+
 export type GetNotificationsResponse = Result<{ notifications_enabled: boolean }>;
 export type GetTelemetryResponse = Result<{
   telemetry_enabled: boolean;
@@ -249,6 +255,8 @@ export type GetTelemetryResponse = Result<{
 }>;
 export type GetDockIconResponse = Result<{ hide_dock_icon: boolean }>;
 export type GetSystemAudioResponse = Result<{ system_audio_enabled: boolean }>;
+export type GetWhisperModelResponse = Result<{ whisper_model: string; supported_models: string[] }>;
+export type GetKeepRecordingsResponse = Result<{ keep_recordings: boolean }>;
 export type GetLanguageResponse = Result<{ language: string }>;
 export type GetUserNameResponse = Result<{ user_name: string }>;
 export type StoragePathResponse = Result<{
@@ -320,6 +328,15 @@ export interface ModelPullProgressEvent {
   progress: string;
 }
 export interface ModelPullCompleteEvent {
+  model: string;
+  success: boolean;
+  error?: string;
+}
+export interface WhisperPullProgressEvent {
+  model: string;
+  progress: string;
+}
+export interface WhisperPullCompleteEvent {
   model: string;
   success: boolean;
   error?: string;
@@ -449,6 +466,12 @@ export interface StenoaiBridge {
     pull: RequestFn<[name: string], Result<Record<string, never>>>;
   };
 
+  whisperModels: {
+    list: RequestFn<[], ListWhisperModelsResponse>;
+    set: RequestFn<[name: string], Result<Record<string, never>>>;
+    pull: RequestFn<[name: string], Result<Record<string, never>>>;
+  };
+
   settings: {
     getNotifications: RequestFn<[], GetNotificationsResponse>;
     setNotifications: RequestFn<[v: boolean], Result<Record<string, never>>>;
@@ -458,6 +481,10 @@ export interface StenoaiBridge {
     setDockIcon: RequestFn<[v: boolean], Result<Record<string, never>>>;
     getSystemAudio: RequestFn<[], GetSystemAudioResponse>;
     setSystemAudio: RequestFn<[v: boolean], Result<Record<string, never>>>;
+    getWhisperModel: RequestFn<[], GetWhisperModelResponse>;
+    setWhisperModel: RequestFn<[model: string], Result<Record<string, never>>>;
+    getKeepRecordings: RequestFn<[], GetKeepRecordingsResponse>;
+    setKeepRecordings: RequestFn<[v: boolean], Result<Record<string, never>>>;
     getLanguage: RequestFn<[], GetLanguageResponse>;
     setLanguage: RequestFn<[code: string], Result<Record<string, never>>>;
     getUserName: RequestFn<[], GetUserNameResponse>;
@@ -517,6 +544,8 @@ export interface StenoaiBridge {
     queryDone: Subscribe<QueryDoneEvent>;
     modelPullProgress: Subscribe<ModelPullProgressEvent>;
     modelPullComplete: Subscribe<ModelPullCompleteEvent>;
+    whisperPullProgress: Subscribe<WhisperPullProgressEvent>;
+    whisperPullComplete: Subscribe<WhisperPullCompleteEvent>;
     updateAvailable: Subscribe<UpdateAvailableEvent>;
     updateDownloadProgress: Subscribe<UpdateProgressEvent>;
     updateDownloaded: Subscribe<UpdateDownloadedEvent>;

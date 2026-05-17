@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -72,6 +73,47 @@ class ConfigWhisperModelTests(unittest.TestCase):
             # Simulate a hand-edited config with a stale model name
             config._config["whisper_model"] = "obsolete-model"
             self.assertEqual(config.get_whisper_model(), "small")
+
+
+class ConfigWhisperModelMigrationTests(unittest.TestCase):
+    """_migrate_whisper_model runs at load time to rescue configs that hold
+    values outside the current SUPPORTED_WHISPER_MODELS list. Bare 'large'
+    is the critical case — pywhispercpp.AVAILABLE_MODELS doesn't include it
+    and the native loader segfaults if we let the value through to Model()."""
+
+    def _write_config(self, path: Path, payload: dict) -> None:
+        path.write_text(json.dumps(payload))
+
+    def test_migrates_bare_large_to_turbo(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "config.json"
+            self._write_config(path, {"whisper_model": "large"})
+            config = Config(config_path=path)
+            self.assertEqual(config.get_whisper_model(), "large-v3-turbo")
+            # Persisted to disk so the migration doesn't re-run forever.
+            self.assertEqual(
+                json.loads(path.read_text())["whisper_model"], "large-v3-turbo"
+            )
+
+    def test_migrates_retired_tier_to_small(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "config.json"
+            self._write_config(path, {"whisper_model": "medium"})
+            config = Config(config_path=path)
+            self.assertEqual(config.get_whisper_model(), "small")
+            self.assertEqual(
+                json.loads(path.read_text())["whisper_model"], "small"
+            )
+
+    def test_leaves_supported_value_untouched(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "config.json"
+            self._write_config(path, {"whisper_model": "large-v3-turbo"})
+            Config(config_path=path)
+            # No rewrite happened — value identical, no migration thrash.
+            self.assertEqual(
+                json.loads(path.read_text())["whisper_model"], "large-v3-turbo"
+            )
 
 
 class ConfigKeepRecordingsTests(unittest.TestCase):

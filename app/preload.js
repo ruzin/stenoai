@@ -150,6 +150,12 @@ const stenoai = {
     pull: (name) => invoke('pull-model', name),
   },
 
+  whisperModels: {
+    list: () => invoke('list-whisper-models'),
+    set: (name) => invoke('set-whisper-model', name),
+    pull: (name) => invoke('pull-whisper-model', name),
+  },
+
   settings: {
     getNotifications: () => invoke('get-notifications'),
     setNotifications: (v) => invoke('set-notifications', v),
@@ -159,6 +165,10 @@ const stenoai = {
     setDockIcon: (v) => invoke('set-dock-icon', v),
     getSystemAudio: () => invoke('get-system-audio'),
     setSystemAudio: (v) => invoke('set-system-audio', v),
+    getWhisperModel: () => invoke('get-whisper-model'),
+    setWhisperModel: (model) => invoke('set-whisper-model', model),
+    getKeepRecordings: () => invoke('get-keep-recordings'),
+    setKeepRecordings: (v) => invoke('set-keep-recordings', v),
     getLanguage: () => invoke('get-language'),
     setLanguage: (code) => invoke('set-language', code),
     getUserName: () => invoke('get-user-name'),
@@ -241,6 +251,8 @@ const stenoai = {
     queryDone: (cb) => subscribe('query-done', cb),
     modelPullProgress: (cb) => subscribe('model-pull-progress', cb),
     modelPullComplete: (cb) => subscribe('model-pull-complete', cb),
+    whisperPullProgress: (cb) => subscribe('whisper-pull-progress', cb),
+    whisperPullComplete: (cb) => subscribe('whisper-pull-complete', cb),
     updateAvailable: (cb) => subscribe('update-available', cb),
     updateDownloadProgress: (cb) => subscribe('update-download-progress', cb),
     updateDownloaded: (cb) => subscribe('update-downloaded', cb),
