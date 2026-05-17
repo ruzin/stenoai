@@ -19,8 +19,6 @@
 
 <p align="center"><sub>Trusted by users at <b>AWS</b>, <b>Deliveroo</b>, <b>Tesco</b>, <b>Rutgers</b>, <b>European Union</b> & <b>HashiCorp</b>.</sub></p>
 
-<p align="center"><sub>Sponsored by <b>GitLab Founder's Open Core Ventures</b>.</sub></p>
-
 <div align="center">
   <picture>
     <source srcset="website/public/demo.gif" type="image/gif">
