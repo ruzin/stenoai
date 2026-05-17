@@ -748,7 +748,7 @@ function TranscriptionTab() {
 
       <SettingRow
         label="Keep recordings"
-        description="Save audio files after processing"
+        description="Save audio files after processing. Uses 1–10 MB per minute depending on capture mode."
       >
         <Switch
           checked={keepRecordings.data ?? false}

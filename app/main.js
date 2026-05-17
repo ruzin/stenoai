@@ -463,6 +463,23 @@ function getAllowedBaseDirs() {
   return dirs;
 }
 
+// Sync resolver for the audio recordings folder. Mirrors the path order used
+// by the async `get-recordings-dir` handler (custom storage > packaged data
+// dir > dev scratch). Use this anywhere we need the path inside an IPC
+// handler that can't `await runPythonScript`.
+function resolveRecordingsDir() {
+  let dir;
+  if (_cachedCustomStoragePath) {
+    dir = path.join(_cachedCustomStoragePath, 'recordings');
+  } else if (app.isPackaged) {
+    dir = path.join(os.homedir(), 'Library', 'Application Support', 'stenoai', 'recordings');
+  } else {
+    dir = path.join(__dirname, '..', 'recordings');
+  }
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
 /**
  * Validate that a file path is within allowed directories (security)
  * Prevents path traversal attacks by ensuring files are only accessed
@@ -2135,6 +2152,21 @@ async function processNextInQueue() {
   } catch (error) {
     console.error(`❌ Processing failed for ${currentProcessingJob.sessionName}:`, error);
     trackEvent('error_occurred', { error_type: 'processing_queue' });
+
+    // The Python success path unlinks the source audio when keep_recordings
+    // is OFF. A processing crash never reaches that branch, so without this
+    // cleanup the failed .webm/.wav lingers forever even though the user
+    // opted not to keep recordings. Mirror the same gate here.
+    try {
+      const keepResult = await runPythonScript('simple_recorder.py', ['get-keep-recordings'], true);
+      const keep = JSON.parse(keepResult.trim())?.keep_recordings === true;
+      if (!keep && currentProcessingJob.audioFile && fs.existsSync(currentProcessingJob.audioFile)) {
+        fs.unlinkSync(currentProcessingJob.audioFile);
+        sendDebugLog(`Cleaned up failed-processing audio: ${currentProcessingJob.audioFile}`);
+      }
+    } catch (cleanupErr) {
+      sendDebugLog(`Failed-processing cleanup error: ${cleanupErr.message}`);
+    }
 
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('processing-complete', {
@@ -4013,13 +4045,13 @@ ipcMain.handle('get-recordings-dir', async () => {
   }
 });
 
-// Renderer-driven system audio capture writes its WebM/Opus blob here so it
-// lands inside an allowedBaseDir for validateSafeFilePath downstream. The
-// blob comes over IPC as a Uint8Array (structured-clone friendly).
+// Renderer-driven system audio capture writes its WebM/Opus blob into the
+// same recordings/ folder the mic path uses. Keeping both capture paths in
+// one folder means `keep_recordings` semantics + cleanup are symmetric, and
+// users have a single canonical place to find saved audio.
 ipcMain.handle('write-system-audio-blob', async (_event, payload, sessionName) => {
   try {
-    const dir = path.join(os.homedir(), 'Library', 'Application Support', 'stenoai', 'system_audio_tmp');
-    fs.mkdirSync(dir, { recursive: true });
+    const dir = resolveRecordingsDir();
     const safeName = String(sessionName || 'Meeting').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 64);
     const filename = `sysaudio-${Date.now()}-${safeName}.webm`;
     const filePath = path.join(dir, filename);
