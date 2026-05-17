@@ -3613,6 +3613,16 @@ ipcMain.handle('pull-whisper-model', async (event, modelName) => {
         cwd: getBackendCwd(),
       });
       let lastStdoutLine = '';
+      let timedOut = false;
+      // The 3.1 GB large-v3 weights take 5-10 min on a typical home
+      // connection. 30 min covers everything short of a stalled socket,
+      // matching the process-streaming timeout. Without this, a hung HF
+      // download leaves the spinner spinning indefinitely with no recovery.
+      const procTimeout = setTimeout(() => {
+        timedOut = true;
+        sendDebugLog(`pull-whisper-model timed out after 30 minutes, killing`);
+        try { proc.kill(); } catch (_) { /* already exited */ }
+      }, 30 * 60 * 1000);
       const relayProgress = (output) => {
         if (!output) return;
         if (mainWindow && !mainWindow.isDestroyed()) {
@@ -3634,9 +3644,10 @@ ipcMain.handle('pull-whisper-model', async (event, modelName) => {
         relayProgress(output);
       });
       proc.on('close', (code) => {
+        clearTimeout(procTimeout);
         let pullResult = null;
         try { pullResult = JSON.parse(lastStdoutLine); } catch (_) { /* not JSON */ }
-        const succeeded = code === 0 && (!pullResult || pullResult.success !== false);
+        const succeeded = !timedOut && code === 0 && (!pullResult || pullResult.success !== false);
         if (succeeded) {
           if (mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.webContents.send('whisper-pull-complete', {
@@ -3646,7 +3657,9 @@ ipcMain.handle('pull-whisper-model', async (event, modelName) => {
           }
           resolve({ success: true, model: modelName });
         } else {
-          const errorMsg = (pullResult && pullResult.error) || `Process exited with code ${code}`;
+          const errorMsg = timedOut
+            ? 'Download timed out after 30 minutes'
+            : (pullResult && pullResult.error) || `Process exited with code ${code}`;
           if (mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.webContents.send('whisper-pull-complete', {
               model: modelName,
@@ -3658,6 +3671,7 @@ ipcMain.handle('pull-whisper-model', async (event, modelName) => {
         }
       });
       proc.on('error', (error) => {
+        clearTimeout(procTimeout);
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send('whisper-pull-complete', {
             model: modelName,
