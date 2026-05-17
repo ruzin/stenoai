@@ -693,7 +693,7 @@ function GeneralTab() {
 
       <SettingRow
         label="Desktop notifications"
-        description="Notify when meetings finish processing"
+        description="App Notifications"
       >
         <Switch
           checked={notifications.data ?? false}
