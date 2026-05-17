@@ -53,6 +53,8 @@ import {
   useStoragePath,
   useSystemAudioSetting,
   useSystemAudioSupport,
+  useAutoDetectMeetingsSetting,
+  useSetAutoDetectMeetings,
   useKeepRecordingsSetting,
   useSetKeepRecordings,
   useTelemetrySetting,
@@ -526,6 +528,8 @@ function GeneralTab() {
   const systemAudio = useSystemAudioSetting();
   const setSystemAudio = useSetSystemAudio();
   const systemAudioSupport = useSystemAudioSupport();
+  const autoDetect = useAutoDetectMeetingsSetting();
+  const setAutoDetect = useSetAutoDetectMeetings();
   const dockIcon = useDockIconSetting();
   const setDockIcon = useSetDockIcon();
   const google = useGoogleCalendarAuth();
@@ -689,7 +693,7 @@ function GeneralTab() {
 
       <SettingRow
         label="Desktop notifications"
-        description="Notify when meetings finish processing"
+        description="App Notifications"
       >
         <Switch
           checked={notifications.data ?? false}
@@ -710,6 +714,17 @@ function GeneralTab() {
           checked={(systemAudio.data ?? false) && (systemAudioSupport.data?.supported ?? true)}
           onCheckedChange={(v) => setSystemAudio.mutate(v)}
           disabled={systemAudio.data === undefined || systemAudioSupport.data?.supported === false}
+        />
+      </SettingRow>
+
+      <SettingRow
+        label="Auto-detect meetings"
+        description="Show a notification when another app starts using the microphone, with a one-click button to start recording."
+      >
+        <Switch
+          checked={autoDetect.data ?? true}
+          onCheckedChange={(v) => setAutoDetect.mutate(v)}
+          disabled={autoDetect.data === undefined}
         />
       </SettingRow>
 

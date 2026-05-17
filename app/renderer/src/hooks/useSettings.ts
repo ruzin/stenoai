@@ -9,6 +9,7 @@ export const settingsKeys = {
   dockIcon: () => [...settingsKeys.all, 'dockIcon'] as const,
   systemAudio: () => [...settingsKeys.all, 'systemAudio'] as const,
   systemAudioSupport: () => [...settingsKeys.all, 'systemAudioSupport'] as const,
+  autoDetectMeetings: () => [...settingsKeys.all, 'autoDetectMeetings'] as const,
   language: () => [...settingsKeys.all, 'language'] as const,
   storagePath: () => [...settingsKeys.all, 'storagePath'] as const,
   appVersion: () => [...settingsKeys.all, 'appVersion'] as const,
@@ -80,6 +81,21 @@ export function useSystemAudioSupport() {
     queryKey: settingsKeys.systemAudioSupport(),
     queryFn: async () => unwrap(await ipc().recording.getSystemAudioSupport()),
     staleTime: Infinity,
+  });
+}
+
+export function useAutoDetectMeetingsSetting() {
+  return useQuery({
+    queryKey: settingsKeys.autoDetectMeetings(),
+    queryFn: async () => unwrap(await ipc().settings.getAutoDetectMeetings()).auto_detect_meetings_enabled,
+  });
+}
+
+export function useSetAutoDetectMeetings() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (v: boolean) => unwrap(await ipc().settings.setAutoDetectMeetings(v)),
+    onSuccess: () => qc.invalidateQueries({ queryKey: settingsKeys.autoDetectMeetings() }),
   });
 }
 

@@ -2501,6 +2501,32 @@ def set_system_audio(enabled):
 
 
 @cli.command()
+def get_auto_detect_meetings():
+    """Get the current auto-detect meetings preference"""
+    from src.config import get_config
+
+    config = get_config()
+    enabled = config.get_auto_detect_meetings_enabled()
+
+    print(json.dumps({"auto_detect_meetings_enabled": enabled}))
+
+
+@cli.command()
+@click.argument('enabled', callback=lambda ctx, param, v: v.lower() == 'true')
+def set_auto_detect_meetings(enabled):
+    """Set auto-detect meetings preference (True/False)"""
+    from src.config import get_config
+
+    config = get_config()
+    success = config.set_auto_detect_meetings_enabled(enabled)
+
+    if success:
+        print(json.dumps({"success": True, "auto_detect_meetings_enabled": enabled}))
+    else:
+        print(json.dumps({"success": False, "error": "Failed to save config"}))
+
+
+@cli.command()
 def get_language():
     """Get the current language setting"""
     from src.config import get_config

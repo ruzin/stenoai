@@ -238,6 +238,10 @@ class Config:
             # alongside the mic on macOS 14.4+. Older macOS auto-falls back
             # to mic-only via main.js's loadSystemAudioEnabled() OS gate.
             "system_audio_enabled": True,
+            # Default ON — surfaces a "Meeting detected" notification when
+            # any non-Steno app starts capturing the mic. Helper is gated
+            # to macOS 14+ in main.js; users can flip off in Settings.
+            "auto_detect_meetings_enabled": True,
             "language": "en",
             "ai_provider": "local",
             "remote_ollama_url": "",
@@ -416,6 +420,15 @@ class Config:
             True if saved successfully, False otherwise
         """
         self._config["system_audio_enabled"] = enabled
+        return self._save()
+
+    def get_auto_detect_meetings_enabled(self) -> bool:
+        """Get whether auto-detect meetings is enabled."""
+        return self._config.get("auto_detect_meetings_enabled", True)
+
+    def set_auto_detect_meetings_enabled(self, enabled: bool) -> bool:
+        """Set whether auto-detect meetings is enabled."""
+        self._config["auto_detect_meetings_enabled"] = enabled
         return self._save()
 
     def get_language(self) -> str:
