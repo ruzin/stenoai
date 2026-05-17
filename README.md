@@ -39,30 +39,28 @@
 If you're looking for a hosted desktop recording API, consider checking out [Recall.ai](https://www.recall.ai/product/desktop-recording-sdk?utm_source=github&utm_medium=sponsorship&utm_campaign=ruzin-stenoai), an API that records Zoom, Google Meet, Microsoft Teams, in-person meetings, and more.
 
 ## 📢 What's New
+- **2026-05-17** 🎙️ Auto start/stop meetings (Granola-style) — Steno notifies you when a meeting starts and offers to take notes; when the meeting ends it offers to summarise. Toggle in Settings → General (default ON).
+- **2026-05-17** 🎚️ In-app Whisper model downloads — Pick a model from Settings → Transcribe (`small` / `large-v3-turbo`) and download it with a progress bar; legacy values migrate automatically.
 - **2026-05-12** 🐛 Non-English summaries no longer disappear — Fixed a bug where summaries in non-English (or auto-detected) languages briefly appeared then flipped to "No summary available" once processing finished. Existing affected meetings can be recovered with the regenerate-notes button.
 - **2026-05-11** 🐛 Smoother stop → Processing handoff — Fixed a race where typing notes during a recording could bounce you to Home on Stop instead of showing the analyser bar; the next *New note* now also starts with empty title and notes.
 - **2026-05-09** 🎙️ Native system audio (Core Audio Tap) — On macOS 14.4+, system audio now records natively with no shell-out, with an automatic fallback for older versions. Default ON.
 - **2026-05-09** 💬 Cross-note Chat tab — Ask natural-language questions across your entire note library, not just one note at a time
-- **2026-05-09** 🎚️ Whisper model picker — Choose `small` / `base` / `medium` from Settings to trade accuracy for speed
 - **2026-05-09** 🔔 Auto-update toast — A top-right notification appears when an update is ready to install
 - **2026-05-09** 🪶 Brand refresh — Paper-and-ink palette and the app display name is now "Steno"
-- **2026-04-19** 🔄 In-app auto-updates — Updates download in the background and install on next quit; no more manual DMG downloads
-- **2026-04-19** 💬 Inline ask bar — Query your meetings from a floating bar at the bottom of every note
-- **2026-04-19** 📂 Ask against saved markdown — The ask bar now reads your saved `.md` notes directly (summary, topics, and full transcript)
-- **2026-04-19** 📝 Diarised markdown export — Saved transcripts include `[You]` / `[Others]` speaker labels
-- **2026-03-25** ✍️ In-app note-taking — Jot notes during a recording and they're folded into the AI summary
-- **2026-03-23** 🗣️ Speaker diarisation — [You] vs [Others] labels for system audio recordings
-- **2026-03-23** 🌍 Auto-detect language — 99 languages supported out of the box
 
 ## Features
 
 - **Privacy-first** — 100% on-device; your recordings, transcripts, and summaries never leave your Mac
+- **Auto start/stop meetings** — Steno notifies you when a meeting starts and offers to take notes, then offers to summarise when it ends (Granola-style)
 - **In-app note-taking** — Jot notes while you record; they're folded straight into the AI summary
 - **Ask your meetings** — Natural-language Q&A across a single note or your entire library via the Chat tab (summary, key topics, full transcript)
 - **System audio capture** — Record both sides of virtual meetings, headphones on, no extra setup. Native Core Audio Tap on macOS 14.4+ with automatic fallback on older versions
 - **Speaker diarisation** — `[You]` vs `[Others]` labels on system-audio recordings
 - **Multi-language** — Auto-detect and transcribe in 99 languages
 - **Markdown notes** — Summaries and transcripts saved as clean Markdown you can edit, search, or sync
+- **Whisper model picker** — Choose your accuracy/speed tradeoff in Settings → Transcribe and download models in-app with a progress bar
+- **Auto-updates** — New versions download in the background and install on next quit; a top-right toast lets you know when one's ready
+- **macOS Shortcuts** — Start and stop recordings via `stenoai://` deep links for calendar-driven automation
 - **Remote Ollama server** — Offload summarisation to a beefier Mac or workstation on your network
 - **Bring your own cloud model** — Optional OpenAI, Anthropic, or custom API endpoint for users who prefer a hosted LLM
 - **Under the hood** — Local transcription via whisper.cpp, summarisation via bundled Ollama (5 models to choose from)
