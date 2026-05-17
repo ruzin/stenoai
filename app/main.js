@@ -2988,8 +2988,9 @@ const APP_NAME_OVERRIDES = [
 // Teams use software-mute (keep the OS-level stream open while muted), so
 // muting in-meeting does NOT emit a stop event and won't trip this debounce
 // — the only remaining false-positive source is a brief device switch.
-// 5s is responsive after a real meeting end while still safe.
-const MEETING_END_DEBOUNCE_MS = 5_000;
+// 3s feels near-instant after a real meeting end; auto-resume handles any
+// rare device-switch case if the mic comes back within the window.
+const MEETING_END_DEBOUNCE_MS = 3_000;
 
 let micMonitorProc = null;
 let micMonitorRespawnTimer = null;
