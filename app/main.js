@@ -3565,6 +3565,82 @@ ipcMain.handle('set-whisper-model', async (event, modelSize) => {
   } catch (e) { return { success: false, error: e.message }; }
 });
 
+ipcMain.handle('list-whisper-models', async () => {
+  try {
+    const result = await runPythonScript('simple_recorder.py', ['list-whisper-models'], true);
+    const jsonData = JSON.parse(result.trim());
+    return { success: true, ...jsonData };
+  } catch (e) { return { success: false, error: e.message }; }
+});
+
+ipcMain.handle('pull-whisper-model', async (event, modelName) => {
+  try {
+    sendDebugLog(`Pulling whisper model: ${modelName}`);
+    return new Promise((resolve) => {
+      const proc = spawn(getBackendPath(), ['pull-whisper-model', modelName], {
+        cwd: getBackendCwd(),
+      });
+      let lastStdoutLine = '';
+      const relayProgress = (output) => {
+        if (!output) return;
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('whisper-pull-progress', {
+            model: modelName,
+            progress: output,
+          });
+        }
+      };
+      proc.stdout.on('data', (data) => {
+        const output = data.toString().trim();
+        sendDebugLog(output);
+        if (output) lastStdoutLine = output;
+        relayProgress(output);
+      });
+      proc.stderr.on('data', (data) => {
+        const output = data.toString().trim();
+        if (output) sendDebugLog(`STDERR: ${output}`);
+        relayProgress(output);
+      });
+      proc.on('close', (code) => {
+        let pullResult = null;
+        try { pullResult = JSON.parse(lastStdoutLine); } catch (_) { /* not JSON */ }
+        const succeeded = code === 0 && (!pullResult || pullResult.success !== false);
+        if (succeeded) {
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('whisper-pull-complete', {
+              model: modelName,
+              success: true,
+            });
+          }
+          resolve({ success: true, model: modelName });
+        } else {
+          const errorMsg = (pullResult && pullResult.error) || `Process exited with code ${code}`;
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('whisper-pull-complete', {
+              model: modelName,
+              success: false,
+              error: errorMsg,
+            });
+          }
+          resolve({ success: false, error: errorMsg });
+        }
+      });
+      proc.on('error', (error) => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('whisper-pull-complete', {
+            model: modelName,
+            success: false,
+            error: error.message,
+          });
+        }
+        resolve({ success: false, error: error.message });
+      });
+    });
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
 ipcMain.handle('get-keep-recordings', async () => {
   try {
     const result = await runPythonScript('simple_recorder.py', ['get-keep-recordings'], true);

@@ -150,6 +150,12 @@ const stenoai = {
     pull: (name) => invoke('pull-model', name),
   },
 
+  whisperModels: {
+    list: () => invoke('list-whisper-models'),
+    set: (name) => invoke('set-whisper-model', name),
+    pull: (name) => invoke('pull-whisper-model', name),
+  },
+
   settings: {
     getNotifications: () => invoke('get-notifications'),
     setNotifications: (v) => invoke('set-notifications', v),
@@ -245,6 +251,8 @@ const stenoai = {
     queryDone: (cb) => subscribe('query-done', cb),
     modelPullProgress: (cb) => subscribe('model-pull-progress', cb),
     modelPullComplete: (cb) => subscribe('model-pull-complete', cb),
+    whisperPullProgress: (cb) => subscribe('whisper-pull-progress', cb),
+    whisperPullComplete: (cb) => subscribe('whisper-pull-complete', cb),
     updateAvailable: (cb) => subscribe('update-available', cb),
     updateDownloadProgress: (cb) => subscribe('update-download-progress', cb),
     updateDownloaded: (cb) => subscribe('update-downloaded', cb),

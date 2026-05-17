@@ -81,7 +81,11 @@ class Config:
     }
 
 
-    SUPPORTED_WHISPER_MODELS = ["tiny", "base", "small", "medium", "large", "large-v3-turbo"]
+    # Curated to the two tiers we expose in the UI. The full pywhispercpp
+    # AVAILABLE_MODELS set is larger but most variants are either
+    # English-only (.en) or too low-quality for meeting notes. Plain "large"
+    # is *not* a valid pywhispercpp name — use "large-v3" / "large-v3-turbo".
+    SUPPORTED_WHISPER_MODELS = ["small", "large-v3-turbo"]
 
     # Languages shown in the settings dropdown (curated/tested)
     SUPPORTED_LANGUAGES = {
@@ -154,6 +158,24 @@ class Config:
 
         self._config: Dict[str, Any] = self._load()
         self._migrate_cloud_model_map()
+        self._migrate_whisper_model()
+
+    def _migrate_whisper_model(self) -> None:
+        """Map any out-of-current-list whisper model to a supported one.
+
+        - 'large' (invalid pywhispercpp name — crashes the native loader) →
+          'large-v3-turbo' (closest current-list match).
+        - Any other previously-supported but now-retired tier
+          (tiny/base/medium/large-v3) → 'small' (the safe default).
+        """
+        current = self._config.get("whisper_model")
+        if current is None or current in self.SUPPORTED_WHISPER_MODELS:
+            return
+        if current == "large":
+            self._config["whisper_model"] = "large-v3-turbo"
+        else:
+            self._config["whisper_model"] = "small"
+        self._save()
 
     def _migrate_cloud_model_map(self) -> None:
         """One-shot migration from legacy single 'cloud_model' to per-provider

@@ -186,21 +186,6 @@ export function useSetUserName() {
   });
 }
 
-export function useWhisperModelSetting() {
-  return useQuery({
-    queryKey: [...settingsKeys.all, 'whisperModel'] as const,
-    queryFn: async () => unwrap(await ipc().settings.getWhisperModel()),
-  });
-}
-
-export function useSetWhisperModel() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (model: string) => unwrap(await ipc().settings.setWhisperModel(model)),
-    onSuccess: () => qc.invalidateQueries({ queryKey: [...settingsKeys.all, 'whisperModel'] }),
-  });
-}
-
 export function useKeepRecordingsSetting() {
   return useQuery({
     queryKey: [...settingsKeys.all, 'keepRecordings'] as const,

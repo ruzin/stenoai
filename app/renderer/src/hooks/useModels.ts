@@ -10,6 +10,11 @@ export const modelsKeys = {
   ollama: () => [...modelsKeys.all, 'ollama'] as const,
 };
 
+export const whisperKeys = {
+  all: ['whisperModels'] as const,
+  list: () => [...whisperKeys.all, 'list'] as const,
+};
+
 function parseSizeGb(size?: string): number | undefined {
   if (!size) return undefined;
   const match = size.match(/^([\d.]+)\s*(GB|MB|KB|B)?$/i);
@@ -103,6 +108,77 @@ export function usePullModel() {
   const pullAndSelect = async (name: string) => {
     setPendingSelect(name);
     unwrap(await ipc().models.pull(name));
+  };
+
+  const mutation = useMutation({
+    mutationFn: pullAndSelect,
+  });
+
+  return { ...mutation, progress };
+}
+
+// ---------------------------------------------------------------------------
+// Whisper models (mirrors the Ollama pattern above)
+// ---------------------------------------------------------------------------
+
+export function useWhisperModels() {
+  return useQuery({
+    queryKey: whisperKeys.list(),
+    queryFn: async (): Promise<{ models: ListedModel[]; current: string }> => {
+      const raw = unwrap(await ipc().whisperModels.list());
+      const models: ListedModel[] = Object.entries(raw.supported_models).map(([id, info]) => ({
+        name: id,
+        displayName: info.name,
+        size_gb: parseSizeGb(info.size),
+        installed: info.installed ?? false,
+        current: id === raw.current_model,
+        deprecated: info.deprecated,
+        description: info.description,
+        speed: info.speed,
+        quality: info.quality,
+      }));
+      return { models, current: raw.current_model };
+    },
+  });
+}
+
+export function useSetWhisperModel() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (name: string) => unwrap(await ipc().whisperModels.set(name)),
+    onSuccess: () => qc.invalidateQueries({ queryKey: whisperKeys.all }),
+  });
+}
+
+export function usePullWhisperModel() {
+  const qc = useQueryClient();
+  const [progress, setProgress] = React.useState<Record<string, string>>({});
+  const [pendingSelect, setPendingSelect] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    const offProgress = ipc().on.whisperPullProgress(({ model, progress: p }) => {
+      setProgress((prev) => ({ ...prev, [model]: p }));
+    });
+    const offComplete = ipc().on.whisperPullComplete(async ({ model, success }) => {
+      setProgress((prev) => {
+        const { [model]: _drop, ...rest } = prev;
+        return rest;
+      });
+      if (success && pendingSelect === model) {
+        await ipc().whisperModels.set(model);
+        setPendingSelect(null);
+      }
+      qc.invalidateQueries({ queryKey: whisperKeys.all });
+    });
+    return () => {
+      offProgress();
+      offComplete();
+    };
+  }, [qc, pendingSelect]);
+
+  const pullAndSelect = async (name: string) => {
+    setPendingSelect(name);
+    unwrap(await ipc().whisperModels.pull(name));
   };
 
   const mutation = useMutation({

@@ -53,8 +53,6 @@ import {
   useStoragePath,
   useSystemAudioSetting,
   useSystemAudioSupport,
-  useWhisperModelSetting,
-  useSetWhisperModel,
   useKeepRecordingsSetting,
   useSetKeepRecordings,
   useTelemetrySetting,
@@ -75,7 +73,10 @@ import {
   useCurrentModel,
   useModels,
   usePullModel,
+  usePullWhisperModel,
   useSetCurrentModel,
+  useSetWhisperModel,
+  useWhisperModels,
 } from '@/hooks/useModels';
 import {
   useGoogleCalendarAuth,
@@ -111,6 +112,7 @@ const LANGUAGES: Array<{ value: string; label: string }> = [
 
 const TABS = [
   { id: 'general', label: 'General' },
+  { id: 'transcription', label: 'Transcribe' },
   { id: 'ai', label: 'AI' },
   { id: 'organisation', label: 'Organisation' },
   { id: 'advanced', label: 'Advanced' },
@@ -477,6 +479,7 @@ export function Settings() {
         >
           <div style={{ maxWidth: 600, paddingTop: 8 }}>
             {tab === 'general' && <GeneralTab />}
+            {tab === 'transcription' && <TranscriptionTab />}
             {tab === 'ai' && <AiTab />}
             {tab === 'organisation' && <OrganisationTab />}
             {tab === 'advanced' && <AdvancedTab />}
@@ -502,17 +505,11 @@ export function Settings() {
 
 function GeneralTab() {
   const { theme, setTheme } = useTheme();
-  const language = useLanguageSetting();
-  const setLanguage = useSetLanguage();
   const notifications = useNotificationsSetting();
   const setNotifications = useSetNotifications();
   const systemAudio = useSystemAudioSetting();
   const setSystemAudio = useSetSystemAudio();
   const systemAudioSupport = useSystemAudioSupport();
-  const whisperModel = useWhisperModelSetting();
-  const setWhisperModel = useSetWhisperModel();
-  const keepRecordings = useKeepRecordingsSetting();
-  const setKeepRecordings = useSetKeepRecordings();
   const dockIcon = useDockIconSetting();
   const setDockIcon = useSetDockIcon();
   const google = useGoogleCalendarAuth();
@@ -627,28 +624,6 @@ function GeneralTab() {
       </SettingRow>
 
       <SettingRow
-        label="Language"
-        description="Language for transcription and summaries"
-      >
-        <Select
-          value={language.data ?? 'en'}
-          onValueChange={(v) => setLanguage.mutate(v)}
-          disabled={!language.data}
-        >
-          <SelectTrigger className={COMPACT_TRIGGER}>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {LANGUAGES.map((l) => (
-              <SelectItem key={l.value} value={l.value}>
-                {l.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </SettingRow>
-
-      <SettingRow
         label="Calendar"
         description={
           calendarConnected
@@ -708,16 +683,6 @@ function GeneralTab() {
       </SettingRow>
 
       <SettingRow
-        label="Keep recordings"
-        description="Save audio files after processing for reuse or reprocessing"
-      >
-        <Switch
-          checked={keepRecordings.data ?? false}
-          onCheckedChange={(v) => setKeepRecordings.mutate(v)}
-          disabled={keepRecordings.data === undefined}
-        />
-      </SettingRow>
-      <SettingRow
         label="Record system audio"
         description={
           systemAudioSupport.data && !systemAudioSupport.data.supported
@@ -743,6 +708,64 @@ function GeneralTab() {
           disabled={dockIcon.data === undefined}
         />
       </SettingRow>
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Transcription tab
+// ---------------------------------------------------------------------------
+
+function TranscriptionTab() {
+  const language = useLanguageSetting();
+  const setLanguage = useSetLanguage();
+  const keepRecordings = useKeepRecordingsSetting();
+  const setKeepRecordings = useSetKeepRecordings();
+
+  return (
+    <section data-settings-tab="transcription">
+      <SettingRow
+        label="Language"
+        description="Language for transcription and summaries"
+      >
+        <Select
+          value={language.data ?? 'en'}
+          onValueChange={(v) => setLanguage.mutate(v)}
+          disabled={!language.data}
+        >
+          <SelectTrigger className={COMPACT_TRIGGER}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {LANGUAGES.map((l) => (
+              <SelectItem key={l.value} value={l.value}>
+                {l.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </SettingRow>
+
+      <SettingRow
+        label="Keep recordings"
+        description="Save audio files after processing"
+      >
+        <Switch
+          checked={keepRecordings.data ?? false}
+          onCheckedChange={(v) => setKeepRecordings.mutate(v)}
+          disabled={keepRecordings.data === undefined}
+        />
+      </SettingRow>
+
+      <SectionHeading>Model</SectionHeading>
+      <p
+        className="mb-3 text-[13px]"
+        style={{ color: 'var(--fg-2)' }}
+      >
+        Larger models are more accurate but slower. Models download on first
+        use and are kept on disk for reuse.
+      </p>
+      <WhisperModelList />
     </section>
   );
 }
@@ -798,9 +821,7 @@ function AiTab() {
 
       {current !== 'cloud' && (
         <>
-          <SectionHeading>Transcription Model</SectionHeading>
-          <WhisperModelSelector />
-          <SectionHeading>Summarisation Model</SectionHeading>
+          <SectionHeading>Model</SectionHeading>
           <ModelList />
         </>
       )}
@@ -1150,40 +1171,74 @@ function OAuthPrompt({ state, onClose, onRetry }: OAuthPromptProps) {
 }
 
 
-const WHISPER_MODELS = [
-  { value: 'tiny', label: 'Tiny', description: 'Fastest, least accurate (~75MB)' },
-  { value: 'base', label: 'Base', description: 'Fast and lightweight (~142MB)' },
-  { value: 'small', label: 'Small', description: 'Balanced speed and accuracy (~466MB)' },
-  { value: 'medium', label: 'Medium', description: 'More accurate, slower (~1.5GB)' },
-  { value: 'large', label: 'Large', description: 'Most accurate, slowest (~2.9GB)' },
-  { value: 'large-v3-turbo', label: 'Large v3 Turbo', description: 'Best accuracy, optimised speed (~1.6GB)' },
-];
+function WhisperModelList() {
+  const models = useWhisperModels();
+  const setCurrent = useSetWhisperModel();
+  const pull = usePullWhisperModel();
 
-function WhisperModelSelector() {
-  const whisperModel = useWhisperModelSetting();
-  const setWhisperModel = useSetWhisperModel();
-  return (
-    <SettingRow
-      label="Whisper model size"
-      description="Larger models are more accurate but slower to load. Models are downloaded on first use."
-    >
-      <Select
-        value={whisperModel.data?.whisper_model ?? 'small'}
-        onValueChange={(v) => setWhisperModel.mutate(v)}
-        disabled={!whisperModel.data}
+  if (models.isLoading) {
+    return (
+      <div
+        className="flex items-center gap-2 text-[13px]"
+        style={{ color: 'var(--fg-2)' }}
       >
-        <SelectTrigger className={cn(COMPACT_TRIGGER, 'min-w-[200px]')}>
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent className="w-72">
-          {WHISPER_MODELS.map((m) => (
-            <SelectItem key={m.value} value={m.value} description={m.description}>
-              {m.label}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-    </SettingRow>
+        <Loader2 className="size-3.5 animate-spin" />
+        Loading models…
+      </div>
+    );
+  }
+  if (models.isError || !models.data?.models?.length) {
+    return (
+      <div className="text-[13px]" style={{ color: 'var(--fg-2)' }}>
+        Could not load Whisper models.
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      {models.data.models.map((m) => {
+        const isCurrent = m.name === models.data.current;
+        const isDownloading = Boolean(pull.progress[m.name]);
+        const downloadProgress = pull.progress[m.name];
+        const isDefault = /default/i.test(m.displayName ?? '');
+
+        const parts: string[] = [];
+        if (m.description) parts.push(m.description);
+        if (m.speed) parts.push(`${m.speed} speed`);
+        if (m.quality) parts.push(`${m.quality} quality`);
+        const note = parts.length ? parts.join(' · ') : undefined;
+
+        const sizeLabel =
+          m.size_gb !== undefined
+            ? m.size_gb < 1
+              ? `${Math.round(m.size_gb * 1024)} MB`
+              : `${m.size_gb.toFixed(1)} GB`
+            : undefined;
+
+        const onSelect = () => {
+          if (m.installed) {
+            setCurrent.mutate(m.name);
+          } else {
+            pull.mutate(m.name);
+          }
+        };
+
+        return (
+          <ModelCard
+            key={m.name}
+            name={m.displayName ?? m.name}
+            sizeLabel={sizeLabel}
+            note={note}
+            isCurrent={isCurrent}
+            isDefault={isDefault}
+            isDownloading={isDownloading}
+            downloadProgress={downloadProgress}
+            onSelect={onSelect}
+          />
+        );
+      })}
+    </div>
   );
 }
 

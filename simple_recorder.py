@@ -973,6 +973,52 @@ def get_whisper_model_cmd():
     }))
 
 
+@cli.command(name='list-whisper-models')
+def list_whisper_models_cmd():
+    """List supported Whisper models with metadata + installed status (UI)."""
+    from src.config import get_config
+    from src.whisper_models import SUPPORTED_WHISPER_MODELS, is_installed
+    config = get_config()
+    current = config.get_whisper_model()
+    supported = {
+        key: {**meta, "installed": is_installed(key)}
+        for key, meta in SUPPORTED_WHISPER_MODELS.items()
+    }
+    print(json.dumps({
+        "current_model": current,
+        "supported_models": supported,
+        "provider": "local",
+    }))
+
+
+@cli.command(name='pull-whisper-model')
+@click.argument('model_name')
+def pull_whisper_model_cmd(model_name):
+    """Download a Whisper model from HuggingFace, streaming progress lines."""
+    from src.whisper_models import (
+        SUPPORTED_WHISPER_MODELS,
+        download_with_progress,
+        is_installed,
+    )
+    if model_name not in SUPPORTED_WHISPER_MODELS:
+        print(json.dumps({"success": False, "error": f"Unknown model: {model_name}"}))
+        return
+    if is_installed(model_name):
+        print(json.dumps({"success": True, "model": model_name, "already_installed": True}))
+        return
+
+    def emit(pct, done, total):
+        # Match the Ollama pull format ("<status> <pct>%") so the Electron
+        # progress parser can reuse the same regex.
+        print(f"Downloading {pct}%", flush=True)
+
+    ok = download_with_progress(model_name, emit)
+    if ok:
+        print(json.dumps({"success": True, "model": model_name}))
+    else:
+        print(json.dumps({"success": False, "error": "Download failed"}))
+
+
 @cli.command(name='set-whisper-model')
 @click.argument('model_size')
 def set_whisper_model_cmd(model_size: str):
