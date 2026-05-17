@@ -69,17 +69,35 @@ class DownloadWithProgressTests(unittest.TestCase):
             self.assertEqual(final[0], 100)
             self.assertEqual(final[2], total_bytes)
 
-    def test_cleans_up_part_file_on_network_failure(self):
+    def test_cleans_up_part_file_when_download_interrupts_mid_stream(self):
+        # The realistic failure: connection succeeded, headers arrived, some
+        # bytes were written to .part, then the socket died mid-iteration.
+        # An earlier version of this test raised inside requests.get itself,
+        # which short-circuited before any .part file was created and made
+        # the cleanup assertion vacuous. Now we let iter_content yield real
+        # chunks then explode, so a .part file actually exists at the
+        # moment cleanup needs to run.
+        def chunks_then_die():
+            yield b"some-bytes"
+            yield b"more-bytes"
+            raise ConnectionResetError("peer closed mid-stream")
+
+        fake_response = MagicMock()
+        fake_response.__enter__ = MagicMock(return_value=fake_response)
+        fake_response.__exit__ = MagicMock(return_value=False)
+        fake_response.headers = {"content-length": "100"}
+        fake_response.iter_content = MagicMock(return_value=chunks_then_die())
+        fake_response.raise_for_status = MagicMock()
+
         with tempfile.TemporaryDirectory() as tmp_dir:
             with patch.object(whisper_models, "get_models_dir", return_value=Path(tmp_dir)), \
-                 patch("requests.get", side_effect=RuntimeError("network died")):
+                 patch("requests.get", return_value=fake_response):
                 ok = whisper_models.download_with_progress("small", lambda *a: None)
 
             self.assertFalse(ok)
             # No partial file lingers — would otherwise grow the models dir
             # over repeated aborted attempts.
             self.assertEqual(list(Path(tmp_dir).iterdir()), [])
-
 
 if __name__ == "__main__":
     unittest.main()
