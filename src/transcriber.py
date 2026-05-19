@@ -475,6 +475,33 @@ class WhisperTranscriber:
                 transcribe_kwargs["language"] = resolved_language
             segments = self.model.transcribe(**transcribe_kwargs)
 
+            # Drop whisper.cpp loop hallucinations. On quiet/no-content audio
+            # the decoder gets stuck emitting the same segment text (often a
+            # bracketed annotation like "[Sounds of a question]" or a real
+            # phrase like "Thank you.") dozens of times in a row. A run of 5+
+            # consecutive identical segments is the signature of a loop;
+            # legitimate repetition (three speakers saying "yes", a chant)
+            # rarely exceeds 4 in a row.
+            if segments:
+                deduped: list = []
+                i = 0
+                while i < len(segments):
+                    text = segments[i].text.strip()
+                    run_end = i + 1
+                    while (
+                        run_end < len(segments)
+                        and segments[run_end].text.strip() == text
+                    ):
+                        run_end += 1
+                    if run_end - i >= 5 and text:
+                        logger.warning(
+                            f"Dropped {run_end - i} repeated whisper segments: {text[:60]!r}"
+                        )
+                    else:
+                        deduped.extend(segments[i:run_end])
+                    i = run_end
+                segments = deduped
+
             if not segments:
                 return {
                     "text": None,
