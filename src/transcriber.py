@@ -469,19 +469,38 @@ class WhisperTranscriber:
                     # use its own internal language detection as a fallback.
                     resolved_language = None
 
-            # pywhispercpp returns a list of segments.
-            # suppress_non_speech_tokens stops whisper.cpp from emitting
-            # bracketed annotations like [Music], [Sounds of a question],
-            # [Applause]. On quiet/no-content audio whisper.cpp otherwise
-            # loops on these tokens and fills the transcript with dozens of
-            # identical bracketed lines.
-            transcribe_kwargs = {
-                "media": str(converted_path),
-                "suppress_non_speech_tokens": True,
-            }
+            # pywhispercpp returns a list of segments
+            transcribe_kwargs = {"media": str(converted_path)}
             if resolved_language and resolved_language != "auto":
                 transcribe_kwargs["language"] = resolved_language
             segments = self.model.transcribe(**transcribe_kwargs)
+
+            # Drop whisper.cpp loop hallucinations. On quiet/no-content audio
+            # the decoder gets stuck emitting the same segment text (often a
+            # bracketed annotation like "[Sounds of a question]" or a real
+            # phrase like "Thank you.") dozens of times in a row. A run of 5+
+            # consecutive identical segments is the signature of a loop;
+            # legitimate repetition (three speakers saying "yes", a chant)
+            # rarely exceeds 4 in a row.
+            if segments:
+                deduped: list = []
+                i = 0
+                while i < len(segments):
+                    text = segments[i].text.strip()
+                    run_end = i + 1
+                    while (
+                        run_end < len(segments)
+                        and segments[run_end].text.strip() == text
+                    ):
+                        run_end += 1
+                    if run_end - i >= 5 and text:
+                        logger.warning(
+                            f"Dropped {run_end - i} repeated whisper segments: {text[:60]!r}"
+                        )
+                    else:
+                        deduped.extend(segments[i:run_end])
+                    i = run_end
+                segments = deduped
 
             if not segments:
                 return {
