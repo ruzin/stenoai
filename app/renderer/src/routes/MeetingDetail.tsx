@@ -469,9 +469,6 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
               {participants.length} {participants.length === 1 ? 'person' : 'people'}
             </ChipV2>
           )}
-          {meeting.is_diarised && (
-            <ChipV2 icon={<FolderIcon className="size-[11px]" />}>Diarised</ChipV2>
-          )}
         </div>
 
         {titleError && (
