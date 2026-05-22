@@ -5746,6 +5746,54 @@ function clearOrgSession() {
   }
 }
 
+// Tracks which summary files we've already auto-backed-up so an unshare
+// sticks: once a note has been shared (manually or automatically), we never
+// re-upload it. The state lives outside the meeting JSON so the meeting
+// files stay byte-stable and the share/unshare cycle leaves no residue in
+// the user's notes.
+function getOrgBackupStatePath() {
+  return path.join(os.homedir(), 'Library', 'Application Support', 'stenoai', '.org-backup-state.json');
+}
+
+function loadOrgBackupState() {
+  try {
+    const p = getOrgBackupStatePath();
+    if (!fs.existsSync(p)) return { attempts: {} };
+    const raw = JSON.parse(fs.readFileSync(p, 'utf8'));
+    return raw && typeof raw === 'object' && raw.attempts ? raw : { attempts: {} };
+  } catch (e) {
+    console.error('Failed to load org backup state:', e.message);
+    return { attempts: {} };
+  }
+}
+
+function saveOrgBackupState(state) {
+  try {
+    const p = getOrgBackupStatePath();
+    const dir = path.dirname(p);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(p, JSON.stringify(state, null, 2));
+    return true;
+  } catch (e) {
+    console.error('Failed to save org backup state:', e.message);
+    return false;
+  }
+}
+
+function isOrgBackupAttempted(summaryFile) {
+  const state = loadOrgBackupState();
+  return Boolean(state.attempts[summaryFile]);
+}
+
+function recordOrgBackupAttempt(summaryFile, meetingId) {
+  const state = loadOrgBackupState();
+  state.attempts[summaryFile] = {
+    attempted_at: new Date().toISOString(),
+    meeting_id: meetingId || null,
+  };
+  return saveOrgBackupState(state);
+}
+
 // Matches anything that looks like a loopback authority — covers
 // `localhost`, `127.0.0.1`, IPv6 `::1` (bare or bracketed), with or
 // without a port and/or path. Used to pick the right default scheme
@@ -6078,7 +6126,7 @@ ipcMain.handle('org-delete-meeting', async (_event, id) => {
 // has stricter CORS).
 ipcMain.handle('org-share-meeting', async (_event, payload) => {
   try {
-    const { title, body, visibility = 'org' } = payload || {};
+    const { title, body, visibility = 'org', summaryFile } = payload || {};
     if (!title) return { success: false, error: 'title is required' };
     if (typeof body !== 'string') return { success: false, error: 'body is required' };
 
@@ -6119,9 +6167,117 @@ ipcMain.handle('org-share-meeting', async (_event, payload) => {
         s3_key: presign.s3_key,
       }),
     });
+    // Mark this note as having been attempted so a later auto-backup
+    // trigger (e.g. a reprocess that re-fires processing-complete)
+    // doesn't push a second copy into the org.
+    if (summaryFile) recordOrgBackupAttempt(summaryFile, meeting?.id);
     return { success: true, meeting, s3_key: presign.s3_key };
   } catch (e) {
     return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('org-get-auto-backup', async () => {
+  try {
+    const result = await runPythonScript('simple_recorder.py', ['get-org-auto-backup']);
+    const jsonData = JSON.parse(result.trim());
+    return { success: true, ...jsonData };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('org-set-auto-backup', async (_event, enabled) => {
+  try {
+    const result = await runPythonScript(
+      'simple_recorder.py',
+      ['set-org-auto-backup', enabled ? 'True' : 'False'],
+    );
+    const jsonMatch = result.match(/\{.*\}/s);
+    if (jsonMatch) return JSON.parse(jsonMatch[0]);
+    return { success: true, org_auto_backup_enabled: enabled };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+// Single-shot auto-backup gateway. The renderer fires this once per
+// processing-complete event; main does all the gating (signed in + toggle
+// on + not previously attempted) so the renderer doesn't have to chain
+// three IPC calls. Records the attempt only on a successful upload so a
+// transient failure can self-heal next time. After a successful upload we
+// mark the summary as attempted *permanently* — that's what makes unshare
+// stick (the user pressed unshare, we won't re-push it without an explicit
+// manual Share).
+ipcMain.handle('org-try-auto-backup', async (_event, payload) => {
+  try {
+    const { summaryFile, title, body, visibility = 'org' } = payload || {};
+    if (!summaryFile) return { attempted: false, reason: 'missing-summary-file' };
+    if (!title) return { attempted: false, reason: 'missing-title' };
+    if (typeof body !== 'string') return { attempted: false, reason: 'missing-body' };
+
+    const session = loadOrgSession();
+    if (!session) return { attempted: false, reason: 'not-signed-in' };
+
+    let enabled = true;
+    try {
+      const cfg = await runPythonScript('simple_recorder.py', ['get-org-auto-backup']);
+      enabled = JSON.parse(cfg.trim())?.org_auto_backup_enabled !== false;
+    } catch (_) {
+      // Config read failure — default to enabled (preserves user intent
+      // since enabled is the default). Logged for diagnostics only.
+      sendDebugLog('org-try-auto-backup: failed to read auto-backup pref, defaulting to enabled');
+    }
+    if (!enabled) return { attempted: false, reason: 'disabled' };
+
+    if (isOrgBackupAttempted(summaryFile)) {
+      return { attempted: false, reason: 'already-attempted' };
+    }
+
+    // Reuse the proven manual-share path verbatim. Anything that goes
+    // wrong here propagates the same way the manual button reports it,
+    // and we do NOT record the attempt — leaves the door open for a
+    // retry next time something pokes this path.
+    const safeTitle = String(title)
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 60) || 'note';
+    const filename = `${safeTitle}.md`;
+
+    const presign = await adapterFetch('/uploads/presign', {
+      method: 'POST',
+      body: JSON.stringify({ filename, content_type: 'text/markdown' }),
+    });
+
+    const putRes = await fetch(presign.upload_url, {
+      method: 'PUT',
+      headers: { 'content-type': 'text/markdown' },
+      body,
+    });
+    if (!putRes.ok) {
+      const detail = await putRes.text().catch(() => '');
+      return {
+        attempted: false,
+        reason: 'upload-failed',
+        error: `s3 upload failed (${putRes.status}): ${detail.slice(0, 200)}`,
+      };
+    }
+
+    const meeting = await adapterFetch('/meetings', {
+      method: 'POST',
+      body: JSON.stringify({
+        title,
+        body: '',
+        visibility,
+        s3_key: presign.s3_key,
+      }),
+    });
+
+    recordOrgBackupAttempt(summaryFile, meeting?.id);
+    return { attempted: true, meeting, s3_key: presign.s3_key };
+  } catch (e) {
+    return { attempted: false, reason: 'error', error: e.message };
   }
 });
 

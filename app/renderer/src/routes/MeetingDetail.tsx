@@ -128,7 +128,7 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
     // shared corpus to limit blast radius if the bucket is ever leaked).
     const body = composeShareBody(meeting);
     try {
-      await shareToOrg.mutateAsync({ title, body, visibility: 'org' });
+      await shareToOrg.mutateAsync({ title, body, visibility: 'org', summaryFile });
       setShareState('shared');
       setTimeout(() => setShareState('idle'), 2500);
     } catch (e) {
@@ -1147,7 +1147,7 @@ function getErrorMessage(error: unknown): string {
 /** Builds the markdown body shipped to the org adapter when the user shares
  *  a local note. Mirrors what the local note view renders (minus the raw
  *  transcript) so colleagues see the same structured summary. */
-function composeShareBody(meeting: Meeting): string {
+export function composeShareBody(meeting: Meeting): string {
   const sections: string[] = [];
 
   const summary = meeting.summary?.trim();

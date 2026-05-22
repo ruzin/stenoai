@@ -2422,6 +2422,29 @@ def get_dock_icon():
 
 
 @cli.command()
+def get_org_auto_backup():
+    """Get whether org auto-backup is enabled."""
+    from src.config import get_config
+
+    config = get_config()
+    print(json.dumps({"org_auto_backup_enabled": config.get_org_auto_backup_enabled()}))
+
+
+@cli.command()
+@click.argument('enabled', type=bool)
+def set_org_auto_backup(enabled):
+    """Set whether org auto-backup is enabled (True/False)."""
+    from src.config import get_config
+
+    config = get_config()
+    success = config.set_org_auto_backup_enabled(enabled)
+    if success:
+        print(json.dumps({"success": True, "org_auto_backup_enabled": enabled}))
+    else:
+        print(json.dumps({"success": False, "error": "Failed to save config"}))
+
+
+@cli.command()
 @click.argument('enabled', type=bool)
 def set_dock_icon(enabled):
     """Set hide-dock-icon preference (True/False)"""

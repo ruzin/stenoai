@@ -378,6 +378,16 @@ class Config:
         self._config["hide_dock_icon"] = enabled
         return self._save()
 
+    def get_org_auto_backup_enabled(self) -> bool:
+        """Get whether new notes should auto-upload to the org adapter (S3)
+        once summarization finishes. Only takes effect when the user is signed
+        in to the enterprise adapter."""
+        return self._config.get("org_auto_backup_enabled", True)
+
+    def set_org_auto_backup_enabled(self, enabled: bool) -> bool:
+        self._config["org_auto_backup_enabled"] = enabled
+        return self._save()
+
 
     def get_keep_recordings(self) -> bool:
         """Get whether audio recordings should be kept after processing."""

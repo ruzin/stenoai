@@ -85,7 +85,14 @@ import {
   useOutlookCalendarAuth,
 } from '@/hooks/useCalendarEvents';
 import type { AiProvider, CloudProvider, OrgStatusResponse } from '@/lib/ipc';
-import { useOrgLogin, useOrgLogout, useOrgSession, useOrgSsoGoogle } from '@/hooks/useOrg';
+import {
+  useOrgAutoBackup,
+  useOrgLogin,
+  useOrgLogout,
+  useOrgSession,
+  useOrgSsoGoogle,
+  useSetOrgAutoBackup,
+} from '@/hooks/useOrg';
 
 // ---------------------------------------------------------------------------
 // Local style helpers — values come straight from the new design (Pencil
@@ -1394,6 +1401,8 @@ function OrganisationTab() {
   const loginMutation = useOrgLogin();
   const ssoGoogleMutation = useOrgSsoGoogle();
   const logoutMutation = useOrgLogout();
+  const autoBackupQuery = useOrgAutoBackup();
+  const setAutoBackup = useSetOrgAutoBackup();
   const status: OrgStatusResponse | null = sessionQuery.data ?? null;
 
   // Remember the last adapter URL the user typed/signed-in-against so they
@@ -1500,6 +1509,29 @@ function OrganisationTab() {
             >
               Sign out
             </Button>
+          </div>
+          <div
+            className="mt-4 flex items-start justify-between gap-4 border-t pt-4"
+            style={{ borderColor: 'var(--border-subtle)' }}
+          >
+            <div className="min-w-0">
+              <div className="text-[13px] font-medium" style={{ color: 'var(--fg-1)' }}>
+                Auto-back up new notes
+              </div>
+              <div
+                className="mt-0.5 text-[12px] leading-[1.5]"
+                style={{ color: 'var(--fg-2)', maxWidth: '52ch' }}
+              >
+                Push every new note to your org's S3 once summarisation finishes. You can still
+                unshare individual notes from the Shared notes view.
+              </div>
+            </div>
+            <Switch
+              checked={autoBackupQuery.data ?? true}
+              onCheckedChange={(v) => setAutoBackup.mutate(v)}
+              disabled={autoBackupQuery.data === undefined || setAutoBackup.isPending}
+              aria-label="Auto-back up new notes to org"
+            />
           </div>
         </div>
       ) : (

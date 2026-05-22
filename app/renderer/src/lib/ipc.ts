@@ -153,9 +153,42 @@ export interface OrgShareMeetingPayload {
   title: string;
   body: string;
   visibility?: 'private' | 'org';
+  /** When present, main records this summary as "backup attempted" so the
+   *  auto-backup trigger won't push a duplicate copy on a later reprocess. */
+  summaryFile?: string;
 }
 
 export type OrgShareMeetingResponse = Result<{ meeting: OrgMeeting; s3_key: string }>;
+
+export interface OrgTryAutoBackupPayload {
+  summaryFile: string;
+  title: string;
+  body: string;
+  visibility?: 'private' | 'org';
+}
+
+/** Result of the auto-backup gateway. `attempted` is true only if we
+ *  actually performed an upload; otherwise `reason` tells the caller why
+ *  we skipped (most are silent — only 'error' / 'upload-failed' surface
+ *  in the UI). */
+export type OrgTryAutoBackupResponse =
+  | { attempted: true; meeting: OrgMeeting; s3_key: string }
+  | {
+      attempted: false;
+      reason:
+        | 'not-signed-in'
+        | 'disabled'
+        | 'already-attempted'
+        | 'missing-summary-file'
+        | 'missing-title'
+        | 'missing-body'
+        | 'upload-failed'
+        | 'error';
+      error?: string;
+    };
+
+export type GetOrgAutoBackupResponse = Result<{ org_auto_backup_enabled: boolean }>;
+export type SetOrgAutoBackupResponse = Result<{ org_auto_backup_enabled: boolean }>;
 
 export interface OrgChatPayload {
   messages: Array<{ role: 'user' | 'assistant'; content: string }>;
@@ -576,6 +609,9 @@ export interface StenoaiBridge {
     createMeeting: RequestFn<[payload: OrgCreateMeetingPayload], OrgGetMeetingResponse>;
     deleteMeeting: RequestFn<[id: string], Result<{ id: string }>>;
     shareMeeting: RequestFn<[payload: OrgShareMeetingPayload], OrgShareMeetingResponse>;
+    getAutoBackup: RequestFn<[], GetOrgAutoBackupResponse>;
+    setAutoBackup: RequestFn<[enabled: boolean], SetOrgAutoBackupResponse>;
+    tryAutoBackup: RequestFn<[payload: OrgTryAutoBackupPayload], OrgTryAutoBackupResponse>;
     aiChat: RequestFn<[payload: OrgChatPayload], OrgChatResponse>;
     chatStream: SendFn<[streamId: string, payload: OrgChatPayload]>;
   };

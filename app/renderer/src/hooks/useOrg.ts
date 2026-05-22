@@ -12,6 +12,7 @@ export const orgKeys = {
   status: () => [...orgKeys.all, 'status'] as const,
   meetings: () => [...orgKeys.all, 'meetings'] as const,
   meeting: (id: string) => [...orgKeys.all, 'meeting', id] as const,
+  autoBackup: () => [...orgKeys.all, 'auto-backup'] as const,
 };
 
 export function useOrgSession() {
@@ -110,5 +111,28 @@ export function useOrgAiChat() {
   return useMutation({
     mutationFn: async (payload: OrgChatPayload) =>
       unwrap(await ipc().org.aiChat(payload)),
+  });
+}
+
+/** Auto-backup preference. Lives in the Python config (so it persists in
+ *  config.json alongside notifications/telemetry) and applies whenever the
+ *  user is signed in to the enterprise adapter. Default true — connecting
+ *  the adapter implies the user wants their notes available to the org. */
+export function useOrgAutoBackup() {
+  return useQuery({
+    queryKey: orgKeys.autoBackup(),
+    queryFn: async () => unwrap(await ipc().org.getAutoBackup()).org_auto_backup_enabled,
+    staleTime: 60_000,
+  });
+}
+
+export function useSetOrgAutoBackup() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (enabled: boolean) =>
+      unwrap(await ipc().org.setAutoBackup(enabled)).org_auto_backup_enabled,
+    onSuccess: (enabled) => {
+      qc.setQueryData(orgKeys.autoBackup(), enabled);
+    },
   });
 }
