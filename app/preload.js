@@ -228,6 +228,9 @@ const stenoai = {
     createMeeting: (payload) => invoke('org-create-meeting', payload),
     deleteMeeting: (id) => invoke('org-delete-meeting', id),
     shareMeeting: (payload) => invoke('org-share-meeting', payload),
+    getAutoBackup: () => invoke('org-get-auto-backup'),
+    setAutoBackup: (enabled) => invoke('org-set-auto-backup', enabled),
+    tryAutoBackup: (payload) => invoke('org-try-auto-backup', payload),
     aiChat: (payload) => invoke('org-ai-chat', payload),
     /** Fire-and-forget streaming start. Chunks arrive via query-chunk +
      *  query-done events on the existing channel — same wire as

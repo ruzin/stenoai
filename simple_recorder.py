@@ -46,6 +46,15 @@ except ImportError:
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+# Session names that should trigger AI title regeneration after summarization.
+# Covers manual placeholders (Meeting / Note / Meeting-ABC123 / Note-ABC123) and
+# the auto-detect-meetings shape "<AppName> — YYYY-MM-DD HH:MM" produced by
+# requestAutoRecord in app/main.js. Keep in sync if the auto-detect format changes.
+_AUTO_NAMED_PATTERN = re.compile(
+    r'^(?:(?:Meeting|Note)(?:-[A-Z0-9]{6})?'
+    r'|.+ — \d{4}-\d{2}-\d{2} \d{2}:\d{2})$'
+)
+
 class SimpleRecorder:
     """Simple audio recorder and transcriber."""
     
@@ -437,7 +446,7 @@ Transcript:
         )
 
         # Step 2b: Auto-generate title for auto-named meetings
-        if re.match(r'^(Meeting|Note)(-[A-Z0-9]{6})?$', session_name):
+        if _AUTO_NAMED_PATTERN.match(session_name):
             try:
                 language = transcript_data.get("output_language")
                 generated_title = self.summarizer.generate_title(
@@ -559,7 +568,7 @@ Transcript:
         print("STREAM_COMPLETE", flush=True)
 
         # Step 3: Generate title
-        if re.match(r'^(Meeting|Note)(-[A-Z0-9]{6})?$', session_name):
+        if _AUTO_NAMED_PATTERN.match(session_name):
             try:
                 generated_title = self.summarizer.generate_title(
                     streamed_md, transcript_text, language=output_language
@@ -894,7 +903,7 @@ def process_streaming(audio_file, name, notes):
 
         # Step 3: Generate title
         session_name = name
-        if re.match(r'^(Meeting|Note)(-[A-Z0-9]{6})?$', name):
+        if _AUTO_NAMED_PATTERN.match(name):
             try:
                 generated_title = recorder.summarizer.generate_title(
                     streamed_md, transcript_text, language=output_language
@@ -2419,6 +2428,29 @@ def get_dock_icon():
     enabled = config.get_hide_dock_icon()
 
     print(json.dumps({"hide_dock_icon": enabled}))
+
+
+@cli.command()
+def get_org_auto_backup():
+    """Get whether org auto-backup is enabled."""
+    from src.config import get_config
+
+    config = get_config()
+    print(json.dumps({"org_auto_backup_enabled": config.get_org_auto_backup_enabled()}))
+
+
+@cli.command()
+@click.argument('enabled', type=bool)
+def set_org_auto_backup(enabled):
+    """Set whether org auto-backup is enabled (True/False)."""
+    from src.config import get_config
+
+    config = get_config()
+    success = config.set_org_auto_backup_enabled(enabled)
+    if success:
+        print(json.dumps({"success": True, "org_auto_backup_enabled": enabled}))
+    else:
+        print(json.dumps({"success": False, "error": "Failed to save config"}))
 
 
 @cli.command()

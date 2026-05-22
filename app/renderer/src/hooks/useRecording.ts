@@ -3,8 +3,10 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ipc } from '@/lib/ipc';
 import { unwrap } from '@/lib/result';
 import { meetingsKeys } from './meetingKeys';
+import { orgKeys } from './useOrg';
 import { useLiveDraftStore } from './liveDraftStore';
 import { navigate } from '@/lib/router';
+import { composeShareBody } from '@/routes/MeetingDetail';
 import type { Meeting, QueueStatus } from '@/lib/ipc';
 
 export type RecordingStatus = 'idle' | 'recording' | 'paused' | 'processing';
@@ -199,6 +201,34 @@ export function useRecordingProcessingEffects() {
           );
           return [newMeeting, ...filtered];
         });
+
+        // Fire-and-forget auto-backup. Main does all the gating
+        // (signed-in, toggle on, not-already-attempted), so the renderer
+        // just hands it the formatted artifact and forgets. Failures are
+        // silent — the manual Share button is the user-visible recovery
+        // path. We invalidate the org meetings list on success so the
+        // sidebar Shared Notes view updates without a refresh.
+        const title = newMeeting.session_info.name || 'Untitled note';
+        const body = composeShareBody(newMeeting);
+        if (body) {
+          ipc()
+            .org.tryAutoBackup({
+              summaryFile: newSummaryFile,
+              title,
+              body,
+              visibility: 'org',
+            })
+            .then((res) => {
+              if (res.attempted) {
+                qc.invalidateQueries({ queryKey: orgKeys.meetings() });
+              } else if (res.reason === 'upload-failed' || res.reason === 'error') {
+                console.warn('[org-auto-backup] skipped:', res.reason, res.error);
+              }
+            })
+            .catch((e) => {
+              console.warn('[org-auto-backup] ipc failed:', e);
+            });
+        }
       }
       qc.invalidateQueries({ queryKey: meetingsKeys.all });
       qc.invalidateQueries({ queryKey: queueKey });
