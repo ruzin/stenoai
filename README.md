@@ -41,6 +41,8 @@
 If you're looking for a hosted desktop recording API, consider checking out [Recall.ai](https://www.recall.ai/product/desktop-recording-sdk?utm_source=github&utm_medium=sponsorship&utm_campaign=ruzin-stenoai), an API that records Zoom, Google Meet, Microsoft Teams, in-person meetings, and more.
 
 ## 📢 What's New
+- **2026-05-22** 🎙️ Smarter titles for auto-detect recordings — Recordings started via the "Meeting detected" notification now get an AI-generated title from the transcript after summarisation, instead of staying as `<App> — <timestamp>` forever.
+- **2026-05-22** 🐛 Quieter transcripts on silent audio — Whisper.cpp's decoder loop on quiet audio (e.g. dozens of repeated `[Sounds of a question]` lines) is now caught by a post-process dedup of 5+ consecutive identical segments.
 - **2026-05-17** 🎙️ Auto start/stop meetings (Granola-style) — Steno notifies you when a meeting starts and offers to take notes; when the meeting ends it offers to summarise. Toggle in Settings → General (default ON).
 - **2026-05-17** 🎚️ In-app Whisper model downloads — Pick a model from Settings → Transcribe (`small` / `large-v3-turbo`) and download it with a progress bar; legacy values migrate automatically.
 - **2026-05-12** 🐛 Non-English summaries no longer disappear — Fixed a bug where summaries in non-English (or auto-detected) languages briefly appeared then flipped to "No summary available" once processing finished. Existing affected meetings can be recovered with the regenerate-notes button.
