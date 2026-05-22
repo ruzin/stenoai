@@ -6120,58 +6120,66 @@ ipcMain.handle('org-delete-meeting', async (_event, id) => {
   }
 });
 
-// Three-step share: presign → PUT bytes to S3 → register meeting metadata
-// with the s3_key. Centralised in main so the renderer doesn't have to do
+// Three-step upload reused by both org-share-meeting and org-try-auto-backup:
+// presign → PUT bytes to S3 → register meeting metadata with the s3_key.
+// Throws on any failure; callers shape the IPC return value and persist
+// attempt state. Centralised in main so the renderer doesn't have to do
 // raw PUT (and so we can keep the bytes off the renderer when the bucket
 // has stricter CORS).
+async function uploadMeetingToOrg({ title, body, visibility = 'org' }) {
+  const safeTitle = String(title)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 60) || 'note';
+  const filename = `${safeTitle}.md`;
+
+  // Step 1: presign — adapter returns a 15-minute PUT URL + s3_key
+  const presign = await adapterFetch('/uploads/presign', {
+    method: 'POST',
+    body: JSON.stringify({ filename, content_type: 'text/markdown' }),
+  });
+
+  // Step 2: PUT the markdown bytes straight to S3. Bucket has SSE-AES256
+  // by default; the upload inherits that.
+  const putRes = await fetch(presign.upload_url, {
+    method: 'PUT',
+    headers: { 'content-type': 'text/markdown' },
+    body,
+  });
+  if (!putRes.ok) {
+    const detail = await putRes.text().catch(() => '');
+    throw new Error(`s3 upload failed (${putRes.status}): ${detail.slice(0, 200)}`);
+  }
+
+  // Step 3: register metadata in the adapter. The body field is empty —
+  // the adapter holds only the s3_key and serves a presigned GET when
+  // someone in the org opens the note.
+  const meeting = await adapterFetch('/meetings', {
+    method: 'POST',
+    body: JSON.stringify({
+      title,
+      body: '',
+      visibility,
+      s3_key: presign.s3_key,
+    }),
+  });
+
+  return { meeting, s3_key: presign.s3_key };
+}
+
 ipcMain.handle('org-share-meeting', async (_event, payload) => {
   try {
     const { title, body, visibility = 'org', summaryFile } = payload || {};
     if (!title) return { success: false, error: 'title is required' };
     if (typeof body !== 'string') return { success: false, error: 'body is required' };
 
-    const safeTitle = String(title)
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '')
-      .slice(0, 60) || 'note';
-    const filename = `${safeTitle}.md`;
-
-    // Step 1: presign — adapter returns a 15-minute PUT URL + s3_key
-    const presign = await adapterFetch('/uploads/presign', {
-      method: 'POST',
-      body: JSON.stringify({ filename, content_type: 'text/markdown' }),
-    });
-
-    // Step 2: PUT the markdown bytes straight to S3. Bucket has SSE-AES256
-    // by default; the upload inherits that.
-    const putRes = await fetch(presign.upload_url, {
-      method: 'PUT',
-      headers: { 'content-type': 'text/markdown' },
-      body,
-    });
-    if (!putRes.ok) {
-      const detail = await putRes.text().catch(() => '');
-      return { success: false, error: `s3 upload failed (${putRes.status}): ${detail.slice(0, 200)}` };
-    }
-
-    // Step 3: register metadata in the adapter. The body field is empty —
-    // the adapter holds only the s3_key and serves a presigned GET when
-    // someone in the org opens the note.
-    const meeting = await adapterFetch('/meetings', {
-      method: 'POST',
-      body: JSON.stringify({
-        title,
-        body: '',
-        visibility,
-        s3_key: presign.s3_key,
-      }),
-    });
+    const { meeting, s3_key } = await uploadMeetingToOrg({ title, body, visibility });
     // Mark this note as having been attempted so a later auto-backup
     // trigger (e.g. a reprocess that re-fires processing-complete)
     // doesn't push a second copy into the org.
     if (summaryFile) recordOrgBackupAttempt(summaryFile, meeting?.id);
-    return { success: true, meeting, s3_key: presign.s3_key };
+    return { success: true, meeting, s3_key };
   } catch (e) {
     return { success: false, error: e.message };
   }
@@ -6219,14 +6227,20 @@ ipcMain.handle('org-try-auto-backup', async (_event, payload) => {
     const session = loadOrgSession();
     if (!session) return { attempted: false, reason: 'not-signed-in' };
 
-    let enabled = true;
+    // Fail closed: any error / unparseable output treats the toggle as
+    // disabled. A privacy + sharing setting should never default ON via a
+    // transient read failure — if the user enabled it, they can do so
+    // again explicitly. The regex match guards against stray Python
+    // stderr/stdout noise around the JSON payload.
+    let enabled = false;
     try {
       const cfg = await runPythonScript('simple_recorder.py', ['get-org-auto-backup']);
-      enabled = JSON.parse(cfg.trim())?.org_auto_backup_enabled !== false;
+      const jsonMatch = cfg.match(/\{.*\}/s);
+      enabled = jsonMatch
+        ? JSON.parse(jsonMatch[0])?.org_auto_backup_enabled !== false
+        : false;
     } catch (_) {
-      // Config read failure — default to enabled (preserves user intent
-      // since enabled is the default). Logged for diagnostics only.
-      sendDebugLog('org-try-auto-backup: failed to read auto-backup pref, defaulting to enabled');
+      sendDebugLog('org-try-auto-backup: failed to read auto-backup pref, treating as disabled');
     }
     if (!enabled) return { attempted: false, reason: 'disabled' };
 
@@ -6234,48 +6248,16 @@ ipcMain.handle('org-try-auto-backup', async (_event, payload) => {
       return { attempted: false, reason: 'already-attempted' };
     }
 
-    // Reuse the proven manual-share path verbatim. Anything that goes
-    // wrong here propagates the same way the manual button reports it,
-    // and we do NOT record the attempt — leaves the door open for a
-    // retry next time something pokes this path.
-    const safeTitle = String(title)
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '')
-      .slice(0, 60) || 'note';
-    const filename = `${safeTitle}.md`;
-
-    const presign = await adapterFetch('/uploads/presign', {
-      method: 'POST',
-      body: JSON.stringify({ filename, content_type: 'text/markdown' }),
-    });
-
-    const putRes = await fetch(presign.upload_url, {
-      method: 'PUT',
-      headers: { 'content-type': 'text/markdown' },
-      body,
-    });
-    if (!putRes.ok) {
-      const detail = await putRes.text().catch(() => '');
-      return {
-        attempted: false,
-        reason: 'upload-failed',
-        error: `s3 upload failed (${putRes.status}): ${detail.slice(0, 200)}`,
-      };
+    // Reuse the proven manual-share path verbatim. On failure we do NOT
+    // record the attempt — leaves the door open for a retry next time
+    // something pokes this path.
+    try {
+      const { meeting, s3_key } = await uploadMeetingToOrg({ title, body, visibility });
+      recordOrgBackupAttempt(summaryFile, meeting?.id);
+      return { attempted: true, meeting, s3_key };
+    } catch (e) {
+      return { attempted: false, reason: 'upload-failed', error: e.message };
     }
-
-    const meeting = await adapterFetch('/meetings', {
-      method: 'POST',
-      body: JSON.stringify({
-        title,
-        body: '',
-        visibility,
-        s3_key: presign.s3_key,
-      }),
-    });
-
-    recordOrgBackupAttempt(summaryFile, meeting?.id);
-    return { attempted: true, meeting, s3_key: presign.s3_key };
   } catch (e) {
     return { attempted: false, reason: 'error', error: e.message };
   }
