@@ -2983,6 +2983,46 @@ const APP_NAME_OVERRIDES = [
   { match: /^org\.mozilla\./, name: 'Firefox' },
 ];
 
+// Allowlist of bundle-id patterns we treat as "meeting apps". Anything not
+// matching is ignored — without this filter, dictation tools (Wispr Flow,
+// Superwhisper, MacWhisper, Apple Dictation, VoiceInk) and music apps that
+// open the mic would all trigger "Meeting detected".
+// Browsers are included as a class because most web meetings (Meet, Teams
+// web, Whereby, Around, etc.) route mic capture through the browser bundle
+// id or a helper sub-process (see APP_NAME_OVERRIDES). Tradeoff: in-browser
+// dictation extensions also match, but browser meetings are far more common.
+const MEETING_APP_ALLOWLIST = [
+  // Native videoconf / meeting apps (prefix match catches helper sub-processes)
+  /^us\.zoom\.xos/,                    // Zoom
+  /^com\.microsoft\.teams/,            // Microsoft Teams (classic + new "teams2")
+  /^com\.cisco\.webexmeetingsapp/,     // Cisco Webex
+  /^com\.webex\.meetingmanager/,       // Cisco Webex (alt id)
+  /^com\.apple\.FaceTime/,             // FaceTime
+  /^com\.hnc\.Discord/,                // Discord
+  /^com\.tinyspeck\.slackmacgap/,      // Slack (huddles)
+  /^com\.logmein\.GoToMeeting/,        // GoToMeeting
+  /^com\.bluejeansnet\.BlueJeans/,     // BlueJeans
+  /^co\.pop\.desktop/,                 // Pop
+  /^com\.google\.meetings/,            // Google Meet (standalone PWA)
+  /^com\.apple\.VoiceMemos/,           // Apple Voice Memos
+  // Browsers — most web meetings route mic capture through here
+  /^com\.apple\.WebKit/,               // Safari (helper)
+  /^com\.apple\.Safari/,               // Safari (main)
+  /^com\.google\.Chrome/,              // Chrome (+ helpers)
+  /^org\.chromium\./,                  // Chromium
+  /^com\.microsoft\.edgemac/,          // Edge
+  /^company\.thebrowser\.Browser/,     // Arc
+  /^com\.brave\.Browser/,              // Brave
+  /^org\.mozilla\./,                   // Firefox
+];
+
+function isMeetingApp(evt) {
+  // macOS 12/13 fallback emits no app_id (device-level signal). We can't
+  // filter there, so preserve legacy behaviour and notify regardless.
+  if (!evt.app_id) return true;
+  return MEETING_APP_ALLOWLIST.some((re) => re.test(evt.app_id));
+}
+
 // Wait this long after the meeting app releases the mic before triggering
 // auto-pause + "Meeting ended" prompt. Verified empirically that Zoom/Meet/
 // Teams use software-mute (keep the OS-level stream open while muted), so
@@ -3110,6 +3150,11 @@ function handleMicEvent(line) {
       }
       sendDebugLog(`[auto-detect] auto-resumed: ${autoStartedSession.appName}`);
     }
+    return;
+  }
+
+  if (!isMeetingApp(evt)) {
+    sendDebugLog(`[auto-detect] ignoring non-meeting app: ${evt.app_name || evt.app_id}`);
     return;
   }
 
