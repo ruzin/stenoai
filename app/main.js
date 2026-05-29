@@ -5717,12 +5717,17 @@ ipcMain.handle('get-calendar-events', async () => {
 });
 
 // Pick the calendar event most likely to be the one the user is joining now.
-// Tolerance: ±5 min on the event start, so an early join (a few min before
-// the scheduled time) or joining a meeting already in progress both match.
+// Match window:
+//   - opens 5 min before the scheduled start (early-join grace)
+//   - closes at the scheduled end, OR 10 min after start, whichever is later
+// The 10-min floor only matters for meetings shorter than 10 min: a 5-min
+// standup that overruns by a couple of minutes still matches when the user
+// joins late. Long meetings are unaffected (their end is past start+10).
 // Preference: in-progress events beat upcoming ones; among ties, the most
 // recently started (or soonest-upcoming) wins.
 function pickCurrentCalendarEvent(events, now = new Date()) {
-  const TOLERANCE_MS = 5 * 60 * 1000;
+  const EARLY_GRACE_MS = 5 * 60 * 1000;
+  const LATE_FLOOR_MS = 10 * 60 * 1000;
   const nowMs = now.getTime();
   const candidates = [];
   for (const e of events) {
@@ -5730,7 +5735,8 @@ function pickCurrentCalendarEvent(events, now = new Date()) {
     const startMs = new Date(e.start).getTime();
     const endMs = new Date(e.end).getTime();
     if (!isFinite(startMs) || !isFinite(endMs)) continue;
-    if (nowMs >= startMs - TOLERANCE_MS && nowMs < endMs) {
+    const closesAt = Math.max(endMs, startMs + LATE_FLOOR_MS);
+    if (nowMs >= startMs - EARLY_GRACE_MS && nowMs < closesAt) {
       candidates.push({ event: e, startMs });
     }
   }
