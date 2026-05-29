@@ -3114,7 +3114,7 @@ function stopMicMonitor() {
   clearAutoStartedSession();
 }
 
-function handleMicEvent(line) {
+async function handleMicEvent(line) {
   let evt;
   try {
     evt = JSON.parse(line);
@@ -3170,7 +3170,11 @@ function handleMicEvent(line) {
 
   const appName = humanizeAppName(evt);
   sendDebugLog(`[auto-detect] meeting detected: ${appName} (${evt.app_id || 'no-bundle-id'})`);
-  showMeetingDetectedNotification(appName, evt);
+  const calEvent = await getCalendarEventForNow();
+  if (calEvent) {
+    sendDebugLog(`[auto-detect] matched calendar event: ${calEvent.title}`);
+  }
+  showMeetingDetectedNotification(appName, evt, calEvent);
 }
 
 function handleMicStop(evt) {
@@ -3199,17 +3203,17 @@ function handleMicStop(evt) {
   }, MEETING_END_DEBOUNCE_MS);
 }
 
-function showMeetingDetectedNotification(appName, originatingEvt) {
+function showMeetingDetectedNotification(appName, originatingEvt, calEvent) {
   // Notification rendering quirk: setting `closeButtonText` alongside a single
   // `actions` entry causes macOS to collapse everything into an "Options"
   // dropdown instead of showing the action inline. Leaving closeButtonText
   // unset gives us Granola's layout — single inline button to the right.
   const notif = new Notification({
     title: 'Meeting detected',
-    body: appName,
+    body: calEvent?.title || appName,
     actions: [{ type: 'button', text: 'Take Notes' }],
   });
-  const trigger = () => requestAutoRecord(appName, originatingEvt);
+  const trigger = () => requestAutoRecord(appName, originatingEvt, calEvent);
   notif.on('action', (_evt, _index) => trigger()); // shown when banner style = Alerts
   notif.on('click', trigger);                       // body tap (always available)
   notif.show();
@@ -3237,12 +3241,15 @@ function showMeetingEndedNotification(appName) {
   return notif;
 }
 
-function requestAutoRecord(appName, originatingEvt) {
-  // Match the existing "session" naming style: "<App> — YYYY-MM-DD HH:MM".
+function requestAutoRecord(appName, originatingEvt, calEvent) {
+  // Prefer the calendar event title when we matched one — it's user-authored
+  // and recognisable weeks later. Falls back to "<App> — YYYY-MM-DD HH:MM",
+  // which simple_recorder.py treats as an "auto-named" placeholder and lets
+  // the post-summary LLM-title step rewrite (see _AUTO_NAMED_PATTERN).
   const now = new Date();
   const pad = (n) => String(n).padStart(2, '0');
   const stamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
-  const sessionName = `${appName} — ${stamp}`;
+  const sessionName = calEvent?.title || `${appName} — ${stamp}`;
   sendDebugLog(`[auto-detect] user requested record: ${sessionName}`);
 
   // Track the originating app so we can pair its mic-stop with this recording
@@ -5708,6 +5715,66 @@ ipcMain.handle('get-calendar-events', async () => {
     return { success: false, error: error.message };
   }
 });
+
+// Pick the calendar event most likely to be the one the user is joining now.
+// Tolerance: ±5 min on the event start, so an early join (a few min before
+// the scheduled time) or joining a meeting already in progress both match.
+// Preference: in-progress events beat upcoming ones; among ties, the most
+// recently started (or soonest-upcoming) wins.
+function pickCurrentCalendarEvent(events, now = new Date()) {
+  const TOLERANCE_MS = 5 * 60 * 1000;
+  const nowMs = now.getTime();
+  const candidates = [];
+  for (const e of events) {
+    if (!e || !e.start || !e.end) continue;
+    const startMs = new Date(e.start).getTime();
+    const endMs = new Date(e.end).getTime();
+    if (!isFinite(startMs) || !isFinite(endMs)) continue;
+    if (nowMs >= startMs - TOLERANCE_MS && nowMs < endMs) {
+      candidates.push({ event: e, startMs });
+    }
+  }
+  if (candidates.length === 0) return null;
+  const inProgress = candidates.filter((c) => c.startMs <= nowMs);
+  if (inProgress.length > 0) {
+    inProgress.sort((a, b) => b.startMs - a.startMs);
+    return inProgress[0].event;
+  }
+  candidates.sort((a, b) => a.startMs - b.startMs);
+  return candidates[0].event;
+}
+
+// Fetches from whichever provider is connected, applies a hard timeout so a
+// slow API never blocks the "Meeting detected" notification. Returns the
+// matched event or null.
+async function getCalendarEventForNow(timeoutMs = 1500) {
+  const fetchOnce = async () => {
+    try {
+      const googleToken = await getValidAccessToken();
+      if (googleToken) {
+        const raw = await fetchCalendarEvents(googleToken);
+        return raw.map(normalizeCalendarEvent);
+      }
+      const outlookToken = await getValidOutlookAccessToken();
+      if (outlookToken) {
+        const raw = await fetchOutlookCalendarEvents(outlookToken);
+        return raw.map(normalizeCalendarEvent);
+      }
+      return null;
+    } catch (err) {
+      sendDebugLog(`[auto-detect] calendar lookup failed: ${err.message}`);
+      return null;
+    }
+  };
+  const timeout = new Promise((resolve) => setTimeout(() => resolve('timeout'), timeoutMs));
+  const events = await Promise.race([fetchOnce(), timeout]);
+  if (events === 'timeout') {
+    sendDebugLog(`[auto-detect] calendar lookup timed out after ${timeoutMs}ms`);
+    return null;
+  }
+  if (!events) return null;
+  return pickCurrentCalendarEvent(events);
+}
 
 // ── Outlook Calendar: IPC Handlers ──────────────────────────────────────
 
