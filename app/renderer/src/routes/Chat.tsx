@@ -363,7 +363,6 @@ export function Chat() {
     </MeetingsShell>
   );
 }
-
 // Module-level handoff between the entry page (kicks off the stream right
 // before navigating) and the conversation page (picks up the stream id +
 // session id on mount). Avoids stuffing them in the URL.
@@ -432,4 +431,3 @@ function SectionHead({
     </div>
   );
 }
-

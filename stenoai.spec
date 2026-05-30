@@ -83,6 +83,12 @@ try:
 except Exception:
     pass
 
+# OpenCC ships JSON dictionaries required at runtime for Chinese variant conversion.
+try:
+    datas += collect_data_files('opencc')
+except Exception:
+    pass
+
 # Collect dynamic libraries (whisper.cpp native libs)
 binaries = []
 try:

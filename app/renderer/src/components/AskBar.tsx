@@ -31,7 +31,11 @@ export function TranscriptBar() {
 
   const copyTranscript = async () => {
     if (!meeting.data) return;
-    const text = (meeting.data.transcript ?? '').trim();
+    const text = (
+      meeting.data.is_diarised && meeting.data.diarised_text
+        ? meeting.data.diarised_text
+        : meeting.data.transcript
+    )?.trim();
     if (!text) return;
     await navigator.clipboard.writeText(text);
     setCopied(true);

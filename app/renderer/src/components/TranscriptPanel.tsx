@@ -9,6 +9,7 @@ import type { Meeting } from '@/lib/ipc';
 interface Segment {
   speaker: 'You' | 'Others' | null;
   text: string;
+  timestamp?: string;
 }
 
 /** Bare transcript content — no outer card or header. Used inside the dock's mv-transcript panel. */
@@ -103,6 +104,11 @@ function TranscriptRow({ segment, highlight }: { segment: Segment; highlight: st
   if (!segment.speaker) {
     return (
       <p className="px-2 py-1 text-sm leading-[1.65] text-foreground/90">
+        {segment.timestamp ? (
+          <span className="mr-2 text-xs tabular-nums text-muted-foreground">
+            {segment.timestamp}
+          </span>
+        ) : null}
         {renderHighlighted(segment.text, highlight)}
       </p>
     );
@@ -125,6 +131,11 @@ function TranscriptRow({ segment, highlight }: { segment: Segment; highlight: st
             : 'bg-neutral-200/80 text-neutral-900 rounded-bl-md dark:bg-neutral-700/60 dark:text-neutral-100',
         )}
       >
+        {segment.timestamp ? (
+          <span className="mb-1 block text-[11px] tabular-nums opacity-60">
+            {segment.timestamp}
+          </span>
+        ) : null}
         {renderHighlighted(segment.text, highlight)}
       </div>
     </div>
@@ -159,14 +170,19 @@ function renderHighlighted(text: string, highlight: string): React.ReactNode {
 
 function parseTranscript(meeting: Meeting): Segment[] {
   if (meeting.is_diarised && meeting.diarised_text) {
-    const blocks = meeting.diarised_text.split(/(?=\[You\]|\[Others\])/);
+    const blocks = meeting.diarised_text.split(/(?=(?:\[\d{2}:\d{2}\]\s*)?\[(?:You|Others)\])/);
     return blocks
       .map((b) => b.trim())
       .filter(Boolean)
       .map((b): Segment => {
-        if (b.startsWith('[You]')) return { speaker: 'You', text: b.replace('[You]', '').trim() };
-        if (b.startsWith('[Others]'))
-          return { speaker: 'Others', text: b.replace('[Others]', '').trim() };
+        const match = b.match(/^(?:\[(\d{2}:\d{2})\]\s*)?\[(You|Others)\]\s*([\s\S]*)$/);
+        if (match) {
+          return {
+            timestamp: match[1],
+            speaker: match[2] as 'You' | 'Others',
+            text: match[3].trim(),
+          };
+        }
         return { speaker: null, text: b };
       });
   }
@@ -178,4 +194,3 @@ function parseTranscript(meeting: Meeting): Segment[] {
     .filter(Boolean);
   return (sentences.length > 1 ? sentences : [text]).map((s) => ({ speaker: null, text: s }));
 }
-

@@ -516,17 +516,24 @@ class WhisperTranscriber:
             # turns from multiple channels. pywhispercpp reports t0/t1 in
             # centiseconds (1/100s), so divide by 100 to get seconds.
             transcript = " ".join(segment.text.strip() for segment in segments)
+            # pywhispercpp t0/t1 are in centiseconds (1/100 s)
+            def _cs_to_seconds(value):
+                try:
+                    return float(value) / 100.0
+                except (TypeError, ValueError):
+                    return 0.0
+            segment_list = [
+                {
+                    "text": s.text.strip(),
+                    "start": _cs_to_seconds(getattr(s, "t0", 0)),
+                    "end": _cs_to_seconds(getattr(s, "t1", 0)),
+                }
+                for s in segments
+                if s.text and s.text.strip()
+            ]
             return {
                 "text": transcript.strip(),
-                "segments": [
-                    {
-                        "text": segment.text.strip(),
-                        "start": segment.t0 / 100.0,
-                        "end": segment.t1 / 100.0,
-                    }
-                    for segment in segments
-                    if segment.text.strip()
-                ],
+                "segments": segment_list,
                 "duration_seconds": duration_seconds,
                 "detected_language": detected_language,
                 "detected_language_probability": detected_language_probability,
@@ -736,6 +743,8 @@ class WhisperTranscriber:
                 mic_result = self.transcribe_audio(mic_path, language)
                 if mic_result and mic_result.get("text"):
                     mic_segments = mic_result.get("segments") or []
+                    if not mic_segments:
+                        mic_segments = [{"text": mic_result["text"], "start": 0.0, "end": 0.0}]
                     # Propagate detected language from the first channel with speech
                     if not detected_language and mic_result.get("detected_language"):
                         detected_language = mic_result["detected_language"]
@@ -748,6 +757,8 @@ class WhisperTranscriber:
                 sys_result = self.transcribe_audio(system_path, language)
                 if sys_result and sys_result.get("text"):
                     system_segments = sys_result.get("segments") or []
+                    if not system_segments:
+                        system_segments = [{"text": sys_result["text"], "start": 0.0, "end": 0.0}]
                     if not detected_language and sys_result.get("detected_language"):
                         detected_language = sys_result["detected_language"]
                         detected_language_probability = sys_result.get("detected_language_probability")
@@ -793,15 +804,20 @@ class WhisperTranscriber:
             # which keeps the user as the "first speaker" in tied cases.
             tagged.sort(key=lambda t: t[0])
 
-            turns: list[tuple[str, list[str]]] = []
-            for _start, speaker, text in tagged:
+            turns: list[tuple[str, float, list[str]]] = []
+            for start, speaker, text in tagged:
                 if turns and turns[-1][0] == speaker:
-                    turns[-1][1].append(text)
+                    turns[-1][2].append(text)
                 else:
-                    turns.append((speaker, [text]))
+                    turns.append((speaker, start, [text]))
 
-            plain_parts = [' '.join(parts) for _speaker, parts in turns]
+            plain_parts = [' '.join(parts) for _speaker, _start, parts in turns]
             plain_text = "\n\n".join(plain_parts) if plain_parts else "No speech detected in audio"
+
+            def _fmt_ts(seconds: float) -> str:
+                seconds = max(0, int(seconds))
+                mm, ss = divmod(seconds, 60)
+                return f"[{mm:02d}:{ss:02d}]"
 
             # Only emit a labelled diarised_text when we actually had speech
             # on BOTH channels. A single-speaker run shouldn't pretend to be
@@ -811,7 +827,8 @@ class WhisperTranscriber:
             is_diarised = bool(mic_segments) and bool(system_segments)
             if is_diarised:
                 labelled_parts = [
-                    f"[{speaker}] {' '.join(parts)}" for speaker, parts in turns
+                    f"{_fmt_ts(start)} [{speaker}] {' '.join(parts)}"
+                    for speaker, start, parts in turns
                 ]
                 diarised_text = "\n\n".join(labelled_parts)
             else:

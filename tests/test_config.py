@@ -1,6 +1,7 @@
 import json
 import tempfile
 import unittest
+import json
 from pathlib import Path
 from unittest.mock import patch
 
@@ -43,6 +44,28 @@ class ConfigLanguageTests(unittest.TestCase):
             self.assertTrue(success)
             self.assertEqual(config.get_language(), "auto")
             self.assertEqual(config.get_language_name("auto"), "Auto (detect)")
+
+    def test_legacy_chinese_language_migrates_to_simplified(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config_path = Path(tmp_dir) / "config.json"
+            config_path.write_text(json.dumps({"language": "zh"}))
+
+            config = Config(config_path=config_path)
+
+            self.assertEqual(config.get_language(), "zh-Hans")
+            self.assertEqual(json.loads(config_path.read_text())["language"], "zh-Hans")
+
+    def test_chinese_variants_map_to_whisper_language(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config = Config(config_path=Path(tmp_dir) / "config.json")
+
+            self.assertTrue(config.set_language("zh-Hans"))
+            self.assertEqual(config.get_whisper_language(), "zh")
+            self.assertEqual(config.get_chinese_variant(), "simplified")
+
+            self.assertTrue(config.set_language("zh-Hant"))
+            self.assertEqual(config.get_whisper_language(), "zh")
+            self.assertEqual(config.get_chinese_variant(), "traditional")
 
 
 class ConfigWhisperModelTests(unittest.TestCase):

@@ -62,7 +62,6 @@ function Badge({ status }: { status: StepStatus }) {
     </span>
   );
 }
-
 function StepCard({ step }: { step: Step }) {
   const Icon = step.icon;
   return (
@@ -501,4 +500,3 @@ export function Setup() {
     </div>
   );
 }
-

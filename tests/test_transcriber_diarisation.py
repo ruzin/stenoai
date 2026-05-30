@@ -15,6 +15,7 @@ import tempfile
 import unittest
 import wave
 from pathlib import Path
+from unittest.mock import Mock
 
 from src.transcriber import (
     BLEED_JACCARD_THRESHOLD,
@@ -220,6 +221,76 @@ class CheckRmsEnergyTests(unittest.TestCase):
         import inspect
         sig = inspect.signature(self.transcriber._check_rms_energy)
         self.assertEqual(sig.parameters['threshold'].default, MIN_RMS_THRESHOLD)
+
+
+class TranscribeDiarisedTests(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.tmpdir = Path(self._tmp.name)
+        self.audio_path = self.tmpdir / "source.wav"
+        self.mic_path = self.tmpdir / "mic.wav"
+        self.system_path = self.tmpdir / "system.wav"
+        self.audio_path.write_bytes(b"audio")
+        self.mic_path.write_bytes(b"mic")
+        self.system_path.write_bytes(b"system")
+        self.transcriber = WhisperTranscriber.__new__(WhisperTranscriber)
+        self.transcriber._split_stereo_to_channels = Mock(
+            return_value=(self.mic_path, self.system_path, 3.0)
+        )
+        self.transcriber._check_rms_energy = Mock(return_value=True)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_interleaves_diarised_segments_with_timestamps(self):
+        self.transcriber.transcribe_audio = Mock(side_effect=[
+            {
+                "text": "Hello. Later.",
+                "segments": [
+                    {"text": "Hello.", "start": 1.2, "end": 1.8},
+                    {"text": "Later.", "start": 4.0, "end": 4.5},
+                ],
+            },
+            {
+                "text": "Reply.",
+                "segments": [{"text": "Reply.", "start": 2.1, "end": 2.8}],
+            },
+        ])
+
+        result = self.transcriber.transcribe_diarised(self.audio_path)
+
+        self.assertTrue(result["is_diarised"])
+        self.assertEqual(
+            result["diarised_text"],
+            "[00:01] [You] Hello.\n\n[00:02] [Others] Reply.\n\n[00:04] [You] Later.",
+        )
+
+    def test_single_source_is_not_marked_diarised(self):
+        self.transcriber.transcribe_audio = Mock(side_effect=[
+            {"text": "Only mic.", "segments": [{"text": "Only mic.", "start": 0.4, "end": 1.0}]},
+            {"text": "", "segments": []},
+        ])
+
+        result = self.transcriber.transcribe_diarised(self.audio_path)
+
+        self.assertFalse(result["is_diarised"])
+        self.assertIsNone(result["diarised_text"])
+        self.assertEqual(result["text"], "Only mic.")
+
+    def test_segmentless_backend_falls_back_to_text(self):
+        self.transcriber.transcribe_audio = Mock(side_effect=[
+            {"text": "Mic text.", "segments": []},
+            {"text": "System text.", "segments": []},
+        ])
+
+        result = self.transcriber.transcribe_diarised(self.audio_path)
+
+        self.assertTrue(result["is_diarised"])
+        self.assertEqual(result["text"], "Mic text.\n\nSystem text.")
+        self.assertEqual(
+            result["diarised_text"],
+            "[00:00] [You] Mic text.\n\n[00:00] [Others] System text.",
+        )
 
 
 class ResolveFfmpegTests(unittest.TestCase):
