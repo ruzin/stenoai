@@ -123,12 +123,17 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
     setShareState('sharing');
     setShareError(null);
     const title = meeting.session_info.name || 'Untitled note';
-    // Compose the full structured note as markdown — same content the
-    // local detail page renders, minus the raw transcript (kept off the
-    // shared corpus to limit blast radius if the bucket is ever leaked).
+    // Body = structured summary markdown (same as local detail page).
+    // Transcript ships as a separate S3 artifact so the org viewer can
+    // toggle it via the side panel rather than rendering it inline below
+    // the summary. Diarised text (with [You]/[Others] tags) is preferred
+    // when available so the org viewer gets the speaker-attributed view.
     const body = composeShareBody(meeting);
+    const transcript = (meeting.is_diarised && meeting.diarised_text)
+      ? meeting.diarised_text
+      : (meeting.transcript ?? '');
     try {
-      await shareToOrg.mutateAsync({ title, body, visibility: 'org', summaryFile });
+      await shareToOrg.mutateAsync({ title, body, transcript, visibility: 'org', summaryFile });
       setShareState('shared');
       setTimeout(() => setShareState('idle'), 2500);
     } catch (e) {

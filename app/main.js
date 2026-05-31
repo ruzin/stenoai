@@ -6263,7 +6263,7 @@ ipcMain.handle('org-delete-meeting', async (_event, id) => {
 // attempt state. Centralised in main so the renderer doesn't have to do
 // raw PUT (and so we can keep the bytes off the renderer when the bucket
 // has stricter CORS).
-async function uploadMeetingToOrg({ title, body, visibility = 'org' }) {
+async function uploadMeetingToOrg({ title, body, transcript = '', visibility = 'org' }) {
   const safeTitle = String(title)
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
@@ -6289,9 +6289,44 @@ async function uploadMeetingToOrg({ title, body, visibility = 'org' }) {
     throw new Error(`s3 upload failed (${putRes.status}): ${detail.slice(0, 200)}`);
   }
 
+  // Step 2b (optional): second presign+PUT for the transcript when one was
+  // supplied. Kept as a separate S3 object (rather than appended to the
+  // markdown body) so the desktop can lazily render it in the floating
+  // transcript panel instead of inline below the summary — matches the
+  // local-note UX. Failure here is non-fatal: the body upload already
+  // succeeded, so we POST /meetings without a transcript_s3_key rather
+  // than orphan an S3 object after rolling everything back.
+  let transcriptKey = null;
+  const transcriptText = String(transcript || '').trim();
+  if (transcriptText) {
+    try {
+      const tPresign = await adapterFetch('/uploads/presign', {
+        method: 'POST',
+        body: JSON.stringify({
+          filename: `${safeTitle}.transcript.txt`,
+          content_type: 'text/plain',
+        }),
+      });
+      const tPut = await fetch(tPresign.upload_url, {
+        method: 'PUT',
+        headers: { 'content-type': 'text/plain' },
+        body: transcriptText,
+      });
+      if (tPut.ok) {
+        transcriptKey = tPresign.s3_key;
+      } else {
+        const detail = await tPut.text().catch(() => '');
+        console.warn(`transcript upload failed (${tPut.status}): ${detail.slice(0, 200)}`);
+      }
+    } catch (err) {
+      console.warn('transcript upload skipped:', err.message);
+    }
+  }
+
   // Step 3: register metadata in the adapter. The body field is empty —
-  // the adapter holds only the s3_key and serves a presigned GET when
-  // someone in the org opens the note.
+  // the adapter holds only the s3_key (+ optional transcript_s3_key) and
+  // serves a presigned GET / inlined body when someone in the org opens
+  // the note.
   const meeting = await adapterFetch('/meetings', {
     method: 'POST',
     body: JSON.stringify({
@@ -6299,19 +6334,20 @@ async function uploadMeetingToOrg({ title, body, visibility = 'org' }) {
       body: '',
       visibility,
       s3_key: presign.s3_key,
+      ...(transcriptKey ? { transcript_s3_key: transcriptKey } : {}),
     }),
   });
 
-  return { meeting, s3_key: presign.s3_key };
+  return { meeting, s3_key: presign.s3_key, transcript_s3_key: transcriptKey };
 }
 
 ipcMain.handle('org-share-meeting', async (_event, payload) => {
   try {
-    const { title, body, visibility = 'org', summaryFile } = payload || {};
+    const { title, body, transcript, visibility = 'org', summaryFile } = payload || {};
     if (!title) return { success: false, error: 'title is required' };
     if (typeof body !== 'string') return { success: false, error: 'body is required' };
 
-    const { meeting, s3_key } = await uploadMeetingToOrg({ title, body, visibility });
+    const { meeting, s3_key } = await uploadMeetingToOrg({ title, body, transcript, visibility });
     // Mark this note as having been attempted so a later auto-backup
     // trigger (e.g. a reprocess that re-fires processing-complete)
     // doesn't push a second copy into the org.
@@ -6356,7 +6392,7 @@ ipcMain.handle('org-set-auto-backup', async (_event, enabled) => {
 // manual Share).
 ipcMain.handle('org-try-auto-backup', async (_event, payload) => {
   try {
-    const { summaryFile, title, body, visibility = 'org' } = payload || {};
+    const { summaryFile, title, body, transcript, visibility = 'org' } = payload || {};
     if (!summaryFile) return { attempted: false, reason: 'missing-summary-file' };
     if (!title) return { attempted: false, reason: 'missing-title' };
     if (typeof body !== 'string') return { attempted: false, reason: 'missing-body' };
@@ -6389,7 +6425,7 @@ ipcMain.handle('org-try-auto-backup', async (_event, payload) => {
     // record the attempt — leaves the door open for a retry next time
     // something pokes this path.
     try {
-      const { meeting, s3_key } = await uploadMeetingToOrg({ title, body, visibility });
+      const { meeting, s3_key } = await uploadMeetingToOrg({ title, body, transcript, visibility });
       recordOrgBackupAttempt(summaryFile, meeting?.id);
       return { attempted: true, meeting, s3_key };
     } catch (e) {

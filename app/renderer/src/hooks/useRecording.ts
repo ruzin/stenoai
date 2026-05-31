@@ -210,12 +210,16 @@ export function useRecordingProcessingEffects() {
         // sidebar Shared Notes view updates without a refresh.
         const title = newMeeting.session_info.name || 'Untitled note';
         const body = composeShareBody(newMeeting);
+        const transcript = (newMeeting.is_diarised && newMeeting.diarised_text)
+          ? newMeeting.diarised_text
+          : (newMeeting.transcript ?? '');
         if (body) {
           ipc()
             .org.tryAutoBackup({
               summaryFile: newSummaryFile,
               title,
               body,
+              transcript,
               visibility: 'org',
             })
             .then((res) => {

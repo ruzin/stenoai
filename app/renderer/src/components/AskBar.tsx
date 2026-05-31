@@ -17,7 +17,10 @@ import {
   type ChatSession,
 } from '@/hooks/useChatSessions';
 import { useGlobalStreaming } from '@/hooks/useStreamingQuery';
-import { TranscriptPanelContent } from '@/components/TranscriptPanel';
+import {
+  OrgTranscriptPanelContent,
+  TranscriptPanelContent,
+} from '@/components/TranscriptPanel';
 import { useMeeting } from '@/hooks/useMeetings';
 
 // ---------------------------------------------------------------------------
@@ -25,20 +28,29 @@ import { useMeeting } from '@/hooks/useMeetings';
 // ---------------------------------------------------------------------------
 
 export function TranscriptBar() {
-  const { activeSummaryFile, transcriptOpen, setTranscriptOpen } = useAskBar();
+  const { activeSummaryFile, activeOrgMeeting, transcriptOpen, setTranscriptOpen } = useAskBar();
   const meeting = useMeeting(activeSummaryFile ?? undefined);
   const [copied, setCopied] = React.useState(false);
+  const orgTranscript = activeOrgMeeting?.transcript ?? '';
+  const hasOrgTranscript = orgTranscript.trim().length > 0;
 
   const copyTranscript = async () => {
-    if (!meeting.data) return;
-    const text = (meeting.data.transcript ?? '').trim();
+    let text = '';
+    if (activeOrgMeeting) {
+      text = orgTranscript.trim();
+    } else if (meeting.data) {
+      text = (meeting.data.transcript ?? '').trim();
+    }
     if (!text) return;
     await navigator.clipboard.writeText(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   };
 
-  if (!transcriptOpen || !activeSummaryFile) return null;
+  if (!transcriptOpen) return null;
+  // Two valid contexts: a local meeting (activeSummaryFile) or a shared
+  // org note that was uploaded with a transcript.
+  if (!activeSummaryFile && !hasOrgTranscript) return null;
 
   return (
     <div
@@ -76,7 +88,11 @@ export function TranscriptBar() {
         </button>
       </div>
       <div style={{ height: 260, display: 'flex', flexDirection: 'column', borderTop: '1px solid var(--border-subtle)' }}>
-        <TranscriptPanelContent summaryFile={activeSummaryFile} />
+        {activeOrgMeeting ? (
+          <OrgTranscriptPanelContent transcript={orgTranscript} />
+        ) : (
+          <TranscriptPanelContent summaryFile={activeSummaryFile!} />
+        )}
       </div>
     </div>
   );
@@ -327,10 +343,12 @@ export function AskBar() {
         className="mv-chat"
         onSubmit={(e) => { e.preventDefault(); void submit(); }}
       >
-        {/* Transcript toggle — local-meeting only. Shared (org) notes have
-            no transcript to display, so hide the toggle in that mode rather
-            than expose a button that opens an empty panel. */}
-        {!activeOrgMeeting && (
+        {/* Transcript toggle — shown for any meeting that actually has a
+            transcript. For local meetings that's always true; for shared
+            (org) notes it depends on whether the original share included
+            a transcript artifact. Older shared notes have no transcript
+            and the toggle stays hidden. */}
+        {(activeSummaryFile || (activeOrgMeeting?.transcript ?? '').trim()) && (
         <button
           type="button"
           className={cn('mv-chat-tool', transcriptOpen && 'active')}

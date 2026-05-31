@@ -4,14 +4,14 @@ import { Search as SearchIcon } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import { useMeeting } from '@/hooks/useMeetings';
-import type { Meeting } from '@/lib/ipc';
 
 interface Segment {
   speaker: 'You' | 'Others' | null;
   text: string;
 }
 
-/** Bare transcript content — no outer card or header. Used inside the dock's mv-transcript panel. */
+/** Local-meeting wrapper — fetches the meeting JSON, then renders. Kept as
+ *  the original API so existing callers don't change. */
 export function TranscriptPanelContent({
   summaryFile,
 }: {
@@ -26,12 +26,28 @@ export function TranscriptPanelContent({
   if (!meeting.data) {
     return <div className="px-4 py-3 text-sm text-muted-foreground">No transcript available.</div>;
   }
-  return <TranscriptBody meeting={meeting.data} />;
+  const m = meeting.data;
+  const isDiarised = !!(m.is_diarised && m.diarised_text);
+  const text = isDiarised ? (m.diarised_text ?? '') : (m.transcript ?? '');
+  return <TranscriptBody text={text} isDiarised={isDiarised} />;
+}
+
+/** Org-meeting wrapper — transcript already in memory (came from the
+ *  adapter's GET /meetings/{id} response). Diarisation is auto-detected
+ *  from the presence of [You]/[Others] markers because the adapter
+ *  doesn't currently round-trip an explicit flag (avoids another
+ *  enterprise schema change). */
+export function OrgTranscriptPanelContent({ transcript }: { transcript: string }) {
+  if (!transcript.trim()) {
+    return <div className="px-4 py-3 text-sm text-muted-foreground">No transcript available.</div>;
+  }
+  const isDiarised = /\[(?:You|Others)\]/.test(transcript);
+  return <TranscriptBody text={transcript} isDiarised={isDiarised} />;
 }
 
 
-function TranscriptBody({ meeting }: { meeting: Meeting }) {
-  const segments = React.useMemo(() => parseTranscript(meeting), [meeting]);
+function TranscriptBody({ text, isDiarised }: { text: string; isDiarised: boolean }) {
+  const segments = React.useMemo(() => parseTranscript(text, isDiarised), [text, isDiarised]);
   const [query, setQuery] = React.useState('');
 
   const filtered = React.useMemo(() => {
@@ -157,9 +173,9 @@ function renderHighlighted(text: string, highlight: string): React.ReactNode {
   return parts;
 }
 
-function parseTranscript(meeting: Meeting): Segment[] {
-  if (meeting.is_diarised && meeting.diarised_text) {
-    const blocks = meeting.diarised_text.split(/(?=\[You\]|\[Others\])/);
+function parseTranscript(text: string, isDiarised: boolean): Segment[] {
+  if (isDiarised) {
+    const blocks = text.split(/(?=\[You\]|\[Others\])/);
     return blocks
       .map((b) => b.trim())
       .filter(Boolean)
@@ -170,12 +186,12 @@ function parseTranscript(meeting: Meeting): Segment[] {
         return { speaker: null, text: b };
       });
   }
-  const text = (meeting.transcript ?? '').trim();
-  if (!text) return [];
-  const sentences = text
+  const trimmed = text.trim();
+  if (!trimmed) return [];
+  const sentences = trimmed
     .split(/(?<=[.!?])\s+(?=[A-Z"'(\[])/)
     .map((s) => s.trim())
     .filter(Boolean);
-  return (sentences.length > 1 ? sentences : [text]).map((s) => ({ speaker: null, text: s }));
+  return (sentences.length > 1 ? sentences : [trimmed]).map((s) => ({ speaker: null, text: s }));
 }
 
