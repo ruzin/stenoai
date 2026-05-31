@@ -3114,7 +3114,7 @@ function stopMicMonitor() {
   clearAutoStartedSession();
 }
 
-function handleMicEvent(line) {
+async function handleMicEvent(line) {
   let evt;
   try {
     evt = JSON.parse(line);
@@ -3170,7 +3170,11 @@ function handleMicEvent(line) {
 
   const appName = humanizeAppName(evt);
   sendDebugLog(`[auto-detect] meeting detected: ${appName} (${evt.app_id || 'no-bundle-id'})`);
-  showMeetingDetectedNotification(appName, evt);
+  const calEvent = await getCalendarEventForNow();
+  if (calEvent) {
+    sendDebugLog(`[auto-detect] matched calendar event: ${calEvent.title}`);
+  }
+  showMeetingDetectedNotification(appName, evt, calEvent);
 }
 
 function handleMicStop(evt) {
@@ -3199,17 +3203,17 @@ function handleMicStop(evt) {
   }, MEETING_END_DEBOUNCE_MS);
 }
 
-function showMeetingDetectedNotification(appName, originatingEvt) {
+function showMeetingDetectedNotification(appName, originatingEvt, calEvent) {
   // Notification rendering quirk: setting `closeButtonText` alongside a single
   // `actions` entry causes macOS to collapse everything into an "Options"
   // dropdown instead of showing the action inline. Leaving closeButtonText
   // unset gives us Granola's layout — single inline button to the right.
   const notif = new Notification({
     title: 'Meeting detected',
-    body: appName,
+    body: calEvent?.title || appName,
     actions: [{ type: 'button', text: 'Take Notes' }],
   });
-  const trigger = () => requestAutoRecord(appName, originatingEvt);
+  const trigger = () => requestAutoRecord(appName, originatingEvt, calEvent);
   notif.on('action', (_evt, _index) => trigger()); // shown when banner style = Alerts
   notif.on('click', trigger);                       // body tap (always available)
   notif.show();
@@ -3237,12 +3241,15 @@ function showMeetingEndedNotification(appName) {
   return notif;
 }
 
-function requestAutoRecord(appName, originatingEvt) {
-  // Match the existing "session" naming style: "<App> — YYYY-MM-DD HH:MM".
+function requestAutoRecord(appName, originatingEvt, calEvent) {
+  // Prefer the calendar event title when we matched one — it's user-authored
+  // and recognisable weeks later. Falls back to "<App> — YYYY-MM-DD HH:MM",
+  // which simple_recorder.py treats as an "auto-named" placeholder and lets
+  // the post-summary LLM-title step rewrite (see _AUTO_NAMED_PATTERN).
   const now = new Date();
   const pad = (n) => String(n).padStart(2, '0');
   const stamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
-  const sessionName = `${appName} — ${stamp}`;
+  const sessionName = calEvent?.title || `${appName} — ${stamp}`;
   sendDebugLog(`[auto-detect] user requested record: ${sessionName}`);
 
   // Track the originating app so we can pair its mic-stop with this recording
@@ -5240,7 +5247,7 @@ function refreshAccessToken(refreshToken) {
 
 // ── Google Calendar: Fetch Events ───────────────────────────────────────
 
-function fetchCalendarEvents(accessToken, maxResults = 7) {
+function fetchCalendarEvents(accessToken, maxResults = 7, signal) {
   return new Promise((resolve, reject) => {
     const now = new Date();
     const weekAhead = new Date(now);
@@ -5262,6 +5269,7 @@ function fetchCalendarEvents(accessToken, maxResults = 7) {
         'Authorization': `Bearer ${accessToken}`
       }
     };
+    if (signal) options.signal = signal;
 
     const req = https.request(options, (res) => {
       let data = '';
@@ -5513,7 +5521,7 @@ function refreshOutlookAccessToken(refreshToken) {
 
 // ── Outlook Calendar: Fetch Events ──────────────────────────────────────
 
-function fetchOutlookCalendarEvents(accessToken, maxResults = 7) {
+function fetchOutlookCalendarEvents(accessToken, maxResults = 7, signal) {
   return new Promise((resolve, reject) => {
     const now = new Date();
     const weekAhead = new Date(now);
@@ -5536,6 +5544,7 @@ function fetchOutlookCalendarEvents(accessToken, maxResults = 7) {
         'Prefer': 'outlook.timezone="UTC"'
       }
     };
+    if (signal) options.signal = signal;
 
     const req = https.request(options, (res) => {
       let data = '';
@@ -5708,6 +5717,89 @@ ipcMain.handle('get-calendar-events', async () => {
     return { success: false, error: error.message };
   }
 });
+
+// Pick the calendar event most likely to be the one the user is joining now.
+// Match window:
+//   - opens 5 min before the scheduled start (early-join grace)
+//   - closes at the scheduled end, OR 10 min after start, whichever is later
+// The 10-min floor only matters for meetings shorter than 10 min: a 5-min
+// standup that overruns by a couple of minutes still matches when the user
+// joins late. Long meetings are unaffected (their end is past start+10).
+// Priority:
+//   1. Genuinely in-progress (now within real [start, end))
+//   2. Upcoming (start is still in the future) — soonest first
+//   3. Recently ended but still within the late-floor — most recently ended
+// (2) beats (3) so a short event that overran the floor cannot block the next
+// real upcoming meeting.
+// All-day events are skipped — their start is a date-only string ("YYYY-MM-DD")
+// with no 'T' separator, spans midnight to midnight, and would mistag every
+// meeting that day (e.g. "On vacation" appearing in every recording's title).
+function pickCurrentCalendarEvent(events, now = new Date()) {
+  const EARLY_GRACE_MS = 5 * 60 * 1000;
+  const LATE_FLOOR_MS = 10 * 60 * 1000;
+  const nowMs = now.getTime();
+  const candidates = [];
+  for (const e of events) {
+    if (!e || typeof e.start !== 'string' || typeof e.end !== 'string') continue;
+    if (!e.start.includes('T') || !e.end.includes('T')) continue;
+    const startMs = new Date(e.start).getTime();
+    const endMs = new Date(e.end).getTime();
+    if (!isFinite(startMs) || !isFinite(endMs)) continue;
+    const closesAt = Math.max(endMs, startMs + LATE_FLOOR_MS);
+    if (nowMs >= startMs - EARLY_GRACE_MS && nowMs < closesAt) {
+      candidates.push({ event: e, startMs, endMs });
+    }
+  }
+  if (candidates.length === 0) return null;
+
+  const inProgress = candidates.filter((c) => c.startMs <= nowMs && nowMs < c.endMs);
+  if (inProgress.length > 0) {
+    inProgress.sort((a, b) => b.startMs - a.startMs);
+    return inProgress[0].event;
+  }
+  const upcoming = candidates.filter((c) => c.startMs > nowMs);
+  if (upcoming.length > 0) {
+    upcoming.sort((a, b) => a.startMs - b.startMs);
+    return upcoming[0].event;
+  }
+  candidates.sort((a, b) => b.endMs - a.endMs);
+  return candidates[0].event;
+}
+
+// Fetches from whichever provider is connected, applies a hard timeout so a
+// slow API never blocks the "Meeting detected" notification. The timeout
+// aborts the in-flight request (via AbortController) so we don't leak the
+// HTTPS request after fallback. Returns the matched event or null.
+async function getCalendarEventForNow(timeoutMs = 1500) {
+  const controller = new AbortController();
+  const signal = controller.signal;
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    let events = null;
+    const googleToken = await getValidAccessToken();
+    if (googleToken) {
+      const raw = await fetchCalendarEvents(googleToken, 7, signal);
+      events = raw.map(normalizeCalendarEvent);
+    } else {
+      const outlookToken = await getValidOutlookAccessToken();
+      if (outlookToken) {
+        const raw = await fetchOutlookCalendarEvents(outlookToken, 7, signal);
+        events = raw.map(normalizeCalendarEvent);
+      }
+    }
+    if (!events) return null;
+    return pickCurrentCalendarEvent(events);
+  } catch (err) {
+    if (signal.aborted) {
+      sendDebugLog(`[auto-detect] calendar lookup timed out after ${timeoutMs}ms`);
+    } else {
+      sendDebugLog(`[auto-detect] calendar lookup failed: ${err.message}`);
+    }
+    return null;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
 
 // ── Outlook Calendar: IPC Handlers ──────────────────────────────────────
 
