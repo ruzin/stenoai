@@ -529,10 +529,12 @@ export function Sidebar({
             onClick={() => toggleSettings(currentRoute)}
             aria-label="Settings"
             title="Settings"
-            aria-pressed={currentRoute === '/settings'}
+            // startsWith so the cog still reads "active" on deep-link routes
+            // like /settings?tab=organisation, not just bare /settings.
+            aria-pressed={currentRoute.startsWith('/settings')}
             className={cn(
               'inline-flex h-[26px] w-7 items-center justify-center rounded-md transition-colors hover:bg-[color:var(--surface-hover)] hover:text-[color:var(--fg-1)]',
-              currentRoute === '/settings'
+              currentRoute.startsWith('/settings')
                 ? 'bg-[color:var(--surface-active)] text-[color:var(--fg-1)]'
                 : 'text-[color:var(--fg-2)]',
             )}
