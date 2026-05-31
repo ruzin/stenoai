@@ -123,12 +123,15 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
     setShareState('sharing');
     setShareError(null);
     const title = meeting.session_info.name || 'Untitled note';
-    // Compose the full structured note as markdown — same content the
-    // local detail page renders, minus the raw transcript (kept off the
-    // shared corpus to limit blast radius if the bucket is ever leaked).
+    // Body = structured summary markdown (same as local detail page).
+    // Transcript ships as a separate S3 artifact so the org viewer can
+    // toggle it via the side panel rather than rendering it inline below
+    // the summary. Diarised text (with [You]/[Others] tags) is preferred
+    // when available so the org viewer gets the speaker-attributed view.
     const body = composeShareBody(meeting);
+    const transcript = pickTranscriptForShare(meeting);
     try {
-      await shareToOrg.mutateAsync({ title, body, visibility: 'org', summaryFile });
+      await shareToOrg.mutateAsync({ title, body, transcript, visibility: 'org', summaryFile });
       setShareState('shared');
       setTimeout(() => setShareState('idle'), 2500);
     } catch (e) {
@@ -1141,7 +1144,19 @@ function getErrorMessage(error: unknown): string {
   return 'Something went wrong.';
 }
 
-/** Builds the markdown body shipped to the org adapter when the user shares
+/** Pick which transcript flavour to ship to org. Diarised text (with
+ *  [You]/[Others] tags) preferred when available so org viewers get the
+ *  speaker-attributed view; falls back to the plain transcript. Returns
+ *  an empty string for meetings with no transcript at all, which the
+ *  upload path treats as "skip the second presign+PUT". Kept here next
+ *  to composeShareBody so manual-share (MeetingDetail) and auto-backup
+ *  (useRecording) can't drift out of sync. */
+export function pickTranscriptForShare(meeting: Meeting): string {
+  if (meeting.is_diarised && meeting.diarised_text) return meeting.diarised_text;
+  return meeting.transcript ?? '';
+}
+
+/** Compose the markdown body that will be uploaded to S3 when sharing
  *  a local note. Mirrors what the local note view renders (minus the raw
  *  transcript) so colleagues see the same structured summary. */
 export function composeShareBody(meeting: Meeting): string {

@@ -5,6 +5,10 @@ export interface ActiveOrgMeeting {
   title: string;
   body: string;
   ownerEmail: string;
+  /** When the shared note was uploaded with a transcript, the adapter
+   *  inlines it on GET /meetings/{id}. The AskBar's transcript toggle
+   *  surfaces only when this is non-empty. */
+  transcript?: string;
 }
 
 interface AskBarContextValue {
@@ -50,7 +54,8 @@ export function AskBarProvider({ children }: { children: React.ReactNode }) {
         prev.id === meeting.id &&
         prev.title === meeting.title &&
         prev.body === meeting.body &&
-        prev.ownerEmail === meeting.ownerEmail
+        prev.ownerEmail === meeting.ownerEmail &&
+        prev.transcript === meeting.transcript
       ) {
         return prev;
       }

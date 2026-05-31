@@ -149,6 +149,7 @@ export function OrgSharedDetail({ id }: { id: string }) {
             title: meeting.data.title,
             body: meeting.data.body ?? '',
             ownerEmail: meeting.data.owner_email,
+            transcript: meeting.data.transcript_body ?? '',
           }
         : null,
     [
@@ -156,6 +157,7 @@ export function OrgSharedDetail({ id }: { id: string }) {
       meeting.data?.title,
       meeting.data?.body,
       meeting.data?.owner_email,
+      meeting.data?.transcript_body,
     ],
   );
   useActiveOrgMeeting(activeOrgMeeting);

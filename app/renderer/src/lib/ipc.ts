@@ -132,10 +132,17 @@ export interface OrgMeetingSummary {
   visibility: 'private' | 'org';
   created_at: number;
   has_artifact: boolean;
+  /** True when the shared note also has a transcript artifact in S3. Lets
+   *  the list view show a "has transcript" affordance without GETting each
+   *  meeting individually. */
+  has_transcript: boolean;
 }
 
 export interface OrgMeeting extends OrgMeetingSummary {
   body: string;
+  /** Inlined transcript content. Only present when the meeting was shared
+   *  with a transcript (post-v0.3.0 adapter). Missing for older notes. */
+  transcript_body?: string;
   download_url?: string;
 }
 
@@ -152,6 +159,11 @@ export interface OrgCreateMeetingPayload {
 export interface OrgShareMeetingPayload {
   title: string;
   body: string;
+  /** Optional transcript content uploaded as a separate S3 object. Diarised
+   *  text (with [You]/[Others] tags) is preferred when available; the
+   *  desktop side decides which to send. Empty string skips the second
+   *  upload entirely. */
+  transcript?: string;
   visibility?: 'private' | 'org';
   /** When present, main records this summary as "backup attempted" so the
    *  auto-backup trigger won't push a duplicate copy on a later reprocess. */
@@ -164,6 +176,8 @@ export interface OrgTryAutoBackupPayload {
   summaryFile: string;
   title: string;
   body: string;
+  /** Optional transcript — same semantics as OrgShareMeetingPayload.transcript. */
+  transcript?: string;
   visibility?: 'private' | 'org';
 }
 
