@@ -114,10 +114,16 @@ export interface OrgStatusResponse {
   email?: string;
   name?: string;
   orgId?: string;
-  /** Set by main when org-status detected an expired JWT and cleared the
-   *  session. Lets the UI show "Your session expired — sign in again"
-   *  copy distinct from "Sign in to your organisation" first-time copy. */
-  expired?: boolean;
+  /** True if the user has *ever* successfully signed in to an org (on this
+   *  install). Persists across sign-outs. Used by the sidebar to decide
+   *  whether to surface the "Sign in to org" CTA — personal users who've
+   *  never connected to an org don't see clutter; enterprise users get a
+   *  one-click recovery path after their first connection. */
+  everSignedIn?: boolean;
+  /** JWT exp claim (Unix seconds). When signedIn, the renderer schedules a
+   *  setTimeout to invalidate this query the instant the token expires —
+   *  no polling, no stale UI. Absent on signed-out / malformed responses. */
+  exp?: number;
 }
 
 export type OrgLoginResponse = Result<{

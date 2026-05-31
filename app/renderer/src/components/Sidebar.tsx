@@ -495,9 +495,10 @@ export function Sidebar({
 
         {/* Profile chip + Settings cog. When the user is signed in to an org
             adapter, the chip sits on the left and the cog moves to the right
-            (justify-between). When signed out we still surface a sign-in CTA
-            on the left so the path back into org features is one click rather
-            than a multi-step trek through Settings > Organisation. */}
+            (justify-between). When signed out we surface a one-click sign-in
+            CTA, but ONLY for users who've previously connected to an org —
+            personal users who have never signed in don't see clutter for a
+            feature they don't use. */}
         <div className="flex items-center justify-between gap-2 px-3 py-2">
           {orgSignedIn ? (
             <ProfileChip
@@ -506,7 +507,7 @@ export function Sidebar({
               orgId={orgSession.data?.orgId ?? ''}
               onSignOut={() => orgLogout.mutate()}
             />
-          ) : (
+          ) : orgSession.data?.everSignedIn ? (
             <button
               type="button"
               onClick={() => {
@@ -515,17 +516,13 @@ export function Sidebar({
               }}
               className="inline-flex h-[26px] min-w-0 items-center gap-1.5 rounded-md px-2 text-[12px] transition-colors hover:bg-[color:var(--surface-hover)]"
               style={{ color: 'var(--fg-1)' }}
-              title={
-                orgSession.data?.expired
-                  ? 'Your organisation session expired — sign in again'
-                  : 'Sign in to share notes with your organisation'
-              }
+              title="Sign in to share notes with your organisation"
             >
               <LogIn className="size-[13px]" style={{ color: 'var(--fg-2)' }} />
-              <span className="truncate">
-                {orgSession.data?.expired ? 'Re-sign in to org' : 'Sign in to org'}
-              </span>
+              <span className="truncate">Sign in to org</span>
             </button>
+          ) : (
+            <span />
           )}
           <button
             type="button"
