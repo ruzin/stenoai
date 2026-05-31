@@ -129,9 +129,7 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
     // the summary. Diarised text (with [You]/[Others] tags) is preferred
     // when available so the org viewer gets the speaker-attributed view.
     const body = composeShareBody(meeting);
-    const transcript = (meeting.is_diarised && meeting.diarised_text)
-      ? meeting.diarised_text
-      : (meeting.transcript ?? '');
+    const transcript = pickTranscriptForShare(meeting);
     try {
       await shareToOrg.mutateAsync({ title, body, transcript, visibility: 'org', summaryFile });
       setShareState('shared');
@@ -1146,7 +1144,19 @@ function getErrorMessage(error: unknown): string {
   return 'Something went wrong.';
 }
 
-/** Builds the markdown body shipped to the org adapter when the user shares
+/** Pick which transcript flavour to ship to org. Diarised text (with
+ *  [You]/[Others] tags) preferred when available so org viewers get the
+ *  speaker-attributed view; falls back to the plain transcript. Returns
+ *  an empty string for meetings with no transcript at all, which the
+ *  upload path treats as "skip the second presign+PUT". Kept here next
+ *  to composeShareBody so manual-share (MeetingDetail) and auto-backup
+ *  (useRecording) can't drift out of sync. */
+export function pickTranscriptForShare(meeting: Meeting): string {
+  if (meeting.is_diarised && meeting.diarised_text) return meeting.diarised_text;
+  return meeting.transcript ?? '';
+}
+
+/** Compose the markdown body that will be uploaded to S3 when sharing
  *  a local note. Mirrors what the local note view renders (minus the raw
  *  transcript) so colleagues see the same structured summary. */
 export function composeShareBody(meeting: Meeting): string {

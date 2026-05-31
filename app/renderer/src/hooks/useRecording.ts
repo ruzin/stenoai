@@ -6,7 +6,7 @@ import { meetingsKeys } from './meetingKeys';
 import { orgKeys } from './useOrg';
 import { useLiveDraftStore } from './liveDraftStore';
 import { navigate } from '@/lib/router';
-import { composeShareBody } from '@/routes/MeetingDetail';
+import { composeShareBody, pickTranscriptForShare } from '@/routes/MeetingDetail';
 import type { Meeting, QueueStatus } from '@/lib/ipc';
 
 export type RecordingStatus = 'idle' | 'recording' | 'paused' | 'processing';
@@ -210,9 +210,7 @@ export function useRecordingProcessingEffects() {
         // sidebar Shared Notes view updates without a refresh.
         const title = newMeeting.session_info.name || 'Untitled note';
         const body = composeShareBody(newMeeting);
-        const transcript = (newMeeting.is_diarised && newMeeting.diarised_text)
-          ? newMeeting.diarised_text
-          : (newMeeting.transcript ?? '');
+        const transcript = pickTranscriptForShare(newMeeting);
         if (body) {
           ipc()
             .org.tryAutoBackup({

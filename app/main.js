@@ -6319,7 +6319,10 @@ async function uploadMeetingToOrg({ title, body, transcript = '', visibility = '
         console.warn(`transcript upload failed (${tPut.status}): ${detail.slice(0, 200)}`);
       }
     } catch (err) {
-      console.warn('transcript upload skipped:', err.message);
+      console.warn(
+        'transcript upload skipped:',
+        err instanceof Error ? err.message : String(err),
+      );
     }
   }
 
