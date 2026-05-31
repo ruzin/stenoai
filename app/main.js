@@ -5247,7 +5247,7 @@ function refreshAccessToken(refreshToken) {
 
 // ── Google Calendar: Fetch Events ───────────────────────────────────────
 
-function fetchCalendarEvents(accessToken, maxResults = 7) {
+function fetchCalendarEvents(accessToken, maxResults = 7, signal) {
   return new Promise((resolve, reject) => {
     const now = new Date();
     const weekAhead = new Date(now);
@@ -5269,6 +5269,7 @@ function fetchCalendarEvents(accessToken, maxResults = 7) {
         'Authorization': `Bearer ${accessToken}`
       }
     };
+    if (signal) options.signal = signal;
 
     const req = https.request(options, (res) => {
       let data = '';
@@ -5520,7 +5521,7 @@ function refreshOutlookAccessToken(refreshToken) {
 
 // ── Outlook Calendar: Fetch Events ──────────────────────────────────────
 
-function fetchOutlookCalendarEvents(accessToken, maxResults = 7) {
+function fetchOutlookCalendarEvents(accessToken, maxResults = 7, signal) {
   return new Promise((resolve, reject) => {
     const now = new Date();
     const weekAhead = new Date(now);
@@ -5543,6 +5544,7 @@ function fetchOutlookCalendarEvents(accessToken, maxResults = 7) {
         'Prefer': 'outlook.timezone="UTC"'
       }
     };
+    if (signal) options.signal = signal;
 
     const req = https.request(options, (res) => {
       let data = '';
@@ -5723,63 +5725,80 @@ ipcMain.handle('get-calendar-events', async () => {
 // The 10-min floor only matters for meetings shorter than 10 min: a 5-min
 // standup that overruns by a couple of minutes still matches when the user
 // joins late. Long meetings are unaffected (their end is past start+10).
-// Preference: in-progress events beat upcoming ones; among ties, the most
-// recently started (or soonest-upcoming) wins.
+// Priority:
+//   1. Genuinely in-progress (now within real [start, end))
+//   2. Upcoming (start is still in the future) — soonest first
+//   3. Recently ended but still within the late-floor — most recently ended
+// (2) beats (3) so a short event that overran the floor cannot block the next
+// real upcoming meeting.
+// All-day events are skipped — their start is a date-only string ("YYYY-MM-DD")
+// with no 'T' separator, spans midnight to midnight, and would mistag every
+// meeting that day (e.g. "On vacation" appearing in every recording's title).
 function pickCurrentCalendarEvent(events, now = new Date()) {
   const EARLY_GRACE_MS = 5 * 60 * 1000;
   const LATE_FLOOR_MS = 10 * 60 * 1000;
   const nowMs = now.getTime();
   const candidates = [];
   for (const e of events) {
-    if (!e || !e.start || !e.end) continue;
+    if (!e || typeof e.start !== 'string' || typeof e.end !== 'string') continue;
+    if (!e.start.includes('T') || !e.end.includes('T')) continue;
     const startMs = new Date(e.start).getTime();
     const endMs = new Date(e.end).getTime();
     if (!isFinite(startMs) || !isFinite(endMs)) continue;
     const closesAt = Math.max(endMs, startMs + LATE_FLOOR_MS);
     if (nowMs >= startMs - EARLY_GRACE_MS && nowMs < closesAt) {
-      candidates.push({ event: e, startMs });
+      candidates.push({ event: e, startMs, endMs });
     }
   }
   if (candidates.length === 0) return null;
-  const inProgress = candidates.filter((c) => c.startMs <= nowMs);
+
+  const inProgress = candidates.filter((c) => c.startMs <= nowMs && nowMs < c.endMs);
   if (inProgress.length > 0) {
     inProgress.sort((a, b) => b.startMs - a.startMs);
     return inProgress[0].event;
   }
-  candidates.sort((a, b) => a.startMs - b.startMs);
+  const upcoming = candidates.filter((c) => c.startMs > nowMs);
+  if (upcoming.length > 0) {
+    upcoming.sort((a, b) => a.startMs - b.startMs);
+    return upcoming[0].event;
+  }
+  candidates.sort((a, b) => b.endMs - a.endMs);
   return candidates[0].event;
 }
 
 // Fetches from whichever provider is connected, applies a hard timeout so a
-// slow API never blocks the "Meeting detected" notification. Returns the
-// matched event or null.
+// slow API never blocks the "Meeting detected" notification. The timeout
+// aborts the in-flight request (via AbortController) so we don't leak the
+// HTTPS request after fallback. Returns the matched event or null.
 async function getCalendarEventForNow(timeoutMs = 1500) {
-  const fetchOnce = async () => {
-    try {
-      const googleToken = await getValidAccessToken();
-      if (googleToken) {
-        const raw = await fetchCalendarEvents(googleToken);
-        return raw.map(normalizeCalendarEvent);
-      }
+  const controller = new AbortController();
+  const signal = controller.signal;
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    let events = null;
+    const googleToken = await getValidAccessToken();
+    if (googleToken) {
+      const raw = await fetchCalendarEvents(googleToken, 7, signal);
+      events = raw.map(normalizeCalendarEvent);
+    } else {
       const outlookToken = await getValidOutlookAccessToken();
       if (outlookToken) {
-        const raw = await fetchOutlookCalendarEvents(outlookToken);
-        return raw.map(normalizeCalendarEvent);
+        const raw = await fetchOutlookCalendarEvents(outlookToken, 7, signal);
+        events = raw.map(normalizeCalendarEvent);
       }
-      return null;
-    } catch (err) {
-      sendDebugLog(`[auto-detect] calendar lookup failed: ${err.message}`);
-      return null;
     }
-  };
-  const timeout = new Promise((resolve) => setTimeout(() => resolve('timeout'), timeoutMs));
-  const events = await Promise.race([fetchOnce(), timeout]);
-  if (events === 'timeout') {
-    sendDebugLog(`[auto-detect] calendar lookup timed out after ${timeoutMs}ms`);
+    if (!events) return null;
+    return pickCurrentCalendarEvent(events);
+  } catch (err) {
+    if (signal.aborted) {
+      sendDebugLog(`[auto-detect] calendar lookup timed out after ${timeoutMs}ms`);
+    } else {
+      sendDebugLog(`[auto-detect] calendar lookup failed: ${err.message}`);
+    }
     return null;
+  } finally {
+    clearTimeout(timeoutId);
   }
-  if (!events) return null;
-  return pickCurrentCalendarEvent(events);
 }
 
 // ── Outlook Calendar: IPC Handlers ──────────────────────────────────────
