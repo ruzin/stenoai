@@ -114,6 +114,10 @@ export interface OrgStatusResponse {
   email?: string;
   name?: string;
   orgId?: string;
+  /** Set by main when org-status detected an expired JWT and cleared the
+   *  session. Lets the UI show "Your session expired — sign in again"
+   *  copy distinct from "Sign in to your organisation" first-time copy. */
+  expired?: boolean;
 }
 
 export type OrgLoginResponse = Result<{

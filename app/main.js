@@ -5848,6 +5848,32 @@ function getOrgSessionPath() {
   return path.join(os.homedir(), 'Library', 'Application Support', 'stenoai', '.org-session');
 }
 
+// Decode the JWT's payload segment and check whether it's already past its
+// `exp` claim. The adapter signs with HS256 so we *cannot* verify the
+// signature client-side, but the `exp` timestamp is the part the adapter
+// itself enforces — if it's in the past, the next authenticated request
+// will get a 401 anyway. Checking here lets org-status and the sidebar
+// reflect reality without first having to make a request and watch it fail.
+//
+// We treat malformed/unparseable tokens as expired (defensive) so a corrupt
+// session file kicks the user back to sign-in instead of leaving them in a
+// "signed in but every request fails" limbo.
+function isJwtExpired(token) {
+  try {
+    const parts = String(token || '').split('.');
+    if (parts.length !== 3) return true;
+    const payload = JSON.parse(
+      Buffer.from(parts[1].replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8'),
+    );
+    if (typeof payload.exp !== 'number') return true;
+    // 30-second skew buffer so a request fired right at the boundary doesn't
+    // race the adapter to "valid → expired" mid-flight.
+    return payload.exp <= Math.floor(Date.now() / 1000) + 30;
+  } catch (_) {
+    return true;
+  }
+}
+
 function saveOrgSession(session) {
   try {
     const dir = path.dirname(getOrgSessionPath());
@@ -5981,6 +6007,15 @@ async function adapterFetch(pathname, opts = {}) {
 ipcMain.handle('org-status', async () => {
   const session = loadOrgSession();
   if (!session) return { signedIn: false };
+  // Previously this returned signedIn:true as long as the session file
+  // existed, even if the JWT had long since expired. The renderer would
+  // happily show a "signed in" sticker until the user actually triggered
+  // an authenticated request and got booted by a 401. Validate the JWT's
+  // exp claim here so the UI reflects truth at startup.
+  if (isJwtExpired(session.token)) {
+    clearOrgSession();
+    return { signedIn: false, expired: true };
+  }
   return {
     signedIn: true,
     adapterUrl: session.adapterUrl,

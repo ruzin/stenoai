@@ -28,7 +28,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { MeetingsShell } from '@/components/MeetingsShell';
-import { useNavigate, getLastNonSettingsRoute } from '@/lib/router';
+import { useNavigate, getLastNonSettingsRoute, useRoute, getRouteParam } from '@/lib/router';
 import {
   clearDebugLogs,
   getDebugLogs,
@@ -448,7 +448,16 @@ function ModelCard({
 
 export function Settings() {
   const navigate = useNavigate();
-  const [tab, setTab] = React.useState<TabId>('general');
+  // Deep-link support: /settings?tab=<id> opens the matching tab on mount.
+  // Used by the sidebar's "Sign in to organisation" CTA to land users
+  // directly on the org sign-in form rather than the General tab.
+  const route = useRoute();
+  const initialTab = React.useMemo<TabId>(() => {
+    const requested = getRouteParam(route, 'tab');
+    if (requested && TABS.some((t) => t.id === requested)) return requested as TabId;
+    return 'general';
+  }, []); // Intentional — only consume the URL param on first mount.
+  const [tab, setTab] = React.useState<TabId>(initialTab);
   const version = useAppVersion();
 
   return (

@@ -39,7 +39,10 @@ export function useNavigate() {
 let lastNonSettingsRoute: string = '/';
 
 export function rememberNonSettingsRoute(route: string) {
-  if (route !== '/settings') lastNonSettingsRoute = route;
+  // `startsWith` rather than `===` so deep-links like /settings?tab=organisation
+  // are still recognised as the settings route and don't get stored as
+  // "last non-settings route" by mistake.
+  if (!route.startsWith('/settings')) lastNonSettingsRoute = route;
 }
 
 export function getLastNonSettingsRoute(): string {
@@ -52,10 +55,23 @@ export function getLastNonSettingsRoute(): string {
  * /settings.
  */
 export function toggleSettings(currentRoute: string) {
-  if (currentRoute === '/settings') {
+  if (currentRoute.startsWith('/settings')) {
     navigate(lastNonSettingsRoute || '/');
   } else {
     rememberNonSettingsRoute(currentRoute);
     navigate('/settings');
+  }
+}
+
+/** Pull a query-string param out of the current hash route. Used by Settings
+ *  to deep-link to a specific tab via `/settings?tab=organisation`. Returns
+ *  null when the param is absent or the route is malformed. */
+export function getRouteParam(route: string, name: string): string | null {
+  const qIdx = route.indexOf('?');
+  if (qIdx < 0) return null;
+  try {
+    return new URLSearchParams(route.slice(qIdx + 1)).get(name);
+  } catch (_) {
+    return null;
   }
 }

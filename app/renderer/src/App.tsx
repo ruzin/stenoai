@@ -133,7 +133,9 @@ export function App() {
 
 function RouteView({ route }: { route: string }) {
   if (route === '/dev' || route.startsWith('/dev/')) return <Sandbox />;
-  if (route === '/settings') return <Settings />;
+  // Match deep-links like /settings?tab=organisation too — the Settings
+  // component reads the tab param off the route on mount.
+  if (route === '/settings' || route.startsWith('/settings?')) return <Settings />;
   if (route === '/setup') return <Setup />;
   if (route === '/recording') return <Recording />;
   if (route === '/chat') return <Chat />;
