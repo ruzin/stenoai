@@ -6040,7 +6040,15 @@ async function adapterFetch(pathname, opts = {}) {
 
 ipcMain.handle('org-status', async () => {
   const session = loadOrgSession();
-  const everSignedIn = hasOrgEverBeenSignedIn();
+  // Backfill the marker on first org-status hit when a session already
+  // exists from before the marker code shipped — without this, anyone
+  // who signed in on a previous build would lose the sidebar CTA on
+  // their next sign-out / expiry because their session predates the
+  // marker file. `everSignedIn` therefore treats "has live session OR
+  // marker file" as equivalent past-sign-in proof.
+  const knownBefore = hasOrgEverBeenSignedIn();
+  if (session && !knownBefore) markOrgKnown();
+  const everSignedIn = knownBefore || Boolean(session);
   if (!session) return { signedIn: false, everSignedIn };
   // Previously this returned signedIn:true as long as the session file
   // existed, even if the JWT had long since expired. The renderer would
