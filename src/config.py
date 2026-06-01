@@ -474,11 +474,15 @@ class Config:
 
     # --- AI provider settings ---
 
-    VALID_AI_PROVIDERS = ("local", "remote", "cloud")
+    VALID_AI_PROVIDERS = ("local", "remote", "cloud", "adapter")
     VALID_CLOUD_PROVIDERS = ("openai", "anthropic", "custom")
 
     def get_ai_provider(self) -> str:
-        """Get the configured AI provider ('local', 'remote', or 'cloud')."""
+        """Get the configured AI provider ('local', 'remote', 'cloud', or
+        'adapter'). 'adapter' routes AI requests through a signed-in org's
+        adapter so the desktop never sees the provider key — see
+        get_adapter_url / get_adapter_token below for how the desktop's
+        Electron main passes the session into the Python subprocess."""
         value = self._config.get("ai_provider", "local")
         return value if value in self.VALID_AI_PROVIDERS else "local"
 
@@ -512,6 +516,19 @@ class Config:
         """Get the cloud API key from env var (set by Electron via safeStorage)."""
         import os
         return os.environ.get("STENOAI_CLOUD_API_KEY", "")
+
+    def get_adapter_url(self) -> str:
+        """Get the org adapter base URL (set by Electron when a session is
+        active). The summariser uses this when ai_provider == 'adapter' to
+        route AI requests through the customer's adapter instead of touching
+        a provider key directly."""
+        import os
+        return os.environ.get("STENOAI_ADAPTER_URL", "").rstrip("/")
+
+    def get_adapter_token(self) -> str:
+        """Get the org adapter JWT (set by Electron from the persisted session)."""
+        import os
+        return os.environ.get("STENOAI_ADAPTER_TOKEN", "")
 
     # Per-provider sensible defaults. Used when the user switches provider for
     # the first time and we have no remembered model for that provider yet.

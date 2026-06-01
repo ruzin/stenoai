@@ -51,10 +51,13 @@ export function Chat() {
   const inputRef = React.useRef<HTMLInputElement>(null);
 
   const isCloud = provider.data?.ai_provider === 'cloud';
+  const isAdapter = provider.data?.ai_provider === 'adapter';
   const cloudKeySet = provider.data?.cloud_api_key_set ?? false;
   // Org chat goes through the adapter's central key, so it doesn't need
-  // the local cloud provider configured.
-  const localReady = isCloud && cloudKeySet;
+  // the local cloud provider configured. Adapter mode also works — the
+  // adapter brokers a cloud model server-side, fitting the same
+  // "remote-hosted model" requirement that cross-note chat needs.
+  const localReady = (isCloud && cloudKeySet) || isAdapter;
   const orgScopeActive = scopeFolderId === ORG_SHARED_SCOPE;
   const ready = localReady || orgScopeActive;
 
@@ -400,8 +403,8 @@ function CloudRequiredBanner() {
     >
       <Sparkles className="mt-0.5 size-[14px] flex-shrink-0" style={{ color: 'var(--fg-2)' }} />
       <div className="flex-1">
-        Cross-note chat needs a cloud AI provider — local models can't fit a
-        full-corpus prompt yet. Switch to OpenAI or Anthropic in{' '}
+        Cross-note chat needs a remote-hosted model — local models can't fit
+        a full-corpus prompt yet. Switch to Cloud API or your Organisation in{' '}
         <button
           type="button"
           className="underline transition-colors hover:text-[color:var(--fg-1)]"
