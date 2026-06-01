@@ -35,15 +35,16 @@ export function MainToolbar({
   const isRecording =
     recordingStatus === 'recording' || recordingStatus === 'paused';
   const isPaused = recordingStatus === 'paused';
-  const isProcessing = recordingStatus === 'processing';
   const { resolved: resolvedTheme, setTheme } = useTheme();
   // Route-aware primary action. On chat routes the "+ New" affordance maps
   // to a new chat (navigates back to /chat entry). Everywhere else it's
   // the recording button. Recording always wins if a session is active —
   // we don't want a navigation to silently swallow a stop-recording click.
+  // Processing of a previous note runs in the background queue and
+  // doesn't gate this button.
   const route = useRoute();
   const isChatRoute = route === '/chat' || route.startsWith('/chat/');
-  const showChatPrimary = isChatRoute && !isRecording && !isProcessing;
+  const showChatPrimary = isChatRoute && !isRecording;
 
   // Matches sb-top padding-left (82px clears macOS traffic lights)
   const toggleLeft = 82;
@@ -102,35 +103,23 @@ export function MainToolbar({
         <button
           type="button"
           onClick={showChatPrimary ? () => navigate('/chat') : onToggleRecording}
-          disabled={isProcessing}
           className={cn('record-btn', isRecording && 'is-recording')}
           aria-label={
-            isProcessing
-              ? 'Processing previous recording'
-              : isRecording
-                ? 'Open recording in progress'
-                : showChatPrimary
-                  ? 'New chat'
-                  : 'New note'
+            isRecording
+              ? 'Open recording in progress'
+              : showChatPrimary
+                ? 'New chat'
+                : 'New note'
           }
           title={
-            isProcessing
-              ? 'Processing previous recording'
-              : isRecording
-                ? 'Open recording in progress'
-                : showChatPrimary
-                  ? 'New chat'
-                  : 'New note'
+            isRecording
+              ? 'Open recording in progress'
+              : showChatPrimary
+                ? 'New chat'
+                : 'New note'
           }
         >
-          {isProcessing ? (
-            <>
-              <span style={{ color: '#FFFFFF', display: 'inline-flex' }}>
-                <AudioWave active={false} paused bars={5} height={12} barWidth={2} gap={2} />
-              </span>
-              <span>Processing</span>
-            </>
-          ) : isRecording ? (
+          {isRecording ? (
             <>
               <span style={{ color: '#FFFFFF', display: 'inline-flex' }}>
                 <AudioWave

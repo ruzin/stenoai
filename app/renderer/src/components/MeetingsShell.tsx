@@ -105,14 +105,16 @@ export function MeetingsShell({
   const totalMeetings = meetings.data?.length ?? 0;
 
   const isRecording = recording.status === 'recording' || recording.status === 'paused';
-  // Toolbar button behaviour: idle → start (which auto-navigates to /recording);
-  // recording or paused → navigate back to /recording instead of stopping. Stop
-  // is intentionally only available from the LiveDock on the /recording route.
+  // Toolbar button behaviour: idle or processing → start a new recording
+  // (auto-navigates to /recording, previous note keeps processing in the
+  // background queue); recording or paused → navigate back to /recording
+  // instead of stopping. Stop is intentionally only available from the
+  // LiveDock on the /recording route.
   const onToggleRecording = () => {
-    if (recording.status === 'idle') {
-      void recording.startRecording();
-    } else if (isRecording) {
+    if (isRecording) {
       navigate('/recording');
+    } else {
+      void recording.startRecording();
     }
   };
 

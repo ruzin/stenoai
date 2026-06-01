@@ -1120,11 +1120,11 @@ async function handleGetNotifications() {
 // IPC Handlers - Separate start/stop with better error handling
 ipcMain.handle('start-recording', async (event, sessionName) => {
   try {
-    sendDebugLog(`Starting recording session: ${sessionName || 'Meeting'}`);
+    sendDebugLog(`Starting recording session: ${sessionName || 'Note'}`);
     sendDebugLog('$ python simple_recorder.py start');
 
     // Start recording (removed clear-state to prevent race conditions)
-    const result = await runPythonScript('simple_recorder.py', ['start', sessionName || 'Meeting']);
+    const result = await runPythonScript('simple_recorder.py', ['start', sessionName || 'Note']);
 
     if (result.includes('SUCCESS')) {
       sendDebugLog('Recording started successfully');
@@ -2223,7 +2223,7 @@ ipcMain.handle('start-recording-ui', async (_, sessionName) => {
       return { success: false, error: 'Recording already in progress' };
     }
 
-    const actualSessionName = sessionName || 'Meeting';
+    const actualSessionName = sessionName || 'Note';
 
     // Renderer-driven dual-stream path: when system audio is enabled the
     // renderer (useSystemAudioCapture) captures mic + system loopback and
@@ -3239,13 +3239,13 @@ function showMeetingEndedNotification(appName) {
 
 function requestAutoRecord(appName, originatingEvt, calEvent) {
   // Prefer the calendar event title when we matched one — it's user-authored
-  // and recognisable weeks later. Falls back to "<App> — YYYY-MM-DD HH:MM",
-  // which simple_recorder.py treats as an "auto-named" placeholder and lets
-  // the post-summary LLM-title step rewrite (see _AUTO_NAMED_PATTERN).
-  const now = new Date();
-  const pad = (n) => String(n).padStart(2, '0');
-  const stamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
-  const sessionName = calEvent?.title || `${appName} — ${stamp}`;
+  // and recognisable weeks later. Otherwise fall back to the neutral
+  // 'Note' placeholder that simple_recorder.py recognises in
+  // _AUTO_NAMED_PATTERN and lets the post-summary LLM-title step rewrite.
+  // The previous "<App> — YYYY-MM-DD HH:MM" format leaked the internal
+  // app-detection string (e.g. "an app — 2026-06-01 17:00") to the user
+  // whenever title regeneration produced nothing.
+  const sessionName = calEvent?.title || 'Note';
   sendDebugLog(`[auto-detect] user requested record: ${sessionName}`);
 
   // Track the originating app so we can pair its mic-stop with this recording
@@ -4627,7 +4627,7 @@ ipcMain.handle('get-recordings-dir', async () => {
 ipcMain.handle('write-system-audio-blob', async (_event, payload, sessionName) => {
   try {
     const dir = resolveRecordingsDir();
-    const safeName = String(sessionName || 'Meeting').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 64);
+    const safeName = String(sessionName || 'Note').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 64);
     const filename = `sysaudio-${Date.now()}-${safeName}.webm`;
     const filePath = path.join(dir, filename);
     const buf = Buffer.isBuffer(payload) ? payload : Buffer.from(payload);
@@ -4654,7 +4654,7 @@ ipcMain.handle('process-system-audio-recording', async (event, audioFilePath, se
       return { success: false, error: 'Audio file not found' };
     }
 
-    const actualSessionName = sessionName || 'Meeting';
+    const actualSessionName = sessionName || 'Note';
 
     // Check for user notes file
     const safeName = actualSessionName.replace(/[^a-zA-Z0-9_-]/g, '_');
