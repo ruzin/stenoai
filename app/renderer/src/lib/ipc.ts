@@ -214,6 +214,22 @@ export type OrgTryAutoBackupResponse =
 export type GetOrgAutoBackupResponse = Result<{ org_auto_backup_enabled: boolean }>;
 export type SetOrgAutoBackupResponse = Result<{ org_auto_backup_enabled: boolean }>;
 
+export type OrgGetBackupStateResponse = Result<{
+  shared: boolean;
+  meeting_id: string | null;
+  attempted_at: string | null;
+}>;
+
+/** Outcome from `org.unshareBySummary`. `adapter_status` tells you which
+ *  branch ran so the renderer can word the toast — `deleted` is the happy
+ *  path, `already-gone` means the org-side meeting was 404 (someone else
+ *  deleted it; we still clear the local flag), `no-meeting-id` means the
+ *  local flag was orphaned with no `meeting_id` to delete. */
+export type OrgUnshareBySummaryResponse = Result<{
+  meeting_id: string | null;
+  adapter_status: 'deleted' | 'already-gone' | 'no-meeting-id';
+}>;
+
 export interface OrgChatPayload {
   messages: Array<{ role: 'user' | 'assistant'; content: string }>;
   system?: string;
@@ -633,6 +649,8 @@ export interface StenoaiBridge {
     createMeeting: RequestFn<[payload: OrgCreateMeetingPayload], OrgGetMeetingResponse>;
     deleteMeeting: RequestFn<[id: string], Result<{ id: string }>>;
     shareMeeting: RequestFn<[payload: OrgShareMeetingPayload], OrgShareMeetingResponse>;
+    getBackupState: RequestFn<[summaryFile: string], OrgGetBackupStateResponse>;
+    unshareBySummary: RequestFn<[summaryFile: string], OrgUnshareBySummaryResponse>;
     getAutoBackup: RequestFn<[], GetOrgAutoBackupResponse>;
     setAutoBackup: RequestFn<[enabled: boolean], SetOrgAutoBackupResponse>;
     tryAutoBackup: RequestFn<[payload: OrgTryAutoBackupPayload], OrgTryAutoBackupResponse>;

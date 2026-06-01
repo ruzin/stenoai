@@ -15,6 +15,7 @@ export const orgKeys = {
   meetings: () => [...orgKeys.all, 'meetings'] as const,
   meeting: (id: string) => [...orgKeys.all, 'meeting', id] as const,
   autoBackup: () => [...orgKeys.all, 'auto-backup'] as const,
+  backupState: (summaryFile: string) => [...orgKeys.all, 'backup-state', summaryFile] as const,
 };
 
 export function useOrgSession() {
@@ -116,23 +117,72 @@ export function useOrgMeeting(id: string | null) {
 
 /** Three-step share: presign → PUT to S3 → register meeting metadata.
  *  All orchestrated in main.js so the bytes never touch the renderer
- *  process and we get a single round-trip from the caller's view. */
+ *  process and we get a single round-trip from the caller's view.
+ *
+ *  Also invalidates the per-summary backup-state cache so the
+ *  MeetingDetail Share/Unshare toggle flips to "Unshare" immediately
+ *  after a successful manual share. */
 export function useShareToOrg() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (payload: OrgShareMeetingPayload) =>
       unwrap(await ipc().org.shareMeeting(payload)).meeting,
-    onSuccess: () => qc.invalidateQueries({ queryKey: orgKeys.meetings() }),
+    onSuccess: (_data, payload) => {
+      qc.invalidateQueries({ queryKey: orgKeys.meetings() });
+      if (payload.summaryFile) {
+        qc.invalidateQueries({ queryKey: orgKeys.backupState(payload.summaryFile) });
+      }
+    },
   });
 }
 
-/** Unshare a note. Adapter deletes the metadata + the S3 object atomically.
- *  Owner-only; the adapter 403s otherwise. */
+/** Unshare a note by org meeting_id. Adapter deletes the metadata + the
+ *  S3 object atomically; owner-only (the adapter 403s otherwise). Does
+ *  not touch the local `.org-backup-state.json` flag — use
+ *  `useUnshareFromOrgBySummary` for the MeetingDetail toggle, which
+ *  keeps the two stores in sync. */
 export function useUnshareOrgMeeting() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => unwrap(await ipc().org.deleteMeeting(id)),
     onSuccess: () => qc.invalidateQueries({ queryKey: orgKeys.meetings() }),
+  });
+}
+
+/** Per-note share state for the MeetingDetail Share/Unshare toggle.
+ *  Reads the persistent `.org-backup-state.json` flag so the toggle
+ *  reflects "has this note ever been shared" rather than transient
+ *  "did I just click Share". `summaryFile === null` disables the
+ *  query — used on routes that don't have a current meeting context. */
+export function useOrgBackupState(summaryFile: string | null) {
+  return useQuery({
+    queryKey: summaryFile
+      ? orgKeys.backupState(summaryFile)
+      : [...orgKeys.all, 'backup-state', 'none'],
+    queryFn: async () => {
+      const res = unwrap(await ipc().org.getBackupState(summaryFile!));
+      return { shared: res.shared, meeting_id: res.meeting_id };
+    },
+    enabled: !!summaryFile,
+    staleTime: 0,
+  });
+}
+
+/** Unshare a note by summary file. Deletes the org-side meeting AND
+ *  clears the local `.org-backup-state.json` entry so a follow-up Share
+ *  / auto-share isn't suppressed as "already attempted". The matching
+ *  query invalidation flips the toggle back to "Share with {org}". */
+export function useUnshareFromOrgBySummary() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (summaryFile: string) => {
+      const res = unwrap(await ipc().org.unshareBySummary(summaryFile));
+      return res;
+    },
+    onSuccess: (_data, summaryFile) => {
+      qc.invalidateQueries({ queryKey: orgKeys.backupState(summaryFile) });
+      qc.invalidateQueries({ queryKey: orgKeys.meetings() });
+    },
   });
 }
 

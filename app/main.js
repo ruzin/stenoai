@@ -6102,6 +6102,24 @@ function recordOrgBackupAttempt(summaryFile, meetingId) {
   return saveOrgBackupState(state);
 }
 
+function clearOrgBackupAttempt(summaryFile) {
+  const state = loadOrgBackupState();
+  if (!state.attempts[summaryFile]) return true;
+  delete state.attempts[summaryFile];
+  return saveOrgBackupState(state);
+}
+
+function getOrgBackupEntry(summaryFile) {
+  const state = loadOrgBackupState();
+  const entry = state.attempts[summaryFile];
+  if (!entry) return { shared: false, meeting_id: null, attempted_at: null };
+  return {
+    shared: true,
+    meeting_id: entry.meeting_id || null,
+    attempted_at: entry.attempted_at || null,
+  };
+}
+
 // Matches anything that looks like a loopback authority — covers
 // `localhost`, `127.0.0.1`, IPv6 `::1` (bare or bracketed), with or
 // without a port and/or path. Used to pick the right default scheme
@@ -6466,6 +6484,52 @@ ipcMain.handle('org-delete-meeting', async (_event, id) => {
       method: 'DELETE',
     });
     return { success: true, id: body.id };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+// Per-note share state lookup for the meeting detail page's Share/Unshare
+// toggle. Reads the persistent `.org-backup-state.json` flag rather than
+// transient UI state — so a note that was auto-backed-up at processing
+// time, or shared from a different window, still reads as `shared: true`.
+ipcMain.handle('org-get-backup-state', async (_event, summaryFile) => {
+  try {
+    if (!summaryFile) return { success: false, error: 'summaryFile is required' };
+    return { success: true, ...getOrgBackupEntry(summaryFile) };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+// Unshare by summary file. Reads the local backup-state for `summaryFile`,
+// deletes the org-side meeting via the adapter (best-effort — 404 means
+// it's already gone), then clears the local attempt flag so a subsequent
+// Share / auto-share re-uploads instead of being skipped as already-attempted.
+// Any non-404 adapter error aborts before we touch the local flag so the
+// two stores can't desync (local says "not shared", org still has the
+// meeting).
+ipcMain.handle('org-unshare-by-summary', async (_event, summaryFile) => {
+  try {
+    if (!summaryFile) return { success: false, error: 'summaryFile is required' };
+    const entry = getOrgBackupEntry(summaryFile);
+    let adapterStatus = 'no-meeting-id';
+    if (entry.meeting_id) {
+      try {
+        await adapterFetch('/meetings/' + encodeURIComponent(String(entry.meeting_id)), {
+          method: 'DELETE',
+        });
+        adapterStatus = 'deleted';
+      } catch (e) {
+        if (e.message && /\b404\b/.test(e.message)) {
+          adapterStatus = 'already-gone';
+        } else {
+          return { success: false, error: e.message };
+        }
+      }
+    }
+    clearOrgBackupAttempt(summaryFile);
+    return { success: true, meeting_id: entry.meeting_id, adapter_status: adapterStatus };
   } catch (e) {
     return { success: false, error: e.message };
   }
