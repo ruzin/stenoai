@@ -1163,8 +1163,7 @@ ipcMain.handle('get-status', handleGetStatus);
 
 ipcMain.handle('process-recording', async (event, audioFile, sessionName) => {
   try {
-    const cloudKey = loadCloudApiKey();
-    const env = cloudKey ? { STENOAI_CLOUD_API_KEY: cloudKey } : {};
+    const env = getAiEnv();
     const result = await runPythonScript('simple_recorder.py', ['process', audioFile, '--name', sessionName], false, env);
     trackEvent('transcription_completed', { success: true });
     trackEvent('summarization_completed', { success: true });
@@ -1225,8 +1224,8 @@ ipcMain.handle('reprocess-meeting', async (event, summaryFile, regenerateTitle, 
     sendDebugLog(`🔄 Reprocessing meeting: ${summaryFile}`);
     sendDebugLog(`$ stenoai ${args.join(' ')}`);
 
-    const cloudKey = loadCloudApiKey();
-    const reprocessEnv = cloudKey ? { ...require('process').env, STENOAI_CLOUD_API_KEY: cloudKey } : undefined;
+    const aiEnv = getAiEnv();
+    const reprocessEnv = Object.keys(aiEnv).length > 0 ? { ...require('process').env, ...aiEnv } : undefined;
 
     await new Promise((resolve, reject) => {
       const proc = spawn(getBackendPath(), args, {
@@ -1308,8 +1307,8 @@ ipcMain.handle('reprocess-meeting', async (event, summaryFile, regenerateTitle, 
 
 ipcMain.handle('regen-meeting-title', async (event, summaryFile, sessionName) => {
   try {
-    const cloudKey = loadCloudApiKey();
-    const regenEnv = cloudKey ? { ...require('process').env, STENOAI_CLOUD_API_KEY: cloudKey } : undefined;
+    const aiEnv = getAiEnv();
+    const regenEnv = Object.keys(aiEnv).length > 0 ? { ...require('process').env, ...aiEnv } : undefined;
 
     await new Promise((resolve, reject) => {
       const proc = spawn(getBackendPath(), ['regen-title', summaryFile], {
@@ -1352,9 +1351,9 @@ ipcMain.handle('query-transcript', async (event, summaryFile, question) => {
   try {
     sendDebugLog(`🤖 Querying transcript: ${question.substring(0, 50)}...`);
 
-    // Run the query command (pass cloud key for cloud provider)
-    const cloudKey = loadCloudApiKey();
-    const env = cloudKey ? { STENOAI_CLOUD_API_KEY: cloudKey } : {};
+    // Run the query command — getAiEnv supplies the right env for whichever
+    // provider is active (cloud key for cloud, adapter url+token for org).
+    const env = getAiEnv();
     const result = await runPythonScript('simple_recorder.py', ['query', summaryFile, '-q', question], false, env);
 
     // Parse the JSON response
@@ -1416,8 +1415,7 @@ ipcMain.on('query-cancel', (_event, queryId) => {
 ipcMain.on('query-transcript-stream', (event, queryId, summaryFile, question) => {
   console.log(`[QUERY] IPC received: question="${question.substring(0, 50)}" file="${summaryFile}"`);
   sendDebugLog(`🤖 Streaming query: ${question.substring(0, 50)}...`);
-  const cloudKey = loadCloudApiKey();
-  const env = cloudKey ? { ...process.env, STENOAI_CLOUD_API_KEY: cloudKey } : process.env;
+  const env = { ...process.env, ...getAiEnv() };
 
   let proc;
   try {
@@ -1507,8 +1505,7 @@ ipcMain.on('query-transcript-stream', (event, queryId, summaryFile, question) =>
 // yet and a full-corpus prompt blows local context windows.
 ipcMain.on('chat-global-stream', (event, queryId, question, folderId) => {
   sendDebugLog(`💬 Global chat query: ${String(question || '').slice(0, 80)}... (folder: ${folderId || 'all'})`);
-  const cloudKey = loadCloudApiKey();
-  const env = cloudKey ? { ...process.env, STENOAI_CLOUD_API_KEY: cloudKey } : process.env;
+  const env = { ...process.env, ...getAiEnv() };
 
   const args = ['chat-global-streaming', '-q', question];
   if (folderId && typeof folderId === 'string' && folderId !== 'all') {
@@ -2048,8 +2045,8 @@ async function processNextInQueue() {
   console.log(`🔄 Processing queued job: ${currentProcessingJob.sessionName}`);
   
   try {
-    const queueCloudKey = loadCloudApiKey();
-    const queueEnv = queueCloudKey ? { ...require('process').env, STENOAI_CLOUD_API_KEY: queueCloudKey } : undefined;
+    const queueAiEnv = getAiEnv();
+    const queueEnv = Object.keys(queueAiEnv).length > 0 ? { ...require('process').env, ...queueAiEnv } : undefined;
     const processArgs = ['process-streaming', currentProcessingJob.audioFile, '--name', currentProcessingJob.sessionName];
     if (currentProcessingJob.notesFile && fs.existsSync(currentProcessingJob.notesFile)) {
       processArgs.push('--notes', currentProcessingJob.notesFile);
@@ -2260,10 +2257,9 @@ ipcMain.handle('start-recording-ui', async (_, sessionName) => {
     sendDebugLog('$ stenoai record 7200');
 
     // Start background recording with 2-hour limit
-    // Pass cloud API key via env var for cloud summarization
-    const recordEnv = {};
-    const cloudKey = loadCloudApiKey();
-    if (cloudKey) recordEnv.STENOAI_CLOUD_API_KEY = cloudKey;
+    // Pass AI env (cloud key and/or org-adapter url+token) so the
+    // recorder subprocess can summarise via whichever provider is active.
+    const recordEnv = getAiEnv();
 
     currentRecordingProcess = spawn(getBackendPath(), ['record', '7200', actualSessionName], {
       cwd: getBackendCwd(),
@@ -4375,6 +4371,116 @@ function hasCloudApiKey() {
   return fs.existsSync(getCloudKeyPath());
 }
 
+// Build the env additions a Python AI-driven subprocess needs. Merges
+// the encrypted-on-disk cloud key (decrypted only here, never written
+// to the env if absent) AND the org adapter URL+JWT when a session
+// exists. Either or both may be empty — the Python summariser picks
+// the right path based on the configured ai_provider, and we just
+// surface whatever's available.
+function getAiEnv() {
+  const env = {};
+  const cloudKey = loadCloudApiKey();
+  if (cloudKey) env.STENOAI_CLOUD_API_KEY = cloudKey;
+  const session = loadOrgSession();
+  if (session && session.adapterUrl && session.token && !isJwtExpired(session.token)) {
+    env.STENOAI_ADAPTER_URL = session.adapterUrl;
+    env.STENOAI_ADAPTER_TOKEN = session.token;
+  }
+  return env;
+}
+
+// Read the Python-side ai_provider config so we can react to it on sign-in
+// / sign-out events. Returns 'local' on any error so an unreadable config
+// can't accidentally keep us in 'adapter' mode after logout.
+async function readAiProvider() {
+  try {
+    const raw = await runPythonScript('simple_recorder.py', ['get-ai-provider'], true);
+    const data = JSON.parse(raw.trim());
+    return typeof data.ai_provider === 'string' ? data.ai_provider : 'local';
+  } catch (e) {
+    sendDebugLog(`readAiProvider failed, treating as 'local': ${e.message}`);
+    return 'local';
+  }
+}
+
+// Tiny on-disk marker so the auto-switch can remember which provider
+// the user was on before we flipped them to 'adapter'. Restored on
+// sign-out so a user previously on 'cloud' goes back to 'cloud' rather
+// than getting silently downgraded to 'local'. Cleared whenever the
+// user manually picks a non-adapter provider — at that point there's
+// no longer a stale value to restore to.
+function getPreAdapterProviderPath() {
+  return path.join(os.homedir(), 'Library', 'Application Support', 'stenoai', '.pre-adapter-provider');
+}
+
+function loadPreAdapterProvider() {
+  try {
+    const p = getPreAdapterProviderPath();
+    if (!fs.existsSync(p)) return null;
+    const value = fs.readFileSync(p, 'utf8').trim();
+    return value || null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function savePreAdapterProvider(provider) {
+  try {
+    const p = getPreAdapterProviderPath();
+    if (!fs.existsSync(path.dirname(p))) fs.mkdirSync(path.dirname(p), { recursive: true });
+    fs.writeFileSync(p, String(provider || ''));
+  } catch (e) {
+    sendDebugLog(`savePreAdapterProvider failed: ${e.message}`);
+  }
+}
+
+function clearPreAdapterProvider() {
+  try {
+    const p = getPreAdapterProviderPath();
+    if (fs.existsSync(p)) fs.unlinkSync(p);
+  } catch (_) {}
+}
+
+// Auto-switch helpers wired into the org sign-in / sign-out flow so a
+// user doesn't have to paste an Anthropic key in Settings > AI just to
+// summarise — the adapter brokers AI for them once they're signed in.
+// Switches from ANY non-adapter provider (local / remote / cloud) on
+// sign-in; remembers the previous choice so sign-out restores it. The
+// customer's ask was zero-config for org users, which means even users
+// already on 'cloud' (because they had no other option at the time)
+// shouldn't have to manually toggle to take advantage of the adapter.
+async function autoSwitchToAdapterOnSignIn() {
+  const current = await readAiProvider();
+  if (current === 'adapter') return;
+  sendDebugLog(`Org sign-in: switching ai_provider from ${current} to adapter (will restore ${current} on sign-out)`);
+  savePreAdapterProvider(current);
+  try {
+    await runPythonScript('simple_recorder.py', ['set-ai-provider', 'adapter']);
+  } catch (e) {
+    sendDebugLog(`auto-switch to adapter failed: ${e.message}`);
+    clearPreAdapterProvider(); // don't leave a stale marker if the switch never landed
+  }
+}
+
+// On sign-out (or stale-session clear), restore the pre-adapter provider
+// if we still have it. Falls back to 'local' if the marker is missing
+// (e.g. user manually switched to adapter without coming via auto-switch).
+async function restorePreAdapterProvider() {
+  const current = await readAiProvider();
+  if (current !== 'adapter') {
+    clearPreAdapterProvider(); // tidy: if not on adapter, the marker is stale
+    return;
+  }
+  const restored = loadPreAdapterProvider() || 'local';
+  sendDebugLog(`Org sign-out: restoring ai_provider from adapter to ${restored}`);
+  try {
+    await runPythonScript('simple_recorder.py', ['set-ai-provider', restored]);
+  } catch (e) {
+    sendDebugLog(`restore to ${restored} failed: ${e.message}`);
+  }
+  clearPreAdapterProvider();
+}
+
 ipcMain.handle('get-ai-provider', async () => {
   try {
     const result = await runPythonScript('simple_recorder.py', ['get-ai-provider'], true);
@@ -4391,6 +4497,11 @@ ipcMain.handle('get-ai-provider', async () => {
 ipcMain.handle('set-ai-provider', async (event, provider) => {
   try {
     sendDebugLog(`Setting AI provider to: ${provider}`);
+    // A manual switch away from 'adapter' invalidates the pre-adapter
+    // marker — without this, a user who auto-switched on sign-in and
+    // then manually moved to a different provider would still be
+    // restored to the stale "before adapter" value on sign-out.
+    if (provider !== 'adapter') clearPreAdapterProvider();
     const result = await runPythonScript('simple_recorder.py', ['set-ai-provider', provider]);
     const jsonMatch = result.match(/\{.*\}/s);
     if (jsonMatch) return JSON.parse(jsonMatch[0]);
@@ -6057,6 +6168,10 @@ ipcMain.handle('org-status', async () => {
   // exp claim here so the UI reflects truth at startup.
   if (isJwtExpired(session.token)) {
     clearOrgSession();
+    // If the user was on 'adapter', drop them back to 'local' so the next
+    // summary attempt doesn't error out with "adapter not configured".
+    // Same reasoning as the explicit-logout path; both end the session.
+    restorePreAdapterProvider().catch(() => {});
     return { signedIn: false, everSignedIn };
   }
   return {
@@ -6101,6 +6216,8 @@ ipcMain.handle('org-login', async (_event, payload) => {
     };
     if (!saveOrgSession(session)) return { success: false, error: 'failed to persist session' };
     markOrgKnown();
+    // Fire-and-forget — sign-in shouldn't wait on a config write.
+    autoSwitchToAdapterOnSignIn().catch(() => {});
     return {
       success: true,
       signedIn: true,
@@ -6116,6 +6233,16 @@ ipcMain.handle('org-login', async (_event, payload) => {
 
 ipcMain.handle('org-logout', async () => {
   clearOrgSession();
+  // Await the restore — the user just clicked sign-out and expects the
+  // app to settle into the signed-out state before returning. If we
+  // fire-and-forget here there's a race window where Python config
+  // still says 'adapter' but the env vars are already gone, and any
+  // AI op triggered in that window fails with "adapter not configured".
+  // org-status's stale-session path stays fire-and-forget because that
+  // handler is called frequently and any blocking would slow the UI.
+  try {
+    await restorePreAdapterProvider();
+  } catch (_) {}
   return { success: true };
 });
 
@@ -6283,6 +6410,8 @@ ipcMain.handle('org-sso-google-start', async (_event, payload) => {
     };
     if (!saveOrgSession(session)) return { success: false, error: 'failed to persist session' };
     markOrgKnown();
+    // Fire-and-forget — sign-in shouldn't wait on a config write.
+    autoSwitchToAdapterOnSignIn().catch(() => {});
     return {
       success: true,
       signedIn: true,

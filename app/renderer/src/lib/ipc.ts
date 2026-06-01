@@ -235,7 +235,7 @@ export type MicPermissionStatus =
   | 'not-determined'
   | 'unknown';
 
-export type AiProvider = 'local' | 'remote' | 'cloud';
+export type AiProvider = 'local' | 'remote' | 'cloud' | 'adapter';
 export type CloudProvider = 'openai' | 'anthropic' | 'custom';
 
 // ---------- response envelopes ----------

@@ -1895,17 +1895,22 @@ def chat_global_streaming(question, folder):
     context to the cloud LLM, stream the answer. Optionally scope to a single
     folder; default queries every note.
 
-    Cloud-only. Local models can't fit a full corpus of summaries reliably,
-    and we don't have retrieval (RAG) yet — caller (main.js) is responsible
-    for gating this on ai_provider === 'cloud'."""
+    Requires a remote-hosted model — either a direct cloud API key OR a
+    signed-in organisation adapter that brokers one. Local models can't fit
+    a full corpus of summaries reliably and we don't have retrieval (RAG)
+    yet — caller (main.js) is responsible for gating accordingly."""
     import sys
     import base64
     from pathlib import Path
     from src.config import get_config, get_data_dirs
 
     config = get_config()
-    if config.get_ai_provider() != "cloud":
-        print("CHAT_STREAM_ERROR:Cross-note chat requires a cloud AI provider. Switch in Settings → AI.", flush=True)
+    if config.get_ai_provider() not in ("cloud", "adapter"):
+        print(
+            "CHAT_STREAM_ERROR:Cross-note chat needs a cloud or organisation AI provider. "
+            "Switch in Settings → AI.",
+            flush=True,
+        )
         return
 
     dirs = get_data_dirs()

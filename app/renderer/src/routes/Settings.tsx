@@ -824,7 +824,9 @@ function TranscriptionTab() {
 function AiTab() {
   const provider = useAiProvider();
   const setProvider = useSetAiProvider();
+  const orgSession = useOrgSession();
   const current = provider.data?.ai_provider ?? 'local';
+  const orgSignedIn = orgSession.data?.signedIn ?? false;
 
   return (
     <section data-settings-tab="ai">
@@ -859,20 +861,59 @@ function AiTab() {
             >
               Cloud API
             </SelectItem>
+            <SelectItem
+              value="adapter"
+              disabled={!orgSignedIn}
+              description={
+                orgSignedIn
+                  ? "Uses your organisation's AI key. No setup needed."
+                  : 'Sign in to your organisation to enable this option.'
+              }
+            >
+              Organisation
+            </SelectItem>
           </SelectContent>
         </Select>
       </SettingRow>
 
       {current === 'remote' && <RemoteProviderConfig />}
       {current === 'cloud' && <CloudProviderConfig />}
+      {current === 'adapter' && <AdapterProviderInfo signedIn={orgSignedIn} />}
 
-      {current !== 'cloud' && (
+      {current !== 'cloud' && current !== 'adapter' && (
         <>
           <SectionHeading>Model</SectionHeading>
           <ModelList />
         </>
       )}
     </section>
+  );
+}
+
+/** Adapter mode has no per-user configuration — the customer's IT
+ *  controls the model + API key on the adapter side. This block just
+ *  reassures the user it's working (or warns them if their session has
+ *  lapsed, in which case summarisation would fall back to an error). */
+function AdapterProviderInfo({ signedIn }: { signedIn: boolean }) {
+  return (
+    <div
+      className="space-y-2 py-4 text-[12px]"
+      style={{ borderBottom: '1px solid var(--border-subtle)', color: 'var(--fg-2)' }}
+    >
+      {signedIn ? (
+        <p>
+          Summaries, titles, and chat are routed through your organisation's
+          adapter. The model and API key are configured by your organisation
+          — no setup needed here.
+        </p>
+      ) : (
+        <p style={{ color: 'var(--accent-danger, var(--fg-1))' }}>
+          You are not signed in to an organisation. Sign in under{' '}
+          <strong>Settings &gt; Organisation</strong>, or switch this provider
+          back to Local / Private Server / Cloud API.
+        </p>
+      )}
+    </div>
   );
 }
 

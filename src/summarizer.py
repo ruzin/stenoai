@@ -36,7 +36,26 @@ class OllamaSummarizer:
         self.ollama_process = None
         self.remote_url = config.get_remote_ollama_url()
 
-        if self.ai_provider == "cloud":
+        if self.ai_provider == "adapter":
+            # Adapter mode: route every AI request through the customer's
+            # org adapter, which holds the Anthropic key server-side. The
+            # desktop never sees the provider key. URL + JWT come from
+            # env vars set by Electron when a session is active.
+            self.adapter_url = config.get_adapter_url()
+            self.adapter_token = config.get_adapter_token()
+            # Model name is informational — the adapter is configured with
+            # its own DEFAULT_MODEL and we omit `model` from the request
+            # body so the customer's org-wide choice wins. Keep a label
+            # for logs.
+            self.model_name = model_name or "adapter (org)"
+            if not self.adapter_url or not self.adapter_token:
+                raise ValueError(
+                    "Organisation adapter is not configured. Sign in to your "
+                    "organisation in Settings > Organisation, then re-try."
+                )
+            logger.info(f"Adapter provider initialized: url={self.adapter_url}")
+
+        elif self.ai_provider == "cloud":
             # Cloud mode: use OpenAI-compatible or Anthropic API
             cloud_api_key = config.get_cloud_api_key()
             self.cloud_provider = config.get_cloud_provider()
@@ -330,6 +349,116 @@ class OllamaSummarizer:
                     raise
         raise RuntimeError("OpenAI chat failed after all retries")
 
+    def _adapter_chat(self, prompt: str, timeout_seconds: int = 7200) -> str:
+        """One-shot AI request via the org adapter's /ai/chat endpoint.
+
+        The adapter wraps Anthropic so the request/response shape mirrors
+        the Anthropic Messages API: send {messages, system?, model?,
+        max_tokens?}, receive {reply, model, input_tokens, output_tokens}.
+        Same 3-retry pattern as _anthropic_chat — auth failures (401)
+        won't recover so we surface them immediately.
+        """
+        import urllib.request
+        import urllib.error
+        import json as _json
+
+        url = f"{self.adapter_url}/ai/chat"
+        # max_tokens is capped at 4096 on the adapter side. Long summaries
+        # may need that bumped on stenoai-enterprise; until then we max it.
+        payload = _json.dumps({
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": 8192,
+        }).encode("utf-8")
+        headers = {
+            "content-type": "application/json",
+            "authorization": f"Bearer {self.adapter_token}",
+        }
+
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                if attempt > 0:
+                    logger.info(f"Adapter API retry attempt {attempt + 1}/{max_retries}")
+                    time.sleep(5)
+                req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
+                with urllib.request.urlopen(req, timeout=timeout_seconds) as resp:
+                    body = _json.loads(resp.read().decode("utf-8"))
+                return (body.get("reply") or "").strip()
+            except urllib.error.HTTPError as e:
+                # 401/403 won't fix themselves — abort retry loop early so
+                # the user sees the auth error rather than waiting through
+                # three pointless backoffs.
+                if e.code in (401, 403):
+                    raise RuntimeError(
+                        f"Org adapter rejected the request ({e.code}). "
+                        "Your session may have expired — re-sign in to your "
+                        "organisation in Settings."
+                    )
+                logger.error(f"Adapter API attempt {attempt + 1} failed: HTTP {e.code}")
+                if attempt == max_retries - 1:
+                    raise
+            except Exception as e:
+                logger.error(f"Adapter API attempt {attempt + 1} failed: {e}")
+                if attempt == max_retries - 1:
+                    raise
+        raise RuntimeError("Adapter chat failed after all retries")
+
+    def _adapter_stream(self, prompt: str, timeout_seconds: int = 600):
+        """Streaming AI request via the adapter's /ai/chat/stream endpoint.
+
+        The adapter emits NDJSON — one JSON object per line:
+            {"type": "chunk", "text": "..."}
+            ...
+            {"type": "done",  "model": "...", "input_tokens": N, "output_tokens": M}
+            or {"type": "error", "error": "..."} on failure.
+        Yields the text portion of each chunk record. Errors are logged
+        and the generator returns silently — matches the streaming-error
+        behaviour of the cloud and ollama paths.
+        """
+        import urllib.request
+        import urllib.error
+        import json as _json
+
+        url = f"{self.adapter_url}/ai/chat/stream"
+        payload = _json.dumps({
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": 8192,
+        }).encode("utf-8")
+        headers = {
+            "content-type": "application/json",
+            "authorization": f"Bearer {self.adapter_token}",
+        }
+
+        try:
+            req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
+            with urllib.request.urlopen(req, timeout=timeout_seconds) as resp:
+                for raw_line in resp:
+                    line = raw_line.decode("utf-8", errors="replace").strip()
+                    if not line:
+                        continue
+                    try:
+                        record = _json.loads(line)
+                    except _json.JSONDecodeError:
+                        logger.warning(f"Adapter stream: malformed NDJSON line dropped: {line[:120]}")
+                        continue
+                    kind = record.get("type")
+                    if kind == "chunk":
+                        text = record.get("text") or ""
+                        if text:
+                            yield text
+                    elif kind == "error":
+                        logger.error(f"Adapter stream error: {record.get('error')}")
+                        return
+                    elif kind == "done":
+                        return
+        except urllib.error.HTTPError as e:
+            if e.code in (401, 403):
+                logger.error("Adapter stream rejected: session expired or unauthorized")
+            else:
+                logger.error(f"Adapter streaming failed: HTTP {e.code}")
+        except Exception as e:
+            logger.error(f"Adapter streaming failed: {e}")
+
     def _anthropic_chat(self, prompt: str, timeout_seconds: int = 300) -> str:
         """Send a chat request via the Anthropic Messages API."""
         max_retries = 3
@@ -341,7 +470,7 @@ class OllamaSummarizer:
 
                 response = self.anthropic_client.messages.create(
                     model=self.model_name,
-                    max_tokens=4096,
+                    max_tokens=8192,
                     messages=[{"role": "user", "content": prompt}],
                     timeout=timeout_seconds,
                 )
@@ -508,7 +637,9 @@ Return ONLY the response in this exact JSON format:
             timeout_seconds = min(base_timeout + extra_timeout, 7200)  # Cap at 2 hours
             logger.info(f"Using timeout: {timeout_seconds} seconds ({timeout_seconds // 60} minutes)")
 
-            if self.ai_provider == "cloud":
+            if self.ai_provider == "adapter":
+                response_text = self._adapter_chat(prompt, timeout_seconds)
+            elif self.ai_provider == "cloud":
                 response_text = self._cloud_chat(prompt, timeout_seconds)
             else:
                 # Retry logic for Ollama API calls (local or remote)
@@ -731,12 +862,19 @@ TRANSCRIPT:
         prompt = self._create_markdown_prompt(transcript, language, notes)
         logger.info(f"Starting streaming summary with {self.ai_provider} model: {self.model_name}")
 
+        if self.ai_provider == "adapter":
+            # Summarisation can legitimately take a long time for a long
+            # meeting; match the dynamic-timeout ceiling summarize_transcript
+            # already uses (2h).
+            yield from self._adapter_stream(prompt, timeout_seconds=7200)
+            return
+
         if self.ai_provider == "cloud":
             if self.cloud_provider == "anthropic":
                 try:
                     with self.anthropic_client.messages.stream(
                         model=self.model_name,
-                        max_tokens=4096,
+                        max_tokens=8192,
                         messages=[{"role": "user", "content": prompt}],
                     ) as stream:
                         for text in stream.text_stream:
@@ -901,7 +1039,9 @@ TITLE:"""
 
             logger.info("Generating meeting title from summary")
 
-            if self.ai_provider == "cloud":
+            if self.ai_provider == "adapter":
+                response_text = self._adapter_chat(prompt, 30)
+            elif self.ai_provider == "cloud":
                 response_text = self._cloud_chat(prompt, 30)
             else:
                 # HTTP-level timeout must account for model cold-start (~10s Metal init)
@@ -967,6 +1107,12 @@ ANSWER:"""
         prompt = self._build_query_prompt(transcript, question, language)
 
         try:
+            if self.ai_provider == "adapter":
+                # Interactive query — user is waiting at the AskBar. Fail
+                # fast on a stalled connection rather than letting it hang
+                # for the summarisation-grade ceiling.
+                yield from self._adapter_stream(prompt, timeout_seconds=300)
+                return
             if self.ai_provider == "cloud":
                 if self.cloud_provider == "anthropic":
                     with self.anthropic_client.messages.stream(
@@ -1032,7 +1178,9 @@ ANSWER:"""
 
             logger.info(f"Querying transcript with question: {question[:50]}...")
 
-            if self.ai_provider == "cloud":
+            if self.ai_provider == "adapter":
+                response_text = self._adapter_chat(prompt, 120)
+            elif self.ai_provider == "cloud":
                 response_text = self._cloud_chat(prompt, 120)
             else:
                 # Retry logic for Ollama API calls (local or remote)
