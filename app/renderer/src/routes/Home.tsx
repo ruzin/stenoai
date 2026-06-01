@@ -26,12 +26,14 @@ export function Home({ mode }: HomeProps) {
 
   const emptyState = !meetings.data?.length;
   const isRecording = recording.status === 'recording' || recording.status === 'paused';
-  // Empty-state CTA: idle → start (auto-navigates); recording/paused → back to /recording.
+  // Empty-state CTA: idle or processing → start a new recording (auto-navigates;
+  // previous note keeps processing in the background queue); recording/paused
+  // → back to /recording.
   const onToggleRecording = () => {
-    if (recording.status === 'idle') {
-      void recording.startRecording();
-    } else if (isRecording) {
+    if (isRecording) {
       navigate('/recording');
+    } else {
+      void recording.startRecording();
     }
   };
 
