@@ -4,13 +4,14 @@ import {
   Globe,
   Home as HomeIcon,
   Inbox,
+  LogIn,
   LogOut,
   MessageSquare,
   Plus,
   Search,
   Settings as SettingsIcon,
 } from 'lucide-react';
-import { navigate, toggleSettings } from '@/lib/router';
+import { navigate, rememberNonSettingsRoute, toggleSettings } from '@/lib/router';
 import { cn, shortcut } from '@/lib/utils';
 import { LucideIcon, IconPicker } from '@/components/IconPicker';
 import { useUpdateFolderIcon } from '@/hooks/useFolders';
@@ -494,31 +495,46 @@ export function Sidebar({
 
         {/* Profile chip + Settings cog. When the user is signed in to an org
             adapter, the chip sits on the left and the cog moves to the right
-            (justify-between). When signed out the chip is gone and the cog
-            falls back to the left where it originally lived. */}
-        <div
-          className={cn(
-            'flex items-center gap-2 px-3 py-2',
-            orgSignedIn && 'justify-between',
-          )}
-        >
-          {orgSignedIn && (
+            (justify-between). When signed out we surface a one-click sign-in
+            CTA, but ONLY for users who've previously connected to an org —
+            personal users who have never signed in don't see clutter for a
+            feature they don't use. */}
+        <div className="flex items-center justify-between gap-2 px-3 py-2">
+          {orgSignedIn ? (
             <ProfileChip
               email={orgSession.data?.email ?? ''}
               name={orgSession.data?.name ?? ''}
               orgId={orgSession.data?.orgId ?? ''}
               onSignOut={() => orgLogout.mutate()}
             />
+          ) : orgSession.data?.everSignedIn ? (
+            <button
+              type="button"
+              onClick={() => {
+                rememberNonSettingsRoute(currentRoute);
+                navigate('/settings?tab=organisation');
+              }}
+              className="inline-flex h-[26px] min-w-0 items-center gap-1.5 rounded-md px-2 text-[12px] transition-colors hover:bg-[color:var(--surface-hover)]"
+              style={{ color: 'var(--fg-1)' }}
+              title="Sign in to share notes with your organisation"
+            >
+              <LogIn className="size-[13px]" style={{ color: 'var(--fg-2)' }} />
+              <span className="truncate">Sign in to org</span>
+            </button>
+          ) : (
+            <span />
           )}
           <button
             type="button"
             onClick={() => toggleSettings(currentRoute)}
             aria-label="Settings"
             title="Settings"
-            aria-pressed={currentRoute === '/settings'}
+            // startsWith so the cog still reads "active" on deep-link routes
+            // like /settings?tab=organisation, not just bare /settings.
+            aria-pressed={currentRoute.startsWith('/settings')}
             className={cn(
               'inline-flex h-[26px] w-7 items-center justify-center rounded-md transition-colors hover:bg-[color:var(--surface-hover)] hover:text-[color:var(--fg-1)]',
-              currentRoute === '/settings'
+              currentRoute.startsWith('/settings')
                 ? 'bg-[color:var(--surface-active)] text-[color:var(--fg-1)]'
                 : 'text-[color:var(--fg-2)]',
             )}

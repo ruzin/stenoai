@@ -5848,6 +5848,37 @@ function getOrgSessionPath() {
   return path.join(os.homedir(), 'Library', 'Application Support', 'stenoai', '.org-session');
 }
 
+// Decode the JWT's payload segment and check whether it's already past its
+// `exp` claim. The adapter signs with HS256 so we *cannot* verify the
+// signature client-side, but the `exp` timestamp is the part the adapter
+// itself enforces — if it's in the past, the next authenticated request
+// will get a 401 anyway. Checking here lets org-status and the sidebar
+// reflect reality without first having to make a request and watch it fail.
+//
+// We treat malformed/unparseable tokens as expired (defensive) so a corrupt
+// session file kicks the user back to sign-in instead of leaving them in a
+// "signed in but every request fails" limbo.
+function decodeJwtExp(token) {
+  try {
+    const parts = String(token || '').split('.');
+    if (parts.length !== 3) return null;
+    const payload = JSON.parse(
+      Buffer.from(parts[1].replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8'),
+    );
+    return typeof payload.exp === 'number' ? payload.exp : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function isJwtExpired(token) {
+  const exp = decodeJwtExp(token);
+  if (exp === null) return true;
+  // 30-second skew buffer so a request fired right at the boundary doesn't
+  // race the adapter to "valid → expired" mid-flight.
+  return exp <= Math.floor(Date.now() / 1000) + 30;
+}
+
 function saveOrgSession(session) {
   try {
     const dir = path.dirname(getOrgSessionPath());
@@ -5879,6 +5910,35 @@ function clearOrgSession() {
     if (fs.existsSync(p)) fs.unlinkSync(p);
     return true;
   } catch (e) {
+    return false;
+  }
+}
+
+// Persistent marker — survives sign-out, gets written on the FIRST successful
+// org sign-in (password OR Google SSO). Used by the sidebar to decide whether
+// to surface the "Sign in to org" CTA: personal users who never sign in see
+// nothing; enterprise users get a one-click recovery path after their first
+// connection. Empty file content; existence is the only signal.
+function getOrgKnownMarkerPath() {
+  return path.join(os.homedir(), 'Library', 'Application Support', 'stenoai', '.org-known');
+}
+
+function markOrgKnown() {
+  try {
+    const p = getOrgKnownMarkerPath();
+    if (!fs.existsSync(path.dirname(p))) fs.mkdirSync(path.dirname(p), { recursive: true });
+    if (!fs.existsSync(p)) fs.writeFileSync(p, '');
+    return true;
+  } catch (e) {
+    console.error('Failed to write org-known marker:', e.message);
+    return false;
+  }
+}
+
+function hasOrgEverBeenSignedIn() {
+  try {
+    return fs.existsSync(getOrgKnownMarkerPath());
+  } catch (_) {
     return false;
   }
 }
@@ -5980,9 +6040,32 @@ async function adapterFetch(pathname, opts = {}) {
 
 ipcMain.handle('org-status', async () => {
   const session = loadOrgSession();
-  if (!session) return { signedIn: false };
+  // Backfill the marker on first org-status hit when a session already
+  // exists from before the marker code shipped — without this, anyone
+  // who signed in on a previous build would lose the sidebar CTA on
+  // their next sign-out / expiry because their session predates the
+  // marker file. `everSignedIn` therefore treats "has live session OR
+  // marker file" as equivalent past-sign-in proof.
+  const knownBefore = hasOrgEverBeenSignedIn();
+  if (session && !knownBefore) markOrgKnown();
+  const everSignedIn = knownBefore || Boolean(session);
+  if (!session) return { signedIn: false, everSignedIn };
+  // Previously this returned signedIn:true as long as the session file
+  // existed, even if the JWT had long since expired. The renderer would
+  // happily show a "signed in" sticker until the user actually triggered
+  // an authenticated request and got booted by a 401. Validate the JWT's
+  // exp claim here so the UI reflects truth at startup.
+  if (isJwtExpired(session.token)) {
+    clearOrgSession();
+    return { signedIn: false, everSignedIn };
+  }
   return {
     signedIn: true,
+    everSignedIn,
+    // Surfaced so the renderer can schedule a precise setTimeout to
+    // invalidate this query the instant the JWT expires — no polling,
+    // no stale UI in the "app left open all day" case.
+    exp: decodeJwtExp(session.token) ?? undefined,
     adapterUrl: session.adapterUrl,
     email: session.email,
     name: session.name,
@@ -6017,6 +6100,7 @@ ipcMain.handle('org-login', async (_event, payload) => {
       orgId: body.org_id,
     };
     if (!saveOrgSession(session)) return { success: false, error: 'failed to persist session' };
+    markOrgKnown();
     return {
       success: true,
       signedIn: true,
@@ -6198,6 +6282,7 @@ ipcMain.handle('org-sso-google-start', async (_event, payload) => {
       orgId: cbBody.org_id,
     };
     if (!saveOrgSession(session)) return { success: false, error: 'failed to persist session' };
+    markOrgKnown();
     return {
       success: true,
       signedIn: true,

@@ -1,3 +1,4 @@
+import * as React from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ipc } from '@/lib/ipc';
 import { unwrap } from '@/lib/result';
@@ -16,11 +17,39 @@ export const orgKeys = {
 };
 
 export function useOrgSession() {
-  return useQuery({
+  const qc = useQueryClient();
+  const query = useQuery({
     queryKey: orgKeys.status(),
     queryFn: () => ipc().org.status(),
     staleTime: 60_000,
   });
+
+  // Precise expiry detection: when the response carries a JWT exp claim,
+  // schedule a one-shot timer to invalidate this query at exactly that
+  // moment. The next refetch lands in main's org-status, which sees the
+  // expired token, clears the session, and returns signedIn:false — the
+  // sidebar swaps to the "Sign in" CTA without any polling or staleness.
+  //
+  // Edge cases:
+  // - exp in the past (clock skew, race): delay clamps to 0, fires
+  //   immediately
+  // - exp very far out (30-day TTL): setTimeout's max delay is ~2^31 ms
+  //   (~24.8 days). For longer values we cap at MAX_TIMEOUT and let the
+  //   effect re-run after invalidation — costs one extra IPC every ~23
+  //   days, negligible.
+  // - exp unset (signed out, malformed): effect skips, no timer
+  const exp = query.data?.signedIn ? query.data.exp : undefined;
+  React.useEffect(() => {
+    if (typeof exp !== 'number') return;
+    const MAX_TIMEOUT = 2_000_000_000; // safe upper bound for setTimeout
+    const delay = Math.max(0, Math.min(exp * 1000 - Date.now(), MAX_TIMEOUT));
+    const id = setTimeout(() => {
+      qc.invalidateQueries({ queryKey: orgKeys.status() });
+    }, delay);
+    return () => clearTimeout(id);
+  }, [exp, qc]);
+
+  return query;
 }
 
 export function useOrgLogin() {
