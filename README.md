@@ -50,13 +50,7 @@ If you're looking for a hosted desktop recording API, consider checking out [Rec
 - **2026-05-22** 🎙️ Smarter titles for auto-detect recordings — Recordings started via the "Meeting detected" notification now get an AI-generated title from the transcript after summarisation, instead of staying as `<App> — <timestamp>` forever.
 - **2026-05-22** 🐛 Quieter transcripts on silent audio — Whisper.cpp's decoder loop on quiet audio (e.g. dozens of repeated `[Sounds of a question]` lines) is now caught by a post-process dedup of 5+ consecutive identical segments.
 - **2026-05-17** 🎙️ Auto start/stop meetings (Granola-style) — Steno notifies you when a meeting starts and offers to take notes; when the meeting ends it offers to summarise. Toggle in Settings → General (default ON).
-- **2026-05-17** 🎚️ In-app Whisper model downloads — Pick a model from Settings → Transcribe (`small` / `large-v3-turbo`) and download it with a progress bar; legacy values migrate automatically.
-- **2026-05-12** 🐛 Non-English summaries no longer disappear — Fixed a bug where summaries in non-English (or auto-detected) languages briefly appeared then flipped to "No summary available" once processing finished. Existing affected meetings can be recovered with the regenerate-notes button.
-- **2026-05-11** 🐛 Smoother stop → Processing handoff — Fixed a race where typing notes during a recording could bounce you to Home on Stop instead of showing the analyser bar; the next *New note* now also starts with empty title and notes.
-- **2026-05-09** 🎙️ Native system audio (Core Audio Tap) — On macOS 14.4+, system audio now records natively with no shell-out, with an automatic fallback for older versions. Default ON.
-- **2026-05-09** 💬 Cross-note Chat tab — Ask natural-language questions across your entire note library, not just one note at a time
-- **2026-05-09** 🔔 Auto-update toast — A top-right notification appears when an update is ready to install
-- **2026-05-09** 🪶 Brand refresh — Paper-and-ink palette and the app display name is now "Steno"
+
 
 ## Features
 
