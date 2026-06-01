@@ -20,7 +20,6 @@ import {
 import { useQueryClient } from '@tanstack/react-query';
 import * as SelectPrimitive from '@radix-ui/react-select';
 import { MeetingsShell } from '@/components/MeetingsShell';
-import { Chip } from '@/components/ui/chip';
 import {
   Select,
   SelectContent,
@@ -50,9 +49,8 @@ import {
   useRemoveMeetingFromFolder,
   useCreateFolder,
 } from '@/hooks/useFolders';
-import { useCalendarEvents } from '@/hooks/useCalendarEvents';
 import { useActiveMeeting } from '@/lib/askBarContext';
-import { ipc, type CalendarEvent, type Meeting } from '@/lib/ipc';
+import { ipc, type Meeting } from '@/lib/ipc';
 import { unwrap } from '@/lib/result';
 import { cn } from '@/lib/utils';
 import { navigate } from '@/lib/router';
@@ -553,7 +551,6 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
             </section>
           )}
 
-          <CalendarSection meeting={meeting} />
         </div>
       )}
 
@@ -840,66 +837,6 @@ function StreamingView({ text, phase }: { text: string; phase: StreamPhase }) {
 }
 
 // ---------------------------------------------------------------------------
-// Calendar section (related events for a meeting)
-// ---------------------------------------------------------------------------
-
-function CalendarSection({ meeting }: { meeting: Meeting }) {
-  const calendar = useCalendarEvents();
-  const state = calendar.data;
-
-  if (calendar.isLoading || !state || state.needsAuth) return null;
-
-  const related = findRelatedEvents(state.events, meeting);
-  if (related.length === 0) return null;
-
-  return (
-    <section className="flex flex-col gap-3">
-      <SectionTitle>Calendar</SectionTitle>
-      <ul className="space-y-3">
-        {related.map((event) => (
-          <li
-            key={event.id}
-            className="rounded-md border p-4"
-            style={{
-              borderColor: 'var(--border-subtle)',
-              background: 'var(--surface-raised)',
-            }}
-          >
-            <div className="flex items-start gap-3">
-              <CalendarIcon
-                className="mt-0.5 size-4 flex-shrink-0"
-                style={{ color: 'var(--fg-2)' }}
-              />
-              <div className="flex-1 space-y-1">
-                <div className="font-medium" style={{ color: 'var(--fg-1)' }}>{event.title}</div>
-                <div className="text-xs" style={{ color: 'var(--fg-2)' }}>
-                  {formatEventTime(event)}
-                </div>
-                {event.location && (
-                  <div className="text-xs" style={{ color: 'var(--fg-2)' }}>{event.location}</div>
-                )}
-                {event.attendees && event.attendees.length > 0 && (
-                  <div className="mt-2 flex flex-wrap gap-1">
-                    {event.attendees.slice(0, 6).map((a, i) => (
-                      <Chip key={i} variant="muted">
-                        {a.name ?? a.email}
-                      </Chip>
-                    ))}
-                    {event.attendees.length > 6 && (
-                      <Chip variant="muted">+{event.attendees.length - 6}</Chip>
-                    )}
-                  </div>
-                )}
-              </div>
-            </div>
-          </li>
-        ))}
-      </ul>
-    </section>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // Folder picker (meeting → folder assignment via the chip dropdown)
 // ---------------------------------------------------------------------------
 
@@ -1066,39 +1003,6 @@ function formatDuration(seconds?: number): string | undefined {
   if (h > 0) return `${h}h ${m}m`;
   if (m > 0) return `${m}m`;
   return `${s}s`;
-}
-
-function formatEventTime(event: CalendarEvent): string {
-  try {
-    const start = new Date(event.start);
-    const end = new Date(event.end);
-    const sameDay =
-      start.getFullYear() === end.getFullYear() &&
-      start.getMonth() === end.getMonth() &&
-      start.getDate() === end.getDate();
-    const dateFmt: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric' };
-    const timeFmt: Intl.DateTimeFormatOptions = { hour: 'numeric', minute: '2-digit' };
-    if (sameDay) {
-      return `${start.toLocaleDateString(undefined, dateFmt)} · ${start.toLocaleTimeString(undefined, timeFmt)} – ${end.toLocaleTimeString(undefined, timeFmt)}`;
-    }
-    return `${start.toLocaleString(undefined, { ...dateFmt, ...timeFmt })} – ${end.toLocaleString(undefined, { ...dateFmt, ...timeFmt })}`;
-  } catch {
-    return event.start;
-  }
-}
-
-function findRelatedEvents(events: CalendarEvent[], meeting: Meeting): CalendarEvent[] {
-  const processedAt = meeting.session_info.processed_at;
-  if (!processedAt) return [];
-  const processed = new Date(processedAt).getTime();
-  if (Number.isNaN(processed)) return [];
-  const windowMs = 4 * 60 * 60 * 1000;
-  return events.filter((e) => {
-    const start = new Date(e.start).getTime();
-    const end = new Date(e.end).getTime();
-    if (Number.isNaN(start) || Number.isNaN(end)) return false;
-    return Math.abs(start - processed) <= windowMs || (processed >= start && processed <= end);
-  });
 }
 
 function asStringArray(value: unknown): string[] {
