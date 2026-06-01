@@ -2,6 +2,7 @@ import * as React from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ipc } from '@/lib/ipc';
 import { unwrap } from '@/lib/result';
+import { aiKeys } from './useAi';
 import type {
   OrgCreateMeetingPayload,
   OrgChatPayload,
@@ -52,6 +53,17 @@ export function useOrgSession() {
   return query;
 }
 
+// Sign-in / sign-out auto-switches the Python-side ai_provider (between
+// 'adapter' and the user's previous choice), so the renderer's
+// useAiProvider query needs to refetch — otherwise Settings > AI keeps
+// showing stale "adapter" copy after a sign-out, or "local" after a
+// sign-in. Invalidating both query namespaces on every org auth
+// transition keeps the renderer aligned with main's state.
+function invalidateOrgAndAi(qc: ReturnType<typeof useQueryClient>) {
+  qc.invalidateQueries({ queryKey: orgKeys.all });
+  qc.invalidateQueries({ queryKey: aiKeys.all });
+}
+
 export function useOrgLogin() {
   const qc = useQueryClient();
   return useMutation({
@@ -60,7 +72,7 @@ export function useOrgLogin() {
       email: string;
       password: string;
     }) => unwrap(await ipc().org.login(args.adapterUrl, args.email, args.password)),
-    onSuccess: () => qc.invalidateQueries({ queryKey: orgKeys.all }),
+    onSuccess: () => invalidateOrgAndAi(qc),
   });
 }
 
@@ -73,7 +85,7 @@ export function useOrgSsoGoogle() {
   return useMutation({
     mutationFn: async (adapterUrl: string) =>
       unwrap(await ipc().org.ssoGoogleStart(adapterUrl)),
-    onSuccess: () => qc.invalidateQueries({ queryKey: orgKeys.all }),
+    onSuccess: () => invalidateOrgAndAi(qc),
   });
 }
 
@@ -81,7 +93,7 @@ export function useOrgLogout() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: () => ipc().org.logout(),
-    onSuccess: () => qc.invalidateQueries({ queryKey: orgKeys.all }),
+    onSuccess: () => invalidateOrgAndAi(qc),
   });
 }
 
