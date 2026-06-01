@@ -6508,7 +6508,10 @@ ipcMain.handle('org-get-backup-state', async (_event, summaryFile) => {
 // Share / auto-share re-uploads instead of being skipped as already-attempted.
 // Any non-404 adapter error aborts before we touch the local flag so the
 // two stores can't desync (local says "not shared", org still has the
-// meeting).
+// meeting). If the local clear fails (disk full / permissions), we surface
+// the failure rather than reporting success — otherwise the toggle would
+// keep showing "Unshare" against an org that's already empty and the user
+// would have no signal that they need to retry.
 ipcMain.handle('org-unshare-by-summary', async (_event, summaryFile) => {
   try {
     if (!summaryFile) return { success: false, error: 'summaryFile is required' };
@@ -6521,14 +6524,19 @@ ipcMain.handle('org-unshare-by-summary', async (_event, summaryFile) => {
         });
         adapterStatus = 'deleted';
       } catch (e) {
-        if (e.message && /\b404\b/.test(e.message)) {
+        if (e && e.status === 404) {
           adapterStatus = 'already-gone';
         } else {
           return { success: false, error: e.message };
         }
       }
     }
-    clearOrgBackupAttempt(summaryFile);
+    if (!clearOrgBackupAttempt(summaryFile)) {
+      return {
+        success: false,
+        error: 'unshared on the org but could not clear the local share flag — retry',
+      };
+    }
     return { success: true, meeting_id: entry.meeting_id, adapter_status: adapterStatus };
   } catch (e) {
     return { success: false, error: e.message };

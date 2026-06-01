@@ -374,7 +374,11 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
                       className="flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-sm transition-colors hover:bg-[color:var(--surface-hover)] disabled:opacity-50"
                       style={{ color: 'var(--fg-1)' }}
                       onClick={() => void onShareToOrg()}
-                      disabled={isSharing}
+                      // Disable while the persistent share state is still
+                      // loading — otherwise a fast click during initial
+                      // mount would treat the note as "not shared" and
+                      // upload a duplicate against an already-shared note.
+                      disabled={isSharing || backupState.isLoading}
                       title={`Share with ${orgSession.data.orgId}`}
                     >
                       <Globe className="size-[13px] shrink-0" style={{ color: 'var(--fg-2)' }} />
