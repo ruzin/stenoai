@@ -57,7 +57,12 @@ export function Chat() {
   // the local cloud provider configured. Adapter mode also works — the
   // adapter brokers a cloud model server-side, fitting the same
   // "remote-hosted model" requirement that cross-note chat needs.
-  const localReady = (isCloud && cloudKeySet) || isAdapter;
+  // Critically: adapter mode is only "ready" when the org session is
+  // actually signed in. Without this, a user on ai_provider=adapter but
+  // signed out (e.g. session expired mid-app, restore not yet run) sees
+  // the chat input enabled and gets an opaque failure on submit.
+  const orgSignedIn = orgSession.data?.signedIn === true;
+  const localReady = (isCloud && cloudKeySet) || (isAdapter && orgSignedIn);
   const orgScopeActive = scopeFolderId === ORG_SHARED_SCOPE;
   const ready = localReady || orgScopeActive;
 

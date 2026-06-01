@@ -6233,10 +6233,16 @@ ipcMain.handle('org-login', async (_event, payload) => {
 
 ipcMain.handle('org-logout', async () => {
   clearOrgSession();
-  // Roll back the AI provider to 'local' if the user was on 'adapter';
-  // without this, the next summary attempt errors because the env vars
-  // are no longer populated and the Python summariser raises.
-  restorePreAdapterProvider().catch(() => {});
+  // Await the restore — the user just clicked sign-out and expects the
+  // app to settle into the signed-out state before returning. If we
+  // fire-and-forget here there's a race window where Python config
+  // still says 'adapter' but the env vars are already gone, and any
+  // AI op triggered in that window fails with "adapter not configured".
+  // org-status's stale-session path stays fire-and-forget because that
+  // handler is called frequently and any blocking would slow the UI.
+  try {
+    await restorePreAdapterProvider();
+  } catch (_) {}
   return { success: true };
 });
 

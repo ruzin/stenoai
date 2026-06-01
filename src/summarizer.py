@@ -349,7 +349,7 @@ class OllamaSummarizer:
                     raise
         raise RuntimeError("OpenAI chat failed after all retries")
 
-    def _adapter_chat(self, prompt: str, timeout_seconds: int = 300) -> str:
+    def _adapter_chat(self, prompt: str, timeout_seconds: int = 7200) -> str:
         """One-shot AI request via the org adapter's /ai/chat endpoint.
 
         The adapter wraps Anthropic so the request/response shape mirrors
@@ -403,7 +403,7 @@ class OllamaSummarizer:
                     raise
         raise RuntimeError("Adapter chat failed after all retries")
 
-    def _adapter_stream(self, prompt: str, timeout_seconds: int = 300):
+    def _adapter_stream(self, prompt: str, timeout_seconds: int = 7200):
         """Streaming AI request via the adapter's /ai/chat/stream endpoint.
 
         The adapter emits NDJSON — one JSON object per line:
