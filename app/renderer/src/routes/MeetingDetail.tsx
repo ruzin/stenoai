@@ -27,7 +27,12 @@ import {
   SelectSeparator,
 } from '@/components/ui/select';
 import { useMeeting, useReprocessMeeting, useDeleteMeeting, meetingsKeys } from '@/hooks/useMeetings';
-import { useOrgSession, useShareToOrg } from '@/hooks/useOrg';
+import {
+  useOrgSession,
+  useShareToOrg,
+  useOrgBackupState,
+  useUnshareFromOrgBySummary,
+} from '@/hooks/useOrg';
 import {
   Dialog,
   DialogContent,
@@ -114,11 +119,16 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
   const reprocess = useReprocessMeeting();
   const orgSession = useOrgSession();
   const shareToOrg = useShareToOrg();
-  const [shareState, setShareState] = React.useState<'idle' | 'sharing' | 'shared' | 'error'>('idle');
+  const backupState = useOrgBackupState(orgSession.data?.signedIn ? summaryFile : null);
+  const unshareFromOrg = useUnshareFromOrgBySummary();
+  const [unshareOpen, setUnshareOpen] = React.useState(false);
   const [shareError, setShareError] = React.useState<string | null>(null);
 
+  const isShared = backupState.data?.shared ?? false;
+  const isSharing = shareToOrg.isPending;
+  const isUnsharing = unshareFromOrg.isPending;
+
   const onShareToOrg = async () => {
-    setShareState('sharing');
     setShareError(null);
     const title = meeting.session_info.name || 'Untitled note';
     // Body = structured summary markdown (same as local detail page).
@@ -130,10 +140,19 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
     const transcript = pickTranscriptForShare(meeting);
     try {
       await shareToOrg.mutateAsync({ title, body, transcript, visibility: 'org', summaryFile });
-      setShareState('shared');
-      setTimeout(() => setShareState('idle'), 2500);
+      // Successful share — useShareToOrg invalidates the backup-state
+      // query, so the button flips to "Unshare" on the next render.
     } catch (e) {
-      setShareState('error');
+      setShareError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const onUnshareFromOrg = async () => {
+    setShareError(null);
+    try {
+      await unshareFromOrg.mutateAsync(summaryFile);
+      setUnshareOpen(false);
+    } catch (e) {
       setShareError(e instanceof Error ? e.message : String(e));
     }
   };
@@ -337,23 +356,39 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
                   View containing folder
                 </button>
                 {orgSession.data?.signedIn && (
-                  <button
-                    type="button"
-                    className="flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-sm transition-colors hover:bg-[color:var(--surface-hover)] disabled:opacity-50"
-                    style={{ color: 'var(--fg-1)' }}
-                    onClick={() => void onShareToOrg()}
-                    disabled={shareState === 'sharing' || shareState === 'shared'}
-                    title={`Share with ${orgSession.data.orgId}`}
-                  >
-                    <Globe className="size-[13px] shrink-0" style={{ color: 'var(--fg-2)' }} />
-                    {shareState === 'sharing'
-                      ? 'Sharing…'
-                      : shareState === 'shared'
-                        ? 'Shared with org ✓'
-                        : shareState === 'error'
-                          ? `Share failed${shareError ? ': ' + shareError : ''}`
+                  isShared ? (
+                    <button
+                      type="button"
+                      className="flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-sm transition-colors hover:bg-[color:var(--surface-hover)] disabled:opacity-50"
+                      style={{ color: 'var(--fg-1)' }}
+                      onClick={() => setUnshareOpen(true)}
+                      disabled={isUnsharing}
+                      title={`Unshare from ${orgSession.data.orgId}`}
+                    >
+                      <Globe className="size-[13px] shrink-0" style={{ color: 'var(--fg-2)' }} />
+                      {`Unshare from ${orgSession.data.orgId}`}
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-sm transition-colors hover:bg-[color:var(--surface-hover)] disabled:opacity-50"
+                      style={{ color: 'var(--fg-1)' }}
+                      onClick={() => void onShareToOrg()}
+                      // Disable while the persistent share state is still
+                      // loading — otherwise a fast click during initial
+                      // mount would treat the note as "not shared" and
+                      // upload a duplicate against an already-shared note.
+                      disabled={isSharing || backupState.isLoading}
+                      title={`Share with ${orgSession.data.orgId}`}
+                    >
+                      <Globe className="size-[13px] shrink-0" style={{ color: 'var(--fg-2)' }} />
+                      {isSharing
+                        ? 'Sharing…'
+                        : shareError
+                          ? `Share failed: ${shareError}`
                           : `Share with ${orgSession.data.orgId}`}
-                  </button>
+                    </button>
+                  )
                 )}
                 <button
                   type="button"
@@ -575,6 +610,37 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
               }}
             >
               Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={unshareOpen} onOpenChange={setUnshareOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>
+              Unshare from {orgSession.data?.signedIn ? orgSession.data.orgId : 'your org'}?
+            </DialogTitle>
+            <DialogDescription>
+              The shared copy will be removed from your organisation. Your
+              local note stays on this Mac. You can re-share at any time.
+            </DialogDescription>
+          </DialogHeader>
+          {shareError && (
+            <p className="text-sm" style={{ color: 'var(--danger)' }}>
+              {shareError}
+            </p>
+          )}
+          <DialogFooter>
+            <DialogClose asChild>
+              <Button variant="ghost">Cancel</Button>
+            </DialogClose>
+            <Button
+              variant="destructive"
+              disabled={isUnsharing}
+              onClick={() => void onUnshareFromOrg()}
+            >
+              {isUnsharing ? 'Unsharing…' : 'Unshare'}
             </Button>
           </DialogFooter>
         </DialogContent>

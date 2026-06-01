@@ -223,6 +223,10 @@ export function useRecordingProcessingEffects() {
             .then((res) => {
               if (res.attempted) {
                 qc.invalidateQueries({ queryKey: orgKeys.meetings() });
+                // Flip the MeetingDetail Share/Unshare toggle to
+                // "Unshare" without waiting for staleTime — the user
+                // may already be looking at the note.
+                qc.invalidateQueries({ queryKey: orgKeys.backupState(newSummaryFile) });
               } else if (res.reason === 'upload-failed' || res.reason === 'error') {
                 console.warn('[org-auto-backup] skipped:', res.reason, res.error);
               }
