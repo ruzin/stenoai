@@ -26,6 +26,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+# Wire stdlib SSL up to certifi's CA bundle before anything tries to make
+# an HTTPS call. PyInstaller's compiled-in cert paths don't exist on a
+# customer's Mac, so without this the adapter request in summarizer.py
+# fails with CERTIFICATE_VERIFY_FAILED.
+from src import tls_bootstrap  # noqa: F401
+
 # Import modules with graceful fallback for missing dependencies
 try:
     from src.audio_recorder import AudioRecorder
@@ -2953,6 +2959,35 @@ def pull_model(model_name):
         print(json.dumps({"success": True, "model": model_name}))
     except Exception as e:
         print(json.dumps({"success": False, "error": str(e)}))
+
+
+@cli.command(name='check-adapter')
+@click.argument('url')
+def check_adapter_cmd(url: str):
+    """Probe an adapter's /health over HTTPS using the bundle's stdlib SSL stack.
+
+    Diagnostic for the customer-side trust-store issue where the
+    PyInstaller bundle's compiled-in CA paths don't exist on the host.
+    Prints OK on a successful TLS handshake or the underlying SSL/HTTP
+    error so support can paste it into a ticket.
+    """
+    import urllib.request
+    import urllib.error
+
+    url = url.rstrip('/') + '/health'
+    try:
+        with urllib.request.urlopen(url, timeout=10) as resp:
+            body = resp.read().decode('utf-8', errors='replace')
+        print(f"OK {resp.status} {url}")
+        print(body)
+    except urllib.error.URLError as e:
+        print(f"FAIL {url}")
+        print(f"  reason: {e.reason}")
+        sys.exit(1)
+    except Exception as e:
+        print(f"FAIL {url}")
+        print(f"  error: {e}")
+        sys.exit(1)
 
 
 if __name__ == '__main__':
