@@ -403,7 +403,7 @@ class OllamaSummarizer:
                     raise
         raise RuntimeError("Adapter chat failed after all retries")
 
-    def _adapter_stream(self, prompt: str, timeout_seconds: int = 7200):
+    def _adapter_stream(self, prompt: str, timeout_seconds: int = 600):
         """Streaming AI request via the adapter's /ai/chat/stream endpoint.
 
         The adapter emits NDJSON — one JSON object per line:
@@ -863,7 +863,10 @@ TRANSCRIPT:
         logger.info(f"Starting streaming summary with {self.ai_provider} model: {self.model_name}")
 
         if self.ai_provider == "adapter":
-            yield from self._adapter_stream(prompt)
+            # Summarisation can legitimately take a long time for a long
+            # meeting; match the dynamic-timeout ceiling summarize_transcript
+            # already uses (2h).
+            yield from self._adapter_stream(prompt, timeout_seconds=7200)
             return
 
         if self.ai_provider == "cloud":
@@ -1105,7 +1108,10 @@ ANSWER:"""
 
         try:
             if self.ai_provider == "adapter":
-                yield from self._adapter_stream(prompt)
+                # Interactive query — user is waiting at the AskBar. Fail
+                # fast on a stalled connection rather than letting it hang
+                # for the summarisation-grade ceiling.
+                yield from self._adapter_stream(prompt, timeout_seconds=300)
                 return
             if self.ai_provider == "cloud":
                 if self.cloud_provider == "anthropic":
