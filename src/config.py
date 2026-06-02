@@ -398,6 +398,37 @@ class Config:
         self._config["keep_recordings"] = enabled
         return self._save()
 
+    def get_silence_auto_stop_enabled(self) -> bool:
+        """Get whether recordings auto-stop after a stretch of silence on
+        both the mic and system-audio streams. Default on — the primary
+        use case is "I forgot to stop a meeting" where doing nothing
+        leaves a multi-hour zombie recording."""
+        return self._config.get("silence_auto_stop_enabled", True)
+
+    def set_silence_auto_stop_enabled(self, enabled: bool) -> bool:
+        self._config["silence_auto_stop_enabled"] = enabled
+        return self._save()
+
+    SUPPORTED_SILENCE_AUTO_STOP_MINUTES = (2, 5, 10, 15, 30)
+
+    def get_silence_auto_stop_minutes(self) -> int:
+        """Minutes of bilateral silence before auto-stop fires. Default 15
+        to match the Granola convention; constrained to the supported set
+        so the Settings dropdown stays in sync with persisted values."""
+        value = self._config.get("silence_auto_stop_minutes", 15)
+        if value in self.SUPPORTED_SILENCE_AUTO_STOP_MINUTES:
+            return value
+        logger.warning(
+            f"Invalid silence_auto_stop_minutes in config: {value}; falling back to 15"
+        )
+        return 15
+
+    def set_silence_auto_stop_minutes(self, minutes: int) -> bool:
+        if minutes not in self.SUPPORTED_SILENCE_AUTO_STOP_MINUTES:
+            return False
+        self._config["silence_auto_stop_minutes"] = minutes
+        return self._save()
+
 
     def get_whisper_model(self) -> str:
         """Get the configured Whisper model size."""

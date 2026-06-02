@@ -1,7 +1,19 @@
 import * as React from 'react';
 import { ipc } from '@/lib/ipc';
 import { useRecording } from './useRecording';
-import { useSystemAudioSetting, useSystemAudioSupport } from './useSettings';
+import {
+  useSystemAudioSetting,
+  useSystemAudioSupport,
+  useSilenceAutoStopSetting,
+} from './useSettings';
+
+/** Hardcoded RMS floor (0..1, computed on the time-domain samples from an
+ *  AnalyserNode). Above this on either mic OR system audio counts as
+ *  "active." Tuned empirically to ignore desk-fan / room-tone noise but
+ *  catch any actual speech or media playback. Not user-configurable —
+ *  exposing this just creates a knob no one tunes correctly. */
+const SILENCE_RMS_THRESHOLD = 0.01;
+const SILENCE_SAMPLE_INTERVAL_MS = 1_000;
 
 /**
  * Mounts ONCE at App level. When system audio is enabled and the user starts
@@ -45,6 +57,27 @@ export function useSystemAudioCapture() {
   // getUserMedia/getDisplayMedia knows it's been cancelled and aborts
   // before installing the streams it just acquired.
   const startTokenRef = React.useRef(0);
+  // Silence-auto-stop detector lives alongside the MediaRecorder. The
+  // setting and pause state are read via refs so the polling loop sees
+  // current values without re-creating the interval.
+  const silenceIntervalRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
+  const silenceConfigRef = React.useRef<{ enabled: boolean; minutes: number }>({
+    enabled: true,
+    minutes: 15,
+  });
+  const isPausedRef = React.useRef(false);
+  const silenceAutoStop = useSilenceAutoStopSetting();
+  React.useEffect(() => {
+    if (silenceAutoStop.data) {
+      silenceConfigRef.current = {
+        enabled: silenceAutoStop.data.enabled,
+        minutes: silenceAutoStop.data.minutes,
+      };
+    }
+  }, [silenceAutoStop.data]);
+  React.useEffect(() => {
+    isPausedRef.current = status === 'paused';
+  }, [status]);
 
   React.useEffect(() => {
     sessionNameRef.current = sessionName;
@@ -53,7 +86,15 @@ export function useSystemAudioCapture() {
   React.useEffect(() => {
     const bridge = ipc();
 
+    const teardownSilenceDetector = () => {
+      if (silenceIntervalRef.current !== null) {
+        clearInterval(silenceIntervalRef.current);
+        silenceIntervalRef.current = null;
+      }
+    };
+
     const teardownStreams = () => {
+      teardownSilenceDetector();
       micStreamRef.current?.getTracks().forEach((t) => t.stop());
       sysStreamRef.current?.getTracks().forEach((t) => t.stop());
       mixedStreamRef.current?.getTracks().forEach((t) => t.stop());
@@ -178,7 +219,72 @@ export function useSystemAudioCapture() {
         recorder.start(1_000);
         recorderRef.current = recorder;
 
-        // 5. Confirm to main that the renderer-driven recording is live.
+        // 5. Silence-auto-stop detector. Taps each pre-merge source with its
+        //    own AnalyserNode so we can distinguish "mic active" from
+        //    "system audio playing" — auto-stop only fires when BOTH have
+        //    been below SILENCE_RMS_THRESHOLD for the configured duration.
+        //    Mic-only would auto-stop real meetings where the user is
+        //    listening but not talking; system-only would auto-stop when
+        //    the user is talking on a phone (headphones, no playback).
+        const micAnalyser = ctx.createAnalyser();
+        micAnalyser.fftSize = 512;
+        micAnalyser.smoothingTimeConstant = 0;
+        micSource.connect(micAnalyser);
+        const sysAnalyser = ctx.createAnalyser();
+        sysAnalyser.fftSize = 512;
+        sysAnalyser.smoothingTimeConstant = 0;
+        sysSource.connect(sysAnalyser);
+
+        const computeRms = (analyser: AnalyserNode, buf: Uint8Array<ArrayBuffer>): number => {
+          analyser.getByteTimeDomainData(buf);
+          let sumSq = 0;
+          for (let i = 0; i < buf.length; i++) {
+            const v = (buf[i] - 128) / 128;
+            sumSq += v * v;
+          }
+          return Math.sqrt(sumSq / buf.length);
+        };
+
+        const micBuf = new Uint8Array(new ArrayBuffer(micAnalyser.fftSize));
+        const sysBuf = new Uint8Array(new ArrayBuffer(sysAnalyser.fftSize));
+        let lastActiveAtMs = Date.now();
+
+        silenceIntervalRef.current = setInterval(() => {
+          const cfg = silenceConfigRef.current;
+          // Treat manual-pause as activity — user paused on purpose; don't
+          // auto-stop their recording out from under them. Resetting the
+          // timestamp also avoids racing the resume: any silence after a
+          // long pause has to re-accumulate from scratch.
+          if (!cfg.enabled || isPausedRef.current || !activeRef.current) {
+            lastActiveAtMs = Date.now();
+            return;
+          }
+          const micRms = computeRms(micAnalyser, micBuf);
+          const sysRms = computeRms(sysAnalyser, sysBuf);
+          if (micRms > SILENCE_RMS_THRESHOLD || sysRms > SILENCE_RMS_THRESHOLD) {
+            lastActiveAtMs = Date.now();
+            return;
+          }
+          const silenceMs = Date.now() - lastActiveAtMs;
+          const limitMs = cfg.minutes * 60 * 1000;
+          if (silenceMs < limitMs) return;
+
+          // Disarm immediately so a slow stop IPC doesn't fire the
+          // trigger again on the next tick.
+          teardownSilenceDetector();
+          const minutes = cfg.minutes;
+          void (async () => {
+            try {
+              await bridge.recording.stop();
+              await bridge.settings.showSilenceAutoStopNotification(minutes);
+            } catch (e) {
+              // eslint-disable-next-line no-console
+              console.error('[silenceAutoStop] failed to stop:', e);
+            }
+          })();
+        }, SILENCE_SAMPLE_INTERVAL_MS);
+
+        // 6. Confirm to main that the renderer-driven recording is live.
         //    Idempotent — main.js already flipped systemAudioRecordingActive
         //    when start-recording-ui ran, but this re-affirms it.
         bridge.recording.reportSystemAudioState(true);

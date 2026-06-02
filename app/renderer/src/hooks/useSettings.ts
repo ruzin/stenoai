@@ -10,6 +10,7 @@ export const settingsKeys = {
   systemAudio: () => [...settingsKeys.all, 'systemAudio'] as const,
   systemAudioSupport: () => [...settingsKeys.all, 'systemAudioSupport'] as const,
   autoDetectMeetings: () => [...settingsKeys.all, 'autoDetectMeetings'] as const,
+  silenceAutoStop: () => [...settingsKeys.all, 'silenceAutoStop'] as const,
   language: () => [...settingsKeys.all, 'language'] as const,
   storagePath: () => [...settingsKeys.all, 'storagePath'] as const,
   appVersion: () => [...settingsKeys.all, 'appVersion'] as const,
@@ -214,5 +215,41 @@ export function useSetKeepRecordings() {
   return useMutation({
     mutationFn: async (v: boolean) => unwrap(await ipc().settings.setKeepRecordings(v)),
     onSuccess: () => qc.invalidateQueries({ queryKey: [...settingsKeys.all, 'keepRecordings'] }),
+  });
+}
+
+/** Toggle + duration for the renderer-side silence detector. Defaults
+ *  to enabled / 15 minutes (matches Granola). Returns the supported
+ *  minutes list too so the Settings dropdown is driven by the same
+ *  source of truth as the persisted-value validation. */
+export function useSilenceAutoStopSetting() {
+  return useQuery({
+    queryKey: settingsKeys.silenceAutoStop(),
+    queryFn: async () => {
+      const res = unwrap(await ipc().settings.getSilenceAutoStop());
+      return {
+        enabled: res.silence_auto_stop_enabled,
+        minutes: res.silence_auto_stop_minutes,
+        supportedMinutes: res.supported_minutes,
+      };
+    },
+  });
+}
+
+export function useSetSilenceAutoStopEnabled() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (v: boolean) =>
+      unwrap(await ipc().settings.setSilenceAutoStopEnabled(v)),
+    onSuccess: () => qc.invalidateQueries({ queryKey: settingsKeys.silenceAutoStop() }),
+  });
+}
+
+export function useSetSilenceAutoStopMinutes() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (v: number) =>
+      unwrap(await ipc().settings.setSilenceAutoStopMinutes(v)),
+    onSuccess: () => qc.invalidateQueries({ queryKey: settingsKeys.silenceAutoStop() }),
   });
 }

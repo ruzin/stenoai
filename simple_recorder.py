@@ -1070,6 +1070,43 @@ def set_keep_recordings_cmd(enabled: bool):
         print(json.dumps({"success": False, "error": "Failed to persist setting"}))
 
 
+@cli.command(name='get-silence-auto-stop')
+def get_silence_auto_stop_cmd():
+    """Get whether recordings auto-stop on a stretch of silence + the duration."""
+    from src.config import get_config
+    config = get_config()
+    print(json.dumps({
+        "silence_auto_stop_enabled": config.get_silence_auto_stop_enabled(),
+        "silence_auto_stop_minutes": config.get_silence_auto_stop_minutes(),
+        "supported_minutes": list(config.SUPPORTED_SILENCE_AUTO_STOP_MINUTES),
+    }))
+
+
+@cli.command(name='set-silence-auto-stop-enabled')
+@click.argument('enabled', type=bool)
+def set_silence_auto_stop_enabled_cmd(enabled: bool):
+    from src.config import get_config
+    config = get_config()
+    if config.set_silence_auto_stop_enabled(enabled):
+        print(json.dumps({"success": True, "silence_auto_stop_enabled": enabled}))
+    else:
+        print(json.dumps({"success": False, "error": "Failed to persist setting"}))
+
+
+@cli.command(name='set-silence-auto-stop-minutes')
+@click.argument('minutes', type=int)
+def set_silence_auto_stop_minutes_cmd(minutes: int):
+    from src.config import get_config
+    config = get_config()
+    if config.set_silence_auto_stop_minutes(minutes):
+        print(json.dumps({"success": True, "silence_auto_stop_minutes": minutes}))
+    else:
+        print(json.dumps({
+            "success": False,
+            "error": f"Unsupported minutes value; expected one of {list(config.SUPPORTED_SILENCE_AUTO_STOP_MINUTES)}",
+        }))
+
+
 @cli.command()
 def status():
     """Show recorder status"""
