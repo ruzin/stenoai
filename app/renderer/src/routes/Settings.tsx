@@ -57,6 +57,9 @@ import {
   useSetAutoDetectMeetings,
   useKeepRecordingsSetting,
   useSetKeepRecordings,
+  useSilenceAutoStopSetting,
+  useSetSilenceAutoStopEnabled,
+  useSetSilenceAutoStopMinutes,
   useTelemetrySetting,
   useUserName,
 } from '@/hooks/useSettings';
@@ -546,6 +549,9 @@ function GeneralTab() {
   const systemAudioSupport = useSystemAudioSupport();
   const autoDetect = useAutoDetectMeetingsSetting();
   const setAutoDetect = useSetAutoDetectMeetings();
+  const silenceAutoStop = useSilenceAutoStopSetting();
+  const setSilenceAutoStopEnabled = useSetSilenceAutoStopEnabled();
+  const setSilenceAutoStopMinutes = useSetSilenceAutoStopMinutes();
   const dockIcon = useDockIconSetting();
   const setDockIcon = useSetDockIcon();
   const google = useGoogleCalendarAuth();
@@ -742,6 +748,37 @@ function GeneralTab() {
           onCheckedChange={(v) => setAutoDetect.mutate(v)}
           disabled={autoDetect.data === undefined}
         />
+      </SettingRow>
+
+      <SettingRow
+        label="Auto-stop on silence"
+        description="End the recording and start processing it once both the mic and system audio have been silent for the chosen duration. Useful when you forget to stop after a meeting ends."
+      >
+        <div className="flex items-center gap-3">
+          <Select
+            value={String(silenceAutoStop.data?.minutes ?? 15)}
+            onValueChange={(v) => setSilenceAutoStopMinutes.mutate(Number(v))}
+            disabled={
+              silenceAutoStop.data === undefined || silenceAutoStop.data.enabled === false
+            }
+          >
+            <SelectTrigger className="h-8 w-28 text-sm">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {(silenceAutoStop.data?.supportedMinutes ?? [2, 5, 10, 15, 30]).map((m) => (
+                <SelectItem key={m} value={String(m)}>
+                  {m} minutes
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Switch
+            checked={silenceAutoStop.data?.enabled ?? true}
+            onCheckedChange={(v) => setSilenceAutoStopEnabled.mutate(v)}
+            disabled={silenceAutoStop.data === undefined}
+          />
+        </div>
       </SettingRow>
 
       <SettingRow

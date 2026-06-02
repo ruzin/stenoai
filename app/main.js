@@ -4107,6 +4107,60 @@ ipcMain.handle('set-keep-recordings', async (event, enabled) => {
   } catch (e) { return { success: false, error: e.message }; }
 });
 
+ipcMain.handle('get-silence-auto-stop', async () => {
+  try {
+    const result = await runPythonScript('simple_recorder.py', ['get-silence-auto-stop'], true);
+    const jsonData = JSON.parse(result.trim());
+    return { success: true, ...jsonData };
+  } catch (e) { return { success: false, error: e.message }; }
+});
+
+ipcMain.handle('set-silence-auto-stop-enabled', async (_event, enabled) => {
+  try {
+    const result = await runPythonScript(
+      'simple_recorder.py',
+      ['set-silence-auto-stop-enabled', enabled ? 'True' : 'False']
+    );
+    const jsonData = JSON.parse(result.trim());
+    return jsonData;
+  } catch (e) { return { success: false, error: e.message }; }
+});
+
+ipcMain.handle('set-silence-auto-stop-minutes', async (_event, minutes) => {
+  try {
+    const result = await runPythonScript(
+      'simple_recorder.py',
+      ['set-silence-auto-stop-minutes', String(minutes)]
+    );
+    const jsonData = JSON.parse(result.trim());
+    return jsonData;
+  } catch (e) { return { success: false, error: e.message }; }
+});
+
+// Fired by the renderer's silence detector. The renderer has already
+// asked main to stop the recording via pause/stop; this just surfaces
+// the reason to the user via a system-tray notification so they know
+// what happened when they come back to the laptop.
+ipcMain.handle('show-silence-auto-stop-notification', async (_event, minutes) => {
+  try {
+    const notif = new Notification({
+      title: 'Recording stopped',
+      body: `${minutes} minutes of silence — your note is being processed.`,
+    });
+    notif.on('click', () => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        if (!mainWindow.isVisible()) mainWindow.show();
+        mainWindow.focus();
+      }
+    });
+    notif.show();
+    return { success: true };
+  } catch (e) {
+    sendDebugLog(`Failed to show silence auto-stop notification: ${e.message}`);
+    return { success: false, error: e.message };
+  }
+});
+
 ipcMain.handle('get-notifications', handleGetNotifications);
 
 ipcMain.handle('set-notifications', async (event, enabled) => {

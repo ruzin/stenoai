@@ -331,6 +331,15 @@ export type GetSystemAudioResponse = Result<{ system_audio_enabled: boolean }>;
 export type GetAutoDetectMeetingsResponse = Result<{ auto_detect_meetings_enabled: boolean }>;
 export type GetWhisperModelResponse = Result<{ whisper_model: string; supported_models: string[] }>;
 export type GetKeepRecordingsResponse = Result<{ keep_recordings: boolean }>;
+
+export type GetSilenceAutoStopResponse = Result<{
+  silence_auto_stop_enabled: boolean;
+  silence_auto_stop_minutes: number;
+  supported_minutes: number[];
+}>;
+
+export type SetSilenceAutoStopEnabledResponse = Result<{ silence_auto_stop_enabled: boolean }>;
+export type SetSilenceAutoStopMinutesResponse = Result<{ silence_auto_stop_minutes: number }>;
 export type GetLanguageResponse = Result<{ language: string }>;
 export type GetUserNameResponse = Result<{ user_name: string }>;
 export type StoragePathResponse = Result<{
@@ -561,6 +570,10 @@ export interface StenoaiBridge {
     setWhisperModel: RequestFn<[model: string], Result<Record<string, never>>>;
     getKeepRecordings: RequestFn<[], GetKeepRecordingsResponse>;
     setKeepRecordings: RequestFn<[v: boolean], Result<Record<string, never>>>;
+    getSilenceAutoStop: RequestFn<[], GetSilenceAutoStopResponse>;
+    setSilenceAutoStopEnabled: RequestFn<[v: boolean], SetSilenceAutoStopEnabledResponse>;
+    setSilenceAutoStopMinutes: RequestFn<[v: number], SetSilenceAutoStopMinutesResponse>;
+    showSilenceAutoStopNotification: RequestFn<[minutes: number], Result<Record<string, never>>>;
     getLanguage: RequestFn<[], GetLanguageResponse>;
     setLanguage: RequestFn<[code: string], Result<Record<string, never>>>;
     getUserName: RequestFn<[], GetUserNameResponse>;
