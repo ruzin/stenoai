@@ -248,6 +248,14 @@ export function useSystemAudioCapture() {
         const micBuf = new Uint8Array(new ArrayBuffer(micAnalyser.fftSize));
         const sysBuf = new Uint8Array(new ArrayBuffer(sysAnalyser.fftSize));
         let lastActiveAtMs = Date.now();
+        // Latch the in-flight stop attempt instead of tearing the
+        // interval down: a stop failure (Python crash, queue lock, race
+        // with manual stop) used to permanently disarm auto-stop for the
+        // rest of the recording. Now the detector keeps running; the
+        // latch just prevents re-firing while one attempt is still in
+        // flight, and clears on failure so a subsequent sustained silent
+        // stretch can retry.
+        let stopAttemptInFlight = false;
 
         silenceIntervalRef.current = setInterval(() => {
           const cfg = silenceConfigRef.current;
@@ -259,6 +267,7 @@ export function useSystemAudioCapture() {
             lastActiveAtMs = Date.now();
             return;
           }
+          if (stopAttemptInFlight) return;
           const micRms = computeRms(micAnalyser, micBuf);
           const sysRms = computeRms(sysAnalyser, sysBuf);
           if (micRms > SILENCE_RMS_THRESHOLD || sysRms > SILENCE_RMS_THRESHOLD) {
@@ -269,9 +278,7 @@ export function useSystemAudioCapture() {
           const limitMs = cfg.minutes * 60 * 1000;
           if (silenceMs < limitMs) return;
 
-          // Disarm immediately so a slow stop IPC doesn't fire the
-          // trigger again on the next tick.
-          teardownSilenceDetector();
+          stopAttemptInFlight = true;
           const minutes = cfg.minutes;
           void (async () => {
             try {
@@ -284,8 +291,18 @@ export function useSystemAudioCapture() {
               if (!stopResult.success) {
                 // eslint-disable-next-line no-console
                 console.error('[silenceAutoStop] stop failed:', stopResult.error);
+                // Reset the silence window so the user gets a fresh
+                // duration of silence before we retry the stop — avoids
+                // hammering a failing IPC every second.
+                lastActiveAtMs = Date.now();
+                stopAttemptInFlight = false;
                 return;
               }
+              // Success — the recording is gone, so the detector has no
+              // recording to watch anymore. Tear it down here (instead
+              // of pre-emptively before the stop call) so a failed stop
+              // doesn't permanently disarm auto-stop for the session.
+              teardownSilenceDetector();
               const notifResult = await bridge.settings.showSilenceAutoStopNotification(minutes);
               if (!notifResult.success) {
                 // Notification failure isn't fatal — the recording has
@@ -296,6 +313,8 @@ export function useSystemAudioCapture() {
             } catch (e) {
               // eslint-disable-next-line no-console
               console.error('[silenceAutoStop] failed to stop:', e);
+              lastActiveAtMs = Date.now();
+              stopAttemptInFlight = false;
             }
           })();
         }, SILENCE_SAMPLE_INTERVAL_MS);
