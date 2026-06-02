@@ -275,8 +275,24 @@ export function useSystemAudioCapture() {
           const minutes = cfg.minutes;
           void (async () => {
             try {
-              await bridge.recording.stop();
-              await bridge.settings.showSilenceAutoStopNotification(minutes);
+              // Check the IPC result envelope before claiming success —
+              // if the stop failed (no active recording, Python error,
+              // queue lock, etc.) we don't want to fire a "Recording
+              // stopped" notification while the recording is actually
+              // still running.
+              const stopResult = await bridge.recording.stop();
+              if (!stopResult.success) {
+                // eslint-disable-next-line no-console
+                console.error('[silenceAutoStop] stop failed:', stopResult.error);
+                return;
+              }
+              const notifResult = await bridge.settings.showSilenceAutoStopNotification(minutes);
+              if (!notifResult.success) {
+                // Notification failure isn't fatal — the recording has
+                // already been finalised — but worth logging for support.
+                // eslint-disable-next-line no-console
+                console.warn('[silenceAutoStop] notification failed:', notifResult.error);
+              }
             } catch (e) {
               // eslint-disable-next-line no-console
               console.error('[silenceAutoStop] failed to stop:', e);
