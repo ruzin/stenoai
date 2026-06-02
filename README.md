@@ -41,6 +41,10 @@
 If you're looking for a hosted desktop recording API, consider checking out [Recall.ai](https://www.recall.ai/product/desktop-recording-sdk?utm_source=github&utm_medium=sponsorship&utm_campaign=ruzin-stenoai), an API that records Zoom, Google Meet, Microsoft Teams, in-person meetings, and more.
 
 ## 📢 What's New
+- **2026-06-01** 🔒 Enterprise adapter HTTPS fix — Summaries, meeting titles, and shared-note backups via your org's Steno adapter were silently failing with a TLS verification error on clean Macs that don't have Homebrew. The bundle now ships its own CA trust store and uses it unconditionally — no user action required.
+- **2026-06-01** ⏯️ Back-to-back recordings — Start a new note while a previous one is still processing in the background, instead of waiting for it to finish. The previous recording continues through the queue normally. Useful when meetings stack and you're on a heavier Whisper model.
+- **2026-06-01** 🔁 Share/Unshare toggle on shared notes — The kebab menu now reflects whether a note is actually shared with your org. Already-shared notes show "Unshare from <org>" instead of letting you re-share and create duplicates in the org meetings store.
+- **2026-06-01** 🧹 Cleaner default note titles — When summarisation produces no title (silent recording, model returned junk), the placeholder is now just "Note" rather than leaking the auto-detect internals like `an app — 2026-06-01 17:00`.
 - **2026-06-01** 🤖 Organisation AI provider — Sign in to your org and Steno routes summaries, titles, and cross-note chat through your org's adapter automatically. No more pasting an Anthropic key in Settings → AI for users on a managed deployment.
 - **2026-06-01** 🔐 30-day sign-in + sidebar CTA — Org sessions now last 30 days (was 8 h). A prominent "Sign in to org" button appears in the sidebar for users who've connected before, replacing the hidden Settings tab as the recovery path.
 - **2026-05-31** 📝 Transcripts on shared notes — Notes shared with your org now include the full transcript, surfaced via the floating Transcript panel just like local notes.
