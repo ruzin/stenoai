@@ -234,13 +234,21 @@ function enqueueShortcutAction(action) {
 }
 
 async function shouldShowShortcutNotifications() {
+  return notificationsEnabled();
+}
+
+// Single source of truth for "is the user's Desktop notifications toggle
+// on?". Reads the persisted Python config via handleGetNotifications.
+// Falls back to `true` on any read error so a transient config issue
+// never silently swallows notifications the user expects. Used by every
+// notification handler (shortcut, silence auto-stop, note ready) — keeps
+// the gate consistent rather than re-implementing it per call site.
+async function notificationsEnabled() {
   try {
     const settings = await handleGetNotifications();
-    if (!settings.success) {
-      return true;
-    }
+    if (!settings.success) return true;
     return settings.notifications_enabled !== false;
-  } catch (error) {
+  } catch (_) {
     return true;
   }
 }
@@ -1224,6 +1232,16 @@ ipcMain.handle('reprocess-meeting', async (event, summaryFile, regenerateTitle, 
     sendDebugLog(`🔄 Reprocessing meeting: ${summaryFile}`);
     sendDebugLog(`$ stenoai ${args.join(' ')}`);
 
+    // Surface this reprocess as in-flight on the queue payload so the
+    // renderer can show the existing meeting row with a processing badge
+    // even when the user navigates away from MeetingDetail mid-reprocess.
+    // Keyed by summaryFile in the activeReprocessJobs map so overlapping
+    // reprocess calls (e.g. user reprocesses A then navigates and
+    // reprocesses B before A finishes) coexist. Removed in the finally
+    // block below so a Python crash or spawn error doesn't leave it
+    // stuck.
+    activeReprocessJobs.set(summaryFile, { summaryFile, sessionName: sessionName || null });
+
     const aiEnv = getAiEnv();
     const reprocessEnv = Object.keys(aiEnv).length > 0 ? { ...require('process').env, ...aiEnv } : undefined;
 
@@ -1287,6 +1305,7 @@ ipcMain.handle('reprocess-meeting', async (event, summaryFile, regenerateTitle, 
             mainWindow.webContents.send('processing-complete', {
               success: true,
               sessionName,
+              summaryFile,
               message: 'Reprocessing completed successfully'
             });
           }
@@ -1302,6 +1321,8 @@ ipcMain.handle('reprocess-meeting', async (event, summaryFile, regenerateTitle, 
   } catch (error) {
     sendDebugLog(`❌ Reprocessing failed: ${error.message}`);
     return { success: false, error: error.message };
+  } finally {
+    activeReprocessJobs.delete(summaryFile);
   }
 });
 
@@ -1915,6 +1936,7 @@ ipcMain.handle('get-queue-status', async () => {
     isProcessing,
     queueSize: processingQueue.length,
     currentJob: currentProcessingJob?.sessionName || null,
+    currentReprocesses: Array.from(activeReprocessJobs.values()),
     hasRecording: currentRecordingProcess !== null || systemAudioRecordingActive,
     isPaused: recordingRuntimeState.isPaused,
     elapsedSeconds: (currentRecordingProcess !== null || systemAudioRecordingActive) ? getRecordingElapsedSeconds() : 0,
@@ -1970,6 +1992,15 @@ let currentRecordingSessionName = null;  // Surfaced in get-queue-status so rend
 let processingQueue = [];
 let isProcessing = false;
 let currentProcessingJob = null;
+// Reprocess runs as a side-channel from the main processing queue (different
+// Python command, started directly from the reprocess-meeting IPC). Tracked
+// here so the renderer can show "this note is being regenerated" on Home
+// without confusing it with a queued recording. Map keyed by summaryFile so
+// overlapping reprocess calls coexist — earlier a single global raced: B's
+// IPC overwrote A's entry, and A's finally would null the state out while
+// B was still running, hiding B's badge. Entries are removed in each IPC's
+// finally so a Python crash or spawn error doesn't leave them stuck.
+const activeReprocessJobs = new Map();
 let recordingRuntimeState = {
   startedAtMs: null,
   pausedAtMs: null,
@@ -4140,12 +4171,23 @@ ipcMain.handle('set-silence-auto-stop-minutes', async (_event, minutes) => {
 // Fired by the renderer's silence detector. The renderer has already
 // asked main to stop the recording via pause/stop; this just surfaces
 // the reason to the user via a system-tray notification so they know
-// what happened when they come back to the laptop.
-ipcMain.handle('show-silence-auto-stop-notification', async (_event, minutes) => {
+// what happened when they come back to the laptop. sessionName matches
+// what they'll see in the sidebar — calendar event title for
+// auto-detect recordings, "Note" for the default placeholder.
+ipcMain.handle('show-silence-auto-stop-notification', async (_event, payload) => {
   try {
+    if (!(await notificationsEnabled())) return { success: true };
+    // Back-compat: earlier callers passed `minutes` as a number directly.
+    // Accept both shapes so older renderer bundles don't crash this handler
+    // until they're rebuilt.
+    const minutes = typeof payload === 'number' ? payload : payload?.minutes;
+    const sessionName = typeof payload === 'object' ? payload?.sessionName : null;
+    const body = sessionName
+      ? `${sessionName} — ${minutes} minutes of silence`
+      : `${minutes} minutes of silence — your note is being processed.`;
     const notif = new Notification({
       title: 'Recording stopped',
-      body: `${minutes} minutes of silence — your note is being processed.`,
+      body,
     });
     notif.on('click', () => {
       if (mainWindow && !mainWindow.isDestroyed()) {
@@ -4157,6 +4199,35 @@ ipcMain.handle('show-silence-auto-stop-notification', async (_event, minutes) =>
     return { success: true };
   } catch (e) {
     sendDebugLog(`Failed to show silence auto-stop notification: ${e.message}`);
+    return { success: false, error: e.message };
+  }
+});
+
+// Fired by the renderer's processing-complete handler when we skipped
+// auto-navigate (user was on a route other than /meetings/processing).
+// Click just focuses Steno — same predictable behaviour as the auto-stop
+// notification. We don't navigate anywhere: the new note appears at the
+// top of the sidebar / Home list, so once Steno is focused the user
+// can see it instantly. Navigating away (especially when the user is
+// recording another note back-to-back) is worse than no navigation.
+ipcMain.handle('show-note-ready-notification', async (_event, payload) => {
+  try {
+    if (!(await notificationsEnabled())) return { success: true };
+    const { title } = payload || {};
+    const notif = new Notification({
+      title: 'Note ready',
+      body: title || 'Your note has finished processing',
+    });
+    notif.on('click', () => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        if (!mainWindow.isVisible()) mainWindow.show();
+        mainWindow.focus();
+      }
+    });
+    notif.show();
+    return { success: true };
+  } catch (e) {
+    sendDebugLog(`Failed to show note-ready notification: ${e.message}`);
     return { success: false, error: e.message };
   }
 });

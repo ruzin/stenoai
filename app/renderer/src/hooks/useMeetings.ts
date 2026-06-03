@@ -49,6 +49,22 @@ export function useMeetings() {
 
   const data = React.useMemo<Meeting[] | undefined>(() => {
     if (!query.data) return query.data;
+    // When one or more reprocesses are in flight, flag the matching
+    // existing meeting rows so they show the ProcessingBadge — same
+    // surface as a queued recording, no synthetic duplicate row.
+    // Without this, Home looks identical to "nothing happening" during
+    // a reprocess because reprocess doesn't touch the processingQueue
+    // / currentJob. Live recording row (below) is independent — both
+    // can co-exist if the user is recording one note AND reprocessing
+    // another simultaneously.
+    const reprocessing = recording.reprocessingSummaryFiles;
+    const base = reprocessing.size > 0
+      ? query.data.map((m) =>
+          reprocessing.has(m.session_info.summary_file) && !m.is_processing
+            ? { ...m, is_processing: true }
+            : m,
+        )
+      : query.data;
     const live = recording.sessionName
       ? buildLiveMeeting(
           recording.sessionName,
@@ -58,12 +74,13 @@ export function useMeetings() {
           recording.status === 'processing',
         )
       : null;
-    if (!live) return query.data;
-    return [live, ...query.data];
+    if (!live) return base;
+    return [live, ...base];
   }, [
     query.data,
     recording.sessionName,
     recording.status,
+    recording.reprocessingSummaryFiles,
     liveElapsed,
     draft?.title,
     draft?.startedAtMs,

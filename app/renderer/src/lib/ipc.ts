@@ -275,6 +275,15 @@ export interface QueueStatus {
   isProcessing: boolean;
   queueSize: number;
   currentJob: string | null;
+  /** Side-channel tracking for in-flight `reprocess-meeting` invocations,
+   *  which don't go through `processingQueue` / `currentJob`. Populated
+   *  by the reprocess IPC for the lifetime of each spawned Python
+   *  subprocess and cleared in its finally block. Keyed by summaryFile
+   *  in main so overlapping reprocesses coexist (e.g. user reprocesses A,
+   *  navigates to B, reprocesses B before A finishes). Renderer consumers
+   *  use this to flag the matching existing meeting rows as in-progress
+   *  on Home. Empty array (not undefined) when no reprocess is active. */
+  currentReprocesses: Array<{ summaryFile: string; sessionName: string | null }>;
   hasRecording: boolean;
   isPaused: boolean;
   elapsedSeconds: number;
@@ -396,6 +405,11 @@ export interface ProcessingCompleteEvent {
   sessionName: string;
   message: string;
   meetingData?: Meeting;
+  /** Populated by the reprocess flow (which doesn't carry a freshly-
+   *  generated Meeting payload like the recording flow does). Lets the
+   *  app-level cleanup find the matching streamCache entry to clear
+   *  even when MeetingDetail unmounted mid-reprocess. */
+  summaryFile?: string;
 }
 export interface QueryChunkEvent {
   queryId: string;
@@ -573,7 +587,14 @@ export interface StenoaiBridge {
     getSilenceAutoStop: RequestFn<[], GetSilenceAutoStopResponse>;
     setSilenceAutoStopEnabled: RequestFn<[v: boolean], SetSilenceAutoStopEnabledResponse>;
     setSilenceAutoStopMinutes: RequestFn<[v: number], SetSilenceAutoStopMinutesResponse>;
-    showSilenceAutoStopNotification: RequestFn<[minutes: number], Result<Record<string, never>>>;
+    showSilenceAutoStopNotification: RequestFn<
+      [payload: { minutes: number; sessionName: string | null }],
+      Result<Record<string, never>>
+    >;
+    showNoteReadyNotification: RequestFn<
+      [payload: { title: string }],
+      Result<Record<string, never>>
+    >;
     getLanguage: RequestFn<[], GetLanguageResponse>;
     setLanguage: RequestFn<[code: string], Result<Record<string, never>>>;
     getUserName: RequestFn<[], GetUserNameResponse>;

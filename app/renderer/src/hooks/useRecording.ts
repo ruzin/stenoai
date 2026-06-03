@@ -5,13 +5,20 @@ import { unwrap } from '@/lib/result';
 import { meetingsKeys } from './meetingKeys';
 import { orgKeys } from './useOrg';
 import { useLiveDraftStore } from './liveDraftStore';
-import { navigate } from '@/lib/router';
+import { navigate, routeFromHash } from '@/lib/router';
 import { composeShareBody, pickTranscriptForShare } from '@/routes/MeetingDetail';
+import { streamCache } from '@/lib/meetingDetailState';
 import type { Meeting, QueueStatus } from '@/lib/ipc';
 
 export type RecordingStatus = 'idle' | 'recording' | 'paused' | 'processing';
 
 const queueKey = ['recording', 'queue'] as const;
+
+/** Stable empty-Set sentinel so consumers (useMeetings) don't see a
+ *  fresh reference each render when there are no active reprocesses —
+ *  keeps their useMemo deps shallow-equal and avoids re-mapping the
+ *  whole meetings list every queue poll. */
+const EMPTY_REPROCESS_SET: ReadonlySet<string> = new Set<string>();
 
 export function useRecording() {
   const qc = useQueryClient();
@@ -32,6 +39,17 @@ export function useRecording() {
     if (q?.isProcessing) return 'processing';
     return 'idle';
   }, [queue.data]);
+
+  // Memoised so the Set reference is stable across renders when the
+  // backend's currentReprocesses array contents haven't changed —
+  // useMeetings's dependency on this is then satisfied by a referential
+  // equality check rather than re-running the meeting-list map on every
+  // queue poll.
+  const reprocessingSummaryFiles = React.useMemo(() => {
+    const arr = queue.data?.currentReprocesses;
+    if (!arr || arr.length === 0) return EMPTY_REPROCESS_SET;
+    return new Set(arr.map((r) => r.summaryFile));
+  }, [queue.data?.currentReprocesses]);
 
   // NOTE: processing-complete handling lives in useRecordingProcessingEffects
   // below, mounted ONCE at App level. Putting it here would attach a fresh
@@ -111,7 +129,20 @@ export function useRecording() {
   return {
     status,
     elapsed: queue.data?.elapsedSeconds ?? 0,
-    sessionName: queue.data?.sessionName ?? null,
+    // Fall back to currentJob (the in-flight processing session) when no
+    // recording is active. Keeps `sessionName` populated through the full
+    // recording → processing → done lifecycle so the synthetic in-progress
+    // row in useMeetings stays visible while a note is processing —
+    // otherwise Home goes blank between "stopped" and "processed" and the
+    // user can't see anything is happening in the background.
+    sessionName: queue.data?.sessionName ?? queue.data?.currentJob ?? null,
+    /** Set of summary files whose `reprocess-meeting` IPC is currently
+     *  in flight. Used by useMeetings to flip the matching existing
+     *  meeting rows' `is_processing` flag so Home shows the badge even
+     *  when the user navigates away from MeetingDetail mid-reprocess.
+     *  Set rather than array so consumers can do O(1) membership checks
+     *  inside the meetings list map. */
+    reprocessingSummaryFiles: reprocessingSummaryFiles,
     startRecording,
     stopRecording,
     pauseRecording,
@@ -238,14 +269,71 @@ export function useRecordingProcessingEffects() {
       }
       qc.invalidateQueries({ queryKey: meetingsKeys.all });
       qc.invalidateQueries({ queryKey: queueKey });
+      // Clear any streamCache entry for the finished session. MeetingDetail
+      // does its own cleanup when mounted (with a 400ms grace so the "done"
+      // phase animates), but if the user navigated away mid-reprocess the
+      // component-local listener gets torn down before the event arrives
+      // and the cache stays stuck at 'generating'. This app-level
+      // cleanup runs regardless of route so the next time the user opens
+      // the note, the page reads fresh data instead of stale phase state.
+      const summaryFileFromEvent =
+        data.meetingData?.session_info.summary_file ?? data.summaryFile ?? null;
+      if (summaryFileFromEvent) {
+        streamCache.delete(summaryFileFromEvent);
+      }
       // Clear the live-draft entry for this finished session so the next
       // "New note" with the same default sessionName ('Meeting' / 'Note')
       // doesn't inherit the previous title or notes.
       if (data.sessionName) {
         useLiveDraftStore.getState().clear(data.sessionName);
       }
-      if (data.success && data.meetingData?.session_info.summary_file) {
-        navigate(`/meetings/${encodeURIComponent(data.meetingData.session_info.summary_file)}`);
+      // The summary file lands here for both flows: recording-complete
+      // carries it via meetingData; reprocess carries it as a top-level
+      // summaryFile field (no meetingData). Treat both the same below.
+      const finishedSummaryFile =
+        data.meetingData?.session_info.summary_file ?? data.summaryFile ?? null;
+      if (data.success && finishedSummaryFile) {
+        const currentRoute = routeFromHash(window.location.hash);
+        const finishedMeetingRoute = `/meetings/${encodeURIComponent(finishedSummaryFile)}`;
+        if (currentRoute === '/meetings/processing') {
+          // Watching it finish on the processing page → take them straight
+          // into the now-ready note.
+          navigate(finishedMeetingRoute);
+        } else if (currentRoute !== finishedMeetingRoute) {
+          // Anywhere else (Home, Chat, Settings, recording another note,
+          // a different meeting's detail page) → fire a native "Note
+          // ready" banner so the user knows their work-in-progress
+          // finished. Route comparison rather than window-focus check on
+          // purpose: it means a minimised Steno / alt-tabbed user who
+          // *was* sitting on this note's detail page still doesn't get a
+          // notification, because the route hasn't changed. They'll see
+          // the static summary the moment they come back.
+          //
+          // Click just focuses Steno (mirrors the auto-stop notification)
+          // — no navigation, so a back-to-back recording isn't yanked
+          // out and the user can find the new note in the sidebar / Home
+          // list at the top once Steno is focused.
+          const title =
+            data.meetingData?.session_info.name?.trim() ||
+            data.sessionName?.trim() ||
+            'Your note has finished processing';
+          // Note: no `notifications_enabled` pre-check here — the IPC
+          // handler in main.js gates internally via
+          // `notificationsEnabled()` and short-circuits when the user
+          // has Desktop notifications disabled in Settings. Doing a
+          // round-trip from the renderer to fetch the setting before
+          // firing this IPC would be a wasted poll. The gate stays
+          // single-source-of-truth in main.
+          void ipc()
+            .settings.showNoteReadyNotification({ title })
+            .catch(() => {
+              // Notification failure isn't fatal — the note is still
+              // visible in Home + sidebar. Don't bubble up.
+            });
+        }
+        // else: on this note's own detail page → nothing. The streaming
+        // UI's own listener swaps to the static view; no extra signal
+        // needed.
       }
       // Clear the live-draft entry AFTER any other processing-complete
       // listeners (notably Processing.tsx's, which reads draft.title to
