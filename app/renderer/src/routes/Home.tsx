@@ -43,6 +43,19 @@ export function Home({ mode }: HomeProps) {
     return map;
   }, [folders.data]);
 
+  // 60-second tick so the upcoming filter below re-evaluates and
+  // events whose end time has passed roll off the list without
+  // waiting for the next calendar refetch (which could be many
+  // minutes). Minute precision is plenty — events are minute-grained
+  // at best. Gated on `mode === 'home'` so the timer doesn't run on
+  // /meetings where this widget isn't rendered.
+  const [upcomingTickMs, setUpcomingTickMs] = React.useState<number>(() => Date.now());
+  React.useEffect(() => {
+    if (mode !== 'home') return;
+    const id = setInterval(() => setUpcomingTickMs(Date.now()), 60_000);
+    return () => clearInterval(id);
+  }, [mode]);
+
   // Today's relevant events: anything that overlaps with today AND
   // hasn't ended yet. Includes timed events for today, all-day events
   // for today, AND multi-day events (conference, OOO block) that
@@ -69,7 +82,9 @@ export function Home({ mode }: HomeProps) {
         return true;
       })
       .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
-  }, [calendar.data]);
+    // upcomingTickMs included so the filter re-runs each minute and
+    // ended events roll off without waiting for calendar.refetch.
+  }, [calendar.data, upcomingTickMs]);
 
   const UPCOMING_PAGE_SIZE = 3;
   const upcomingPageCount = Math.max(
