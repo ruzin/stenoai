@@ -24,6 +24,10 @@ interface LiveDraftStore {
   /** Drop the draft for a finished session so the next "New note" with the
    *  same sessionName (e.g. the default 'Meeting' / 'Note') starts clean. */
   clear: (sessionName: string) => void;
+  /** Put a previously-snapshot draft back. Used to undo a speculative
+   *  `clear()` when the action that motivated it (e.g. start-recording IPC)
+   *  later fails. */
+  restore: (sessionName: string, draft: DraftEntry) => void;
 }
 
 export const useLiveDraftStore = create<LiveDraftStore>((set) => ({
@@ -64,6 +68,10 @@ export const useLiveDraftStore = create<LiveDraftStore>((set) => ({
       const { [sessionName]: _drop, ...rest } = state.drafts;
       return { drafts: rest };
     }),
+  restore: (sessionName, draft) =>
+    set((state) => ({
+      drafts: { ...state.drafts, [sessionName]: draft },
+    })),
 }));
 
 /** Non-hook accessor for the current draft (use inside event handlers). */

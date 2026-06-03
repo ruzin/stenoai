@@ -81,6 +81,11 @@ export function useRecording() {
       // so it'll be lost. Acceptable trade-off: the leak case is common,
       // the rename case is rare and recoverable via manual rename
       // post-processing.
+      //
+      // Snapshot before clearing so we can put it back if start-recording
+      // fails — without restore, a transient IPC error would silently drop
+      // the previous session's in-memory state.
+      const priorDraft = useLiveDraftStore.getState().drafts[optimisticName];
       useLiveDraftStore.getState().clear(optimisticName);
       qc.setQueryData(queueKey, {
         success: true,
@@ -99,6 +104,12 @@ export function useRecording() {
         return data;
       } catch (err) {
         // Roll back optimistic state and leave the dead /recording page.
+        // Restore the prior draft too — the recording never started so the
+        // previous session (probably still mid-processing) shouldn't lose
+        // its in-memory title / notes.
+        if (priorDraft) {
+          useLiveDraftStore.getState().restore(optimisticName, priorDraft);
+        }
         qc.invalidateQueries({ queryKey: queueKey });
         navigate('/');
         throw err;
