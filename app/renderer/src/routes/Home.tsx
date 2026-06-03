@@ -63,7 +63,12 @@ export function Home({ mode }: HomeProps) {
   // context the user might want to glance at.
   const upcomingToday = React.useMemo<CalendarEvent[]>(() => {
     if (!calendar.data || calendar.data.needsAuth) return [];
-    const now = new Date();
+    // Use the tick as the time source so the memo is a pure function of
+    // its deps (same inputs → same output) — rather than reading
+    // Date.now() inside, which would leave upcomingTickMs as an
+    // ostensibly-unused dep used only to trigger re-runs. 60s
+    // staleness is well within tolerance for "has this event ended."
+    const now = new Date(upcomingTickMs);
     const todayY = now.getFullYear();
     const todayM = now.getMonth();
     const todayD = now.getDate();
@@ -82,8 +87,6 @@ export function Home({ mode }: HomeProps) {
         return true;
       })
       .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
-    // upcomingTickMs included so the filter re-runs each minute and
-    // ended events roll off without waiting for calendar.refetch.
   }, [calendar.data, upcomingTickMs]);
 
   const UPCOMING_PAGE_SIZE = 3;
