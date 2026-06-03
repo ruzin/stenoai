@@ -108,6 +108,13 @@ const stenoai = {
     getDir: () => invoke('get-recordings-dir'),
   },
 
+  liveTranscript: {
+    // Snapshot of segments + model-load status for the in-flight recording.
+    // Renderer calls this once on mount, then subscribes to
+    // on.liveTranscriptChunk for the tail.
+    getState: () => invoke('get-live-transcript-state'),
+  },
+
   meetings: {
     list: () => invoke('list-meetings'),
     update: (summaryFile, patch) => invoke('update-meeting', summaryFile, patch),
@@ -265,6 +272,9 @@ const stenoai = {
     modelPullComplete: (cb) => subscribe('model-pull-complete', cb),
     whisperPullProgress: (cb) => subscribe('whisper-pull-progress', cb),
     whisperPullComplete: (cb) => subscribe('whisper-pull-complete', cb),
+    liveTranscriptReady: (cb) => subscribe('live-transcript-ready', cb),
+    liveTranscriptChunk: (cb) => subscribe('live-transcript-chunk', cb),
+    liveTranscriptError: (cb) => subscribe('live-transcript-error', cb),
     updateAvailable: (cb) => subscribe('update-available', cb),
     updateDownloadProgress: (cb) => subscribe('update-download-progress', cb),
     updateDownloaded: (cb) => subscribe('update-downloaded', cb),

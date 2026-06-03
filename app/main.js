@@ -1944,6 +1944,21 @@ ipcMain.handle('get-queue-status', async () => {
   };
 });
 
+// Returns the current live transcript buffer for the in-flight recording.
+// Used by LiveTranscriptPanel after a late mount (e.g. user navigated away
+// and back during recording) to backfill segments before subscribing to
+// `live-transcript-chunk` for the tail. Returns an empty array when no
+// recording is active.
+ipcMain.handle('get-live-transcript-state', async () => {
+  return {
+    success: true,
+    sessionName: liveTranscriptState.sessionName,
+    segments: liveTranscriptState.segments.slice(),
+    ready: liveTranscriptState.ready,
+    error: liveTranscriptState.error,
+  };
+});
+
 // Synchronously read system_audio_enabled from the user config so
 // start-recording-ui can decide whether to spawn the Python `record`
 // subprocess (off) or let the renderer drive the dual-stream capture (on).
@@ -1990,6 +2005,20 @@ let systemAudioRecordingActive = false;  // Track system audio recording for tra
 let currentRecordingProcess = null;
 let currentRecordingSessionName = null;  // Surfaced in get-queue-status so renderer knows which meeting is live
 let processingQueue = [];
+// Live-transcript ring buffer for the in-flight recording. Populated by the
+// Python `record --live` subprocess's LIVE_SEG: stdout lines. The renderer
+// subscribes to `live-transcript-chunk` for new entries and calls
+// `liveTranscript.getState()` after a late mount to backfill. Reset on every
+// fresh recording start so a previous session's segments don't leak into
+// the next note. ``ready`` flips true once the Python side has loaded the
+// Parakeet model; ``error`` carries the last failure reason (model failed
+// to load, MLX missing, etc.) for the UI to surface.
+let liveTranscriptState = {
+  sessionName: null,
+  segments: [],
+  ready: false,
+  error: null,
+};
 let isProcessing = false;
 let currentProcessingJob = null;
 // Reprocess runs as a side-channel from the main processing queue (different
@@ -2292,11 +2321,24 @@ ipcMain.handle('start-recording-ui', async (_, sessionName) => {
     // recorder subprocess can summarise via whichever provider is active.
     const recordEnv = getAiEnv();
 
-    currentRecordingProcess = spawn(getBackendPath(), ['record', '7200', actualSessionName], {
+    // --live engages the Parakeet streaming consumer thread inside the
+    // record subprocess. The subprocess loads the model lazily, so this
+    // doesn't delay recording start — the user sees "Recording" instantly
+    // and LIVE_READY arrives a moment later once MLX has weights in memory.
+    currentRecordingProcess = spawn(getBackendPath(), ['record', '7200', actualSessionName, '--live'], {
       cwd: getBackendCwd(),
       env: Object.keys(recordEnv).length > 0 ? { ...require('process').env, ...recordEnv } : undefined
     });
     currentRecordingSessionName = actualSessionName;
+    // Reset the live transcript buffer for this session. We do it here
+    // (before spawn parses anything) so a late-mounting LiveTranscriptPanel
+    // can never see a stale segments array from a previous recording.
+    liveTranscriptState = {
+      sessionName: actualSessionName,
+      segments: [],
+      ready: false,
+      error: null,
+    };
     startRecordingRuntimeState();
 
     let hasStarted = false;
@@ -2335,6 +2377,60 @@ ipcMain.handle('start-recording-ui', async (_, sessionName) => {
         } else if (line === 'STREAM_COMPLETE') {
           if (mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.webContents.send('summary-complete', { success: true, sessionName: actualSessionName });
+          }
+        } else if (line.startsWith('LIVE_READY:')) {
+          // Model finished loading — UI uses this to swap "Loading…" for
+          // the empty consent-only state.
+          liveTranscriptState.ready = true;
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('live-transcript-ready', {
+              sessionName: actualSessionName,
+            });
+          }
+        } else if (line.startsWith('LIVE_SEG:')) {
+          try {
+            const seg = JSON.parse(line.slice('LIVE_SEG:'.length));
+            // Map snake_case wire shape to camelCase for the renderer.
+            const segment = {
+              text: seg.text,
+              start: seg.start,
+              end: seg.end,
+              isFinal: !!seg.is_final,
+            };
+            // Final segments append. Partials overwrite the trailing entry
+            // when it was also a partial; otherwise they're appended as
+            // the new tail.
+            if (segment.isFinal) {
+              liveTranscriptState.segments.push(segment);
+            } else {
+              const tail = liveTranscriptState.segments[liveTranscriptState.segments.length - 1];
+              if (tail && !tail.isFinal) {
+                liveTranscriptState.segments[liveTranscriptState.segments.length - 1] = segment;
+              } else {
+                liveTranscriptState.segments.push(segment);
+              }
+            }
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('live-transcript-chunk', {
+                sessionName: actualSessionName,
+                segment,
+              });
+            }
+          } catch (e) {
+            sendDebugLog(`LIVE_SEG parse error: ${e.message}`);
+          }
+        } else if (line.startsWith('LIVE_ERROR:')) {
+          try {
+            const payload = JSON.parse(line.slice('LIVE_ERROR:'.length));
+            liveTranscriptState.error = payload;
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('live-transcript-error', {
+                sessionName: actualSessionName,
+                ...payload,
+              });
+            }
+          } catch (e) {
+            sendDebugLog(`LIVE_ERROR parse error: ${e.message}`);
           }
         } else if (line.startsWith('SAVED:')) {
           savedSummaryFile = line.slice(6).trim();

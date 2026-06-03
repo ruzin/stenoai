@@ -10,6 +10,7 @@ import wave
 import threading
 import time
 import atexit
+import queue
 from pathlib import Path
 from typing import Optional
 import logging
@@ -49,6 +50,15 @@ class AudioRecorder:
 
         # Simple state - no persistence for now
         self.stream = None
+
+        # Optional fan-out queue for live consumers (e.g. the Parakeet
+        # streaming transcriber). Off by default — the audio callback only
+        # pays a queue.put() per chunk when streaming is explicitly enabled
+        # via ``enable_stream()``. Bounded so a stalled consumer can't grow
+        # memory without bound; oldest chunks are dropped under back-pressure
+        # rather than blocking the audio callback (which would underrun the
+        # input stream).
+        self.stream_queue: Optional[queue.Queue] = None
     
     def _load_state(self):
         """No persistence - start fresh each time."""
@@ -165,6 +175,21 @@ class AudioRecorder:
                     logger.warning(f"Error closing audio stream: {e}")
             self.stream = None
             
+    def enable_stream(self, maxsize: int = 256) -> queue.Queue:
+        """Start fanning audio chunks into a queue for a live consumer.
+
+        Must be called BEFORE ``start_recording()``. Returns the queue
+        the consumer should read from. Each item is the same float32 numpy
+        array the recorder accumulates internally — same shape and rate.
+
+        ``maxsize`` bounds the queue at roughly 256 callback buffers (~6 s
+        at 44.1 kHz with blocksize=1024). If the consumer falls behind that,
+        we drop the oldest chunk rather than blocking the audio callback.
+        """
+        if self.stream_queue is None:
+            self.stream_queue = queue.Queue(maxsize=maxsize)
+        return self.stream_queue
+
     def _audio_callback(self, indata, frames, time, status):
         """Callback function for audio input stream."""
         if status:
@@ -173,6 +198,23 @@ class AudioRecorder:
             # Thread-safe append to audio_data (skip when paused)
             with self.audio_lock:
                 self.audio_data.append(indata.copy())
+            # Fan-out to the live stream consumer when enabled. Non-blocking:
+            # if the consumer (Parakeet thread) is mid-decode and the queue
+            # fills, we drop the oldest chunk and put the newest. ASR cares
+            # more about recent audio than back-pressuring the mic.
+            q = self.stream_queue
+            if q is not None:
+                try:
+                    q.put_nowait(indata.copy())
+                except queue.Full:
+                    try:
+                        q.get_nowait()
+                    except queue.Empty:
+                        pass
+                    try:
+                        q.put_nowait(indata.copy())
+                    except queue.Full:
+                        pass
             
     def save_recording(self, filepath: Path) -> bool:
         """Save the recorded audio to a WAV file."""

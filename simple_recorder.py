@@ -1134,20 +1134,130 @@ def status():
             print(f"  • {recording.name} ({size_mb:.1f}MB)")
 
 
+def _live_parakeet_consumer(stream_queue, source_rate, stop_event):
+    """Run a Parakeet streaming session on a side thread fed by the recorder.
+
+    Reads float32 chunks from ``stream_queue``, resamples to the model's
+    expected rate (typically 16 kHz) using linear interpolation, pushes them
+    to a ``StreamingSession``, and emits ``LIVE_SEG:<json>`` lines on stdout
+    that ``app/main.js`` parses into ``live-transcript-chunk`` IPC events.
+
+    Linear resampling is intentionally cheap: a 44.1 → 16 kHz downsample with
+    no anti-alias filter is suboptimal but acceptable for ASR — the model's
+    feature extractor smooths over residual aliasing. We can swap in
+    ``scipy.signal.resample_poly`` later without changing the contract here.
+
+    The consumer prints a single ``LIVE_READY`` / ``LIVE_ERROR`` line on
+    startup so main.js can distinguish "model still loading" from "model
+    failed to load" — without it, an unbundled MLX would silently never
+    produce segments and the panel would just stay empty.
+    """
+    import queue as _q
+    try:
+        import numpy as _np
+    except ImportError:
+        print("LIVE_ERROR:" + json.dumps({"stage": "import_numpy"}), flush=True)
+        return
+
+    try:
+        from src.parakeet import StreamingSession, model_sample_rate
+    except ImportError as e:
+        print("LIVE_ERROR:" + json.dumps({
+            "stage": "import_parakeet", "error": str(e)
+        }), flush=True)
+        return
+
+    try:
+        target_rate = model_sample_rate()
+    except Exception as e:
+        print("LIVE_ERROR:" + json.dumps({
+            "stage": "load_model", "error": str(e)
+        }), flush=True)
+        return
+
+    print("LIVE_READY:" + json.dumps({
+        "sample_rate": target_rate, "source_rate": source_rate
+    }), flush=True)
+
+    def _emit(seg):
+        print("LIVE_SEG:" + json.dumps({
+            "text": seg.text,
+            "start": seg.start,
+            "end": seg.end,
+            "is_final": seg.is_final,
+        }), flush=True)
+
+    def _prepare(chunk):
+        # sounddevice gives float32. Multichannel inputs (stereo recordings)
+        # collapse to the left channel for live preview — diarisation is a
+        # post-stop concern.
+        arr = _np.asarray(chunk, dtype=_np.float32)
+        if arr.ndim > 1:
+            arr = arr[:, 0]
+        if source_rate == target_rate:
+            return arr
+        new_len = int(len(arr) * target_rate / source_rate)
+        if new_len <= 0:
+            return None
+        return _np.interp(
+            _np.linspace(0.0, len(arr) - 1, new_len),
+            _np.arange(len(arr)),
+            arr,
+        ).astype(_np.float32)
+
+    try:
+        with StreamingSession() as session:
+            while not stop_event.is_set():
+                try:
+                    chunk = stream_queue.get(timeout=0.1)
+                except _q.Empty:
+                    continue
+                prepared = _prepare(chunk)
+                if prepared is None or len(prepared) == 0:
+                    continue
+                session.push(prepared)
+                for seg in session.drain():
+                    _emit(seg)
+
+            # Drain anything the recorder enqueued between stop_event being
+            # set and us noticing — otherwise the last second of audio gets
+            # discarded silently.
+            while True:
+                try:
+                    chunk = stream_queue.get_nowait()
+                except _q.Empty:
+                    break
+                prepared = _prepare(chunk)
+                if prepared is not None and len(prepared) > 0:
+                    session.push(prepared)
+            for seg in session.finalize():
+                _emit(seg)
+    except Exception as e:
+        print("LIVE_ERROR:" + json.dumps({
+            "stage": "stream", "error": str(e)
+        }), flush=True)
+
+
 @cli.command()
 @click.argument('duration', type=int, default=10)
 @click.argument('session_name', default='Recording')
-def record(duration, session_name):
+@click.option('--live/--no-live', default=False,
+              help='Emit LIVE_SEG:<json> lines from Parakeet while recording')
+def record(duration, session_name, live):
     """Record audio for specified duration and process it"""
     import signal
     import sys
 
     print(f"🎤 Recording {duration} seconds of audio for '{session_name}'...")
+    if live:
+        print("🟢 Live transcription enabled (Parakeet TDT v3)")
 
     recorder = SimpleRecorder()
     recording_path = None
     recording_started = False
     is_paused = False
+    live_thread = None
+    live_stop = None
 
     def pause_handler(signum, frame):
         """Handle SIGUSR1 to pause recording"""
@@ -1194,6 +1304,14 @@ def record(duration, session_name):
             print("⏹️ Stopping recording and starting processing pipeline...")
             try:
                 final_path = recorder.stop_recording()
+                # Drain the live Parakeet consumer (if running) before the
+                # summarizer takes over stdout. Setting the event after
+                # stop_recording guarantees the audio queue is no longer
+                # being written to — the consumer will drain what's left
+                # and call finalize() on the way out, then we join.
+                if live_thread is not None and live_stop is not None:
+                    live_stop.set()
+                    live_thread.join(timeout=10.0)
                 if final_path:
                     print(f"✅ Recording saved: {final_path}")
                     
@@ -1247,6 +1365,25 @@ def record(duration, session_name):
     signal.signal(signal.SIGINT, signal_handler)
     
     try:
+        # When --live is set, stand up the Parakeet streaming consumer
+        # BEFORE start_recording fires so the audio callback's first chunk
+        # has a non-None queue to publish into. The model is loaded on the
+        # consumer thread, so start_recording returns instantly even if
+        # MLX takes a couple of seconds to bring weights up — the user
+        # hears recording start immediately and live segments stream in
+        # once the model is ready.
+        if live and recorder.audio_recorder is not None:
+            import threading as _threading
+            live_stop = _threading.Event()
+            stream_q = recorder.audio_recorder.enable_stream()
+            live_thread = _threading.Thread(
+                target=_live_parakeet_consumer,
+                args=(stream_q, recorder.audio_recorder.sample_rate, live_stop),
+                daemon=True,
+                name='parakeet-live',
+            )
+            live_thread.start()
+
         # Start recording
         recording_path = recorder.start_recording(session_name)
         recording_started = True
@@ -1270,6 +1407,14 @@ def record(duration, session_name):
         
         # Normal completion (if not interrupted)
         final_path = recorder.stop_recording()
+        # Mirror the signal_handler teardown: stop audio first, then signal
+        # the live consumer to finalize, then join. Without this the
+        # consumer would keep running into the summarizer's stdout window
+        # and the renderer would see late LIVE_SEG lines arrive after
+        # processing-complete.
+        if live_thread is not None and live_stop is not None:
+            live_stop.set()
+            live_thread.join(timeout=10.0)
         if not final_path:
             print("❌ Recording failed - no audio data collected")
             return
@@ -3025,6 +3170,44 @@ def check_adapter_cmd(url: str):
         print(f"FAIL {url}")
         print(f"  error: {e}")
         sys.exit(1)
+
+
+@cli.command(name='spike-parakeet')
+def spike_parakeet_cmd():
+    """Run the Parakeet TDT v3 spike from inside the bundled binary.
+
+    Equivalent to ``python scripts/spike_parakeet.py`` but reachable from the
+    PyInstaller bundle — that's the run that matters for proving MLX +
+    parakeet-mlx survive the hardened runtime + codesign.
+    """
+    try:
+        # Adjust sys.path so the dev-mode invocation finds scripts/ without
+        # the user having to set PYTHONPATH. In a PyInstaller bundle the
+        # script lives at sys._MEIPASS/scripts/ (datas=('scripts','scripts')
+        # would be required to ship it — but we just inline the spike here
+        # so the bundle doesn't need extra data files).
+        from scripts.spike_parakeet import main as spike_main
+    except ImportError:
+        # PyInstaller bundle: the scripts/ tree isn't copied in (datas don't
+        # include it). Re-import the spike logic inline by exec'ing the file
+        # if it's beside us, otherwise just import the modules directly and
+        # run the equivalent loop here.
+        import importlib
+        try:
+            mod = importlib.import_module('scripts.spike_parakeet')
+            spike_main = mod.main
+        except ImportError:
+            click.echo(
+                json.dumps({
+                    "event": "error",
+                    "stage": "import_spike",
+                    "message": "scripts/spike_parakeet.py not bundled; "
+                               "run the dev-mode invocation instead."
+                }),
+                err=True,
+            )
+            sys.exit(2)
+    sys.exit(spike_main())
 
 
 if __name__ == '__main__':
