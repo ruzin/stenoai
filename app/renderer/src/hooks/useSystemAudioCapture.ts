@@ -303,7 +303,14 @@ export function useSystemAudioCapture() {
               // of pre-emptively before the stop call) so a failed stop
               // doesn't permanently disarm auto-stop for the session.
               teardownSilenceDetector();
-              const notifResult = await bridge.settings.showSilenceAutoStopNotification(minutes);
+              const notifResult = await bridge.settings.showSilenceAutoStopNotification({
+                minutes,
+                // Pre-processing name — calendar event title for
+                // auto-detect recordings, "Note" for the default
+                // placeholder, user-typed otherwise. Matches what's
+                // visible in the sidebar at the moment of stop.
+                sessionName: sessionNameRef.current ?? null,
+              });
               if (!notifResult.success) {
                 // Notification failure isn't fatal — the recording has
                 // already been finalised — but worth logging for support.

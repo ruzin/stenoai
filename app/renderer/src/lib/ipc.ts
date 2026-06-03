@@ -275,6 +275,12 @@ export interface QueueStatus {
   isProcessing: boolean;
   queueSize: number;
   currentJob: string | null;
+  /** Side-channel tracking for a `reprocess-meeting` invocation, which
+   *  doesn't go through `processingQueue` / `currentJob`. Populated by
+   *  the reprocess IPC for the lifetime of the spawned Python subprocess
+   *  and cleared in its finally block. Renderer consumers use this to
+   *  flag the matching existing meeting row as in-progress on Home. */
+  currentReprocess: { summaryFile: string; sessionName: string | null } | null;
   hasRecording: boolean;
   isPaused: boolean;
   elapsedSeconds: number;
@@ -396,6 +402,11 @@ export interface ProcessingCompleteEvent {
   sessionName: string;
   message: string;
   meetingData?: Meeting;
+  /** Populated by the reprocess flow (which doesn't carry a freshly-
+   *  generated Meeting payload like the recording flow does). Lets the
+   *  app-level cleanup find the matching streamCache entry to clear
+   *  even when MeetingDetail unmounted mid-reprocess. */
+  summaryFile?: string;
 }
 export interface QueryChunkEvent {
   queryId: string;
@@ -573,7 +584,14 @@ export interface StenoaiBridge {
     getSilenceAutoStop: RequestFn<[], GetSilenceAutoStopResponse>;
     setSilenceAutoStopEnabled: RequestFn<[v: boolean], SetSilenceAutoStopEnabledResponse>;
     setSilenceAutoStopMinutes: RequestFn<[v: number], SetSilenceAutoStopMinutesResponse>;
-    showSilenceAutoStopNotification: RequestFn<[minutes: number], Result<Record<string, never>>>;
+    showSilenceAutoStopNotification: RequestFn<
+      [payload: { minutes: number; sessionName: string | null }],
+      Result<Record<string, never>>
+    >;
+    showNoteReadyNotification: RequestFn<
+      [payload: { title: string; summaryFile: string }],
+      Result<Record<string, never>>
+    >;
     getLanguage: RequestFn<[], GetLanguageResponse>;
     setLanguage: RequestFn<[code: string], Result<Record<string, never>>>;
     getUserName: RequestFn<[], GetUserNameResponse>;
@@ -629,6 +647,10 @@ export interface StenoaiBridge {
     summaryTitle: Subscribe<SummaryTitleEvent>;
     summaryComplete: Subscribe<SummaryCompleteEvent>;
     processingComplete: Subscribe<ProcessingCompleteEvent>;
+    /** Fires when the user clicks the "Note ready" macOS notification —
+     *  payload is the meeting's summaryFile. The renderer-side listener
+     *  navigates to the matching detail page. */
+    openMeetingFromNotification: Subscribe<string>;
     queryChunk: Subscribe<QueryChunkEvent>;
     queryDone: Subscribe<QueryDoneEvent>;
     modelPullProgress: Subscribe<ModelPullProgressEvent>;
