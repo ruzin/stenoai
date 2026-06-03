@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { PencilLine, RefreshCw, Search, Square, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, PencilLine, RefreshCw, Search, Square, X } from 'lucide-react';
 import { MeetingsShell } from '@/components/MeetingsShell';
 import { UpcomingCard } from '@/components/home/UpcomingCard';
 import { PreviousRow } from '@/components/home/PreviousRow';
@@ -10,7 +10,7 @@ import { useMeetings } from '@/hooks/useMeetings';
 import { useRecording } from '@/hooks/useRecording';
 import { useCalendarEvents } from '@/hooks/useCalendarEvents';
 import { useFolders } from '@/hooks/useFolders';
-import type { Meeting } from '@/lib/ipc';
+import type { CalendarEvent, Meeting } from '@/lib/ipc';
 import { shortcut } from '@/lib/utils';
 import { navigate } from '@/lib/router';
 
@@ -43,8 +43,73 @@ export function Home({ mode }: HomeProps) {
     return map;
   }, [folders.data]);
 
-  const upcoming =
-    calendar.data && !calendar.data.needsAuth ? calendar.data.events.slice(0, 3) : [];
+  // 60-second tick so the upcoming filter below re-evaluates and
+  // events whose end time has passed roll off the list without
+  // waiting for the next calendar refetch (which could be many
+  // minutes). Minute precision is plenty — events are minute-grained
+  // at best. Gated on `mode === 'home'` so the timer doesn't run on
+  // /meetings where this widget isn't rendered.
+  const [upcomingTickMs, setUpcomingTickMs] = React.useState<number>(() => Date.now());
+  React.useEffect(() => {
+    if (mode !== 'home') return;
+    const id = setInterval(() => setUpcomingTickMs(Date.now()), 60_000);
+    return () => clearInterval(id);
+  }, [mode]);
+
+  // Today's relevant events: anything that overlaps with today AND
+  // hasn't ended yet. Includes timed events for today, all-day events
+  // for today, AND multi-day events (conference, OOO block) that
+  // started in the past but are still ongoing — those are useful
+  // context the user might want to glance at.
+  const upcomingToday = React.useMemo<CalendarEvent[]>(() => {
+    if (!calendar.data || calendar.data.needsAuth) return [];
+    // Use the tick as the time source so the memo is a pure function of
+    // its deps (same inputs → same output) — rather than reading
+    // Date.now() inside, which would leave upcomingTickMs as an
+    // ostensibly-unused dep used only to trigger re-runs. 60s
+    // staleness is well within tolerance for "has this event ended."
+    const now = new Date(upcomingTickMs);
+    const todayY = now.getFullYear();
+    const todayM = now.getMonth();
+    const todayD = now.getDate();
+    // 00:00 tomorrow — events that start at or after this aren't "today."
+    const startOfTomorrow = new Date(todayY, todayM, todayD + 1).getTime();
+    const nowMs = now.getTime();
+    return calendar.data.events
+      .filter((e) => {
+        const start = new Date(e.start).getTime();
+        const end = new Date(e.end).getTime();
+        if (Number.isNaN(start) || Number.isNaN(end)) return false;
+        // Event must end after now (not in the past).
+        if (end <= nowMs) return false;
+        // Event must start before end-of-today (so it overlaps today).
+        if (start >= startOfTomorrow) return false;
+        return true;
+      })
+      .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
+  }, [calendar.data, upcomingTickMs]);
+
+  const UPCOMING_PAGE_SIZE = 3;
+  const upcomingPageCount = Math.max(
+    1,
+    Math.ceil(upcomingToday.length / UPCOMING_PAGE_SIZE),
+  );
+  const [upcomingPage, setUpcomingPage] = React.useState(0);
+  // Clamp the page when the list shrinks underneath us — e.g. an event
+  // ends and rolls off, or the user reloads the calendar with fewer
+  // entries. Without this the user could be stuck on an empty page 3
+  // after the count drops to 5.
+  React.useEffect(() => {
+    if (upcomingPage >= upcomingPageCount) {
+      setUpcomingPage(Math.max(0, upcomingPageCount - 1));
+    }
+  }, [upcomingPage, upcomingPageCount]);
+  const upcomingVisible = upcomingToday.slice(
+    upcomingPage * UPCOMING_PAGE_SIZE,
+    (upcomingPage + 1) * UPCOMING_PAGE_SIZE,
+  );
+  const canPagePrev = upcomingPage > 0;
+  const canPageNext = upcomingPage < upcomingPageCount - 1;
 
   const previous = meetings.data ?? [];
 
@@ -147,31 +212,60 @@ export function Home({ mode }: HomeProps) {
                 className="max-w-[52ch] text-sm leading-[1.55]"
                 style={{ color: 'var(--fg-2)' }}
               >
-                {summaryLine(upcoming.length)}
+                {summaryLine(upcomingToday.length)}
               </p>
             </div>
           )}
 
-          {upcoming.length > 0 && mode === 'home' && (
+          {upcomingToday.length > 0 && mode === 'home' && (
             <section className="mb-10">
               <SectionHead
                 title="Upcoming"
-                count={upcoming.length}
+                count={upcomingToday.length}
                 action={
-                  <button
-                    type="button"
-                    className="inline-flex items-center rounded p-0.5 transition-colors hover:bg-[color:var(--surface-hover)] disabled:opacity-50"
-                    title="Check for new calendar events"
-                    onClick={() => calendar.refetch()}
-                    disabled={calendar.isFetching}
-                    style={{ color: 'var(--fg-2)' }}
-                  >
-                    <RefreshCw className={`size-3 ${calendar.isFetching ? 'animate-spin' : ''}`} />
-                  </button>
+                  // Outer gap separates the page-nav cluster from the
+                  // refresh button so they read as two distinct groups.
+                  // Inner cluster keeps < and > tight against each other.
+                  <div className="flex items-center gap-1.5">
+                    {upcomingPageCount > 1 && (
+                      <div className="flex items-center gap-0.5">
+                        <button
+                          type="button"
+                          className="inline-flex items-center rounded p-1 transition-colors hover:bg-[color:var(--surface-hover)] disabled:opacity-30 disabled:hover:bg-transparent"
+                          title="Previous"
+                          onClick={() => setUpcomingPage((p) => Math.max(0, p - 1))}
+                          disabled={!canPagePrev}
+                          style={{ color: 'var(--fg-2)' }}
+                        >
+                          <ChevronLeft className="size-[14px]" />
+                        </button>
+                        <button
+                          type="button"
+                          className="inline-flex items-center rounded p-1 transition-colors hover:bg-[color:var(--surface-hover)] disabled:opacity-30 disabled:hover:bg-transparent"
+                          title="Next"
+                          onClick={() => setUpcomingPage((p) => Math.min(upcomingPageCount - 1, p + 1))}
+                          disabled={!canPageNext}
+                          style={{ color: 'var(--fg-2)' }}
+                        >
+                          <ChevronRight className="size-[14px]" />
+                        </button>
+                      </div>
+                    )}
+                    <button
+                      type="button"
+                      className="inline-flex items-center rounded p-1 transition-colors hover:bg-[color:var(--surface-hover)] disabled:opacity-50"
+                      title="Check for new calendar events"
+                      onClick={() => calendar.refetch()}
+                      disabled={calendar.isFetching}
+                      style={{ color: 'var(--fg-2)' }}
+                    >
+                      <RefreshCw className={`size-[14px] ${calendar.isFetching ? 'animate-spin' : ''}`} />
+                    </button>
+                  </div>
                 }
               />
               <div className="flex flex-col gap-2">
-                {upcoming.map((event) => (
+                {upcomingVisible.map((event) => (
                   <UpcomingCard key={event.id} event={event} />
                 ))}
               </div>
