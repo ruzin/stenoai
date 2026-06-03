@@ -41,10 +41,10 @@
 If you're looking for a hosted desktop recording API, consider checking out [Recall.ai](https://www.recall.ai/product/desktop-recording-sdk?utm_source=github&utm_medium=sponsorship&utm_campaign=ruzin-stenoai), an API that records Zoom, Google Meet, Microsoft Teams, in-person meetings, and more.
 
 ## 📢 What's New
+- **2026-06-03** 🗒️ Clean notes panel on back-to-back recordings — Hit "+ New note" while the previous one is still processing and the new recording no longer shows the previous session's typed notes. Fixes a stale in-memory draft that survived between recordings sharing the default "Note" name.
 - **2026-06-03** 📅 Paginated upcoming events on Home — The Upcoming widget now shows all of today's events with `< >` page navigation instead of silently dropping the 4th+ event. Past events roll off as the day progresses; multi-day blocks (OOO, conferences) show inline as context.
 - **2026-06-03** 👀 Background processing visible on Home + "Note ready" banner — Stop a recording or hit Reprocess and the row gets a processing badge on Home through to completion. Steno no longer yanks you to the finished note when you're mid-recording another one; instead, a native "Note ready" banner fires when your note finishes processing.
 - **2026-06-02** 🤫 Auto-stop on silence — Recordings auto-finalise after 15 minutes of bilateral silence (mic + system audio both quiet). For the "I walked away after the meeting ended and forgot to stop" case. Configurable in Settings → General (2 / 5 / 10 / 15 / 30 min), with a macOS notification when it triggers.
-- **2026-06-01** 🔒 Enterprise adapter HTTPS fix — Summaries, meeting titles, and shared-note backups via your org's Steno adapter were silently failing with a TLS verification error on clean Macs without Homebrew. The bundle now ships its own CA trust store and uses it unconditionally — no user action required.
 
 
 ## Features
