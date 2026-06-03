@@ -317,6 +317,13 @@ export function useRecordingProcessingEffects() {
             data.meetingData?.session_info.name?.trim() ||
             data.sessionName?.trim() ||
             'Your note has finished processing';
+          // Note: no `notifications_enabled` pre-check here — the IPC
+          // handler in main.js gates internally via
+          // `notificationsEnabled()` and short-circuits when the user
+          // has Desktop notifications disabled in Settings. Doing a
+          // round-trip from the renderer to fetch the setting before
+          // firing this IPC would be a wasted poll. The gate stays
+          // single-source-of-truth in main.
           void ipc()
             .settings.showNoteReadyNotification({ title })
             .catch(() => {
