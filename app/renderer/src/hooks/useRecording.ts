@@ -14,6 +14,12 @@ export type RecordingStatus = 'idle' | 'recording' | 'paused' | 'processing';
 
 const queueKey = ['recording', 'queue'] as const;
 
+/** Stable empty-Set sentinel so consumers (useMeetings) don't see a
+ *  fresh reference each render when there are no active reprocesses —
+ *  keeps their useMemo deps shallow-equal and avoids re-mapping the
+ *  whole meetings list every queue poll. */
+const EMPTY_REPROCESS_SET: ReadonlySet<string> = new Set<string>();
+
 export function useRecording() {
   const qc = useQueryClient();
 
@@ -33,6 +39,17 @@ export function useRecording() {
     if (q?.isProcessing) return 'processing';
     return 'idle';
   }, [queue.data]);
+
+  // Memoised so the Set reference is stable across renders when the
+  // backend's currentReprocesses array contents haven't changed —
+  // useMeetings's dependency on this is then satisfied by a referential
+  // equality check rather than re-running the meeting-list map on every
+  // queue poll.
+  const reprocessingSummaryFiles = React.useMemo(() => {
+    const arr = queue.data?.currentReprocesses;
+    if (!arr || arr.length === 0) return EMPTY_REPROCESS_SET;
+    return new Set(arr.map((r) => r.summaryFile));
+  }, [queue.data?.currentReprocesses]);
 
   // NOTE: processing-complete handling lives in useRecordingProcessingEffects
   // below, mounted ONCE at App level. Putting it here would attach a fresh
@@ -119,12 +136,13 @@ export function useRecording() {
     // otherwise Home goes blank between "stopped" and "processed" and the
     // user can't see anything is happening in the background.
     sessionName: queue.data?.sessionName ?? queue.data?.currentJob ?? null,
-    /** When a `reprocess-meeting` IPC is in flight, the summary file of
-     *  the meeting it's regenerating. Used by useMeetings to flip the
-     *  matching existing meeting row's `is_processing` flag so Home
-     *  shows the processing badge even when the user navigates away
-     *  from MeetingDetail mid-reprocess. */
-    currentReprocessSummaryFile: queue.data?.currentReprocess?.summaryFile ?? null,
+    /** Set of summary files whose `reprocess-meeting` IPC is currently
+     *  in flight. Used by useMeetings to flip the matching existing
+     *  meeting rows' `is_processing` flag so Home shows the badge even
+     *  when the user navigates away from MeetingDetail mid-reprocess.
+     *  Set rather than array so consumers can do O(1) membership checks
+     *  inside the meetings list map. */
+    reprocessingSummaryFiles: reprocessingSummaryFiles,
     startRecording,
     stopRecording,
     pauseRecording,

@@ -275,12 +275,15 @@ export interface QueueStatus {
   isProcessing: boolean;
   queueSize: number;
   currentJob: string | null;
-  /** Side-channel tracking for a `reprocess-meeting` invocation, which
-   *  doesn't go through `processingQueue` / `currentJob`. Populated by
-   *  the reprocess IPC for the lifetime of the spawned Python subprocess
-   *  and cleared in its finally block. Renderer consumers use this to
-   *  flag the matching existing meeting row as in-progress on Home. */
-  currentReprocess: { summaryFile: string; sessionName: string | null } | null;
+  /** Side-channel tracking for in-flight `reprocess-meeting` invocations,
+   *  which don't go through `processingQueue` / `currentJob`. Populated
+   *  by the reprocess IPC for the lifetime of each spawned Python
+   *  subprocess and cleared in its finally block. Keyed by summaryFile
+   *  in main so overlapping reprocesses coexist (e.g. user reprocesses A,
+   *  navigates to B, reprocesses B before A finishes). Renderer consumers
+   *  use this to flag the matching existing meeting rows as in-progress
+   *  on Home. Empty array (not undefined) when no reprocess is active. */
+  currentReprocesses: Array<{ summaryFile: string; sessionName: string | null }>;
   hasRecording: boolean;
   isPaused: boolean;
   elapsedSeconds: number;

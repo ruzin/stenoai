@@ -1227,9 +1227,12 @@ ipcMain.handle('reprocess-meeting', async (event, summaryFile, regenerateTitle, 
     // Surface this reprocess as in-flight on the queue payload so the
     // renderer can show the existing meeting row with a processing badge
     // even when the user navigates away from MeetingDetail mid-reprocess.
-    // Cleared in the finally block below so a Python crash or spawn error
-    // doesn't leave it stuck.
-    currentReprocessJob = { summaryFile, sessionName: sessionName || null };
+    // Keyed by summaryFile in the activeReprocessJobs map so overlapping
+    // reprocess calls (e.g. user reprocesses A then navigates and
+    // reprocesses B before A finishes) coexist. Removed in the finally
+    // block below so a Python crash or spawn error doesn't leave it
+    // stuck.
+    activeReprocessJobs.set(summaryFile, { summaryFile, sessionName: sessionName || null });
 
     const aiEnv = getAiEnv();
     const reprocessEnv = Object.keys(aiEnv).length > 0 ? { ...require('process').env, ...aiEnv } : undefined;
@@ -1311,7 +1314,7 @@ ipcMain.handle('reprocess-meeting', async (event, summaryFile, regenerateTitle, 
     sendDebugLog(`❌ Reprocessing failed: ${error.message}`);
     return { success: false, error: error.message };
   } finally {
-    currentReprocessJob = null;
+    activeReprocessJobs.delete(summaryFile);
   }
 });
 
@@ -1925,7 +1928,7 @@ ipcMain.handle('get-queue-status', async () => {
     isProcessing,
     queueSize: processingQueue.length,
     currentJob: currentProcessingJob?.sessionName || null,
-    currentReprocess: currentReprocessJob,
+    currentReprocesses: Array.from(activeReprocessJobs.values()),
     hasRecording: currentRecordingProcess !== null || systemAudioRecordingActive,
     isPaused: recordingRuntimeState.isPaused,
     elapsedSeconds: (currentRecordingProcess !== null || systemAudioRecordingActive) ? getRecordingElapsedSeconds() : 0,
@@ -1983,10 +1986,13 @@ let isProcessing = false;
 let currentProcessingJob = null;
 // Reprocess runs as a side-channel from the main processing queue (different
 // Python command, started directly from the reprocess-meeting IPC). Tracked
-// separately so the renderer can show "this note is being regenerated" on
-// Home without confusing it with a queued recording. Cleared in the IPC's
-// finally block so a thrown error / crashed Python doesn't leave this stuck.
-let currentReprocessJob = null;
+// here so the renderer can show "this note is being regenerated" on Home
+// without confusing it with a queued recording. Map keyed by summaryFile so
+// overlapping reprocess calls coexist — earlier a single global raced: B's
+// IPC overwrote A's entry, and A's finally would null the state out while
+// B was still running, hiding B's badge. Entries are removed in each IPC's
+// finally so a Python crash or spawn error doesn't leave them stuck.
+const activeReprocessJobs = new Map();
 let recordingRuntimeState = {
   startedAtMs: null,
   pausedAtMs: null,
