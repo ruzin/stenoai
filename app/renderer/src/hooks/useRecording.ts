@@ -65,6 +65,23 @@ export function useRecording() {
       // (regex ^(Meeting|Note)(-[A-Z0-9]{6})?$) and replaces with an AI-
       // generated title from the summary + transcript.
       const optimisticName = name && name.trim() ? name.trim() : 'Note';
+      // Clear any stale draft keyed under this same name. The live-draft
+      // store is keyed by sessionName, and the most common case
+      // (default 'Note' or 'Meeting') means back-to-back recordings
+      // collide on the same key. Previously the draft was only cleared
+      // on processing-complete, which can land minutes after the user
+      // hits '+ New note' — meaning the new recording reads the previous
+      // session's notes and shows them in the UI. Clearing here is
+      // tighter: the new recording starts with a guaranteed-clean draft
+      // before useLiveMeeting's `ensure` looks for one.
+      //
+      // Edge case: if the previous recording's draft.title was edited
+      // (custom user rename), that rename is also cleared — Processing.tsx
+      // applies the rename on processing-complete by reading the draft,
+      // so it'll be lost. Acceptable trade-off: the leak case is common,
+      // the rename case is rare and recoverable via manual rename
+      // post-processing.
+      useLiveDraftStore.getState().clear(optimisticName);
       qc.setQueryData(queueKey, {
         success: true,
         isProcessing: false,
