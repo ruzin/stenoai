@@ -234,13 +234,21 @@ function enqueueShortcutAction(action) {
 }
 
 async function shouldShowShortcutNotifications() {
+  return notificationsEnabled();
+}
+
+// Single source of truth for "is the user's Desktop notifications toggle
+// on?". Reads the persisted Python config via handleGetNotifications.
+// Falls back to `true` on any read error so a transient config issue
+// never silently swallows notifications the user expects. Used by every
+// notification handler (shortcut, silence auto-stop, note ready) — keeps
+// the gate consistent rather than re-implementing it per call site.
+async function notificationsEnabled() {
   try {
     const settings = await handleGetNotifications();
-    if (!settings.success) {
-      return true;
-    }
+    if (!settings.success) return true;
     return settings.notifications_enabled !== false;
-  } catch (error) {
+  } catch (_) {
     return true;
   }
 }
@@ -4168,6 +4176,7 @@ ipcMain.handle('set-silence-auto-stop-minutes', async (_event, minutes) => {
 // auto-detect recordings, "Note" for the default placeholder.
 ipcMain.handle('show-silence-auto-stop-notification', async (_event, payload) => {
   try {
+    if (!(await notificationsEnabled())) return { success: true };
     // Back-compat: earlier callers passed `minutes` as a number directly.
     // Accept both shapes so older renderer bundles don't crash this handler
     // until they're rebuilt.
@@ -4203,6 +4212,7 @@ ipcMain.handle('show-silence-auto-stop-notification', async (_event, payload) =>
 // recording another note back-to-back) is worse than no navigation.
 ipcMain.handle('show-note-ready-notification', async (_event, payload) => {
   try {
+    if (!(await notificationsEnabled())) return { success: true };
     const { title } = payload || {};
     const notif = new Notification({
       title: 'Note ready',

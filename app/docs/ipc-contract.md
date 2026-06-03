@@ -100,9 +100,16 @@ interface QueueStatus {
   isProcessing: boolean;
   queueSize: number;
   currentJob: string | null;   // sessionName or null
+  /** Side-channel tracking for in-flight `reprocess-meeting` invocations.
+   *  Reprocess doesn't go through `processingQueue` / `currentJob`, so it
+   *  ships here so the renderer can flag the matching existing meeting
+   *  rows as in-progress. Keyed in main by summaryFile so overlapping
+   *  reprocesses coexist. Empty array when none active. */
+  currentReprocesses: Array<{ summaryFile: string; sessionName: string | null }>;
   hasRecording: boolean;
   isPaused: boolean;
   elapsedSeconds: number;
+  sessionName: string | null;
 }
 
 type PickAudioFileResponse = Result<{ filePath: string }>;
@@ -302,6 +309,11 @@ are string-cased (`"True"`/`"False"`) — that translation lives in main.js.
 | Channel | Direction | Needed | Preload API |
 | --- | --- | --- | --- |
 | `get-notifications` / `set-notifications` | R→M invoke | yes | `stenoai.settings.getNotifications()` / `setNotifications(b)` |
+| `get-silence-auto-stop` | R→M invoke | yes | `stenoai.settings.getSilenceAutoStop()` |
+| `set-silence-auto-stop-enabled` | R→M invoke | yes | `stenoai.settings.setSilenceAutoStopEnabled(b)` |
+| `set-silence-auto-stop-minutes` | R→M invoke | yes | `stenoai.settings.setSilenceAutoStopMinutes(n)` |
+| `show-silence-auto-stop-notification` | R→M invoke | yes | `stenoai.settings.showSilenceAutoStopNotification({ minutes, sessionName })` |
+| `show-note-ready-notification` | R→M invoke | yes | `stenoai.settings.showNoteReadyNotification({ title })` |
 | `get-telemetry` / `set-telemetry` | R→M invoke | yes | `stenoai.settings.getTelemetry()` / `setTelemetry(b)` |
 | `get-dock-icon` / `set-dock-icon` | R→M invoke | yes | `stenoai.settings.getDockIcon()` / `setDockIcon(b)` |
 | `get-system-audio` / `set-system-audio` | R→M invoke | yes | `stenoai.settings.getSystemAudio()` / `setSystemAudio(b)` |
@@ -325,6 +337,22 @@ type StoragePathResponse = Result<{
 type PickStorageFolderResponse = Result<{ folderPath: string }>;
 
 type GetAiPromptsResponse = Result<{ summarization: string }>;
+
+type GetSilenceAutoStopResponse = Result<{
+  silence_auto_stop_enabled: boolean;
+  silence_auto_stop_minutes: number;
+  supported_minutes: number[];
+}>;
+type SetSilenceAutoStopEnabledResponse = Result<{ silence_auto_stop_enabled: boolean }>;
+type SetSilenceAutoStopMinutesResponse = Result<{ silence_auto_stop_minutes: number }>;
+
+/** Both notification IPCs gate internally on `notifications_enabled`
+ *  (the global "Desktop notifications" toggle in Settings → General) —
+ *  the renderer doesn't need to pre-check. They return `{success: true}`
+ *  even when the banner was suppressed by the user setting so callers
+ *  don't need to distinguish "disabled" from "shown" failure paths. */
+type ShowSilenceAutoStopNotificationResponse = Result<Record<string, never>>;
+type ShowNoteReadyNotificationResponse = Result<Record<string, never>>;
 ```
 
 ---
