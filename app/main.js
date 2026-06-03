@@ -4188,35 +4188,6 @@ ipcMain.handle('show-silence-auto-stop-notification', async (_event, payload) =>
   }
 });
 
-// Fired by the renderer's processing-complete handler when we skipped
-// auto-navigate (user was elsewhere). Surfaces the now-ready note via a
-// native banner — clicking it focuses Steno and asks the renderer to
-// navigate to the note's detail page so the user goes straight into it
-// instead of hunting through Home.
-ipcMain.handle('show-note-ready-notification', async (_event, payload) => {
-  try {
-    const { title, summaryFile } = payload || {};
-    const notif = new Notification({
-      title: 'Note ready',
-      body: title || 'Your note has finished processing',
-    });
-    notif.on('click', () => {
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        if (!mainWindow.isVisible()) mainWindow.show();
-        mainWindow.focus();
-        if (summaryFile) {
-          mainWindow.webContents.send('open-meeting-from-notification', summaryFile);
-        }
-      }
-    });
-    notif.show();
-    return { success: true };
-  } catch (e) {
-    sendDebugLog(`Failed to show note-ready notification: ${e.message}`);
-    return { success: false, error: e.message };
-  }
-});
-
 ipcMain.handle('get-notifications', handleGetNotifications);
 
 ipcMain.handle('set-notifications', async (event, enabled) => {

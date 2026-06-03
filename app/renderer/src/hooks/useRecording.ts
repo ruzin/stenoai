@@ -269,41 +269,18 @@ export function useRecordingProcessingEffects() {
       if (data.sessionName) {
         useLiveDraftStore.getState().clear(data.sessionName);
       }
-      // Decide whether to auto-navigate vs. fire a Note-ready
-      // notification. Both branches need a summary_file to land on —
-      // recording-complete carries it via meetingData; reprocess
-      // carries it as a top-level summaryFile field (no meetingData).
-      const summaryFileForOpen =
-        data.meetingData?.session_info.summary_file ?? data.summaryFile ?? null;
-      if (data.success && summaryFileForOpen) {
+      if (data.success && data.meetingData?.session_info.summary_file) {
         // Only auto-navigate when the user is on the "watching this
         // finish" page — anywhere else (recording another note via the
         // back-to-back flow, reading a different note, in chat, settings)
         // yanking them out is worse than no navigation at all. The new
         // note still appears in Home (synthetic + cache pre-seed above)
-        // and the sidebar.
+        // and the sidebar, and clicking the processing row on Home would
+        // have brought them here anyway, so we're only skipping a
+        // redirect for users who explicitly chose to be elsewhere.
         const currentRoute = routeFromHash(window.location.hash);
         if (currentRoute === '/meetings/processing') {
-          navigate(`/meetings/${encodeURIComponent(summaryFileForOpen)}`);
-        } else {
-          // Otherwise surface a "Note ready" native banner so the user
-          // knows their work-in-progress finished, even if Steno isn't
-          // focused. Click opens the note via the open-meeting handler
-          // below. We don't navigate ourselves here — that's exactly
-          // what we just decided not to do.
-          const title =
-            data.meetingData?.session_info.name?.trim() ||
-            data.sessionName?.trim() ||
-            'Your note has finished processing';
-          void ipc()
-            .settings.showNoteReadyNotification({
-              title,
-              summaryFile: summaryFileForOpen,
-            })
-            .catch(() => {
-              // Notification failure isn't fatal — note is still
-              // visible in Home + sidebar. Don't bubble up.
-            });
+          navigate(`/meetings/${encodeURIComponent(data.meetingData.session_info.summary_file)}`);
         }
       }
       // Clear the live-draft entry AFTER any other processing-complete
@@ -319,16 +296,4 @@ export function useRecordingProcessingEffects() {
     });
     return off;
   }, [qc]);
-
-  // Click handler for the "Note ready" macOS notification: main fires
-  // this event when the user clicks the banner, we navigate to the
-  // matching detail page. Kept here next to the notification's emit
-  // site so the round-trip is reviewable in one place.
-  React.useEffect(() => {
-    const off = ipc().on.openMeetingFromNotification((summaryFile) => {
-      if (!summaryFile) return;
-      navigate(`/meetings/${encodeURIComponent(summaryFile)}`);
-    });
-    return off;
-  }, []);
 }

@@ -588,10 +588,6 @@ export interface StenoaiBridge {
       [payload: { minutes: number; sessionName: string | null }],
       Result<Record<string, never>>
     >;
-    showNoteReadyNotification: RequestFn<
-      [payload: { title: string; summaryFile: string }],
-      Result<Record<string, never>>
-    >;
     getLanguage: RequestFn<[], GetLanguageResponse>;
     setLanguage: RequestFn<[code: string], Result<Record<string, never>>>;
     getUserName: RequestFn<[], GetUserNameResponse>;
@@ -647,10 +643,6 @@ export interface StenoaiBridge {
     summaryTitle: Subscribe<SummaryTitleEvent>;
     summaryComplete: Subscribe<SummaryCompleteEvent>;
     processingComplete: Subscribe<ProcessingCompleteEvent>;
-    /** Fires when the user clicks the "Note ready" macOS notification —
-     *  payload is the meeting's summaryFile. The renderer-side listener
-     *  navigates to the matching detail page. */
-    openMeetingFromNotification: Subscribe<string>;
     queryChunk: Subscribe<QueryChunkEvent>;
     queryDone: Subscribe<QueryDoneEvent>;
     modelPullProgress: Subscribe<ModelPullProgressEvent>;
