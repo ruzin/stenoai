@@ -287,19 +287,46 @@ export function useRecordingProcessingEffects() {
       if (data.sessionName) {
         useLiveDraftStore.getState().clear(data.sessionName);
       }
-      if (data.success && data.meetingData?.session_info.summary_file) {
-        // Only auto-navigate when the user is on the "watching this
-        // finish" page — anywhere else (recording another note via the
-        // back-to-back flow, reading a different note, in chat, settings)
-        // yanking them out is worse than no navigation at all. The new
-        // note still appears in Home (synthetic + cache pre-seed above)
-        // and the sidebar, and clicking the processing row on Home would
-        // have brought them here anyway, so we're only skipping a
-        // redirect for users who explicitly chose to be elsewhere.
+      // The summary file lands here for both flows: recording-complete
+      // carries it via meetingData; reprocess carries it as a top-level
+      // summaryFile field (no meetingData). Treat both the same below.
+      const finishedSummaryFile =
+        data.meetingData?.session_info.summary_file ?? data.summaryFile ?? null;
+      if (data.success && finishedSummaryFile) {
         const currentRoute = routeFromHash(window.location.hash);
+        const finishedMeetingRoute = `/meetings/${encodeURIComponent(finishedSummaryFile)}`;
         if (currentRoute === '/meetings/processing') {
-          navigate(`/meetings/${encodeURIComponent(data.meetingData.session_info.summary_file)}`);
+          // Watching it finish on the processing page → take them straight
+          // into the now-ready note.
+          navigate(finishedMeetingRoute);
+        } else if (currentRoute !== finishedMeetingRoute) {
+          // Anywhere else (Home, Chat, Settings, recording another note,
+          // a different meeting's detail page) → fire a native "Note
+          // ready" banner so the user knows their work-in-progress
+          // finished. Route comparison rather than window-focus check on
+          // purpose: it means a minimised Steno / alt-tabbed user who
+          // *was* sitting on this note's detail page still doesn't get a
+          // notification, because the route hasn't changed. They'll see
+          // the static summary the moment they come back.
+          //
+          // Click just focuses Steno (mirrors the auto-stop notification)
+          // — no navigation, so a back-to-back recording isn't yanked
+          // out and the user can find the new note in the sidebar / Home
+          // list at the top once Steno is focused.
+          const title =
+            data.meetingData?.session_info.name?.trim() ||
+            data.sessionName?.trim() ||
+            'Your note has finished processing';
+          void ipc()
+            .settings.showNoteReadyNotification({ title })
+            .catch(() => {
+              // Notification failure isn't fatal — the note is still
+              // visible in Home + sidebar. Don't bubble up.
+            });
         }
+        // else: on this note's own detail page → nothing. The streaming
+        // UI's own listener swaps to the static view; no extra signal
+        // needed.
       }
       // Clear the live-draft entry AFTER any other processing-complete
       // listeners (notably Processing.tsx's, which reads draft.title to

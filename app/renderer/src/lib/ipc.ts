@@ -591,6 +591,10 @@ export interface StenoaiBridge {
       [payload: { minutes: number; sessionName: string | null }],
       Result<Record<string, never>>
     >;
+    showNoteReadyNotification: RequestFn<
+      [payload: { title: string }],
+      Result<Record<string, never>>
+    >;
     getLanguage: RequestFn<[], GetLanguageResponse>;
     setLanguage: RequestFn<[code: string], Result<Record<string, never>>>;
     getUserName: RequestFn<[], GetUserNameResponse>;

@@ -4194,6 +4194,34 @@ ipcMain.handle('show-silence-auto-stop-notification', async (_event, payload) =>
   }
 });
 
+// Fired by the renderer's processing-complete handler when we skipped
+// auto-navigate (user was on a route other than /meetings/processing).
+// Click just focuses Steno — same predictable behaviour as the auto-stop
+// notification. We don't navigate anywhere: the new note appears at the
+// top of the sidebar / Home list, so once Steno is focused the user
+// can see it instantly. Navigating away (especially when the user is
+// recording another note back-to-back) is worse than no navigation.
+ipcMain.handle('show-note-ready-notification', async (_event, payload) => {
+  try {
+    const { title } = payload || {};
+    const notif = new Notification({
+      title: 'Note ready',
+      body: title || 'Your note has finished processing',
+    });
+    notif.on('click', () => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        if (!mainWindow.isVisible()) mainWindow.show();
+        mainWindow.focus();
+      }
+    });
+    notif.show();
+    return { success: true };
+  } catch (e) {
+    sendDebugLog(`Failed to show note-ready notification: ${e.message}`);
+    return { success: false, error: e.message };
+  }
+});
+
 ipcMain.handle('get-notifications', handleGetNotifications);
 
 ipcMain.handle('set-notifications', async (event, enabled) => {

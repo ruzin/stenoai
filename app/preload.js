@@ -175,6 +175,7 @@ const stenoai = {
     setSilenceAutoStopEnabled: (v) => invoke('set-silence-auto-stop-enabled', v),
     setSilenceAutoStopMinutes: (v) => invoke('set-silence-auto-stop-minutes', v),
     showSilenceAutoStopNotification: (payload) => invoke('show-silence-auto-stop-notification', payload),
+    showNoteReadyNotification: (payload) => invoke('show-note-ready-notification', payload),
     getLanguage: () => invoke('get-language'),
     setLanguage: (code) => invoke('set-language', code),
     getUserName: () => invoke('get-user-name'),
