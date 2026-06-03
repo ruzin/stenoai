@@ -41,19 +41,10 @@
 If you're looking for a hosted desktop recording API, consider checking out [Recall.ai](https://www.recall.ai/product/desktop-recording-sdk?utm_source=github&utm_medium=sponsorship&utm_campaign=ruzin-stenoai), an API that records Zoom, Google Meet, Microsoft Teams, in-person meetings, and more.
 
 ## 📢 What's New
-- **2026-06-01** 🔒 Enterprise adapter HTTPS fix — Summaries, meeting titles, and shared-note backups via your org's Steno adapter were silently failing with a TLS verification error on clean Macs that don't have Homebrew. The bundle now ships its own CA trust store and uses it unconditionally — no user action required.
-- **2026-06-01** ⏯️ Back-to-back recordings — Start a new note while a previous one is still processing in the background, instead of waiting for it to finish. The previous recording continues through the queue normally. Useful when meetings stack and you're on a heavier Whisper model.
-- **2026-06-01** 🔁 Share/Unshare toggle on shared notes — The kebab menu now reflects whether a note is actually shared with your org. Already-shared notes show "Unshare from <org>" instead of letting you re-share and create duplicates in the org meetings store.
-- **2026-06-01** 🧹 Cleaner default note titles — When summarisation produces no title (silent recording, model returned junk), the placeholder is now just "Note" rather than leaking the auto-detect internals like `an app — 2026-06-01 17:00`.
-- **2026-06-01** 🤖 Organisation AI provider — Sign in to your org and Steno routes summaries, titles, and cross-note chat through your org's adapter automatically. No more pasting an Anthropic key in Settings → AI for users on a managed deployment.
-- **2026-06-01** 🔐 30-day sign-in + sidebar CTA — Org sessions now last 30 days (was 8 h). A prominent "Sign in to org" button appears in the sidebar for users who've connected before, replacing the hidden Settings tab as the recovery path.
-- **2026-05-31** 📝 Transcripts on shared notes — Notes shared with your org now include the full transcript, surfaced via the floating Transcript panel just like local notes.
-- **2026-05-31** 📅 Calendar event titles for scheduled meetings — When Google/Outlook calendar is connected, the "Meeting detected" notification and recording name use your scheduled event title instead of `<App> — <timestamp>`.
-- **2026-05-31** 🪲 Dragonfly menu bar icon — Tray icon now matches the dock and sidebar brand instead of a generic waveform.
-- **2026-05-28** 🔇 Quieter Meeting detected — Dictation tools (Wispr Flow, Apple Dictation, etc.) and other apps that open the mic no longer trigger the "Meeting detected" notification.
-- **2026-05-22** 🎙️ Smarter titles for auto-detect recordings — Recordings started via the "Meeting detected" notification now get an AI-generated title from the transcript after summarisation, instead of staying as `<App> — <timestamp>` forever.
-- **2026-05-22** 🐛 Quieter transcripts on silent audio — Whisper.cpp's decoder loop on quiet audio (e.g. dozens of repeated `[Sounds of a question]` lines) is now caught by a post-process dedup of 5+ consecutive identical segments.
-- **2026-05-17** 🎙️ Auto start/stop meetings (Granola-style) — Steno notifies you when a meeting starts and offers to take notes; when the meeting ends it offers to summarise. Toggle in Settings → General (default ON).
+- **2026-06-03** 📅 Paginated upcoming events on Home — The Upcoming widget now shows all of today's events with `< >` page navigation instead of silently dropping the 4th+ event. Past events roll off as the day progresses; multi-day blocks (OOO, conferences) show inline as context.
+- **2026-06-03** 👀 Background processing visible on Home + "Note ready" banner — Stop a recording or hit Reprocess and the row gets a processing badge on Home through to completion. Steno no longer yanks you to the finished note when you're mid-recording another one; instead, a native "Note ready" banner fires when your note finishes processing.
+- **2026-06-02** 🤫 Auto-stop on silence — Recordings auto-finalise after 15 minutes of bilateral silence (mic + system audio both quiet). For the "I walked away after the meeting ended and forgot to stop" case. Configurable in Settings → General (2 / 5 / 10 / 15 / 30 min), with a macOS notification when it triggers.
+- **2026-06-01** 🔒 Enterprise adapter HTTPS fix — Summaries, meeting titles, and shared-note backups via your org's Steno adapter were silently failing with a TLS verification error on clean Macs without Homebrew. The bundle now ships its own CA trust store and uses it unconditionally — no user action required.
 
 
 ## Features

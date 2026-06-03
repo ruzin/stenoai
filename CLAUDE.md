@@ -90,7 +90,7 @@ Releases are automated via `.github/workflows/build-release.yml`. Never create r
 1. **Survey what's shipping** — `git log v<previous>..HEAD --oneline` and `gh pr list --state merged --limit 20` to confirm the changeset.
 2. **Update the README** to reflect what's shipping:
    - Add bullet entries to the "📢 What's New" section for each notable user-facing change. Format: `- **YYYY-MM-DD** <emoji> <Title> — <one-sentence description>`. Most recent entries at the top.
-   - Remove "What's New" entries older than ~2 months to keep the section fresh.
+   - Keep only the **most recent 4 entries** in the section — trim older ones as you add new ones, regardless of date. The section is a rolling marquee, not a changelog.
    - Update the "Features" list if any new user-facing capability is being added (or an existing one materially changed).
    - Update "Models & Performance" if the bundled Whisper or Ollama model lineup changed.
 3. **Bump version** in `app/package.json`.
