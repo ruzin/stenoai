@@ -150,8 +150,18 @@ jobs:
       id: tag_body
       if: startsWith(github.ref, 'refs/tags/v')
       run: |
+        # actions/checkout@v4 with fetch-tags: true sometimes leaves the
+        # annotated tag as a lightweight pointer (just the commit OID,
+        # no annotation object), which makes `for-each-ref --format=
+        # '%(contents:body)'` return empty. The action-gh-release step
+        # below then falls back to the commit subject in the release
+        # body — that's how every prior release ended up with
+        # "chore(release): prep vX.Y.Z" as its body instead of the
+        # actual notes we wrote on the tag. Refetch the tag explicitly
+        # so the annotation object is present locally before we read it.
+        git fetch --force origin "refs/tags/${{ github.ref_name }}:refs/tags/${{ github.ref_name }}"
         # Pull the body of the annotated tag (strips the PGP signature if any).
-        # Falls back to the commit subject if the tag is lightweight.
+        # Falls back to the tag subject if the body is empty (one-line tag).
         MSG=$(git for-each-ref --format='%(contents:body)' "refs/tags/${{ github.ref_name }}")
         if [ -z "$MSG" ]; then
           MSG=$(git for-each-ref --format='%(contents:subject)' "refs/tags/${{ github.ref_name }}")

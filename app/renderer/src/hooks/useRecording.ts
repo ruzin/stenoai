@@ -65,6 +65,28 @@ export function useRecording() {
       // (regex ^(Meeting|Note)(-[A-Z0-9]{6})?$) and replaces with an AI-
       // generated title from the summary + transcript.
       const optimisticName = name && name.trim() ? name.trim() : 'Note';
+      // Clear any stale draft keyed under this same name. The live-draft
+      // store is keyed by sessionName, and the most common case
+      // (default 'Note' or 'Meeting') means back-to-back recordings
+      // collide on the same key. Previously the draft was only cleared
+      // on processing-complete, which can land minutes after the user
+      // hits '+ New note' — meaning the new recording reads the previous
+      // session's notes and shows them in the UI. Clearing here is
+      // tighter: the new recording starts with a guaranteed-clean draft
+      // before useLiveMeeting's `ensure` looks for one.
+      //
+      // Edge case: if the previous recording's draft.title was edited
+      // (custom user rename), that rename is also cleared — Processing.tsx
+      // applies the rename on processing-complete by reading the draft,
+      // so it'll be lost. Acceptable trade-off: the leak case is common,
+      // the rename case is rare and recoverable via manual rename
+      // post-processing.
+      //
+      // Snapshot before clearing so we can put it back if start-recording
+      // fails — without restore, a transient IPC error would silently drop
+      // the previous session's in-memory state.
+      const priorDraft = useLiveDraftStore.getState().drafts[optimisticName];
+      useLiveDraftStore.getState().clear(optimisticName);
       qc.setQueryData(queueKey, {
         success: true,
         isProcessing: false,
@@ -82,6 +104,12 @@ export function useRecording() {
         return data;
       } catch (err) {
         // Roll back optimistic state and leave the dead /recording page.
+        // Restore the prior draft too — the recording never started so the
+        // previous session (probably still mid-processing) shouldn't lose
+        // its in-memory title / notes.
+        if (priorDraft) {
+          useLiveDraftStore.getState().restore(optimisticName, priorDraft);
+        }
         qc.invalidateQueries({ queryKey: queueKey });
         navigate('/');
         throw err;
