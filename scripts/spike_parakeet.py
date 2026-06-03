@@ -47,6 +47,7 @@ def main() -> int:
     try:
         import sounddevice as sd
         import numpy as np
+        import mlx.core as mx
     except ImportError as e:
         emit("error", stage="import_audio", message=str(e))
         return 1
@@ -82,8 +83,10 @@ def main() -> int:
             emit("streaming_started")
             while captured < total_samples:
                 frames, _overflowed = stream.read(chunk_samples)
-                # Mono channel as 1-D float32 — that's the contract parakeet expects.
-                chunk = np.asarray(frames, dtype=np.float32).reshape(-1)
+                # parakeet-mlx's add_audio expects an mx.array (1-D float32).
+                # Passing numpy directly trips a concat() type mismatch
+                # inside the internal audio_buffer accumulator.
+                chunk = mx.array(np.asarray(frames, dtype=np.float32).reshape(-1))
                 transcriber.add_audio(chunk)
                 captured += len(chunk)
 

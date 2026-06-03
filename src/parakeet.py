@@ -206,9 +206,22 @@ class StreamingSession:
 
     def push(self, chunk) -> None:
         """Feed a float32 mono chunk at ``sample_rate``. Safe to call with
-        arbitrary chunk sizes — parakeet-mlx buffers internally."""
+        arbitrary chunk sizes — parakeet-mlx buffers internally.
+
+        ``chunk`` may be either an ``mx.array`` or a numpy float32 array;
+        callers commonly have numpy in hand (sounddevice gives numpy). We
+        coerce here because parakeet-mlx's internal ``mx.concat`` will
+        otherwise fail with an opaque "incompatible function arguments"
+        when its audio buffer ends up mixed-type.
+        """
         if self._transcriber is None:
             raise RuntimeError("StreamingSession used outside `with` block")
+        try:
+            import mlx.core as mx  # local: keep module-level import light
+        except ImportError as e:
+            raise RuntimeError("mlx is not installed") from e
+        if not isinstance(chunk, mx.array):
+            chunk = mx.array(chunk)
         self._transcriber.add_audio(chunk)
 
     def drain(self) -> Iterator[Segment]:

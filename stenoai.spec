@@ -164,7 +164,9 @@ a = Analysis(
         'notebook',
         'sphinx',
         'pytest',
-        'unittest',
+        # `unittest` is kept in the bundle now — parakeet-mlx (via librosa /
+        # scipy) lazy-imports it during from_pretrained; excluding it makes
+        # model loading fail with "No module named 'unittest'".
         # ASR engines we no longer ship — Parakeet via MLX is the only path.
         'whisper',
         'pywhispercpp',
