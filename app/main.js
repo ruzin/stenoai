@@ -28,6 +28,12 @@ if (IS_E2E_MOCK_IPC) {
   require('./e2e-mock-ipc').install({ ipcMain, BrowserWindow });
 }
 
+// Distinguish dev runs from the packaged "Steno" app in the dock, About menu,
+// and Cmd+Tab. Production keeps the productName from package.json untouched.
+if (!app.isPackaged) {
+  app.setName('Steno Dev');
+}
+
 // Initialize electron-audio-loopback before app is ready.
 // forceCoreAudioTap drives Chromium to use macOS 14.4+ CoreAudio Process Taps
 // (NSAudioCaptureUsageDescription) rather than ScreenCaptureKit. SCK was
@@ -840,6 +846,16 @@ if (!gotSingleInstanceLock) {
         sendDebugLog(`[sysaudio] macOS ${osVer} — CoreAudio Tap supported=${tapOk}, screen permission=${screenPerm}`);
       } catch (e) {
         sendDebugLog(`[sysaudio] startup probe failed: ${e.message}`);
+      }
+    }
+
+    // Dev runs otherwise show the default Electron dock icon. Packaged builds
+    // already get this icon via electron-builder's `mac.icon` setting.
+    if (!app.isPackaged && process.platform === 'darwin' && app.dock) {
+      try {
+        app.dock.setIcon(path.join(__dirname, 'build', 'icon-dragonfly.icns'));
+      } catch (e) {
+        console.error('Failed to set dev dock icon:', e.message);
       }
     }
 

@@ -9,6 +9,7 @@
     "url": "https://github.com/ruzin/stenoai.git"
   },
   "scripts": {
+    "postinstall": "node scripts/patch-electron-dev.js",
     "start": "npm run build:renderer && electron .",
     "start:nobuild": "electron .",
     "dev:renderer": "vite",
