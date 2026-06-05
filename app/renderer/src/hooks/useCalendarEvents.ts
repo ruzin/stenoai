@@ -37,6 +37,12 @@ export function useCalendarEvents() {
       if ('needsAuth' in res) return { needsAuth: true, events: [] };
       throw new Error(res.error);
     },
+    // Poll every 5 minutes so the user doesn't have to hit the refresh icon
+    // to see meetings added after the app launched. 5 min is comfortably
+    // below the granularity of "is this happening soon" decisions, and the
+    // API call is cheap.
+    refetchInterval: 5 * 60 * 1000,
+    refetchOnWindowFocus: true,
   });
 }
 

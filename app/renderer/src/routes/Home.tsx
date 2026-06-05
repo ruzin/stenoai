@@ -1,5 +1,6 @@
 import * as React from 'react';
-import { ChevronLeft, ChevronRight, PencilLine, RefreshCw, Search, Square, X } from 'lucide-react';
+import { PencilLine, RefreshCw, Search, Square, X } from 'lucide-react';
+import { shortcut } from '@/lib/utils';
 import { MeetingsShell } from '@/components/MeetingsShell';
 import { UpcomingCard } from '@/components/home/UpcomingCard';
 import { PreviousRow } from '@/components/home/PreviousRow';
@@ -11,7 +12,6 @@ import { useRecording } from '@/hooks/useRecording';
 import { useCalendarEvents } from '@/hooks/useCalendarEvents';
 import { useFolders } from '@/hooks/useFolders';
 import type { CalendarEvent, Meeting } from '@/lib/ipc';
-import { shortcut } from '@/lib/utils';
 import { navigate } from '@/lib/router';
 
 interface HomeProps {
@@ -57,10 +57,9 @@ export function Home({ mode }: HomeProps) {
   }, [mode]);
 
   // Today's relevant events: anything that overlaps with today AND
-  // hasn't ended yet. Includes timed events for today, all-day events
-  // for today, AND multi-day events (conference, OOO block) that
-  // started in the past but are still ongoing — those are useful
-  // context the user might want to glance at.
+  // hasn't ended yet, AND that the user is likely to attend.
+  // All-day blocks (OOO, conference day) and declined meetings are
+  // dropped — they pushed real meetings off the visible page.
   const upcomingToday = React.useMemo<CalendarEvent[]>(() => {
     if (!calendar.data || calendar.data.needsAuth) return [];
     // Use the tick as the time source so the memo is a pure function of
@@ -84,32 +83,78 @@ export function Home({ mode }: HomeProps) {
         if (end <= nowMs) return false;
         // Event must start before end-of-today (so it overlaps today).
         if (start >= startOfTomorrow) return false;
+        // All-day blocks pose as 00:00 "meetings" and crowd out real ones.
+        if (e.is_all_day === true) return false;
+        // Declined: user said no — don't surface or auto-act on it.
+        if (e.response_status === 'declined') return false;
         return true;
       })
       .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
   }, [calendar.data, upcomingTickMs]);
 
-  const UPCOMING_PAGE_SIZE = 3;
-  const upcomingPageCount = Math.max(
-    1,
-    Math.ceil(upcomingToday.length / UPCOMING_PAGE_SIZE),
-  );
-  const [upcomingPage, setUpcomingPage] = React.useState(0);
-  // Clamp the page when the list shrinks underneath us — e.g. an event
-  // ends and rolls off, or the user reloads the calendar with fewer
-  // entries. Without this the user could be stuck on an empty page 3
-  // after the count drops to 5.
-  React.useEffect(() => {
-    if (upcomingPage >= upcomingPageCount) {
-      setUpcomingPage(Math.max(0, upcomingPageCount - 1));
-    }
-  }, [upcomingPage, upcomingPageCount]);
-  const upcomingVisible = upcomingToday.slice(
-    upcomingPage * UPCOMING_PAGE_SIZE,
-    (upcomingPage + 1) * UPCOMING_PAGE_SIZE,
-  );
-  const canPagePrev = upcomingPage > 0;
-  const canPageNext = upcomingPage < upcomingPageCount - 1;
+  // First event of tomorrow that the user is likely to attend. Used for
+  // the "Tomorrow peek" when today's carousel is empty — keeps the panel
+  // useful at 6pm with a clear evening, instead of disappearing.
+  const tomorrowPreview = React.useMemo<CalendarEvent | null>(() => {
+    if (!calendar.data || calendar.data.needsAuth) return null;
+    const now = new Date(upcomingTickMs);
+    const startOfTomorrow = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate() + 1,
+    ).getTime();
+    const startOfDayAfter = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate() + 2,
+    ).getTime();
+    const candidates = calendar.data.events
+      .filter((e) => {
+        const start = new Date(e.start).getTime();
+        if (Number.isNaN(start)) return false;
+        if (start < startOfTomorrow) return false;
+        if (start >= startOfDayAfter) return false;
+        if (e.is_all_day === true) return false;
+        if (e.response_status === 'declined') return false;
+        return true;
+      })
+      .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
+    return candidates[0] || null;
+  }, [calendar.data, upcomingTickMs]);
+
+  // All-day events overlapping today that the user hasn't declined. Rendered
+  // as a small clickable chip row so the user can see "OOO" / "Conference
+  // Day" without these blocks crowding the timed carousel — and can click
+  // a chip to record against that event's title.
+  const allDayToday = React.useMemo<CalendarEvent[]>(() => {
+    if (!calendar.data || calendar.data.needsAuth) return [];
+    const now = new Date(upcomingTickMs);
+    const startOfToday = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate(),
+    ).getTime();
+    const startOfTomorrow = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate() + 1,
+    ).getTime();
+    return calendar.data.events.filter((e) => {
+      if (e.is_all_day !== true) return false;
+      if (e.response_status === 'declined') return false;
+      const start = new Date(e.start).getTime();
+      const end = new Date(e.end).getTime();
+      if (Number.isNaN(start) || Number.isNaN(end)) return false;
+      // Overlaps with today's local window.
+      return start < startOfTomorrow && end > startOfToday;
+    });
+  }, [calendar.data, upcomingTickMs]);
+
+  const onStartAllDay = (title: string) => {
+    if (recording.status !== 'idle') return;
+    void recording.startRecording(title);
+  };
+  const [allDayExpanded, setAllDayExpanded] = React.useState(false);
 
   const previous = meetings.data ?? [];
 
@@ -212,7 +257,7 @@ export function Home({ mode }: HomeProps) {
                 className="max-w-[52ch] text-sm leading-[1.55]"
                 style={{ color: 'var(--fg-2)' }}
               >
-                {summaryLine(upcomingToday.length)}
+                {`Start recording from the top-right, or from anywhere with ${shortcut('⌘⇧R', 'Ctrl+Shift+R')}.`}
               </p>
             </div>
           )}
@@ -223,52 +268,59 @@ export function Home({ mode }: HomeProps) {
                 title="Upcoming"
                 count={upcomingToday.length}
                 action={
-                  // Outer gap separates the page-nav cluster from the
-                  // refresh button so they read as two distinct groups.
-                  // Inner cluster keeps < and > tight against each other.
-                  <div className="flex items-center gap-1.5">
-                    {upcomingPageCount > 1 && (
-                      <div className="flex items-center gap-0.5">
-                        <button
-                          type="button"
-                          className="inline-flex items-center rounded p-1 transition-colors hover:bg-[color:var(--surface-hover)] disabled:opacity-30 disabled:hover:bg-transparent"
-                          title="Previous"
-                          onClick={() => setUpcomingPage((p) => Math.max(0, p - 1))}
-                          disabled={!canPagePrev}
-                          style={{ color: 'var(--fg-2)' }}
-                        >
-                          <ChevronLeft className="size-[14px]" />
-                        </button>
-                        <button
-                          type="button"
-                          className="inline-flex items-center rounded p-1 transition-colors hover:bg-[color:var(--surface-hover)] disabled:opacity-30 disabled:hover:bg-transparent"
-                          title="Next"
-                          onClick={() => setUpcomingPage((p) => Math.min(upcomingPageCount - 1, p + 1))}
-                          disabled={!canPageNext}
-                          style={{ color: 'var(--fg-2)' }}
-                        >
-                          <ChevronRight className="size-[14px]" />
-                        </button>
-                      </div>
-                    )}
-                    <button
-                      type="button"
-                      className="inline-flex items-center rounded p-1 transition-colors hover:bg-[color:var(--surface-hover)] disabled:opacity-50"
-                      title="Check for new calendar events"
-                      onClick={() => calendar.refetch()}
-                      disabled={calendar.isFetching}
-                      style={{ color: 'var(--fg-2)' }}
-                    >
-                      <RefreshCw className={`size-[14px] ${calendar.isFetching ? 'animate-spin' : ''}`} />
-                    </button>
-                  </div>
+                  <button
+                    type="button"
+                    className="inline-flex items-center rounded p-1 transition-colors hover:bg-[color:var(--surface-hover)] disabled:opacity-50"
+                    title="Check for new calendar events"
+                    onClick={() => calendar.refetch()}
+                    disabled={calendar.isFetching}
+                    style={{ color: 'var(--fg-2)' }}
+                  >
+                    <RefreshCw className={`size-[14px] ${calendar.isFetching ? 'animate-spin' : ''}`} />
+                  </button>
                 }
               />
+              <AllDayInline
+                events={allDayToday}
+                expanded={allDayExpanded}
+                onToggle={() => setAllDayExpanded((v) => !v)}
+                onStart={onStartAllDay}
+                recordingIdle={recording.status === 'idle'}
+              />
               <div className="flex flex-col gap-2">
-                {upcomingVisible.map((event) => (
+                {upcomingToday.map((event) => (
                   <UpcomingCard key={event.id} event={event} />
                 ))}
               </div>
+            </section>
+          )}
+
+          {upcomingToday.length === 0 && tomorrowPreview && mode === 'home' && (
+            <section className="mb-10">
+              <SectionHead title="Tomorrow" count={1} />
+              <AllDayInline
+                events={allDayToday}
+                expanded={allDayExpanded}
+                onToggle={() => setAllDayExpanded((v) => !v)}
+                onStart={onStartAllDay}
+                recordingIdle={recording.status === 'idle'}
+              />
+              <div className="flex flex-col gap-2">
+                <UpcomingCard event={tomorrowPreview} />
+              </div>
+            </section>
+          )}
+
+          {upcomingToday.length === 0 && !tomorrowPreview && allDayToday.length > 0 && mode === 'home' && (
+            <section className="mb-10">
+              <SectionHead title="Today" count={allDayToday.length} />
+              <AllDayInline
+                events={allDayToday}
+                expanded={allDayExpanded}
+                onToggle={() => setAllDayExpanded((v) => !v)}
+                onStart={onStartAllDay}
+                recordingIdle={recording.status === 'idle'}
+              />
             </section>
           )}
 
@@ -381,8 +433,55 @@ function SectionHead({ title, count, action }: SectionHeadProps) {
   );
 }
 
-function summaryLine(_upcomingCount: number): string {
-  return `Start recording from the top-right, or from anywhere with ${shortcut('⌘⇧R', 'Ctrl+Shift+R')}.`;
+
+interface AllDayInlineProps {
+  events: CalendarEvent[];
+  expanded: boolean;
+  onToggle: () => void;
+  onStart: (title: string) => void;
+  recordingIdle: boolean;
+}
+
+function AllDayInline({
+  events,
+  expanded,
+  onToggle,
+  onStart,
+  recordingIdle,
+}: AllDayInlineProps) {
+  if (events.length === 0) return null;
+  return (
+    <div
+      className="mb-2 flex flex-col gap-1 text-xs"
+      style={{ color: 'var(--fg-2)' }}
+    >
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={expanded}
+        className="-mx-1 self-start rounded px-1 py-0.5 transition-colors hover:bg-[color:var(--surface-hover)]"
+      >
+        + {events.length} all-day event{events.length === 1 ? '' : 's'} today
+      </button>
+      {expanded && (
+        <div className="flex flex-col items-start gap-0.5 pl-3">
+          {events.map((e) => (
+            <button
+              key={e.id}
+              type="button"
+              onClick={() => onStart(e.title)}
+              disabled={!recordingIdle}
+              title={`Start recording: ${e.title}`}
+              className="-mx-1 rounded px-1 py-0.5 transition-colors hover:bg-[color:var(--surface-hover)] disabled:opacity-50 disabled:hover:bg-transparent"
+              style={{ color: 'var(--fg-1)' }}
+            >
+              {e.title}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function firstFolderName(

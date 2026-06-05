@@ -5494,7 +5494,7 @@ function fetchCalendarEvents(accessToken, maxResults = 7, signal) {
       maxResults: String(maxResults),
       singleEvents: 'true',
       orderBy: 'startTime',
-      fields: 'items(id,summary,description,start,end,attendees,htmlLink,conferenceData)'
+      fields: 'items(id,status,summary,description,start,end,attendees,htmlLink,conferenceData)'
     });
 
     const options = {
@@ -5768,7 +5768,7 @@ function fetchOutlookCalendarEvents(accessToken, maxResults = 7, signal) {
       endDateTime: weekAhead.toISOString(),
       $top: String(maxResults),
       $orderby: 'start/dateTime',
-      $select: 'id,subject,body,start,end,attendees,webLink,onlineMeeting,isOnlineMeeting'
+      $select: 'id,subject,body,start,end,attendees,webLink,onlineMeeting,isOnlineMeeting,isAllDay,isCancelled,responseStatus'
     });
 
     const options = {
@@ -5829,6 +5829,21 @@ function normalizeOutlookEvent(event) {
     return dt.endsWith('Z') ? dt : dt + 'Z';
   };
 
+  // Map Outlook responseStatus.response → the common enum used downstream.
+  // 'tentativelyAccepted' is the Outlook wire name for what Google calls 'tentative';
+  // 'notResponded' maps to Google's 'needsAction'. 'none' / missing → 'unknown'
+  // so the downstream filter defaults to "show" rather than guessing.
+  const mapOutlookResponse = (r) => {
+    switch (r) {
+      case 'accepted': return 'accepted';
+      case 'declined': return 'declined';
+      case 'tentativelyAccepted': return 'tentative';
+      case 'notResponded': return 'needsAction';
+      case 'organizer': return 'organizer';
+      default: return 'unknown';
+    }
+  };
+
   return {
     id: event.id,
     summary: event.subject || 'No title',
@@ -5849,7 +5864,12 @@ function normalizeOutlookEvent(event) {
     htmlLink: event.webLink,
     conferenceData: event.isOnlineMeeting && event.onlineMeeting ? {
       entryPoints: [{ uri: event.onlineMeeting.joinUrl, entryPointType: 'video' }]
-    } : undefined
+    } : undefined,
+    // Carried forward for normalizeCalendarEvent — Outlook reports these at the
+    // top level so we don't need to inspect attendees to find "self".
+    isAllDay: event.isAllDay === true,
+    isCancelled: event.isCancelled === true,
+    selfResponseStatus: mapOutlookResponse(event.responseStatus?.response)
   };
 }
 
@@ -5910,7 +5930,24 @@ ipcMain.handle('google-auth-disconnect', async () => {
   }
 });
 
+// Map Google attendee.responseStatus → the common enum. Google uses the same
+// strings as our enum for the four "real" states, so this is mostly identity.
+function mapGoogleResponse(r) {
+  switch (r) {
+    case 'accepted': return 'accepted';
+    case 'declined': return 'declined';
+    case 'tentative': return 'tentative';
+    case 'needsAction': return 'needsAction';
+    default: return 'unknown';
+  }
+}
+
+// Returns null for cancelled events so the caller can drop them. Google marks
+// them with status === 'cancelled'; Outlook with isCancelled === true (carried
+// through from normalizeOutlookEvent).
 function normalizeCalendarEvent(event) {
+  if (event.status === 'cancelled' || event.isCancelled === true) return null;
+
   const start =
     event.start?.dateTime ||
     event.start?.date ||
@@ -5919,6 +5956,32 @@ function normalizeCalendarEvent(event) {
     event.end?.dateTime ||
     event.end?.date ||
     (typeof event.end === 'string' ? event.end : '');
+
+  // All-day events have date-only start/end ("YYYY-MM-DD") on Google. Outlook
+  // carries an explicit flag through normalizeOutlookEvent.
+  const isAllDay =
+    event.isAllDay === true ||
+    (!event.start?.dateTime && !!event.start?.date);
+
+  // Self response. Outlook hands us the answer directly (top-level
+  // responseStatus → carried through as selfResponseStatus). Google requires
+  // finding the attendee with self === true; if there's no attendees list at
+  // all the event is calendar-only (e.g. a self-blocked focus block) so treat
+  // it as 'organizer' — show it, never label it as declined.
+  let responseStatus = event.selfResponseStatus;
+  if (!responseStatus) {
+    if (Array.isArray(event.attendees) && event.attendees.length > 0) {
+      const self = event.attendees.find((a) => a && a.self === true);
+      if (self) {
+        responseStatus = self.organizer ? 'organizer' : mapGoogleResponse(self.responseStatus);
+      } else {
+        responseStatus = 'unknown';
+      }
+    } else {
+      responseStatus = 'organizer';
+    }
+  }
+
   return {
     id: event.id,
     title: event.summary || event.title || 'No title',
@@ -5929,6 +5992,8 @@ function normalizeCalendarEvent(event) {
       event.onlineMeeting?.joinUrl ||
       event.meeting_url ||
       undefined,
+    is_all_day: isAllDay,
+    response_status: responseStatus,
   };
 }
 
@@ -5938,13 +6003,13 @@ ipcMain.handle('get-calendar-events', async () => {
     const googleToken = await getValidAccessToken();
     if (googleToken) {
       const raw = await fetchCalendarEvents(googleToken);
-      return { success: true, events: raw.map(normalizeCalendarEvent) };
+      return { success: true, events: raw.map(normalizeCalendarEvent).filter(Boolean) };
     }
 
     const outlookToken = await getValidOutlookAccessToken();
     if (outlookToken) {
       const raw = await fetchOutlookCalendarEvents(outlookToken);
-      return { success: true, events: raw.map(normalizeCalendarEvent) };
+      return { success: true, events: raw.map(normalizeCalendarEvent).filter(Boolean) };
     }
 
     return { success: false, needsAuth: true };
@@ -5978,6 +6043,8 @@ function pickCurrentCalendarEvent(events, now = new Date()) {
   for (const e of events) {
     if (!e || typeof e.start !== 'string' || typeof e.end !== 'string') continue;
     if (!e.start.includes('T') || !e.end.includes('T')) continue;
+    if (e.is_all_day === true) continue;
+    if (e.response_status === 'declined') continue;
     const startMs = new Date(e.start).getTime();
     const endMs = new Date(e.end).getTime();
     if (!isFinite(startMs) || !isFinite(endMs)) continue;
@@ -6015,12 +6082,12 @@ async function getCalendarEventForNow(timeoutMs = 1500) {
     const googleToken = await getValidAccessToken();
     if (googleToken) {
       const raw = await fetchCalendarEvents(googleToken, 7, signal);
-      events = raw.map(normalizeCalendarEvent);
+      events = raw.map(normalizeCalendarEvent).filter(Boolean);
     } else {
       const outlookToken = await getValidOutlookAccessToken();
       if (outlookToken) {
         const raw = await fetchOutlookCalendarEvents(outlookToken, 7, signal);
-        events = raw.map(normalizeCalendarEvent);
+        events = raw.map(normalizeCalendarEvent).filter(Boolean);
       }
     }
     if (!events) return null;
