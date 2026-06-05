@@ -32,12 +32,23 @@ atexit.register(cleanup_sounddevice)
 
 
 class AudioRecorder:
-    def __init__(self, sample_rate: int = 44100, channels: int = 1):
+    # Capture at 16 kHz natively — matches Parakeet's expected rate AND
+    # Silero VAD's expected rate, so neither pipeline pays a resample cost.
+    # The post-stop diarisation pipeline already runs everything through
+    # ffmpeg → 16 kHz, so this is a no-op for the existing path. blocksize
+    # 4096 ≈ 256 ms per callback, which is the cadence Silero's internal
+    # 32 ms windows roll up to neatly (256 / 32 = 8 sub-chunks per call).
+    DEFAULT_SAMPLE_RATE = 16000
+    DEFAULT_BLOCKSIZE = 4096
+
+    def __init__(self, sample_rate: int = DEFAULT_SAMPLE_RATE, channels: int = 1,
+                 blocksize: int = DEFAULT_BLOCKSIZE):
         if not AUDIO_AVAILABLE:
             raise ImportError("Audio dependencies not available. Please install sounddevice and numpy.")
 
         self.sample_rate = sample_rate
         self.channels = channels
+        self.blocksize = blocksize
         self.recording = False
         self.paused = False
         self.audio_data = []
@@ -145,12 +156,12 @@ class AudioRecorder:
         """Internal method to handle the recording process."""
         stream = None
         try:
-            logger.info(f"Starting audio stream with sample_rate={self.sample_rate}, channels={self.channels}")
+            logger.info(f"Starting audio stream with sample_rate={self.sample_rate}, channels={self.channels}, blocksize={self.blocksize}")
             stream = sd.InputStream(
                 samplerate=self.sample_rate,
                 channels=self.channels,
                 callback=self._audio_callback,
-                blocksize=1024
+                blocksize=self.blocksize,
             )
             self.stream = stream  # Store reference for cleanup
             stream.start()

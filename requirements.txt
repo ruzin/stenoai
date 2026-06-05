@@ -4,6 +4,15 @@ sounddevice>=0.4.6
 # the floor is the only real constraint now.
 numpy>=2.0,<3.0
 parakeet-mlx>=0.5.0
+# Silero VAD runs via onnxruntime directly (we ship the .onnx file in
+# src/data/). The official silero-vad pip package would pull in torch
+# and torchaudio (~1 GB), which would balloon the DMG — onnxruntime
+# CPU is a few MB and runs the same model.
+onnxruntime>=1.17
+# pywhispercpp is still used by src/transcriber.py for the post-stop
+# batch pipeline. Will be removed once the transcriber rewrite
+# (parakeet for batch too) lands — until then this is the safety net.
+pywhispercpp>=1.2.0
 ollama>=0.1.7
 click>=8.1.0
 pydantic>=2.5.0

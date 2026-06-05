@@ -1944,6 +1944,35 @@ ipcMain.handle('get-queue-status', async () => {
   };
 });
 
+// Push a chunk of raw 16 kHz mono float32 audio to the live transcribe
+// sidecar's stdin. Renderer downsamples its Web Audio mix and calls this
+// every ~256 ms. We expect either a Node Buffer or a TypedArray; both
+// stringify safely to bytes via the same write() call. No-op if the
+// sidecar isn't running (e.g. spawn failed, or recording ended).
+ipcMain.on('live-transcribe-chunk', (event, payload) => {
+  if (!liveTranscribeProcess || liveTranscribeProcess.killed) return;
+  if (!payload) return;
+  // Renderer side sends an ArrayBuffer; Electron's IPC layer hands us a
+  // Buffer here. If a TypedArray slipped through, normalise.
+  const buf = Buffer.isBuffer(payload) ? payload : Buffer.from(payload);
+  try {
+    liveTranscribeProcess.stdin.write(buf);
+  } catch (e) {
+    // EPIPE means Python exited (e.g. crashed). Drop silently; the exit
+    // handler will null out the process ref.
+    sendDebugLog(`live-transcribe-chunk write failed: ${e.message}`);
+  }
+});
+
+// Optional explicit stop signal (mirrors live-transcribe-chunk on the
+// send channel). stop-recording-ui already calls stopLiveTranscribe, so
+// this is mostly defensive — e.g. if the renderer wants to tear down the
+// sidecar without ending the recording (it doesn't today, but a future
+// "pause live transcription" toggle could).
+ipcMain.on('live-transcribe-stop', () => {
+  stopLiveTranscribe();
+});
+
 // Returns the current live transcript buffer for the in-flight recording.
 // Used by LiveTranscriptPanel after a late mount (e.g. user navigated away
 // and back during recording) to backfill segments before subscribing to
@@ -1971,6 +2000,137 @@ ipcMain.handle('get-live-transcript-state', async () => {
 // by useSystemAudioCapture's own OS check). Falls through to the config
 // default (currently true on a missing/empty config) when the OS does
 // support CoreAudio Tap so new installs get system audio out of the box.
+// Spawn the Python transcribe-stream sidecar for the system-audio path.
+// Wires stdout NDJSON to the same live-transcript-{ready,chunk,error}
+// IPC events the in-process `record --live` consumer uses, so the
+// renderer doesn't care which path produced the events.
+function spawnLiveTranscribe(sessionName) {
+  if (liveTranscribeProcess) {
+    sendDebugLog('Live transcribe sidecar already running, skipping spawn');
+    return;
+  }
+  const aiEnv = getAiEnv();
+  const env = Object.keys(aiEnv).length > 0
+    ? { ...require('process').env, ...aiEnv }
+    : undefined;
+  liveTranscribeProcess = spawn(getBackendPath(), ['transcribe-stream'], {
+    cwd: getBackendCwd(),
+    env,
+    // Default {pipe, pipe, pipe} — we need stdin to push audio in and
+    // stdout to parse the LIVE_* protocol.
+  });
+  liveTranscribeSessionName = sessionName;
+  liveTranscribeStdoutBuf = '';
+
+  liveTranscribeProcess.stdout.on('data', (data) => {
+    // Stdout arrives in arbitrary-sized chunks; concatenate then split on
+    // newlines so a multi-line frame straddling reads is handled.
+    liveTranscribeStdoutBuf += data.toString();
+    let nl;
+    while ((nl = liveTranscribeStdoutBuf.indexOf('\n')) !== -1) {
+      const line = liveTranscribeStdoutBuf.slice(0, nl);
+      liveTranscribeStdoutBuf = liveTranscribeStdoutBuf.slice(nl + 1);
+      handleLiveTranscribeLine(line);
+    }
+  });
+
+  liveTranscribeProcess.stderr.on('data', (data) => {
+    // Python logger output goes to stderr — bubble through debug log
+    // without spamming the renderer.
+    sendDebugLog(`[live-transcribe] ${data.toString().trim()}`);
+  });
+
+  liveTranscribeProcess.on('exit', (code, signal) => {
+    sendDebugLog(`Live transcribe sidecar exited code=${code} signal=${signal}`);
+    liveTranscribeProcess = null;
+    liveTranscribeSessionName = null;
+    liveTranscribeStdoutBuf = '';
+  });
+
+  liveTranscribeProcess.on('error', (err) => {
+    sendDebugLog(`Live transcribe sidecar error: ${err.message}`);
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('live-transcript-error', {
+        sessionName,
+        stage: 'spawn',
+        message: err.message,
+      });
+    }
+  });
+}
+
+// Shared LIVE_* line handler used by the transcribe-stream stdout parser.
+// Keeps the per-line semantics (buffer mutation + IPC emit) in one place
+// so the legacy `record --live` path and this sidecar path stay in lock
+// step if we ever extend the protocol.
+function handleLiveTranscribeLine(line) {
+  const sessionName = liveTranscribeSessionName;
+  if (line.startsWith('LIVE_READY:')) {
+    liveTranscriptState.ready = true;
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('live-transcript-ready', { sessionName });
+    }
+    return;
+  }
+  if (line.startsWith('LIVE_SEG:')) {
+    try {
+      const seg = JSON.parse(line.slice('LIVE_SEG:'.length));
+      const segment = {
+        text: seg.text,
+        start: seg.start,
+        end: seg.end,
+        isFinal: !!seg.is_final,
+      };
+      if (segment.isFinal) {
+        liveTranscriptState.segments.push(segment);
+      } else {
+        const tail = liveTranscriptState.segments[liveTranscriptState.segments.length - 1];
+        if (tail && !tail.isFinal) {
+          liveTranscriptState.segments[liveTranscriptState.segments.length - 1] = segment;
+        } else {
+          liveTranscriptState.segments.push(segment);
+        }
+      }
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('live-transcript-chunk', { sessionName, segment });
+      }
+    } catch (e) {
+      sendDebugLog(`LIVE_SEG parse error (sidecar): ${e.message}`);
+    }
+    return;
+  }
+  if (line.startsWith('LIVE_ERROR:')) {
+    try {
+      const payload = JSON.parse(line.slice('LIVE_ERROR:'.length));
+      liveTranscriptState.error = payload;
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('live-transcript-error', {
+          sessionName, ...payload,
+        });
+      }
+    } catch (e) {
+      sendDebugLog(`LIVE_ERROR parse error (sidecar): ${e.message}`);
+    }
+  }
+}
+
+// Tear down the live transcribe sidecar. Closing stdin is the clean
+// shutdown signal — Python's read loop hits EOF, drains the VAD, exits.
+// Falls back to SIGTERM after a short wait if it doesn't exit on its own.
+function stopLiveTranscribe() {
+  const proc = liveTranscribeProcess;
+  if (!proc) return;
+  try {
+    proc.stdin.end();
+  } catch (_) { /* already closed */ }
+  // Watchdog: if Python hasn't exited in 5 s, force kill.
+  setTimeout(() => {
+    if (liveTranscribeProcess === proc && !proc.killed) {
+      try { proc.kill('SIGTERM'); } catch (_) {}
+    }
+  }, 5000);
+}
+
 function loadSystemAudioEnabled() {
   if (!isCoreAudioTapSupported()) return false;
   try {
@@ -2019,6 +2179,17 @@ let liveTranscriptState = {
   ready: false,
   error: null,
 };
+
+// Sidecar Python `transcribe-stream` subprocess used by the system-audio
+// path. The renderer captures + mixes in Web Audio, downsamples to 16 kHz
+// mono float32, and pushes chunks here via `live-transcribe-chunk`; we
+// pipe them into this process's stdin. Its stdout is parsed the same way
+// the in-process `record --live` stdout is — same LIVE_READY / LIVE_SEG /
+// LIVE_ERROR protocol, same liveTranscriptState mutations, same IPC
+// events emitted to the renderer.
+let liveTranscribeProcess = null;
+let liveTranscribeSessionName = null;
+let liveTranscribeStdoutBuf = '';
 let isProcessing = false;
 let currentProcessingJob = null;
 // Reprocess runs as a side-channel from the main processing queue (different
@@ -2302,6 +2473,23 @@ ipcMain.handle('start-recording-ui', async (_, sessionName) => {
       // capture would never start. The renderer's reportSystemAudioState
       // IPC is then idempotent on success and clears the flag on failure.
       systemAudioRecordingActive = true;
+      // Reset live transcript buffer for this session before the live
+      // sidecar spawns and starts emitting events.
+      liveTranscriptState = {
+        sessionName: actualSessionName,
+        segments: [],
+        ready: false,
+        error: null,
+      };
+      // Spawn the Parakeet+Silero transcribe-stream subprocess. The
+      // renderer will pipe audio chunks into it via `live-transcribe-chunk`
+      // and the stdout protocol matches the in-process `record --live`
+      // consumer so the renderer's useLiveTranscript hook works unchanged.
+      try {
+        spawnLiveTranscribe(actualSessionName);
+      } catch (e) {
+        sendDebugLog(`Failed to spawn live transcribe sidecar: ${e.message}`);
+      }
       updateTrayIcon(true);
       trackEvent('recording_started', { recording_mode: 'system_audio' });
       return {
@@ -2620,6 +2808,10 @@ ipcMain.handle('stop-recording-ui', async () => {
     // errored before reportSystemAudioState) can leave this stuck true and
     // the UI thinks a recording is still in progress.
     systemAudioRecordingActive = false;
+    // Shut down the live transcribe sidecar if it's running (system-audio
+    // path). Closing stdin lets Python drain any final utterance before
+    // exiting; a watchdog SIGTERM in stopLiveTranscribe covers stuck cases.
+    stopLiveTranscribe();
 
     if (!currentRecordingProcess) {
       // Idempotent: clicking stop with no active recording is not an error

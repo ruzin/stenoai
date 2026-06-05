@@ -1,11 +1,30 @@
-"""
-Whisper transcription module.
+"""Batch transcription via Parakeet TDT v3 (MLX).
 
-Supports two backends:
-1. whisper.cpp (via pywhispercpp) - Lightweight, fast, recommended
-2. openai-whisper (PyTorch) - Original, heavier, fallback
+Replaces the previous pywhispercpp + openai-whisper backends. One engine
+for live (in simple_recorder.py's VAD-gated consumer) and post-stop
+(here), which means a recording's live transcript and final transcript
+share the same model — no flavour mismatch between what the user saw
+during recording and what summarisation sees afterwards.
 
-whisper.cpp is preferred as it's 10x smaller and 2-4x faster.
+Public surface kept compatible with the prior whisper-era pipeline so
+the rest of the codebase doesn't churn:
+
+* ``WhisperTranscriber`` (class name retained for callers / tests)
+  - ``transcribe_audio(path, language)`` — single-channel batch
+  - ``transcribe_diarised(path, language)`` — stereo channel split into
+    [You] / [Others] turns
+  - ``transcribe_with_timestamps(path)`` — segment-level timing
+
+The stereo channel split, RMS-energy gating, and speaker-bleed collapse
+all stay — they operate on transcript text + audio metadata, not on the
+specific ASR engine.
+
+Whisper-era hallucination filtering ("Thank you." / "Bye." on silence)
+is gone: Parakeet doesn't produce those canned phrases on silent or
+noisy input (verified empirically — pure silence, low noise, and
+isolated clicks all return empty). Filtering by phrase against a real
+ASR engine would now strictly remove real speech without preventing
+anything; the model is the source of truth.
 """
 
 import logging
@@ -31,7 +50,7 @@ BLEED_JACCARD_THRESHOLD = 0.6
 
 # RMS energy gate for "channel has speech". Intentionally low (-70 dB) so
 # headphones-mode mic recordings — captured at much lower amplitude than
-# speakers-mode — still pass. Whisper handles low-amplitude speech fine;
+# speakers-mode — still pass. The model handles low-amplitude speech fine;
 # this gate's only job is to skip channels with effectively zero audio.
 MIN_RMS_THRESHOLD = 0.0003
 
@@ -128,23 +147,11 @@ def _rms_of_pcm16(raw: bytes, n_samples: int) -> float:
 
 
 def _scan_max_rms(wf, window: int, step: int, early_exit_threshold: float) -> float:
-    """Return the maximum RMS amplitude found across stepped 1-second windows.
-
-    Reads int16 PCM frames from a `wave.Wave_read` and computes RMS per
-    window in [0, 1]. Early-exits as soon as a window crosses the
-    threshold so we don't keep scanning a clearly-non-silent channel.
-    Uses numpy when available (orders of magnitude faster than pure
-    Python on long recordings); falls back to struct/math otherwise so
-    transcriber doesn't hard-require numpy.
-    """
+    """Return the maximum RMS amplitude found across stepped 1-second windows."""
     n_frames = wf.getnframes()
     if n_frames == 0:
         return 0.0
 
-    # Short clip: file is shorter than one window. Scan the whole thing
-    # as a single window so a sub-window-length recording isn't falsely
-    # classified as silent just because the windowed loop's `pos +
-    # window <= n_frames` guard would never enter.
     if n_frames < window:
         wf.setpos(0)
         raw = wf.readframes(n_frames)
@@ -177,94 +184,83 @@ def _token_jaccard(a: str, b: str) -> float:
         return 0.0
     return len(tokens_a & tokens_b) / len(tokens_a | tokens_b)
 
-# Try whisper.cpp first (preferred - smaller, faster)
-try:
-    from pywhispercpp.model import Model as WhisperCppModel
-    WHISPER_CPP_AVAILABLE = True
-    logger.info("Using whisper.cpp backend (pywhispercpp)")
-except ImportError:
-    WhisperCppModel = None
-    WHISPER_CPP_AVAILABLE = False
 
-# Fall back to openai-whisper if whisper.cpp not available
+# Try Parakeet first (preferred — same engine as live).
 try:
-    import whisper as openai_whisper
-    OPENAI_WHISPER_AVAILABLE = True
+    from src.parakeet import transcribe_file as _parakeet_transcribe_file
+    PARAKEET_AVAILABLE = True
 except ImportError:
-    openai_whisper = None
-    OPENAI_WHISPER_AVAILABLE = False
+    _parakeet_transcribe_file = None
+    PARAKEET_AVAILABLE = False
+    logger.warning("parakeet backend not importable; batch transcription will fail")
 
-WHISPER_AVAILABLE = WHISPER_CPP_AVAILABLE or OPENAI_WHISPER_AVAILABLE
+
+# Top-level capability flag retained for callers that probed for whisper
+# presence. Now it just means "do we have any working ASR backend at all".
+WHISPER_AVAILABLE = PARAKEET_AVAILABLE
 
 
 class WhisperTranscriber:
-    """
-    Whisper-based audio transcription.
+    """Batch transcription via Parakeet TDT v3.
 
-    Automatically uses whisper.cpp if available (faster, smaller),
-    falls back to openai-whisper (PyTorch) if not.
+    Class name retained from the whisper era so the rest of the codebase
+    (CLI in simple_recorder.py, tests, etc.) doesn't churn. Internally
+    it's just a thin shim over ``src.parakeet.transcribe_file`` plus the
+    stereo-channel split + speaker-bleed collapse + RMS-energy gating
+    logic that the old whisper path had.
+
+    ``model_size`` is accepted for backwards compatibility with the old
+    pywhispercpp interface but ignored — Parakeet TDT v3 is a single
+    model (no size variants).
     """
 
     def __init__(self, model_size: str = "small"):
-        """
-        Initialize the Whisper transcriber.
-
-        Args:
-            model_size: Whisper model size (tiny, base, small, medium, large)
-        """
-        if not WHISPER_AVAILABLE:
+        if not PARAKEET_AVAILABLE:
             raise ImportError(
-                "No Whisper backend available. Install pywhispercpp (recommended) "
-                "or openai-whisper: pip install pywhispercpp"
+                "Parakeet (parakeet-mlx) backend is not available. "
+                "Run `pip install parakeet-mlx` in the venv or rebuild the "
+                "PyInstaller bundle."
             )
-
+        # Kept on the instance so existing callers / logs that read
+        # ``model_size`` and ``backend`` don't change.
         self.model_size = model_size
-        self.model = None
-        self.backend = None
+        self.model = None  # Parakeet manages its own model singleton
+        self.backend = "parakeet-tdt-v3"
         self._ensure_ffmpeg_in_path()
-        self._load_model()
 
     def _ensure_ffmpeg_in_path(self) -> None:
-        """
-        Ensure ffmpeg is in PATH for audio processing.
-        Checks bundled ffmpeg first, then system locations.
-        """
-        import sys
+        """Make sure ffmpeg is reachable from $PATH for the stereo split.
 
-        # Build list of possible ffmpeg locations
+        We don't need ffmpeg for the basic transcribe path anymore (Parakeet
+        handles arbitrary formats via librosa), but the stereo-channel split
+        in ``transcribe_diarised`` still calls ffmpeg with a `pan` filter to
+        separate the mic and system channels.
+        """
         possible_ffmpeg_paths = []
 
-        # Check bundled ffmpeg first (PyInstaller bundle)
         if getattr(sys, 'frozen', False):
-            # Running from PyInstaller bundle
-            # stenoai.spec places ffmpeg at '.' (bundle root, next to executable)
             exe_dir = Path(sys.executable).parent
             root_ffmpeg = exe_dir / 'ffmpeg'
             if root_ffmpeg.exists():
                 possible_ffmpeg_paths.append(str(root_ffmpeg))
-            # Also check _MEIPASS (_internal) in case layout changes
             if hasattr(sys, '_MEIPASS'):
                 meipass_ffmpeg = Path(sys._MEIPASS) / 'ffmpeg'
                 if meipass_ffmpeg.exists():
                     possible_ffmpeg_paths.append(str(meipass_ffmpeg))
-            # Also check _internal subdirectory
             internal_ffmpeg = exe_dir / '_internal' / 'ffmpeg'
             if internal_ffmpeg.exists():
                 possible_ffmpeg_paths.append(str(internal_ffmpeg))
         else:
-            # Development mode - check bin directory
             dev_ffmpeg = Path(__file__).parent.parent / 'bin' / 'ffmpeg'
             if dev_ffmpeg.exists():
                 possible_ffmpeg_paths.append(str(dev_ffmpeg))
 
-        # Add system locations as fallback
         possible_ffmpeg_paths.extend([
-            '/opt/homebrew/bin/ffmpeg',  # Homebrew on Apple Silicon
-            '/usr/local/bin/ffmpeg',     # Homebrew on Intel
-            '/usr/bin/ffmpeg',           # System installation
+            '/opt/homebrew/bin/ffmpeg',
+            '/usr/local/bin/ffmpeg',
+            '/usr/bin/ffmpeg',
         ])
 
-        # Check if ffmpeg is already in PATH
         try:
             subprocess.run(['ffmpeg', '-version'], capture_output=True, timeout=5, check=True)
             logger.info("ffmpeg found in PATH")
@@ -272,7 +268,6 @@ class WhisperTranscriber:
         except (subprocess.TimeoutExpired, subprocess.CalledProcessError, FileNotFoundError):
             pass
 
-        # Try each possible location
         ffmpeg_found_path = None
         for ffmpeg_path in possible_ffmpeg_paths:
             try:
@@ -290,64 +285,61 @@ class WhisperTranscriber:
                 os.environ['PATH'] = f"{ffmpeg_dir}:{current_path}"
                 logger.info(f"Added {ffmpeg_dir} to PATH")
         else:
-            logger.warning("ffmpeg not found - transcription may fail")
+            logger.warning("ffmpeg not found - stereo diarisation will fall back to mono")
 
-    def _load_model(self) -> None:
-        """Load the Whisper model using the best available backend."""
-        try:
-            if WHISPER_CPP_AVAILABLE:
-                self._load_whisper_cpp()
-            elif OPENAI_WHISPER_AVAILABLE:
-                self._load_openai_whisper()
-            else:
-                raise ImportError("No Whisper backend available")
-        except Exception as e:
-            logger.error(f"Error loading Whisper model: {e}")
-            raise
+    # ------------------------------------------------------------------
+    # Core: run Parakeet on a WAV path, return our normalised dict shape.
+    # ------------------------------------------------------------------
 
-    def _load_whisper_cpp(self) -> None:
-        """Load model using whisper.cpp (pywhispercpp)."""
-        logger.info(f"Loading whisper.cpp model: {self.model_size}")
+    def _run_parakeet(self, audio_filepath: Path, language: str) -> dict:
+        """Call into ``src.parakeet`` and normalise the result shape.
 
-        # Determine number of threads (use most cores, leave 2 for system)
-        import multiprocessing
-        n_threads = max(1, multiprocessing.cpu_count() - 2)
+        No phrase-level filtering here — Parakeet returns empty on silence
+        and noise (verified) so the previous whisper-era "Thank you." /
+        "Bye." canned-phrase blocklist would strictly drop real speech now.
+        """
+        # Parakeet TDT v3 is multilingual + language-agnostic at inference
+        # time, so "auto" and a concrete code both work — the model just
+        # decodes. We surface the requested code in ``detected_language``
+        # when it's concrete so the summariser still sees a hint.
+        lang_for_parakeet = None if language == "auto" else language
+        result = _parakeet_transcribe_file(audio_filepath, language=lang_for_parakeet)
+        if not result:
+            return {
+                "text": None,
+                "segments": [],
+                "duration_seconds": None,
+                "detected_language": None,
+                "detected_language_probability": None,
+            }
 
-        # pywhispercpp auto-downloads the model if not present
-        self.model = WhisperCppModel(self.model_size, n_threads=n_threads)
-        self.backend = "whisper.cpp"
-        logger.info(f"whisper.cpp model loaded successfully (threads: {n_threads})")
+        segments = result.get("segments") or []
+        raw_text = (result.get("text") or "").strip()
+        return {
+            "text": raw_text or None,
+            "segments": segments,
+            "duration_seconds": result.get("duration_seconds"),
+            "detected_language": result.get("detected_language"),
+            "detected_language_probability": result.get("detected_language_probability"),
+        }
 
-    def _load_openai_whisper(self) -> None:
-        """Load model using openai-whisper (PyTorch)."""
-        logger.info(f"Loading openai-whisper model: {self.model_size}")
-        self.model = openai_whisper.load_model(self.model_size)
-        self.backend = "openai-whisper"
-        logger.info("openai-whisper model loaded successfully")
+    # ------------------------------------------------------------------
+    # Public batch API (back-compat with the whisper-era surface).
+    # ------------------------------------------------------------------
 
     def transcribe_audio(self, audio_filepath: Path, language: str = "en") -> Optional[dict]:
-        """
-        Transcribe audio file to text.
+        """Transcribe a single-channel (or mono-mixed) audio file.
 
-        Args:
-            audio_filepath: Path to the audio file
-            language: Language code (e.g., "en", "de", "auto")
-
-        Returns:
-            Transcribed text or None if transcription failed
+        Returns ``None`` if the file is missing or too small to transcribe;
+        otherwise a dict with ``text`` / ``segments`` / ``duration_seconds`` /
+        ``detected_language`` / ``detected_language_probability``.
         """
         if not audio_filepath.exists():
             logger.error(f"Audio file not found: {audio_filepath}")
             return None
 
-        if self.model is None:
-            logger.error("Whisper model not loaded")
-            return None
-
         try:
             logger.info(f"Transcribing audio file: {audio_filepath}")
-
-            # Check file size
             file_size = audio_filepath.stat().st_size
             logger.info(f"Audio file size: {file_size / 1024:.1f} KB")
 
@@ -360,18 +352,13 @@ class WhisperTranscriber:
                     "detected_language_probability": None,
                 }
 
-            # Use appropriate backend
-            if self.backend == "whisper.cpp":
-                result = self._transcribe_whisper_cpp(audio_filepath, language)
-            else:
-                result = self._transcribe_openai_whisper(audio_filepath, language)
-                result["duration_seconds"] = None
+            result = self._run_parakeet(audio_filepath, language)
 
             transcript = result.get("text")
             logger.info(f"Transcription completed. Length: {len(transcript) if transcript else 0} characters")
 
             if not transcript:
-                logger.warning("Transcription returned empty text")
+                logger.warning("Transcription returned empty text (all hallucinations or silent)")
                 result["text"] = "No speech detected in audio"
 
             result.setdefault("detected_language", None)
@@ -384,206 +371,11 @@ class WhisperTranscriber:
             logger.error(f"Traceback: {traceback.format_exc()}")
             return None
 
-    def _convert_to_16khz(self, audio_filepath: Path) -> tuple:
-        """Convert audio to 16kHz mono WAV for whisper.cpp compatibility.
-
-        Returns:
-            (converted_path, duration_seconds) where duration_seconds is the
-            audio length read from the converted WAV header, or None if it
-            could not be determined.
-        """
-        import tempfile
-        import wave
-
-        # Create temp file for converted audio
-        temp_dir = tempfile.gettempdir()
-        converted_path = Path(temp_dir) / f"stenoai_16khz_{audio_filepath.stem}.wav"
-
-        try:
-            # Use ffmpeg to convert to 16kHz mono WAV
-            result = subprocess.run(
-                [
-                    'ffmpeg', '-y',  # Overwrite output
-                    '-i', str(audio_filepath),
-                    '-ar', '16000',  # 16kHz sample rate
-                    '-ac', '1',      # Mono
-                    '-c:a', 'pcm_s16le',  # 16-bit PCM
-                    str(converted_path)
-                ],
-                capture_output=True,
-                timeout=60
-            )
-
-            if result.returncode == 0 and converted_path.exists():
-                logger.info(f"Converted audio to 16kHz: {converted_path}")
-
-                # Read duration from converted WAV header
-                duration_seconds = None
-                try:
-                    with wave.open(str(converted_path), 'rb') as wf:
-                        duration_seconds = wf.getnframes() / wf.getframerate()
-                        logger.info(f"Audio duration from converted WAV: {duration_seconds:.1f}s")
-                except Exception as e:
-                    logger.warning(f"Could not read duration from converted WAV: {e}")
-
-                return converted_path, duration_seconds
-            else:
-                logger.error(f"ffmpeg conversion failed: {result.stderr.decode()}")
-                return audio_filepath, None
-
-        except Exception as e:
-            logger.error(f"Audio conversion error: {e}")
-            return audio_filepath, None
-
-    def _transcribe_whisper_cpp(self, audio_filepath: Path, language: str = "en") -> dict:
-        """Transcribe using whisper.cpp backend.
-
-        Returns:
-            dict with text/duration and optional detected language metadata
-        """
-        # whisper.cpp requires 16kHz audio - convert if needed
-        converted_path, duration_seconds = self._convert_to_16khz(audio_filepath)
-        cleanup_converted = converted_path != audio_filepath
-
-        try:
-            resolved_language = language
-            detected_language = None
-            detected_language_probability = None
-
-            if language == "auto":
-                try:
-                    detection_result, _ = self.model.auto_detect_language(media=str(converted_path))
-                    if detection_result and len(detection_result) >= 1:
-                        # pywhispercpp returns (language_code, probability) on auto_detect_language.
-                        detected_language = detection_result[0]
-                        resolved_language = detected_language
-                        if len(detection_result) >= 2:
-                            detected_language_probability = float(detection_result[1])
-                    logger.info(
-                        f"Auto-detected language: {detected_language} "
-                        f"(p={detected_language_probability})"
-                    )
-                except Exception as e:
-                    logger.warning(f"Failed to auto-detect language; using whisper default detection: {e}")
-                    # Setting to None omits the language kwarg, letting whisper.cpp
-                    # use its own internal language detection as a fallback.
-                    resolved_language = None
-
-            # pywhispercpp returns a list of segments
-            transcribe_kwargs = {"media": str(converted_path)}
-            if resolved_language and resolved_language != "auto":
-                transcribe_kwargs["language"] = resolved_language
-            segments = self.model.transcribe(**transcribe_kwargs)
-
-            # Drop whisper.cpp loop hallucinations. On quiet/no-content audio
-            # the decoder gets stuck emitting the same segment text (often a
-            # bracketed annotation like "[Sounds of a question]" or a real
-            # phrase like "Thank you.") dozens of times in a row. A run of 5+
-            # consecutive identical segments is the signature of a loop;
-            # legitimate repetition (three speakers saying "yes", a chant)
-            # rarely exceeds 4 in a row.
-            if segments:
-                deduped: list = []
-                i = 0
-                while i < len(segments):
-                    text = segments[i].text.strip()
-                    run_end = i + 1
-                    while (
-                        run_end < len(segments)
-                        and segments[run_end].text.strip() == text
-                    ):
-                        run_end += 1
-                    if run_end - i >= 5 and text:
-                        logger.warning(
-                            f"Dropped {run_end - i} repeated whisper segments: {text[:60]!r}"
-                        )
-                    else:
-                        deduped.extend(segments[i:run_end])
-                    i = run_end
-                segments = deduped
-
-            if not segments:
-                return {
-                    "text": None,
-                    "segments": [],
-                    "duration_seconds": duration_seconds,
-                    "detected_language": detected_language,
-                    "detected_language_probability": detected_language_probability,
-                }
-
-            # Combine all segment texts and surface per-segment timing so
-            # callers like transcribe_diarised can chronologically interleave
-            # turns from multiple channels. pywhispercpp reports t0/t1 in
-            # centiseconds (1/100s), so divide by 100 to get seconds.
-            transcript = " ".join(segment.text.strip() for segment in segments)
-            return {
-                "text": transcript.strip(),
-                "segments": [
-                    {
-                        "text": segment.text.strip(),
-                        "start": segment.t0 / 100.0,
-                        "end": segment.t1 / 100.0,
-                    }
-                    for segment in segments
-                    if segment.text.strip()
-                ],
-                "duration_seconds": duration_seconds,
-                "detected_language": detected_language,
-                "detected_language_probability": detected_language_probability,
-            }
-        finally:
-            # Clean up temp file
-            if cleanup_converted and converted_path.exists():
-                try:
-                    converted_path.unlink()
-                    logger.debug(f"Cleaned up converted audio: {converted_path}")
-                except Exception:
-                    pass
-
-    def _transcribe_openai_whisper(self, audio_filepath: Path, language: str = "en") -> dict:
-        """Transcribe using openai-whisper backend."""
-        transcribe_kwargs = {
-            "audio": str(audio_filepath),
-            "verbose": False,
-            "fp16": False,  # Disable FP16 to avoid warnings on CPU
-        }
-        if language and language != "auto":
-            transcribe_kwargs["language"] = language
-        result = self.model.transcribe(**transcribe_kwargs)
-
-        if not result or "text" not in result:
-            return {
-                "text": None,
-                "segments": [],
-                "detected_language": None,
-                "detected_language_probability": None,
-            }
-
-        # openai-whisper returns segments with start/end in seconds and
-        # additional fields we don't need; normalise the shape so the
-        # whisper.cpp and openai paths are interchangeable downstream.
-        raw_segments = result.get("segments") or []
-        return {
-            "text": result["text"].strip(),
-            "segments": [
-                {
-                    "text": (s.get("text") or "").strip(),
-                    "start": float(s.get("start") or 0.0),
-                    "end": float(s.get("end") or 0.0),
-                }
-                for s in raw_segments
-                if (s.get("text") or "").strip()
-            ],
-            "detected_language": result.get("language"),
-            "detected_language_probability": None,
-        }
-
     def _split_stereo_to_channels(self, audio_filepath: Path) -> Tuple[Optional[Path], Optional[Path], Optional[float]]:
-        """Detect if audio is stereo and split into separate channel files.
+        """Detect stereo and split into mono mic + system channel files.
 
-        Returns:
-            (mic_path, system_path, duration_seconds) if stereo,
-            (None, None, None) if mono or detection fails.
+        Returns ``(mic_path, system_path, duration_seconds)`` if stereo,
+        ``(None, None, None)`` if mono or detection fails.
         """
         ffmpeg = _resolve_ffmpeg()
         if not ffmpeg:
@@ -593,9 +385,7 @@ class WhisperTranscriber:
         # Detect channel count via ffmpeg. `-t 0` makes ffmpeg parse the
         # input header (where the channel layout lives) and exit immediately
         # without decoding any audio frames — without it, a 1-hour recording
-        # would actually decode in full just to read metadata. We parse the
-        # "Audio: ..., stereo|mono|N channels" line from stderr. ffprobe
-        # would be cleaner but isn't shipped in our PyInstaller bundle.
+        # would actually decode in full just to read metadata.
         try:
             probe = subprocess.run(
                 [ffmpeg, '-hide_banner', '-t', '0', '-i', str(audio_filepath),
@@ -619,7 +409,8 @@ class WhisperTranscriber:
             logger.warning(f"Channel detection failed: {e}")
             return None, None, None
 
-        # Split channels into temp files
+        # Split channels into temp files (16kHz mono — Parakeet's expected
+        # rate, so the model doesn't have to resample internally).
         temp_dir = tempfile.gettempdir()
         mic_path = Path(temp_dir) / f"stenoai_ch0_{audio_filepath.stem}.wav"
         system_path = Path(temp_dir) / f"stenoai_ch1_{audio_filepath.stem}.wav"
@@ -657,19 +448,12 @@ class WhisperTranscriber:
     def _check_rms_energy(self, audio_path: Path, threshold: float = MIN_RMS_THRESHOLD) -> bool:
         """Check if an audio file has speech-level energy in any 1-second window.
 
-        Uses sliding 1-second windows sampled across the entire file rather
-        than only the first few seconds. System audio captured via CoreAudio
-        Tap may not start until the user plays a clip mid-recording, and a
-        head-only check averages those leading-silence seconds and falsely
-        declares the channel silent — disabling diarisation for the whole
-        meeting.
-
         Default threshold (MIN_RMS_THRESHOLD, -70 dB) is intentionally low so
         headphones-mode recordings, where the mic input is captured at a
-        fraction of speakers-mode levels, still pass. Whisper handles
+        fraction of speakers-mode levels, still pass. The model handles
         low-amplitude speech fine; the gate's only job is to skip channels
         with effectively zero audio (digital silence from a stalled tap,
-        etc.) so we don't waste time transcribing nothing or invite Whisper
+        etc.) so we don't waste time transcribing nothing or invite
         hallucinations on dead air.
         """
         try:
@@ -680,8 +464,6 @@ class WhisperTranscriber:
                 if n_frames == 0:
                     return False
                 window = sr  # 1 second
-                # Cap the number of windows we sample so a 30-min recording
-                # doesn't pull all 30 min of int16 samples through Python.
                 step = max(window, n_frames // RMS_MAX_WINDOWS)
                 max_rms = _scan_max_rms(wf, window, step, threshold)
 
@@ -693,25 +475,15 @@ class WhisperTranscriber:
             return max_rms >= threshold
         except Exception as e:
             logger.warning(f"RMS check failed for {audio_path}: {e}")
-            # If we can't check, assume it has audio so we don't drop diarisation.
             return True
 
     def transcribe_diarised(self, audio_filepath: Path, language: str = "en") -> Optional[dict]:
-        """Transcribe audio with stereo channel diarisation.
+        """Transcribe with stereo channel diarisation.
 
         If the audio is stereo (left=mic, right=system), each channel is
-        transcribed separately and labelled as [You] and [Others].
-
-        Falls back to normal transcription for mono audio.
-
-        Args:
-            audio_filepath: Path to the audio file
-            language: Language code
-
-        Returns:
-            Dict with text, diarised_text, is_diarised, plus standard fields
+        transcribed separately and labelled as [You] and [Others]. Falls
+        back to normal transcription for mono audio.
         """
-        # Try stereo split
         mic_path, system_path, duration = self._split_stereo_to_channels(audio_filepath)
 
         if mic_path is None:
@@ -736,7 +508,6 @@ class WhisperTranscriber:
                 mic_result = self.transcribe_audio(mic_path, language)
                 if mic_result and mic_result.get("text"):
                     mic_segments = mic_result.get("segments") or []
-                    # Propagate detected language from the first channel with speech
                     if not detected_language and mic_result.get("detected_language"):
                         detected_language = mic_result["detected_language"]
                         detected_language_probability = mic_result.get("detected_language_probability")
@@ -760,9 +531,8 @@ class WhisperTranscriber:
             # cleanly. Both channels end up containing nearly identical
             # text and labelled bubbles would just repeat the same content
             # twice (once green, once grey). When the two transcripts
-            # overlap above this Jaccard threshold, we drop the system
-            # channel and present the recording as mic-only — honest UX,
-            # matches what Granola does when no headphones are detected.
+            # overlap above this Jaccard threshold, drop the system
+            # channel and present as mic-only.
             if mic_segments and system_segments:
                 mic_text = ' '.join(s.get('text', '') for s in mic_segments)
                 sys_text = ' '.join(s.get('text', '') for s in system_segments)
@@ -776,9 +546,7 @@ class WhisperTranscriber:
 
             # Chronologically interleave segments from both channels and
             # collapse runs of consecutive same-speaker segments into a
-            # single labelled turn so the rendered transcript reads as a
-            # natural back-and-forth (Granola-style) instead of two
-            # block-concatenated monologues.
+            # single labelled turn.
             tagged: list[tuple[float, str, str]] = []
             for s in mic_segments:
                 text = (s.get("text") or "").strip()
@@ -788,9 +556,6 @@ class WhisperTranscriber:
                 text = (s.get("text") or "").strip()
                 if text:
                     tagged.append((float(s.get("start") or 0.0), "Others", text))
-            # Stable sort: equal-start segments (overlapping speech) keep
-            # the order they were appended in (mic first, then system),
-            # which keeps the user as the "first speaker" in tied cases.
             tagged.sort(key=lambda t: t[0])
 
             turns: list[tuple[str, list[str]]] = []
@@ -803,11 +568,6 @@ class WhisperTranscriber:
             plain_parts = [' '.join(parts) for _speaker, parts in turns]
             plain_text = "\n\n".join(plain_parts) if plain_parts else "No speech detected in audio"
 
-            # Only emit a labelled diarised_text when we actually had speech
-            # on BOTH channels. A single-speaker run shouldn't pretend to be
-            # a multi-party transcript — and leaking a stray `[You]` prefix
-            # into the saved transcript file (which the meeting list shows
-            # as plain text when is_diarised=false) looks broken in the UI.
             is_diarised = bool(mic_segments) and bool(system_segments)
             if is_diarised:
                 labelled_parts = [
@@ -835,72 +595,46 @@ class WhisperTranscriber:
                         pass
 
     def transcribe_with_timestamps(self, audio_filepath: Path) -> Optional[dict]:
-        """
-        Transcribe audio file with timestamp information.
+        """Batch transcribe and return segment-level timing.
 
-        Args:
-            audio_filepath: Path to the audio file
-
-        Returns:
-            Dict with 'text' and 'segments' (list of {text, start, end})
+        Thin wrapper around ``_run_parakeet`` — Parakeet returns AlignedSentence
+        timings directly, so we just normalise the shape.
         """
         if not audio_filepath.exists():
             logger.error(f"Audio file not found: {audio_filepath}")
             return None
 
-        if self.model is None:
-            logger.error("Whisper model not loaded")
-            return None
-
         try:
             logger.info(f"Transcribing audio file with timestamps: {audio_filepath}")
-
-            if self.backend == "whisper.cpp":
-                segments = self.model.transcribe(str(audio_filepath))
-                result = {
-                    "text": " ".join(s.text.strip() for s in segments),
-                    "segments": [
-                        {"text": s.text.strip(), "start": s.t0 / 100.0, "end": s.t1 / 100.0}
-                        for s in segments
-                    ]
-                }
-            else:
-                result = self.model.transcribe(str(audio_filepath), verbose=True)
-
-            logger.info("Transcription with timestamps completed")
-            return result
-
+            result = self._run_parakeet(audio_filepath, language="auto")
+            return {
+                "text": result.get("text") or "",
+                "segments": result.get("segments") or [],
+            }
         except Exception as e:
             logger.error(f"Error during transcription: {e}")
             return None
 
     def change_model(self, model_size: str) -> bool:
-        """
-        Change the Whisper model size.
-
-        Args:
-            model_size: New model size
-
-        Returns:
-            True if model changed successfully
-        """
-        if model_size == self.model_size:
-            logger.info(f"Already using model: {model_size}")
-            return True
-
-        try:
-            self.model_size = model_size
-            self._load_model()
-            return True
-        except Exception as e:
-            logger.error(f"Failed to change model to {model_size}: {e}")
-            return False
+        """Back-compat shim. Parakeet TDT v3 has no size variants; we just
+        accept the call so the existing CLI / settings code doesn't break,
+        log a notice, and return True."""
+        if model_size != self.model_size:
+            logger.info(
+                "change_model called with %r — ignored, Parakeet TDT v3 is "
+                "the only available model.", model_size,
+            )
+        self.model_size = model_size
+        return True
 
     def get_backend_info(self) -> dict:
-        """Get information about the current backend."""
+        """Backend info surface kept compatible with the whisper-era callers."""
         return {
             "backend": self.backend,
             "model_size": self.model_size,
-            "whisper_cpp_available": WHISPER_CPP_AVAILABLE,
-            "openai_whisper_available": OPENAI_WHISPER_AVAILABLE,
+            "parakeet_available": PARAKEET_AVAILABLE,
+            # Legacy keys retained so any existing UI that probes them
+            # doesn't crash on KeyError; both are now always False.
+            "whisper_cpp_available": False,
+            "openai_whisper_available": False,
         }

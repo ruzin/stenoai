@@ -38,8 +38,20 @@ hiddenimports = [
     'mlx.nn',
     'mlx.utils',
 
+    # whisper.cpp bindings — still used by the post-stop batch pipeline.
+    # Will be dropped once transcriber.py is rewritten to use Parakeet
+    # for batch transcription too.
+    'pywhispercpp',
+    'pywhispercpp.model',
+    'pywhispercpp.constants',
+
     # HuggingFace hub (parakeet-mlx pulls weights through this)
     'huggingface_hub',
+
+    # ONNX Runtime — runs the bundled Silero VAD model directly. We avoid
+    # the silero-vad pip package because it imports torch at module load.
+    'onnxruntime',
+    'onnxruntime.capi',
 
     # Audio processing
     'sounddevice',
@@ -87,6 +99,7 @@ hiddenimports += collect_submodules('numpy')
 hiddenimports += collect_submodules('parakeet_mlx')
 hiddenimports += collect_submodules('mlx')
 hiddenimports += collect_submodules('huggingface_hub')
+hiddenimports += collect_submodules('onnxruntime')
 
 # Collect data files
 datas = []
@@ -101,7 +114,7 @@ datas += [('scripts', 'scripts')]
 
 # Collect data files (tokenizers, configs) from parakeet-mlx + mlx.
 # parakeet-mlx ships tokenizer JSON resources that get loaded by path.
-for pkg in ('parakeet_mlx', 'mlx', 'huggingface_hub'):
+for pkg in ('parakeet_mlx', 'mlx', 'huggingface_hub', 'pywhispercpp', 'onnxruntime'):
     try:
         datas += collect_data_files(pkg)
     except Exception:
@@ -109,9 +122,10 @@ for pkg in ('parakeet_mlx', 'mlx', 'huggingface_hub'):
 
 # Collect dynamic libraries — MLX ships compiled Metal kernels (.metallib)
 # and a libmlx dylib. Without collect_dynamic_libs the bundle imports MLX
-# but bombs the first time it touches a Metal op.
+# but bombs the first time it touches a Metal op. pywhispercpp ships
+# libwhisper.dylib via the same mechanism.
 binaries = []
-for pkg in ('mlx', 'parakeet_mlx'):
+for pkg in ('mlx', 'parakeet_mlx', 'pywhispercpp', 'onnxruntime'):
     try:
         binaries += collect_dynamic_libs(pkg)
     except Exception:
@@ -167,9 +181,10 @@ a = Analysis(
         # `unittest` is kept in the bundle now — parakeet-mlx (via librosa /
         # scipy) lazy-imports it during from_pretrained; excluding it makes
         # model loading fail with "No module named 'unittest'".
-        # ASR engines we no longer ship — Parakeet via MLX is the only path.
+        # openai-whisper (PyTorch) is excluded — we use parakeet for live and
+        # whisper.cpp (via pywhispercpp) for batch, neither needs the
+        # PyTorch-based reference implementation.
         'whisper',
-        'pywhispercpp',
         'tiktoken',
         'tiktoken_ext',
     ],

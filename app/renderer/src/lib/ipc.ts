@@ -552,6 +552,8 @@ export interface StenoaiBridge {
 
   liveTranscript: {
     getState: RequestFn<[], LiveTranscriptStateResponse>;
+    pushChunk: SendFn<[bytes: ArrayBuffer | Uint8Array]>;
+    stop: SendFn<[]>;
   };
 
   meetings: {

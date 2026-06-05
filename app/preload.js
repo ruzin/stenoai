@@ -113,6 +113,13 @@ const stenoai = {
     // Renderer calls this once on mount, then subscribes to
     // on.liveTranscriptChunk for the tail.
     getState: () => invoke('get-live-transcript-state'),
+    // System-audio path: push a downsampled 16 kHz mono float32 chunk to
+    // main's live transcribe sidecar. Bytes pass through to the Python
+    // subprocess's stdin; no IPC ack to keep the hot path cheap.
+    pushChunk: (bytes) => send('live-transcribe-chunk', bytes),
+    // Optional explicit shutdown for the sidecar — stop-recording-ui
+    // already calls it, but renderer may want to tear it down independently.
+    stop: () => send('live-transcribe-stop'),
   },
 
   meetings: {

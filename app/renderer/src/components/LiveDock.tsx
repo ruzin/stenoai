@@ -1,6 +1,7 @@
 import { Pause, Play, Square } from 'lucide-react';
 import { AudioWave } from '@/components/AudioWave';
 import { useRecording } from '@/hooks/useRecording';
+import { useLiveTranscriptOpen } from '@/hooks/liveTranscriptOpenStore';
 
 /**
  * Recording-state dock for the /recording route. Mounted at App level inside
@@ -9,6 +10,8 @@ import { useRecording } from '@/hooks/useRecording';
  */
 export function LiveDock() {
   const recording = useRecording();
+  const transcriptOpen = useLiveTranscriptOpen((s) => s.open);
+  const toggleTranscript = useLiveTranscriptOpen((s) => s.toggle);
   const paused = recording.status === 'paused';
   const isRecording = recording.status === 'recording';
   const stopped = !paused && !isRecording;
@@ -37,6 +40,26 @@ export function LiveDock() {
           stopped={stopped}
           elapsedSeconds={recording.elapsed}
         />
+        {/* Transcript toggle — hides/shows the inline transcript panel
+            via the shared liveTranscriptOpenStore. Icon-only to keep the
+            pill compact; tooltip + aria-label carry the meaning. */}
+        <button
+          type="button"
+          onClick={toggleTranscript}
+          disabled={stopped}
+          aria-label={transcriptOpen ? 'Hide transcript' : 'Show transcript'}
+          aria-pressed={transcriptOpen}
+          title={transcriptOpen ? 'Hide transcript' : 'Show transcript'}
+          className="inline-flex size-8 cursor-pointer items-center justify-center rounded-full border-0 transition-colors hover:bg-[color:var(--surface-hover)] disabled:cursor-not-allowed disabled:opacity-50"
+          style={{
+            background: transcriptOpen ? 'var(--surface-hover)' : 'transparent',
+            color: 'var(--fg-1)',
+          }}
+        >
+          <span className="mv-transcript-wave" aria-hidden="true" style={{ width: 14, height: 12 }}>
+            <span /><span /><span /><span /><span /><span /><span />
+          </span>
+        </button>
         <button
           type="button"
           onClick={onPauseToggle}

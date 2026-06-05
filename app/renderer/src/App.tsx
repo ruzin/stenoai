@@ -14,6 +14,8 @@ import { Processing, ProcessingDock } from '@/routes/Processing';
 import { AskBar, TranscriptBar } from '@/components/AskBar';
 import { BottomDockSlot } from '@/components/BottomDockSlot';
 import { LiveDock } from '@/components/LiveDock';
+import { LiveTranscriptBar } from '@/components/LiveTranscriptBar';
+import { useLiveTranscriptOpen } from '@/hooks/liveTranscriptOpenStore';
 import { QuitDialog } from '@/components/QuitDialog';
 import { AskBarProvider } from '@/lib/askBarContext';
 import {
@@ -113,9 +115,13 @@ export function App() {
         <RouteView route={route} />
         <QuitDialog />
 
-        {/* Bottom dock — shared anchor across recording → processing → meeting. */}
+        {/* Bottom dock — shared anchor across recording → processing → meeting.
+            During recording the slot swaps between the compact LiveDock pill
+            and the larger LiveTranscriptBar (which owns Pause/Stop + the
+            Multi language selector when expanded). Either occupies the slot;
+            never both at once. */}
         <BottomDockSlot>
-          {isRecordingRoute && <LiveDock />}
+          {isRecordingRoute && <LiveRecordingDock />}
           {isProcessingRoute && <ProcessingDock />}
           {showAskBar && <AskBar />}
         </BottomDockSlot>
@@ -129,6 +135,17 @@ export function App() {
       </AskBarProvider>
     </StreamingProvider>
   );
+}
+
+/**
+ * Recording-mode dock-slot child. Switches between the compact LiveDock pill
+ * (transcript closed) and the expanded LiveTranscriptBar (transcript open).
+ * They share the slot rather than stacking so the bottom of the page has a
+ * single anchor at any moment.
+ */
+function LiveRecordingDock() {
+  const open = useLiveTranscriptOpen((s) => s.open);
+  return open ? <LiveTranscriptBar /> : <LiveDock />;
 }
 
 function RouteView({ route }: { route: string }) {

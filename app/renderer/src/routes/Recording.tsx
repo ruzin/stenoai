@@ -7,7 +7,6 @@ import {
   PencilLine,
 } from 'lucide-react';
 import { MeetingsShell } from '@/components/MeetingsShell';
-import { LiveTranscriptPanel } from '@/components/LiveTranscriptPanel';
 import { useNavigate } from '@/lib/router';
 import { useRecording } from '@/hooks/useRecording';
 import { useLiveMeeting } from '@/hooks/useLiveMeeting';
@@ -16,13 +15,6 @@ export function Recording() {
   const navigate = useNavigate();
   const recording = useRecording();
   const live = useLiveMeeting();
-  // Local user-dismissal state for the floating transcript panel. Resets on
-  // each session change so a new recording brings the panel back even if
-  // the previous session's user had hidden it.
-  const [panelHidden, setPanelHidden] = React.useState(false);
-  React.useEffect(() => {
-    setPanelHidden(false);
-  }, [live.sessionName]);
 
   // If we land on /recording with no active recording (e.g. cold reload after
   // it stopped), bounce back home so we don't leave the user on a dead page.
@@ -114,21 +106,6 @@ export function Recording() {
             </section>
           </div>
         </div>
-
-        {!panelHidden && live.active && (
-          <div
-            className="pointer-events-none fixed z-30"
-            style={{
-              right: 32,
-              bottom: 96,
-            }}
-          >
-            <LiveTranscriptPanel
-              sessionName={live.sessionName}
-              onClose={() => setPanelHidden(true)}
-            />
-          </div>
-        )}
       </div>
     </MeetingsShell>
   );
