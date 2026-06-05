@@ -807,7 +807,35 @@ if (!gotSingleInstanceLock) {
   app.whenReady().then(async () => {
     // Set application menu with Help > Learn More
     const appMenu = Menu.buildFromTemplate([
-      { role: 'appMenu' },
+      {
+        // Custom appMenu to add Settings… with the conventional ⌘, shortcut
+        // (the default `{ role: 'appMenu' }` doesn't include Settings). Mirrors
+        // the tray's Settings item — both fire the same `tray-open-settings`
+        // IPC so the renderer wiring stays in one place.
+        label: app.name,
+        submenu: [
+          { role: 'about' },
+          { type: 'separator' },
+          {
+            label: 'Settings…',
+            accelerator: 'CmdOrCtrl+,',
+            click: () => {
+              showAndFocusWindow();
+              if (mainWindow) {
+                mainWindow.webContents.send('tray-open-settings');
+              }
+            }
+          },
+          { type: 'separator' },
+          { role: 'services' },
+          { type: 'separator' },
+          { role: 'hide' },
+          { role: 'hideOthers' },
+          { role: 'unhide' },
+          { type: 'separator' },
+          { role: 'quit' }
+        ]
+      },
       { role: 'fileMenu' },
       { role: 'editMenu' },
       { role: 'viewMenu' },
