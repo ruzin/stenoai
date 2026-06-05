@@ -2006,8 +2006,16 @@ ipcMain.handle('get-live-transcript-state', async () => {
 // renderer doesn't care which path produced the events.
 function spawnLiveTranscribe(sessionName) {
   if (liveTranscribeProcess) {
-    sendDebugLog('Live transcribe sidecar already running, skipping spawn');
-    return;
+    // Race-safe restart: a quick stop→start can land here while the
+    // previous subprocess is still draining its stdin. Skipping the
+    // spawn would silently leave the new session with no live
+    // transcription. Force-stop the old one and reset state so we
+    // always end up with a fresh sidecar.
+    sendDebugLog('Live transcribe sidecar still present at new start; forcing restart');
+    stopLiveTranscribe();
+    liveTranscribeProcess = null;
+    liveTranscribeSessionName = null;
+    liveTranscribeStdoutBuf = '';
   }
   const aiEnv = getAiEnv();
   const env = Object.keys(aiEnv).length > 0

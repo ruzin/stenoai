@@ -3,6 +3,7 @@ import { Pause, Play, Square } from 'lucide-react';
 import { AudioWave } from '@/components/AudioWave';
 import { useRecording } from '@/hooks/useRecording';
 import { useLiveTranscriptOpen } from '@/hooks/liveTranscriptOpenStore';
+import { formatElapsed } from '@/lib/utils';
 
 /**
  * Recording-state dock for the /recording route. Mounted at App level inside
@@ -143,12 +144,3 @@ function RecordingPill({
   );
 }
 
-function formatElapsed(seconds: number): string {
-  const s = Math.max(0, seconds | 0);
-  const h = Math.floor(s / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  const rem = s % 60;
-  const pad = (n: number) => n.toString().padStart(2, '0');
-  if (h > 0) return `${h}:${pad(m)}:${pad(rem)}`;
-  return `${pad(m)}:${pad(rem)}`;
-}

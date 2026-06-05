@@ -1285,12 +1285,17 @@ def _live_parakeet_consumer(stream_queue, source_rate, stop_event):
             last_partial_sample_count = 0
             last_partial_text = ""
             return
+        end_sample = speech_start_offset_samples + len(speech_samples)
         _emit_segment(
             text,
             start_samples=speech_start_offset_samples,
-            end_samples=speech_start_offset_samples + len(speech_samples),
+            end_samples=end_sample,
             is_final=True,
         )
+        # Advance the offset so a continued utterance (e.g. when
+        # MAX_UTTERANCE_S forces a mid-monologue final) doesn't reuse
+        # the just-emitted segment's start time on its next partial/final.
+        speech_start_offset_samples = end_sample
         speech_samples = _np.empty((0,), dtype=_np.float32)
         last_partial_sample_count = 0
         last_partial_text = ""
@@ -1549,12 +1554,17 @@ def _live_stdin_consumer():
             last_partial_sample_count = 0
             last_partial_text = ""
             return
+        end_sample = speech_start_offset_samples + len(speech_samples)
         _emit_segment(
             text,
             start_samples=speech_start_offset_samples,
-            end_samples=speech_start_offset_samples + len(speech_samples),
+            end_samples=end_sample,
             is_final=True,
         )
+        # Advance the offset so a continued utterance (e.g. when
+        # MAX_UTTERANCE_S forces a mid-monologue final) doesn't reuse
+        # the just-emitted segment's start time on its next partial/final.
+        speech_start_offset_samples = end_sample
         speech_samples = _np.empty((0,), dtype=_np.float32)
         last_partial_sample_count = 0
         last_partial_text = ""

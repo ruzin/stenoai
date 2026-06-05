@@ -20,6 +20,7 @@ import { useLiveTranscript } from '@/hooks/useLiveTranscript';
 import { useRecording } from '@/hooks/useRecording';
 import { useLanguageSetting, useSetLanguage } from '@/hooks/useSettings';
 import { useLiveTranscriptOpen } from '@/hooks/liveTranscriptOpenStore';
+import { formatElapsed } from '@/lib/utils';
 
 /**
  * Live transcript dock — Granola-style.
@@ -51,12 +52,19 @@ export function LiveTranscriptBar() {
   // Auto-scroll to the most recent segment on every change. Compare against
   // trailing text rather than just length so a partial that updates in
   // place (same array length, different last text) still triggers a scroll.
+  //
+  // Skip the auto-scroll while the user has an active search query — they
+  // were browsing past matches and a jump to the new tail would yank the
+  // viewport away from what they were reading. They get the new segment
+  // automatically once they clear the query.
   const tailText = segments[segments.length - 1]?.text ?? '';
+  const filtering = query.trim().length > 0;
   React.useEffect(() => {
+    if (filtering) return;
     const el = bodyRef.current;
     if (!el || !open) return;
     el.scrollTop = el.scrollHeight;
-  }, [segments.length, tailText, open]);
+  }, [segments.length, tailText, open, filtering]);
 
   const filtered = React.useMemo(() => {
     if (!query.trim()) return segments;
@@ -96,15 +104,12 @@ export function LiveTranscriptBar() {
         className="mv-transcript open"
         onMouseDown={(e) => e.stopPropagation()}
       >
-        {/* Header — the wave + "Transcript" + copy + minimize. Click the
-            header (button surface) to minimize back to the LiveDock pill. */}
-        <button
-          type="button"
-          className="mv-transcript-head"
-          onClick={() => setOpen(false)}
-          aria-label="Minimize transcript"
-          title="Minimize transcript"
-        >
+        {/* Header — wave + "Transcript" + copy + minimize. The minimize
+            (chevron) is the primary click target; copy is a sibling
+            action button, not nested. (Nesting `<button>` inside `<button>`
+            is invalid HTML and breaks both keyboard navigation and
+            assistive-tech focus order.) */}
+        <div className="mv-transcript-head" role="group" aria-label="Transcript header">
           {/* Static (non-animated) wave for the header — the "is anything
               happening?" cue lives in the footer's recording indicator. */}
           <span className="mv-transcript-wave mv-transcript-wave-static" aria-hidden="true">
@@ -114,17 +119,22 @@ export function LiveTranscriptBar() {
           <button
             type="button"
             className="mv-chat-tool"
-            onClick={(e) => {
-              e.stopPropagation();
-              void copyAll();
-            }}
+            onClick={() => void copyAll()}
             aria-label="Copy transcript"
             title="Copy transcript"
           >
             {copied ? <Check size={13} /> : <Copy size={13} />}
           </button>
-          <ChevronDown size={13} style={{ color: 'var(--fg-2)', flexShrink: 0 }} />
-        </button>
+          <button
+            type="button"
+            className="mv-chat-tool"
+            onClick={() => setOpen(false)}
+            aria-label="Minimize transcript"
+            title="Minimize transcript"
+          >
+            <ChevronDown size={13} />
+          </button>
+        </div>
 
         {/* Search bar */}
         <div
@@ -385,12 +395,3 @@ function RecordingStatusChip({
   );
 }
 
-function formatElapsed(seconds: number): string {
-  const s = Math.max(0, seconds | 0);
-  const h = Math.floor(s / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  const rem = s % 60;
-  const pad = (n: number) => n.toString().padStart(2, '0');
-  if (h > 0) return `${h}:${pad(m)}:${pad(rem)}`;
-  return `${pad(m)}:${pad(rem)}`;
-}

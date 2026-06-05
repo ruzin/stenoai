@@ -30,22 +30,29 @@ logger = logging.getLogger(__name__)
 # be a sibling entry, not a swap.
 DEFAULT_MODEL_ID = "mlx-community/parakeet-tdt-0.6b-v3"
 
-_MODEL = None
+_MODEL_CACHE: dict[str, object] = {}
 _MODEL_LOCK = threading.Lock()
 
 
 def _load_model(model_id: str):
-    """Lazily load (and cache) the Parakeet model. Returns the model object.
+    """Lazily load (and cache) a Parakeet model by id. Returns the model.
+
+    Cache is keyed by ``model_id`` so a call with a non-default id (e.g. a
+    future English-only TDT v2 variant) actually loads that model rather
+    than silently returning the first one ever loaded. Today only
+    ``DEFAULT_MODEL_ID`` is in use; this keeps the function contract
+    correct against future variants without an API change.
 
     Raises ImportError if parakeet-mlx isn't available — caller decides how
     to surface that.
     """
-    global _MODEL
-    if _MODEL is not None:
-        return _MODEL
+    cached = _MODEL_CACHE.get(model_id)
+    if cached is not None:
+        return cached
     with _MODEL_LOCK:
-        if _MODEL is not None:
-            return _MODEL
+        cached = _MODEL_CACHE.get(model_id)
+        if cached is not None:
+            return cached
         try:
             from parakeet_mlx import from_pretrained
         except ImportError as e:
@@ -54,9 +61,10 @@ def _load_model(model_id: str):
                 "in the venv (dev) or rebuild the PyInstaller bundle (prod)."
             ) from e
         logger.info("Loading Parakeet model: %s", model_id)
-        _MODEL = from_pretrained(model_id)
+        model = from_pretrained(model_id)
+        _MODEL_CACHE[model_id] = model
         logger.info("Parakeet model loaded")
-        return _MODEL
+        return model
 
 
 def model_sample_rate(model_id: str = DEFAULT_MODEL_ID) -> int:

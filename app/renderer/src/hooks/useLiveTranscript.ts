@@ -35,48 +35,35 @@ export function useLiveTranscript(sessionName: string | null): UseLiveTranscript
   const [segments, setSegments] = React.useState<LiveSegment[]>([]);
   const [ready, setReady] = React.useState(false);
   const [error, setError] = React.useState<{ stage: string; message?: string } | null>(null);
+  // Per-session marker that flips true the moment any subscription event
+  // arrives. The backfill (getState resolves async) checks it before
+  // applying its snapshot — if a chunk landed first, the snapshot is
+  // older than what we already have and would clobber live updates.
+  const receivedEventRef = React.useRef(false);
 
-  // Backfill on mount + every session change. Calling getState resets the
-  // local view to whatever main.js has buffered for this session.
   React.useEffect(() => {
-    let cancelled = false;
+    // Reset state for the new session. Doing this in the same effect as
+    // the subscription guarantees the marker resets BEFORE any chunk
+    // event can fire for the new session.
+    receivedEventRef.current = false;
     setSegments([]);
     setReady(false);
     setError(null);
-    if (!sessionName) return;
-    ipc()
-      .liveTranscript.getState()
-      .then((res) => {
-        if (cancelled || !res.success) return;
-        // Only backfill if the buffer is actually for this session — main.js
-        // resets on each new recording, so a stale name means we missed the
-        // boundary; render empty.
-        if (res.sessionName !== sessionName) return;
-        setSegments(res.segments);
-        setReady(res.ready);
-        if (res.error) {
-          setError({ stage: res.error.stage, message: res.error.message ?? res.error.error });
-        }
-      })
-      .catch(() => {
-        // Best-effort backfill; subscription below still works.
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [sessionName]);
 
-  React.useEffect(() => {
     if (!sessionName) return;
 
+    // Subscribe FIRST so chunks arriving while getState is in flight are
+    // captured (not lost behind a still-pending resolve).
     const offReady = ipc().on.liveTranscriptReady((ev) => {
       if (ev.sessionName !== sessionName) return;
+      receivedEventRef.current = true;
       setReady(true);
       setError(null);
     });
 
     const offChunk = ipc().on.liveTranscriptChunk((ev) => {
       if (ev.sessionName !== sessionName) return;
+      receivedEventRef.current = true;
       setSegments((prev) => {
         if (ev.segment.isFinal) {
           // Append-only on final. If the previous tail was a partial, it's
@@ -99,10 +86,31 @@ export function useLiveTranscript(sessionName: string | null): UseLiveTranscript
 
     const offError = ipc().on.liveTranscriptError((ev) => {
       if (ev.sessionName !== sessionName) return;
+      receivedEventRef.current = true;
       setError({ stage: ev.stage, message: ev.message ?? ev.error });
     });
 
+    // Now backfill. If a live event arrived between subscribe and resolve,
+    // skip the snapshot — the subscription has fresher data.
+    let cancelled = false;
+    ipc()
+      .liveTranscript.getState()
+      .then((res) => {
+        if (cancelled || !res.success) return;
+        if (res.sessionName !== sessionName) return;
+        if (receivedEventRef.current) return;
+        setSegments(res.segments);
+        setReady(res.ready);
+        if (res.error) {
+          setError({ stage: res.error.stage, message: res.error.message ?? res.error.error });
+        }
+      })
+      .catch(() => {
+        // Best-effort backfill; subscription is the source of truth.
+      });
+
     return () => {
+      cancelled = true;
       offReady();
       offChunk();
       offError();

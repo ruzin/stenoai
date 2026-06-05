@@ -64,6 +64,21 @@ export function App() {
   // still summarizing, drop the user on /meetings/processing so they don't
   // sit on Home wondering what happened. Only fires once on first render.
   const recording = useRecording();
+
+  // Reset the inline transcript panel to closed on every new recording
+  // session. Without this, a user who opened the panel in session A would
+  // start session B with the panel already expanded — the store survives
+  // session boundaries by design (zustand isn't React-tree-scoped), so we
+  // explicitly reset it here at the App level when sessionName changes.
+  const setLiveTranscriptOpen = useLiveTranscriptOpen((s) => s.setOpen);
+  const lastSessionRef = React.useRef<string | null>(null);
+  React.useEffect(() => {
+    if (recording.sessionName !== lastSessionRef.current) {
+      lastSessionRef.current = recording.sessionName ?? null;
+      setLiveTranscriptOpen(false);
+    }
+  }, [recording.sessionName, setLiveTranscriptOpen]);
+
   const didAutoRouteRef = React.useRef(false);
   React.useEffect(() => {
     if (didAutoRouteRef.current) return;

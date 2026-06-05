@@ -266,12 +266,20 @@ class SileroProcessor:
 
     def flush(self) -> list[SpeechEvent]:
         """End any in-progress speech run. Call once when the input stream
-        closes so the consumer sees a final SpeechEnd."""
+        closes so the consumer sees a final SpeechEnd.
+
+        Includes the tail buffer's length in the final timestamp — the tail
+        is audio that hadn't yet filled a 512-sample VAD window when the
+        stream ended, but the consumer has been adding it to its speech
+        buffer all along, so the SpeechEnd timestamp needs to reflect the
+        actual end of the audio (not just the last fully-processed chunk).
+        Without this the final segment's ``end`` was off by up to ~32 ms.
+        """
         events: list[SpeechEvent] = []
         if self._in_speech and self._speech_start_sample is not None:
             events.append(SpeechEnd(
                 start_timestamp_samples=self._speech_start_sample,
-                end_timestamp_samples=self._cursor_samples,
+                end_timestamp_samples=self._cursor_samples + len(self._tail),
             ))
             self._in_speech = False
             self._speech_start_sample = None
