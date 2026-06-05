@@ -1,3 +1,4 @@
+import * as React from 'react';
 import { Pause, Play, Square } from 'lucide-react';
 import { AudioWave } from '@/components/AudioWave';
 import { useRecording } from '@/hooks/useRecording';
@@ -12,6 +13,7 @@ export function LiveDock() {
   const recording = useRecording();
   const transcriptOpen = useLiveTranscriptOpen((s) => s.open);
   const toggleTranscript = useLiveTranscriptOpen((s) => s.toggle);
+  const [transcriptHover, setTranscriptHover] = React.useState(false);
   const paused = recording.status === 'paused';
   const isRecording = recording.status === 'recording';
   const stopped = !paused && !isRecording;
@@ -41,22 +43,38 @@ export function LiveDock() {
           elapsedSeconds={recording.elapsed}
         />
         {/* Transcript toggle — hides/shows the inline transcript panel
-            via the shared liveTranscriptOpenStore. Icon-only to keep the
-            pill compact; tooltip + aria-label carry the meaning. */}
+            via the shared liveTranscriptOpenStore. Uses the static (non-
+            animated) wave variant so it doesn't visually compete with the
+            recording-state wave in RecordingPill. Sized up vs the
+            Pause/Stop affordances so it reads as a primary control, not
+            a stray glyph. */}
         <button
           type="button"
           onClick={toggleTranscript}
+          onMouseEnter={() => setTranscriptHover(true)}
+          onMouseLeave={() => setTranscriptHover(false)}
           disabled={stopped}
           aria-label={transcriptOpen ? 'Hide transcript' : 'Show transcript'}
           aria-pressed={transcriptOpen}
           title={transcriptOpen ? 'Hide transcript' : 'Show transcript'}
-          className="inline-flex size-8 cursor-pointer items-center justify-center rounded-full border-0 transition-colors hover:bg-[color:var(--surface-hover)] disabled:cursor-not-allowed disabled:opacity-50"
+          className="inline-flex size-9 cursor-pointer items-center justify-center rounded-full border-0 transition-colors hover:bg-[color:var(--surface-hover)] disabled:cursor-not-allowed disabled:opacity-50"
           style={{
             background: transcriptOpen ? 'var(--surface-hover)' : 'transparent',
             color: 'var(--fg-1)',
           }}
         >
-          <span className="mv-transcript-wave" aria-hidden="true" style={{ width: 14, height: 12 }}>
+          {/* Static when idle, animated on hover — the wave bars "wake up"
+              to telegraph what the button does without competing with the
+              recording wave at rest. */}
+          <span
+            className={
+              transcriptHover
+                ? 'mv-transcript-wave'
+                : 'mv-transcript-wave mv-transcript-wave-static'
+            }
+            aria-hidden="true"
+            style={{ width: 20, height: 16 }}
+          >
             <span /><span /><span /><span /><span /><span /><span />
           </span>
         </button>

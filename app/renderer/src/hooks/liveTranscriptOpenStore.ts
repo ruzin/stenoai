@@ -8,8 +8,9 @@ import { create } from 'zustand';
  * without a context provider — LiveDock's Transcript toggle and the bar's
  * header chevron both call the same ``toggle()``.
  *
- * Defaults to open: the transcript is the centerpiece of the recording
- * experience; users opt into hiding it rather than opting into showing it.
+ * Defaults to closed: the user clicks the LiveDock transcript toggle to
+ * reveal the panel. Granola behaves the same way — the panel is opt-in
+ * rather than always-on so the page stays calm on session start.
  */
 interface LiveTranscriptOpenStore {
   open: boolean;
@@ -18,7 +19,7 @@ interface LiveTranscriptOpenStore {
 }
 
 export const useLiveTranscriptOpen = create<LiveTranscriptOpenStore>((set) => ({
-  open: true,
+  open: false,
   setOpen: (open) => set({ open }),
   toggle: () => set((s) => ({ open: !s.open })),
 }));
