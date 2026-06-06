@@ -108,6 +108,20 @@ const stenoai = {
     getDir: () => invoke('get-recordings-dir'),
   },
 
+  liveTranscript: {
+    // Snapshot of segments + model-load status for the in-flight recording.
+    // Renderer calls this once on mount, then subscribes to
+    // on.liveTranscriptChunk for the tail.
+    getState: () => invoke('get-live-transcript-state'),
+    // System-audio path: push a downsampled 16 kHz mono float32 chunk to
+    // main's live transcribe sidecar. Bytes pass through to the Python
+    // subprocess's stdin; no IPC ack to keep the hot path cheap.
+    pushChunk: (bytes) => send('live-transcribe-chunk', bytes),
+    // Optional explicit shutdown for the sidecar — stop-recording-ui
+    // already calls it, but renderer may want to tear it down independently.
+    stop: () => send('live-transcribe-stop'),
+  },
+
   meetings: {
     list: () => invoke('list-meetings'),
     update: (summaryFile, patch) => invoke('update-meeting', summaryFile, patch),
@@ -265,6 +279,9 @@ const stenoai = {
     modelPullComplete: (cb) => subscribe('model-pull-complete', cb),
     whisperPullProgress: (cb) => subscribe('whisper-pull-progress', cb),
     whisperPullComplete: (cb) => subscribe('whisper-pull-complete', cb),
+    liveTranscriptReady: (cb) => subscribe('live-transcript-ready', cb),
+    liveTranscriptChunk: (cb) => subscribe('live-transcript-chunk', cb),
+    liveTranscriptError: (cb) => subscribe('live-transcript-error', cb),
     updateAvailable: (cb) => subscribe('update-available', cb),
     updateDownloadProgress: (cb) => subscribe('update-download-progress', cb),
     updateDownloaded: (cb) => subscribe('update-downloaded', cb),

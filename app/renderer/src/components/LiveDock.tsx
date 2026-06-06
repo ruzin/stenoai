@@ -1,6 +1,9 @@
+import * as React from 'react';
 import { Pause, Play, Square } from 'lucide-react';
 import { AudioWave } from '@/components/AudioWave';
 import { useRecording } from '@/hooks/useRecording';
+import { useLiveTranscriptOpen } from '@/hooks/liveTranscriptOpenStore';
+import { formatElapsed } from '@/lib/utils';
 
 /**
  * Recording-state dock for the /recording route. Mounted at App level inside
@@ -9,6 +12,9 @@ import { useRecording } from '@/hooks/useRecording';
  */
 export function LiveDock() {
   const recording = useRecording();
+  const transcriptOpen = useLiveTranscriptOpen((s) => s.open);
+  const toggleTranscript = useLiveTranscriptOpen((s) => s.toggle);
+  const [transcriptHover, setTranscriptHover] = React.useState(false);
   const paused = recording.status === 'paused';
   const isRecording = recording.status === 'recording';
   const stopped = !paused && !isRecording;
@@ -37,6 +43,42 @@ export function LiveDock() {
           stopped={stopped}
           elapsedSeconds={recording.elapsed}
         />
+        {/* Transcript toggle — hides/shows the inline transcript panel
+            via the shared liveTranscriptOpenStore. Uses the static (non-
+            animated) wave variant so it doesn't visually compete with the
+            recording-state wave in RecordingPill. Sized up vs the
+            Pause/Stop affordances so it reads as a primary control, not
+            a stray glyph. */}
+        <button
+          type="button"
+          onClick={toggleTranscript}
+          onMouseEnter={() => setTranscriptHover(true)}
+          onMouseLeave={() => setTranscriptHover(false)}
+          disabled={stopped}
+          aria-label={transcriptOpen ? 'Hide transcript' : 'Show transcript'}
+          aria-pressed={transcriptOpen}
+          title={transcriptOpen ? 'Hide transcript' : 'Show transcript'}
+          className="inline-flex size-9 cursor-pointer items-center justify-center rounded-full border-0 transition-colors hover:bg-[color:var(--surface-hover)] disabled:cursor-not-allowed disabled:opacity-50"
+          style={{
+            background: transcriptOpen ? 'var(--surface-hover)' : 'transparent',
+            color: 'var(--fg-1)',
+          }}
+        >
+          {/* Static when idle, animated on hover — the wave bars "wake up"
+              to telegraph what the button does without competing with the
+              recording wave at rest. */}
+          <span
+            className={
+              transcriptHover
+                ? 'mv-transcript-wave'
+                : 'mv-transcript-wave mv-transcript-wave-static'
+            }
+            aria-hidden="true"
+            style={{ width: 20, height: 16 }}
+          >
+            <span /><span /><span /><span /><span /><span /><span />
+          </span>
+        </button>
         <button
           type="button"
           onClick={onPauseToggle}
@@ -102,12 +144,3 @@ function RecordingPill({
   );
 }
 
-function formatElapsed(seconds: number): string {
-  const s = Math.max(0, seconds | 0);
-  const h = Math.floor(s / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  const rem = s % 60;
-  const pad = (n: number) => n.toString().padStart(2, '0');
-  if (h > 0) return `${h}:${pad(m)}:${pad(rem)}`;
-  return `${pad(m)}:${pad(rem)}`;
-}

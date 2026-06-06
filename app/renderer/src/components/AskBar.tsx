@@ -117,6 +117,7 @@ export function AskBar() {
 
   const [expanded, setExpanded] = React.useState(false);
   const [sessionMenuOpen, setSessionMenuOpen] = React.useState(false);
+  const [transcriptHover, setTranscriptHover] = React.useState(false);
   const [input, setInput] = React.useState('');
   const [activeStreamId, setActiveStreamId] = React.useState<string | null>(null);
   const pendingPersistRef = React.useRef<string | null>(null);
@@ -353,25 +354,32 @@ export function AskBar() {
           type="button"
           className={cn('mv-chat-tool', transcriptOpen && 'active')}
           onClick={handleTranscriptToggle}
+          onMouseEnter={() => setTranscriptHover(true)}
+          onMouseLeave={() => setTranscriptHover(false)}
           aria-label={transcriptOpen ? 'Hide transcript' : 'Show transcript'}
           aria-pressed={transcriptOpen}
           title="Transcript"
         >
-          {transcriptOpen ? (
-            <span className="mv-transcript-wave" aria-hidden="true" style={{ width: 16, height: 12 }}>
-              <span /><span /><span /><span /><span /><span /><span />
-            </span>
-          ) : (
-            <span className="mv-transcript-wave" aria-hidden="true" style={{ width: 16, height: 12, opacity: 0.5, animation: 'none' }}>
-              <span style={{ height: '40%', animation: 'none' }} />
-              <span style={{ height: '70%', animation: 'none' }} />
-              <span style={{ height: '100%', animation: 'none' }} />
-              <span style={{ height: '60%', animation: 'none' }} />
-              <span style={{ height: '90%', animation: 'none' }} />
-              <span style={{ height: '50%', animation: 'none' }} />
-              <span style={{ height: '30%', animation: 'none' }} />
-            </span>
-          )}
+          {/* Animation states:
+              - Closed at rest: static (no animation), so it doesn't compete
+                with other UI motion.
+              - Closed + hovered: animated, signals "click me" affordance.
+              - Open: animated continuously — matches the prior behavior
+                where the open-transcript wave conveys "live thing".
+              The "active" class on the wrapping button also flips the
+              icon color when the transcript bar is open, preserving the
+              persistent open-state cue alongside the motion. */}
+          <span
+            className={
+              transcriptOpen || transcriptHover
+                ? 'mv-transcript-wave'
+                : 'mv-transcript-wave mv-transcript-wave-static'
+            }
+            aria-hidden="true"
+            style={{ width: 16, height: 12 }}
+          >
+            <span /><span /><span /><span /><span /><span /><span />
+          </span>
         </button>
         )}
 

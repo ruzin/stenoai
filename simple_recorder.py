@@ -1134,20 +1134,437 @@ def status():
             print(f"  • {recording.name} ({size_mb:.1f}MB)")
 
 
+class _LiveVadPipeline:
+    """VAD-gated batch transcription pipeline shared by both live consumers.
+
+    Replaces the earlier parakeet-mlx streaming approach with the
+    Granola / OpenOats / Meetily pattern: Silero VAD detects utterance
+    boundaries; each closed utterance is batch-transcribed by Parakeet
+    for a stable, finalised segment. While speech is in progress, a
+    throttled re-transcribe of the trailing few seconds emits a partial
+    so the user sees text forming in real time without flicker between
+    unrelated decoder hypotheses.
+
+    Protocol emitted on stdout (unchanged from earlier streaming consumer
+    so main.js / preload / ipc.ts wiring is reused):
+
+      LIVE_READY:<config json>     once, after both models are loaded
+      LIVE_SEG:<segment json>      per partial OR final
+      LIVE_ERROR:<error json>      on any unrecoverable failure
+
+    Two callers use this:
+      * ``_live_parakeet_consumer`` — sounddevice queue input (mic-only path)
+      * ``_live_stdin_consumer`` — stdin bytes input (system-audio path)
+
+    Each caller drives ``process(chunk)`` from its own input loop and
+    calls ``finalize()`` on shutdown. The shared class owns all VAD +
+    partial/final state so a fix to either path lands in one place.
+
+    Architecture notes:
+      * Audio is consumed at 16 kHz mono float32 (Parakeet + Silero
+        native rate). Callers must downsample / decimate / mono-mix
+        upstream — the pipeline doesn't resample.
+      * Preroll ring holds the most recent ``PREROLL_CHUNKS`` chunks of
+        pre-speech audio so the first syllable of every utterance is
+        recovered after VAD fires (Silero always trips slightly late).
+      * Partials see only the trailing ``PARTIAL_WINDOW_S`` of the
+        utterance — re-transcribing the whole utterance every 400 ms
+        would be O(n²).
+      * Final fires on Silero's SpeechEnd OR when the utterance hits
+        ``MAX_UTTERANCE_S`` so a monologue still produces output.
+    """
+
+    PARTIAL_INTERVAL_S = 0.4
+    PARTIAL_WINDOW_S = 5.0
+    MIN_UTTERANCE_S = 0.5
+    MAX_UTTERANCE_S = 30.0
+    PREROLL_CHUNKS = 2  # ≈ 512 ms at 256 ms per callback
+
+    @classmethod
+    def create(cls, source_rate, source_label):
+        """Load Parakeet + Silero, emit LIVE_READY, return a ready pipeline.
+
+        Returns ``None`` if any setup step fails (after emitting
+        LIVE_ERROR). Callers should ``return`` on ``None``.
+        """
+        try:
+            import numpy as _np
+        except ImportError:
+            print("LIVE_ERROR:" + json.dumps({"stage": "import_numpy"}), flush=True)
+            return None
+
+        try:
+            from src.parakeet import (
+                transcribe_samples, ensure_loaded, model_sample_rate,
+            )
+        except ImportError as e:
+            print("LIVE_ERROR:" + json.dumps({
+                "stage": "import_parakeet", "error": str(e),
+            }), flush=True)
+            return None
+
+        try:
+            from src.silero_vad import (
+                SileroProcessor, SpeechStart, SpeechEnd, VAD_SAMPLE_RATE,
+            )
+        except ImportError as e:
+            print("LIVE_ERROR:" + json.dumps({
+                "stage": "import_silero", "error": str(e),
+            }), flush=True)
+            return None
+
+        try:
+            sr = model_sample_rate()
+        except Exception as e:
+            print("LIVE_ERROR:" + json.dumps({
+                "stage": "load_parakeet", "error": str(e),
+            }), flush=True)
+            return None
+
+        if sr != VAD_SAMPLE_RATE:
+            # Silero is hard-pinned to 16 kHz; if Parakeet's expected rate
+            # ever diverges we'd need a real resampler here. Surface it
+            # loudly rather than silently producing garbage.
+            print("LIVE_ERROR:" + json.dumps({
+                "stage": "rate_mismatch",
+                "error": f"parakeet_rate={sr} != silero_rate={VAD_SAMPLE_RATE}",
+            }), flush=True)
+            return None
+
+        try:
+            vad = SileroProcessor()
+        except Exception as e:
+            print("LIVE_ERROR:" + json.dumps({
+                "stage": "load_silero", "error": str(e),
+            }), flush=True)
+            return None
+
+        # Pre-load Parakeet so the first SpeechEnd doesn't pay the warm-load
+        # latency on the user's first utterance.
+        try:
+            ensure_loaded()
+        except Exception as e:
+            print("LIVE_ERROR:" + json.dumps({
+                "stage": "ensure_loaded", "error": str(e),
+            }), flush=True)
+            return None
+
+        ready_payload = {
+            "sample_rate": sr,
+            "vad_chunk_samples": vad.chunk_samples,
+            "min_utterance_s": cls.MIN_UTTERANCE_S,
+            "max_utterance_s": cls.MAX_UTTERANCE_S,
+            "partial_interval_s": cls.PARTIAL_INTERVAL_S,
+        }
+        if source_rate is not None:
+            ready_payload["source_rate"] = source_rate
+        if source_label is not None:
+            ready_payload["source"] = source_label
+        print("LIVE_READY:" + json.dumps(ready_payload), flush=True)
+
+        return cls(
+            np=_np,
+            vad=vad,
+            sr=sr,
+            SpeechStart=SpeechStart,
+            SpeechEnd=SpeechEnd,
+            transcribe_samples=transcribe_samples,
+        )
+
+    def __init__(self, np, vad, sr, SpeechStart, SpeechEnd, transcribe_samples):
+        self.np = np
+        self.vad = vad
+        self.sr = sr
+        self.SpeechStart = SpeechStart
+        self.SpeechEnd = SpeechEnd
+        self.transcribe_samples = transcribe_samples
+        self.partial_interval_samples = int(sr * self.PARTIAL_INTERVAL_S)
+        self.partial_window_samples = int(sr * self.PARTIAL_WINDOW_S)
+        self.min_utterance_samples = int(sr * self.MIN_UTTERANCE_S)
+        self.max_utterance_samples = int(sr * self.MAX_UTTERANCE_S)
+
+        # Mutable state for the run.
+        self.speech_samples = np.empty((0,), dtype=np.float32)
+        self.speech_start_offset = 0
+        self.last_partial_count = 0
+        self.last_partial_text = ""
+        self.preroll: list = []
+        self.cursor = 0
+
+    def flatten_chunk(self, chunk):
+        """Coerce queue payloads (sounddevice gives (frames, channels) for
+        multichannel; mono is (frames, 1)) to a 1-D float32 array. Stdin
+        path already passes 1-D, so this is a no-op there."""
+        arr = self.np.asarray(chunk, dtype=self.np.float32)
+        if arr.ndim > 1:
+            arr = arr[:, 0]
+        return arr
+
+    def parse_float32_bytes(self, raw_bytes):
+        """Parse raw little-endian float32 bytes into a 1-D float32 array.
+
+        Used by the stdin consumer so the consumer itself doesn't need a
+        guarded numpy import — the pipeline already failed at create()
+        time if numpy was missing, so by the time we get here it exists.
+        ``.copy()`` because ``frombuffer`` returns a read-only view of
+        the input bytes; downstream VAD code mutates in place.
+        """
+        return self.np.frombuffer(raw_bytes, dtype=self.np.float32).copy()
+
+    def process(self, chunk):
+        """Feed one float32 1-D chunk through the VAD + transcribe pipeline."""
+        if chunk.size == 0:
+            return
+        was_in_speech = self.vad.in_speech
+        events = self.vad.process(chunk)
+        self.cursor += len(chunk)
+
+        for ev in events:
+            if isinstance(ev, self.SpeechStart):
+                preroll_audio = (
+                    self.np.concatenate(self.preroll) if self.preroll
+                    else self.np.empty((0,), dtype=self.np.float32)
+                )
+                self.speech_samples = preroll_audio
+                self.speech_start_offset = max(
+                    0, self.cursor - len(chunk) - len(preroll_audio),
+                )
+                self.last_partial_count = 0
+                self.last_partial_text = ""
+            elif isinstance(ev, self.SpeechEnd):
+                self._finalise()
+
+        if self.vad.in_speech:
+            self.speech_samples = self.np.concatenate([self.speech_samples, chunk])
+            self.preroll = []
+            if len(self.speech_samples) >= self.max_utterance_samples:
+                self._finalise()
+            else:
+                self._maybe_emit_partial()
+        else:
+            self.preroll.append(chunk)
+            if len(self.preroll) > self.PREROLL_CHUNKS:
+                self.preroll.pop(0)
+
+        if was_in_speech != self.vad.in_speech:
+            logger.debug(
+                "VAD transition: in_speech=%s buffer=%d samples",
+                self.vad.in_speech, len(self.speech_samples),
+            )
+
+    def tick_idle(self):
+        """Called by callers between input reads (e.g. queue.get timeout).
+        Forces a mid-monologue final if MAX_UTTERANCE_S is reached without
+        new audio."""
+        if self.vad.in_speech and len(self.speech_samples) >= self.max_utterance_samples:
+            self._finalise()
+
+    def finalize(self):
+        """Drain VAD on shutdown so a trailing utterance still emits.
+
+        Callers should call this once after their input loop exits (EOF,
+        stop_event set, etc.)."""
+        for ev in self.vad.flush():
+            if isinstance(ev, self.SpeechEnd):
+                self._finalise()
+        if len(self.speech_samples) >= self.min_utterance_samples:
+            self._finalise()
+
+    def _emit(self, text, start_samples, end_samples, is_final):
+        if not text:
+            return
+        print("LIVE_SEG:" + json.dumps({
+            "text": text,
+            "start": start_samples / self.sr,
+            "end": end_samples / self.sr,
+            "is_final": is_final,
+        }), flush=True)
+
+    def _finalise(self):
+        if len(self.speech_samples) < self.min_utterance_samples:
+            self.speech_samples = self.np.empty((0,), dtype=self.np.float32)
+            self.last_partial_count = 0
+            self.last_partial_text = ""
+            return
+        try:
+            result = self.transcribe_samples(self.speech_samples)
+            text = (result.get("text") or "").strip() if result else ""
+        except Exception as e:
+            print("LIVE_ERROR:" + json.dumps({
+                "stage": "transcribe_final", "error": str(e),
+            }), flush=True)
+            self.speech_samples = self.np.empty((0,), dtype=self.np.float32)
+            self.last_partial_count = 0
+            self.last_partial_text = ""
+            return
+        end_sample = self.speech_start_offset + len(self.speech_samples)
+        self._emit(
+            text,
+            start_samples=self.speech_start_offset,
+            end_samples=end_sample,
+            is_final=True,
+        )
+        # Advance the offset so a continued utterance (e.g. when
+        # MAX_UTTERANCE_S forces a mid-monologue final) doesn't reuse the
+        # just-emitted segment's start time on its next partial/final.
+        self.speech_start_offset = end_sample
+        self.speech_samples = self.np.empty((0,), dtype=self.np.float32)
+        self.last_partial_count = 0
+        self.last_partial_text = ""
+
+    def _maybe_emit_partial(self):
+        delta = len(self.speech_samples) - self.last_partial_count
+        if delta < self.partial_interval_samples:
+            return
+        if len(self.speech_samples) < self.min_utterance_samples:
+            return
+        # Only the trailing window — re-transcribing the full utterance
+        # every PARTIAL_INTERVAL_S would scale O(n²) with utterance length.
+        tail = self.speech_samples[-self.partial_window_samples:]
+        try:
+            result = self.transcribe_samples(tail)
+        except Exception as e:
+            # Partials are best-effort. Don't tear down the consumer over
+            # a transient decode hiccup; the next partial/final retries.
+            logger.debug("partial transcribe failed: %s", e)
+            self.last_partial_count = len(self.speech_samples)
+            return
+        text = (result.get("text") or "").strip() if result else ""
+        self.last_partial_count = len(self.speech_samples)
+        if text and text != self.last_partial_text:
+            self.last_partial_text = text
+            self._emit(
+                text,
+                start_samples=self.speech_start_offset + max(
+                    0, len(self.speech_samples) - self.partial_window_samples,
+                ),
+                end_samples=self.speech_start_offset + len(self.speech_samples),
+                is_final=False,
+            )
+
+
+def _live_parakeet_consumer(stream_queue, source_rate, stop_event):
+    """Live consumer fed by the AudioRecorder's queue (mic-only path)."""
+    import queue as _q
+    pipeline = _LiveVadPipeline.create(source_rate=source_rate, source_label=None)
+    if pipeline is None:
+        return
+    try:
+        while not stop_event.is_set():
+            try:
+                raw = stream_queue.get(timeout=0.1)
+            except _q.Empty:
+                pipeline.tick_idle()
+                continue
+            pipeline.process(pipeline.flatten_chunk(raw))
+
+        # Drain remaining queued chunks before final flush.
+        while True:
+            try:
+                raw = stream_queue.get_nowait()
+            except _q.Empty:
+                break
+            pipeline.process(pipeline.flatten_chunk(raw))
+
+        pipeline.finalize()
+    except Exception as e:
+        print("LIVE_ERROR:" + json.dumps({
+            "stage": "consumer_loop", "error": str(e),
+        }), flush=True)
+
+
+def _live_stdin_consumer():
+    """Live consumer fed by raw float32 stdin (renderer-driven system-audio
+    path). The renderer captures mic + system audio via Web Audio,
+    downsamples its 48 kHz mix to 16 kHz mono float32, and pushes chunks
+    to main.js over IPC. main.js spawns this subprocess and writes those
+    chunks to our stdin.
+
+    Exits cleanly on stdin EOF (main.js closes the pipe on stop) or on
+    SIGTERM. Input format is contract: 16 kHz mono float32, native byte
+    order. Any other input is undefined behaviour.
+    """
+    import sys
+    import signal
+
+    # numpy is imported (and guarded) inside _LiveVadPipeline.create() so
+    # an absent install emits LIVE_ERROR and returns None rather than
+    # crashing the subprocess before main.js sees any signal.
+    pipeline = _LiveVadPipeline.create(source_rate=None, source_label="stdin")
+    if pipeline is None:
+        return
+
+    # Signal handler: SIGTERM from main.js (on stop) should flush + exit
+    # cleanly. SIGINT covers terminal Ctrl-C in dev runs.
+    stop_flag = [False]
+    def _on_signal(signum, frame):
+        stop_flag[0] = True
+    try:
+        signal.signal(signal.SIGTERM, _on_signal)
+        signal.signal(signal.SIGINT, _on_signal)
+    except (AttributeError, ValueError):
+        pass
+
+    # Read stdin in 4 KB blocks (~1024 samples per read at 16 kHz). The
+    # block size is a latency-vs-syscall-overhead trade; smaller blocks
+    # give finer VAD timing but more read() calls. 4 KB is comfortable.
+    BLOCK_BYTES = 4096
+    pending = bytearray()
+    try:
+        stdin_buf = sys.stdin.buffer
+        while not stop_flag[0]:
+            block = stdin_buf.read(BLOCK_BYTES)
+            if not block:
+                break  # EOF
+            pending.extend(block)
+            n_floats = len(pending) // 4
+            if n_floats == 0:
+                continue
+            # Slice off complete float32 samples; leave any partial-sample
+            # tail in pending for the next read.
+            usable = bytes(pending[: n_floats * 4])
+            del pending[: n_floats * 4]
+            pipeline.process(pipeline.parse_float32_bytes(usable))
+        pipeline.finalize()
+    except Exception as e:
+        print("LIVE_ERROR:" + json.dumps({
+            "stage": "consumer_loop", "error": str(e),
+        }), flush=True)
+
+
+@cli.command(name='transcribe-stream')
+def transcribe_stream_cmd():
+    """Run the VAD-gated live transcription consumer over raw stdin audio.
+
+    The pipe contract: caller writes raw 16 kHz mono float32 little-endian
+    samples to our stdin; we emit LIVE_READY / LIVE_SEG / LIVE_ERROR
+    NDJSON lines to stdout. Used by main.js for the renderer-driven
+    system-audio path, where the Web Audio mix is downsampled in the
+    renderer and pushed to us through IPC.
+    """
+    _live_stdin_consumer()
+
+
 @cli.command()
 @click.argument('duration', type=int, default=10)
 @click.argument('session_name', default='Recording')
-def record(duration, session_name):
+@click.option('--live/--no-live', default=False,
+              help='Emit LIVE_SEG:<json> lines from Parakeet while recording')
+def record(duration, session_name, live):
     """Record audio for specified duration and process it"""
     import signal
     import sys
 
     print(f"🎤 Recording {duration} seconds of audio for '{session_name}'...")
+    if live:
+        print("🟢 Live transcription enabled (Parakeet TDT v3)")
 
     recorder = SimpleRecorder()
     recording_path = None
     recording_started = False
     is_paused = False
+    live_thread = None
+    live_stop = None
 
     def pause_handler(signum, frame):
         """Handle SIGUSR1 to pause recording"""
@@ -1194,6 +1611,14 @@ def record(duration, session_name):
             print("⏹️ Stopping recording and starting processing pipeline...")
             try:
                 final_path = recorder.stop_recording()
+                # Drain the live Parakeet consumer (if running) before the
+                # summarizer takes over stdout. Setting the event after
+                # stop_recording guarantees the audio queue is no longer
+                # being written to — the consumer will drain what's left
+                # and call finalize() on the way out, then we join.
+                if live_thread is not None and live_stop is not None:
+                    live_stop.set()
+                    live_thread.join(timeout=10.0)
                 if final_path:
                     print(f"✅ Recording saved: {final_path}")
                     
@@ -1247,6 +1672,25 @@ def record(duration, session_name):
     signal.signal(signal.SIGINT, signal_handler)
     
     try:
+        # When --live is set, stand up the Parakeet streaming consumer
+        # BEFORE start_recording fires so the audio callback's first chunk
+        # has a non-None queue to publish into. The model is loaded on the
+        # consumer thread, so start_recording returns instantly even if
+        # MLX takes a couple of seconds to bring weights up — the user
+        # hears recording start immediately and live segments stream in
+        # once the model is ready.
+        if live and recorder.audio_recorder is not None:
+            import threading as _threading
+            live_stop = _threading.Event()
+            stream_q = recorder.audio_recorder.enable_stream()
+            live_thread = _threading.Thread(
+                target=_live_parakeet_consumer,
+                args=(stream_q, recorder.audio_recorder.sample_rate, live_stop),
+                daemon=True,
+                name='parakeet-live',
+            )
+            live_thread.start()
+
         # Start recording
         recording_path = recorder.start_recording(session_name)
         recording_started = True
@@ -1270,6 +1714,14 @@ def record(duration, session_name):
         
         # Normal completion (if not interrupted)
         final_path = recorder.stop_recording()
+        # Mirror the signal_handler teardown: stop audio first, then signal
+        # the live consumer to finalize, then join. Without this the
+        # consumer would keep running into the summarizer's stdout window
+        # and the renderer would see late LIVE_SEG lines arrive after
+        # processing-complete.
+        if live_thread is not None and live_stop is not None:
+            live_stop.set()
+            live_thread.join(timeout=10.0)
         if not final_path:
             print("❌ Recording failed - no audio data collected")
             return
@@ -3025,6 +3477,44 @@ def check_adapter_cmd(url: str):
         print(f"FAIL {url}")
         print(f"  error: {e}")
         sys.exit(1)
+
+
+@cli.command(name='spike-parakeet')
+def spike_parakeet_cmd():
+    """Run the Parakeet TDT v3 spike from inside the bundled binary.
+
+    Equivalent to ``python scripts/spike_parakeet.py`` but reachable from the
+    PyInstaller bundle — that's the run that matters for proving MLX +
+    parakeet-mlx survive the hardened runtime + codesign.
+    """
+    try:
+        # Adjust sys.path so the dev-mode invocation finds scripts/ without
+        # the user having to set PYTHONPATH. In a PyInstaller bundle the
+        # script lives at sys._MEIPASS/scripts/ (datas=('scripts','scripts')
+        # would be required to ship it — but we just inline the spike here
+        # so the bundle doesn't need extra data files).
+        from scripts.spike_parakeet import main as spike_main
+    except ImportError:
+        # PyInstaller bundle: the scripts/ tree isn't copied in (datas don't
+        # include it). Re-import the spike logic inline by exec'ing the file
+        # if it's beside us, otherwise just import the modules directly and
+        # run the equivalent loop here.
+        import importlib
+        try:
+            mod = importlib.import_module('scripts.spike_parakeet')
+            spike_main = mod.main
+        except ImportError:
+            click.echo(
+                json.dumps({
+                    "event": "error",
+                    "stage": "import_spike",
+                    "message": "scripts/spike_parakeet.py not bundled; "
+                               "run the dev-mode invocation instead."
+                }),
+                err=True,
+            )
+            sys.exit(2)
+    sys.exit(spike_main())
 
 
 if __name__ == '__main__':
