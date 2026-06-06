@@ -1291,16 +1291,25 @@ class _LiveVadPipeline:
         self.preroll: list = []
         self.cursor = 0
 
-    @staticmethod
-    def flatten_chunk(chunk):
+    def flatten_chunk(self, chunk):
         """Coerce queue payloads (sounddevice gives (frames, channels) for
         multichannel; mono is (frames, 1)) to a 1-D float32 array. Stdin
         path already passes 1-D, so this is a no-op there."""
-        import numpy as _np
-        arr = _np.asarray(chunk, dtype=_np.float32)
+        arr = self.np.asarray(chunk, dtype=self.np.float32)
         if arr.ndim > 1:
             arr = arr[:, 0]
         return arr
+
+    def parse_float32_bytes(self, raw_bytes):
+        """Parse raw little-endian float32 bytes into a 1-D float32 array.
+
+        Used by the stdin consumer so the consumer itself doesn't need a
+        guarded numpy import — the pipeline already failed at create()
+        time if numpy was missing, so by the time we get here it exists.
+        ``.copy()`` because ``frombuffer`` returns a read-only view of
+        the input bytes; downstream VAD code mutates in place.
+        """
+        return self.np.frombuffer(raw_bytes, dtype=self.np.float32).copy()
 
     def process(self, chunk):
         """Feed one float32 1-D chunk through the VAD + transcribe pipeline."""
@@ -1477,8 +1486,10 @@ def _live_stdin_consumer():
     """
     import sys
     import signal
-    import numpy as _np
 
+    # numpy is imported (and guarded) inside _LiveVadPipeline.create() so
+    # an absent install emits LIVE_ERROR and returns None rather than
+    # crashing the subprocess before main.js sees any signal.
     pipeline = _LiveVadPipeline.create(source_rate=None, source_label="stdin")
     if pipeline is None:
         return
@@ -1513,8 +1524,7 @@ def _live_stdin_consumer():
             # tail in pending for the next read.
             usable = bytes(pending[: n_floats * 4])
             del pending[: n_floats * 4]
-            samples = _np.frombuffer(usable, dtype=_np.float32).copy()
-            pipeline.process(samples)
+            pipeline.process(pipeline.parse_float32_bytes(usable))
         pipeline.finalize()
     except Exception as e:
         print("LIVE_ERROR:" + json.dumps({
