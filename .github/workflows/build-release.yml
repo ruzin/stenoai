@@ -104,14 +104,15 @@ jobs:
       run: npm ci
 
     - name: Inject build-time secrets
-      # Writes app/.env (gitignored) from GitHub Actions secrets so
-      # electron-builder packages the credentials into app.asar at build
-      # time. Local dev fills its own .env from .env.example.
+      # Writes app/build-config.js (gitignored) from GitHub Actions
+      # secrets so electron-builder packages the credentials into the
+      # asar at build time. Local dev fills its own build-config.js
+      # from build-config.example.js.
       #
       # Fail loudly if either secret is missing — without this guard, a
       # release built before the secrets were added would silently ship
-      # a DMG with empty OAuth credentials, and every user's calendar
-      # would fail to authenticate.
+      # with empty OAuth credentials and every user's calendar would
+      # fail to authenticate.
       working-directory: app
       env:
         GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
@@ -121,14 +122,16 @@ jobs:
           echo "::error::GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET must be set in repo Settings → Secrets and variables → Actions before releasing." >&2
           exit 1
         fi
-        # printf '%s\n' writes the value verbatim — no backtick / command
-        # substitution, no risk that a value containing the heredoc
-        # terminator splits the file early. Safer than a heredoc for
-        # writing untrusted strings to a config file.
-        {
-          printf 'GOOGLE_OAUTH_CLIENT_ID=%s\n' "${GOOGLE_OAUTH_CLIENT_ID}"
-          printf 'GOOGLE_OAUTH_CLIENT_SECRET=%s\n' "${GOOGLE_OAUTH_CLIENT_SECRET}"
-        } > .env
+        # Generate via node so JSON.stringify handles all escaping (quotes,
+        # backslashes, unicode) — safer than shell string substitution.
+        node -e '
+          const fs = require("fs");
+          const cfg = {
+            GOOGLE_OAUTH_CLIENT_ID: process.env.GOOGLE_OAUTH_CLIENT_ID,
+            GOOGLE_OAUTH_CLIENT_SECRET: process.env.GOOGLE_OAUTH_CLIENT_SECRET,
+          };
+          fs.writeFileSync("build-config.js", "module.exports = " + JSON.stringify(cfg, null, 2) + ";\n");
+        '
 
     - name: Import code signing certificate
       uses: apple-actions/import-codesign-certs@v2

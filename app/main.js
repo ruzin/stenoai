@@ -15,21 +15,22 @@ const { PostHog } = require('posthog-node');
 const { initMain } = require('electron-audio-loopback');
 const { autoUpdater } = require('electron-updater');
 
-// Load build-time secrets from app/.env. The file is gitignored; CI writes
-// it from GitHub Actions secrets before electron-builder runs (see
-// .github/workflows/build-release.yml). For local dev, copy `.env.example`
-// to `.env` and fill in your own Google OAuth credentials — calendar
-// integration is degraded without it but the rest of the app works.
+// Build-time configuration. `build-config.js` is gitignored and written
+// by CI from GitHub Actions secrets before electron-builder runs (see
+// .github/workflows/build-release.yml). For local dev, copy
+// `build-config.example.js` to `build-config.js` and fill in your own
+// Google OAuth credentials — calendar integration is "not connected"
+// without it but the rest of the app works.
 //
-// `silent: true` so a missing `.env` doesn't spam the console for
-// contributors who haven't set up calendar integration.
-require('dotenv').config({
-  path: path.join(__dirname, '.env'),
-  // dotenv v17+ accepts `quiet`; older `silent` is harmless. Use both
-  // so we don't have to pin to a specific minor.
-  quiet: true,
-  silent: true,
-});
+// Plain require + try/catch (rather than dotenv) so we don't ship a
+// runtime dependency just to read two constants.
+let buildConfig = {};
+try {
+  buildConfig = require('./build-config');
+} catch (_) {
+  // Missing file in local dev → calendar surfaces as "not connected"
+  // rather than crashing.
+}
 
 // E2E test-harness hooks. Set via env vars; production sees none of these.
 //   STENOAI_USER_DATA_DIR — per-test temp userData dir (must be set before app.whenReady)
@@ -374,14 +375,14 @@ const POSTHOG_HOST = 'https://us.i.posthog.com';
 
 // Google Calendar OAuth2 configuration.
 //
-// Both values are injected at build time via dotenv (see top of file).
-// Empty strings in local dev with no `.env` mean Google auth is disabled
-// — the renderer surfaces this as "calendar not connected" rather than a
-// crash. Rotate the secret in Google Cloud Console + update the
-// `GOOGLE_OAUTH_CLIENT_*` GitHub Actions secrets to roll a new
-// credential without a code change.
-const GOOGLE_CLIENT_ID = process.env.GOOGLE_OAUTH_CLIENT_ID || '';
-const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_OAUTH_CLIENT_SECRET || '';
+// Both values come from `build-config.js` (see top of file). Empty
+// strings in local dev with no `build-config.js` mean Google auth is
+// disabled — the renderer surfaces this as "calendar not connected"
+// rather than a crash. Rotate the secret in Google Cloud Console +
+// update the `GOOGLE_OAUTH_CLIENT_*` GitHub Actions secrets to roll a
+// new credential without a code change.
+const GOOGLE_CLIENT_ID = buildConfig.GOOGLE_OAUTH_CLIENT_ID || '';
+const GOOGLE_CLIENT_SECRET = buildConfig.GOOGLE_OAUTH_CLIENT_SECRET || '';
 const GOOGLE_SCOPES = 'https://www.googleapis.com/auth/calendar.readonly';
 const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';

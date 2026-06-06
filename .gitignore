@@ -107,6 +107,9 @@ celerybeat.pid
 # Environments
 .env
 .venv
+# Build-time OAuth credentials — written by CI from GitHub Actions secrets,
+# or by contributors locally from build-config.example.js. Never commit.
+app/build-config.js
 env/
 venv/
 ENV/

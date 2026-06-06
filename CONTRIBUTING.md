@@ -47,13 +47,13 @@ Thank you for your interest in contributing to StenoAI! This guide will help you
 
 5. **(Optional) Configure Google Calendar OAuth for local dev**
 
-   Calendar integration reads its OAuth credentials from `app/.env` at
-   build time. CI builds inject the production values from GitHub
-   Actions secrets; local builds need your own.
+   Calendar integration reads its OAuth credentials from
+   `app/build-config.js` at startup. CI builds write this file from
+   GitHub Actions secrets; local builds need your own.
 
    ```bash
    cd app
-   cp .env.example .env
+   cp build-config.example.js build-config.js
    ```
 
    Then fill in `GOOGLE_OAUTH_CLIENT_ID` and `GOOGLE_OAUTH_CLIENT_SECRET`
