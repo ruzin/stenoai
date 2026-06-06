@@ -45,7 +45,27 @@ Thank you for your interest in contributing to StenoAI! This guide will help you
    npm start
    ```
 
-5. **Test the setup**
+5. **(Optional) Configure Google Calendar OAuth for local dev**
+
+   Calendar integration reads its OAuth credentials from
+   `app/build-config.js` at startup. CI builds write this file from
+   GitHub Actions secrets; local builds need your own.
+
+   ```bash
+   cd app
+   cp build-config.example.js build-config.js
+   ```
+
+   Then fill in `GOOGLE_OAUTH_CLIENT_ID` and `GOOGLE_OAUTH_CLIENT_SECRET`
+   from your own Google Cloud project (Create an OAuth 2.0 Client ID of
+   type **Desktop application** at
+   https://console.cloud.google.com → APIs & Services → Credentials).
+
+   If you skip this step the app launches normally — calendar
+   integration will surface "calendar not connected" and the rest of
+   the app (recording, transcription, summarization) works as usual.
+
+6. **Test the setup**
    ```bash
    # Test CLI
    python simple_recorder.py --help

@@ -15,6 +15,23 @@ const { PostHog } = require('posthog-node');
 const { initMain } = require('electron-audio-loopback');
 const { autoUpdater } = require('electron-updater');
 
+// Build-time configuration. `build-config.js` is gitignored and written
+// by CI from GitHub Actions secrets before electron-builder runs (see
+// .github/workflows/build-release.yml). For local dev, copy
+// `build-config.example.js` to `build-config.js` and fill in your own
+// Google OAuth credentials — calendar integration is "not connected"
+// without it but the rest of the app works.
+//
+// Plain require + try/catch (rather than dotenv) so we don't ship a
+// runtime dependency just to read two constants.
+let buildConfig = {};
+try {
+  buildConfig = require('./build-config');
+} catch (_) {
+  // Missing file in local dev → calendar surfaces as "not connected"
+  // rather than crashing.
+}
+
 // E2E test-harness hooks. Set via env vars; production sees none of these.
 //   STENOAI_USER_DATA_DIR — per-test temp userData dir (must be set before app.whenReady)
 //   STENOAI_E2E=1         — skip tray, auto-updater, PostHog telemetry
@@ -356,9 +373,16 @@ let anonymousId = null;
 const POSTHOG_API_KEY = 'phc_U2cnTyIyKGNSVaK18FyBMltd8nmN7uHxhhm21fAHwqb';
 const POSTHOG_HOST = 'https://us.i.posthog.com';
 
-// Google Calendar OAuth2 configuration
-const GOOGLE_CLIENT_ID = '281073275073-20da4u5t9luk2366vd5ai0a2r55d5pf5.apps.googleusercontent.com';
-const GOOGLE_CLIENT_SECRET = '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';
+// Google Calendar OAuth2 configuration.
+//
+// Both values come from `build-config.js` (see top of file). Empty
+// strings in local dev with no `build-config.js` mean Google auth is
+// disabled — the renderer surfaces this as "calendar not connected"
+// rather than a crash. Rotate the secret in Google Cloud Console +
+// update the `GOOGLE_OAUTH_CLIENT_*` GitHub Actions secrets to roll a
+// new credential without a code change.
+const GOOGLE_CLIENT_ID = buildConfig.GOOGLE_OAUTH_CLIENT_ID || '';
+const GOOGLE_CLIENT_SECRET = buildConfig.GOOGLE_OAUTH_CLIENT_SECRET || '';
 const GOOGLE_SCOPES = 'https://www.googleapis.com/auth/calendar.readonly';
 const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';

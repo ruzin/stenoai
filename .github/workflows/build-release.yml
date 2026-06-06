@@ -103,6 +103,36 @@ jobs:
       working-directory: app
       run: npm ci
 
+    - name: Inject build-time secrets
+      # Writes app/build-config.js (gitignored) from GitHub Actions
+      # secrets so electron-builder packages the credentials into the
+      # asar at build time. Local dev fills its own build-config.js
+      # from build-config.example.js.
+      #
+      # Fail loudly if either secret is missing — without this guard, a
+      # release built before the secrets were added would silently ship
+      # with empty OAuth credentials and every user's calendar would
+      # fail to authenticate.
+      working-directory: app
+      env:
+        GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+        GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+      run: |
+        if [ -z "${GOOGLE_OAUTH_CLIENT_ID}" ] || [ -z "${GOOGLE_OAUTH_CLIENT_SECRET}" ]; then
+          echo "::error::GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET must be set in repo Settings → Secrets and variables → Actions before releasing." >&2
+          exit 1
+        fi
+        # Generate via node so JSON.stringify handles all escaping (quotes,
+        # backslashes, unicode) — safer than shell string substitution.
+        node -e '
+          const fs = require("fs");
+          const cfg = {
+            GOOGLE_OAUTH_CLIENT_ID: process.env.GOOGLE_OAUTH_CLIENT_ID,
+            GOOGLE_OAUTH_CLIENT_SECRET: process.env.GOOGLE_OAUTH_CLIENT_SECRET,
+          };
+          fs.writeFileSync("build-config.js", "module.exports = " + JSON.stringify(cfg, null, 2) + ";\n");
+        '
+
     - name: Import code signing certificate
       uses: apple-actions/import-codesign-certs@v2
       with:
