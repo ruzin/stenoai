@@ -185,19 +185,33 @@ def _token_jaccard(a: str, b: str) -> float:
     return len(tokens_a & tokens_b) / len(tokens_a | tokens_b)
 
 
-# Try Parakeet first (preferred — same engine as live).
+# Try Parakeet first (preferred — same engine as live, arm64 Macs only).
 try:
     from src.parakeet import transcribe_file as _parakeet_transcribe_file
     PARAKEET_AVAILABLE = True
 except ImportError:
     _parakeet_transcribe_file = None
     PARAKEET_AVAILABLE = False
-    logger.warning("parakeet backend not importable; batch transcription will fail")
 
+# whisper.cpp via pywhispercpp is the cross-platform fallback that keeps
+# Intel-Mac DMGs working (parakeet-mlx is Apple-Silicon-only). Bundled
+# unconditionally in stenoai.spec and lazily probed here at import time.
+try:
+    from pywhispercpp.model import Model as WhisperCppModel
+    WHISPER_CPP_AVAILABLE = True
+except ImportError:
+    WhisperCppModel = None
+    WHISPER_CPP_AVAILABLE = False
+
+if not PARAKEET_AVAILABLE and not WHISPER_CPP_AVAILABLE:
+    logger.warning(
+        "No ASR backend importable (parakeet-mlx + pywhispercpp both "
+        "missing); batch transcription will fail",
+    )
 
 # Top-level capability flag retained for callers that probed for whisper
-# presence. Now it just means "do we have any working ASR backend at all".
-WHISPER_AVAILABLE = PARAKEET_AVAILABLE
+# presence. Means "any working ASR backend at all".
+WHISPER_AVAILABLE = PARAKEET_AVAILABLE or WHISPER_CPP_AVAILABLE
 
 
 class WhisperTranscriber:
@@ -215,18 +229,37 @@ class WhisperTranscriber:
     """
 
     def __init__(self, model_size: str = "small"):
-        if not PARAKEET_AVAILABLE:
+        if not (PARAKEET_AVAILABLE or WHISPER_CPP_AVAILABLE):
             raise ImportError(
-                "Parakeet (parakeet-mlx) backend is not available. "
-                "Run `pip install parakeet-mlx` in the venv or rebuild the "
-                "PyInstaller bundle."
+                "No ASR backend available. Need parakeet-mlx (Apple Silicon) "
+                "or pywhispercpp (cross-platform). Rebuild the PyInstaller "
+                "bundle or `pip install` the relevant package."
             )
         # Kept on the instance so existing callers / logs that read
-        # ``model_size`` and ``backend`` don't change.
+        # ``model_size`` and ``backend`` don't change. Backend selection
+        # prefers Parakeet when available; falls back to whisper.cpp on
+        # Intel Macs where parakeet-mlx (which needs MLX) can't install.
         self.model_size = model_size
-        self.model = None  # Parakeet manages its own model singleton
-        self.backend = "parakeet-tdt-v3"
+        self.model = None
+        if PARAKEET_AVAILABLE:
+            self.backend = "parakeet-tdt-v3"
+        else:
+            self.backend = "whisper.cpp"
+            self._load_whisper_cpp()
         self._ensure_ffmpeg_in_path()
+
+    def _load_whisper_cpp(self) -> None:
+        """Load the whisper.cpp model lazily for the Intel-Mac fallback path.
+
+        pywhispercpp auto-downloads the ggml weight on first construction;
+        ``self.model_size`` should be one of the entries in
+        ``src/whisper_models.py`` (``small`` is the historical default).
+        """
+        import multiprocessing
+        n_threads = max(1, multiprocessing.cpu_count() - 2)
+        logger.info("Loading whisper.cpp model: %s", self.model_size)
+        self.model = WhisperCppModel(self.model_size, n_threads=n_threads)
+        logger.info("whisper.cpp model loaded (threads=%d)", n_threads)
 
     def _ensure_ffmpeg_in_path(self) -> None:
         """Make sure ffmpeg is reachable from $PATH for the stereo split.
@@ -291,6 +324,12 @@ class WhisperTranscriber:
     # Core: run Parakeet on a WAV path, return our normalised dict shape.
     # ------------------------------------------------------------------
 
+    def _run_backend(self, audio_filepath: Path, language: str) -> dict:
+        """Dispatch to whichever ASR backend is active for this instance."""
+        if self.backend == "parakeet-tdt-v3":
+            return self._run_parakeet(audio_filepath, language)
+        return self._run_whisper_cpp(audio_filepath, language)
+
     def _run_parakeet(self, audio_filepath: Path, language: str) -> dict:
         """Call into ``src.parakeet`` and normalise the result shape.
 
@@ -323,6 +362,118 @@ class WhisperTranscriber:
             "detected_language_probability": result.get("detected_language_probability"),
         }
 
+    def _convert_to_16khz(self, audio_filepath: Path) -> tuple[Path, Optional[float]]:
+        """Convert audio to 16 kHz mono WAV for whisper.cpp via ffmpeg.
+
+        Used only on the whisper.cpp fallback path (Intel Macs). Parakeet's
+        ``transcribe_file`` accepts arbitrary formats via librosa, so the
+        Parakeet path doesn't need this step.
+        """
+        import wave
+        temp_dir = tempfile.gettempdir()
+        converted_path = Path(temp_dir) / f"stenoai_16khz_{audio_filepath.stem}.wav"
+        try:
+            result = subprocess.run(
+                ['ffmpeg', '-y', '-i', str(audio_filepath),
+                 '-ar', '16000', '-ac', '1', '-c:a', 'pcm_s16le',
+                 str(converted_path)],
+                capture_output=True,
+                timeout=60,
+            )
+            if result.returncode == 0 and converted_path.exists():
+                duration_seconds = None
+                try:
+                    with wave.open(str(converted_path), 'rb') as wf:
+                        duration_seconds = wf.getnframes() / wf.getframerate()
+                except Exception as e:
+                    logger.warning("Could not read duration from converted WAV: %s", e)
+                return converted_path, duration_seconds
+            logger.error("ffmpeg conversion failed: %s", result.stderr.decode())
+            return audio_filepath, None
+        except Exception as e:
+            logger.error("Audio conversion error: %s", e)
+            return audio_filepath, None
+
+    def _run_whisper_cpp(self, audio_filepath: Path, language: str) -> dict:
+        """Call into pywhispercpp on the converted 16 kHz mono WAV.
+
+        Same return shape as ``_run_parakeet``. ``language="auto"`` uses
+        whisper.cpp's built-in language detection; a concrete code biases
+        the decoder toward that language. Loop-hallucination dedup (runs
+        of 5+ identical segments) preserved from the whisper-era code —
+        whisper.cpp is known to emit canned phrases like ``"Thank you."``
+        repeatedly on silent input.
+        """
+        if self.model is None:
+            logger.error("whisper.cpp model not loaded")
+            return {"text": None, "segments": [], "duration_seconds": None,
+                    "detected_language": None, "detected_language_probability": None}
+
+        converted_path, duration_seconds = self._convert_to_16khz(audio_filepath)
+        cleanup_converted = converted_path != audio_filepath
+
+        try:
+            resolved_language = language
+            detected_language = None
+            detected_language_probability = None
+
+            if language == "auto":
+                try:
+                    detection_result, _ = self.model.auto_detect_language(media=str(converted_path))
+                    if detection_result and len(detection_result) >= 1:
+                        detected_language = detection_result[0]
+                        resolved_language = detected_language
+                        if len(detection_result) >= 2:
+                            detected_language_probability = float(detection_result[1])
+                except Exception as e:
+                    logger.warning("Failed to auto-detect language; using whisper default: %s", e)
+                    resolved_language = None
+
+            transcribe_kwargs = {"media": str(converted_path)}
+            if resolved_language and resolved_language != "auto":
+                transcribe_kwargs["language"] = resolved_language
+            segments = self.model.transcribe(**transcribe_kwargs)
+
+            # Dedup whisper.cpp loop hallucinations: 5+ consecutive identical
+            # segments. Preserved from the historical whisper code path.
+            if segments:
+                deduped: list = []
+                i = 0
+                while i < len(segments):
+                    text = segments[i].text.strip()
+                    run_end = i + 1
+                    while run_end < len(segments) and segments[run_end].text.strip() == text:
+                        run_end += 1
+                    if run_end - i >= 5 and text:
+                        logger.warning("Dropped %d repeated whisper segments: %r", run_end - i, text[:60])
+                    else:
+                        deduped.extend(segments[i:run_end])
+                    i = run_end
+                segments = deduped
+
+            if not segments:
+                return {"text": None, "segments": [], "duration_seconds": duration_seconds,
+                        "detected_language": detected_language,
+                        "detected_language_probability": detected_language_probability}
+
+            transcript = " ".join(s.text.strip() for s in segments)
+            return {
+                "text": transcript.strip() or None,
+                "segments": [
+                    {"text": s.text.strip(), "start": s.t0 / 100.0, "end": s.t1 / 100.0}
+                    for s in segments if s.text.strip()
+                ],
+                "duration_seconds": duration_seconds,
+                "detected_language": detected_language,
+                "detected_language_probability": detected_language_probability,
+            }
+        finally:
+            if cleanup_converted and converted_path.exists():
+                try:
+                    converted_path.unlink()
+                except Exception:
+                    pass
+
     # ------------------------------------------------------------------
     # Public batch API (back-compat with the whisper-era surface).
     # ------------------------------------------------------------------
@@ -352,7 +503,7 @@ class WhisperTranscriber:
                     "detected_language_probability": None,
                 }
 
-            result = self._run_parakeet(audio_filepath, language)
+            result = self._run_backend(audio_filepath, language)
 
             transcript = result.get("text")
             logger.info(f"Transcription completed. Length: {len(transcript) if transcript else 0} characters")
@@ -597,8 +748,9 @@ class WhisperTranscriber:
     def transcribe_with_timestamps(self, audio_filepath: Path) -> Optional[dict]:
         """Batch transcribe and return segment-level timing.
 
-        Thin wrapper around ``_run_parakeet`` — Parakeet returns AlignedSentence
-        timings directly, so we just normalise the shape.
+        Thin wrapper around ``_run_backend`` — Parakeet returns AlignedSentence
+        timings directly; whisper.cpp segments expose t0/t1 in centiseconds
+        which the backend's normaliser converts.
         """
         if not audio_filepath.exists():
             logger.error(f"Audio file not found: {audio_filepath}")
@@ -606,7 +758,7 @@ class WhisperTranscriber:
 
         try:
             logger.info(f"Transcribing audio file with timestamps: {audio_filepath}")
-            result = self._run_parakeet(audio_filepath, language="auto")
+            result = self._run_backend(audio_filepath, language="auto")
             return {
                 "text": result.get("text") or "",
                 "segments": result.get("segments") or [],

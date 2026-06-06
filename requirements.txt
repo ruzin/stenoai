@@ -3,10 +3,12 @@ sounddevice>=0.4.6
 # numpy<2.0 pin was tied to pywhispercpp. Tests pass under NumPy 2.3 so
 # the floor is the only real constraint now.
 numpy>=2.0,<3.0
-# parakeet-mlx is Apple-Silicon-only (depends on mlx). Gate so non-Mac
-# contributors can still `pip install -r requirements.txt` without errors;
-# at runtime the bundle only ships on arm64 Macs anyway.
-parakeet-mlx>=0.5.0; sys_platform == "darwin" and platform_machine == "arm64"
+# parakeet-mlx ships Mac-arm64 wheels only — its own PyPI metadata
+# already rejects non-arm64-Mac installs, so we leave the dep
+# unconditional. The release workflow builds both arm64 and x64 DMGs;
+# the x64 DMG falls back through the whisper.cpp path (kept alive in
+# transcriber.py + the bundle) since parakeet is Apple-Silicon-only.
+parakeet-mlx>=0.5.0
 # Silero VAD runs via onnxruntime directly (we ship the .onnx file in
 # src/data/). The official silero-vad pip package would pull in torch
 # and torchaudio (~1 GB), which would balloon the DMG — onnxruntime
