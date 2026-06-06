@@ -759,6 +759,7 @@ if (!gotSingleInstanceLock) {
           currentRecordingProcess.kill('SIGTERM');
           currentRecordingProcess = null;
           currentRecordingSessionName = null;
+          clearRecordPidSidecarSync();
         }
         if (systemAudioRecordingActive && mainWindow && !mainWindow.isDestroyed()) {
           try {
@@ -841,6 +842,16 @@ if (!gotSingleInstanceLock) {
       } catch (e) {
         sendDebugLog(`[sysaudio] startup probe failed: ${e.message}`);
       }
+    }
+
+    // Reap any orphan recording subprocess left over from a prior crash
+    // before creating the window. We don't want to surface "Recording in
+    // progress" UI while the prior orphan still holds the mic / writes to
+    // disk. Failures here are non-fatal — the helper logs and returns.
+    try {
+      await cleanupOrphanRecording();
+    } catch (e) {
+      sendDebugLog(`[orphan-cleanup] unexpected error during startup cleanup: ${e.message}`);
     }
 
     createWindow();
@@ -2173,6 +2184,120 @@ let systemAudioRecordingActive = false;  // Track system audio recording for tra
 let currentRecordingProcess = null;
 let currentRecordingSessionName = null;  // Surfaced in get-queue-status so renderer knows which meeting is live
 let processingQueue = [];
+
+// ── Orphan-recording cleanup ────────────────────────────────────────────
+//
+// When the user starts a recording, we spawn the Python `record` subprocess
+// as a child of Electron. If Electron crashes between start and stop (renderer
+// OOM, native module segfault, force-quit), the OS *usually* tears the child
+// down via broken stdio pipes — but not always, and not immediately. To
+// guarantee the next launch ends any orphan rather than leaving it writing
+// audio in the background, we persist the spawned PID + backend path to a
+// sidecar file. On startup we read the sidecar and, if the recorded PID is
+// still alive AND still looks like our backend, signal it to exit and remove
+// the sidecar.
+//
+// Lives in its own sidecar file rather than `recorder_state.json` so it stays
+// purely a renderer/main-side concern — the Python state file format doesn't
+// change.
+const RECORD_PID_SIDECAR_FILENAME = 'last-record.json';
+function recordPidSidecarPath() {
+  return path.join(app.getPath('userData'), RECORD_PID_SIDECAR_FILENAME);
+}
+
+function writeRecordPidSidecarSync(info) {
+  const filePath = recordPidSidecarPath();
+  const tmpPath = `${filePath}.tmp`;
+  try {
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(tmpPath, JSON.stringify(info), 'utf-8');
+    fs.renameSync(tmpPath, filePath);
+  } catch (e) {
+    sendDebugLog(`[orphan-cleanup] Failed to write PID sidecar: ${e.message}`);
+    try { if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath); } catch (_) {}
+  }
+}
+
+function clearRecordPidSidecarSync() {
+  try {
+    const filePath = recordPidSidecarPath();
+    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+  } catch (e) {
+    sendDebugLog(`[orphan-cleanup] Failed to clear PID sidecar: ${e.message}`);
+  }
+}
+
+// Returns true only when (a) the PID is alive and (b) it looks like our
+// backend binary. The `ps` check guards against PID reuse — a long-since-dead
+// orphan whose PID was recycled to an unrelated process must not be killed.
+function isOrphanedRecordProcess(pid, expectedBackendPath) {
+  try {
+    process.kill(pid, 0); // throws ESRCH if no such process
+  } catch (_) {
+    return false;
+  }
+  try {
+    const { execSync } = require('child_process');
+    const cmd = execSync(`ps -p ${pid} -o command=`, { timeout: 1500 }).toString().trim();
+    // Match by basename so dev (`dist/stenoai/stenoai`) and packaged
+    // (`<resourcesPath>/stenoai/stenoai`) both resolve correctly.
+    const binaryName = path.basename(expectedBackendPath);
+    return Boolean(binaryName) && cmd.includes(binaryName);
+  } catch (_) {
+    // ps unavailable or pid disappeared between the kill(0) and the ps;
+    // err on the side of "not orphan" rather than signalling a stranger.
+    return false;
+  }
+}
+
+async function cleanupOrphanRecording() {
+  const filePath = recordPidSidecarPath();
+  if (!fs.existsSync(filePath)) return;
+
+  let info;
+  try {
+    info = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+  } catch (e) {
+    sendDebugLog(`[orphan-cleanup] PID sidecar unreadable, removing: ${e.message}`);
+    try { fs.unlinkSync(filePath); } catch (_) {}
+    return;
+  }
+
+  const pid = info && info.pid;
+  const backendPath = info && info.backendPath;
+  const sessionName = (info && info.sessionName) || '';
+  if (!Number.isInteger(pid) || !backendPath) {
+    try { fs.unlinkSync(filePath); } catch (_) {}
+    return;
+  }
+
+  if (!isOrphanedRecordProcess(pid, backendPath)) {
+    sendDebugLog(`[orphan-cleanup] pid=${pid} is not our backend; clearing sidecar`);
+    try { fs.unlinkSync(filePath); } catch (_) {}
+    return;
+  }
+
+  sendDebugLog(`[orphan-cleanup] Orphan record subprocess detected pid=${pid} session="${sessionName}"; sending SIGTERM`);
+  try { process.kill(pid, 'SIGTERM'); } catch (_) {}
+
+  // Wait up to 5s for clean exit, then escalate to SIGKILL.
+  const deadline = Date.now() + 5000;
+  while (Date.now() < deadline) {
+    try {
+      process.kill(pid, 0);
+    } catch (_) {
+      sendDebugLog(`[orphan-cleanup] pid=${pid} exited cleanly`);
+      try { fs.unlinkSync(filePath); } catch (_) {}
+      return;
+    }
+    await new Promise((r) => setTimeout(r, 250));
+  }
+
+  sendDebugLog(`[orphan-cleanup] pid=${pid} still alive after SIGTERM; sending SIGKILL`);
+  try { process.kill(pid, 'SIGKILL'); } catch (_) {}
+  try { fs.unlinkSync(filePath); } catch (_) {}
+}
+// ── End orphan-recording cleanup ────────────────────────────────────────
 // Live-transcript ring buffer for the in-flight recording. Populated by the
 // Python `record --live` subprocess's LIVE_SEG: stdout lines. The renderer
 // subscribes to `live-transcript-chunk` for new entries and calls
@@ -2526,6 +2651,14 @@ ipcMain.handle('start-recording-ui', async (_, sessionName) => {
       env: Object.keys(recordEnv).length > 0 ? { ...require('process').env, ...recordEnv } : undefined
     });
     currentRecordingSessionName = actualSessionName;
+    // Persist {pid, sessionName, backendPath} so the next launch can detect
+    // an orphan if Electron crashes between here and the close handler.
+    writeRecordPidSidecarSync({
+      pid: currentRecordingProcess.pid,
+      sessionName: actualSessionName,
+      startedAt: Date.now(),
+      backendPath: getBackendPath(),
+    });
     // Reset the live transcript buffer for this session. We do it here
     // (before spawn parses anything) so a late-mounting LiveTranscriptPanel
     // can never see a stale segments array from a previous recording.
@@ -2717,6 +2850,9 @@ ipcMain.handle('start-recording-ui', async (_, sessionName) => {
     currentRecordingProcess.on('close', (code) => {
       console.log(`Recording process closed with code ${code}`);
       sendDebugLog(`Recording process completed with exit code: ${code}`);
+      // Normal exit — drop the orphan-detection sidecar so the next launch
+      // doesn't try to kill a long-dead PID (or worse, a recycled one).
+      clearRecordPidSidecarSync();
       currentRecordingProcess = null;
       currentRecordingSessionName = null;
       resetRecordingRuntimeState();
