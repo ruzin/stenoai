@@ -107,11 +107,23 @@ jobs:
       # Writes app/.env (gitignored) from GitHub Actions secrets so
       # electron-builder packages the credentials into app.asar at build
       # time. Local dev fills its own .env from .env.example.
+      #
+      # Fail loudly if either secret is missing — without this guard, a
+      # release built before the secrets were added would silently ship
+      # a DMG with empty OAuth credentials, and every user's calendar
+      # would fail to authenticate.
       working-directory: app
+      env:
+        GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+        GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
       run: |
+        if [ -z "${GOOGLE_OAUTH_CLIENT_ID}" ] || [ -z "${GOOGLE_OAUTH_CLIENT_SECRET}" ]; then
+          echo "::error::GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET must be set in repo Settings → Secrets and variables → Actions before releasing." >&2
+          exit 1
+        fi
         cat > .env <<EOF
-        GOOGLE_OAUTH_CLIENT_ID=${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
-        GOOGLE_OAUTH_CLIENT_SECRET=${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+        GOOGLE_OAUTH_CLIENT_ID=${GOOGLE_OAUTH_CLIENT_ID}
+        GOOGLE_OAUTH_CLIENT_SECRET=${GOOGLE_OAUTH_CLIENT_SECRET}
         EOF
 
     - name: Import code signing certificate
