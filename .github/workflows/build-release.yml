@@ -121,10 +121,14 @@ jobs:
           echo "::error::GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET must be set in repo Settings → Secrets and variables → Actions before releasing." >&2
           exit 1
         fi
-        cat > .env <<EOF
-        GOOGLE_OAUTH_CLIENT_ID=${GOOGLE_OAUTH_CLIENT_ID}
-        GOOGLE_OAUTH_CLIENT_SECRET=${GOOGLE_OAUTH_CLIENT_SECRET}
-        EOF
+        # printf '%s\n' writes the value verbatim — no backtick / command
+        # substitution, no risk that a value containing the heredoc
+        # terminator splits the file early. Safer than a heredoc for
+        # writing untrusted strings to a config file.
+        {
+          printf 'GOOGLE_OAUTH_CLIENT_ID=%s\n' "${GOOGLE_OAUTH_CLIENT_ID}"
+          printf 'GOOGLE_OAUTH_CLIENT_SECRET=%s\n' "${GOOGLE_OAUTH_CLIENT_SECRET}"
+        } > .env
 
     - name: Import code signing certificate
       uses: apple-actions/import-codesign-certs@v2
