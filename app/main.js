@@ -759,7 +759,11 @@ if (!gotSingleInstanceLock) {
           currentRecordingProcess.kill('SIGTERM');
           currentRecordingProcess = null;
           currentRecordingSessionName = null;
-          clearRecordPidSidecarSync();
+          // Intentionally do NOT clear the sidecar here. SIGTERM is async;
+          // if the subprocess doesn't honour it before Electron exits, we
+          // need the sidecar to survive so the next launch can detect and
+          // reap the orphan. The 'close' event handler clears the sidecar
+          // when the process actually exits — that's the right moment.
         }
         if (systemAudioRecordingActive && mainWindow && !mainWindow.isDestroyed()) {
           try {
@@ -2239,10 +2243,15 @@ function isOrphanedRecordProcess(pid, expectedBackendPath) {
   try {
     const { execSync } = require('child_process');
     const cmd = execSync(`ps -p ${pid} -o command=`, { timeout: 1500 }).toString().trim();
-    // Match by basename so dev (`dist/stenoai/stenoai`) and packaged
-    // (`<resourcesPath>/stenoai/stenoai`) both resolve correctly.
+    // The first whitespace-separated token in `ps -o command=` is argv[0]
+    // — the executable path. Match its basename against ours so dev
+    // (`dist/stenoai/stenoai`) and packaged (`<resourcesPath>/stenoai/stenoai`)
+    // both resolve, but a stranger that merely *mentions* "stenoai" in its
+    // arguments doesn't get killed.
     const binaryName = path.basename(expectedBackendPath);
-    return Boolean(binaryName) && cmd.includes(binaryName);
+    if (!binaryName) return false;
+    const argv0 = cmd.split(/\s+/)[0] || '';
+    return path.basename(argv0) === binaryName;
   } catch (_) {
     // ps unavailable or pid disappeared between the kill(0) and the ps;
     // err on the side of "not orphan" rather than signalling a stranger.
