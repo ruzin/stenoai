@@ -17,17 +17,25 @@ export function UpcomingCard({ event }: UpcomingCardProps) {
   const isLive = relative.state === 'now';
   const urgent = relative.urgent || isLive;
 
+  // Click the card → start a new recording titled after this event. The
+  // event title becomes the note's session name (instead of the auto
+  // 'Note' placeholder), so the AI rename step skips it and the user
+  // gets the meeting they expected. Doesn't open the join URL — the
+  // Join / Start now buttons on the right own that action.
   const onStart = () => {
     if (recording.status !== 'idle') return;
     void recording.startRecording(event.title);
   };
 
+  // Open the meeting URL externally. Used by the inner Join button only.
   const onJoin = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (!meetingUrl) return;
     void ipc().shell.openExternal(meetingUrl);
   };
 
+  // Start recording AND open the URL — used by the urgent "Start now"
+  // button when the meeting is imminent.
   const onStartAndJoin = (e: React.MouseEvent) => {
     e.stopPropagation();
     onStart();
@@ -41,6 +49,9 @@ export function UpcomingCard({ event }: UpcomingCardProps) {
       tabIndex={0}
       onClick={onStart}
       onKeyDown={(e) => {
+        // Only handle Enter/Space when the card itself has focus — inner
+        // buttons (Join, Start now) own their own keyboard activation, and
+        // we don't want to double-fire them.
         if (e.target !== e.currentTarget) return;
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();

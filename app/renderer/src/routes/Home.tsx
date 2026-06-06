@@ -57,9 +57,12 @@ export function Home({ mode }: HomeProps) {
   }, [mode]);
 
   // Today's relevant events: anything that overlaps with today AND
-  // hasn't ended yet, AND that the user is likely to attend.
-  // All-day blocks (OOO, conference day) and declined meetings are
-  // dropped — they pushed real meetings off the visible page.
+  // hasn't ended yet AND that the user is likely to attend. Includes
+  // timed events for today and timed multi-day events (conference
+  // sessions, calls spanning a day boundary) that started in the past
+  // but are still ongoing — those are useful context the user might
+  // want to glance at. All-day blocks (OOO, conference day) and declined
+  // meetings are dropped — they crowd real meetings off the visible page.
   const upcomingToday = React.useMemo<CalendarEvent[]>(() => {
     if (!calendar.data || calendar.data.needsAuth) return [];
     // Use the tick as the time source so the memo is a pure function of
