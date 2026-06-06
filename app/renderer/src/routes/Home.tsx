@@ -826,15 +826,14 @@ function heroHeadline(s: HeroState): string {
     const startMs = new Date(s.nextSoonEvent.start).getTime();
     if (!Number.isNaN(startMs)) {
       const deltaMs = startMs - s.now;
-      if (deltaMs < HOUR_MS) {
-        // Math.ceil + Math.max(1) keeps the headline non-zero and avoids
-        // the boundary jitter that Math.round would cause around 0 mins
-        // (would print "0 mins") and around 60 mins (would round up into
-        // the hour branch one tick early).
-        const mins = Math.max(1, Math.ceil(deltaMs / MIN_MS));
-        return `Next meeting in ${mins} min${mins === 1 ? '' : 's'}`;
-      }
-      const hrs = Math.round(deltaMs / HOUR_MS);
+      // Compute mins first and gate on the rounded value: Math.ceil rounds
+      // anything in (59 min, 60 min) up to 60, and "60 mins" reads
+      // unnaturally — fall straight through to "1 hr" instead. The
+      // Math.max(1) keeps the headline non-zero in the last 30 seconds
+      // before start.
+      const mins = Math.max(1, Math.ceil(deltaMs / MIN_MS));
+      if (mins < 60) return `Next meeting in ${mins} min${mins === 1 ? '' : 's'}`;
+      const hrs = Math.max(1, Math.round(deltaMs / HOUR_MS));
       return `First meeting in ${hrs} hr${hrs === 1 ? '' : 's'}`;
     }
   }
@@ -870,12 +869,15 @@ function heroSubtitle(s: HeroState): string {
   }
   if (s.nextSoonEvent) {
     const startMs = new Date(s.nextSoonEvent.start).getTime();
-    // Use the raw ms delta so the subtitle's "<60 min" threshold flips at
-    // the same moment the headline does — keeps them in sync at the
-    // boundary instead of one flipping a tick before the other.
-    if (!Number.isNaN(startMs) && startMs - s.now < HOUR_MS) {
-      const at = HERO_TIME_FMT.format(new Date(startMs));
-      return `${s.nextSoonEvent.title} at ${at}.`;
+    if (!Number.isNaN(startMs)) {
+      // Mirror the headline's `mins < 60` threshold (Math.ceil-based) so
+      // the title-at-time line and "Next meeting in N min" headline flip
+      // to "First meeting in 1 hr" at the same instant.
+      const mins = Math.max(1, Math.ceil((startMs - s.now) / MIN_MS));
+      if (mins < 60) {
+        const at = HERO_TIME_FMT.format(new Date(startMs));
+        return `${s.nextSoonEvent.title} at ${at}.`;
+      }
     }
     return RECORDING_HINT;
   }
