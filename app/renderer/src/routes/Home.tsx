@@ -167,6 +167,69 @@ export function Home({ mode }: HomeProps) {
   const googleAuth = useGoogleCalendarAuth();
   const outlookAuth = useOutlookCalendarAuth();
 
+  // Rendered both in the empty-state Welcome screen (brand-new users with
+  // zero meetings — exactly who needs to discover calendar integration)
+  // and in the regular Home above the Upcoming section. Extracted here
+  // so both branches use the same JSX instead of drifting.
+  const calendarNudge = showCalendarNudge ? (
+    <div
+      className="flex items-center gap-2 text-xs"
+      style={{ color: 'var(--fg-2)' }}
+    >
+      {!calendarNudgeExpanded ? (
+        <button
+          type="button"
+          onClick={() => setCalendarNudgeExpanded(true)}
+          className="-mx-1 flex flex-1 items-center gap-2 rounded px-1 py-0.5 text-left transition-colors hover:bg-[color:var(--surface-hover)]"
+          style={{ color: 'var(--fg-2)' }}
+        >
+          <Calendar className="size-3.5 flex-shrink-0" />
+          <span>Connect a calendar to see today's meetings.</span>
+        </button>
+      ) : (
+        <>
+          <Calendar
+            className="size-3.5 flex-shrink-0"
+            style={{ color: 'var(--fg-2)' }}
+          />
+          <span>Connect:</span>
+          <button
+            type="button"
+            onClick={() => googleAuth.connect.mutate()}
+            disabled={
+              googleAuth.connect.isPending || outlookAuth.connect.isPending
+            }
+            className="rounded px-2 py-0.5 transition-colors hover:bg-[color:var(--surface-hover)] disabled:opacity-50 disabled:hover:bg-transparent"
+            style={{ color: 'var(--fg-1)' }}
+          >
+            {googleAuth.connect.isPending ? 'Connecting…' : 'Google'}
+          </button>
+          <button
+            type="button"
+            onClick={() => outlookAuth.connect.mutate()}
+            disabled={
+              googleAuth.connect.isPending || outlookAuth.connect.isPending
+            }
+            className="rounded px-2 py-0.5 transition-colors hover:bg-[color:var(--surface-hover)] disabled:opacity-50 disabled:hover:bg-transparent"
+            style={{ color: 'var(--fg-1)' }}
+          >
+            {outlookAuth.connect.isPending ? 'Connecting…' : 'Outlook'}
+          </button>
+        </>
+      )}
+      <button
+        type="button"
+        onClick={onDismissCalendarNudge}
+        aria-label="Dismiss"
+        title="Dismiss"
+        className="ml-auto rounded p-1 transition-colors hover:bg-[color:var(--surface-hover)]"
+        style={{ color: 'var(--fg-2)' }}
+      >
+        <X className="size-3" />
+      </button>
+    </div>
+  ) : null;
+
   const greeting = `Ready to capture beautiful notes`;
   const dateStr = new Date().toLocaleDateString(undefined, {
     weekday: 'long',
@@ -229,6 +292,9 @@ export function Home({ mode }: HomeProps) {
               <span>from anywhere</span>
             </p>
           </div>
+          {calendarNudge && (
+            <div className="w-full max-w-[420px]">{calendarNudge}</div>
+          )}
         </div>
       ) : (
         <>
@@ -255,66 +321,7 @@ export function Home({ mode }: HomeProps) {
             </div>
           )}
 
-          {showCalendarNudge && (
-            <div
-              className="mb-8 flex items-center gap-2 text-xs"
-              style={{ color: 'var(--fg-2)' }}
-            >
-              {!calendarNudgeExpanded ? (
-                <button
-                  type="button"
-                  onClick={() => setCalendarNudgeExpanded(true)}
-                  className="-mx-1 flex flex-1 items-center gap-2 rounded px-1 py-0.5 text-left transition-colors hover:bg-[color:var(--surface-hover)]"
-                  style={{ color: 'var(--fg-2)' }}
-                >
-                  <Calendar className="size-3.5 flex-shrink-0" />
-                  <span>Connect a calendar to see today's meetings.</span>
-                </button>
-              ) : (
-                <>
-                  <Calendar
-                    className="size-3.5 flex-shrink-0"
-                    style={{ color: 'var(--fg-2)' }}
-                  />
-                  <span>Connect:</span>
-                  <button
-                    type="button"
-                    onClick={() => googleAuth.connect.mutate()}
-                    disabled={
-                      googleAuth.connect.isPending ||
-                      outlookAuth.connect.isPending
-                    }
-                    className="rounded px-2 py-0.5 transition-colors hover:bg-[color:var(--surface-hover)] disabled:opacity-50 disabled:hover:bg-transparent"
-                    style={{ color: 'var(--fg-1)' }}
-                  >
-                    {googleAuth.connect.isPending ? 'Connecting…' : 'Google'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => outlookAuth.connect.mutate()}
-                    disabled={
-                      googleAuth.connect.isPending ||
-                      outlookAuth.connect.isPending
-                    }
-                    className="rounded px-2 py-0.5 transition-colors hover:bg-[color:var(--surface-hover)] disabled:opacity-50 disabled:hover:bg-transparent"
-                    style={{ color: 'var(--fg-1)' }}
-                  >
-                    {outlookAuth.connect.isPending ? 'Connecting…' : 'Outlook'}
-                  </button>
-                </>
-              )}
-              <button
-                type="button"
-                onClick={onDismissCalendarNudge}
-                aria-label="Dismiss"
-                title="Dismiss"
-                className="ml-auto rounded p-1 transition-colors hover:bg-[color:var(--surface-hover)]"
-                style={{ color: 'var(--fg-2)' }}
-              >
-                <X className="size-3" />
-              </button>
-            </div>
-          )}
+          {calendarNudge && <div className="mb-8">{calendarNudge}</div>}
 
           {upcomingToday.length > 0 && mode === 'home' && (
             <section className="mb-10">
