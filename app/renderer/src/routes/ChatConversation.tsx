@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import {
   ArrowLeft,
   ArrowUp,
@@ -141,11 +142,47 @@ export function ChatConversation({ sessionId }: ChatConversationProps) {
     setActiveStreamId(null);
   }, [activeStreamId, streaming, chat]);
 
-  // Keep the conversation scrolled to the bottom on new content.
+  // Virtualized message list. Long meetings produce thousands of messages
+  // (diarised replay + long prompts), and rendering them all on every
+  // streaming-text update or message append made input feel laggy on
+  // longer conversations. The virtualizer only mounts what's visible
+  // (+ overscan), so frame time stays O(visible) instead of O(messages).
+  //
+  // The streaming bubble is included as a synthetic last item when
+  // `isStreaming`, so the scrollToIndex auto-follow logic and measurement
+  // both work uniformly.
+  const chatItems = React.useMemo(() => {
+    const msgs = session?.messages ?? [];
+    if (!isStreaming) return msgs.map((m) => ({ ...m, live: false }));
+    return [
+      ...msgs.map((m) => ({ ...m, live: false })),
+      {
+        role: 'assistant' as const,
+        content: activeStream?.text || 'Thinking…',
+        ts: 0,
+        live: true,
+      },
+    ];
+  }, [session?.messages, isStreaming, activeStream?.text]);
+
+  const rowVirtualizer = useVirtualizer({
+    count: chatItems.length,
+    getScrollElement: () => scrollRef.current,
+    // Bubbles are typically 60-120 px tall; measureElement reads the real
+    // height on first paint so the estimate only matters for off-screen
+    // items that haven't been mounted yet.
+    estimateSize: () => 96,
+    overscan: 6,
+  });
+
+  // Keep the conversation pinned to the bottom on new content. Mirrors
+  // the previous `scrollTop = scrollHeight` behaviour but routed through
+  // the virtualizer so the target row is actually materialised before the
+  // scroll lands at the right offset.
   React.useEffect(() => {
-    const el = scrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [session?.messages.length, activeStream?.text]);
+    if (chatItems.length === 0) return;
+    rowVirtualizer.scrollToIndex(chatItems.length - 1, { align: 'end' });
+  }, [chatItems.length, activeStream?.text, rowVirtualizer]);
 
   const [submitError, setSubmitError] = React.useState<string | null>(null);
   const submit = async (raw: string) => {
@@ -196,8 +233,6 @@ export function ChatConversation({ sessionId }: ChatConversationProps) {
     e.preventDefault();
     void submit(input);
   };
-
-  const liveText = isStreaming ? activeStream?.text ?? '' : '';
 
   // Session might not exist yet on cold reload (allSessions is still
   // loading). Show a soft loading state rather than dumping the user
@@ -330,13 +365,43 @@ export function ChatConversation({ sessionId }: ChatConversationProps) {
           className="scrollbar-clean min-h-0 flex-1 overflow-y-auto"
           style={{ scrollbarGutter: 'stable' }}
         >
-          <div className="mx-auto flex w-full max-w-[760px] flex-col gap-5 px-10 pb-6 pt-2">
-            {(session?.messages ?? []).map((m, i) => (
-              <Bubble key={i} role={m.role} content={m.content} />
-            ))}
-            {isStreaming && (
-              <Bubble role="assistant" content={liveText || 'Thinking…'} live />
-            )}
+          <div className="mx-auto w-full max-w-[760px] px-10 pb-6 pt-2">
+            <div
+              style={{
+                height: rowVirtualizer.getTotalSize(),
+                position: 'relative',
+                width: '100%',
+              }}
+            >
+              {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+                const item = chatItems[virtualRow.index];
+                return (
+                  <div
+                    key={virtualRow.key}
+                    data-index={virtualRow.index}
+                    ref={rowVirtualizer.measureElement}
+                    style={{
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      transform: `translateY(${virtualRow.start}px)`,
+                    }}
+                    // pb-5 recreates the previous flex `gap-5` between
+                    // bubbles. Applied to every row including the last —
+                    // the wrapper's pb-6 provides additional breathing
+                    // room above the composer.
+                    className="pb-5"
+                  >
+                    <Bubble
+                      role={item.role}
+                      content={item.content}
+                      live={item.live}
+                    />
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </div>
 
