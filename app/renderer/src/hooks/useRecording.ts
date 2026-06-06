@@ -23,6 +23,20 @@ const EMPTY_REPROCESS_SET: ReadonlySet<string> = new Set<string>();
 export function useRecording() {
   const qc = useQueryClient();
 
+  // Track window visibility so polling can back off when the user isn't
+  // looking. Twelve+ components consume useRecording, so a 1-2s poll
+  // running while the window is hidden wakes the main process 30+ times
+  // per minute for nothing — wasteful on battery and noise in the IPC log.
+  const [isVisible, setIsVisible] = React.useState<boolean>(() =>
+    typeof document !== 'undefined' ? document.visibilityState === 'visible' : true,
+  );
+  React.useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const onChange = () => setIsVisible(document.visibilityState === 'visible');
+    document.addEventListener('visibilitychange', onChange);
+    return () => document.removeEventListener('visibilitychange', onChange);
+  }, []);
+
   const queue = useQuery({
     queryKey: queueKey,
     queryFn: async () => {
@@ -30,7 +44,14 @@ export function useRecording() {
       if (!res.success) throw new Error(res.error);
       return res;
     },
-    refetchInterval: (query) => (query.state.data?.hasRecording ? 1000 : 2000),
+    refetchInterval: (query) => {
+      // Hidden: 10s regardless of state. The user can't see a 1s update
+      // anyway; when they bring the window back, react-query's
+      // refetchOnWindowFocus + the visibilitychange listener flipping
+      // isVisible will both trigger a fresh fetch.
+      if (!isVisible) return 10_000;
+      return query.state.data?.hasRecording ? 1000 : 2000;
+    },
   });
 
   const status: RecordingStatus = React.useMemo(() => {
