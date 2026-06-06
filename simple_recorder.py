@@ -141,10 +141,13 @@ class SimpleRecorder:
         try:
             with open(self.state_file, 'r') as f:
                 return json.load(f)
-        except json.JSONDecodeError as e:
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
             # Corrupt state — most likely a non-atomic write was killed
             # mid-flight before save_state's tempfile + rename pattern was
-            # in place. Quarantine the file so a human can inspect it.
+            # in place. UnicodeDecodeError covers the case where binary
+            # garbage from a partial write fails UTF-8 decoding before
+            # json.load even sees it. Both are "content unparseable" —
+            # quarantine and return default.
             logger.error(f"State file corrupt at {self.state_file}: {e}")
             try:
                 quarantine = self.state_file.with_suffix(self.state_file.suffix + '.corrupt')

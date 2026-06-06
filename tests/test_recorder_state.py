@@ -124,6 +124,28 @@ class GetStateTests(unittest.TestCase):
             self.assertTrue(quarantine.exists())
             self.assertEqual(quarantine.read_text(), '{"recording": tru')
 
+    def test_invalid_utf8_is_quarantined(self):
+        """A partial write can leave the file with bytes that aren't valid
+        UTF-8 — open(..., 'r') raises UnicodeDecodeError before json.load
+        sees it. That's the same 'content unparseable' failure mode as
+        JSONDecodeError and must be quarantined, not propagated."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            recorder = self._recorder_in(tmp_dir)
+            # 0xFF / 0xFE are not valid leading UTF-8 bytes.
+            recorder.state_file.write_bytes(b'\xff\xfe\x00\x01')
+
+            result = recorder.get_state()
+
+            self.assertEqual(
+                result,
+                {"recording": False, "current_file": None, "session_name": None},
+            )
+            self.assertFalse(recorder.state_file.exists())
+            quarantine = recorder.state_file.with_suffix(
+                recorder.state_file.suffix + ".corrupt"
+            )
+            self.assertTrue(quarantine.exists())
+
     def test_unreadable_file_does_not_quarantine(self):
         """A permission error is transient (user could fix it). Don't
         destroy the file — just log and return default."""
