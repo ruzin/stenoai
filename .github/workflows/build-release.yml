@@ -103,6 +103,17 @@ jobs:
       working-directory: app
       run: npm ci
 
+    - name: Inject build-time secrets
+      # Writes app/.env (gitignored) from GitHub Actions secrets so
+      # electron-builder packages the credentials into app.asar at build
+      # time. Local dev fills its own .env from .env.example.
+      working-directory: app
+      run: |
+        cat > .env <<EOF
+        GOOGLE_OAUTH_CLIENT_ID=${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+        GOOGLE_OAUTH_CLIENT_SECRET=${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+        EOF
+
     - name: Import code signing certificate
       uses: apple-actions/import-codesign-certs@v2
       with:

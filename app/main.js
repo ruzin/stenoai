@@ -15,6 +15,22 @@ const { PostHog } = require('posthog-node');
 const { initMain } = require('electron-audio-loopback');
 const { autoUpdater } = require('electron-updater');
 
+// Load build-time secrets from app/.env. The file is gitignored; CI writes
+// it from GitHub Actions secrets before electron-builder runs (see
+// .github/workflows/build-release.yml). For local dev, copy `.env.example`
+// to `.env` and fill in your own Google OAuth credentials — calendar
+// integration is degraded without it but the rest of the app works.
+//
+// `silent: true` so a missing `.env` doesn't spam the console for
+// contributors who haven't set up calendar integration.
+require('dotenv').config({
+  path: path.join(__dirname, '.env'),
+  // dotenv v17+ accepts `quiet`; older `silent` is harmless. Use both
+  // so we don't have to pin to a specific minor.
+  quiet: true,
+  silent: true,
+});
+
 // E2E test-harness hooks. Set via env vars; production sees none of these.
 //   STENOAI_USER_DATA_DIR — per-test temp userData dir (must be set before app.whenReady)
 //   STENOAI_E2E=1         — skip tray, auto-updater, PostHog telemetry
@@ -356,9 +372,16 @@ let anonymousId = null;
 const POSTHOG_API_KEY = 'phc_U2cnTyIyKGNSVaK18FyBMltd8nmN7uHxhhm21fAHwqb';
 const POSTHOG_HOST = 'https://us.i.posthog.com';
 
-// Google Calendar OAuth2 configuration
-const GOOGLE_CLIENT_ID = '281073275073-20da4u5t9luk2366vd5ai0a2r55d5pf5.apps.googleusercontent.com';
-const GOOGLE_CLIENT_SECRET = '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';
+// Google Calendar OAuth2 configuration.
+//
+// Both values are injected at build time via dotenv (see top of file).
+// Empty strings in local dev with no `.env` mean Google auth is disabled
+// — the renderer surfaces this as "calendar not connected" rather than a
+// crash. Rotate the secret in Google Cloud Console + update the
+// `GOOGLE_OAUTH_CLIENT_*` GitHub Actions secrets to roll a new
+// credential without a code change.
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_OAUTH_CLIENT_ID || '';
+const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_OAUTH_CLIENT_SECRET || '';
 const GOOGLE_SCOPES = 'https://www.googleapis.com/auth/calendar.readonly';
 const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
