@@ -21,6 +21,11 @@ import {
   useChatSessions,
   type ChatMessage,
 } from '@/hooks/useChatSessions';
+
+// Stable empty-array sentinel so `messages` keeps the same reference when
+// session is null/loading — otherwise the useMemo around it would produce
+// a fresh `[]` on every render, invalidating downstream deps.
+const EMPTY_MESSAGES: ChatMessage[] = [];
 import { useGlobalStreaming } from '@/hooks/useStreamingQuery';
 import { useAiProvider } from '@/hooks/useAi';
 import { navigate } from '@/lib/router';
@@ -148,25 +153,21 @@ export function ChatConversation({ sessionId }: ChatConversationProps) {
   // longer conversations. The virtualizer only mounts what's visible
   // (+ overscan), so frame time stays O(visible) instead of O(messages).
   //
-  // The streaming bubble is included as a synthetic last item when
-  // `isStreaming`, so the scrollToIndex auto-follow logic and measurement
-  // both work uniformly.
-  const chatItems = React.useMemo(() => {
-    const msgs = session?.messages ?? [];
-    if (!isStreaming) return msgs.map((m) => ({ ...m, live: false }));
-    return [
-      ...msgs.map((m) => ({ ...m, live: false })),
-      {
-        role: 'assistant' as const,
-        content: activeStream?.text || 'Thinking…',
-        ts: 0,
-        live: true,
-      },
-    ];
-  }, [session?.messages, isStreaming, activeStream?.text]);
+  // The streaming bubble is rendered as a synthetic last item when
+  // `isStreaming`, derived at render time rather than cloned into a new
+  // array — cloning per token was O(messages) work on every streaming
+  // update, which defeated the virtualization.
+  const messages = React.useMemo(
+    () => session?.messages ?? EMPTY_MESSAGES,
+    [session?.messages],
+  );
+  const streamingContent = isStreaming
+    ? activeStream?.text || 'Thinking…'
+    : null;
+  const totalItems = messages.length + (streamingContent !== null ? 1 : 0);
 
   const rowVirtualizer = useVirtualizer({
-    count: chatItems.length,
+    count: totalItems,
     getScrollElement: () => scrollRef.current,
     // Bubbles are typically 60-120 px tall; measureElement reads the real
     // height on first paint so the estimate only matters for off-screen
@@ -180,9 +181,9 @@ export function ChatConversation({ sessionId }: ChatConversationProps) {
   // the virtualizer so the target row is actually materialised before the
   // scroll lands at the right offset.
   React.useEffect(() => {
-    if (chatItems.length === 0) return;
-    rowVirtualizer.scrollToIndex(chatItems.length - 1, { align: 'end' });
-  }, [chatItems.length, activeStream?.text, rowVirtualizer]);
+    if (totalItems === 0) return;
+    rowVirtualizer.scrollToIndex(totalItems - 1, { align: 'end' });
+  }, [totalItems, streamingContent, rowVirtualizer]);
 
   const [submitError, setSubmitError] = React.useState<string | null>(null);
   const submit = async (raw: string) => {
@@ -374,7 +375,17 @@ export function ChatConversation({ sessionId }: ChatConversationProps) {
               }}
             >
               {rowVirtualizer.getVirtualItems().map((virtualRow) => {
-                const item = chatItems[virtualRow.index];
+                const isStreamingBubble =
+                  virtualRow.index >= messages.length;
+                const msg = isStreamingBubble
+                  ? null
+                  : messages[virtualRow.index];
+                const role: 'user' | 'assistant' = isStreamingBubble
+                  ? 'assistant'
+                  : msg!.role;
+                const content = isStreamingBubble
+                  ? (streamingContent ?? '')
+                  : msg!.content;
                 return (
                   <div
                     key={virtualRow.key}
@@ -394,9 +405,9 @@ export function ChatConversation({ sessionId }: ChatConversationProps) {
                     className="pb-5"
                   >
                     <Bubble
-                      role={item.role}
-                      content={item.content}
-                      live={item.live}
+                      role={role}
+                      content={content}
+                      live={isStreamingBubble}
                     />
                   </div>
                 );
