@@ -16,6 +16,7 @@ import {
 } from '@/hooks/useCalendarEvents';
 import { useFolders } from '@/hooks/useFolders';
 import { ipc, type CalendarEvent, type Meeting } from '@/lib/ipc';
+import { pickInProgressEvent } from '@/lib/calendar';
 import { navigate } from '@/lib/router';
 
 interface HomeProps {
@@ -411,7 +412,50 @@ export function Home({ mode }: HomeProps) {
   const emptyStateCalendarNudge = renderCalendarNudge(false);
   const homeCalendarNudge = renderCalendarNudge(true);
 
-  const greeting = `Ready to capture beautiful notes`;
+  // Hero state inputs. All recompute on the existing 60s tick — no new
+  // intervals. `inProgressEvent` uses the same matching window as the
+  // backend's auto-detect (5 min early grace, 10 min late floor) so the
+  // hero copy and the "Meeting detected" notification agree.
+  const inProgressEvent = React.useMemo<CalendarEvent | null>(() => {
+    if (!calendar.data || calendar.data.needsAuth) return null;
+    return pickInProgressEvent(calendar.data.events, new Date(upcomingTickMs));
+  }, [calendar.data, upcomingTickMs]);
+
+  const nextSoonEvent = React.useMemo<CalendarEvent | null>(() => {
+    const nowMs = upcomingTickMs;
+    for (const e of upcomingToday) {
+      // Skip all-day blocks (date-only start/end, no 'T' separator) — they
+      // parse to midnight local and would show up as "Next meeting in 1
+      // min" / "ev at 1:00" right after midnight in tz's with positive UTC
+      // offset. Same guard as pickInProgressEvent and tomorrowPreview.
+      if (!e.start.includes('T') || !e.end.includes('T')) continue;
+      const start = new Date(e.start).getTime();
+      if (Number.isNaN(start)) continue;
+      if (start > nowMs) return e;
+    }
+    return null;
+  }, [upcomingToday, upcomingTickMs]);
+
+  const heroState = React.useMemo(
+    () => ({
+      status: recording.status,
+      sessionName: recording.sessionName,
+      inProgressEvent,
+      nextSoonEvent,
+      tomorrowPreview,
+      now: upcomingTickMs,
+    }),
+    [
+      recording.status,
+      recording.sessionName,
+      inProgressEvent,
+      nextSoonEvent,
+      tomorrowPreview,
+      upcomingTickMs,
+    ],
+  );
+  const greeting = heroHeadline(heroState);
+  const heroSub = heroSubtitle(heroState);
   const dateStr = new Date().toLocaleDateString(undefined, {
     weekday: 'long',
     month: 'long',
@@ -497,7 +541,7 @@ export function Home({ mode }: HomeProps) {
                 className="max-w-[52ch] text-sm leading-[1.55]"
                 style={{ color: 'var(--fg-2)' }}
               >
-                {`Start recording from the top-right, or from anywhere with ${shortcut('⌘⇧R', 'Ctrl+Shift+R')}.`}
+                {heroSub}
               </p>
             </div>
           )}
@@ -700,7 +744,6 @@ function SectionHead({ title, count, action }: SectionHeadProps) {
   );
 }
 
-
 interface AllDayInlineProps {
   events: CalendarEvent[];
   expanded: boolean;
@@ -733,6 +776,96 @@ function AllDayInline({ events, expanded, onToggle }: AllDayInlineProps) {
       )}
     </div>
   );
+}
+
+// Default subtitle — also used as the empty/idle fallback. Cached so it
+// renders the same string each call without rebuilding the shortcut.
+const RECORD_SHORTCUT = shortcut('⌘⇧R', 'Ctrl+Shift+R');
+const RECORDING_HINT = `Start recording from the top-right, or from anywhere with ${RECORD_SHORTCUT}.`;
+
+const HERO_TIME_FMT = new Intl.DateTimeFormat(undefined, {
+  hour: 'numeric',
+  minute: '2-digit',
+});
+
+interface HeroState {
+  status: 'idle' | 'recording' | 'paused' | 'processing';
+  sessionName: string | null;
+  inProgressEvent: CalendarEvent | null;
+  nextSoonEvent: CalendarEvent | null;
+  tomorrowPreview: CalendarEvent | null;
+  now: number;
+}
+
+// Headline. Recording state always wins over calendar state — when the
+// user is recording / paused / processing they want status, not a
+// schedule. Idle falls through to the calendar-driven copy.
+function heroHeadline(s: HeroState): string {
+  switch (s.status) {
+    case 'recording':
+      return 'Recording';
+    case 'paused':
+      return 'Recording paused';
+    case 'processing':
+      return 'Processing your note';
+  }
+  if (s.inProgressEvent) return 'In a meeting now';
+  if (s.nextSoonEvent) {
+    const startMs = new Date(s.nextSoonEvent.start).getTime();
+    if (!Number.isNaN(startMs)) {
+      const mins = Math.max(0, Math.round((startMs - s.now) / 60000));
+      if (mins < 60) return `Next meeting in ${mins} min${mins === 1 ? '' : 's'}`;
+      const hrs = Math.round(mins / 60);
+      return `First meeting in ${hrs} hr${hrs === 1 ? '' : 's'}`;
+    }
+  }
+  if (s.tomorrowPreview) return 'Clear day ahead';
+  return 'Ready to capture beautiful notes';
+}
+
+// Subtitle. Mirrors the headline cases. Keeps the recording shortcut hint
+// as the default fallback so the page always tells the user how to act.
+function heroSubtitle(s: HeroState): string {
+  if (s.status === 'recording') {
+    // Source of truth for "what we're capturing" is the active session
+    // name — the user may have started a recording titled after one
+    // event while a different calendar event is also concurrently in
+    // progress, and the subtitle should reflect what they actually hit
+    // record on. ⌘⇧R is a record-toggle per main.js's global shortcut
+    // so "to stop" is accurate when already recording.
+    const title =
+      s.sessionName?.trim() || s.inProgressEvent?.title?.trim() || 'In progress';
+    return `${title} · ${RECORD_SHORTCUT} to stop`;
+  }
+  if (s.status === 'paused') {
+    // The global ⌘⇧R toggle stops the recording rather than resuming —
+    // resume is a click-only action on the bottom bar. Don't claim a
+    // shortcut here.
+    return 'Recording paused. Tap resume on the bar below to continue.';
+  }
+  if (s.status === 'processing') {
+    return `We'll have your notes ready in a moment.`;
+  }
+  if (s.inProgressEvent) {
+    return `Press ${RECORD_SHORTCUT} to start recording — or tap a meeting card below.`;
+  }
+  if (s.nextSoonEvent) {
+    const startMs = new Date(s.nextSoonEvent.start).getTime();
+    const startMins = Math.round((startMs - s.now) / 60000);
+    if (!Number.isNaN(startMs) && startMins < 60) {
+      const at = HERO_TIME_FMT.format(new Date(startMs));
+      return `${s.nextSoonEvent.title} at ${at}.`;
+    }
+    return RECORDING_HINT;
+  }
+  if (s.tomorrowPreview) {
+    const startMs = new Date(s.tomorrowPreview.start).getTime();
+    if (!Number.isNaN(startMs)) {
+      const at = HERO_TIME_FMT.format(new Date(startMs));
+      return `Next up: ${s.tomorrowPreview.title} tomorrow at ${at}.`;
+    }
+  }
+  return RECORDING_HINT;
 }
 
 function firstFolderName(
