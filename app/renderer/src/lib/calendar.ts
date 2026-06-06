@@ -4,10 +4,16 @@ const EARLY_GRACE_MS = 5 * 60 * 1000;
 const LATE_FLOOR_MS = 10 * 60 * 1000;
 
 /**
- * Find the calendar event the user is most likely "in" right now. Mirrors
- * the backend's `pickCurrentCalendarEvent` in `app/main.js` so the hero
- * and the auto-detect-meeting notification agree on what counts as
- * "currently in a meeting":
+ * Find the calendar event the user is most likely "in" right now.
+ *
+ * INTENTIONAL DUPLICATION: this algorithm is mirrored byte-for-byte in
+ * `app/main.js` → `pickCurrentCalendarEvent`. The main process can't
+ * import renderer ESM modules and the renderer can't import from main,
+ * so the two surfaces (hero copy here + auto-detect-meeting
+ * notification there) keep their own copy. If you change the constants
+ * (EARLY_GRACE_MS, LATE_FLOOR_MS) or the matching/tie-break rules,
+ * update BOTH or the hero and the notification will disagree about
+ * what counts as "in a meeting now".
  *
  *   - opens 5 min before the scheduled start (early-join grace)
  *   - closes at the scheduled end, OR 10 min after start, whichever is later
