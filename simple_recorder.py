@@ -750,11 +750,16 @@ def start(session_name):
     def signal_handler(signum, frame):
         """Handle SIGTERM/SIGINT gracefully by stopping recording and processing"""
         nonlocal processing_started
-        
+        # Track real failures so we exit non-zero on the way out. Previously
+        # the handler always exited 0 even when transcription/summarization
+        # threw — Electron read that as success and the renderer would
+        # navigate to a non-existent meeting.
+        had_failure = False
+
         # Different handling for different signals
         signal_name = "SIGINT" if signum == 2 else f"SIGTERM" if signum == 15 else f"Signal {signum}"
         print(f"\n🛑 Received {signal_name} - stopping recording and processing...")
-        
+
         # Prevent double processing if multiple signals received
         if processing_started:
             print("⚠️ Processing already started - please wait for completion...")
@@ -762,28 +767,28 @@ def start(session_name):
                 print("🔄 Ignoring SIGTERM during transcription/summarization")
                 return
             sys.exit(0)
-            
+
         if recording_started and recorder:
             processing_started = True
             try:
                 final_path = recorder.stop_recording()
                 if final_path:
                     print(f"✅ Recording saved: {final_path}")
-                    
+
                     # Check file size
                     from pathlib import Path
                     file_size = Path(final_path).stat().st_size
                     print(f"📏 File size: {file_size / 1024:.1f} KB")
-                    
+
                     if file_size >= 1000:  # At least 1KB of audio data
                         print("🔄 Starting transcription and summarization pipeline...")
-                        
+
                         # Process recording with proper async handling
                         try:
                             import asyncio
                             loop = asyncio.new_event_loop()
                             asyncio.set_event_loop(loop)
-                            
+
                             _notes_text = recorder._load_user_notes(session_name, recorder.output_dir)
 
                             print("📝 Starting transcription...")
@@ -798,17 +803,22 @@ def start(session_name):
                             print(f"❌ Processing pipeline failed: {e}", flush=True)
                             import traceback
                             traceback.print_exc()
+                            had_failure = True
                     else:
+                        # Recording succeeded but was too short to process —
+                        # not a failure, just nothing to do.
                         print("⚠️ Recording too short - skipping processing")
                 else:
                     print("❌ No recording data to save")
+                    had_failure = True
             except Exception as e:
                 print(f"❌ Error during signal handling: {e}")
                 import traceback
                 traceback.print_exc()
+                had_failure = True
 
         print("🏁 Recording session ended")
-        sys.exit(0)
+        sys.exit(1 if had_failure else 0)
 
     # Register signal handlers for graceful shutdown
     signal.signal(signal.SIGTERM, signal_handler)

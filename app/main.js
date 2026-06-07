@@ -6338,7 +6338,11 @@ function startOutlookAuth() {
 
     server.listen(0, '127.0.0.1', () => {
       const port = server.address().port;
-      const redirectUri = `http://localhost:${port}`;
+      // Use the literal IP we listen on. `localhost` resolves via the host
+      // resolver, which a tampered /etc/hosts or local DNS could point
+      // elsewhere — a low-but-not-zero risk for OAuth callback hijack on
+      // shared dev machines. 127.0.0.1 bypasses name resolution entirely.
+      const redirectUri = `http://127.0.0.1:${port}`;
 
       const authParams = new URLSearchParams({
         client_id: OUTLOOK_CLIENT_ID,
@@ -6366,7 +6370,9 @@ function startOutlookAuth() {
 
 function exchangeOutlookCodeForTokens(code, codeVerifier, port) {
   return new Promise((resolve, reject) => {
-    const redirectUri = `http://localhost:${port}`;
+    // Must match the redirect_uri used in startOutlookAuth's auth request.
+    // See the comment there — bypass name resolution by using the IP literal.
+    const redirectUri = `http://127.0.0.1:${port}`;
     const postData = new URLSearchParams({
       code,
       client_id: OUTLOOK_CLIENT_ID,

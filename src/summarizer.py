@@ -983,11 +983,15 @@ TRANSCRIPT:
                 self.ollama_process.terminate()
                 self.ollama_process.wait(timeout=10)
                 logger.info("Ollama service process terminated")
-            except:
+            except (subprocess.TimeoutExpired, ProcessLookupError, OSError) as e:
+                # terminate didn't take (or the process is already gone) —
+                # escalate to SIGKILL. ProcessLookupError on the second
+                # try just means it died in the gap, which is fine.
+                logger.warning(f"Ollama terminate failed ({e}); escalating to kill")
                 try:
                     self.ollama_process.kill()
                     logger.info("Ollama service process killed")
-                except:
+                except (ProcessLookupError, OSError):
                     pass
             self.ollama_process = None
     
