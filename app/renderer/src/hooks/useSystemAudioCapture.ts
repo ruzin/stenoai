@@ -276,6 +276,16 @@ export function useSystemAudioCapture() {
             // Re-check each callback so a flip to whisper mid-recording
             // stops pushing (chunks would otherwise stack up in main).
             if (!liveTapEnabledRef.current) return;
+            // MediaRecorder.pause() halts the WebM file growth but the
+            // underlying MediaStream keeps flowing — without this guard
+            // we'd keep feeding the live consumer audio during a pause
+            // and the transcript would keep growing after the user
+            // explicitly told us to stop. Drop the chunk buffer too so
+            // the half-collected samples don't leak across the pause.
+            if (isPausedRef.current) {
+              tapBuffer.length = 0;
+              return;
+            }
             const input = ev.inputBuffer.getChannelData(0);
             for (let i = 0; i < input.length; i += DECIMATION) {
               tapBuffer.push(input[i]);
