@@ -60,6 +60,12 @@ export function pushRmsSample(sample: LiveRmsSample): void {
  * Decide who spoke during [startSec, endSec] from the energy ratio
  * between channels.
  *
+ *  - System below SPEECH_FLOOR: loopback is silent (noise floor only),
+ *    so there's no plausible Others speaker. Tag You regardless of
+ *    mic. Without this, mic-only recordings with system_audio_enabled
+ *    set to true (default) would occasionally mis-tag random segments
+ *    as Others because mic-quantisation noise nudged sysMean past
+ *    micMean during a silent dip.
  *  - Ratio >= 1.5 in either direction: confident attribution.
  *  - Ratio between (1/1.5, 1.5): both channels roughly equal energy.
  *    This is the bleed case (mic picks up speaker echo at similar
@@ -77,6 +83,12 @@ export function pushRmsSample(sample: LiveRmsSample): void {
  * is quiet.
  */
 const SPEAKER_RATIO_THRESHOLD = 1.5;
+// Empirical RMS floor below which "system audio" is just the loopback's
+// noise floor, not real audio. Conversational speech reaching the
+// loopback typically reads 0.01-0.05; this catches "silence-with-
+// quantisation-noise" at 0.001-0.003 and prevents it from triggering
+// an Others attribution against a quiet mic dip.
+const SPEECH_FLOOR = 0.005;
 
 /** Lower-bound binary search for the first index with `tSec >= target`.
  *  Buffer is monotonic by tSec (we push from setInterval, time only
@@ -116,8 +128,10 @@ export function decideSpeaker(startSec: number, endSec: number): LiveSpeaker {
   if (count === 0) return 'You';
   const micMean = micSum / count;
   const sysMean = sysSum / count;
-  if (sysMean === 0) return micMean === 0 ? 'You' : 'You';
-  if (micMean === 0) return 'Others';
+  // No real audio on the loopback — system_audio is enabled but nothing
+  // is actually playing. There's no plausible 'Others' speaker, so
+  // don't let mic-quantisation noise tag random segments as Others.
+  if (sysMean < SPEECH_FLOOR) return 'You';
   if (micMean >= sysMean * SPEAKER_RATIO_THRESHOLD) return 'You';
   if (sysMean >= micMean * SPEAKER_RATIO_THRESHOLD) return 'Others';
   return 'You';
