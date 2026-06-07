@@ -48,6 +48,29 @@ logger = logging.getLogger(__name__)
 # is typically <0.2. 0.6 leaves wide headroom on either side.
 BLEED_JACCARD_THRESHOLD = 0.6
 
+# Per-segment bleed correction. Whole-transcript Jaccard catches
+# catastrophic bleed but misses the case where ASR word-level differences
+# ("weight" vs "wait", "let me" vs "let") drop the aggregate similarity
+# into the 0.5-0.6 gap while individual adjacent segments still obviously
+# echo. For each system_segment we find the nearest mic_segment by start
+# time within ±PER_SEGMENT_BLEED_WINDOW_S and drop it if Jaccard exceeds
+# the per-segment threshold. Threshold is lower than the whole-transcript
+# one because per-segment text is shorter — random vocabulary overlap is
+# rarer in a single sentence than across a whole call.
+PER_SEGMENT_BLEED_JACCARD = 0.5
+PER_SEGMENT_BLEED_WINDOW_S = 3.0
+# Minimum-length gate. Short utterances ("Yes", "OK", "thanks", "好的")
+# trivially Jaccard-match across channels when both speakers genuinely
+# say the same brief thing — the dedup would then delete a real Others
+# reply rather than a bleed echo. We gate on character count instead of
+# token count because Python's ``\w+`` matches a whole CJK sentence as
+# one continuous token (no inter-word spaces), so a token-based gate
+# would silently disable bleed correction for Chinese / Japanese /
+# Thai etc. ~15 chars is "substantial sentence" in any script: ~3-4
+# English words, ~5-6 CJK ideographs. The whole-transcript backstop
+# still catches catastrophic bleed where every line is short.
+PER_SEGMENT_BLEED_MIN_CHARS = 15
+
 # RMS energy gate for "channel has speech". Intentionally low (-70 dB) so
 # headphones-mode mic recordings — captured at much lower amplitude than
 # speakers-mode — still pass. The model handles low-amplitude speech fine;
@@ -185,6 +208,67 @@ def _token_jaccard(a: str, b: str) -> float:
     return len(tokens_a & tokens_b) / len(tokens_a | tokens_b)
 
 
+def _drop_per_segment_bleed(mic_segments: list, system_segments: list) -> list:
+    """Drop system_segments that are clearly mic-bleed echoes.
+
+    For each system segment, find any mic segment whose start time is
+    within PER_SEGMENT_BLEED_WINDOW_S and compute Jaccard. If the best
+    match exceeds PER_SEGMENT_BLEED_JACCARD, the system segment is
+    treated as a bleed echo of the mic and dropped. Catches the
+    "Estimated, underpowered, and under the radar" → "Estimated,
+    underpowered, and under the radar" duplication that whole-transcript
+    Jaccard misses when 1-2 ASR word swaps per segment drag the aggregate
+    below BLEED_JACCARD_THRESHOLD.
+    """
+    if not mic_segments or not system_segments:
+        return system_segments
+    kept: list = []
+    dropped_count = 0
+    for sys_seg in system_segments:
+        sys_text = (sys_seg.get("text") or "").strip()
+        if not sys_text:
+            kept.append(sys_seg)
+            continue
+        # Length gate. A short system utterance against a likewise-short
+        # mic utterance ("Yes" vs "Yes") trivially matches and would be
+        # falsely dropped as bleed. Character-based so it works for
+        # CJK / Thai / scripts without inter-word spaces.
+        if len(sys_text) < PER_SEGMENT_BLEED_MIN_CHARS:
+            kept.append(sys_seg)
+            continue
+        sys_start = float(sys_seg.get("start") or 0.0)
+        best_jaccard = 0.0
+        for mic_seg in mic_segments:
+            mic_start = float(mic_seg.get("start") or 0.0)
+            if abs(sys_start - mic_start) > PER_SEGMENT_BLEED_WINDOW_S:
+                continue
+            mic_text = (mic_seg.get("text") or "").strip()
+            if not mic_text:
+                continue
+            # Same guard on the mic side — comparing a substantial system
+            # line against a brief mic "ok" ack would give Jaccard ≈ 0
+            # anyway, but skipping avoids the spurious work.
+            if len(mic_text) < PER_SEGMENT_BLEED_MIN_CHARS:
+                continue
+            jac = _token_jaccard(sys_text, mic_text)
+            if jac > best_jaccard:
+                best_jaccard = jac
+        if best_jaccard >= PER_SEGMENT_BLEED_JACCARD:
+            dropped_count += 1
+            logger.debug(
+                "Per-segment bleed: dropping system %r (Jaccard=%.2f)",
+                sys_text[:60], best_jaccard,
+            )
+        else:
+            kept.append(sys_seg)
+    if dropped_count:
+        logger.info(
+            "Per-segment bleed correction: dropped %d/%d system segments",
+            dropped_count, len(system_segments),
+        )
+    return kept
+
+
 # Try Parakeet first (preferred — same engine as live, arm64 Macs only).
 try:
     from src.parakeet import transcribe_file as _parakeet_transcribe_file
@@ -237,11 +321,28 @@ class WhisperTranscriber:
             )
         # Kept on the instance so existing callers / logs that read
         # ``model_size`` and ``backend`` don't change. Backend selection
-        # prefers Parakeet when available; falls back to whisper.cpp on
-        # Intel Macs where parakeet-mlx (which needs MLX) can't install.
+        # respects the user-selected engine from Settings → Transcribe
+        # (Config.get_transcription_engine). Without this, an arm64 user
+        # who picked Whisper would still get Parakeet on the post-stop
+        # pass — live and final would silently use different engines
+        # and the diarised transcript wouldn't match what they previewed
+        # live. Fallback order when the requested engine isn't installed:
+        #   * engine='whisper' but pywhispercpp missing → use Parakeet
+        #   * engine='parakeet' but parakeet-mlx missing (x64 Macs) →
+        #     fall back to whisper.cpp as before
         self.model_size = model_size
         self.model = None
-        if PARAKEET_AVAILABLE:
+
+        try:
+            from src.config import get_config
+            requested = get_config().get_transcription_engine()
+        except Exception:
+            requested = "parakeet"
+
+        if requested == "whisper" and WHISPER_CPP_AVAILABLE:
+            self.backend = "whisper.cpp"
+            self._load_whisper_cpp()
+        elif PARAKEET_AVAILABLE:
             self.backend = "parakeet-tdt-v3"
         else:
             self.backend = "whisper.cpp"
@@ -676,14 +777,21 @@ class WhisperTranscriber:
             else:
                 logger.info("System channel is silent, skipping")
 
-            # Speaker-bleed collapse. Without headphones, the mic captures
-            # both the user AND the system audio echoing through speakers,
-            # while the CoreAudio Tap captures the same system audio
-            # cleanly. Both channels end up containing nearly identical
-            # text and labelled bubbles would just repeat the same content
-            # twice (once green, once grey). When the two transcripts
-            # overlap above this Jaccard threshold, drop the system
-            # channel and present as mic-only.
+            # Speaker-bleed correction runs in two passes:
+            #
+            # 1. Per-segment: drop individual system segments that are
+            #    nearly identical to a mic segment at the same point in
+            #    time. Catches the localised case where most of the call
+            #    is fine but specific lines echo (or where ASR word-level
+            #    differences hide aggregate bleed behind the whole-
+            #    transcript threshold).
+            # 2. Whole-transcript: if what's LEFT of the system channel
+            #    still overlaps mic >= BLEED_JACCARD_THRESHOLD, the
+            #    remaining content is also bleed — collapse to mic-only.
+            #    The first pass usually handles things and this is a
+            #    backstop for catastrophic bleed.
+            if mic_segments and system_segments:
+                system_segments = _drop_per_segment_bleed(mic_segments, system_segments)
             if mic_segments and system_segments:
                 mic_text = ' '.join(s.get('text', '') for s in mic_segments)
                 sys_text = ' '.join(s.get('text', '') for s in system_segments)

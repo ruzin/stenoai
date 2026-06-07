@@ -1,6 +1,12 @@
 import * as React from 'react';
 import { ipc } from '@/lib/ipc';
+import {
+  LIVE_RMS_HZ,
+  pushRmsSample,
+  resetRmsBuffer,
+} from '@/lib/liveRmsBuffer';
 import { useRecording } from './useRecording';
+import { useTranscriptionEngine } from './useModels';
 import {
   useSystemAudioSetting,
   useSystemAudioSupport,
@@ -39,6 +45,18 @@ export function useSystemAudioCapture() {
   const { status, sessionName } = useRecording();
   const systemAudio = useSystemAudioSetting();
   const systemAudioSupport = useSystemAudioSupport();
+  const engineQuery = useTranscriptionEngine();
+  // Whisper recordings have no live transcript: the transcribe-stream
+  // sidecar isn't spawned by main.js, so any chunks we'd push would be
+  // silently dropped. Skip the tap setup entirely on whisper.
+  const liveTapEnabled = (engineQuery.data ?? 'parakeet') === 'parakeet';
+  // Read into a ref so the tap callback (closed over once at startCapture)
+  // can be a no-op if the engine flips mid-recording without rebuilding
+  // the AudioContext graph.
+  const liveTapEnabledRef = React.useRef(liveTapEnabled);
+  React.useEffect(() => {
+    liveTapEnabledRef.current = liveTapEnabled;
+  }, [liveTapEnabled]);
   // While the support query is still loading (data === undefined), assume
   // supported so a fast user who hits record before the IPC resolves still
   // gets system audio. The result-aware false case only fires after the
@@ -61,6 +79,12 @@ export function useSystemAudioCapture() {
   // setting and pause state are read via refs so the polling loop sees
   // current values without re-creating the interval.
   const silenceIntervalRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
+  // Higher-cadence interval that feeds the per-channel RMS buffer
+  // useLiveTranscript reads from to attribute each LIVE_SEG to You vs
+  // Others. Kept separate from the silence-auto-stop interval (1 Hz):
+  // the silence detector is decision-heavy and runs cheap; speaker
+  // attribution needs finer time resolution (~100 ms) than 1 s.
+  const rmsIntervalRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
   const silenceConfigRef = React.useRef<{ enabled: boolean; minutes: number }>({
     enabled: true,
     minutes: 15,
@@ -93,8 +117,20 @@ export function useSystemAudioCapture() {
       }
     };
 
+    const teardownRmsSampler = () => {
+      if (rmsIntervalRef.current !== null) {
+        clearInterval(rmsIntervalRef.current);
+        rmsIntervalRef.current = null;
+      }
+      // Don't reset the buffer on teardown — useLiveTranscript may still
+      // be processing the final LIVE_SEG events that arrived after
+      // recorder.stop(). Reset only happens at the START of the next
+      // recording.
+    };
+
     const teardownStreams = () => {
       teardownSilenceDetector();
+      teardownRmsSampler();
       micStreamRef.current?.getTracks().forEach((t) => t.stop());
       sysStreamRef.current?.getTracks().forEach((t) => t.stop());
       mixedStreamRef.current?.getTracks().forEach((t) => t.stop());
@@ -203,50 +239,61 @@ export function useSystemAudioCapture() {
 
         mixedStreamRef.current = dest.stream;
 
-        // 4a. Live transcription tap. Sums mic + system to a mono mix,
-        //     decimates 48 kHz → 16 kHz (exact 3:1 — speech energy lives
-        //     well below the 8 kHz Nyquist limit at 16 kHz, so plain
-        //     decimation is adequate without an anti-alias filter), and
-        //     pushes 4096-sample chunks (≈256 ms) to main's transcribe-
+        // 4a. Live transcription tap — Parakeet only. Sums mic + system
+        //     to a mono mix, decimates 48 kHz → 16 kHz (exact 3:1 — speech
+        //     energy lives well below the 8 kHz Nyquist limit at 16 kHz,
+        //     so plain decimation is adequate without an anti-alias filter),
+        //     and pushes 4096-sample chunks (≈256 ms) to main's transcribe-
         //     stream sidecar via IPC. Main pipes those bytes into the
         //     Python subprocess's stdin; the same Silero VAD + Parakeet
         //     pipeline that drives the mic-only path emits LIVE_SEG events
         //     the renderer's useLiveTranscript hook subscribes to.
         //
+        //     Whisper recordings skip this section entirely — main.js
+        //     doesn't spawn the sidecar so any chunks we'd push would be
+        //     silently dropped. The decision is read off liveTapEnabledRef
+        //     so a mid-session engine flip is honoured without rebuilding
+        //     the AudioContext graph.
+        //
         //     ScriptProcessorNode is deprecated but works without a
         //     separate worklet file. The output is silenced (gain 0) and
         //     connected to ctx.destination only because the node needs a
         //     downstream consumer to fire — no audio plays.
-        const liveMono = ctx.createGain();
-        liveMono.channelCount = 1;
-        liveMono.channelCountMode = 'explicit';
-        liveMono.channelInterpretation = 'speakers';
-        micGain.connect(liveMono);
-        sysGain.connect(liveMono);
+        if (liveTapEnabledRef.current) {
+          const liveMono = ctx.createGain();
+          liveMono.channelCount = 1;
+          liveMono.channelCountMode = 'explicit';
+          liveMono.channelInterpretation = 'speakers';
+          micGain.connect(liveMono);
+          sysGain.connect(liveMono);
 
-        const TAP_BUFFER = 4096;       // 48 kHz frames per callback (~85 ms)
-        const DECIMATION = 3;           // 48 kHz / 16 kHz
-        const SEND_SAMPLES = 4096;      // 16 kHz samples per IPC push (~256 ms)
-        const tapNode = ctx.createScriptProcessor(TAP_BUFFER, 1, 1);
-        const tapBuffer: number[] = [];
-        tapNode.onaudioprocess = (ev) => {
-          const input = ev.inputBuffer.getChannelData(0);
-          for (let i = 0; i < input.length; i += DECIMATION) {
-            tapBuffer.push(input[i]);
-          }
-          while (tapBuffer.length >= SEND_SAMPLES) {
-            const slice = tapBuffer.splice(0, SEND_SAMPLES);
-            const f32 = new Float32Array(slice);
-            // Send the underlying ArrayBuffer — Electron's structured-clone
-            // path encodes typed arrays as Buffers on the main side.
-            ipc().liveTranscript.pushChunk(f32.buffer);
-          }
-        };
-        const tapSilencer = ctx.createGain();
-        tapSilencer.gain.value = 0;
-        liveMono.connect(tapNode);
-        tapNode.connect(tapSilencer);
-        tapSilencer.connect(ctx.destination);
+          const TAP_BUFFER = 4096;       // 48 kHz frames per callback (~85 ms)
+          const DECIMATION = 3;           // 48 kHz / 16 kHz
+          const SEND_SAMPLES = 4096;      // 16 kHz samples per IPC push (~256 ms)
+          const tapNode = ctx.createScriptProcessor(TAP_BUFFER, 1, 1);
+          const tapBuffer: number[] = [];
+          tapNode.onaudioprocess = (ev) => {
+            // Re-check each callback so a flip to whisper mid-recording
+            // stops pushing (chunks would otherwise stack up in main).
+            if (!liveTapEnabledRef.current) return;
+            const input = ev.inputBuffer.getChannelData(0);
+            for (let i = 0; i < input.length; i += DECIMATION) {
+              tapBuffer.push(input[i]);
+            }
+            while (tapBuffer.length >= SEND_SAMPLES) {
+              const slice = tapBuffer.splice(0, SEND_SAMPLES);
+              const f32 = new Float32Array(slice);
+              // Send the underlying ArrayBuffer — Electron's structured-
+              // clone path encodes typed arrays as Buffers on the main side.
+              ipc().liveTranscript.pushChunk(f32.buffer);
+            }
+          };
+          const tapSilencer = ctx.createGain();
+          tapSilencer.gain.value = 0;
+          liveMono.connect(tapNode);
+          tapNode.connect(tapSilencer);
+          tapSilencer.connect(ctx.destination);
+        }
 
         // 4. Record the mix.
         const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
@@ -371,6 +418,27 @@ export function useSystemAudioCapture() {
           })();
         }, SILENCE_SAMPLE_INTERVAL_MS);
 
+        // 5b. Per-channel RMS sampler — feeds liveRmsBuffer so
+        //     useLiveTranscript can attribute each LIVE_SEG to You vs
+        //     Others. Only meaningful when the live tap is engaged
+        //     (Parakeet engine): no live segments → no consumers of
+        //     this data. Reset the buffer here so it starts at t=0 for
+        //     this recording.
+        if (liveTapEnabledRef.current) {
+          resetRmsBuffer();
+          const recordingStartMs = Date.now();
+          rmsIntervalRef.current = setInterval(() => {
+            if (!activeRef.current || isPausedRef.current) return;
+            const micRms = computeRms(micAnalyser, micBuf);
+            const sysRms = computeRms(sysAnalyser, sysBuf);
+            pushRmsSample({
+              tSec: (Date.now() - recordingStartMs) / 1000,
+              micRms,
+              sysRms,
+            });
+          }, 1000 / LIVE_RMS_HZ);
+        }
+
         // 6. Confirm to main that the renderer-driven recording is live.
         //    Idempotent — main.js already flipped systemAudioRecordingActive
         //    when start-recording-ui ran, but this re-affirms it.
@@ -467,6 +535,20 @@ export function useSystemAudioCapture() {
   React.useEffect(() => {
     const bridge = ipc();
     return () => {
+      // Clear any live intervals first — the per-recording teardown helpers
+      // live in the other useEffect's scope so they aren't reachable here,
+      // and without explicit clears the silence-auto-stop poll and the
+      // per-channel RMS sampler would survive across unmount/remount
+      // cycles (visible in dev hot-reload, and a slow leak in any setup
+      // that conditionally mounts the app shell).
+      if (silenceIntervalRef.current !== null) {
+        clearInterval(silenceIntervalRef.current);
+        silenceIntervalRef.current = null;
+      }
+      if (rmsIntervalRef.current !== null) {
+        clearInterval(rmsIntervalRef.current);
+        rmsIntervalRef.current = null;
+      }
       const recorder = recorderRef.current;
       if (recorder && recorder.state !== 'inactive') {
         try { recorder.stop(); } catch { /* already stopping */ }

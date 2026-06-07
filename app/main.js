@@ -2109,6 +2109,20 @@ function spawnLiveTranscribe(sessionName) {
       });
     }
   });
+
+  // stdin emits 'error' asynchronously when a write completes against a
+  // closed pipe (the sync try/catch around stdin.write only catches
+  // immediate errors). Without a listener, EPIPE bubbles to uncaught and
+  // crashes the main process. Race window: chunks queued in the IPC
+  // pipeline land here after the sidecar exited (stop, crash, kill).
+  liveTranscribeProcess.stdin.on('error', (err) => {
+    if (err && err.code === 'EPIPE') {
+      // Expected when Python exited mid-write. The exit handler will
+      // null the ref so subsequent chunks short-circuit at the guard.
+      return;
+    }
+    sendDebugLog(`Live transcribe stdin error: ${err.message}`);
+  });
 }
 
 // Shared LIVE_* line handler used by the transcribe-stream stdout parser.
@@ -2194,6 +2208,24 @@ function loadSystemAudioEnabled() {
     return cfg.system_audio_enabled !== false;
   } catch (_) {
     return false;
+  }
+}
+
+// Sync read of the active ASR engine. Mirrors loadSystemAudioEnabled —
+// reading the JSON directly so we don't spawn a Python subprocess on
+// every recording start just to ask. Default 'parakeet' matches the
+// Python migration (fresh installs default to Parakeet); existing users
+// will have had transcription_engine written on their first launch by
+// Config._migrate_transcription_engine.
+function loadTranscriptionEngine() {
+  try {
+    const cfgPath = path.join(os.homedir(), 'Library', 'Application Support', 'stenoai', 'config.json');
+    if (!fs.existsSync(cfgPath)) return 'parakeet';
+    const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf-8'));
+    const engine = cfg.transcription_engine;
+    return engine === 'whisper' ? 'whisper' : 'parakeet';
+  } catch (_) {
+    return 'parakeet';
   }
 }
 
@@ -2507,6 +2539,12 @@ ipcMain.handle('start-recording-ui', async (_, sessionName) => {
     }
 
     const actualSessionName = sessionName || 'Note';
+    // Whisper recordings use the post-stop pipeline (no live drawer, no
+    // sidecar). Parakeet recordings spawn the VAD-gated live consumer
+    // so the renderer can show real-time text. Cached read — avoids a
+    // Python subprocess on every recording start.
+    const engine = loadTranscriptionEngine();
+    const liveEnabled = engine === 'parakeet';
 
     // Renderer-driven dual-stream path: when system audio is enabled the
     // renderer (useSystemAudioCapture) captures mic + system loopback and
@@ -2533,14 +2571,18 @@ ipcMain.handle('start-recording-ui', async (_, sessionName) => {
         ready: false,
         error: null,
       };
-      // Spawn the Parakeet+Silero transcribe-stream subprocess. The
-      // renderer will pipe audio chunks into it via `live-transcribe-chunk`
-      // and the stdout protocol matches the in-process `record --live`
-      // consumer so the renderer's useLiveTranscript hook works unchanged.
-      try {
-        spawnLiveTranscribe(actualSessionName);
-      } catch (e) {
-        sendDebugLog(`Failed to spawn live transcribe sidecar: ${e.message}`);
+      // Spawn the Parakeet+Silero transcribe-stream subprocess. Whisper
+      // recordings skip this entirely — the renderer's useSystemAudioCapture
+      // gates its IPC writes on the same engine, so no chunks are produced
+      // when the sidecar isn't running.
+      if (liveEnabled) {
+        try {
+          spawnLiveTranscribe(actualSessionName);
+        } catch (e) {
+          sendDebugLog(`Failed to spawn live transcribe sidecar: ${e.message}`);
+        }
+      } else {
+        sendDebugLog(`Live transcription off — engine=${engine}`);
       }
       updateTrayIcon(true);
       trackEvent('recording_started', { recording_mode: 'system_audio' });
@@ -2553,8 +2595,8 @@ ipcMain.handle('start-recording-ui', async (_, sessionName) => {
 
     // Legacy mic-only path: spawn Python `record` subprocess.
     console.log('Starting long recording process...');
-    sendDebugLog(`Starting recording process: ${actualSessionName}`);
-    sendDebugLog('$ stenoai record 7200');
+    sendDebugLog(`Starting recording process: ${actualSessionName} (engine=${engine})`);
+    sendDebugLog('$ stenoai record 7200' + (liveEnabled ? ' --live' : ''));
 
     // Start background recording with 2-hour limit
     // Pass AI env (cloud key and/or org-adapter url+token) so the
@@ -2562,10 +2604,12 @@ ipcMain.handle('start-recording-ui', async (_, sessionName) => {
     const recordEnv = getAiEnv();
 
     // --live engages the Parakeet streaming consumer thread inside the
-    // record subprocess. The subprocess loads the model lazily, so this
-    // doesn't delay recording start — the user sees "Recording" instantly
-    // and LIVE_READY arrives a moment later once MLX has weights in memory.
-    currentRecordingProcess = spawn(getBackendPath(), ['record', '7200', actualSessionName, '--live'], {
+    // record subprocess. Whisper recordings record without --live so the
+    // subprocess captures audio only — the post-stop pipeline transcribes
+    // the WAV via WhisperTranscriber.
+    const recordArgs = ['record', '7200', actualSessionName];
+    if (liveEnabled) recordArgs.push('--live');
+    currentRecordingProcess = spawn(getBackendPath(), recordArgs, {
       cwd: getBackendCwd(),
       env: Object.keys(recordEnv).length > 0 ? { ...require('process').env, ...recordEnv } : undefined
     });
@@ -3879,6 +3923,66 @@ ipcMain.handle('setup-ollama-and-model', async () => {
   }
 });
 
+ipcMain.handle('setup-parakeet', async () => {
+  try {
+    // Download Parakeet TDT v3 (~572 MB) via the bundled backend. Used by
+    // the Setup wizard's step 2 for fresh installs. Emits coarse stage
+    // lines (PARAKEET_PULL_STAGE:downloading / :loading) rather than
+    // byte-level progress — see src/parakeet_models.py for why.
+    const backendPath = getBackendPath();
+    sendDebugLog('Downloading Parakeet TDT v3 (~572 MB)...');
+    sendDebugLog(`$ ${backendPath} download-parakeet-model`);
+
+    return new Promise((resolve) => {
+      const proc = spawn(backendPath, ['download-parakeet-model'], { stdio: 'pipe' });
+      let lastStdoutLine = '';
+
+      proc.stdout.on('data', (data) => {
+        const text = data.toString();
+        for (const line of text.split('\n')) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+          sendDebugLog(trimmed);
+          if (trimmed.startsWith('PARAKEET_PULL_STAGE:')) {
+            const stage = trimmed.slice('PARAKEET_PULL_STAGE:'.length);
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('parakeet-pull-progress', { stage });
+            }
+          } else {
+            lastStdoutLine = trimmed;
+          }
+        }
+      });
+
+      proc.stderr.on('data', (data) => {
+        const text = data.toString().trim();
+        if (text) sendDebugLog('STDERR: ' + text);
+      });
+
+      proc.on('close', (code) => {
+        let parsed = null;
+        try { parsed = JSON.parse(lastStdoutLine); } catch (_) { /* not JSON */ }
+        const ok = code === 0 && (!parsed || parsed.success !== false);
+        if (ok) {
+          sendDebugLog('Parakeet model ready');
+          resolve({ success: true, message: 'Parakeet model ready' });
+        } else {
+          const err = (parsed && parsed.error) || `Parakeet download exited with code ${code}`;
+          sendDebugLog(err);
+          resolve({ success: false, error: err });
+        }
+      });
+
+      proc.on('error', (error) => {
+        sendDebugLog(`Process error: ${error.message}`);
+        resolve({ success: false, error: error.message });
+      });
+    });
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
 ipcMain.handle('setup-whisper', async () => {
   try {
     // Download whisper model using the bundled backend
@@ -4333,6 +4437,38 @@ ipcMain.handle('set-model', async (event, modelName) => {
 
 
 
+ipcMain.handle('get-transcription-engine', async () => {
+  try {
+    const result = await runPythonScript('simple_recorder.py', ['get-transcription-engine'], true);
+    const jsonData = JSON.parse(result.trim());
+    return { success: true, ...jsonData };
+  } catch (e) { return { success: false, error: e.message }; }
+});
+
+ipcMain.handle('set-transcription-engine', async (event, engine) => {
+  try {
+    const result = await runPythonScript('simple_recorder.py', ['set-transcription-engine', engine]);
+    const jsonData = JSON.parse(result.trim());
+    return { success: true, ...jsonData };
+  } catch (e) { return { success: false, error: e.message }; }
+});
+
+ipcMain.handle('list-parakeet-models', async () => {
+  try {
+    const result = await runPythonScript('simple_recorder.py', ['list-parakeet-models'], true);
+    const jsonData = JSON.parse(result.trim());
+    return { success: true, ...jsonData };
+  } catch (e) { return { success: false, error: e.message }; }
+});
+
+ipcMain.handle('parakeet-status', async () => {
+  try {
+    const result = await runPythonScript('simple_recorder.py', ['parakeet-status'], true);
+    const jsonData = JSON.parse(result.trim());
+    return { success: true, ...jsonData };
+  } catch (e) { return { success: false, error: e.message }; }
+});
+
 ipcMain.handle('get-whisper-model', async () => {
   try {
     const result = await runPythonScript('simple_recorder.py', ['get-whisper-model'], true);
@@ -4454,6 +4590,100 @@ ipcMain.handle('pull-whisper-model', async (event, modelName) => {
         finishOnce(
           { success: false, error: error.message },
           { model: modelName, success: false, error: error.message },
+        );
+      });
+    });
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('pull-parakeet-model', async (event, modelId) => {
+  // Mirrors pull-whisper-model: settle-gate + SIGTERM-then-SIGKILL escalation
+  // so a stalled HF download can never leave the renderer spinner hanging.
+  // Progress is coarse — we relay PARAKEET_PULL_STAGE:<stage> lines from the
+  // Python child rather than byte counts. See src/parakeet_models.py for why.
+  try {
+    sendDebugLog(`Pulling Parakeet model: ${modelId || '<default>'}`);
+    return new Promise((resolve) => {
+      const args = ['download-parakeet-model'];
+      if (modelId) args.push(modelId);
+      const proc = spawn(getBackendPath(), args, { cwd: getBackendCwd() });
+      let lastStdoutLine = '';
+      let timedOut = false;
+      let settled = false;
+      let sigkillTimer = null;
+      let forceSettleTimer = null;
+      const finishOnce = (result, completeEvent) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(procTimeout);
+        if (sigkillTimer) clearTimeout(sigkillTimer);
+        if (forceSettleTimer) clearTimeout(forceSettleTimer);
+        if (mainWindow && !mainWindow.isDestroyed() && completeEvent) {
+          mainWindow.webContents.send('parakeet-pull-complete', completeEvent);
+        }
+        resolve(result);
+      };
+      const procTimeout = setTimeout(() => {
+        timedOut = true;
+        sendDebugLog('pull-parakeet-model timed out after 30 minutes, killing');
+        try { proc.kill('SIGTERM'); } catch (_) { /* already exited */ }
+        sigkillTimer = setTimeout(() => {
+          sendDebugLog('SIGTERM unresponsive, escalating to SIGKILL');
+          try { proc.kill('SIGKILL'); } catch (_) { /* already exited */ }
+        }, 5000);
+        forceSettleTimer = setTimeout(() => {
+          sendDebugLog('Force-settling pull-parakeet-model Promise after kill grace');
+          finishOnce(
+            { success: false, error: 'Download timed out after 30 minutes' },
+            { model: modelId, success: false, error: 'Download timed out after 30 minutes' },
+          );
+        }, 15000);
+      }, 30 * 60 * 1000);
+      proc.stdout.on('data', (data) => {
+        const text = data.toString();
+        for (const line of text.split('\n')) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+          sendDebugLog(trimmed);
+          if (trimmed.startsWith('PARAKEET_PULL_STAGE:')) {
+            const stage = trimmed.slice('PARAKEET_PULL_STAGE:'.length);
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('parakeet-pull-progress', { model: modelId, stage });
+            }
+          } else {
+            lastStdoutLine = trimmed;
+          }
+        }
+      });
+      proc.stderr.on('data', (data) => {
+        const text = data.toString().trim();
+        if (text) sendDebugLog(`STDERR: ${text}`);
+      });
+      proc.on('close', (code) => {
+        let pullResult = null;
+        try { pullResult = JSON.parse(lastStdoutLine); } catch (_) { /* not JSON */ }
+        const succeeded = !timedOut && code === 0 && (!pullResult || pullResult.success !== false);
+        if (succeeded) {
+          finishOnce(
+            { success: true, model: modelId },
+            { model: modelId, success: true },
+          );
+        } else {
+          const errorMsg = timedOut
+            ? 'Download timed out after 30 minutes'
+            : (pullResult && pullResult.error) || `Process exited with code ${code}`;
+          finishOnce(
+            { success: false, error: errorMsg },
+            { model: modelId, success: false, error: errorMsg },
+          );
+        }
+      });
+      proc.on('error', (error) => {
+        finishOnce(
+          { success: false, error: error.message },
+          { model: modelId, success: false, error: error.message },
         );
       });
     });

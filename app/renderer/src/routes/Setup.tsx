@@ -31,7 +31,7 @@ import { cn } from '@/lib/utils';
 type StepStatus = 'waiting' | 'running' | 'done' | 'failed';
 
 interface Step {
-  id: 'microphone' | 'whisper' | 'ollama';
+  id: 'microphone' | 'transcription' | 'ollama';
   title: string;
   description: string;
   icon: React.ComponentType<{ className?: string }>;
@@ -89,12 +89,12 @@ export function Setup() {
   const navigate = useNavigate();
   const [statuses, setStatuses] = React.useState<Record<Step['id'], StepStatus>>({
     microphone: 'waiting',
-    whisper: 'waiting',
+    transcription: 'waiting',
     ollama: 'waiting',
   });
   const [details, setDetails] = React.useState<Record<Step['id'], string | undefined>>({
     microphone: undefined,
-    whisper: undefined,
+    transcription: undefined,
     ollama: undefined,
   });
   const [running, setRunning] = React.useState(false);
@@ -114,7 +114,11 @@ export function Setup() {
 
   const checkMic = useCheckMicPermission();
   const requestMic = useRequestMicPermission();
-  const whisperStep = useSetupStep('whisper');
+  // Step 2 installs Parakeet TDT v3 (~572 MB) by default — the active engine
+  // for fresh installs. Existing Whisper users get skipped past this step in
+  // runSetup() once we see their model is already on disk; see the
+  // parakeet-status + list-whisper-models precheck below.
+  const parakeetStep = useSetupStep('parakeet');
   const ollamaStep = useSetupStep('ollamaAndModel');
 
   // Telemetry choice surfaced here so users opt in/out during onboarding
@@ -194,10 +198,29 @@ export function Setup() {
         }
       }
 
-      if (snapshot.whisper !== 'done') {
-        setStatus('whisper', 'running', 'Installing transcription engine...');
-        await whisperStep.mutateAsync();
-        setStatus('whisper', 'done', 'Transcription engine ready');
+      if (snapshot.transcription !== 'done') {
+        setStatus('transcription', 'running', 'Checking transcription model...');
+        // Skip the install if any ASR engine is already on disk — covers
+        // existing Whisper users running setup again and Parakeet users
+        // rerunning to fix a different step.
+        const [parakeetStatus, whisperList] = await Promise.all([
+          ipc().parakeetModels.status(),
+          ipc().whisperModels.list(),
+        ]);
+        const parakeetInstalled =
+          parakeetStatus.success && parakeetStatus.installed === true;
+        const anyWhisperInstalled =
+          whisperList.success &&
+          Object.values(whisperList.supported_models ?? {}).some(
+            (m) => (m as { installed?: boolean }).installed === true,
+          );
+        if (parakeetInstalled || anyWhisperInstalled) {
+          setStatus('transcription', 'done', 'Transcription model ready');
+        } else {
+          setStatus('transcription', 'running', 'Downloading Parakeet TDT v3 (~572 MB)...');
+          await parakeetStep.mutateAsync();
+          setStatus('transcription', 'done', 'Transcription model ready');
+        }
       }
 
       // Always re-run the summarization step on retry (the choice or key may
@@ -250,12 +273,12 @@ export function Setup() {
       detail: details.microphone,
     },
     {
-      id: 'whisper',
-      title: 'Transcription Engine',
+      id: 'transcription',
+      title: 'Transcription Model',
       description: 'Converts speech to text locally',
       icon: MessageSquare,
-      status: statuses.whisper,
-      detail: details.whisper,
+      status: statuses.transcription,
+      detail: details.transcription,
     },
     {
       id: 'ollama',

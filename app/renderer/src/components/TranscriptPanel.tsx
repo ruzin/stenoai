@@ -113,22 +113,22 @@ function TranscriptBody({ text, isDiarised }: { text: string; isDiarised: boolea
 }
 
 function TranscriptRow({ segment, highlight }: { segment: Segment; highlight: string }) {
-  // Non-diarised (mono / mic-only) — render as a single full-width line
-  // without bubbles. The chat metaphor only makes sense when there are
-  // actual sides to alternate between.
-  if (!segment.speaker) {
-    return (
-      <p className="px-2 py-1 text-sm leading-[1.65] text-foreground/90">
-        {renderHighlighted(segment.text, highlight)}
-      </p>
-    );
-  }
-
-  // Diarised — Granola-style chat bubbles. Position (right vs left) and
-  // tint do the speaker-attribution work; explicit "You" / "Others" pill
-  // labels are redundant once the visual cue is there. Max-width keeps
-  // long monologues readable rather than spanning the whole panel.
-  const isYou = segment.speaker === 'You';
+  // Granola-style chat bubbles for every line, including non-diarised
+  // (mono / mic-only / bleed-collapsed) recordings. Position (right vs
+  // left) and tint do the speaker-attribution work; explicit "You" /
+  // "Others" pill labels are redundant once the visual cue is there.
+  // Max-width keeps long monologues readable rather than spanning the
+  // whole panel.
+  //
+  // Default to "You" when we have no speaker marker: this covers mono-mic
+  // recordings (no stereo source) and bleed-collapsed stereo recordings
+  // where transcriber.py decided the system channel was just mic echo.
+  // In both cases the recording mechanically belongs to the user and
+  // showing their content as un-bubbled plain text (or worse, on the
+  // "Others" side) reads as wrong. Granola takes the same charitable
+  // default — when in doubt, attribute to the mic owner. Explicit
+  // `Others` markers still render as grey/left.
+  const isYou = segment.speaker !== 'Others';
   return (
     <div className={cn('flex px-1 py-0.5', isYou ? 'justify-end' : 'justify-start')}>
       <div

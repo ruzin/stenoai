@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { ipc, type LiveSegment } from '@/lib/ipc';
+import { decideSpeaker } from '@/lib/liveRmsBuffer';
 
 export type LiveTranscriptStatus =
   | 'idle'
@@ -64,23 +65,34 @@ export function useLiveTranscript(sessionName: string | null): UseLiveTranscript
     const offChunk = ipc().on.liveTranscriptChunk((ev) => {
       if (ev.sessionName !== sessionName) return;
       receivedEventRef.current = true;
+      // Attribute the speaker from the per-channel RMS buffer the
+      // useSystemAudioCapture hook populates. Decided here (not in
+      // useSystemAudioCapture, not in main.js) because the decision
+      // depends on the segment's start/end which only exist on the
+      // LIVE_SEG event. Mic-only recordings: no system channel, no
+      // samples in the buffer → decideSpeaker returns 'You' which
+      // matches the TranscriptPanel charitable default.
+      const segment: LiveSegment = {
+        ...ev.segment,
+        speaker: decideSpeaker(ev.segment.start, ev.segment.end),
+      };
       setSegments((prev) => {
-        if (ev.segment.isFinal) {
+        if (segment.isFinal) {
           // Append-only on final. If the previous tail was a partial, it's
           // promoted (replaced by the final) — Parakeet's contract is that
           // a new sentence supersedes the previous tail.
           const tail = prev[prev.length - 1];
           if (tail && !tail.isFinal) {
-            return [...prev.slice(0, -1), ev.segment];
+            return [...prev.slice(0, -1), segment];
           }
-          return [...prev, ev.segment];
+          return [...prev, segment];
         }
         // Partial: overwrite the trailing partial, otherwise append.
         const tail = prev[prev.length - 1];
         if (tail && !tail.isFinal) {
-          return [...prev.slice(0, -1), ev.segment];
+          return [...prev.slice(0, -1), segment];
         }
-        return [...prev, ev.segment];
+        return [...prev, segment];
       });
     });
 
@@ -99,7 +111,15 @@ export function useLiveTranscript(sessionName: string | null): UseLiveTranscript
         if (cancelled || !res.success) return;
         if (res.sessionName !== sessionName) return;
         if (receivedEventRef.current) return;
-        setSegments(res.segments);
+        // Attribute each backfilled segment from the same RMS buffer. The
+        // RMS samples for these segments were captured at the time the
+        // chunks streamed through, so decideSpeaker is a meaningful lookup
+        // even though the segments were stored before this hook mounted.
+        const attributed: LiveSegment[] = res.segments.map((seg) => ({
+          ...seg,
+          speaker: decideSpeaker(seg.start, seg.end),
+        }));
+        setSegments(attributed);
         setReady(res.ready);
         if (res.error) {
           setError({ stage: res.error.stage, message: res.error.message ?? res.error.error });

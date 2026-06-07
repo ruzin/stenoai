@@ -77,10 +77,13 @@ import {
 import {
   useCurrentModel,
   useModels,
+  useParakeetModels,
   usePullModel,
+  usePullParakeetModel,
   usePullWhisperModel,
+  useSetActiveTranscription,
   useSetCurrentModel,
-  useSetWhisperModel,
+  useTranscriptionEngine,
   useWhisperModels,
 } from '@/hooks/useModels';
 import {
@@ -107,7 +110,16 @@ const COMPACT_TRIGGER =
   'h-[30px] min-w-[150px] rounded-[6px] bg-[color:var(--surface-raised)] px-2.5 py-0 text-[13px]';
 const COMPACT_BTN = 'h-[30px] px-3 text-[13px]';
 
-const LANGUAGES: Array<{ value: string; label: string }> = [
+type LangOption = { value: string; label: string };
+
+// Curated language list shown in Settings → Transcribe. Whisper supports
+// all 12 (it covers 99 languages at the model level; the dropdown is just
+// the tested curation). Parakeet TDT v3 supports 25 European languages
+// and is language-agnostic at inference — per-language hints don't bias
+// the decoder, so we expose only Auto vs English-only. Picking a
+// non-European concrete code (e.g. Hindi) on Parakeet would produce
+// garbage; hiding the option avoids that footgun.
+const LANGUAGES_WHISPER: LangOption[] = [
   { value: 'auto', label: 'Auto (detect)' },
   { value: 'en', label: 'English' },
   { value: 'es', label: 'Spanish' },
@@ -120,6 +132,10 @@ const LANGUAGES: Array<{ value: string; label: string }> = [
   { value: 'ko', label: 'Korean' },
   { value: 'hi', label: 'Hindi' },
   { value: 'ar', label: 'Arabic' },
+];
+const LANGUAGES_PARAKEET: LangOption[] = [
+  { value: 'auto', label: 'Auto (detect)' },
+  { value: 'en', label: 'English' },
 ];
 
 const TABS = [
@@ -352,7 +368,12 @@ function ModelCard({
           isCurrent ? 'var(--border-strong)' : 'var(--border-subtle)'
         }`,
         background: isCurrent ? 'var(--surface-raised)' : 'transparent',
-        opacity: deprecated ? 0.4 : 1,
+        // Dim deprecated rows EXCEPT when they're the user's current
+        // selection. A user's active choice should never look disabled —
+        // the Deprecated badge does the warning work, the dim just adds
+        // noise for someone who already opted in (e.g. existing Whisper
+        // Small users migrated from v0.3.7).
+        opacity: deprecated && !isCurrent ? 0.4 : 1,
       }}
     >
       <div className="min-w-0 flex-1">
@@ -805,15 +826,31 @@ function TranscriptionTab() {
   const setLanguage = useSetLanguage();
   const keepRecordings = useKeepRecordingsSetting();
   const setKeepRecordings = useSetKeepRecordings();
+  const engineQuery = useTranscriptionEngine();
+
+  const engine = engineQuery.data ?? 'parakeet';
+  const options = engine === 'whisper' ? LANGUAGES_WHISPER : LANGUAGES_PARAKEET;
+  // useSetActiveTranscription coerces language to 'auto' when switching
+  // to an engine that doesn't support the current pick. So by the time
+  // this renders, persisted is normally in `options`. Edge case (CLI
+  // user, migrated config): fall back to 'auto' for display so the
+  // trigger isn't blank — the persisted value stays on disk until they
+  // pick something new.
+  const persisted = language.data ?? 'auto';
+  const displayValue = options.some((o) => o.value === persisted) ? persisted : 'auto';
+  const helperText =
+    engine === 'parakeet'
+      ? 'Auto-detect covers 25 European languages. For other languages, switch to Whisper.'
+      : 'Language for transcription and summaries';
 
   return (
     <section data-settings-tab="transcription">
       <SettingRow
         label="Language"
-        description="Language for transcription and summaries"
+        description={helperText}
       >
         <Select
-          value={language.data ?? 'en'}
+          value={displayValue}
           onValueChange={(v) => setLanguage.mutate(v)}
           disabled={!language.data}
         >
@@ -821,7 +858,7 @@ function TranscriptionTab() {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {LANGUAGES.map((l) => (
+            {options.map((l) => (
               <SelectItem key={l.value} value={l.value}>
                 {l.label}
               </SelectItem>
@@ -841,15 +878,8 @@ function TranscriptionTab() {
         />
       </SettingRow>
 
-      <SectionHeading>Model</SectionHeading>
-      <p
-        className="mb-3 text-[13px]"
-        style={{ color: 'var(--fg-2)' }}
-      >
-        Larger models are more accurate but slower. Models download on first
-        use and are kept on disk for reuse.
-      </p>
-      <WhisperModelList />
+      <SectionHeading>Models</SectionHeading>
+      <TranscriptionModelList />
     </section>
   );
 }
@@ -1296,12 +1326,31 @@ function OAuthPrompt({ state, onClose, onRetry }: OAuthPromptProps) {
 }
 
 
-function WhisperModelList() {
-  const models = useWhisperModels();
-  const setCurrent = useSetWhisperModel();
-  const pull = usePullWhisperModel();
+/**
+ * Unified Parakeet + Whisper picker. One row per model, regardless of
+ * engine — clicking [Select] on an installed row activates that engine
+ * (and, for Whisper rows, also sets `whisper_model`). Clicking [Download]
+ * pulls the model; on success the pull-completion handler in the
+ * use(Parakeet|Whisper)Model hook flips the active engine over, so the
+ * user lands on the row they just downloaded.
+ *
+ * Parakeet sits at the top because new installs default to it; the
+ * migration in src/config.py keeps existing users on Whisper, but if
+ * they're seeing this UI on an upgraded install the Whisper row will
+ * already be marked Selected so the position-as-default reading is OK.
+ */
+function TranscriptionModelList() {
+  const parakeet = useParakeetModels();
+  const whisper = useWhisperModels();
+  const engine = useTranscriptionEngine();
+  const setActive = useSetActiveTranscription();
+  const pullParakeet = usePullParakeetModel();
+  const pullWhisper = usePullWhisperModel();
 
-  if (models.isLoading) {
+  const isLoading = parakeet.isLoading || whisper.isLoading || engine.isLoading;
+  const isError = parakeet.isError || whisper.isError || engine.isError;
+
+  if (isLoading) {
     return (
       <div
         className="flex items-center gap-2 text-[13px]"
@@ -1312,52 +1361,103 @@ function WhisperModelList() {
       </div>
     );
   }
-  if (models.isError || !models.data?.models?.length) {
+  if (isError) {
     return (
       <div className="text-[13px]" style={{ color: 'var(--fg-2)' }}>
-        Could not load Whisper models.
+        Could not load transcription models.
       </div>
     );
   }
 
+  const activeEngine = engine.data ?? 'parakeet';
+  const activeWhisperModel = whisper.data?.current;
+
+  type Row = {
+    rowKey: string;
+    engine: 'parakeet' | 'whisper';
+    modelId: string;
+    displayName: string;
+    sizeLabel?: string;
+    note?: string;
+    installed: boolean;
+    isCurrent: boolean;
+    isDownloading: boolean;
+    downloadProgress?: string;
+    deprecated: boolean;
+    onSelect: () => void;
+  };
+
+  const parakeetRows: Row[] = (parakeet.data?.models ?? []).map((m) => {
+    const isDownloading = Boolean(pullParakeet.progress[m.name]);
+    const stage = pullParakeet.progress[m.name];
+    const downloadProgress = stage
+      ? stage === 'downloading'
+        ? 'Downloading…'
+        : stage === 'loading'
+          ? 'Loading model…'
+          : stage
+      : undefined;
+    return {
+      rowKey: `parakeet:${m.name}`,
+      engine: 'parakeet',
+      modelId: m.name,
+      displayName: m.displayName ?? m.name,
+      sizeLabel: formatModelSize(m.size_gb),
+      note: m.description,
+      installed: m.installed,
+      isCurrent: activeEngine === 'parakeet' && m.installed,
+      isDownloading,
+      downloadProgress,
+      deprecated: Boolean(m.deprecated),
+      onSelect: () => {
+        if (m.installed) {
+          setActive.mutate({ engine: 'parakeet' });
+        } else {
+          pullParakeet.mutate(m.name);
+        }
+      },
+    };
+  });
+
+  const whisperRows: Row[] = (whisper.data?.models ?? []).map((m) => ({
+    rowKey: `whisper:${m.name}`,
+    engine: 'whisper',
+    modelId: m.name,
+    displayName: m.displayName ?? m.name,
+    sizeLabel: formatModelSize(m.size_gb),
+    note: m.description,
+    installed: m.installed,
+    isCurrent:
+      activeEngine === 'whisper' && m.installed && m.name === activeWhisperModel,
+    isDownloading: Boolean(pullWhisper.progress[m.name]),
+    downloadProgress: pullWhisper.progress[m.name],
+    deprecated: Boolean(m.deprecated),
+    onSelect: () => {
+      if (m.installed) {
+        setActive.mutate({ engine: 'whisper', whisperModel: m.name });
+      } else {
+        pullWhisper.mutate(m.name);
+      }
+    },
+  }));
+
+  const rows: Row[] = [...parakeetRows, ...whisperRows];
+
   return (
     <div>
-      {models.data.models.map((m) => {
-        const isCurrent = m.name === models.data.current;
-        const isDownloading = Boolean(pull.progress[m.name]);
-        const downloadProgress = pull.progress[m.name];
-        const isDefault = isDefaultModel(m.description);
-
-        const parts: string[] = [];
-        if (m.description) parts.push(m.description);
-        if (m.speed) parts.push(`${m.speed} speed`);
-        if (m.quality) parts.push(`${m.quality} quality`);
-        const note = parts.length ? parts.join(' · ') : undefined;
-
-        const sizeLabel = formatModelSize(m.size_gb);
-
-        const onSelect = () => {
-          if (m.installed) {
-            setCurrent.mutate(m.name);
-          } else {
-            pull.mutate(m.name);
-          }
-        };
-
-        return (
-          <ModelCard
-            key={m.name}
-            name={m.displayName ?? m.name}
-            sizeLabel={sizeLabel}
-            note={note}
-            isCurrent={isCurrent}
-            isDefault={isDefault}
-            isDownloading={isDownloading}
-            downloadProgress={downloadProgress}
-            onSelect={onSelect}
-          />
-        );
-      })}
+      {rows.map((row) => (
+        <ModelCard
+          key={row.rowKey}
+          name={row.displayName}
+          sizeLabel={row.sizeLabel}
+          note={row.note}
+          isCurrent={row.isCurrent}
+          deprecated={row.deprecated}
+          isDownloading={row.isDownloading}
+          downloadProgress={row.downloadProgress}
+          onSelect={row.onSelect}
+        />
+      ))}
     </div>
   );
 }
