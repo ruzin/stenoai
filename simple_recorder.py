@@ -19,8 +19,10 @@ import click
 import asyncio
 import logging
 import json
+import os
 import re
 import sys
+import tempfile
 import time
 from datetime import datetime
 from pathlib import Path
@@ -61,6 +63,47 @@ _AUTO_NAMED_PATTERN = re.compile(
     r'|.+ — \d{4}-\d{2}-\d{2} \d{2}:\d{2})$'
 )
 
+def _atomic_write_json(path: Path, payload) -> None:
+    """Write `payload` as JSON to `path` atomically.
+
+    Uses tempfile + os.replace within the same directory so the rename
+    is a single filesystem operation. On POSIX and Windows, os.replace
+    is atomic — a crash mid-write leaves the prior file intact (or
+    nothing, on first write) rather than a half-written file that
+    subsequent reads would misparse.
+
+    Used for `recorder_state.json` (where a corrupt file means we lose
+    track of a live recording) and the final summary JSON (where a
+    corrupt file means a finished meeting's processing is lost).
+    """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    # NamedTemporaryFile in the same dir guarantees os.replace stays on
+    # one filesystem. delete=False so we can rename rather than auto-clean.
+    tmp = tempfile.NamedTemporaryFile(
+        mode='w',
+        dir=str(path.parent),
+        prefix=f'.{path.name}.',
+        suffix='.tmp',
+        delete=False,
+        encoding='utf-8',
+    )
+    try:
+        with tmp as f:
+            json.dump(payload, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp.name, path)
+    except Exception:
+        # Best-effort cleanup of the orphan temp file. Don't mask the
+        # original error.
+        try:
+            os.unlink(tmp.name)
+        except OSError:
+            pass
+        raise
+
+
 class SimpleRecorder:
     """Simple audio recorder and transcriber."""
     
@@ -86,19 +129,50 @@ class SimpleRecorder:
         self.persistent_recorder = None
         
     def get_state(self) -> dict:
-        """Get current recorder state."""
-        if self.state_file.exists():
+        """Get current recorder state.
+
+        Distinguishes "file missing" (normal — return default) from "file
+        unreadable / corrupt" (real failure — log and quarantine so the
+        user can recover the file and we don't pretend we were idle while
+        an orphan subprocess may still be writing audio).
+        """
+        if not self.state_file.exists():
+            return {"recording": False, "current_file": None, "session_name": None}
+        try:
+            with open(self.state_file, 'r') as f:
+                return json.load(f)
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+            # Corrupt state — most likely a non-atomic write was killed
+            # mid-flight before save_state's tempfile + rename pattern was
+            # in place. UnicodeDecodeError covers the case where binary
+            # garbage from a partial write fails UTF-8 decoding before
+            # json.load even sees it. Both are "content unparseable" —
+            # quarantine and return default.
+            logger.error(f"State file corrupt at {self.state_file}: {e}")
             try:
-                with open(self.state_file, 'r') as f:
-                    return json.load(f)
-            except:
-                pass
+                quarantine = self.state_file.with_suffix(self.state_file.suffix + '.corrupt')
+                self.state_file.replace(quarantine)
+                logger.error(f"Moved corrupt state aside to {quarantine}")
+            except OSError as move_err:
+                logger.error(f"Failed to quarantine corrupt state file: {move_err}")
+        except OSError as e:
+            # Permission / IO error reading the file. Don't pretend we're
+            # idle — surface this loudly so the user can fix file perms or
+            # disk issues instead of silently losing recording state.
+            logger.error(f"Failed to read state file {self.state_file}: {e}")
         return {"recording": False, "current_file": None, "session_name": None}
-    
+
     def save_state(self, state: dict):
-        """Save recorder state."""
-        with open(self.state_file, 'w') as f:
-            json.dump(state, f, indent=2)
+        """Save recorder state atomically.
+
+        Writes to a tempfile in the same directory (so os.replace is an
+        atomic rename within one filesystem) and then renames over the
+        real path. A crash mid-write either leaves the prior valid state
+        intact or leaves an orphan tempfile alongside it — never a
+        partially-written recorder_state.json that get_state would
+        misread as "idle" while audio is still being captured.
+        """
+        _atomic_write_json(self.state_file, state)
 
     def _resolve_output_language(self, configured_language: str, detected_language: Optional[str] = None) -> str:
         """Resolve which language should be used for summary/title/query output."""
@@ -493,9 +567,12 @@ Transcript:
             "user_notes": notes_text,
         }
         
-        with open(summary_path, 'w') as f:
-            json.dump(complete_data, f, indent=2)
-        
+        # Atomic write: a crash here previously left a half-written
+        # multi-MB summary JSON and the source WAV gets deleted below,
+        # so the meeting was unrecoverable. Now the prior file (if any)
+        # stays intact unless the new one writes fully.
+        _atomic_write_json(summary_path, complete_data)
+
         print(f"✅ Complete processing saved: {summary_path}")
         
         # Clean up WAV file after successful processing
