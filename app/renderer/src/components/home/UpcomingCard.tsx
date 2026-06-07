@@ -22,8 +22,14 @@ export function UpcomingCard({ event }: UpcomingCardProps) {
   // 'Note' placeholder), so the AI rename step skips it and the user
   // gets the meeting they expected. Doesn't open the join URL — the
   // Join / Start now buttons on the right own that action.
+  //
+  // Block only when a recording is *actively* in progress (recording /
+  // paused); 'processing' is fine — the previous note keeps summarising
+  // in the background queue while a new recording starts. Matches the
+  // Home empty-state CTA's gating so the two entry points behave the
+  // same way back-to-back.
   const onStart = () => {
-    if (recording.status !== 'idle') return;
+    if (recording.status === 'recording' || recording.status === 'paused') return;
     void recording.startRecording(event.title);
   };
 
