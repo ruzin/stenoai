@@ -77,10 +77,13 @@ import {
 import {
   useCurrentModel,
   useModels,
+  useParakeetModels,
   usePullModel,
+  usePullParakeetModel,
   usePullWhisperModel,
+  useSetActiveTranscription,
   useSetCurrentModel,
-  useSetWhisperModel,
+  useTranscriptionEngine,
   useWhisperModels,
 } from '@/hooks/useModels';
 import {
@@ -841,15 +844,8 @@ function TranscriptionTab() {
         />
       </SettingRow>
 
-      <SectionHeading>Model</SectionHeading>
-      <p
-        className="mb-3 text-[13px]"
-        style={{ color: 'var(--fg-2)' }}
-      >
-        Larger models are more accurate but slower. Models download on first
-        use and are kept on disk for reuse.
-      </p>
-      <WhisperModelList />
+      <SectionHeading>Models</SectionHeading>
+      <TranscriptionModelList />
     </section>
   );
 }
@@ -1296,12 +1292,31 @@ function OAuthPrompt({ state, onClose, onRetry }: OAuthPromptProps) {
 }
 
 
-function WhisperModelList() {
-  const models = useWhisperModels();
-  const setCurrent = useSetWhisperModel();
-  const pull = usePullWhisperModel();
+/**
+ * Unified Parakeet + Whisper picker. One row per model, regardless of
+ * engine — clicking [Select] on an installed row activates that engine
+ * (and, for Whisper rows, also sets `whisper_model`). Clicking [Download]
+ * pulls the model; on success the pull-completion handler in the
+ * use(Parakeet|Whisper)Model hook flips the active engine over, so the
+ * user lands on the row they just downloaded.
+ *
+ * Parakeet sits at the top because new installs default to it; the
+ * migration in src/config.py keeps existing users on Whisper, but if
+ * they're seeing this UI on an upgraded install the Whisper row will
+ * already be marked Selected so the position-as-default reading is OK.
+ */
+function TranscriptionModelList() {
+  const parakeet = useParakeetModels();
+  const whisper = useWhisperModels();
+  const engine = useTranscriptionEngine();
+  const setActive = useSetActiveTranscription();
+  const pullParakeet = usePullParakeetModel();
+  const pullWhisper = usePullWhisperModel();
 
-  if (models.isLoading) {
+  const isLoading = parakeet.isLoading || whisper.isLoading || engine.isLoading;
+  const isError = parakeet.isError || whisper.isError || engine.isError;
+
+  if (isLoading) {
     return (
       <div
         className="flex items-center gap-2 text-[13px]"
@@ -1312,52 +1327,99 @@ function WhisperModelList() {
       </div>
     );
   }
-  if (models.isError || !models.data?.models?.length) {
+  if (isError) {
     return (
       <div className="text-[13px]" style={{ color: 'var(--fg-2)' }}>
-        Could not load Whisper models.
+        Could not load transcription models.
       </div>
     );
   }
 
+  const activeEngine = engine.data ?? 'parakeet';
+  const activeWhisperModel = whisper.data?.current;
+
+  type Row = {
+    rowKey: string;
+    engine: 'parakeet' | 'whisper';
+    modelId: string;
+    displayName: string;
+    sizeLabel?: string;
+    note?: string;
+    installed: boolean;
+    isCurrent: boolean;
+    isDownloading: boolean;
+    downloadProgress?: string;
+    onSelect: () => void;
+  };
+
+  const parakeetRows: Row[] = (parakeet.data?.models ?? []).map((m) => {
+    const isDownloading = Boolean(pullParakeet.progress[m.name]);
+    const stage = pullParakeet.progress[m.name];
+    const downloadProgress = stage
+      ? stage === 'downloading'
+        ? 'Downloading…'
+        : stage === 'loading'
+          ? 'Loading model…'
+          : stage
+      : undefined;
+    return {
+      rowKey: `parakeet:${m.name}`,
+      engine: 'parakeet',
+      modelId: m.name,
+      displayName: m.displayName ?? m.name,
+      sizeLabel: formatModelSize(m.size_gb),
+      note: m.description,
+      installed: m.installed,
+      isCurrent: activeEngine === 'parakeet' && m.installed,
+      isDownloading,
+      downloadProgress,
+      onSelect: () => {
+        if (m.installed) {
+          setActive.mutate({ engine: 'parakeet' });
+        } else {
+          pullParakeet.mutate(m.name);
+        }
+      },
+    };
+  });
+
+  const whisperRows: Row[] = (whisper.data?.models ?? []).map((m) => ({
+    rowKey: `whisper:${m.name}`,
+    engine: 'whisper',
+    modelId: m.name,
+    displayName: m.displayName ?? m.name,
+    sizeLabel: formatModelSize(m.size_gb),
+    note: m.description,
+    installed: m.installed,
+    isCurrent:
+      activeEngine === 'whisper' && m.installed && m.name === activeWhisperModel,
+    isDownloading: Boolean(pullWhisper.progress[m.name]),
+    downloadProgress: pullWhisper.progress[m.name],
+    onSelect: () => {
+      if (m.installed) {
+        setActive.mutate({ engine: 'whisper', whisperModel: m.name });
+      } else {
+        pullWhisper.mutate(m.name);
+      }
+    },
+  }));
+
+  const rows: Row[] = [...parakeetRows, ...whisperRows];
+
   return (
     <div>
-      {models.data.models.map((m) => {
-        const isCurrent = m.name === models.data.current;
-        const isDownloading = Boolean(pull.progress[m.name]);
-        const downloadProgress = pull.progress[m.name];
-        const isDefault = isDefaultModel(m.description);
-
-        const parts: string[] = [];
-        if (m.description) parts.push(m.description);
-        if (m.speed) parts.push(`${m.speed} speed`);
-        if (m.quality) parts.push(`${m.quality} quality`);
-        const note = parts.length ? parts.join(' · ') : undefined;
-
-        const sizeLabel = formatModelSize(m.size_gb);
-
-        const onSelect = () => {
-          if (m.installed) {
-            setCurrent.mutate(m.name);
-          } else {
-            pull.mutate(m.name);
-          }
-        };
-
-        return (
-          <ModelCard
-            key={m.name}
-            name={m.displayName ?? m.name}
-            sizeLabel={sizeLabel}
-            note={note}
-            isCurrent={isCurrent}
-            isDefault={isDefault}
-            isDownloading={isDownloading}
-            downloadProgress={downloadProgress}
-            onSelect={onSelect}
-          />
-        );
-      })}
+      {rows.map((row) => (
+        <ModelCard
+          key={row.rowKey}
+          name={row.displayName}
+          sizeLabel={row.sizeLabel}
+          note={row.note}
+          isCurrent={row.isCurrent}
+          isDownloading={row.isDownloading}
+          downloadProgress={row.downloadProgress}
+          onSelect={row.onSelect}
+        />
+      ))}
     </div>
   );
 }

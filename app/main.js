@@ -3835,6 +3835,66 @@ ipcMain.handle('setup-ollama-and-model', async () => {
   }
 });
 
+ipcMain.handle('setup-parakeet', async () => {
+  try {
+    // Download Parakeet TDT v3 (~572 MB) via the bundled backend. Used by
+    // the Setup wizard's step 2 for fresh installs. Emits coarse stage
+    // lines (PARAKEET_PULL_STAGE:downloading / :loading) rather than
+    // byte-level progress — see src/parakeet_models.py for why.
+    const backendPath = getBackendPath();
+    sendDebugLog('Downloading Parakeet TDT v3 (~572 MB)...');
+    sendDebugLog(`$ ${backendPath} download-parakeet-model`);
+
+    return new Promise((resolve) => {
+      const proc = spawn(backendPath, ['download-parakeet-model'], { stdio: 'pipe' });
+      let lastStdoutLine = '';
+
+      proc.stdout.on('data', (data) => {
+        const text = data.toString();
+        for (const line of text.split('\n')) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+          sendDebugLog(trimmed);
+          if (trimmed.startsWith('PARAKEET_PULL_STAGE:')) {
+            const stage = trimmed.slice('PARAKEET_PULL_STAGE:'.length);
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('parakeet-pull-progress', { stage });
+            }
+          } else {
+            lastStdoutLine = trimmed;
+          }
+        }
+      });
+
+      proc.stderr.on('data', (data) => {
+        const text = data.toString().trim();
+        if (text) sendDebugLog('STDERR: ' + text);
+      });
+
+      proc.on('close', (code) => {
+        let parsed = null;
+        try { parsed = JSON.parse(lastStdoutLine); } catch (_) { /* not JSON */ }
+        const ok = code === 0 && (!parsed || parsed.success !== false);
+        if (ok) {
+          sendDebugLog('Parakeet model ready');
+          resolve({ success: true, message: 'Parakeet model ready' });
+        } else {
+          const err = (parsed && parsed.error) || `Parakeet download exited with code ${code}`;
+          sendDebugLog(err);
+          resolve({ success: false, error: err });
+        }
+      });
+
+      proc.on('error', (error) => {
+        sendDebugLog(`Process error: ${error.message}`);
+        resolve({ success: false, error: error.message });
+      });
+    });
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
 ipcMain.handle('setup-whisper', async () => {
   try {
     // Download whisper model using the bundled backend
@@ -4289,6 +4349,38 @@ ipcMain.handle('set-model', async (event, modelName) => {
 
 
 
+ipcMain.handle('get-transcription-engine', async () => {
+  try {
+    const result = await runPythonScript('simple_recorder.py', ['get-transcription-engine'], true);
+    const jsonData = JSON.parse(result.trim());
+    return { success: true, ...jsonData };
+  } catch (e) { return { success: false, error: e.message }; }
+});
+
+ipcMain.handle('set-transcription-engine', async (event, engine) => {
+  try {
+    const result = await runPythonScript('simple_recorder.py', ['set-transcription-engine', engine]);
+    const jsonData = JSON.parse(result.trim());
+    return { success: true, ...jsonData };
+  } catch (e) { return { success: false, error: e.message }; }
+});
+
+ipcMain.handle('list-parakeet-models', async () => {
+  try {
+    const result = await runPythonScript('simple_recorder.py', ['list-parakeet-models'], true);
+    const jsonData = JSON.parse(result.trim());
+    return { success: true, ...jsonData };
+  } catch (e) { return { success: false, error: e.message }; }
+});
+
+ipcMain.handle('parakeet-status', async () => {
+  try {
+    const result = await runPythonScript('simple_recorder.py', ['parakeet-status'], true);
+    const jsonData = JSON.parse(result.trim());
+    return { success: true, ...jsonData };
+  } catch (e) { return { success: false, error: e.message }; }
+});
+
 ipcMain.handle('get-whisper-model', async () => {
   try {
     const result = await runPythonScript('simple_recorder.py', ['get-whisper-model'], true);
@@ -4410,6 +4502,100 @@ ipcMain.handle('pull-whisper-model', async (event, modelName) => {
         finishOnce(
           { success: false, error: error.message },
           { model: modelName, success: false, error: error.message },
+        );
+      });
+    });
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('pull-parakeet-model', async (event, modelId) => {
+  // Mirrors pull-whisper-model: settle-gate + SIGTERM-then-SIGKILL escalation
+  // so a stalled HF download can never leave the renderer spinner hanging.
+  // Progress is coarse — we relay PARAKEET_PULL_STAGE:<stage> lines from the
+  // Python child rather than byte counts. See src/parakeet_models.py for why.
+  try {
+    sendDebugLog(`Pulling Parakeet model: ${modelId || '<default>'}`);
+    return new Promise((resolve) => {
+      const args = ['download-parakeet-model'];
+      if (modelId) args.push(modelId);
+      const proc = spawn(getBackendPath(), args, { cwd: getBackendCwd() });
+      let lastStdoutLine = '';
+      let timedOut = false;
+      let settled = false;
+      let sigkillTimer = null;
+      let forceSettleTimer = null;
+      const finishOnce = (result, completeEvent) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(procTimeout);
+        if (sigkillTimer) clearTimeout(sigkillTimer);
+        if (forceSettleTimer) clearTimeout(forceSettleTimer);
+        if (mainWindow && !mainWindow.isDestroyed() && completeEvent) {
+          mainWindow.webContents.send('parakeet-pull-complete', completeEvent);
+        }
+        resolve(result);
+      };
+      const procTimeout = setTimeout(() => {
+        timedOut = true;
+        sendDebugLog('pull-parakeet-model timed out after 30 minutes, killing');
+        try { proc.kill('SIGTERM'); } catch (_) { /* already exited */ }
+        sigkillTimer = setTimeout(() => {
+          sendDebugLog('SIGTERM unresponsive, escalating to SIGKILL');
+          try { proc.kill('SIGKILL'); } catch (_) { /* already exited */ }
+        }, 5000);
+        forceSettleTimer = setTimeout(() => {
+          sendDebugLog('Force-settling pull-parakeet-model Promise after kill grace');
+          finishOnce(
+            { success: false, error: 'Download timed out after 30 minutes' },
+            { model: modelId, success: false, error: 'Download timed out after 30 minutes' },
+          );
+        }, 15000);
+      }, 30 * 60 * 1000);
+      proc.stdout.on('data', (data) => {
+        const text = data.toString();
+        for (const line of text.split('\n')) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+          sendDebugLog(trimmed);
+          if (trimmed.startsWith('PARAKEET_PULL_STAGE:')) {
+            const stage = trimmed.slice('PARAKEET_PULL_STAGE:'.length);
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('parakeet-pull-progress', { model: modelId, stage });
+            }
+          } else {
+            lastStdoutLine = trimmed;
+          }
+        }
+      });
+      proc.stderr.on('data', (data) => {
+        const text = data.toString().trim();
+        if (text) sendDebugLog(`STDERR: ${text}`);
+      });
+      proc.on('close', (code) => {
+        let pullResult = null;
+        try { pullResult = JSON.parse(lastStdoutLine); } catch (_) { /* not JSON */ }
+        const succeeded = !timedOut && code === 0 && (!pullResult || pullResult.success !== false);
+        if (succeeded) {
+          finishOnce(
+            { success: true, model: modelId },
+            { model: modelId, success: true },
+          );
+        } else {
+          const errorMsg = timedOut
+            ? 'Download timed out after 30 minutes'
+            : (pullResult && pullResult.error) || `Process exited with code ${code}`;
+          finishOnce(
+            { success: false, error: errorMsg },
+            { model: modelId, success: false, error: errorMsg },
+          );
+        }
+      });
+      proc.on('error', (error) => {
+        finishOnce(
+          { success: false, error: error.message },
+          { model: modelId, success: false, error: error.message },
         );
       });
     });

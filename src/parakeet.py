@@ -30,6 +30,12 @@ logger = logging.getLogger(__name__)
 # be a sibling entry, not a swap.
 DEFAULT_MODEL_ID = "mlx-community/parakeet-tdt-0.6b-v3"
 
+# In-memory MLX inference is fast enough on Apple Silicon to re-transcribe
+# the trailing PARTIAL_WINDOW_S of speech every PARTIAL_INTERVAL_S without
+# blowing the live consumer's budget. The whispercpp shim's mirror of this
+# flag is False — see src/whispercpp.py for the rationale.
+SUPPORTS_PARTIALS = True
+
 _MODEL_CACHE: dict[str, object] = {}
 _MODEL_LOCK = threading.Lock()
 

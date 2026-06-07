@@ -237,11 +237,28 @@ class WhisperTranscriber:
             )
         # Kept on the instance so existing callers / logs that read
         # ``model_size`` and ``backend`` don't change. Backend selection
-        # prefers Parakeet when available; falls back to whisper.cpp on
-        # Intel Macs where parakeet-mlx (which needs MLX) can't install.
+        # respects the user-selected engine from Settings → Transcribe
+        # (Config.get_transcription_engine). Without this, an arm64 user
+        # who picked Whisper would still get Parakeet on the post-stop
+        # pass — live and final would silently use different engines
+        # and the diarised transcript wouldn't match what they previewed
+        # live. Fallback order when the requested engine isn't installed:
+        #   * engine='whisper' but pywhispercpp missing → use Parakeet
+        #   * engine='parakeet' but parakeet-mlx missing (x64 Macs) →
+        #     fall back to whisper.cpp as before
         self.model_size = model_size
         self.model = None
-        if PARAKEET_AVAILABLE:
+
+        try:
+            from src.config import get_config
+            requested = get_config().get_transcription_engine()
+        except Exception:
+            requested = "parakeet"
+
+        if requested == "whisper" and WHISPER_CPP_AVAILABLE:
+            self.backend = "whisper.cpp"
+            self._load_whisper_cpp()
+        elif PARAKEET_AVAILABLE:
             self.backend = "parakeet-tdt-v3"
         else:
             self.backend = "whisper.cpp"

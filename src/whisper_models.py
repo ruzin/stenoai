@@ -24,14 +24,21 @@ SUPPORTED_WHISPER_MODELS: dict[str, dict] = {
     "small": {
         "name": "Whisper Small",
         "size": "466MB",
-        "description": "Balanced speed and accuracy (default)",
+        "description": (
+            "Asian, Middle Eastern, and other non-European languages — "
+            "Chinese, Japanese, Korean, Thai, Vietnamese, Hindi, Arabic, "
+            "and 90+ others."
+        ),
         "speed": "fast",
         "quality": "good",
     },
     "large-v3-turbo": {
         "name": "Whisper Large V3 Turbo",
         "size": "1.6GB",
-        "description": "Best accuracy, optimised speed",
+        "description": (
+            "Same coverage as Small, higher quality. Recommended if you "
+            "primarily use non-European languages."
+        ),
         "speed": "medium",
         "quality": "excellent",
     },

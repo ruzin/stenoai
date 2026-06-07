@@ -330,6 +330,24 @@ export type ListWhisperModelsResponse = Result<{
   provider: string;
 }>;
 
+export type ListParakeetModelsResponse = Result<{
+  supported_models: Record<string, RawSupportedModel>;
+  current_model: string;
+  provider: string;
+}>;
+
+export type ParakeetStatusResponse = Result<{
+  model: string;
+  installed: boolean;
+}>;
+
+export type TranscriptionEngine = 'parakeet' | 'whisper';
+
+export type GetTranscriptionEngineResponse = Result<{
+  engine: TranscriptionEngine;
+  valid_engines: TranscriptionEngine[];
+}>;
+
 export type GetNotificationsResponse = Result<{ notifications_enabled: boolean }>;
 export type GetTelemetryResponse = Result<{
   telemetry_enabled: boolean;
@@ -438,6 +456,15 @@ export interface WhisperPullCompleteEvent {
   success: boolean;
   error?: string;
 }
+export interface ParakeetPullProgressEvent {
+  model: string | null;
+  stage: 'downloading' | 'loading' | string;
+}
+export interface ParakeetPullCompleteEvent {
+  model: string | null;
+  success: boolean;
+  error?: string;
+}
 
 // ---------- live transcript ----------
 export interface LiveSegment {
@@ -518,6 +545,7 @@ export interface StenoaiBridge {
     python: RequestFn<[], Result<Record<string, unknown>>>;
     ollamaAndModel: RequestFn<[], Result<Record<string, unknown>>>;
     whisper: RequestFn<[], Result<Record<string, unknown>>>;
+    parakeet: RequestFn<[], Result<Record<string, unknown>>>;
     test: RequestFn<[], Result<Record<string, unknown>>>;
     triggerWizard: RequestFn<[], Result<Record<string, unknown>>>;
   };
@@ -613,6 +641,17 @@ export interface StenoaiBridge {
     pull: RequestFn<[name: string], Result<Record<string, never>>>;
   };
 
+  parakeetModels: {
+    list: RequestFn<[], ListParakeetModelsResponse>;
+    pull: RequestFn<[id?: string | null], Result<{ model?: string; already_installed?: boolean }>>;
+    status: RequestFn<[], ParakeetStatusResponse>;
+  };
+
+  transcriptionEngine: {
+    get: RequestFn<[], GetTranscriptionEngineResponse>;
+    set: RequestFn<[engine: TranscriptionEngine], Result<{ engine: TranscriptionEngine }>>;
+  };
+
   settings: {
     getNotifications: RequestFn<[], GetNotificationsResponse>;
     setNotifications: RequestFn<[v: boolean], Result<Record<string, never>>>;
@@ -700,6 +739,8 @@ export interface StenoaiBridge {
     modelPullComplete: Subscribe<ModelPullCompleteEvent>;
     whisperPullProgress: Subscribe<WhisperPullProgressEvent>;
     whisperPullComplete: Subscribe<WhisperPullCompleteEvent>;
+    parakeetPullProgress: Subscribe<ParakeetPullProgressEvent>;
+    parakeetPullComplete: Subscribe<ParakeetPullCompleteEvent>;
     liveTranscriptReady: Subscribe<LiveTranscriptReadyEvent>;
     liveTranscriptChunk: Subscribe<LiveTranscriptChunkEvent>;
     liveTranscriptError: Subscribe<LiveTranscriptErrorEvent>;
