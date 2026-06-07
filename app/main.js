@@ -887,6 +887,28 @@ if (!gotSingleInstanceLock) {
       }
     }
 
+    // Pre-load Parakeet weights in a background subprocess so the first
+    // recording's `record --live` / `transcribe-stream` spawn sees the
+    // model file already in the OS page cache. Saves ~1 s off the
+    // visible "first record after launch" latency. Fire-and-forget —
+    // never block window creation on it. Skipped for Whisper users
+    // (Parakeet model would be downloading or absent) and gated on
+    // model presence by the CLI command itself (no-ops when missing).
+    if (loadTranscriptionEngine() === 'parakeet') {
+      try {
+        const warmupProc = spawn(getBackendPath(), ['warmup-parakeet'], {
+          cwd: getBackendCwd(),
+          stdio: 'ignore',
+        });
+        warmupProc.unref();
+        warmupProc.on('error', (err) => {
+          sendDebugLog(`[parakeet-warmup] spawn failed (non-fatal): ${err.message}`);
+        });
+      } catch (e) {
+        sendDebugLog(`[parakeet-warmup] startup error (non-fatal): ${e.message}`);
+      }
+    }
+
     createWindow();
     if (!IS_E2E) createTray();
     setupAutoUpdater();
@@ -6921,7 +6943,18 @@ async function adapterFetch(pathname, opts = {}) {
     body = { detail: text };
   }
   if (!res.ok) {
-    if (res.status === 401) clearOrgSession();
+    if (res.status === 401) {
+      // Server-side session revocation / token reuse / org removed our
+      // user. Same response surface as a sign-out: clear the local
+      // session AND restore the pre-adapter provider. Without the
+      // restore, ai_provider stays on 'adapter' with no session, and
+      // the next summarisation call errors out with "adapter not
+      // configured". Fire-and-forget — the awaiting caller already
+      // has an HTTP error to handle and shouldn't block on a Python
+      // subprocess.
+      clearOrgSession();
+      restorePreAdapterProvider().catch(() => {});
+    }
     const err = new Error(body.detail || ('HTTP ' + res.status));
     err.status = res.status;
     throw err;
@@ -7541,7 +7574,13 @@ ipcMain.on('org-chat-stream', async (event, streamId, payload) => {
     if (!res.ok) {
       let detail = '';
       try { detail = await res.text(); } catch (_) {}
-      if (res.status === 401) clearOrgSession();
+      if (res.status === 401) {
+        // Same reasoning as the orgFetch 401 path above — clear the
+        // session AND restore pre-adapter provider so future processing
+        // doesn't hit "adapter not configured".
+        clearOrgSession();
+        restorePreAdapterProvider().catch(() => {});
+      }
       safeSend('query-done', { queryId: streamId, success: false, error: `HTTP ${res.status}: ${detail.slice(0, 200)}` });
       return;
     }

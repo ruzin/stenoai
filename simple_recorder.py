@@ -1102,6 +1102,37 @@ def parakeet_status_cmd():
     }))
 
 
+@cli.command(name='warmup-parakeet')
+def warmup_parakeet_cmd():
+    """Pre-load Parakeet weights to warm the OS page cache.
+
+    Fired by Electron at app launch (best-effort, non-blocking). The
+    subprocess loads the model end-to-end and exits — when the actual
+    recording subprocess later spawns and calls ``ensure_loaded``, the
+    model files are already in the OS page cache so disk I/O is
+    near-instant. Does NOT eliminate the per-subprocess MLX parse cost
+    (that requires a long-running daemon), but it shaves the visible
+    portion of "first record after launch is slow" by ~1 s on modern
+    SSDs and more on cold caches.
+
+    Silent on success — Electron parses only the exit code. On
+    'model not installed' (fresh user before Setup runs), exits 0
+    without loading; the cost of trying to load a missing model is
+    higher than just skipping.
+    """
+    from src.parakeet_models import is_installed, DEFAULT_MODEL_ID
+    if not is_installed(DEFAULT_MODEL_ID):
+        return
+    try:
+        from src.parakeet import ensure_loaded
+        ensure_loaded()
+    except Exception as e:
+        # Best-effort: a warmup failure must never block app startup.
+        # Log to stderr so the Electron debug log captures it, but
+        # exit 0 so main.js doesn't surface it as an error to the user.
+        print(f"warmup-parakeet failed: {e}", file=sys.stderr)
+
+
 @cli.command(name='download-parakeet-model')
 @click.argument('model_id', required=False)
 def download_parakeet_model_cmd(model_id):
@@ -1255,15 +1286,20 @@ class _LiveVadPipeline:
       * Preroll ring holds the most recent ``PREROLL_CHUNKS`` chunks of
         pre-speech audio so the first syllable of every utterance is
         recovered after VAD fires (Silero always trips slightly late).
-      * Partials see only the trailing ``PARTIAL_WINDOW_S`` of the
-        utterance — re-transcribing the whole utterance every 400 ms
-        would be O(n²).
+      * Partials see the trailing ``PARTIAL_WINDOW_S`` of the utterance.
+        At 15 s, a 4-5 sentence monologue stays fully visible in the live
+        bubble (the prior 5 s window meant the rolling view dropped
+        earlier sentences off-screen during continuous speech). Parakeet
+        decodes 15 s in ~150-250 ms on Apple Silicon, comfortably under
+        the 400 ms partial interval. Going wider (e.g. matching MAX at
+        30 s) would risk decode time creeping past the interval and
+        back-pressuring the stdin pipe.
       * Final fires on Silero's SpeechEnd OR when the utterance hits
         ``MAX_UTTERANCE_S`` so a monologue still produces output.
     """
 
     PARTIAL_INTERVAL_S = 0.4
-    PARTIAL_WINDOW_S = 5.0
+    PARTIAL_WINDOW_S = 15.0
     MIN_UTTERANCE_S = 0.5
     MAX_UTTERANCE_S = 30.0
     PREROLL_CHUNKS = 2  # ≈ 512 ms at 256 ms per callback
