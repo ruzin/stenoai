@@ -295,12 +295,14 @@ def _drop_per_segment_bleed(
             sys_rms = _segment_rms(system_path, sys_start, sys_end)
             # Tie-break / RMS unreadable → fall back to historical behaviour
             # (drop system) so we never delete real user mic content on
-            # ambiguous evidence.
-            if mic_rms > sys_rms:
+            # ambiguous evidence. >= covers the genuine-tie case AND the
+            # both-zero case (_segment_rms returns 0.0 on any read error),
+            # both of which should keep mic and drop system.
+            if mic_rms >= sys_rms:
                 drop_sys.add(i_sys)
                 logger.debug(
                     "Per-segment bleed: dropping system %r "
-                    "(Jaccard=%.2f, mic_rms=%.4f > sys_rms=%.4f)",
+                    "(Jaccard=%.2f, mic_rms=%.4f >= sys_rms=%.4f)",
                     sys_text[:60], best_jaccard, mic_rms, sys_rms,
                 )
             else:
