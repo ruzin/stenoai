@@ -14,6 +14,8 @@ import { Processing, ProcessingDock } from '@/routes/Processing';
 import { AskBar, TranscriptBar } from '@/components/AskBar';
 import { BottomDockSlot } from '@/components/BottomDockSlot';
 import { LiveDock } from '@/components/LiveDock';
+import { LiveTranscriptBar } from '@/components/LiveTranscriptBar';
+import { useLiveTranscriptOpen } from '@/hooks/liveTranscriptOpenStore';
 import { QuitDialog } from '@/components/QuitDialog';
 import { AskBarProvider } from '@/lib/askBarContext';
 import {
@@ -62,6 +64,21 @@ export function App() {
   // still summarizing, drop the user on /meetings/processing so they don't
   // sit on Home wondering what happened. Only fires once on first render.
   const recording = useRecording();
+
+  // Reset the inline transcript panel to closed on every new recording
+  // session. Without this, a user who opened the panel in session A would
+  // start session B with the panel already expanded — the store survives
+  // session boundaries by design (zustand isn't React-tree-scoped), so we
+  // explicitly reset it here at the App level when sessionName changes.
+  const setLiveTranscriptOpen = useLiveTranscriptOpen((s) => s.setOpen);
+  const lastSessionRef = React.useRef<string | null>(null);
+  React.useEffect(() => {
+    if (recording.sessionName !== lastSessionRef.current) {
+      lastSessionRef.current = recording.sessionName ?? null;
+      setLiveTranscriptOpen(false);
+    }
+  }, [recording.sessionName, setLiveTranscriptOpen]);
+
   const didAutoRouteRef = React.useRef(false);
   React.useEffect(() => {
     if (didAutoRouteRef.current) return;
@@ -113,9 +130,13 @@ export function App() {
         <RouteView route={route} />
         <QuitDialog />
 
-        {/* Bottom dock — shared anchor across recording → processing → meeting. */}
+        {/* Bottom dock — shared anchor across recording → processing → meeting.
+            During recording the slot swaps between the compact LiveDock pill
+            and the larger LiveTranscriptBar (which owns Pause/Stop + the
+            Multi language selector when expanded). Either occupies the slot;
+            never both at once. */}
         <BottomDockSlot>
-          {isRecordingRoute && <LiveDock />}
+          {isRecordingRoute && <LiveRecordingDock />}
           {isProcessingRoute && <ProcessingDock />}
           {showAskBar && <AskBar />}
         </BottomDockSlot>
@@ -129,6 +150,17 @@ export function App() {
       </AskBarProvider>
     </StreamingProvider>
   );
+}
+
+/**
+ * Recording-mode dock-slot child. Switches between the compact LiveDock pill
+ * (transcript closed) and the expanded LiveTranscriptBar (transcript open).
+ * They share the slot rather than stacking so the bottom of the page has a
+ * single anchor at any moment.
+ */
+function LiveRecordingDock() {
+  const open = useLiveTranscriptOpen((s) => s.open);
+  return open ? <LiveTranscriptBar /> : <LiveDock />;
 }
 
 function RouteView({ route }: { route: string }) {

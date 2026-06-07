@@ -203,6 +203,51 @@ export function useSystemAudioCapture() {
 
         mixedStreamRef.current = dest.stream;
 
+        // 4a. Live transcription tap. Sums mic + system to a mono mix,
+        //     decimates 48 kHz → 16 kHz (exact 3:1 — speech energy lives
+        //     well below the 8 kHz Nyquist limit at 16 kHz, so plain
+        //     decimation is adequate without an anti-alias filter), and
+        //     pushes 4096-sample chunks (≈256 ms) to main's transcribe-
+        //     stream sidecar via IPC. Main pipes those bytes into the
+        //     Python subprocess's stdin; the same Silero VAD + Parakeet
+        //     pipeline that drives the mic-only path emits LIVE_SEG events
+        //     the renderer's useLiveTranscript hook subscribes to.
+        //
+        //     ScriptProcessorNode is deprecated but works without a
+        //     separate worklet file. The output is silenced (gain 0) and
+        //     connected to ctx.destination only because the node needs a
+        //     downstream consumer to fire — no audio plays.
+        const liveMono = ctx.createGain();
+        liveMono.channelCount = 1;
+        liveMono.channelCountMode = 'explicit';
+        liveMono.channelInterpretation = 'speakers';
+        micGain.connect(liveMono);
+        sysGain.connect(liveMono);
+
+        const TAP_BUFFER = 4096;       // 48 kHz frames per callback (~85 ms)
+        const DECIMATION = 3;           // 48 kHz / 16 kHz
+        const SEND_SAMPLES = 4096;      // 16 kHz samples per IPC push (~256 ms)
+        const tapNode = ctx.createScriptProcessor(TAP_BUFFER, 1, 1);
+        const tapBuffer: number[] = [];
+        tapNode.onaudioprocess = (ev) => {
+          const input = ev.inputBuffer.getChannelData(0);
+          for (let i = 0; i < input.length; i += DECIMATION) {
+            tapBuffer.push(input[i]);
+          }
+          while (tapBuffer.length >= SEND_SAMPLES) {
+            const slice = tapBuffer.splice(0, SEND_SAMPLES);
+            const f32 = new Float32Array(slice);
+            // Send the underlying ArrayBuffer — Electron's structured-clone
+            // path encodes typed arrays as Buffers on the main side.
+            ipc().liveTranscript.pushChunk(f32.buffer);
+          }
+        };
+        const tapSilencer = ctx.createGain();
+        tapSilencer.gain.value = 0;
+        liveMono.connect(tapNode);
+        tapNode.connect(tapSilencer);
+        tapSilencer.connect(ctx.destination);
+
         // 4. Record the mix.
         const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
           ? 'audio/webm;codecs=opus'

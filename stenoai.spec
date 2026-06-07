@@ -7,11 +7,11 @@ distributed with the Electron app, eliminating the need for users to have
 Python installed.
 
 Includes:
-- whisper.cpp (via pywhispercpp) for transcription (~70MB)
+- Parakeet TDT v3 (via parakeet-mlx) for transcription (~50MB code, ~600MB model downloaded on first use)
 - Bundled Ollama binary for summarization (~220MB)
-- Total bundle: ~290MB (vs ~1GB+ with PyTorch)
+- MLX runtime for Apple Silicon inference
 
-No external dependencies required - users only need to download LLM models.
+No external dependencies required - users only need to download LLM + ASR models.
 
 Usage:
     pip install pyinstaller
@@ -25,10 +25,33 @@ from PyInstaller.utils.hooks import collect_data_files, collect_submodules, coll
 
 # Collect all hidden imports
 hiddenimports = [
-    # whisper.cpp bindings
+    # Parakeet MLX (ASR)
+    'parakeet_mlx',
+    'parakeet_mlx.audio',
+    'parakeet_mlx.tokenizer',
+    'parakeet_mlx.attention',
+    'parakeet_mlx.cache',
+
+    # MLX runtime
+    'mlx',
+    'mlx.core',
+    'mlx.nn',
+    'mlx.utils',
+
+    # whisper.cpp bindings — still used by the post-stop batch pipeline.
+    # Will be dropped once transcriber.py is rewritten to use Parakeet
+    # for batch transcription too.
     'pywhispercpp',
     'pywhispercpp.model',
     'pywhispercpp.constants',
+
+    # HuggingFace hub (parakeet-mlx pulls weights through this)
+    'huggingface_hub',
+
+    # ONNX Runtime — runs the bundled Silero VAD model directly. We avoid
+    # the silero-vad pip package because it imports torch at module load.
+    'onnxruntime',
+    'onnxruntime.capi',
 
     # Audio processing
     'sounddevice',
@@ -67,9 +90,16 @@ hiddenimports = [
     'multiprocessing',
 ]
 
-# Collect submodules
+# Collect submodules — parakeet-mlx + mlx + huggingface_hub all have
+# late-bound imports that PyInstaller's static analysis misses, and a partial
+# bundle silently breaks at runtime ("module not found" deep inside model
+# load). collect_submodules is the safe sledgehammer.
 hiddenimports += collect_submodules('pydantic')
 hiddenimports += collect_submodules('numpy')
+hiddenimports += collect_submodules('parakeet_mlx')
+hiddenimports += collect_submodules('mlx')
+hiddenimports += collect_submodules('huggingface_hub')
+hiddenimports += collect_submodules('onnxruntime')
 
 # Collect data files
 datas = []
@@ -77,18 +107,29 @@ datas = []
 # Include the src module
 datas += [('src', 'src')]
 
-# Collect any data files from pywhispercpp
-try:
-    datas += collect_data_files('pywhispercpp')
-except Exception:
-    pass
+# Include the scripts dir so the spike command can run from the bundle.
+# Kept tiny on purpose — the diagnostic spike-parakeet entrypoint reaches
+# in here when the user runs `dist/stenoai/stenoai spike-parakeet`.
+datas += [('scripts', 'scripts')]
 
-# Collect dynamic libraries (whisper.cpp native libs)
+# Collect data files (tokenizers, configs) from parakeet-mlx + mlx.
+# parakeet-mlx ships tokenizer JSON resources that get loaded by path.
+for pkg in ('parakeet_mlx', 'mlx', 'huggingface_hub', 'pywhispercpp', 'onnxruntime'):
+    try:
+        datas += collect_data_files(pkg)
+    except Exception:
+        pass
+
+# Collect dynamic libraries — MLX ships compiled Metal kernels (.metallib)
+# and a libmlx dylib. Without collect_dynamic_libs the bundle imports MLX
+# but bombs the first time it touches a Metal op. pywhispercpp ships
+# libwhisper.dylib via the same mechanism.
 binaries = []
-try:
-    binaries += collect_dynamic_libs('pywhispercpp')
-except Exception:
-    pass
+for pkg in ('mlx', 'parakeet_mlx', 'pywhispercpp', 'onnxruntime'):
+    try:
+        binaries += collect_dynamic_libs(pkg)
+    except Exception:
+        pass
 
 # Bundle Ollama binary and libraries
 import os
@@ -137,8 +178,12 @@ a = Analysis(
         'notebook',
         'sphinx',
         'pytest',
-        'unittest',
-        # Exclude openai-whisper (using whisper.cpp instead)
+        # `unittest` is kept in the bundle now — parakeet-mlx (via librosa /
+        # scipy) lazy-imports it during from_pretrained; excluding it makes
+        # model loading fail with "No module named 'unittest'".
+        # openai-whisper (PyTorch) is excluded — we use parakeet for live and
+        # whisper.cpp (via pywhispercpp) for batch, neither needs the
+        # PyTorch-based reference implementation.
         'whisper',
         'tiktoken',
         'tiktoken_ext',

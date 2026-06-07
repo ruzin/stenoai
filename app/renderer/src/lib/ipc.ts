@@ -446,6 +446,44 @@ export interface WhisperPullCompleteEvent {
   success: boolean;
   error?: string;
 }
+
+// ---------- live transcript ----------
+export interface LiveSegment {
+  text: string;
+  start: number;
+  end: number;
+  /** True once Parakeet has frozen this sentence — subsequent pushes will
+   *  start a new partial. False means the segment is the trailing partial
+   *  and may be replaced by the next event. */
+  isFinal: boolean;
+}
+
+export type LiveTranscriptStateResponse = Result<{
+  sessionName: string | null;
+  segments: LiveSegment[];
+  /** True once the Python side has loaded the Parakeet model. Before this
+   *  flips, the UI should show a model-loading state instead of an empty
+   *  "no speech yet" panel — the difference matters for first-launch UX. */
+  ready: boolean;
+  /** Last failure reported by the consumer thread, if any. Null on success. */
+  error: { stage: string; error?: string; message?: string } | null;
+}>;
+
+export interface LiveTranscriptReadyEvent {
+  sessionName: string;
+}
+
+export interface LiveTranscriptChunkEvent {
+  sessionName: string;
+  segment: LiveSegment;
+}
+
+export interface LiveTranscriptErrorEvent {
+  sessionName: string;
+  stage: string;
+  error?: string;
+  message?: string;
+}
 export interface UpdateAvailableEvent {
   version: string;
 }
@@ -518,6 +556,12 @@ export interface StenoaiBridge {
     pickAudioFile: RequestFn<[], PickAudioFileResponse>;
     getQueue: RequestFn<[], QueueStatus | { success: false; error: string }>;
     getDir: RequestFn<[], RecordingsDirResponse>;
+  };
+
+  liveTranscript: {
+    getState: RequestFn<[], LiveTranscriptStateResponse>;
+    pushChunk: SendFn<[bytes: ArrayBuffer | Uint8Array]>;
+    stop: SendFn<[]>;
   };
 
   meetings: {
@@ -664,6 +708,9 @@ export interface StenoaiBridge {
     modelPullComplete: Subscribe<ModelPullCompleteEvent>;
     whisperPullProgress: Subscribe<WhisperPullProgressEvent>;
     whisperPullComplete: Subscribe<WhisperPullCompleteEvent>;
+    liveTranscriptReady: Subscribe<LiveTranscriptReadyEvent>;
+    liveTranscriptChunk: Subscribe<LiveTranscriptChunkEvent>;
+    liveTranscriptError: Subscribe<LiveTranscriptErrorEvent>;
     updateAvailable: Subscribe<UpdateAvailableEvent>;
     updateDownloadProgress: Subscribe<UpdateProgressEvent>;
     updateDownloaded: Subscribe<UpdateDownloadedEvent>;

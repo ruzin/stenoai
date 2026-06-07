@@ -87,6 +87,12 @@ progress events back.
 | `select-audio-file` | R→M invoke | yes | `stenoai.recording.pickAudioFile()` |
 | `get-queue-status` | R→M invoke | yes | `stenoai.recording.getQueue()` |
 | `get-recordings-dir` | R→M invoke | yes | `stenoai.recording.getDir()` |
+| `get-live-transcript-state` | R→M invoke | yes | `stenoai.liveTranscript.getState()` |
+| `live-transcribe-chunk` | R→M send | yes | `stenoai.liveTranscript.pushChunk(bytes)` |
+| `live-transcribe-stop` | R→M send | yes | `stenoai.liveTranscript.stop()` |
+| `live-transcript-ready` | M→R | yes | `stenoai.on.liveTranscriptReady(cb)` |
+| `live-transcript-chunk` | M→R | yes | `stenoai.on.liveTranscriptChunk(cb)` |
+| `live-transcript-error` | M→R | yes | `stenoai.on.liveTranscriptError(cb)` |
 | `toggle-recording-hotkey` | M→R | yes | `stenoai.on.toggleRecordingHotkey(cb)` |
 
 ```ts
@@ -94,6 +100,22 @@ type StartRecordingResponse = Result<{ message: string }>;
 type StopRecordingResponse = Result<{ message: string }>;
 type PauseRecordingResponse = Result<{ message: string }>;
 type ResumeRecordingResponse = Result<{ message: string }>;
+
+interface LiveSegment {
+  text: string;
+  start: number;
+  end: number;
+  isFinal: boolean;
+}
+type LiveTranscriptStateResponse = Result<{
+  sessionName: string | null;
+  segments: LiveSegment[];
+  ready: boolean;
+  error: { stage: string; error?: string; message?: string } | null;
+}>;
+interface LiveTranscriptReadyEvent { sessionName: string }
+interface LiveTranscriptChunkEvent { sessionName: string; segment: LiveSegment }
+interface LiveTranscriptErrorEvent { sessionName: string; stage: string; error?: string; message?: string }
 
 interface QueueStatus {
   success: true;
