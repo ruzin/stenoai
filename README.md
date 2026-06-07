@@ -165,10 +165,11 @@ Have questions or suggestions? [Join our Discord](https://discord.gg/DZ6vcQnxxu)
 
 ## Installation
 
-Download the latest release for your Mac (**requires macOS 14 Sonoma or later**):
+Download the latest release (**Apple Silicon Mac, macOS 12 Monterey or later**):
 
 - [Apple Silicon (M1-M5)](https://github.com/ruzin/stenoai/releases/latest/download/stenoAI-macos-arm64.dmg)
-- [Intel Macs](https://github.com/ruzin/stenoai/releases/latest/download/stenoAI-macos-x64.dmg) Performance on Intel Macs is limited due to lack of dedicated AI inference capabilities on these older chips.
+
+> **Intel Mac users**: v0.4.0 is Apple Silicon only. Stay on [v0.3.8](https://github.com/ruzin/stenoai/releases/tag/v0.3.8) — the last release supporting Intel Macs. Auto-update on existing Intel installs will not push v0.4.0 to those machines.
 
 ### Installing on macOS
 
@@ -262,7 +263,7 @@ log stream --predicate 'eventMessage CONTAINS "ollama" OR process CONTAINS "Sten
 - **Recording stops early**: Check microphone permissions, Screen Recording permission (if using system audio), and available disk space.
 - **"Processing failed"**: Usually an Ollama service or model issue — check the terminal logs.
 - **Empty transcripts**: Whisper couldn't detect speech — verify audio input levels.
-- **Slow processing**: Normal for longer recordings; Ollama is CPU-intensive, especially on older Intel Macs.
+- **Slow processing**: Normal for longer recordings; Ollama is CPU-intensive. If summaries are unusually slow, switch to a smaller model in Settings → AI (Llama 3.2 3B is the fastest).
 
 ### Logs Location
 - **User Data**: `~/Library/Application Support/stenoai/`
