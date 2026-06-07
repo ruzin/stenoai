@@ -31,9 +31,10 @@ SUPPORTED_PARAKEET_MODELS: dict[str, dict] = {
         "name": "Parakeet TDT v3",
         "size": "572MB",
         "description": (
-            "Supports live transcription in English and 25 European "
-            "languages — Spanish, French, German, Italian, Portuguese, "
-            "Dutch, Russian, Polish, Czech, and 16 others."
+            "Highest quality. Supports live transcription in English "
+            "and 25 European languages — Spanish, French, German, "
+            "Italian, Portuguese, Dutch, Russian, Polish, Czech, and "
+            "16 others."
         ),
         "speed": "very fast",
         "quality": "excellent",

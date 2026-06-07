@@ -24,14 +24,28 @@ SUPPORTED_WHISPER_MODELS: dict[str, dict] = {
     "small": {
         "name": "Whisper Small",
         "size": "466MB",
-        "description": "Balanced speed and accuracy (default)",
+        "description": (
+            "Balanced speed and accuracy. Supports 99 languages "
+            "including non-European languages such as Chinese, "
+            "Japanese, Arabic, Korean, and Hindi."
+        ),
         "speed": "fast",
         "quality": "good",
+        # Whisper Large V3 Turbo covers the same 99 languages with
+        # higher quality. We keep Small available so existing users on
+        # tight disk budgets aren't broken, but new users should pick
+        # Large or Parakeet. ModelCard renders deprecated rows with a
+        # badge + dimmed opacity per the existing pattern.
+        "deprecated": True,
     },
     "large-v3-turbo": {
         "name": "Whisper Large V3 Turbo",
         "size": "1.6GB",
-        "description": "Best accuracy, optimised speed",
+        "description": (
+            "Best accuracy Whisper model. Supports 99 languages "
+            "including non-European languages such as Chinese, "
+            "Japanese, Arabic, Korean, and Hindi."
+        ),
         "speed": "medium",
         "quality": "excellent",
     },

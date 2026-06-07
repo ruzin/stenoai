@@ -368,7 +368,12 @@ function ModelCard({
           isCurrent ? 'var(--border-strong)' : 'var(--border-subtle)'
         }`,
         background: isCurrent ? 'var(--surface-raised)' : 'transparent',
-        opacity: deprecated ? 0.4 : 1,
+        // Dim deprecated rows EXCEPT when they're the user's current
+        // selection. A user's active choice should never look disabled —
+        // the Deprecated badge does the warning work, the dim just adds
+        // noise for someone who already opted in (e.g. existing Whisper
+        // Small users migrated from v0.3.7).
+        opacity: deprecated && !isCurrent ? 0.4 : 1,
       }}
     >
       <div className="min-w-0 flex-1">
@@ -825,14 +830,14 @@ function TranscriptionTab() {
 
   const engine = engineQuery.data ?? 'parakeet';
   const options = engine === 'whisper' ? LANGUAGES_WHISPER : LANGUAGES_PARAKEET;
-  // If the persisted language isn't in the active engine's option set
-  // (e.g. user picked Hindi on Whisper, then switched to Parakeet), show
-  // it as the trigger value anyway — but don't include it in the option
-  // list. They can pick a valid value to overwrite. We deliberately don't
-  // auto-coerce: silently rewriting a user's stored language behind their
-  // back is worse than letting them see the mismatch.
+  // useSetActiveTranscription coerces language to 'auto' when switching
+  // to an engine that doesn't support the current pick. So by the time
+  // this renders, persisted is normally in `options`. Edge case (CLI
+  // user, migrated config): fall back to 'auto' for display so the
+  // trigger isn't blank — the persisted value stays on disk until they
+  // pick something new.
   const persisted = language.data ?? 'auto';
-  const valueIsListed = options.some((o) => o.value === persisted);
+  const displayValue = options.some((o) => o.value === persisted) ? persisted : 'auto';
   const helperText =
     engine === 'parakeet'
       ? 'Auto-detect covers 25 European languages. For other languages, switch to Whisper.'
@@ -845,7 +850,7 @@ function TranscriptionTab() {
         description={helperText}
       >
         <Select
-          value={persisted}
+          value={displayValue}
           onValueChange={(v) => setLanguage.mutate(v)}
           disabled={!language.data}
         >
@@ -853,11 +858,6 @@ function TranscriptionTab() {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {!valueIsListed && (
-              <SelectItem value={persisted} disabled>
-                {persisted} (not supported on Parakeet)
-              </SelectItem>
-            )}
             {options.map((l) => (
               <SelectItem key={l.value} value={l.value}>
                 {l.label}
@@ -1383,6 +1383,7 @@ function TranscriptionModelList() {
     isCurrent: boolean;
     isDownloading: boolean;
     downloadProgress?: string;
+    deprecated: boolean;
     onSelect: () => void;
   };
 
@@ -1407,6 +1408,7 @@ function TranscriptionModelList() {
       isCurrent: activeEngine === 'parakeet' && m.installed,
       isDownloading,
       downloadProgress,
+      deprecated: Boolean(m.deprecated),
       onSelect: () => {
         if (m.installed) {
           setActive.mutate({ engine: 'parakeet' });
@@ -1429,6 +1431,7 @@ function TranscriptionModelList() {
       activeEngine === 'whisper' && m.installed && m.name === activeWhisperModel,
     isDownloading: Boolean(pullWhisper.progress[m.name]),
     downloadProgress: pullWhisper.progress[m.name],
+    deprecated: Boolean(m.deprecated),
     onSelect: () => {
       if (m.installed) {
         setActive.mutate({ engine: 'whisper', whisperModel: m.name });
@@ -1449,6 +1452,7 @@ function TranscriptionModelList() {
           sizeLabel={row.sizeLabel}
           note={row.note}
           isCurrent={row.isCurrent}
+          deprecated={row.deprecated}
           isDownloading={row.isDownloading}
           downloadProgress={row.downloadProgress}
           onSelect={row.onSelect}

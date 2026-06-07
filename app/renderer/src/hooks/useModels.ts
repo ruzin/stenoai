@@ -288,6 +288,13 @@ export function useTranscriptionEngine() {
   });
 }
 
+// Language sets the engine-aware dropdown lists honour. Mirrors the
+// LANGUAGES_PARAKEET / LANGUAGES_WHISPER arrays in Settings.tsx — kept in
+// useModels because the coercion below needs to run regardless of where
+// the engine switch was triggered from (Settings card click, Setup
+// wizard, future shortcut, etc.).
+const PARAKEET_LANGUAGES = new Set(['auto', 'en']);
+
 export function useSetActiveTranscription() {
   const qc = useQueryClient();
   return useMutation({
@@ -298,6 +305,23 @@ export function useSetActiveTranscription() {
       engine: TranscriptionEngine;
       whisperModel?: string;
     }) => {
+      // Coerce config.language when switching to an engine that doesn't
+      // support the current pick (e.g. Whisper → Parakeet with language=hi).
+      // Default to 'auto' rather than 'en' so the user's "I want
+      // detection / multi-language" intent is preserved across the switch.
+      // Per-engine memory ("restore the Parakeet language I had last
+      // time") is a richer UX but needs a new config field; deferred.
+      if (engine === 'parakeet') {
+        try {
+          const current = unwrap(await ipc().settings.getLanguage()).language;
+          if (!PARAKEET_LANGUAGES.has(current)) {
+            unwrap(await ipc().settings.setLanguage('auto'));
+          }
+        } catch {
+          // Best-effort coercion; the engine switch itself shouldn't fail
+          // just because the language read errored.
+        }
+      }
       unwrap(await ipc().transcriptionEngine.set(engine));
       if (engine === 'whisper' && whisperModel) {
         unwrap(await ipc().whisperModels.set(whisperModel));
@@ -307,6 +331,9 @@ export function useSetActiveTranscription() {
       qc.invalidateQueries({ queryKey: transcriptionEngineKeys.all });
       qc.invalidateQueries({ queryKey: whisperKeys.all });
       qc.invalidateQueries({ queryKey: parakeetKeys.all });
+      // Language might have been coerced; refresh the Settings dropdown
+      // and the live dock toggle, both of which read from the same key.
+      qc.invalidateQueries({ queryKey: ['settings', 'language'] });
     },
   });
 }
