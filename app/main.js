@@ -2065,6 +2065,20 @@ function spawnLiveTranscribe(sessionName) {
       });
     }
   });
+
+  // stdin emits 'error' asynchronously when a write completes against a
+  // closed pipe (the sync try/catch around stdin.write only catches
+  // immediate errors). Without a listener, EPIPE bubbles to uncaught and
+  // crashes the main process. Race window: chunks queued in the IPC
+  // pipeline land here after the sidecar exited (stop, crash, kill).
+  liveTranscribeProcess.stdin.on('error', (err) => {
+    if (err && err.code === 'EPIPE') {
+      // Expected when Python exited mid-write. The exit handler will
+      // null the ref so subsequent chunks short-circuit at the guard.
+      return;
+    }
+    sendDebugLog(`Live transcribe stdin error: ${err.message}`);
+  });
 }
 
 // Shared LIVE_* line handler used by the transcribe-stream stdout parser.
