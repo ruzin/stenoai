@@ -157,8 +157,14 @@ export function Home({ mode }: HomeProps) {
     });
   }, [calendar.data, upcomingTickMs]);
 
+  // Same gating as Home's empty-state CTA and UpcomingCard's onStart:
+  // block only when actively recording; 'processing' is fine — the
+  // previous note keeps summarising in the background queue while a
+  // new recording starts.
+  const canStartNewRecording =
+    recording.status !== 'recording' && recording.status !== 'paused';
   const onStartAllDay = (title: string) => {
-    if (recording.status !== 'idle') return;
+    if (!canStartNewRecording) return;
     void recording.startRecording(title);
   };
   const [allDayExpanded, setAllDayExpanded] = React.useState(false);
@@ -394,7 +400,7 @@ export function Home({ mode }: HomeProps) {
                 expanded={allDayExpanded}
                 onToggle={() => setAllDayExpanded((v) => !v)}
                 onStart={onStartAllDay}
-                recordingIdle={recording.status === 'idle'}
+                canStart={canStartNewRecording}
               />
               <div className="flex flex-col gap-2">
                 {upcomingToday.map((event) => (
@@ -412,7 +418,7 @@ export function Home({ mode }: HomeProps) {
                 expanded={allDayExpanded}
                 onToggle={() => setAllDayExpanded((v) => !v)}
                 onStart={onStartAllDay}
-                recordingIdle={recording.status === 'idle'}
+                canStart={canStartNewRecording}
               />
               <div className="flex flex-col gap-2">
                 <UpcomingCard event={tomorrowPreview} />
@@ -428,7 +434,7 @@ export function Home({ mode }: HomeProps) {
                 expanded={allDayExpanded}
                 onToggle={() => setAllDayExpanded((v) => !v)}
                 onStart={onStartAllDay}
-                recordingIdle={recording.status === 'idle'}
+                canStart={canStartNewRecording}
               />
             </section>
           )}
@@ -548,7 +554,11 @@ interface AllDayInlineProps {
   expanded: boolean;
   onToggle: () => void;
   onStart: (title: string) => void;
-  recordingIdle: boolean;
+  /** Permission to start a new recording — true when idle OR processing
+   *  (a previous note still summarising in the background queue doesn't
+   *  block a new recording). False only when a recording is actively
+   *  in progress (recording / paused). */
+  canStart: boolean;
 }
 
 function AllDayInline({
@@ -556,7 +566,7 @@ function AllDayInline({
   expanded,
   onToggle,
   onStart,
-  recordingIdle,
+  canStart,
 }: AllDayInlineProps) {
   if (events.length === 0) return null;
   return (
@@ -579,7 +589,7 @@ function AllDayInline({
               key={e.id}
               type="button"
               onClick={() => onStart(e.title)}
-              disabled={!recordingIdle}
+              disabled={!canStart}
               title={`Start recording: ${e.title}`}
               className="-mx-1 rounded px-1 py-0.5 transition-colors hover:bg-[color:var(--surface-hover)] disabled:opacity-50 disabled:hover:bg-transparent"
               style={{ color: 'var(--fg-1)' }}
