@@ -475,6 +475,10 @@ export interface LiveSegment {
    *  start a new partial. False means the segment is the trailing partial
    *  and may be replaced by the next event. */
   isFinal: boolean;
+  /** Speaker attribution from the per-channel RMS comparison performed
+   *  client-side when the segment arrives. 'You' / 'Others' / undefined
+   *  when the mic-only path is active (no system channel to compare). */
+  speaker?: 'You' | 'Others';
 }
 
 export type LiveTranscriptStateResponse = Result<{

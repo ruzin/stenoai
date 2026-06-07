@@ -1,5 +1,10 @@
 import * as React from 'react';
 import { ipc } from '@/lib/ipc';
+import {
+  LIVE_RMS_HZ,
+  pushRmsSample,
+  resetRmsBuffer,
+} from '@/lib/liveRmsBuffer';
 import { useRecording } from './useRecording';
 import { useTranscriptionEngine } from './useModels';
 import {
@@ -74,6 +79,12 @@ export function useSystemAudioCapture() {
   // setting and pause state are read via refs so the polling loop sees
   // current values without re-creating the interval.
   const silenceIntervalRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
+  // Higher-cadence interval that feeds the per-channel RMS buffer
+  // useLiveTranscript reads from to attribute each LIVE_SEG to You vs
+  // Others. Kept separate from the silence-auto-stop interval (1 Hz):
+  // the silence detector is decision-heavy and runs cheap; speaker
+  // attribution needs finer time resolution (~100 ms) than 1 s.
+  const rmsIntervalRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
   const silenceConfigRef = React.useRef<{ enabled: boolean; minutes: number }>({
     enabled: true,
     minutes: 15,
@@ -106,8 +117,20 @@ export function useSystemAudioCapture() {
       }
     };
 
+    const teardownRmsSampler = () => {
+      if (rmsIntervalRef.current !== null) {
+        clearInterval(rmsIntervalRef.current);
+        rmsIntervalRef.current = null;
+      }
+      // Don't reset the buffer on teardown — useLiveTranscript may still
+      // be processing the final LIVE_SEG events that arrived after
+      // recorder.stop(). Reset only happens at the START of the next
+      // recording.
+    };
+
     const teardownStreams = () => {
       teardownSilenceDetector();
+      teardownRmsSampler();
       micStreamRef.current?.getTracks().forEach((t) => t.stop());
       sysStreamRef.current?.getTracks().forEach((t) => t.stop());
       mixedStreamRef.current?.getTracks().forEach((t) => t.stop());
@@ -394,6 +417,27 @@ export function useSystemAudioCapture() {
             }
           })();
         }, SILENCE_SAMPLE_INTERVAL_MS);
+
+        // 5b. Per-channel RMS sampler — feeds liveRmsBuffer so
+        //     useLiveTranscript can attribute each LIVE_SEG to You vs
+        //     Others. Only meaningful when the live tap is engaged
+        //     (Parakeet engine): no live segments → no consumers of
+        //     this data. Reset the buffer here so it starts at t=0 for
+        //     this recording.
+        if (liveTapEnabledRef.current) {
+          resetRmsBuffer();
+          const recordingStartMs = Date.now();
+          rmsIntervalRef.current = setInterval(() => {
+            if (!activeRef.current || isPausedRef.current) return;
+            const micRms = computeRms(micAnalyser, micBuf);
+            const sysRms = computeRms(sysAnalyser, sysBuf);
+            pushRmsSample({
+              tSec: (Date.now() - recordingStartMs) / 1000,
+              micRms,
+              sysRms,
+            });
+          }, 1000 / LIVE_RMS_HZ);
+        }
 
         // 6. Confirm to main that the renderer-driven recording is live.
         //    Idempotent — main.js already flipped systemAudioRecordingActive

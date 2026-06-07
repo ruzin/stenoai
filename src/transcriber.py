@@ -48,6 +48,18 @@ logger = logging.getLogger(__name__)
 # is typically <0.2. 0.6 leaves wide headroom on either side.
 BLEED_JACCARD_THRESHOLD = 0.6
 
+# Per-segment bleed correction. Whole-transcript Jaccard catches
+# catastrophic bleed but misses the case where ASR word-level differences
+# ("weight" vs "wait", "let me" vs "let") drop the aggregate similarity
+# into the 0.5-0.6 gap while individual adjacent segments still obviously
+# echo. For each system_segment we find the nearest mic_segment by start
+# time within ±PER_SEGMENT_BLEED_WINDOW_S and drop it if Jaccard exceeds
+# the per-segment threshold. Threshold is lower than the whole-transcript
+# one because per-segment text is shorter — random vocabulary overlap is
+# rarer in a single sentence than across a whole call.
+PER_SEGMENT_BLEED_JACCARD = 0.5
+PER_SEGMENT_BLEED_WINDOW_S = 3.0
+
 # RMS energy gate for "channel has speech". Intentionally low (-70 dB) so
 # headphones-mode mic recordings — captured at much lower amplitude than
 # speakers-mode — still pass. The model handles low-amplitude speech fine;
@@ -183,6 +195,55 @@ def _token_jaccard(a: str, b: str) -> float:
     if not tokens_a or not tokens_b:
         return 0.0
     return len(tokens_a & tokens_b) / len(tokens_a | tokens_b)
+
+
+def _drop_per_segment_bleed(mic_segments: list, system_segments: list) -> list:
+    """Drop system_segments that are clearly mic-bleed echoes.
+
+    For each system segment, find any mic segment whose start time is
+    within PER_SEGMENT_BLEED_WINDOW_S and compute Jaccard. If the best
+    match exceeds PER_SEGMENT_BLEED_JACCARD, the system segment is
+    treated as a bleed echo of the mic and dropped. Catches the
+    "Estimated, underpowered, and under the radar" → "Estimated,
+    underpowered, and under the radar" duplication that whole-transcript
+    Jaccard misses when 1-2 ASR word swaps per segment drag the aggregate
+    below BLEED_JACCARD_THRESHOLD.
+    """
+    if not mic_segments or not system_segments:
+        return system_segments
+    kept: list = []
+    dropped_count = 0
+    for sys_seg in system_segments:
+        sys_text = (sys_seg.get("text") or "").strip()
+        if not sys_text:
+            kept.append(sys_seg)
+            continue
+        sys_start = float(sys_seg.get("start") or 0.0)
+        best_jaccard = 0.0
+        for mic_seg in mic_segments:
+            mic_start = float(mic_seg.get("start") or 0.0)
+            if abs(sys_start - mic_start) > PER_SEGMENT_BLEED_WINDOW_S:
+                continue
+            mic_text = (mic_seg.get("text") or "").strip()
+            if not mic_text:
+                continue
+            jac = _token_jaccard(sys_text, mic_text)
+            if jac > best_jaccard:
+                best_jaccard = jac
+        if best_jaccard >= PER_SEGMENT_BLEED_JACCARD:
+            dropped_count += 1
+            logger.debug(
+                "Per-segment bleed: dropping system %r (Jaccard=%.2f)",
+                sys_text[:60], best_jaccard,
+            )
+        else:
+            kept.append(sys_seg)
+    if dropped_count:
+        logger.info(
+            "Per-segment bleed correction: dropped %d/%d system segments",
+            dropped_count, len(system_segments),
+        )
+    return kept
 
 
 # Try Parakeet first (preferred — same engine as live, arm64 Macs only).
@@ -693,14 +754,21 @@ class WhisperTranscriber:
             else:
                 logger.info("System channel is silent, skipping")
 
-            # Speaker-bleed collapse. Without headphones, the mic captures
-            # both the user AND the system audio echoing through speakers,
-            # while the CoreAudio Tap captures the same system audio
-            # cleanly. Both channels end up containing nearly identical
-            # text and labelled bubbles would just repeat the same content
-            # twice (once green, once grey). When the two transcripts
-            # overlap above this Jaccard threshold, drop the system
-            # channel and present as mic-only.
+            # Speaker-bleed correction runs in two passes:
+            #
+            # 1. Per-segment: drop individual system segments that are
+            #    nearly identical to a mic segment at the same point in
+            #    time. Catches the localised case where most of the call
+            #    is fine but specific lines echo (or where ASR word-level
+            #    differences hide aggregate bleed behind the whole-
+            #    transcript threshold).
+            # 2. Whole-transcript: if what's LEFT of the system channel
+            #    still overlaps mic >= BLEED_JACCARD_THRESHOLD, the
+            #    remaining content is also bleed — collapse to mic-only.
+            #    The first pass usually handles things and this is a
+            #    backstop for catastrophic bleed.
+            if mic_segments and system_segments:
+                system_segments = _drop_per_segment_bleed(mic_segments, system_segments)
             if mic_segments and system_segments:
                 mic_text = ' '.join(s.get('text', '') for s in mic_segments)
                 sys_text = ' '.join(s.get('text', '') for s in system_segments)
