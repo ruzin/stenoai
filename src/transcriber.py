@@ -59,6 +59,13 @@ BLEED_JACCARD_THRESHOLD = 0.6
 # rarer in a single sentence than across a whole call.
 PER_SEGMENT_BLEED_JACCARD = 0.5
 PER_SEGMENT_BLEED_WINDOW_S = 3.0
+# Tokens-required gate. Short utterances ("Yes", "OK", "hi", "thanks")
+# trivially Jaccard-match across channels when both speakers genuinely
+# say the same one-word thing — the dedup would then delete a real
+# Others reply rather than a bleed echo. Below this token count we
+# leave the segment alone; the whole-transcript backstop still catches
+# catastrophic bleed where every line is short.
+PER_SEGMENT_BLEED_MIN_TOKENS = 4
 
 # RMS energy gate for "channel has speech". Intentionally low (-70 dB) so
 # headphones-mode mic recordings — captured at much lower amplitude than
@@ -218,6 +225,14 @@ def _drop_per_segment_bleed(mic_segments: list, system_segments: list) -> list:
         if not sys_text:
             kept.append(sys_seg)
             continue
+        # Token-count gate. A short system utterance against a
+        # likewise-short mic utterance ("Yes" vs "Yes") trivially
+        # matches and would be falsely dropped as bleed. Require enough
+        # tokens that a coincidental match is unlikely.
+        sys_tokens = re.findall(r"\w+", sys_text.lower())
+        if len(sys_tokens) < PER_SEGMENT_BLEED_MIN_TOKENS:
+            kept.append(sys_seg)
+            continue
         sys_start = float(sys_seg.get("start") or 0.0)
         best_jaccard = 0.0
         for mic_seg in mic_segments:
@@ -226,6 +241,11 @@ def _drop_per_segment_bleed(mic_segments: list, system_segments: list) -> list:
                 continue
             mic_text = (mic_seg.get("text") or "").strip()
             if not mic_text:
+                continue
+            # Same guard on the mic side — comparing a 10-word system
+            # line against a 1-word "OK" mic ack would give Jaccard ≈ 0.1
+            # anyway, but skipping avoids the spurious work.
+            if len(re.findall(r"\w+", mic_text.lower())) < PER_SEGMENT_BLEED_MIN_TOKENS:
                 continue
             jac = _token_jaccard(sys_text, mic_text)
             if jac > best_jaccard:

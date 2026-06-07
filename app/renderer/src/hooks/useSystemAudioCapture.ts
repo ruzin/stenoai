@@ -535,6 +535,20 @@ export function useSystemAudioCapture() {
   React.useEffect(() => {
     const bridge = ipc();
     return () => {
+      // Clear any live intervals first — the per-recording teardown helpers
+      // live in the other useEffect's scope so they aren't reachable here,
+      // and without explicit clears the silence-auto-stop poll and the
+      // per-channel RMS sampler would survive across unmount/remount
+      // cycles (visible in dev hot-reload, and a slow leak in any setup
+      // that conditionally mounts the app shell).
+      if (silenceIntervalRef.current !== null) {
+        clearInterval(silenceIntervalRef.current);
+        silenceIntervalRef.current = null;
+      }
+      if (rmsIntervalRef.current !== null) {
+        clearInterval(rmsIntervalRef.current);
+        rmsIntervalRef.current = null;
+      }
       const recorder = recorderRef.current;
       if (recorder && recorder.state !== 'inactive') {
         try { recorder.stop(); } catch { /* already stopping */ }

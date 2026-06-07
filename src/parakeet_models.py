@@ -45,11 +45,22 @@ SUPPORTED_PARAKEET_MODELS: dict[str, dict] = {
 def _hf_cache_dir_for(model_id: str) -> Path:
     """HuggingFace hub cache directory for a given repo id.
 
-    HF's on-disk layout is ``<hub>/models--<org>--<repo>/``. Honours
-    ``HUGGINGFACE_HUB_CACHE`` then ``HF_HOME`` (matching huggingface_hub's
-    own resolution order) before falling back to the platform default.
+    HF's on-disk layout is ``<hub>/models--<org>--<repo>/``. Resolution
+    matches huggingface_hub's own precedence:
+
+    1. ``HF_HUB_CACHE`` — newest, preferred env var.
+    2. ``HUGGINGFACE_HUB_CACHE`` — older alias still honoured by HF.
+    3. ``$HF_HOME/hub`` — when only the umbrella home is set.
+    4. ``~/.cache/huggingface/hub`` — platform default.
+
+    Without HF_HUB_CACHE in the precedence chain, anyone using the
+    modern env var would see ``is_installed`` falsely report False even
+    after a successful download.
     """
-    hub_cache = os.environ.get("HUGGINGFACE_HUB_CACHE")
+    hub_cache = (
+        os.environ.get("HF_HUB_CACHE")
+        or os.environ.get("HUGGINGFACE_HUB_CACHE")
+    )
     if not hub_cache:
         hf_home = os.environ.get("HF_HOME")
         if hf_home:

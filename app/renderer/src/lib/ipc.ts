@@ -457,11 +457,13 @@ export interface WhisperPullCompleteEvent {
   error?: string;
 }
 export interface ParakeetPullProgressEvent {
-  model: string | null;
+  /** Present on pull-parakeet-model invocations; omitted on
+   *  setup-parakeet (which downloads the default model with no id arg). */
+  model?: string | null;
   stage: 'downloading' | 'loading' | string;
 }
 export interface ParakeetPullCompleteEvent {
-  model: string | null;
+  model?: string | null;
   success: boolean;
   error?: string;
 }

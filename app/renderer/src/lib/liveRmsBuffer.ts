@@ -30,9 +30,14 @@ export type LiveSpeaker = 'You' | 'Others';
 
 /** Sampling rate of the underlying interval in useSystemAudioCapture. */
 export const LIVE_RMS_HZ = 10;
-/** Rolling window cap. 60 s is plenty for any single VAD utterance — even
- *  the MAX_UTTERANCE_S guard in the Python pipeline tops out at 30 s. */
-const BUFFER_CAP_S = 60;
+/** Rolling window cap. Sized for the longest plausible recording rather
+ *  than the longest single VAD utterance — useLiveTranscript's backfill
+ *  path (getState → decideSpeaker per segment) needs RMS coverage for
+ *  segments older than the current utterance, so a 60 s cap would
+ *  silently mis-attribute everything past the first minute as 'You'.
+ *  3600 s at 10 Hz = 36 000 entries × ~24 bytes each ≈ 850 KB, which is
+ *  fine for the renderer process. */
+const BUFFER_CAP_S = 3600;
 const BUFFER_CAP_SAMPLES = LIVE_RMS_HZ * BUFFER_CAP_S;
 
 const buffer: LiveRmsSample[] = [];
