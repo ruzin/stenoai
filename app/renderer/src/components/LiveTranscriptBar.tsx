@@ -248,20 +248,39 @@ function LiveTranscriptBodyState({ status, error, segments, filtering }: BodySta
       />
     );
   }
+  // Granola-style bubbles. Speaker attribution comes from the renderer-
+  // side per-channel RMS lookup in useLiveTranscript: 'Others' renders
+  // grey/left, anything else (explicit 'You' or no attribution) renders
+  // green/right. Same charitable default as TranscriptPanel — the
+  // recording mechanically belongs to the mic owner, so default to You.
+  // Partials stay dimmed at 0.55 opacity so the user can see them
+  // forming without confusing them for finalised text.
   return (
     <ul className="flex flex-col gap-0">
-      {segments.map((seg, i) => (
-        <li
-          key={i}
-          className="px-2 py-1 text-sm leading-[1.65]"
-          style={{
-            color: 'var(--fg-1)',
-            opacity: seg.isFinal ? 1 : 0.55,
-          }}
-        >
-          {seg.text}
-        </li>
-      ))}
+      {segments.map((seg, i) => {
+        const isYou = seg.speaker !== 'Others';
+        return (
+          <li
+            key={i}
+            className={cn(
+              'flex px-1 py-0.5',
+              isYou ? 'justify-end' : 'justify-start',
+            )}
+            style={{ opacity: seg.isFinal ? 1 : 0.55 }}
+          >
+            <div
+              className={cn(
+                'max-w-[78%] rounded-2xl px-3 py-1.5 text-sm leading-[1.5]',
+                isYou
+                  ? 'bg-green-100 text-green-950 rounded-br-md dark:bg-green-900/40 dark:text-green-100'
+                  : 'bg-neutral-200/80 text-neutral-900 rounded-bl-md dark:bg-neutral-700/60 dark:text-neutral-100',
+              )}
+            >
+              {seg.text}
+            </div>
+          </li>
+        );
+      })}
     </ul>
   );
 }

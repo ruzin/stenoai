@@ -1050,6 +1050,125 @@ def set_whisper_model_cmd(model_size: str):
         }))
 
 
+@cli.command(name='get-transcription-engine')
+def get_transcription_engine_cmd():
+    """Get the active ASR engine ('parakeet' or 'whisper')."""
+    from src.config import get_config
+    config = get_config()
+    print(json.dumps({
+        "engine": config.get_transcription_engine(),
+        "valid_engines": list(config.VALID_TRANSCRIPTION_ENGINES),
+    }))
+
+
+@cli.command(name='set-transcription-engine')
+@click.argument('engine')
+def set_transcription_engine_cmd(engine: str):
+    """Set the active ASR engine. Used by Settings → Transcribe."""
+    from src.config import get_config
+    config = get_config()
+    if config.set_transcription_engine(engine):
+        print(json.dumps({"success": True, "engine": engine}))
+    else:
+        print(json.dumps({
+            "success": False,
+            "error": f"Invalid engine: {engine}",
+            "valid_engines": list(config.VALID_TRANSCRIPTION_ENGINES),
+        }))
+
+
+@cli.command(name='list-parakeet-models')
+def list_parakeet_models_cmd():
+    """List Parakeet models with metadata + installed status (UI)."""
+    from src.parakeet_models import SUPPORTED_PARAKEET_MODELS, is_installed, DEFAULT_MODEL_ID
+    supported = {
+        key: {**meta, "installed": is_installed(key)}
+        for key, meta in SUPPORTED_PARAKEET_MODELS.items()
+    }
+    print(json.dumps({
+        "current_model": DEFAULT_MODEL_ID,
+        "supported_models": supported,
+        "provider": "local",
+    }))
+
+
+@cli.command(name='parakeet-status')
+def parakeet_status_cmd():
+    """Cheap check the Setup wizard polls to decide whether step 2 can be skipped."""
+    from src.parakeet_models import is_installed, DEFAULT_MODEL_ID
+    print(json.dumps({
+        "model": DEFAULT_MODEL_ID,
+        "installed": is_installed(DEFAULT_MODEL_ID),
+    }))
+
+
+@cli.command(name='warmup-parakeet')
+def warmup_parakeet_cmd():
+    """Pre-load Parakeet weights to warm the OS page cache.
+
+    Fired by Electron at app launch (best-effort, non-blocking). The
+    subprocess loads the model end-to-end and exits — when the actual
+    recording subprocess later spawns and calls ``ensure_loaded``, the
+    model files are already in the OS page cache so disk I/O is
+    near-instant. Does NOT eliminate the per-subprocess MLX parse cost
+    (that requires a long-running daemon), but it shaves the visible
+    portion of "first record after launch is slow" by ~1 s on modern
+    SSDs and more on cold caches.
+
+    Silent on success — Electron parses only the exit code. On
+    'model not installed' (fresh user before Setup runs), exits 0
+    without loading; the cost of trying to load a missing model is
+    higher than just skipping.
+    """
+    from src.parakeet_models import is_installed, DEFAULT_MODEL_ID
+    if not is_installed(DEFAULT_MODEL_ID):
+        return
+    try:
+        from src.parakeet import ensure_loaded
+        ensure_loaded()
+    except Exception as e:
+        # Best-effort: a warmup failure must never block app startup.
+        # Log to stderr so the Electron debug log captures it, but
+        # exit 0 so main.js doesn't surface it as an error to the user.
+        print(f"warmup-parakeet failed: {e}", file=sys.stderr)
+
+
+@cli.command(name='download-parakeet-model')
+@click.argument('model_id', required=False)
+def download_parakeet_model_cmd(model_id):
+    """Download a Parakeet snapshot from HuggingFace.
+
+    Emits ``PARAKEET_PULL_STAGE:<stage>`` lines (parsed by main.js into a
+    parakeet-pull-progress IPC event) before the final JSON result. Stages
+    are coarse (``downloading`` / ``loading``) because the snapshot is
+    multiple files and threading byte-level progress through
+    huggingface_hub's tqdm isn't worth the wire complexity for a one-time
+    ~600 MB download.
+    """
+    from src.parakeet_models import (
+        DEFAULT_MODEL_ID,
+        SUPPORTED_PARAKEET_MODELS,
+        download,
+        is_installed,
+    )
+    target = model_id or DEFAULT_MODEL_ID
+    if target not in SUPPORTED_PARAKEET_MODELS:
+        print(json.dumps({"success": False, "error": f"Unknown model: {target}"}))
+        return
+    if is_installed(target):
+        print(json.dumps({"success": True, "model": target, "already_installed": True}))
+        return
+
+    def emit(stage: str):
+        print(f"PARAKEET_PULL_STAGE:{stage}", flush=True)
+
+    ok = download(target, emit)
+    if ok:
+        print(json.dumps({"success": True, "model": target}))
+    else:
+        print(json.dumps({"success": False, "error": "Download failed"}))
+
+
 @cli.command(name='get-keep-recordings')
 def get_keep_recordings_cmd():
     """Get whether recordings are kept after processing."""
@@ -1167,15 +1286,20 @@ class _LiveVadPipeline:
       * Preroll ring holds the most recent ``PREROLL_CHUNKS`` chunks of
         pre-speech audio so the first syllable of every utterance is
         recovered after VAD fires (Silero always trips slightly late).
-      * Partials see only the trailing ``PARTIAL_WINDOW_S`` of the
-        utterance — re-transcribing the whole utterance every 400 ms
-        would be O(n²).
+      * Partials see the trailing ``PARTIAL_WINDOW_S`` of the utterance.
+        At 15 s, a 4-5 sentence monologue stays fully visible in the live
+        bubble (the prior 5 s window meant the rolling view dropped
+        earlier sentences off-screen during continuous speech). Parakeet
+        decodes 15 s in ~150-250 ms on Apple Silicon, comfortably under
+        the 400 ms partial interval. Going wider (e.g. matching MAX at
+        30 s) would risk decode time creeping past the interval and
+        back-pressuring the stdin pipe.
       * Final fires on Silero's SpeechEnd OR when the utterance hits
         ``MAX_UTTERANCE_S`` so a monologue still produces output.
     """
 
     PARTIAL_INTERVAL_S = 0.4
-    PARTIAL_WINDOW_S = 5.0
+    PARTIAL_WINDOW_S = 15.0
     MIN_UTTERANCE_S = 0.5
     MAX_UTTERANCE_S = 30.0
     PREROLL_CHUNKS = 2  # ≈ 512 ms at 256 ms per callback
@@ -1191,6 +1315,35 @@ class _LiveVadPipeline:
             import numpy as _np
         except ImportError:
             print("LIVE_ERROR:" + json.dumps({"stage": "import_numpy"}), flush=True)
+            return None
+
+        # Live transcription is Parakeet-only. Whisper users get the
+        # post-stop pipeline (src.transcriber.WhisperTranscriber) and no
+        # live drawer; main.js gates this by not passing --live to
+        # `record` and not spawning the `transcribe-stream` sidecar. The
+        # defensive check below catches anyone driving the CLI directly
+        # with a whisper config.
+        try:
+            from src.config import get_config
+            _cfg = get_config()
+            engine = _cfg.get_transcription_engine()
+            language = _cfg.get_language() or "auto"
+        except Exception as e:
+            print("LIVE_ERROR:" + json.dumps({
+                "stage": "load_config", "error": str(e),
+            }), flush=True)
+            return None
+
+        if engine != "parakeet":
+            print("LIVE_ERROR:" + json.dumps({
+                "stage": "engine_not_supported_for_live",
+                "engine": engine,
+                "message": (
+                    f"Live transcription is Parakeet-only; engine is {engine!r}. "
+                    "Switch to Parakeet in Settings → Transcribe, or rely on the "
+                    "post-stop transcription pipeline."
+                ),
+            }), flush=True)
             return None
 
         try:
@@ -1217,7 +1370,7 @@ class _LiveVadPipeline:
             sr = model_sample_rate()
         except Exception as e:
             print("LIVE_ERROR:" + json.dumps({
-                "stage": "load_parakeet", "error": str(e),
+                "stage": f"load_{engine}", "error": str(e),
             }), flush=True)
             return None
 
@@ -1239,8 +1392,8 @@ class _LiveVadPipeline:
             }), flush=True)
             return None
 
-        # Pre-load Parakeet so the first SpeechEnd doesn't pay the warm-load
-        # latency on the user's first utterance.
+        # Pre-load the active engine so the first SpeechEnd doesn't pay
+        # warm-load latency on the user's very first utterance.
         try:
             ensure_loaded()
         except Exception as e:
@@ -1250,6 +1403,8 @@ class _LiveVadPipeline:
             return None
 
         ready_payload = {
+            "engine": engine,
+            "language": language,
             "sample_rate": sr,
             "vad_chunk_samples": vad.chunk_samples,
             "min_utterance_s": cls.MIN_UTTERANCE_S,
@@ -1269,15 +1424,23 @@ class _LiveVadPipeline:
             SpeechStart=SpeechStart,
             SpeechEnd=SpeechEnd,
             transcribe_samples=transcribe_samples,
+            language=language,
         )
 
-    def __init__(self, np, vad, sr, SpeechStart, SpeechEnd, transcribe_samples):
+    def __init__(self, np, vad, sr, SpeechStart, SpeechEnd, transcribe_samples,
+                 language="auto"):
         self.np = np
         self.vad = vad
         self.sr = sr
         self.SpeechStart = SpeechStart
         self.SpeechEnd = SpeechEnd
         self.transcribe_samples = transcribe_samples
+        # Passed through to every transcribe_samples() call. Parakeet is
+        # multilingual + language-agnostic at inference, so "auto" and a
+        # concrete code both produce the same decoding. The hint is
+        # surfaced back to the summariser via detected_language when
+        # concrete.
+        self.language = "auto" if language in (None, "", "auto") else language
         self.partial_interval_samples = int(sr * self.PARTIAL_INTERVAL_S)
         self.partial_window_samples = int(sr * self.PARTIAL_WINDOW_S)
         self.min_utterance_samples = int(sr * self.MIN_UTTERANCE_S)
@@ -1387,7 +1550,7 @@ class _LiveVadPipeline:
             self.last_partial_text = ""
             return
         try:
-            result = self.transcribe_samples(self.speech_samples)
+            result = self.transcribe_samples(self.speech_samples, language=self.language)
             text = (result.get("text") or "").strip() if result else ""
         except Exception as e:
             print("LIVE_ERROR:" + json.dumps({
@@ -1422,7 +1585,7 @@ class _LiveVadPipeline:
         # every PARTIAL_INTERVAL_S would scale O(n²) with utterance length.
         tail = self.speech_samples[-self.partial_window_samples:]
         try:
-            result = self.transcribe_samples(tail)
+            result = self.transcribe_samples(tail, language=self.language)
         except Exception as e:
             # Partials are best-effort. Don't tear down the consumer over
             # a transient decode hiccup; the next partial/final retries.

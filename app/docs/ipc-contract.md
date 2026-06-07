@@ -38,6 +38,7 @@ will implement exactly what is listed here, exposed through
 | `setup-python` | R→M invoke | yes | `stenoai.setup.python()` |
 | `setup-ollama-and-model` | R→M invoke | yes | `stenoai.setup.ollamaAndModel()` |
 | `setup-whisper` | R→M invoke | yes | `stenoai.setup.whisper()` |
+| `setup-parakeet` | R→M invoke | yes | `stenoai.setup.parakeet()` |
 | `setup-test` | R→M invoke | yes | `stenoai.setup.test()` |
 | `trigger-setup-wizard` | R→M invoke | yes | `stenoai.setup.triggerWizard()` |
 | `trigger-setup-flow` | M→R | yes | `stenoai.on.setupFlowTriggered(cb)` |
@@ -318,6 +319,57 @@ type GetCurrentModelResponse = Result<{ model: string }>;
 
 interface ModelPullProgressEvent { model: string; progress: string }
 interface ModelPullCompleteEvent  { model: string; success: boolean; error?: string }
+```
+
+---
+
+## 6a. Transcription engine (Parakeet / Whisper)
+
+Engine selection + per-engine model management. User picks the active
+engine in Settings → Transcribe; the live VAD pipeline reads
+`transcription_engine` from config to decide which engine to load.
+Parakeet has one model id today; Whisper has two variants (Small +
+Large V3 Turbo).
+
+| Channel | Direction | Needed | Preload API |
+| --- | --- | --- | --- |
+| `get-transcription-engine` | R→M invoke | yes | `stenoai.transcriptionEngine.get()` |
+| `set-transcription-engine` | R→M invoke | yes | `stenoai.transcriptionEngine.set(engine)` |
+| `list-parakeet-models` | R→M invoke | yes | `stenoai.parakeetModels.list()` |
+| `pull-parakeet-model` | R→M invoke | yes | `stenoai.parakeetModels.pull(id?)` |
+| `parakeet-status` | R→M invoke | yes | `stenoai.parakeetModels.status()` |
+| `parakeet-pull-progress` | M→R | yes | `stenoai.on.parakeetPullProgress(cb)` |
+| `parakeet-pull-complete` | M→R | yes | `stenoai.on.parakeetPullComplete(cb)` |
+| `list-whisper-models` | R→M invoke | yes | `stenoai.whisperModels.list()` |
+| `set-whisper-model` | R→M invoke | yes | `stenoai.whisperModels.set(name)` |
+| `pull-whisper-model` | R→M invoke | yes | `stenoai.whisperModels.pull(name)` |
+| `whisper-pull-progress` | M→R | yes | `stenoai.on.whisperPullProgress(cb)` |
+| `whisper-pull-complete` | M→R | yes | `stenoai.on.whisperPullComplete(cb)` |
+
+```ts
+type TranscriptionEngine = 'parakeet' | 'whisper';
+
+type GetTranscriptionEngineResponse = Result<{
+  engine: TranscriptionEngine;
+  valid_engines: TranscriptionEngine[];
+}>;
+type ParakeetStatusResponse = Result<{ model: string; installed: boolean }>;
+
+// Parakeet pull events: `model` is present on pull-parakeet-model
+// invocations (the explicit id is echoed back); on setup-parakeet
+// (no id arg → default model) the field is omitted.
+interface ParakeetPullProgressEvent {
+  model?: string | null;
+  stage: 'downloading' | 'loading' | string;
+}
+interface ParakeetPullCompleteEvent {
+  model?: string | null;
+  success: boolean;
+  error?: string;
+}
+
+interface WhisperPullProgressEvent { model: string; progress: string }
+interface WhisperPullCompleteEvent { model: string; success: boolean; error?: string }
 ```
 
 ---

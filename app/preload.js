@@ -82,6 +82,7 @@ const stenoai = {
     python: () => invoke('setup-python'),
     ollamaAndModel: () => invoke('setup-ollama-and-model'),
     whisper: () => invoke('setup-whisper'),
+    parakeet: () => invoke('setup-parakeet'),
     test: () => invoke('setup-test'),
     triggerWizard: () => invoke('trigger-setup-wizard'),
   },
@@ -168,6 +169,17 @@ const stenoai = {
     list: () => invoke('list-whisper-models'),
     set: (name) => invoke('set-whisper-model', name),
     pull: (name) => invoke('pull-whisper-model', name),
+  },
+
+  parakeetModels: {
+    list: () => invoke('list-parakeet-models'),
+    pull: (id) => invoke('pull-parakeet-model', id ?? null),
+    status: () => invoke('parakeet-status'),
+  },
+
+  transcriptionEngine: {
+    get: () => invoke('get-transcription-engine'),
+    set: (engine) => invoke('set-transcription-engine', engine),
   },
 
   settings: {
@@ -279,6 +291,8 @@ const stenoai = {
     modelPullComplete: (cb) => subscribe('model-pull-complete', cb),
     whisperPullProgress: (cb) => subscribe('whisper-pull-progress', cb),
     whisperPullComplete: (cb) => subscribe('whisper-pull-complete', cb),
+    parakeetPullProgress: (cb) => subscribe('parakeet-pull-progress', cb),
+    parakeetPullComplete: (cb) => subscribe('parakeet-pull-complete', cb),
     liveTranscriptReady: (cb) => subscribe('live-transcript-ready', cb),
     liveTranscriptChunk: (cb) => subscribe('live-transcript-chunk', cb),
     liveTranscriptError: (cb) => subscribe('live-transcript-error', cb),

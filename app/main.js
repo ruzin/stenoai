@@ -28,6 +28,12 @@ if (IS_E2E_MOCK_IPC) {
   require('./e2e-mock-ipc').install({ ipcMain, BrowserWindow });
 }
 
+// Distinguish dev runs from the packaged "Steno" app in the dock, About menu,
+// and Cmd+Tab. Production keeps the productName from package.json untouched.
+if (!app.isPackaged) {
+  app.setName('Steno Dev');
+}
+
 // Initialize electron-audio-loopback before app is ready.
 // forceCoreAudioTap drives Chromium to use macOS 14.4+ CoreAudio Process Taps
 // (NSAudioCaptureUsageDescription) rather than ScreenCaptureKit. SCK was
@@ -812,7 +818,35 @@ if (!gotSingleInstanceLock) {
   app.whenReady().then(async () => {
     // Set application menu with Help > Learn More
     const appMenu = Menu.buildFromTemplate([
-      { role: 'appMenu' },
+      {
+        // Custom appMenu to add Settings… with the conventional ⌘, shortcut
+        // (the default `{ role: 'appMenu' }` doesn't include Settings). Mirrors
+        // the tray's Settings item — both fire the same `tray-open-settings`
+        // IPC so the renderer wiring stays in one place.
+        label: app.name,
+        submenu: [
+          { role: 'about' },
+          { type: 'separator' },
+          {
+            label: 'Settings…',
+            accelerator: 'CmdOrCtrl+,',
+            click: () => {
+              showAndFocusWindow();
+              if (mainWindow) {
+                mainWindow.webContents.send('tray-open-settings');
+              }
+            }
+          },
+          { type: 'separator' },
+          { role: 'services' },
+          { type: 'separator' },
+          { role: 'hide' },
+          { role: 'hideOthers' },
+          { role: 'unhide' },
+          { type: 'separator' },
+          { role: 'quit' }
+        ]
+      },
       { role: 'fileMenu' },
       { role: 'editMenu' },
       { role: 'viewMenu' },
@@ -856,6 +890,38 @@ if (!gotSingleInstanceLock) {
       await cleanupOrphanRecording();
     } catch (e) {
       sendDebugLog(`[orphan-cleanup] unexpected error during startup cleanup: ${e.message}`);
+    }
+
+    // Dev runs otherwise show the default Electron dock icon. Packaged builds
+    // already get this icon via electron-builder's `mac.icon` setting.
+    if (!app.isPackaged && process.platform === 'darwin' && app.dock) {
+      try {
+        app.dock.setIcon(path.join(__dirname, 'build', 'icon-dragonfly.icns'));
+      } catch (e) {
+        console.error('Failed to set dev dock icon:', e.message);
+      }
+    }
+
+    // Pre-load Parakeet weights in a background subprocess so the first
+    // recording's `record --live` / `transcribe-stream` spawn sees the
+    // model file already in the OS page cache. Saves ~1 s off the
+    // visible "first record after launch" latency. Fire-and-forget —
+    // never block window creation on it. Skipped for Whisper users
+    // (Parakeet model would be downloading or absent) and gated on
+    // model presence by the CLI command itself (no-ops when missing).
+    if (loadTranscriptionEngine() === 'parakeet') {
+      try {
+        const warmupProc = spawn(getBackendPath(), ['warmup-parakeet'], {
+          cwd: getBackendCwd(),
+          stdio: 'ignore',
+        });
+        warmupProc.unref();
+        warmupProc.on('error', (err) => {
+          sendDebugLog(`[parakeet-warmup] spawn failed (non-fatal): ${err.message}`);
+        });
+      } catch (e) {
+        sendDebugLog(`[parakeet-warmup] startup error (non-fatal): ${e.message}`);
+      }
     }
 
     createWindow();
@@ -2080,6 +2146,20 @@ function spawnLiveTranscribe(sessionName) {
       });
     }
   });
+
+  // stdin emits 'error' asynchronously when a write completes against a
+  // closed pipe (the sync try/catch around stdin.write only catches
+  // immediate errors). Without a listener, EPIPE bubbles to uncaught and
+  // crashes the main process. Race window: chunks queued in the IPC
+  // pipeline land here after the sidecar exited (stop, crash, kill).
+  liveTranscribeProcess.stdin.on('error', (err) => {
+    if (err && err.code === 'EPIPE') {
+      // Expected when Python exited mid-write. The exit handler will
+      // null the ref so subsequent chunks short-circuit at the guard.
+      return;
+    }
+    sendDebugLog(`Live transcribe stdin error: ${err.message}`);
+  });
 }
 
 // Shared LIVE_* line handler used by the transcribe-stream stdout parser.
@@ -2165,6 +2245,24 @@ function loadSystemAudioEnabled() {
     return cfg.system_audio_enabled !== false;
   } catch (_) {
     return false;
+  }
+}
+
+// Sync read of the active ASR engine. Mirrors loadSystemAudioEnabled —
+// reading the JSON directly so we don't spawn a Python subprocess on
+// every recording start just to ask. Default 'parakeet' matches the
+// Python migration (fresh installs default to Parakeet); existing users
+// will have had transcription_engine written on their first launch by
+// Config._migrate_transcription_engine.
+function loadTranscriptionEngine() {
+  try {
+    const cfgPath = path.join(os.homedir(), 'Library', 'Application Support', 'stenoai', 'config.json');
+    if (!fs.existsSync(cfgPath)) return 'parakeet';
+    const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf-8'));
+    const engine = cfg.transcription_engine;
+    return engine === 'whisper' ? 'whisper' : 'parakeet';
+  } catch (_) {
+    return 'parakeet';
   }
 }
 
@@ -2597,6 +2695,12 @@ ipcMain.handle('start-recording-ui', async (_, sessionName) => {
     }
 
     const actualSessionName = sessionName || 'Note';
+    // Whisper recordings use the post-stop pipeline (no live drawer, no
+    // sidecar). Parakeet recordings spawn the VAD-gated live consumer
+    // so the renderer can show real-time text. Cached read — avoids a
+    // Python subprocess on every recording start.
+    const engine = loadTranscriptionEngine();
+    const liveEnabled = engine === 'parakeet';
 
     // Renderer-driven dual-stream path: when system audio is enabled the
     // renderer (useSystemAudioCapture) captures mic + system loopback and
@@ -2623,14 +2727,18 @@ ipcMain.handle('start-recording-ui', async (_, sessionName) => {
         ready: false,
         error: null,
       };
-      // Spawn the Parakeet+Silero transcribe-stream subprocess. The
-      // renderer will pipe audio chunks into it via `live-transcribe-chunk`
-      // and the stdout protocol matches the in-process `record --live`
-      // consumer so the renderer's useLiveTranscript hook works unchanged.
-      try {
-        spawnLiveTranscribe(actualSessionName);
-      } catch (e) {
-        sendDebugLog(`Failed to spawn live transcribe sidecar: ${e.message}`);
+      // Spawn the Parakeet+Silero transcribe-stream subprocess. Whisper
+      // recordings skip this entirely — the renderer's useSystemAudioCapture
+      // gates its IPC writes on the same engine, so no chunks are produced
+      // when the sidecar isn't running.
+      if (liveEnabled) {
+        try {
+          spawnLiveTranscribe(actualSessionName);
+        } catch (e) {
+          sendDebugLog(`Failed to spawn live transcribe sidecar: ${e.message}`);
+        }
+      } else {
+        sendDebugLog(`Live transcription off — engine=${engine}`);
       }
       updateTrayIcon(true);
       trackEvent('recording_started', { recording_mode: 'system_audio' });
@@ -2643,8 +2751,8 @@ ipcMain.handle('start-recording-ui', async (_, sessionName) => {
 
     // Legacy mic-only path: spawn Python `record` subprocess.
     console.log('Starting long recording process...');
-    sendDebugLog(`Starting recording process: ${actualSessionName}`);
-    sendDebugLog('$ stenoai record 7200');
+    sendDebugLog(`Starting recording process: ${actualSessionName} (engine=${engine})`);
+    sendDebugLog('$ stenoai record 7200' + (liveEnabled ? ' --live' : ''));
 
     // Start background recording with 2-hour limit
     // Pass AI env (cloud key and/or org-adapter url+token) so the
@@ -2652,10 +2760,12 @@ ipcMain.handle('start-recording-ui', async (_, sessionName) => {
     const recordEnv = getAiEnv();
 
     // --live engages the Parakeet streaming consumer thread inside the
-    // record subprocess. The subprocess loads the model lazily, so this
-    // doesn't delay recording start — the user sees "Recording" instantly
-    // and LIVE_READY arrives a moment later once MLX has weights in memory.
-    currentRecordingProcess = spawn(getBackendPath(), ['record', '7200', actualSessionName, '--live'], {
+    // record subprocess. Whisper recordings record without --live so the
+    // subprocess captures audio only — the post-stop pipeline transcribes
+    // the WAV via WhisperTranscriber.
+    const recordArgs = ['record', '7200', actualSessionName];
+    if (liveEnabled) recordArgs.push('--live');
+    currentRecordingProcess = spawn(getBackendPath(), recordArgs, {
       cwd: getBackendCwd(),
       env: Object.keys(recordEnv).length > 0 ? { ...require('process').env, ...recordEnv } : undefined
     });
@@ -3980,6 +4090,66 @@ ipcMain.handle('setup-ollama-and-model', async () => {
   }
 });
 
+ipcMain.handle('setup-parakeet', async () => {
+  try {
+    // Download Parakeet TDT v3 (~572 MB) via the bundled backend. Used by
+    // the Setup wizard's step 2 for fresh installs. Emits coarse stage
+    // lines (PARAKEET_PULL_STAGE:downloading / :loading) rather than
+    // byte-level progress — see src/parakeet_models.py for why.
+    const backendPath = getBackendPath();
+    sendDebugLog('Downloading Parakeet TDT v3 (~572 MB)...');
+    sendDebugLog(`$ ${backendPath} download-parakeet-model`);
+
+    return new Promise((resolve) => {
+      const proc = spawn(backendPath, ['download-parakeet-model'], { stdio: 'pipe' });
+      let lastStdoutLine = '';
+
+      proc.stdout.on('data', (data) => {
+        const text = data.toString();
+        for (const line of text.split('\n')) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+          sendDebugLog(trimmed);
+          if (trimmed.startsWith('PARAKEET_PULL_STAGE:')) {
+            const stage = trimmed.slice('PARAKEET_PULL_STAGE:'.length);
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('parakeet-pull-progress', { stage });
+            }
+          } else {
+            lastStdoutLine = trimmed;
+          }
+        }
+      });
+
+      proc.stderr.on('data', (data) => {
+        const text = data.toString().trim();
+        if (text) sendDebugLog('STDERR: ' + text);
+      });
+
+      proc.on('close', (code) => {
+        let parsed = null;
+        try { parsed = JSON.parse(lastStdoutLine); } catch (_) { /* not JSON */ }
+        const ok = code === 0 && (!parsed || parsed.success !== false);
+        if (ok) {
+          sendDebugLog('Parakeet model ready');
+          resolve({ success: true, message: 'Parakeet model ready' });
+        } else {
+          const err = (parsed && parsed.error) || `Parakeet download exited with code ${code}`;
+          sendDebugLog(err);
+          resolve({ success: false, error: err });
+        }
+      });
+
+      proc.on('error', (error) => {
+        sendDebugLog(`Process error: ${error.message}`);
+        resolve({ success: false, error: error.message });
+      });
+    });
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
 ipcMain.handle('setup-whisper', async () => {
   try {
     // Download whisper model using the bundled backend
@@ -4434,6 +4604,38 @@ ipcMain.handle('set-model', async (event, modelName) => {
 
 
 
+ipcMain.handle('get-transcription-engine', async () => {
+  try {
+    const result = await runPythonScript('simple_recorder.py', ['get-transcription-engine'], true);
+    const jsonData = JSON.parse(result.trim());
+    return { success: true, ...jsonData };
+  } catch (e) { return { success: false, error: e.message }; }
+});
+
+ipcMain.handle('set-transcription-engine', async (event, engine) => {
+  try {
+    const result = await runPythonScript('simple_recorder.py', ['set-transcription-engine', engine]);
+    const jsonData = JSON.parse(result.trim());
+    return { success: true, ...jsonData };
+  } catch (e) { return { success: false, error: e.message }; }
+});
+
+ipcMain.handle('list-parakeet-models', async () => {
+  try {
+    const result = await runPythonScript('simple_recorder.py', ['list-parakeet-models'], true);
+    const jsonData = JSON.parse(result.trim());
+    return { success: true, ...jsonData };
+  } catch (e) { return { success: false, error: e.message }; }
+});
+
+ipcMain.handle('parakeet-status', async () => {
+  try {
+    const result = await runPythonScript('simple_recorder.py', ['parakeet-status'], true);
+    const jsonData = JSON.parse(result.trim());
+    return { success: true, ...jsonData };
+  } catch (e) { return { success: false, error: e.message }; }
+});
+
 ipcMain.handle('get-whisper-model', async () => {
   try {
     const result = await runPythonScript('simple_recorder.py', ['get-whisper-model'], true);
@@ -4555,6 +4757,100 @@ ipcMain.handle('pull-whisper-model', async (event, modelName) => {
         finishOnce(
           { success: false, error: error.message },
           { model: modelName, success: false, error: error.message },
+        );
+      });
+    });
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('pull-parakeet-model', async (event, modelId) => {
+  // Mirrors pull-whisper-model: settle-gate + SIGTERM-then-SIGKILL escalation
+  // so a stalled HF download can never leave the renderer spinner hanging.
+  // Progress is coarse — we relay PARAKEET_PULL_STAGE:<stage> lines from the
+  // Python child rather than byte counts. See src/parakeet_models.py for why.
+  try {
+    sendDebugLog(`Pulling Parakeet model: ${modelId || '<default>'}`);
+    return new Promise((resolve) => {
+      const args = ['download-parakeet-model'];
+      if (modelId) args.push(modelId);
+      const proc = spawn(getBackendPath(), args, { cwd: getBackendCwd() });
+      let lastStdoutLine = '';
+      let timedOut = false;
+      let settled = false;
+      let sigkillTimer = null;
+      let forceSettleTimer = null;
+      const finishOnce = (result, completeEvent) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(procTimeout);
+        if (sigkillTimer) clearTimeout(sigkillTimer);
+        if (forceSettleTimer) clearTimeout(forceSettleTimer);
+        if (mainWindow && !mainWindow.isDestroyed() && completeEvent) {
+          mainWindow.webContents.send('parakeet-pull-complete', completeEvent);
+        }
+        resolve(result);
+      };
+      const procTimeout = setTimeout(() => {
+        timedOut = true;
+        sendDebugLog('pull-parakeet-model timed out after 30 minutes, killing');
+        try { proc.kill('SIGTERM'); } catch (_) { /* already exited */ }
+        sigkillTimer = setTimeout(() => {
+          sendDebugLog('SIGTERM unresponsive, escalating to SIGKILL');
+          try { proc.kill('SIGKILL'); } catch (_) { /* already exited */ }
+        }, 5000);
+        forceSettleTimer = setTimeout(() => {
+          sendDebugLog('Force-settling pull-parakeet-model Promise after kill grace');
+          finishOnce(
+            { success: false, error: 'Download timed out after 30 minutes' },
+            { model: modelId, success: false, error: 'Download timed out after 30 minutes' },
+          );
+        }, 15000);
+      }, 30 * 60 * 1000);
+      proc.stdout.on('data', (data) => {
+        const text = data.toString();
+        for (const line of text.split('\n')) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+          sendDebugLog(trimmed);
+          if (trimmed.startsWith('PARAKEET_PULL_STAGE:')) {
+            const stage = trimmed.slice('PARAKEET_PULL_STAGE:'.length);
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('parakeet-pull-progress', { model: modelId, stage });
+            }
+          } else {
+            lastStdoutLine = trimmed;
+          }
+        }
+      });
+      proc.stderr.on('data', (data) => {
+        const text = data.toString().trim();
+        if (text) sendDebugLog(`STDERR: ${text}`);
+      });
+      proc.on('close', (code) => {
+        let pullResult = null;
+        try { pullResult = JSON.parse(lastStdoutLine); } catch (_) { /* not JSON */ }
+        const succeeded = !timedOut && code === 0 && (!pullResult || pullResult.success !== false);
+        if (succeeded) {
+          finishOnce(
+            { success: true, model: modelId },
+            { model: modelId, success: true },
+          );
+        } else {
+          const errorMsg = timedOut
+            ? 'Download timed out after 30 minutes'
+            : (pullResult && pullResult.error) || `Process exited with code ${code}`;
+          finishOnce(
+            { success: false, error: errorMsg },
+            { model: modelId, success: false, error: errorMsg },
+          );
+        }
+      });
+      proc.on('error', (error) => {
+        finishOnce(
+          { success: false, error: error.message },
+          { model: modelId, success: false, error: error.message },
         );
       });
     });
@@ -5935,7 +6231,7 @@ function fetchCalendarEvents(accessToken, maxResults = 7, signal) {
       maxResults: String(maxResults),
       singleEvents: 'true',
       orderBy: 'startTime',
-      fields: 'items(id,summary,description,start,end,attendees,htmlLink,conferenceData)'
+      fields: 'items(id,status,summary,description,start,end,attendees,htmlLink,conferenceData)'
     });
 
     const options = {
@@ -6209,7 +6505,7 @@ function fetchOutlookCalendarEvents(accessToken, maxResults = 7, signal) {
       endDateTime: weekAhead.toISOString(),
       $top: String(maxResults),
       $orderby: 'start/dateTime',
-      $select: 'id,subject,body,start,end,attendees,webLink,onlineMeeting,isOnlineMeeting'
+      $select: 'id,subject,body,start,end,attendees,webLink,onlineMeeting,isOnlineMeeting,isAllDay,isCancelled,responseStatus'
     });
 
     const options = {
@@ -6270,6 +6566,21 @@ function normalizeOutlookEvent(event) {
     return dt.endsWith('Z') ? dt : dt + 'Z';
   };
 
+  // Map Outlook responseStatus.response → the common enum used downstream.
+  // 'tentativelyAccepted' is the Outlook wire name for what Google calls 'tentative';
+  // 'notResponded' maps to Google's 'needsAction'. 'none' / missing → 'unknown'
+  // so the downstream filter defaults to "show" rather than guessing.
+  const mapOutlookResponse = (r) => {
+    switch (r) {
+      case 'accepted': return 'accepted';
+      case 'declined': return 'declined';
+      case 'tentativelyAccepted': return 'tentative';
+      case 'notResponded': return 'needsAction';
+      case 'organizer': return 'organizer';
+      default: return 'unknown';
+    }
+  };
+
   return {
     id: event.id,
     summary: event.subject || 'No title',
@@ -6290,7 +6601,12 @@ function normalizeOutlookEvent(event) {
     htmlLink: event.webLink,
     conferenceData: event.isOnlineMeeting && event.onlineMeeting ? {
       entryPoints: [{ uri: event.onlineMeeting.joinUrl, entryPointType: 'video' }]
-    } : undefined
+    } : undefined,
+    // Carried forward for normalizeCalendarEvent — Outlook reports these at the
+    // top level so we don't need to inspect attendees to find "self".
+    isAllDay: event.isAllDay === true,
+    isCancelled: event.isCancelled === true,
+    selfResponseStatus: mapOutlookResponse(event.responseStatus?.response)
   };
 }
 
@@ -6351,7 +6667,24 @@ ipcMain.handle('google-auth-disconnect', async () => {
   }
 });
 
+// Map Google attendee.responseStatus → the common enum. Google uses the same
+// strings as our enum for the four "real" states, so this is mostly identity.
+function mapGoogleResponse(r) {
+  switch (r) {
+    case 'accepted': return 'accepted';
+    case 'declined': return 'declined';
+    case 'tentative': return 'tentative';
+    case 'needsAction': return 'needsAction';
+    default: return 'unknown';
+  }
+}
+
+// Returns null for cancelled events so the caller can drop them. Google marks
+// them with status === 'cancelled'; Outlook with isCancelled === true (carried
+// through from normalizeOutlookEvent).
 function normalizeCalendarEvent(event) {
+  if (event.status === 'cancelled' || event.isCancelled === true) return null;
+
   const start =
     event.start?.dateTime ||
     event.start?.date ||
@@ -6360,6 +6693,32 @@ function normalizeCalendarEvent(event) {
     event.end?.dateTime ||
     event.end?.date ||
     (typeof event.end === 'string' ? event.end : '');
+
+  // All-day events have date-only start/end ("YYYY-MM-DD") on Google. Outlook
+  // carries an explicit flag through normalizeOutlookEvent.
+  const isAllDay =
+    event.isAllDay === true ||
+    (!event.start?.dateTime && !!event.start?.date);
+
+  // Self response. Outlook hands us the answer directly (top-level
+  // responseStatus → carried through as selfResponseStatus). Google requires
+  // finding the attendee with self === true; if there's no attendees list at
+  // all the event is calendar-only (e.g. a self-blocked focus block) so treat
+  // it as 'organizer' — show it, never label it as declined.
+  let responseStatus = event.selfResponseStatus;
+  if (!responseStatus) {
+    if (Array.isArray(event.attendees) && event.attendees.length > 0) {
+      const self = event.attendees.find((a) => a && a.self === true);
+      if (self) {
+        responseStatus = self.organizer ? 'organizer' : mapGoogleResponse(self.responseStatus);
+      } else {
+        responseStatus = 'unknown';
+      }
+    } else {
+      responseStatus = 'organizer';
+    }
+  }
+
   return {
     id: event.id,
     title: event.summary || event.title || 'No title',
@@ -6370,6 +6729,8 @@ function normalizeCalendarEvent(event) {
       event.onlineMeeting?.joinUrl ||
       event.meeting_url ||
       undefined,
+    is_all_day: isAllDay,
+    response_status: responseStatus,
   };
 }
 
@@ -6379,13 +6740,13 @@ ipcMain.handle('get-calendar-events', async () => {
     const googleToken = await getValidAccessToken();
     if (googleToken) {
       const raw = await fetchCalendarEvents(googleToken);
-      return { success: true, events: raw.map(normalizeCalendarEvent) };
+      return { success: true, events: raw.map(normalizeCalendarEvent).filter(Boolean) };
     }
 
     const outlookToken = await getValidOutlookAccessToken();
     if (outlookToken) {
       const raw = await fetchOutlookCalendarEvents(outlookToken);
-      return { success: true, events: raw.map(normalizeCalendarEvent) };
+      return { success: true, events: raw.map(normalizeCalendarEvent).filter(Boolean) };
     }
 
     return { success: false, needsAuth: true };
@@ -6419,6 +6780,8 @@ function pickCurrentCalendarEvent(events, now = new Date()) {
   for (const e of events) {
     if (!e || typeof e.start !== 'string' || typeof e.end !== 'string') continue;
     if (!e.start.includes('T') || !e.end.includes('T')) continue;
+    if (e.is_all_day === true) continue;
+    if (e.response_status === 'declined') continue;
     const startMs = new Date(e.start).getTime();
     const endMs = new Date(e.end).getTime();
     if (!isFinite(startMs) || !isFinite(endMs)) continue;
@@ -6456,12 +6819,12 @@ async function getCalendarEventForNow(timeoutMs = 1500) {
     const googleToken = await getValidAccessToken();
     if (googleToken) {
       const raw = await fetchCalendarEvents(googleToken, 7, signal);
-      events = raw.map(normalizeCalendarEvent);
+      events = raw.map(normalizeCalendarEvent).filter(Boolean);
     } else {
       const outlookToken = await getValidOutlookAccessToken();
       if (outlookToken) {
         const raw = await fetchOutlookCalendarEvents(outlookToken, 7, signal);
-        events = raw.map(normalizeCalendarEvent);
+        events = raw.map(normalizeCalendarEvent).filter(Boolean);
       }
     }
     if (!events) return null;
@@ -6725,7 +7088,18 @@ async function adapterFetch(pathname, opts = {}) {
     body = { detail: text };
   }
   if (!res.ok) {
-    if (res.status === 401) clearOrgSession();
+    if (res.status === 401) {
+      // Server-side session revocation / token reuse / org removed our
+      // user. Same response surface as a sign-out: clear the local
+      // session AND restore the pre-adapter provider. Without the
+      // restore, ai_provider stays on 'adapter' with no session, and
+      // the next summarisation call errors out with "adapter not
+      // configured". Fire-and-forget — the awaiting caller already
+      // has an HTTP error to handle and shouldn't block on a Python
+      // subprocess.
+      clearOrgSession();
+      restorePreAdapterProvider().catch(() => {});
+    }
     const err = new Error(body.detail || ('HTTP ' + res.status));
     err.status = res.status;
     throw err;
@@ -7345,7 +7719,13 @@ ipcMain.on('org-chat-stream', async (event, streamId, payload) => {
     if (!res.ok) {
       let detail = '';
       try { detail = await res.text(); } catch (_) {}
-      if (res.status === 401) clearOrgSession();
+      if (res.status === 401) {
+        // Same reasoning as the orgFetch 401 path above — clear the
+        // session AND restore pre-adapter provider so future processing
+        // doesn't hit "adapter not configured".
+        clearOrgSession();
+        restorePreAdapterProvider().catch(() => {});
+      }
       safeSend('query-done', { queryId: streamId, success: false, error: `HTTP ${res.status}: ${detail.slice(0, 200)}` });
       return;
     }

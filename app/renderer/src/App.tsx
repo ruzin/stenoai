@@ -16,6 +16,7 @@ import { BottomDockSlot } from '@/components/BottomDockSlot';
 import { LiveDock } from '@/components/LiveDock';
 import { LiveTranscriptBar } from '@/components/LiveTranscriptBar';
 import { useLiveTranscriptOpen } from '@/hooks/liveTranscriptOpenStore';
+import { useTranscriptionEngine } from '@/hooks/useModels';
 import { QuitDialog } from '@/components/QuitDialog';
 import { AskBarProvider } from '@/lib/askBarContext';
 import {
@@ -160,7 +161,13 @@ export function App() {
  */
 function LiveRecordingDock() {
   const open = useLiveTranscriptOpen((s) => s.open);
-  return open ? <LiveTranscriptBar /> : <LiveDock />;
+  const engineQuery = useTranscriptionEngine();
+  // Whisper has no live transcript. Belt-and-braces vs the LiveDock toggle
+  // being hidden: the store could already be open from a prior Parakeet
+  // session, and zustand survives across recordings. Force LiveDock for
+  // whisper regardless of stored state.
+  const liveAvailable = (engineQuery.data ?? 'parakeet') === 'parakeet';
+  return open && liveAvailable ? <LiveTranscriptBar /> : <LiveDock />;
 }
 
 function RouteView({ route }: { route: string }) {

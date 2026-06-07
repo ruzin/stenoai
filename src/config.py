@@ -139,6 +139,8 @@ class Config:
         "yi": "Yiddish", "yo": "Yoruba", "zh": "Chinese",
     }
 
+    VALID_TRANSCRIPTION_ENGINES = ("parakeet", "whisper")
+
     def __init__(self, config_path: Optional[Path] = None):
         """
         Initialize configuration manager.
@@ -160,9 +162,31 @@ class Config:
         else:
             self.config_path = config_path
 
+        # Captured before _load() because _load() returns defaults silently
+        # when the file is missing — by the time migrations run we can't tell
+        # "fresh install" from "loaded existing file" by inspecting self._config
+        # alone (whisper_model and friends are in the defaults dict).
+        self._existed_at_load = self.config_path.exists()
         self._config: Dict[str, Any] = self._load()
         self._migrate_cloud_model_map()
         self._migrate_whisper_model()
+        self._migrate_transcription_engine()
+
+    def _migrate_transcription_engine(self) -> None:
+        """Decide the active ASR engine on first launch of a version that has
+        this field.
+
+        New installs default to Parakeet. Existing users (config.json existed
+        before this launch) stay on Whisper so their muscle memory and any
+        Asian-language workflows aren't silently swapped under them; the
+        Settings → Transcribe tab is how they opt into Parakeet.
+        """
+        if self._config.get("transcription_engine") in self.VALID_TRANSCRIPTION_ENGINES:
+            return
+        self._config["transcription_engine"] = (
+            "whisper" if self._existed_at_load else "parakeet"
+        )
+        self._save()
 
     def _migrate_whisper_model(self) -> None:
         """Map any out-of-current-list whisper model to a supported one.
@@ -252,6 +276,7 @@ class Config:
             "storage_path": "",
             "keep_recordings": False,
             "whisper_model": "small",
+            "transcription_engine": "parakeet",
             "version": "1.0"
         }
 
@@ -429,6 +454,28 @@ class Config:
         self._config["silence_auto_stop_minutes"] = minutes
         return self._save()
 
+
+    def get_transcription_engine(self) -> str:
+        """Return the active ASR engine ('parakeet' or 'whisper').
+
+        Falls back to 'parakeet' for unknown values. The renderer's
+        Settings → Transcribe tab writes this; the live VAD pipeline reads
+        it to pick which transcribe_samples() implementation to import.
+        """
+        value = self._config.get("transcription_engine", "parakeet")
+        return value if value in self.VALID_TRANSCRIPTION_ENGINES else "parakeet"
+
+    def set_transcription_engine(self, engine: str) -> bool:
+        """Persist the active ASR engine. Validates against
+        VALID_TRANSCRIPTION_ENGINES."""
+        if engine not in self.VALID_TRANSCRIPTION_ENGINES:
+            logger.error(
+                f"Invalid transcription engine: {engine}. "
+                f"Must be one of {self.VALID_TRANSCRIPTION_ENGINES}"
+            )
+            return False
+        self._config["transcription_engine"] = engine
+        return self._save()
 
     def get_whisper_model(self) -> str:
         """Get the configured Whisper model size."""

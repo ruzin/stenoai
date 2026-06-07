@@ -191,8 +191,13 @@ export function useRecordingEvents() {
   React.useEffect(() => {
     const bridge = ipc();
     const toggle = () => {
+      // 'processing' is the post-stop, pre-summary state. Treat it like
+      // idle for start purposes — the previous note keeps summarising in
+      // the background queue while a new recording starts. Matches the
+      // Home empty-state CTA + UpcomingCard click behaviour so the hotkey
+      // doesn't silently no-op when a user is doing back-to-back notes.
       if (status === 'recording' || status === 'paused') void stopRecording();
-      else if (status === 'idle') void startRecording();
+      else void startRecording();
     };
     const offs = [
       bridge.on.toggleRecordingHotkey(toggle),
@@ -210,8 +215,13 @@ export function useRecordingEvents() {
       }),
       bridge.on.autoRecordRequested(({ sessionName }) => {
         // Suggested by the mic-monitor auto-detect notification ("Take Notes").
-        // Only fire if we're idle — user may have already manually started.
-        if (status === 'idle') void startRecording(sessionName ?? undefined);
+        // Allow start when idle OR when a previous note is still processing
+        // — the user explicitly opted in by clicking "Take Notes", and the
+        // background queue handles the previous summary fine. Only skip if
+        // an active recording (recording/paused) is already in progress —
+        // user already manually started or is mid-meeting.
+        if (status === 'recording' || status === 'paused') return;
+        void startRecording(sessionName ?? undefined);
       }),
       bridge.on.autoPauseRequested(() => {
         // Mic stopped on the meeting app — pause so we don't keep recording
