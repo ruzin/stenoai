@@ -1102,6 +1102,37 @@ def parakeet_status_cmd():
     }))
 
 
+@cli.command(name='warmup-parakeet')
+def warmup_parakeet_cmd():
+    """Pre-load Parakeet weights to warm the OS page cache.
+
+    Fired by Electron at app launch (best-effort, non-blocking). The
+    subprocess loads the model end-to-end and exits — when the actual
+    recording subprocess later spawns and calls ``ensure_loaded``, the
+    model files are already in the OS page cache so disk I/O is
+    near-instant. Does NOT eliminate the per-subprocess MLX parse cost
+    (that requires a long-running daemon), but it shaves the visible
+    portion of "first record after launch is slow" by ~1 s on modern
+    SSDs and more on cold caches.
+
+    Silent on success — Electron parses only the exit code. On
+    'model not installed' (fresh user before Setup runs), exits 0
+    without loading; the cost of trying to load a missing model is
+    higher than just skipping.
+    """
+    from src.parakeet_models import is_installed, DEFAULT_MODEL_ID
+    if not is_installed(DEFAULT_MODEL_ID):
+        return
+    try:
+        from src.parakeet import ensure_loaded
+        ensure_loaded()
+    except Exception as e:
+        # Best-effort: a warmup failure must never block app startup.
+        # Log to stderr so the Electron debug log captures it, but
+        # exit 0 so main.js doesn't surface it as an error to the user.
+        print(f"warmup-parakeet failed: {e}", file=sys.stderr)
+
+
 @cli.command(name='download-parakeet-model')
 @click.argument('model_id', required=False)
 def download_parakeet_model_cmd(model_id):

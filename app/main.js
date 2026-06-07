@@ -887,6 +887,28 @@ if (!gotSingleInstanceLock) {
       }
     }
 
+    // Pre-load Parakeet weights in a background subprocess so the first
+    // recording's `record --live` / `transcribe-stream` spawn sees the
+    // model file already in the OS page cache. Saves ~1 s off the
+    // visible "first record after launch" latency. Fire-and-forget —
+    // never block window creation on it. Skipped for Whisper users
+    // (Parakeet model would be downloading or absent) and gated on
+    // model presence by the CLI command itself (no-ops when missing).
+    if (loadTranscriptionEngine() === 'parakeet') {
+      try {
+        const warmupProc = spawn(getBackendPath(), ['warmup-parakeet'], {
+          cwd: getBackendCwd(),
+          stdio: 'ignore',
+        });
+        warmupProc.unref();
+        warmupProc.on('error', (err) => {
+          sendDebugLog(`[parakeet-warmup] spawn failed (non-fatal): ${err.message}`);
+        });
+      } catch (e) {
+        sendDebugLog(`[parakeet-warmup] startup error (non-fatal): ${e.message}`);
+      }
+    }
+
     createWindow();
     if (!IS_E2E) createTray();
     setupAutoUpdater();
