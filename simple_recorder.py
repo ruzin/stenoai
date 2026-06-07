@@ -1286,15 +1286,20 @@ class _LiveVadPipeline:
       * Preroll ring holds the most recent ``PREROLL_CHUNKS`` chunks of
         pre-speech audio so the first syllable of every utterance is
         recovered after VAD fires (Silero always trips slightly late).
-      * Partials see only the trailing ``PARTIAL_WINDOW_S`` of the
-        utterance — re-transcribing the whole utterance every 400 ms
-        would be O(n²).
+      * Partials see the trailing ``PARTIAL_WINDOW_S`` of the utterance.
+        At 15 s, a 4-5 sentence monologue stays fully visible in the live
+        bubble (the prior 5 s window meant the rolling view dropped
+        earlier sentences off-screen during continuous speech). Parakeet
+        decodes 15 s in ~150-250 ms on Apple Silicon, comfortably under
+        the 400 ms partial interval. Going wider (e.g. matching MAX at
+        30 s) would risk decode time creeping past the interval and
+        back-pressuring the stdin pipe.
       * Final fires on Silero's SpeechEnd OR when the utterance hits
         ``MAX_UTTERANCE_S`` so a monologue still produces output.
     """
 
     PARTIAL_INTERVAL_S = 0.4
-    PARTIAL_WINDOW_S = 5.0
+    PARTIAL_WINDOW_S = 15.0
     MIN_UTTERANCE_S = 0.5
     MAX_UTTERANCE_S = 30.0
     PREROLL_CHUNKS = 2  # ≈ 512 ms at 256 ms per callback
