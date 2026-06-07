@@ -2153,6 +2153,24 @@ function loadSystemAudioEnabled() {
   }
 }
 
+// Sync read of the active ASR engine. Mirrors loadSystemAudioEnabled —
+// reading the JSON directly so we don't spawn a Python subprocess on
+// every recording start just to ask. Default 'parakeet' matches the
+// Python migration (fresh installs default to Parakeet); existing users
+// will have had transcription_engine written on their first launch by
+// Config._migrate_transcription_engine.
+function loadTranscriptionEngine() {
+  try {
+    const cfgPath = path.join(os.homedir(), 'Library', 'Application Support', 'stenoai', 'config.json');
+    if (!fs.existsSync(cfgPath)) return 'parakeet';
+    const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf-8'));
+    const engine = cfg.transcription_engine;
+    return engine === 'whisper' ? 'whisper' : 'parakeet';
+  } catch (_) {
+    return 'parakeet';
+  }
+}
+
 // Sync read of the auto-detect-meetings setting; default ON. Mirrors
 // loadSystemAudioEnabled — we avoid spawning Python during startup just
 // to read a boolean. Wire any new defaults through the Python config so
@@ -2463,6 +2481,12 @@ ipcMain.handle('start-recording-ui', async (_, sessionName) => {
     }
 
     const actualSessionName = sessionName || 'Note';
+    // Whisper recordings use the post-stop pipeline (no live drawer, no
+    // sidecar). Parakeet recordings spawn the VAD-gated live consumer
+    // so the renderer can show real-time text. Cached read — avoids a
+    // Python subprocess on every recording start.
+    const engine = loadTranscriptionEngine();
+    const liveEnabled = engine === 'parakeet';
 
     // Renderer-driven dual-stream path: when system audio is enabled the
     // renderer (useSystemAudioCapture) captures mic + system loopback and
@@ -2489,14 +2513,18 @@ ipcMain.handle('start-recording-ui', async (_, sessionName) => {
         ready: false,
         error: null,
       };
-      // Spawn the Parakeet+Silero transcribe-stream subprocess. The
-      // renderer will pipe audio chunks into it via `live-transcribe-chunk`
-      // and the stdout protocol matches the in-process `record --live`
-      // consumer so the renderer's useLiveTranscript hook works unchanged.
-      try {
-        spawnLiveTranscribe(actualSessionName);
-      } catch (e) {
-        sendDebugLog(`Failed to spawn live transcribe sidecar: ${e.message}`);
+      // Spawn the Parakeet+Silero transcribe-stream subprocess. Whisper
+      // recordings skip this entirely — the renderer's useSystemAudioCapture
+      // gates its IPC writes on the same engine, so no chunks are produced
+      // when the sidecar isn't running.
+      if (liveEnabled) {
+        try {
+          spawnLiveTranscribe(actualSessionName);
+        } catch (e) {
+          sendDebugLog(`Failed to spawn live transcribe sidecar: ${e.message}`);
+        }
+      } else {
+        sendDebugLog(`Live transcription off — engine=${engine}`);
       }
       updateTrayIcon(true);
       trackEvent('recording_started', { recording_mode: 'system_audio' });
@@ -2509,8 +2537,8 @@ ipcMain.handle('start-recording-ui', async (_, sessionName) => {
 
     // Legacy mic-only path: spawn Python `record` subprocess.
     console.log('Starting long recording process...');
-    sendDebugLog(`Starting recording process: ${actualSessionName}`);
-    sendDebugLog('$ stenoai record 7200');
+    sendDebugLog(`Starting recording process: ${actualSessionName} (engine=${engine})`);
+    sendDebugLog('$ stenoai record 7200' + (liveEnabled ? ' --live' : ''));
 
     // Start background recording with 2-hour limit
     // Pass AI env (cloud key and/or org-adapter url+token) so the
@@ -2518,10 +2546,12 @@ ipcMain.handle('start-recording-ui', async (_, sessionName) => {
     const recordEnv = getAiEnv();
 
     // --live engages the Parakeet streaming consumer thread inside the
-    // record subprocess. The subprocess loads the model lazily, so this
-    // doesn't delay recording start — the user sees "Recording" instantly
-    // and LIVE_READY arrives a moment later once MLX has weights in memory.
-    currentRecordingProcess = spawn(getBackendPath(), ['record', '7200', actualSessionName, '--live'], {
+    // record subprocess. Whisper recordings record without --live so the
+    // subprocess captures audio only — the post-stop pipeline transcribes
+    // the WAV via WhisperTranscriber.
+    const recordArgs = ['record', '7200', actualSessionName];
+    if (liveEnabled) recordArgs.push('--live');
+    currentRecordingProcess = spawn(getBackendPath(), recordArgs, {
       cwd: getBackendCwd(),
       env: Object.keys(recordEnv).length > 0 ? { ...require('process').env, ...recordEnv } : undefined
     });

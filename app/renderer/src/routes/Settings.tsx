@@ -110,7 +110,16 @@ const COMPACT_TRIGGER =
   'h-[30px] min-w-[150px] rounded-[6px] bg-[color:var(--surface-raised)] px-2.5 py-0 text-[13px]';
 const COMPACT_BTN = 'h-[30px] px-3 text-[13px]';
 
-const LANGUAGES: Array<{ value: string; label: string }> = [
+type LangOption = { value: string; label: string };
+
+// Curated language list shown in Settings → Transcribe. Whisper supports
+// all 12 (it covers 99 languages at the model level; the dropdown is just
+// the tested curation). Parakeet TDT v3 supports 25 European languages
+// and is language-agnostic at inference — per-language hints don't bias
+// the decoder, so we expose only Auto vs English-only. Picking a
+// non-European concrete code (e.g. Hindi) on Parakeet would produce
+// garbage; hiding the option avoids that footgun.
+const LANGUAGES_WHISPER: LangOption[] = [
   { value: 'auto', label: 'Auto (detect)' },
   { value: 'en', label: 'English' },
   { value: 'es', label: 'Spanish' },
@@ -123,6 +132,10 @@ const LANGUAGES: Array<{ value: string; label: string }> = [
   { value: 'ko', label: 'Korean' },
   { value: 'hi', label: 'Hindi' },
   { value: 'ar', label: 'Arabic' },
+];
+const LANGUAGES_PARAKEET: LangOption[] = [
+  { value: 'auto', label: 'Auto (detect)' },
+  { value: 'en', label: 'English' },
 ];
 
 const TABS = [
@@ -808,15 +821,31 @@ function TranscriptionTab() {
   const setLanguage = useSetLanguage();
   const keepRecordings = useKeepRecordingsSetting();
   const setKeepRecordings = useSetKeepRecordings();
+  const engineQuery = useTranscriptionEngine();
+
+  const engine = engineQuery.data ?? 'parakeet';
+  const options = engine === 'whisper' ? LANGUAGES_WHISPER : LANGUAGES_PARAKEET;
+  // If the persisted language isn't in the active engine's option set
+  // (e.g. user picked Hindi on Whisper, then switched to Parakeet), show
+  // it as the trigger value anyway — but don't include it in the option
+  // list. They can pick a valid value to overwrite. We deliberately don't
+  // auto-coerce: silently rewriting a user's stored language behind their
+  // back is worse than letting them see the mismatch.
+  const persisted = language.data ?? 'auto';
+  const valueIsListed = options.some((o) => o.value === persisted);
+  const helperText =
+    engine === 'parakeet'
+      ? 'Auto-detect covers 25 European languages. For other languages, switch to Whisper.'
+      : 'Language for transcription and summaries';
 
   return (
     <section data-settings-tab="transcription">
       <SettingRow
         label="Language"
-        description="Language for transcription and summaries"
+        description={helperText}
       >
         <Select
-          value={language.data ?? 'en'}
+          value={persisted}
           onValueChange={(v) => setLanguage.mutate(v)}
           disabled={!language.data}
         >
@@ -824,7 +853,12 @@ function TranscriptionTab() {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {LANGUAGES.map((l) => (
+            {!valueIsListed && (
+              <SelectItem value={persisted} disabled>
+                {persisted} (not supported on Parakeet)
+              </SelectItem>
+            )}
+            {options.map((l) => (
               <SelectItem key={l.value} value={l.value}>
                 {l.label}
               </SelectItem>

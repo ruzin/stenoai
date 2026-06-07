@@ -1281,16 +1281,16 @@ class _LiveVadPipeline:
             print("LIVE_ERROR:" + json.dumps({"stage": "import_numpy"}), flush=True)
             return None
 
+        # Live transcription is Parakeet-only. Whisper users get the
+        # post-stop pipeline (src.transcriber.WhisperTranscriber) and no
+        # live drawer; main.js gates this by not passing --live to
+        # `record` and not spawning the `transcribe-stream` sidecar. The
+        # defensive check below catches anyone driving the CLI directly
+        # with a whisper config.
         try:
             from src.config import get_config
             _cfg = get_config()
             engine = _cfg.get_transcription_engine()
-            # config.language is the same field Settings → Transcribe and the
-            # in-dock language toggle both write to. Whisper biases the
-            # decoder toward this language; Parakeet ignores at inference
-            # but surfaces it back in detected_language for the summariser.
-            # "auto" / None means "let the engine decide" (whisper auto-detect,
-            # parakeet language-agnostic).
             language = _cfg.get_language() or "auto"
         except Exception as e:
             print("LIVE_ERROR:" + json.dumps({
@@ -1298,24 +1298,25 @@ class _LiveVadPipeline:
             }), flush=True)
             return None
 
-        # Engine modules expose the same surface — transcribe_samples,
-        # ensure_loaded, model_sample_rate, SUPPORTS_PARTIALS — so the
-        # consumer below doesn't need to branch on which is active. Choice
-        # is config-driven; see Config.get_transcription_engine.
+        if engine != "parakeet":
+            print("LIVE_ERROR:" + json.dumps({
+                "stage": "engine_not_supported_for_live",
+                "engine": engine,
+                "message": (
+                    f"Live transcription is Parakeet-only; engine is {engine!r}. "
+                    "Switch to Parakeet in Settings → Transcribe, or rely on the "
+                    "post-stop transcription pipeline."
+                ),
+            }), flush=True)
+            return None
+
         try:
-            if engine == "whisper":
-                from src.whispercpp import (
-                    transcribe_samples, ensure_loaded, model_sample_rate,
-                    SUPPORTS_PARTIALS,
-                )
-            else:
-                from src.parakeet import (
-                    transcribe_samples, ensure_loaded, model_sample_rate,
-                    SUPPORTS_PARTIALS,
-                )
+            from src.parakeet import (
+                transcribe_samples, ensure_loaded, model_sample_rate,
+            )
         except ImportError as e:
             print("LIVE_ERROR:" + json.dumps({
-                "stage": f"import_{engine}", "error": str(e),
+                "stage": "import_parakeet", "error": str(e),
             }), flush=True)
             return None
 
@@ -1368,7 +1369,6 @@ class _LiveVadPipeline:
         ready_payload = {
             "engine": engine,
             "language": language,
-            "supports_partials": SUPPORTS_PARTIALS,
             "sample_rate": sr,
             "vad_chunk_samples": vad.chunk_samples,
             "min_utterance_s": cls.MIN_UTTERANCE_S,
@@ -1388,28 +1388,22 @@ class _LiveVadPipeline:
             SpeechStart=SpeechStart,
             SpeechEnd=SpeechEnd,
             transcribe_samples=transcribe_samples,
-            supports_partials=SUPPORTS_PARTIALS,
             language=language,
         )
 
     def __init__(self, np, vad, sr, SpeechStart, SpeechEnd, transcribe_samples,
-                 supports_partials=True, language="auto"):
+                 language="auto"):
         self.np = np
         self.vad = vad
         self.sr = sr
         self.SpeechStart = SpeechStart
         self.SpeechEnd = SpeechEnd
         self.transcribe_samples = transcribe_samples
-        self.supports_partials = supports_partials
-        # Passed through to every transcribe_samples() call. Both engine
-        # modules treat "auto" specially:
-        #   * whispercpp passes "auto" to pywhispercpp so whisper.cpp
-        #     runs language detection per VAD chunk (otherwise pywhispercpp
-        #     silently defaults to English).
-        #   * parakeet ignores "auto" at inference (model is multilingual
-        #     and language-agnostic) — same effective behaviour as None.
-        # Concrete codes ("en", "hi", "fr") bias whisper's decoder and get
-        # echoed back in detected_language for parakeet.
+        # Passed through to every transcribe_samples() call. Parakeet is
+        # multilingual + language-agnostic at inference, so "auto" and a
+        # concrete code both produce the same decoding. The hint is
+        # surfaced back to the summariser via detected_language when
+        # concrete.
         self.language = "auto" if language in (None, "", "auto") else language
         self.partial_interval_samples = int(sr * self.PARTIAL_INTERVAL_S)
         self.partial_window_samples = int(sr * self.PARTIAL_WINDOW_S)
@@ -1546,12 +1540,6 @@ class _LiveVadPipeline:
         self.last_partial_text = ""
 
     def _maybe_emit_partial(self):
-        # Whisper.cpp can't keep up with re-transcribing the trailing
-        # window every PARTIAL_INTERVAL_S — see src/whispercpp.py. On
-        # that engine we run finals-only, matching the UX Meetily and
-        # OpenOats ship for Whisper.
-        if not self.supports_partials:
-            return
         delta = len(self.speech_samples) - self.last_partial_count
         if delta < self.partial_interval_samples:
             return
