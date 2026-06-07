@@ -59,13 +59,17 @@ BLEED_JACCARD_THRESHOLD = 0.6
 # rarer in a single sentence than across a whole call.
 PER_SEGMENT_BLEED_JACCARD = 0.5
 PER_SEGMENT_BLEED_WINDOW_S = 3.0
-# Tokens-required gate. Short utterances ("Yes", "OK", "hi", "thanks")
+# Minimum-length gate. Short utterances ("Yes", "OK", "thanks", "好的")
 # trivially Jaccard-match across channels when both speakers genuinely
-# say the same one-word thing — the dedup would then delete a real
-# Others reply rather than a bleed echo. Below this token count we
-# leave the segment alone; the whole-transcript backstop still catches
-# catastrophic bleed where every line is short.
-PER_SEGMENT_BLEED_MIN_TOKENS = 4
+# say the same brief thing — the dedup would then delete a real Others
+# reply rather than a bleed echo. We gate on character count instead of
+# token count because Python's ``\w+`` matches a whole CJK sentence as
+# one continuous token (no inter-word spaces), so a token-based gate
+# would silently disable bleed correction for Chinese / Japanese /
+# Thai etc. ~15 chars is "substantial sentence" in any script: ~3-4
+# English words, ~5-6 CJK ideographs. The whole-transcript backstop
+# still catches catastrophic bleed where every line is short.
+PER_SEGMENT_BLEED_MIN_CHARS = 15
 
 # RMS energy gate for "channel has speech". Intentionally low (-70 dB) so
 # headphones-mode mic recordings — captured at much lower amplitude than
@@ -225,12 +229,11 @@ def _drop_per_segment_bleed(mic_segments: list, system_segments: list) -> list:
         if not sys_text:
             kept.append(sys_seg)
             continue
-        # Token-count gate. A short system utterance against a
-        # likewise-short mic utterance ("Yes" vs "Yes") trivially
-        # matches and would be falsely dropped as bleed. Require enough
-        # tokens that a coincidental match is unlikely.
-        sys_tokens = re.findall(r"\w+", sys_text.lower())
-        if len(sys_tokens) < PER_SEGMENT_BLEED_MIN_TOKENS:
+        # Length gate. A short system utterance against a likewise-short
+        # mic utterance ("Yes" vs "Yes") trivially matches and would be
+        # falsely dropped as bleed. Character-based so it works for
+        # CJK / Thai / scripts without inter-word spaces.
+        if len(sys_text) < PER_SEGMENT_BLEED_MIN_CHARS:
             kept.append(sys_seg)
             continue
         sys_start = float(sys_seg.get("start") or 0.0)
@@ -242,10 +245,10 @@ def _drop_per_segment_bleed(mic_segments: list, system_segments: list) -> list:
             mic_text = (mic_seg.get("text") or "").strip()
             if not mic_text:
                 continue
-            # Same guard on the mic side — comparing a 10-word system
-            # line against a 1-word "OK" mic ack would give Jaccard ≈ 0.1
+            # Same guard on the mic side — comparing a substantial system
+            # line against a brief mic "ok" ack would give Jaccard ≈ 0
             # anyway, but skipping avoids the spurious work.
-            if len(re.findall(r"\w+", mic_text.lower())) < PER_SEGMENT_BLEED_MIN_TOKENS:
+            if len(mic_text) < PER_SEGMENT_BLEED_MIN_CHARS:
                 continue
             jac = _token_jaccard(sys_text, mic_text)
             if jac > best_jaccard:

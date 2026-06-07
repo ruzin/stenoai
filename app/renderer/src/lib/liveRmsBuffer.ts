@@ -78,19 +78,36 @@ export function pushRmsSample(sample: LiveRmsSample): void {
  */
 const SPEAKER_RATIO_THRESHOLD = 1.5;
 
+/** Lower-bound binary search for the first index with `tSec >= target`.
+ *  Buffer is monotonic by tSec (we push from setInterval, time only
+ *  moves forward), so this is sound. Returns buffer.length if every
+ *  entry is below the target. */
+function lowerBoundIndex(target: number): number {
+  let lo = 0;
+  let hi = buffer.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    if (buffer[mid].tSec < target) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+
 export function decideSpeaker(startSec: number, endSec: number): LiveSpeaker {
   // Clamp to a sensible minimum window — a 0-duration segment shouldn't
   // sample everything. Take ±100 ms of slack so a sub-100 ms segment
   // still yields at least one sample.
   const lo = Math.min(startSec, endSec) - 0.1;
   const hi = Math.max(startSec, endSec) + 0.1;
+  // O(log N + range) instead of O(N). At BUFFER_CAP_S=3600 the buffer
+  // holds ~36 000 entries, and decideSpeaker is called per LIVE_SEG
+  // event — linear scans add up over a long recording. The range
+  // (samples actually inside [lo, hi]) is typically 20-50 entries.
   let micSum = 0;
   let sysSum = 0;
   let count = 0;
-  // buffer is append-only by time — could binary search, but the buffer
-  // is bounded at 600 entries (60 s * 10 Hz) so a linear scan is fine.
-  for (const s of buffer) {
-    if (s.tSec < lo) continue;
+  for (let i = lowerBoundIndex(lo); i < buffer.length; i++) {
+    const s = buffer[i];
     if (s.tSec > hi) break;
     micSum += s.micRms;
     sysSum += s.sysRms;
