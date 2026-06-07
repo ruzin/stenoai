@@ -41,29 +41,31 @@
 If you're looking for a hosted desktop recording API, consider checking out [Recall.ai](https://www.recall.ai/product/desktop-recording-sdk?utm_source=github&utm_medium=sponsorship&utm_campaign=ruzin-stenoai), an API that records Zoom, Google Meet, Microsoft Teams, in-person meetings, and more.
 
 ## 📢 What's New
-- **2026-06-03** 🗒️ Clean notes panel on back-to-back recordings — Hit "+ New note" while the previous one is still processing and the new recording no longer shows the previous session's typed notes. Fixes a stale in-memory draft that survived between recordings sharing the default "Note" name.
-- **2026-06-03** 📅 Paginated upcoming events on Home — The Upcoming widget now shows all of today's events with `< >` page navigation instead of silently dropping the 4th+ event. Past events roll off as the day progresses; multi-day blocks (OOO, conferences) show inline as context.
-- **2026-06-03** 👀 Background processing visible on Home + "Note ready" banner — Stop a recording or hit Reprocess and the row gets a processing badge on Home through to completion. Steno no longer yanks you to the finished note when you're mid-recording another one; instead, a native "Note ready" banner fires when your note finishes processing.
-- **2026-06-02** 🤫 Auto-stop on silence — Recordings auto-finalise after 15 minutes of bilateral silence (mic + system audio both quiet). For the "I walked away after the meeting ended and forgot to stop" case. Configurable in Settings → General (2 / 5 / 10 / 15 / 30 min), with a macOS notification when it triggers.
+- **2026-06-07** 🎙️ Live transcription with Parakeet TDT v3 — Real-time on-screen transcripts during recording via Apple Silicon's MLX backend. Sentences appear as you speak in a Granola-style chat-bubble view; speakers are attributed to You vs Others in real time.
+- **2026-06-07** 🎛️ Choose your transcription engine — Settings → Transcribe now offers Parakeet (default, live + post-stop, 25 European languages) or Whisper (post-stop only, 99 languages incl. Chinese, Japanese, Arabic, Hindi). Existing Whisper users keep Whisper; new installs default to Parakeet.
+- **2026-06-07** 🛟 Crash recovery for stuck recordings — If Steno is force-quit mid-recording, the orphan recorder subprocess is detected and reaped on the next launch so the mic isn't left hot writing audio to disk.
+- **2026-06-07** 📅 Cleaner Home Upcoming — Cancelled, declined, and all-day events are filtered out so they don't crowd real meetings. Locale-aware times (`11:30 PM` in US, `23:30` in EU) and "Ends in 5 min" / "Started 12 min ago" labels for in-progress events.
 
 
 ## Features
 
 - **Privacy-first** — 100% on-device; your recordings, transcripts, and summaries never leave your Mac
+- **Live transcription** — Real-time on-screen text as you speak via Parakeet TDT v3 on Apple Silicon (MLX). Granola-style chat-bubble view with You / Others attribution.
 - **Auto start/stop meetings** — Steno notifies you when a meeting starts and offers to take notes, then offers to summarise when it ends (Granola-style)
 - **In-app note-taking** — Jot notes while you record; they're folded straight into the AI summary
 - **Ask your meetings** — Natural-language Q&A across a single note or your entire library via the Chat tab (summary, key topics, full transcript)
 - **System audio capture** — Record both sides of virtual meetings, headphones on, no extra setup. Native Core Audio Tap on macOS 14.4+ with automatic fallback on older versions
-- **Speaker diarisation** — `[You]` vs `[Others]` labels on system-audio recordings
-- **Multi-language** — Auto-detect and transcribe in 99 languages
+- **Speaker diarisation** — `[You]` vs `[Others]` labels live during the recording and on the final transcript
+- **Multi-language** — Parakeet covers 25 European languages with live transcription; Whisper handles 99 languages (incl. Chinese, Japanese, Arabic, Hindi) post-stop
 - **Markdown notes** — Summaries and transcripts saved as clean Markdown you can edit, search, or sync
-- **Whisper model picker** — Choose your accuracy/speed tradeoff in Settings → Transcribe and download models in-app with a progress bar
+- **Choose your transcription engine** — Settings → Transcribe lets you pick Parakeet (default) or Whisper, with in-app downloads and a progress bar
+- **Crash-safe recording** — If Steno is force-quit mid-recording, the orphan recorder subprocess is detected and cleaned up on the next launch
 - **Auto-updates** — New versions download in the background and install on next quit; a top-right toast lets you know when one's ready
 - **macOS Shortcuts** — Start and stop recordings via `stenoai://` deep links for calendar-driven automation
 - **Remote Ollama server** — Offload summarisation to a beefier Mac or workstation on your network
 - **Bring your own cloud model** — Optional OpenAI, Anthropic, or custom API endpoint for users who prefer a hosted LLM
 - **Organisation AI** — On managed deployments, sign in to your org's Steno adapter and AI routes through it automatically — no local API key, no setup
-- **Under the hood** — Local transcription via whisper.cpp, summarisation via bundled Ollama (5 models to choose from)
+- **Under the hood** — Local transcription via Parakeet TDT v3 (MLX) or whisper.cpp, summarisation via bundled Ollama (5 models to choose from)
 
 ## macOS Shortcuts (Optional)
 
@@ -141,10 +143,10 @@ Have questions or suggestions? [Join our Discord](https://discord.gg/DZ6vcQnxxu)
 
 ## Models & Performance
 
-**Transcription Models** (Whisper):
-- `small`: Default model - good accuracy and speed on Apple Silicon **(default)**
-- `base`: Faster but lower accuracy for basic meetings
-- `medium`: High accuracy for important meetings (slower)
+**Transcription Models:**
+- `Parakeet TDT v3` (572 MB): Highest quality, supports live transcription, 25 European languages (English, Spanish, French, German, Italian, Portuguese, Dutch, Russian, Polish, Czech, and 15 others). Apple Silicon only via MLX. **(default on fresh installs)**
+- `Whisper Large V3 Turbo` (1.6 GB): Best accuracy Whisper model. 99 languages including Chinese, Japanese, Arabic, Korean, and Hindi. Post-stop only.
+- `Whisper Small` (466 MB): Balanced speed and accuracy. Same 99-language coverage. **(legacy — kept available for existing users; Large V3 Turbo recommended)**
 
 **Summarization Models** (Ollama):
 - `llama3.2:3b` (2GB): Fast and lightweight for quick meetings **(default)**
