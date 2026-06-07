@@ -208,65 +208,122 @@ def _token_jaccard(a: str, b: str) -> float:
     return len(tokens_a & tokens_b) / len(tokens_a | tokens_b)
 
 
-def _drop_per_segment_bleed(mic_segments: list, system_segments: list) -> list:
-    """Drop system_segments that are clearly mic-bleed echoes.
+def _segment_rms(wav_path, start_sec: float, end_sec: float) -> float:
+    """Mean RMS amplitude of a [start_sec, end_sec] slice in a 16-bit
+    PCM WAV. Used by per-segment bleed correction to identify which
+    channel carries the direct signal vs the attenuated echo.
 
-    For each system segment, find any mic segment whose start time is
-    within PER_SEGMENT_BLEED_WINDOW_S and compute Jaccard. If the best
-    match exceeds PER_SEGMENT_BLEED_JACCARD, the system segment is
-    treated as a bleed echo of the mic and dropped. Catches the
-    "Estimated, underpowered, and under the radar" → "Estimated,
-    underpowered, and under the radar" duplication that whole-transcript
-    Jaccard misses when 1-2 ASR word swaps per segment drag the aggregate
-    below BLEED_JACCARD_THRESHOLD.
+    Returns 0.0 on any error so the caller falls back to the
+    conservative "drop system" default.
+    """
+    import wave
+    try:
+        with wave.open(str(wav_path), 'rb') as wf:
+            sr = wf.getframerate()
+            n_frames_total = wf.getnframes()
+            start_frame = max(0, int(start_sec * sr))
+            end_frame = min(n_frames_total, int(end_sec * sr))
+            duration_frames = end_frame - start_frame
+            if duration_frames <= 0:
+                return 0.0
+            wf.setpos(start_frame)
+            raw = wf.readframes(duration_frames)
+            return _rms_of_pcm16(raw, duration_frames)
+    except Exception:
+        return 0.0
+
+
+def _drop_per_segment_bleed(
+    mic_segments: list,
+    system_segments: list,
+    mic_path=None,
+    system_path=None,
+):
+    """Drop the bleed-echo side of each Jaccard-matched (mic, system) pair.
+
+    Returns the (possibly-trimmed) mic_segments and system_segments lists.
+
+    The naive version of this function assumed system = bleed echo of
+    mic, but in the headphone-less case it's typically the opposite:
+    the mic picks up the speaker echo of Others' speech, so the *mic*
+    segment is the bleed and system has the clean direct signal. We
+    decide per-pair by comparing RMS over the segment's time range on
+    each channel — the channel with HIGHER RMS holds the direct signal,
+    the lower-RMS one is the attenuated echo and gets dropped.
+
+    When ``mic_path`` / ``system_path`` aren't supplied (test paths or
+    a defensive caller), we fall back to the historical behaviour of
+    dropping the system side.
     """
     if not mic_segments or not system_segments:
-        return system_segments
-    kept: list = []
-    dropped_count = 0
-    for sys_seg in system_segments:
+        return mic_segments, system_segments
+
+    drop_mic: set = set()
+    drop_sys: set = set()
+    can_compare_rms = mic_path is not None and system_path is not None
+
+    for i_sys, sys_seg in enumerate(system_segments):
         sys_text = (sys_seg.get("text") or "").strip()
-        if not sys_text:
-            kept.append(sys_seg)
-            continue
-        # Length gate. A short system utterance against a likewise-short
-        # mic utterance ("Yes" vs "Yes") trivially matches and would be
-        # falsely dropped as bleed. Character-based so it works for
-        # CJK / Thai / scripts without inter-word spaces.
-        if len(sys_text) < PER_SEGMENT_BLEED_MIN_CHARS:
-            kept.append(sys_seg)
+        if not sys_text or len(sys_text) < PER_SEGMENT_BLEED_MIN_CHARS:
             continue
         sys_start = float(sys_seg.get("start") or 0.0)
+        sys_end = float(sys_seg.get("end") or sys_start)
         best_jaccard = 0.0
-        for mic_seg in mic_segments:
+        best_mic_idx = -1
+        for i_mic, mic_seg in enumerate(mic_segments):
+            if i_mic in drop_mic:
+                continue
             mic_start = float(mic_seg.get("start") or 0.0)
             if abs(sys_start - mic_start) > PER_SEGMENT_BLEED_WINDOW_S:
                 continue
             mic_text = (mic_seg.get("text") or "").strip()
-            if not mic_text:
-                continue
-            # Same guard on the mic side — comparing a substantial system
-            # line against a brief mic "ok" ack would give Jaccard ≈ 0
-            # anyway, but skipping avoids the spurious work.
-            if len(mic_text) < PER_SEGMENT_BLEED_MIN_CHARS:
+            if not mic_text or len(mic_text) < PER_SEGMENT_BLEED_MIN_CHARS:
                 continue
             jac = _token_jaccard(sys_text, mic_text)
             if jac > best_jaccard:
                 best_jaccard = jac
-        if best_jaccard >= PER_SEGMENT_BLEED_JACCARD:
-            dropped_count += 1
-            logger.debug(
-                "Per-segment bleed: dropping system %r (Jaccard=%.2f)",
-                sys_text[:60], best_jaccard,
-            )
+                best_mic_idx = i_mic
+        if best_jaccard < PER_SEGMENT_BLEED_JACCARD or best_mic_idx < 0:
+            continue
+
+        # Bleed pair confirmed. Decide which side to drop.
+        if can_compare_rms:
+            mic_seg = mic_segments[best_mic_idx]
+            mic_start = float(mic_seg.get("start") or 0.0)
+            mic_end = float(mic_seg.get("end") or mic_start)
+            mic_rms = _segment_rms(mic_path, mic_start, mic_end)
+            sys_rms = _segment_rms(system_path, sys_start, sys_end)
+            # Tie-break / RMS unreadable → fall back to historical behaviour
+            # (drop system) so we never delete real user mic content on
+            # ambiguous evidence.
+            if mic_rms > sys_rms:
+                drop_sys.add(i_sys)
+                logger.debug(
+                    "Per-segment bleed: dropping system %r "
+                    "(Jaccard=%.2f, mic_rms=%.4f > sys_rms=%.4f)",
+                    sys_text[:60], best_jaccard, mic_rms, sys_rms,
+                )
+            else:
+                drop_mic.add(best_mic_idx)
+                logger.debug(
+                    "Per-segment bleed: dropping mic %r "
+                    "(Jaccard=%.2f, sys_rms=%.4f >= mic_rms=%.4f)",
+                    (mic_segments[best_mic_idx].get("text") or "")[:60],
+                    best_jaccard, sys_rms, mic_rms,
+                )
         else:
-            kept.append(sys_seg)
-    if dropped_count:
+            drop_sys.add(i_sys)
+
+    if drop_sys or drop_mic:
         logger.info(
-            "Per-segment bleed correction: dropped %d/%d system segments",
-            dropped_count, len(system_segments),
+            "Per-segment bleed correction: dropped %d/%d system, %d/%d mic",
+            len(drop_sys), len(system_segments),
+            len(drop_mic), len(mic_segments),
         )
-    return kept
+
+    kept_mic = [s for i, s in enumerate(mic_segments) if i not in drop_mic]
+    kept_sys = [s for i, s in enumerate(system_segments) if i not in drop_sys]
+    return kept_mic, kept_sys
 
 
 # Try Parakeet first (preferred — same engine as live, arm64 Macs only).
@@ -779,19 +836,23 @@ class WhisperTranscriber:
 
             # Speaker-bleed correction runs in two passes:
             #
-            # 1. Per-segment: drop individual system segments that are
-            #    nearly identical to a mic segment at the same point in
-            #    time. Catches the localised case where most of the call
-            #    is fine but specific lines echo (or where ASR word-level
-            #    differences hide aggregate bleed behind the whole-
-            #    transcript threshold).
+            # 1. Per-segment: drop the bleed-echo side of each Jaccard-
+            #    matched (mic, system) pair. Decides which side is the
+            #    echo by comparing per-segment RMS on the split channel
+            #    WAVs — the channel with higher RMS holds the direct
+            #    signal. Without that RMS step we'd always drop system,
+            #    which is wrong in the headphone-less case where the
+            #    mic is the one picking up the echo of Others' speech.
             # 2. Whole-transcript: if what's LEFT of the system channel
             #    still overlaps mic >= BLEED_JACCARD_THRESHOLD, the
             #    remaining content is also bleed — collapse to mic-only.
             #    The first pass usually handles things and this is a
             #    backstop for catastrophic bleed.
             if mic_segments and system_segments:
-                system_segments = _drop_per_segment_bleed(mic_segments, system_segments)
+                mic_segments, system_segments = _drop_per_segment_bleed(
+                    mic_segments, system_segments,
+                    mic_path=mic_path, system_path=system_path,
+                )
             if mic_segments and system_segments:
                 mic_text = ' '.join(s.get('text', '') for s in mic_segments)
                 sys_text = ' '.join(s.get('text', '') for s in system_segments)
