@@ -69,6 +69,14 @@ export interface CalendarEvent {
   location?: string;
   meeting_url?: string;
   description?: string;
+  is_all_day?: boolean;
+  response_status?:
+    | 'accepted'
+    | 'declined'
+    | 'tentative'
+    | 'needsAction'
+    | 'organizer'
+    | 'unknown';
 }
 
 export interface Announcement {
