@@ -5445,6 +5445,33 @@ ipcMain.handle('set-cloud-model', async (event, model) => {
   }
 });
 
+ipcMain.handle('set-bedrock-region', async (event, region) => {
+  try {
+    const result = await runPythonScript('simple_recorder.py', ['set-bedrock-region', region]);
+    const jsonMatch = result.match(/\{.*\}/s);
+    if (jsonMatch) return JSON.parse(jsonMatch[0]);
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('set-bedrock-inference-profile', async (event, profile) => {
+  try {
+    // Click's required=False + default='' lets us clear the field by passing
+    // the empty string; pass through as a single positional arg.
+    const result = await runPythonScript(
+      'simple_recorder.py',
+      ['set-bedrock-inference-profile', profile || ''],
+    );
+    const jsonMatch = result.match(/\{.*\}/s);
+    if (jsonMatch) return JSON.parse(jsonMatch[0]);
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
 ipcMain.handle('test-remote-ollama', async (event, url) => {
   try {
     sendDebugLog(`Testing remote Ollama at: ${url}`);

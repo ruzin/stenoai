@@ -66,6 +66,8 @@ import {
 import {
   useAiProvider,
   useSetAiProvider,
+  useSetBedrockInferenceProfile,
+  useSetBedrockRegion,
   useSetCloudApiKey,
   useSetCloudApiUrl,
   useSetCloudModel,
@@ -1047,12 +1049,19 @@ function CloudProviderConfig() {
   const setCloudUrl = useSetCloudApiUrl();
   const setCloudKey = useSetCloudApiKey();
   const setCloudModel = useSetCloudModel();
+  const setBedrockRegion = useSetBedrockRegion();
+  const setBedrockProfile = useSetBedrockInferenceProfile();
   const testConnection = useTestCloudApi();
 
   const cloudProvider = provider.data?.cloud_provider ?? 'openai';
   const [apiUrl, setApiUrl] = React.useState('');
   const [apiKey, setApiKey] = React.useState('');
   const [model, setModel] = React.useState('gpt-4o-mini');
+  const [bedrockRegion, setBedrockRegionState] = React.useState('us-east-1');
+  const [bedrockProfile, setBedrockProfileState] = React.useState('');
+  // Bedrock has a curated dropdown of Claude model ids (from the backend) so
+  // the user doesn't have to know the exact `anthropic.claude-…:0` strings.
+  const bedrockModels = provider.data?.bedrock_supported_models ?? [];
   // When provider changes, the available-models cache is provider-specific
   // and the persisted model name swaps. Track which provider the model list
   // belongs to so we don't show OpenAI models against an Anthropic key.
@@ -1068,6 +1077,17 @@ function CloudProviderConfig() {
       setModel(provider.data.cloud_model);
     }
   }, [provider.data?.cloud_api_url, provider.data?.cloud_model]);
+
+  // Sync Bedrock fields from server-side state. Kept separate from the
+  // cloud_api_url/model sync because the deps array would conflate setter
+  // notifications across providers, causing the bedrock state to bounce
+  // when an unrelated openai-mode change lands.
+  React.useEffect(() => {
+    if (provider.data) {
+      setBedrockRegionState(provider.data.bedrock_region || 'us-east-1');
+      setBedrockProfileState(provider.data.bedrock_inference_profile || '');
+    }
+  }, [provider.data?.bedrock_region, provider.data?.bedrock_inference_profile]);
 
   // Reset the cached model list ONLY when the provider changes — otherwise
   // selecting a model triggers a model-name change which would dump the
@@ -1088,10 +1108,15 @@ function CloudProviderConfig() {
     testConnection.mutate();
   };
 
+  // Bedrock surfaces a curated list of Claude model ids from the backend, so
+  // the dropdown is populated immediately — no need to Test connection first.
+  // Other providers still gate the dropdown on a successful list-models call.
   const availableModels =
-    modelListFor === cloudProvider && testConnection.isSuccess
-      ? testConnection.data?.models ?? []
-      : [];
+    cloudProvider === 'bedrock'
+      ? bedrockModels
+      : modelListFor === cloudProvider && testConnection.isSuccess
+        ? testConnection.data?.models ?? []
+        : [];
   const showModelDropdown = availableModels.length > 0 && !customModelMode;
   // Persist the selected model immediately on change (Select doesn't fire
   // onBlur, so the previous "save on blur" pattern would lose the choice).
@@ -1126,10 +1151,47 @@ function CloudProviderConfig() {
           <SelectContent>
             <SelectItem value="openai">OpenAI</SelectItem>
             <SelectItem value="anthropic">Anthropic (Claude)</SelectItem>
+            <SelectItem value="bedrock">AWS Bedrock (Claude)</SelectItem>
             <SelectItem value="custom">Custom (OpenAI-compatible)</SelectItem>
           </SelectContent>
         </Select>
       </div>
+      {cloudProvider === 'bedrock' && (
+        <>
+          <div>
+            <label
+              className="mb-1 block text-[12px] font-medium uppercase"
+              style={{ letterSpacing: '0.06em', color: 'var(--fg-muted)' }}
+            >
+              AWS region
+            </label>
+            <Input
+              value={bedrockRegion}
+              onChange={(e) => setBedrockRegionState(e.target.value)}
+              placeholder="us-east-1"
+              onBlur={() =>
+                bedrockRegion && setBedrockRegion.mutate(bedrockRegion)
+              }
+              className="h-[30px] text-[13px]"
+            />
+          </div>
+          <div>
+            <label
+              className="mb-1 block text-[12px] font-medium uppercase"
+              style={{ letterSpacing: '0.06em', color: 'var(--fg-muted)' }}
+            >
+              Inference profile (optional)
+            </label>
+            <Input
+              value={bedrockProfile}
+              onChange={(e) => setBedrockProfileState(e.target.value)}
+              placeholder="us.anthropic.claude-…"
+              onBlur={() => setBedrockProfile.mutate(bedrockProfile.trim())}
+              className="h-[30px] text-[13px]"
+            />
+          </div>
+        </>
+      )}
       {cloudProvider === 'custom' && (
         <div>
           <label
@@ -1158,7 +1220,15 @@ function CloudProviderConfig() {
           type="password"
           value={apiKey}
           onChange={(e) => setApiKey(e.target.value)}
-          placeholder={provider.data?.cloud_api_key_set ? '••••••••' : 'sk-…'}
+          placeholder={
+            provider.data?.cloud_api_key_set
+              ? '••••••••'
+              : cloudProvider === 'bedrock'
+                ? 'Bedrock API key (bearer token)'
+                : cloudProvider === 'anthropic'
+                  ? 'sk-ant-…'
+                  : 'sk-…'
+          }
           onBlur={() => apiKey && setCloudKey.mutate(apiKey)}
           className="h-[30px] text-[13px]"
         />
@@ -1195,7 +1265,13 @@ function CloudProviderConfig() {
             <Input
               value={model}
               onChange={(e) => setModel(e.target.value)}
-              placeholder={cloudProvider === 'anthropic' ? 'claude-…' : 'gpt-…'}
+              placeholder={
+                cloudProvider === 'bedrock'
+                  ? 'anthropic.claude-…-v1:0'
+                  : cloudProvider === 'anthropic'
+                    ? 'claude-…'
+                    : 'gpt-…'
+              }
               onBlur={() => model && setCloudModel.mutate(model)}
               className="h-[30px] text-[13px]"
             />
@@ -1211,7 +1287,7 @@ function CloudProviderConfig() {
             )}
           </div>
         )}
-        {availableModels.length === 0 && (
+        {availableModels.length === 0 && cloudProvider !== 'bedrock' && (
           <div className="mt-1 text-[11.5px]" style={{ color: 'var(--fg-muted)' }}>
             Test connection to load the list of available models.
           </div>

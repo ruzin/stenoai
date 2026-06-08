@@ -260,7 +260,7 @@ export type MicPermissionStatus =
   | 'unknown';
 
 export type AiProvider = 'local' | 'remote' | 'cloud' | 'adapter';
-export type CloudProvider = 'openai' | 'anthropic' | 'custom';
+export type CloudProvider = 'openai' | 'anthropic' | 'bedrock' | 'custom';
 
 // ---------- response envelopes ----------
 export type AppVersionResponse = Result<{ version: string; name: string }>;
@@ -392,6 +392,12 @@ export type GetAiProviderResponse = Result<{
   cloud_provider: CloudProvider;
   cloud_model: string;
   cloud_api_key_set: boolean;
+  /** AWS region used as the Bedrock endpoint host (defaults to us-east-1). */
+  bedrock_region: string;
+  /** Optional cross-region inference profile id. Empty when unset. */
+  bedrock_inference_profile: string;
+  /** Curated list of Claude-on-Bedrock model ids surfaced as the dropdown. */
+  bedrock_supported_models: string[];
 }>;
 
 export type AuthStatusResponse = Result<{ connected: boolean }>;
@@ -711,6 +717,8 @@ export interface StenoaiBridge {
     setCloudApiKey: RequestFn<[key: string], Result<Record<string, never>>>;
     setCloudProvider: RequestFn<[p: CloudProvider], Result<Record<string, never>>>;
     setCloudModel: RequestFn<[m: string], Result<Record<string, never>>>;
+    setBedrockRegion: RequestFn<[region: string], Result<Record<string, never>>>;
+    setBedrockInferenceProfile: RequestFn<[profile: string], Result<Record<string, never>>>;
     testCloudApi: RequestFn<[], Result<{ models?: string[] }>>;
   };
 

@@ -3515,6 +3515,9 @@ def get_ai_provider():
         "cloud_api_key_set": bool(config.get_cloud_api_key()),
         "cloud_provider": config.get_cloud_provider(),
         "cloud_model": config.get_cloud_model(),
+        "bedrock_region": config.get_bedrock_region(),
+        "bedrock_inference_profile": config.get_bedrock_inference_profile(),
+        "bedrock_supported_models": list(config.SUPPORTED_BEDROCK_MODELS),
     }
     print(json.dumps(result))
 
@@ -3602,6 +3605,32 @@ def set_cloud_model(model):
 
 
 @cli.command()
+@click.argument('region')
+def set_bedrock_region(region):
+    """Set the AWS Bedrock region (e.g. us-east-1)"""
+    from src.config import get_config
+    config = get_config()
+    success = config.set_bedrock_region(region)
+    if success:
+        print(json.dumps({"success": True, "bedrock_region": region}))
+    else:
+        print(json.dumps({"success": False, "error": "Failed to save Bedrock region (empty?)"}))
+
+
+@cli.command()
+@click.argument('profile', required=False, default='')
+def set_bedrock_inference_profile(profile):
+    """Set the AWS Bedrock cross-region inference profile (empty clears)"""
+    from src.config import get_config
+    config = get_config()
+    success = config.set_bedrock_inference_profile(profile)
+    if success:
+        print(json.dumps({"success": True, "bedrock_inference_profile": profile}))
+    else:
+        print(json.dumps({"success": False, "error": "Failed to save Bedrock inference profile"}))
+
+
+@cli.command()
 @click.argument('url')
 def test_remote_ollama(url):
     """Test connection to a remote Ollama server"""
@@ -3637,6 +3666,51 @@ def test_cloud_api():
             models_page = client.models.list(limit=10)
             model_ids = [m.id for m in models_page.data]
             print(json.dumps({"success": True, "models": model_ids}))
+        elif cloud_provider == "bedrock":
+            # Bedrock doesn't expose a cheap list endpoint via the bearer-token
+            # API surface (ListFoundationModels needs SigV4). The Settings UI
+            # uses the curated SUPPORTED_BEDROCK_MODELS list directly, so the
+            # only thing left to verify is "does the key + region actually
+            # answer Converse?". Send a 1-token ping to the configured model.
+            import urllib.request
+            import urllib.error
+            import urllib.parse
+            region = config.get_bedrock_region()
+            profile = config.get_bedrock_inference_profile()
+            model_id = config.get_cloud_model()
+            target = profile or model_id
+            url = (
+                f"https://bedrock-runtime.{region}.amazonaws.com"
+                f"/model/{urllib.parse.quote(target, safe=':.-')}/converse"
+            )
+            body = json.dumps({
+                "messages": [{"role": "user", "content": [{"text": "hi"}]}],
+                "inferenceConfig": {"maxTokens": 1},
+            }).encode("utf-8")
+            headers = {
+                "content-type": "application/json",
+                "authorization": f"Bearer {cloud_api_key}",
+            }
+            try:
+                req = urllib.request.Request(url, data=body, headers=headers, method="POST")
+                with urllib.request.urlopen(req, timeout=15) as resp:
+                    resp.read()  # we only care about the status code
+                # Surface the curated list as "models" so the UI's existing
+                # dropdown wiring lights up after a successful test.
+                print(json.dumps({
+                    "success": True,
+                    "models": list(config.SUPPORTED_BEDROCK_MODELS),
+                }))
+            except urllib.error.HTTPError as he:
+                detail = ""
+                try:
+                    detail = he.read().decode("utf-8", errors="replace")[:300]
+                except Exception:
+                    pass
+                print(json.dumps({
+                    "success": False,
+                    "error": f"Bedrock HTTP {he.code}: {detail or he.reason}",
+                }))
         else:
             from openai import OpenAI
             base_url = cloud_api_url if cloud_provider == "custom" and cloud_api_url else None
