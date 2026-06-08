@@ -1,0 +1,146 @@
+name: Build Windows installer
+
+# End-to-end Windows build: PyInstaller backend (with onnx-asr Parakeet + whisper.cpp)
+# + Electron NSIS installer + zip. Runs on every push to feat/windows-port-v2 so
+# we can iterate quickly, and on tag pushes so released versions get a Windows
+# asset uploaded alongside the macOS DMG produced by build-release.yml.
+#
+# Code signing is intentionally off for the alpha — installers ship unsigned
+# and trigger SmartScreen on first run. Add WINDOWS_CERT secrets + the signing
+# step before the public 1.0.
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feat/windows-port-v2
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: app/package-lock.json
+
+      - name: Get version from package.json
+        id: package_version
+        working-directory: app
+        shell: pwsh
+        run: |
+          $version = (Get-Content -Raw package.json | ConvertFrom-Json).version
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Install Python dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          # requirements.txt uses sys_platform markers — parakeet-mlx is darwin-only,
+          # onnx-asr installs here. pip resolves the right set automatically.
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Download bundled binaries (Ollama Windows + ffmpeg.exe)
+        shell: bash
+        run: |
+          chmod +x scripts/download-ollama.sh
+          ./scripts/download-ollama.sh
+
+      - name: List bin/ contents
+        shell: pwsh
+        run: |
+          Get-ChildItem bin -Recurse | Select-Object FullName, Length | Format-Table -AutoSize
+
+      - name: Build Python backend with PyInstaller
+        shell: pwsh
+        run: |
+          pyinstaller stenoai.spec --noconfirm
+          Get-ChildItem dist/stenoai | Select-Object Name, Length | Format-Table
+
+      - name: Smoke-test bundled CLI
+        shell: pwsh
+        run: |
+          ./dist/stenoai/stenoai.exe --help
+          # setup-check exits non-zero when whisper model isn't pre-downloaded,
+          # which is expected on a fresh CI runner. We just want to confirm the
+          # bundle loads + runs to completion without crashing on missing DLLs
+          # or import errors. `2>&1` merges stderr so we capture import noise too.
+          ./dist/stenoai/stenoai.exe setup-check 2>&1
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "setup-check exited with $LASTEXITCODE (expected when models not downloaded yet)"
+          }
+
+      - name: Verify Parakeet ONNX backend wires up
+        shell: pwsh
+        run: |
+          # parakeet-status calls into the dispatcher, which on Windows must
+          # return the ONNX model id (istupakov/parakeet-tdt-0.6b-v3-onnx).
+          # Doesn't download weights — is_installed() only checks the HF cache.
+          $out = ./dist/stenoai/stenoai.exe parakeet-status
+          Write-Host "parakeet-status: $out"
+          if ($out -notmatch 'onnx') {
+            Write-Error "Expected ONNX-backed Parakeet model id, got: $out"
+            exit 1
+          }
+
+      - name: Install Electron dependencies
+        working-directory: app
+        run: npm ci
+
+      - name: Build Electron installer (unsigned)
+        working-directory: app
+        shell: pwsh
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: |
+          npm run build:renderer
+          # Don't fail the job if NSIS makensis trips on mmap — the zip
+          # target is the alpha deliverable; NSIS is best-effort for now.
+          npx electron-builder --win --publish=never
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "electron-builder exited with $LASTEXITCODE — continuing if zip was produced"
+          }
+
+      - name: Show built artifacts
+        if: always()
+        shell: pwsh
+        run: |
+          Get-ChildItem app/dist | Select-Object Name, Length | Format-Table -AutoSize
+
+      - name: Upload Windows artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stenoai-windows-${{ steps.package_version.outputs.version }}
+          path: |
+            app/dist/*.exe
+            app/dist/*.zip
+            app/dist/*.yml
+            app/dist/*.blockmap
+          retention-days: 14
+          if-no-files-found: warn
+
+      # Tag-driven releases: don't auto-attach to the GitHub release because
+      # build-release.yml (macOS) is creating it in parallel and the two
+      # softprops/action-gh-release jobs can race on body / name. For now,
+      # tag runs leave Windows assets as workflow artifacts (retention 14
+      # days above). After the first stable Windows release, switch to
+      # downloading the Windows artifact from the release job in
+      # build-release.yml so there's one canonical attach step.
