@@ -113,9 +113,19 @@ jobs:
           npm run build:renderer
           # Don't fail the job if NSIS makensis trips on mmap — the zip
           # target is the alpha deliverable; NSIS is best-effort for now.
+          # The known failure is `installSection.nsh on line 66`. As long
+          # as the zip exists when electron-builder exits, treat the
+          # step as successful so downstream artefact upload still runs.
           npx electron-builder --win --publish=never
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "electron-builder exited with $LASTEXITCODE — continuing if zip was produced"
+          $builderExit = $LASTEXITCODE
+          $zipBuilt = Test-Path 'dist\stenoAI-windows-*.zip'
+          if ($builderExit -ne 0 -and $zipBuilt) {
+            Write-Host "electron-builder exited with $builderExit but zip artefact was produced — treating as success (likely NSIS makensis mmap failure)."
+            exit 0
+          }
+          if ($builderExit -ne 0) {
+            Write-Host "electron-builder exited with $builderExit and no zip was produced — failing the job."
+            exit $builderExit
           }
 
       - name: Show built artifacts
