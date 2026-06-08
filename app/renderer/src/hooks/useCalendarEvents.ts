@@ -60,11 +60,17 @@ export function useGoogleCalendarAuth() {
     mutationFn: async () => unwrap(await ipc().calendar.google.connect()),
     onSuccess: () => qc.invalidateQueries({ queryKey: calendarKeys.all }),
   });
+  // No invalidate on cancel — there's nothing to refetch; the connect
+  // mutation will reject with "Cancelled" and the renderer falls back to
+  // its un-pending state on its own.
+  const cancel = useMutation({
+    mutationFn: async () => unwrap(await ipc().calendar.google.cancel()),
+  });
   const disconnect = useMutation({
     mutationFn: async () => unwrap(await ipc().calendar.google.disconnect()),
     onSuccess: () => qc.invalidateQueries({ queryKey: calendarKeys.all }),
   });
-  return { status, connect, disconnect };
+  return { status, connect, cancel, disconnect };
 }
 
 export function useOutlookCalendarAuth() {
@@ -81,9 +87,12 @@ export function useOutlookCalendarAuth() {
     mutationFn: async () => unwrap(await ipc().calendar.outlook.connect()),
     onSuccess: () => qc.invalidateQueries({ queryKey: calendarKeys.all }),
   });
+  const cancel = useMutation({
+    mutationFn: async () => unwrap(await ipc().calendar.outlook.cancel()),
+  });
   const disconnect = useMutation({
     mutationFn: async () => unwrap(await ipc().calendar.outlook.disconnect()),
     onSuccess: () => qc.invalidateQueries({ queryKey: calendarKeys.all }),
   });
-  return { status, connect, disconnect };
+  return { status, connect, cancel, disconnect };
 }

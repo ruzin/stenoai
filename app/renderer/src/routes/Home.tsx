@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Calendar, PencilLine, RefreshCw, Search, Square, X } from 'lucide-react';
+import { Calendar, ChevronRight, PencilLine, RefreshCw, Search, Square, X } from 'lucide-react';
 import { shortcut } from '@/lib/utils';
 import { MeetingsShell } from '@/components/MeetingsShell';
 import { UpcomingCard } from '@/components/home/UpcomingCard';
@@ -200,14 +200,6 @@ export function Home({ mode }: HomeProps) {
         return false;
       }
     });
-  const onDismissCalendarNudge = () => {
-    try {
-      localStorage.setItem(NUDGE_KEY, 'true');
-    } catch {
-      // Private mode / quota errors — just hide locally for this session.
-    }
-    setCalendarNudgeDismissed(true);
-  };
   const showCalendarNudge =
     mode === 'home' &&
     calendar.data?.needsAuth === true &&
@@ -221,68 +213,170 @@ export function Home({ mode }: HomeProps) {
   const googleAuth = useGoogleCalendarAuth();
   const outlookAuth = useOutlookCalendarAuth();
 
+  // Which provider's OAuth handshake (if any) is currently in flight.
+  // Tracks the most recently clicked provider so a Cancel after the user
+  // somehow ended up with both pending hits the right one (defensive —
+  // the UI normally swaps to the Cancel row on first click, so both-pending
+  // shouldn't be reachable, but cheap to guard).
+  const googlePending = googleAuth.connect.isPending;
+  const outlookPending = outlookAuth.connect.isPending;
+  const [lastStartedProvider, setLastStartedProvider] =
+    React.useState<'google' | 'outlook' | null>(null);
+  const pendingProvider: 'google' | 'outlook' | null = React.useMemo(() => {
+    if (googlePending && outlookPending) return lastStartedProvider;
+    if (googlePending) return 'google';
+    if (outlookPending) return 'outlook';
+    return null;
+  }, [googlePending, outlookPending, lastStartedProvider]);
+  const startConnect = (provider: 'google' | 'outlook') => {
+    setLastStartedProvider(provider);
+    if (provider === 'google') googleAuth.connect.mutate();
+    else outlookAuth.connect.mutate();
+  };
+  const onCancelPending = () => {
+    if (pendingProvider === 'google') googleAuth.cancel.mutate();
+    else if (pendingProvider === 'outlook') outlookAuth.cancel.mutate();
+  };
+
+  // Surface the most recent rejection message inline (e.g. "Auth denied",
+  // "Timed out — no response from Google."). Filter out "Cancelled" since
+  // user-initiated cancels don't need to be reported back to the user.
+  // Prefer the error of the last-attempted provider so a stale error from
+  // an earlier try-then-switch doesn't shadow the newer one.
+  const errorOrder =
+    lastStartedProvider === 'outlook'
+      ? [outlookAuth.connect.error?.message, googleAuth.connect.error?.message]
+      : [googleAuth.connect.error?.message, outlookAuth.connect.error?.message];
+  const connectError = errorOrder.find((m) => m && m !== 'Cancelled');
+  // Self-clear so a stale error doesn't sit in the UI forever once the
+  // user has read it. 12s gives a comfortable read window for the longest
+  // message we produce (the timeout line) without feeling sticky. No
+  // separate X on the error row — the nudge already has one dismiss X
+  // and stacking two looks like competing affordances; the user can also
+  // clear by retrying (useMutation auto-resets) or wait out the timer.
+  // Inlined reset calls + connectError-only deps: a useCallback closing
+  // over `googleAuth.connect`/`outlookAuth.connect` would re-create each
+  // render (React Query returns a fresh result object per render — only
+  // the methods on it are referentially stable), which would restart
+  // this timer on every render and the auto-clear would never fire.
+  React.useEffect(() => {
+    if (!connectError) return;
+    const id = setTimeout(() => {
+      googleAuth.connect.reset();
+      outlookAuth.connect.reset();
+    }, 12000);
+    return () => clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connectError]);
+
+  // Hide the nudge — and abort any in-flight handshake so we don't leak
+  // a loopback server (and silently save tokens) after the user has said
+  // "go away".
+  const onDismissCalendarNudge = () => {
+    if (pendingProvider === 'google') googleAuth.cancel.mutate();
+    else if (pendingProvider === 'outlook') outlookAuth.cancel.mutate();
+    try {
+      localStorage.setItem(NUDGE_KEY, 'true');
+    } catch {
+      // Private mode / quota errors — just hide locally for this session.
+    }
+    setCalendarNudgeDismissed(true);
+  };
+
   // Rendered both in the empty-state Welcome screen (brand-new users with
   // zero meetings — exactly who needs to discover calendar integration)
-  // and in the regular Home above the Upcoming section. Extracted here
-  // so both branches use the same JSX instead of drifting.
-  const calendarNudge = showCalendarNudge ? (
-    <div
-      className="flex items-center gap-2 text-xs"
-      style={{ color: 'var(--fg-2)' }}
-    >
-      {!calendarNudgeExpanded ? (
-        <button
-          type="button"
-          onClick={() => setCalendarNudgeExpanded(true)}
-          className="-mx-1 flex flex-1 items-center gap-2 rounded px-1 py-0.5 text-left transition-colors hover:bg-[color:var(--surface-hover)]"
-          style={{ color: 'var(--fg-2)' }}
+  // and in the regular Home above the Upcoming section. Empty state hides
+  // the dismiss X — the nudge is the only secondary affordance there, so
+  // letting users wipe it out leaves nothing to discover calendar from.
+  const renderCalendarNudge = (withDismiss: boolean) =>
+    showCalendarNudge ? (
+      <div className="flex flex-col gap-1">
+        <div
+          className="flex items-center gap-3 text-xs"
+          style={{ color: 'var(--fg-muted)' }}
         >
-          <Calendar className="size-3.5 flex-shrink-0" />
-          <span>Connect a calendar to see today's meetings.</span>
-        </button>
-      ) : (
-        <>
-          <Calendar
-            className="size-3.5 flex-shrink-0"
-            style={{ color: 'var(--fg-2)' }}
-          />
-          <span>Connect:</span>
-          <button
-            type="button"
-            onClick={() => googleAuth.connect.mutate()}
-            disabled={
-              googleAuth.connect.isPending || outlookAuth.connect.isPending
-            }
-            className="rounded px-2 py-0.5 transition-colors hover:bg-[color:var(--surface-hover)] disabled:opacity-50 disabled:hover:bg-transparent"
-            style={{ color: 'var(--fg-1)' }}
+          {!calendarNudgeExpanded ? (
+            <button
+              type="button"
+              onClick={() => setCalendarNudgeExpanded(true)}
+              className="group -mx-1 flex flex-1 items-center gap-2 rounded px-1 py-0.5 text-left transition-colors hover:bg-[color:var(--surface-hover)]"
+              style={{ color: 'var(--fg-muted)' }}
+            >
+              <Calendar className="size-3.5 flex-shrink-0" />
+              <span>Connect your calendar to see today's meetings.</span>
+              {!withDismiss && (
+                <ChevronRight className="size-3 flex-shrink-0 opacity-60 transition-transform group-hover:translate-x-0.5" />
+              )}
+            </button>
+          ) : pendingProvider ? (
+            <>
+              <Calendar
+                className="size-3.5 flex-shrink-0"
+                style={{ color: 'var(--fg-muted)' }}
+              />
+              <span>
+                Connecting to {pendingProvider === 'google' ? 'Google' : 'Outlook'}
+                …
+              </span>
+              <button
+                type="button"
+                onClick={onCancelPending}
+                className="rounded px-2 py-0.5 transition-colors hover:bg-[color:var(--surface-hover)]"
+                style={{ color: 'var(--fg-1)' }}
+              >
+                Cancel
+              </button>
+            </>
+          ) : (
+            <>
+              <Calendar
+                className="size-3.5 flex-shrink-0"
+                style={{ color: 'var(--fg-muted)' }}
+              />
+              <span>Connect:</span>
+              <button
+                type="button"
+                onClick={() => startConnect('google')}
+                className="rounded px-2 py-0.5 transition-colors hover:bg-[color:var(--surface-hover)]"
+                style={{ color: 'var(--fg-1)' }}
+              >
+                Google
+              </button>
+              <button
+                type="button"
+                onClick={() => startConnect('outlook')}
+                className="rounded px-2 py-0.5 transition-colors hover:bg-[color:var(--surface-hover)]"
+                style={{ color: 'var(--fg-1)' }}
+              >
+                Outlook
+              </button>
+            </>
+          )}
+          {withDismiss && (
+            <button
+              type="button"
+              onClick={onDismissCalendarNudge}
+              aria-label="Dismiss"
+              title="Dismiss"
+              className="ml-auto rounded p-1 transition-colors hover:bg-[color:var(--surface-hover)]"
+              style={{ color: 'var(--fg-muted)' }}
+            >
+              <X className="size-3" />
+            </button>
+          )}
+        </div>
+        {connectError && !pendingProvider && (
+          <div
+            className="pl-[1.625rem] text-xs"
+            style={{ color: 'var(--fg-muted)' }}
           >
-            {googleAuth.connect.isPending ? 'Connecting…' : 'Google'}
-          </button>
-          <button
-            type="button"
-            onClick={() => outlookAuth.connect.mutate()}
-            disabled={
-              googleAuth.connect.isPending || outlookAuth.connect.isPending
-            }
-            className="rounded px-2 py-0.5 transition-colors hover:bg-[color:var(--surface-hover)] disabled:opacity-50 disabled:hover:bg-transparent"
-            style={{ color: 'var(--fg-1)' }}
-          >
-            {outlookAuth.connect.isPending ? 'Connecting…' : 'Outlook'}
-          </button>
-        </>
-      )}
-      <button
-        type="button"
-        onClick={onDismissCalendarNudge}
-        aria-label="Dismiss"
-        title="Dismiss"
-        className="ml-auto rounded p-1 transition-colors hover:bg-[color:var(--surface-hover)]"
-        style={{ color: 'var(--fg-2)' }}
-      >
-        <X className="size-3" />
-      </button>
-    </div>
-  ) : null;
+            {connectError}
+          </div>
+        )}
+      </div>
+    ) : null;
+  const emptyStateCalendarNudge = renderCalendarNudge(false);
+  const homeCalendarNudge = renderCalendarNudge(true);
 
   const greeting = `Ready to capture beautiful notes`;
   const dateStr = new Date().toLocaleDateString(undefined, {
@@ -346,8 +440,8 @@ export function Home({ mode }: HomeProps) {
               <span>from anywhere</span>
             </p>
           </div>
-          {calendarNudge && (
-            <div className="w-full max-w-[420px]">{calendarNudge}</div>
+          {emptyStateCalendarNudge && (
+            <div className="pt-8">{emptyStateCalendarNudge}</div>
           )}
         </div>
       ) : (
@@ -375,7 +469,9 @@ export function Home({ mode }: HomeProps) {
             </div>
           )}
 
-          {calendarNudge && <div className="mb-8">{calendarNudge}</div>}
+          {homeCalendarNudge && (
+            <div className="mb-8 w-fit">{homeCalendarNudge}</div>
+          )}
 
           {upcomingToday.length > 0 && mode === 'home' && (
             <section className="mb-10">

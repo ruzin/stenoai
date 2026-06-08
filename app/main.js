@@ -6015,13 +6015,41 @@ function deleteOutlookTokens() {
 
 // ── Google Calendar: OAuth2 Flow with PKCE ──────────────────────────────
 
+// Tracks an in-flight OAuth handshake so `google-auth-cancel` can close
+// the loopback server and reject the pending promise — otherwise the
+// user is stuck on "Connecting…" until the timeout fires.
+let activeGoogleAuth = null;
+
+function cancelActiveGoogleAuth() {
+  if (!activeGoogleAuth) return false;
+  const handle = activeGoogleAuth;
+  activeGoogleAuth = null;
+  if (handle.timeoutId) clearTimeout(handle.timeoutId);
+  // Flip the closure flag first so an in-flight token exchange knows to
+  // throw away its result instead of saving tokens.
+  if (handle.markCancelled) handle.markCancelled();
+  try { handle.server.close(); } catch (_) {}
+  handle.reject(new Error('Cancelled'));
+  return true;
+}
+
 function startGoogleAuth() {
   return new Promise((resolve, reject) => {
+    // If a previous click is still pending, abort it before starting a
+    // new flow — keeps state from desyncing if the user double-clicks.
+    cancelActiveGoogleAuth();
+
     // Generate PKCE code verifier and challenge
     const codeVerifier = crypto.randomBytes(32).toString('base64url');
     const codeChallenge = crypto.createHash('sha256').update(codeVerifier).digest('base64url');
     const state = crypto.randomBytes(16).toString('hex');
     let timeoutId = null;
+    let isCancelled = false;
+    const clearActive = () => {
+      if (activeGoogleAuth && activeGoogleAuth.server === server) {
+        activeGoogleAuth = null;
+      }
+    };
 
     // Start temporary HTTP server on loopback for OAuth redirect
     const server = http.createServer(async (req, res) => {
@@ -6048,6 +6076,7 @@ function startGoogleAuth() {
           res.end('<html><body><h2>Authorization denied</h2><p>You can close this tab.</p></body></html>');
           server.close();
           if (timeoutId) clearTimeout(timeoutId);
+          clearActive();
           reject(new Error(`Auth denied: ${error}`));
           return;
         }
@@ -6061,6 +6090,17 @@ function startGoogleAuth() {
         // Exchange code for tokens
         const port = server.address().port;
         const tokens = await exchangeCodeForTokens(code, codeVerifier, port);
+        // The user may have cancelled while we were waiting on Google's
+        // /token endpoint. Discard the tokens rather than silently
+        // persist them — otherwise the next calendar poll would surface
+        // a "ghost" connection seconds after the user said "Cancel".
+        // Still respond to the open browser tab so it doesn't spin
+        // forever — the request only ends when we write a body.
+        if (isCancelled) {
+          res.writeHead(200, { 'Content-Type': 'text/html' });
+          res.end('<html><body style="font-family: -apple-system, sans-serif; text-align: center; padding: 60px;"><h2>Cancelled</h2><p>You can close this tab.</p></body></html>');
+          return;
+        }
         saveGoogleTokens(tokens);
 
         res.writeHead(200, { 'Content-Type': 'text/html' });
@@ -6068,6 +6108,7 @@ function startGoogleAuth() {
 
         server.close();
         if (timeoutId) clearTimeout(timeoutId);
+        clearActive();
 
         // Notify renderer and bring app to foreground
         if (mainWindow && !mainWindow.isDestroyed()) {
@@ -6082,6 +6123,7 @@ function startGoogleAuth() {
         res.end('<html><body><h2>Authentication failed</h2><p>Please try again.</p></body></html>');
         server.close();
         if (timeoutId) clearTimeout(timeoutId);
+        clearActive();
         reject(err);
       }
     });
@@ -6110,9 +6152,16 @@ function startGoogleAuth() {
     timeoutId = setTimeout(() => {
       if (server.listening) {
         server.close();
-        reject(new Error('OAuth timeout: no response within 5 minutes'));
+        clearActive();
+        reject(new Error('Timed out — no response from Google.'));
       }
-    }, 5 * 60 * 1000);
+    }, 60 * 1000);
+    activeGoogleAuth = {
+      server,
+      reject,
+      timeoutId,
+      markCancelled: () => { isCancelled = true; },
+    };
   });
 }
 
@@ -6295,12 +6344,34 @@ function fetchCalendarEvents(accessToken, maxResults = 7, signal) {
 
 // ── Outlook Calendar: OAuth2 Flow with PKCE ─────────────────────────────
 
+// Mirror of activeGoogleAuth — see comment there.
+let activeOutlookAuth = null;
+
+function cancelActiveOutlookAuth() {
+  if (!activeOutlookAuth) return false;
+  const handle = activeOutlookAuth;
+  activeOutlookAuth = null;
+  if (handle.timeoutId) clearTimeout(handle.timeoutId);
+  if (handle.markCancelled) handle.markCancelled();
+  try { handle.server.close(); } catch (_) {}
+  handle.reject(new Error('Cancelled'));
+  return true;
+}
+
 function startOutlookAuth() {
   return new Promise((resolve, reject) => {
+    cancelActiveOutlookAuth();
+
     const codeVerifier = crypto.randomBytes(32).toString('base64url');
     const codeChallenge = crypto.createHash('sha256').update(codeVerifier).digest('base64url');
     const state = crypto.randomBytes(16).toString('hex');
     let timeoutId = null;
+    let isCancelled = false;
+    const clearActive = () => {
+      if (activeOutlookAuth && activeOutlookAuth.server === server) {
+        activeOutlookAuth = null;
+      }
+    };
 
     const server = http.createServer(async (req, res) => {
       try {
@@ -6327,6 +6398,7 @@ function startOutlookAuth() {
           res.end('<html><body><h2>Authorization denied</h2><p>You can close this tab.</p></body></html>');
           server.close();
           if (timeoutId) clearTimeout(timeoutId);
+          clearActive();
           reject(new Error(`Auth denied: ${error}`));
           return;
         }
@@ -6339,6 +6411,14 @@ function startOutlookAuth() {
 
         const port = server.address().port;
         const tokens = await exchangeOutlookCodeForTokens(code, codeVerifier, port);
+        // See the Google counterpart — discard tokens if the user
+        // cancelled while we awaited Microsoft's /token endpoint, and
+        // still send a response so the open browser tab doesn't hang.
+        if (isCancelled) {
+          res.writeHead(200, { 'Content-Type': 'text/html' });
+          res.end('<html><body style="font-family: -apple-system, sans-serif; text-align: center; padding: 60px;"><h2>Cancelled</h2><p>You can close this tab.</p></body></html>');
+          return;
+        }
         saveOutlookTokens(tokens);
 
         res.writeHead(200, { 'Content-Type': 'text/html' });
@@ -6346,6 +6426,7 @@ function startOutlookAuth() {
 
         server.close();
         if (timeoutId) clearTimeout(timeoutId);
+        clearActive();
 
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send('outlook-auth-changed');
@@ -6359,6 +6440,7 @@ function startOutlookAuth() {
         res.end('<html><body><h2>Authentication failed</h2><p>Please try again.</p></body></html>');
         server.close();
         if (timeoutId) clearTimeout(timeoutId);
+        clearActive();
         reject(err);
       }
     });
@@ -6389,9 +6471,16 @@ function startOutlookAuth() {
     timeoutId = setTimeout(() => {
       if (server.listening) {
         server.close();
-        reject(new Error('OAuth timeout: no response within 5 minutes'));
+        clearActive();
+        reject(new Error('Timed out — no response from Outlook.'));
       }
-    }, 5 * 60 * 1000);
+    }, 60 * 1000);
+    activeOutlookAuth = {
+      server,
+      reject,
+      timeoutId,
+      markCancelled: () => { isCancelled = true; },
+    };
   });
 }
 
@@ -6666,6 +6755,11 @@ ipcMain.handle('google-auth-status', async () => {
   }
 });
 
+ipcMain.handle('google-auth-cancel', async () => {
+  const cancelled = cancelActiveGoogleAuth();
+  return { success: true, cancelled };
+});
+
 ipcMain.handle('google-auth-disconnect', async () => {
   try {
     // Best-effort token revocation
@@ -6895,6 +6989,11 @@ ipcMain.handle('outlook-auth-status', async () => {
   } catch (error) {
     return { success: false, connected: false };
   }
+});
+
+ipcMain.handle('outlook-auth-cancel', async () => {
+  const cancelled = cancelActiveOutlookAuth();
+  return { success: true, cancelled };
 });
 
 ipcMain.handle('outlook-auth-disconnect', async () => {
