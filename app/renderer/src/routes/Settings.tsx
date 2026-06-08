@@ -1185,18 +1185,10 @@ function CloudProviderConfig() {
             <Input
               value={bedrockProfile}
               onChange={(e) => setBedrockProfileState(e.target.value)}
-              placeholder="us.anthropic.claude-…  (leave blank for direct invoke)"
+              placeholder="us.anthropic.claude-…"
               onBlur={() => setBedrockProfile.mutate(bedrockProfile.trim())}
               className="h-[30px] text-[13px]"
             />
-            <div
-              className="mt-1 text-[11.5px]"
-              style={{ color: 'var(--fg-muted)' }}
-            >
-              Optional cross-region inference profile. When set, Bedrock routes
-              the request across the profile's regions instead of pinning to
-              the region above.
-            </div>
           </div>
         </>
       )}
