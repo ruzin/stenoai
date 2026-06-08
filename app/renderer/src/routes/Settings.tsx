@@ -1186,7 +1186,7 @@ function CloudProviderConfig() {
               value={bedrockProfile}
               onChange={(e) => setBedrockProfileState(e.target.value)}
               placeholder="us.anthropic.claude-…  (leave blank for direct invoke)"
-              onBlur={() => setBedrockProfile.mutate(bedrockProfile)}
+              onBlur={() => setBedrockProfile.mutate(bedrockProfile.trim())}
               className="h-[30px] text-[13px]"
             />
             <div

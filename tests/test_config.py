@@ -198,6 +198,17 @@ class ConfigBedrockSettingsTests(unittest.TestCase):
             self.assertTrue(config.set_bedrock_inference_profile(""))
             self.assertEqual(config.get_bedrock_inference_profile(), "")
 
+    def test_whitespace_inference_profile_stored_in_config_is_normalised(self):
+        # A hand-edited config.json with a whitespace-only inference profile
+        # would otherwise survive `target = profile or model_id` in
+        # _bedrock_chat (truthy string) and produce a URL with %20 in place
+        # of the model id. Belt-and-braces strip on read.
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "config.json"
+            path.write_text(json.dumps({"bedrock_inference_profile": "   "}))
+            config = Config(config_path=path)
+            self.assertEqual(config.get_bedrock_inference_profile(), "")
+
     def test_bedrock_is_a_valid_cloud_provider(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             config = Config(config_path=Path(tmp_dir) / "config.json")

@@ -1007,6 +1007,22 @@ TRANSCRIPT:
                 except Exception as e:
                     logger.error(f"Anthropic streaming failed: {e}")
                     return
+            elif self.cloud_provider == "bedrock":
+                # Bedrock's /converse-stream uses amazon eventstream framing
+                # (binary, length-prefixed), which would need a dedicated
+                # parser to unwrap without boto3. For the initial Bedrock
+                # release we fall back to non-streaming Converse and yield
+                # the full response as a single chunk — the user sees the
+                # whole answer arrive at once instead of token-by-token.
+                # Acceptable for summarisation (already a long batch op);
+                # follow-up PR can add proper streaming.
+                try:
+                    text = self._bedrock_chat(prompt, timeout_seconds=7200)
+                    if text:
+                        yield text
+                except Exception as e:
+                    logger.error(f"Bedrock summarisation failed: {e}")
+                    return
             else:
                 try:
                     response = self.cloud_client.chat.completions.create(
@@ -1251,6 +1267,14 @@ ANSWER:"""
                     ) as stream:
                         for text in stream.text_stream:
                             yield text
+                elif self.cloud_provider == "bedrock":
+                    # Same eventstream parsing tradeoff as summarize_streaming
+                    # — fall back to non-streaming Converse and emit the full
+                    # answer in one yield. Interactive query so we keep the
+                    # 300 s ceiling that the OpenAI/Anthropic paths use.
+                    text = self._bedrock_chat(prompt, timeout_seconds=300)
+                    if text:
+                        yield text
                 else:
                     response = self.cloud_client.chat.completions.create(
                         model=self.model_name,

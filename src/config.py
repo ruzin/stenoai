@@ -673,9 +673,16 @@ class Config:
         'us.anthropic.claude-haiku-4-5-20251001-v1:0'. When set this is used
         as the modelId in the Converse URL path so Bedrock routes the
         request across the profile's regions instead of pinning to one.
-        Empty means 'use the bare model id'."""
+        Empty means 'use the bare model id'.
+
+        Stripped on read so a whitespace-only stored value (e.g. from a
+        hand-edited config.json) doesn't survive the `target = profile or
+        model_id` check in _bedrock_chat and produce a URL with `%20`s in
+        place of the model id."""
         value = self._config.get("bedrock_inference_profile", "")
-        return value if isinstance(value, str) else ""
+        if not isinstance(value, str):
+            return ""
+        return value.strip()
 
     def set_bedrock_inference_profile(self, profile: str) -> bool:
         """Persist the inference profile. Empty string clears it — equivalent
