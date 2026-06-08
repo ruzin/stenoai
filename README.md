@@ -186,6 +186,19 @@ Download the latest release (**Apple Silicon Mac, macOS 12 Monterey or later**):
 
 You can run it locally as well (see below) if you don't want to install a DMG.
 
+### Windows alpha
+
+A Windows build is in **early alpha** — download the latest `stenoAI-windows-<version>-x64.zip` artefact from the [GitHub Actions runs of the Windows workflow](https://github.com/ruzin/stenoai/actions/workflows/build-windows.yml) (sign in to GitHub to access). Unzip and run `Steno.exe`.
+
+Caveats to know going in:
+
+- **SmartScreen warning on first launch.** The alpha is unsigned. Click **More info → Run anyway** to launch. We'll sign the build before 1.0.
+- **Mic-only recording.** System-audio (loopback) capture isn't shipped yet on Windows — the "Record system audio" toggle is hidden. Recordings capture only the microphone; diarisation degrades to single-speaker as a result.
+- **CPU-only Parakeet via ONNX Runtime.** Transcription works the same as on mac but runs through `onnx-asr` instead of MLX. A ~670 MB Parakeet weight file downloads on first record.
+- **Auto-update isn't wired yet on Windows.** Check back here for the next zip.
+
+Issues + feedback welcome on the GitHub issues tracker.
+
 ## Local Development/Use Locally
 
 ### Prerequisites

@@ -3,6 +3,7 @@ import { MessageSquare, Moon, MoreHorizontal, Monitor, PanelLeftClose, PanelLeft
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { AudioWave } from '@/components/AudioWave';
+import { isMac } from '@/lib/utils';
 import {
   Popover,
   PopoverContent,
@@ -183,32 +184,34 @@ function RecordingOptionsPopover() {
             </p>
           </div>
 
-          <div
-            className="flex items-start gap-3 rounded-md border p-3"
-            style={{ borderColor: 'var(--border-subtle)' }}
-          >
-            <Monitor className="mt-0.5 size-4 flex-shrink-0 text-muted-foreground" />
-            <div className="flex-1 space-y-0.5">
-              <div className="flex items-center justify-between gap-2">
-                <label
-                  htmlFor="maintoolbar-system-audio"
-                  className="text-sm font-medium"
-                >
-                  Record system audio
-                </label>
-                <Switch
-                  id="maintoolbar-system-audio"
-                  checked={enabled}
-                  disabled={systemAudio.isLoading || setSystemAudio.isPending}
-                  onCheckedChange={(v) => setSystemAudio.mutate(v)}
-                />
+          {isMac && (
+            <div
+              className="flex items-start gap-3 rounded-md border p-3"
+              style={{ borderColor: 'var(--border-subtle)' }}
+            >
+              <Monitor className="mt-0.5 size-4 flex-shrink-0 text-muted-foreground" />
+              <div className="flex-1 space-y-0.5">
+                <div className="flex items-center justify-between gap-2">
+                  <label
+                    htmlFor="maintoolbar-system-audio"
+                    className="text-sm font-medium"
+                  >
+                    Record system audio
+                  </label>
+                  <Switch
+                    id="maintoolbar-system-audio"
+                    checked={enabled}
+                    disabled={systemAudio.isLoading || setSystemAudio.isPending}
+                    onCheckedChange={(v) => setSystemAudio.mutate(v)}
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Capture both sides of calls on macOS. Grants microphone
+                  permission on first use.
+                </p>
               </div>
-              <p className="text-xs text-muted-foreground">
-                Capture both sides of calls on macOS. Grants microphone
-                permission on first use.
-              </p>
             </div>
-          </div>
+          )}
         </div>
       </PopoverContent>
     </Popover>

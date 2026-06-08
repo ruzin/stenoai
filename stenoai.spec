@@ -34,6 +34,15 @@ from PyInstaller.utils.hooks import collect_data_files, collect_submodules, coll
 # imports off-darwin so PyInstaller doesn't blow up trying to find a module
 # that isn't installed.
 _IS_DARWIN = sys.platform == "darwin"
+_IS_WINDOWS = sys.platform == "win32"
+
+# UPX is a binary packer that compresses executables. It's safe on macOS but
+# routinely flagged as suspicious by Windows Defender + corporate AVs because
+# malware abuses it for the same compression benefits. Leaving it on would
+# get the unsigned alpha installer quarantined on download for many users.
+# Disable UPX on Windows; the bundle is a few MB larger but actually
+# installs. macOS keeps UPX so the DMG stays close to its current size.
+_USE_UPX = not _IS_WINDOWS
 
 # Collect all hidden imports
 hiddenimports = [
@@ -246,7 +255,7 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    upx=_USE_UPX,
     console=True,  # Keep console for CLI usage
     disable_windowed_traceback=False,
     argv_emulation=False,
@@ -261,7 +270,7 @@ coll = COLLECT(
     a.zipfiles,
     a.datas,
     strip=False,
-    upx=True,
+    upx=_USE_UPX,
     upx_exclude=[],
     name='stenoai',
 )

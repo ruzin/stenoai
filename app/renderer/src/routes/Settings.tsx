@@ -34,7 +34,7 @@ import {
   getDebugLogs,
   subscribeDebugLogs,
 } from '@/lib/debugLogs';
-import { cn } from '@/lib/utils';
+import { cn, isMac } from '@/lib/utils';
 import { useTheme } from '@/hooks/useTheme';
 import {
   useAppVersion,
@@ -750,9 +750,11 @@ function GeneralTab() {
       <SettingRow
         label="Record system audio"
         description={
-          systemAudioSupport.data && !systemAudioSupport.data.supported
-            ? `Capture audio from virtual meetings (requires macOS 14.4+, you're on ${systemAudioSupport.data.osVersion || 'an older version'})`
-            : 'Capture audio from virtual meetings (requires macOS 14.4+)'
+          !isMac
+            ? 'Capture audio from virtual meetings (macOS only for now; Windows support is on the roadmap).'
+            : systemAudioSupport.data && !systemAudioSupport.data.supported
+              ? `Capture audio from virtual meetings (requires macOS 14.4+, you're on ${systemAudioSupport.data.osVersion || 'an older version'})`
+              : 'Capture audio from virtual meetings (requires macOS 14.4+)'
         }
       >
         <Switch
