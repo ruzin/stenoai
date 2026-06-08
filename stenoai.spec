@@ -131,20 +131,25 @@ for pkg in ('mlx', 'parakeet_mlx', 'pywhispercpp', 'onnxruntime'):
     except Exception:
         pass
 
-# Bundle Ollama binary and libraries
+# Bundle Ollama binary and libraries.
+# Walk bin/ recursively — Ollama for Windows ships GPU libs under lib/ollama/
+# that must be preserved relative to ollama.exe.
 import os
-# SPECPATH is provided by PyInstaller and points to the spec file directory
 ollama_bin_dir = os.path.join(SPECPATH, 'bin')
 if os.path.exists(ollama_bin_dir):
-    for filename in os.listdir(ollama_bin_dir):
-        filepath = os.path.join(ollama_bin_dir, filename)
-        if os.path.isfile(filepath):
-            if filename == 'ffmpeg':
-                # Put ffmpeg in root of bundle for easy PATH access
+    for root, _dirs, files in os.walk(ollama_bin_dir):
+        for filename in files:
+            filepath = os.path.join(root, filename)
+            rel = os.path.relpath(filepath, ollama_bin_dir)
+            rel_dir = os.path.dirname(rel)
+            base = os.path.basename(filename).lower()
+            if base in ('ffmpeg', 'ffmpeg.exe'):
+                # Put ffmpeg at the root of the bundle for easy PATH access
                 binaries.append((filepath, '.'))
             else:
-                # Put Ollama files in 'ollama' subdirectory
-                binaries.append((filepath, 'ollama'))
+                # Everything else lives under ollama/ (preserving subdirs like lib/ollama/)
+                dest = 'ollama' if not rel_dir else os.path.join('ollama', rel_dir)
+                binaries.append((filepath, dest))
 
 block_cipher = None
 

@@ -28,6 +28,15 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+# Force UTF-8 on stdout/stderr so emoji and non-ASCII prints don't crash under
+# Windows' default cp1252 codepage. Must run before any print() in this module.
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, OSError):
+        pass
+
 # Wire stdlib SSL up to certifi's CA bundle before anything tries to make
 # an HTTPS call. PyInstaller's compiled-in cert paths don't exist on a
 # customer's Mac, so without this the adapter request in summarizer.py
@@ -2206,8 +2215,9 @@ def list_meetings():
     # so meetings stored before the path change remain visible
     custom = get_config().get_storage_path()
     if custom:
-        if "StenoAI.app" in str(Path(__file__)) or "Applications" in str(Path(__file__)):
-            default_output = Path.home() / "Library" / "Application Support" / "stenoai" / "output"
+        from src.config import is_bundled, get_user_data_dir
+        if is_bundled():
+            default_output = get_user_data_dir() / "output"
         else:
             default_output = Path(__file__).parent / "output"
         if default_output.exists():
@@ -2784,8 +2794,9 @@ def list_failed():
         seen_files.add(f.resolve())
     custom = get_config().get_storage_path()
     if custom:
-        if "StenoAI.app" in str(Path(__file__)) or "Applications" in str(Path(__file__)):
-            default_output = Path.home() / "Library" / "Application Support" / "stenoai" / "output"
+        from src.config import is_bundled, get_user_data_dir
+        if is_bundled():
+            default_output = get_user_data_dir() / "output"
         else:
             default_output = Path(__file__).parent / "output"
         if default_output.exists():
@@ -2892,23 +2903,26 @@ def setup_check():
     try:
         ffmpeg_found = False
         possible_ffmpeg_paths = []
+        ffmpeg_exe_suffix = ".exe" if sys.platform == "win32" else ""
+        ffmpeg_binary = f"ffmpeg{ffmpeg_exe_suffix}"
 
         # Check bundled ffmpeg (PyInstaller bundle)
         if getattr(sys, 'frozen', False):
             exe_dir = Path(sys.executable).parent
             for candidate in [
-                exe_dir / 'ffmpeg',                    # bundle root (stenoai.spec places it at '.')
-                exe_dir / '_internal' / 'ffmpeg',      # _internal subdirectory
+                exe_dir / ffmpeg_binary,                # bundle root (stenoai.spec places it at '.')
+                exe_dir / '_internal' / ffmpeg_binary,  # _internal subdirectory
             ]:
                 if candidate.exists():
                     possible_ffmpeg_paths.append(('bundled', str(candidate)))
 
-        possible_ffmpeg_paths.extend([
-            (None, 'ffmpeg'),                          # PATH
-            (None, '/opt/homebrew/bin/ffmpeg'),         # Homebrew Apple Silicon
-            (None, '/usr/local/bin/ffmpeg'),            # Homebrew Intel
-            (None, '/usr/bin/ffmpeg'),                  # System
-        ])
+        possible_ffmpeg_paths.append((None, 'ffmpeg'))  # PATH (Windows resolves via PATHEXT)
+        if sys.platform != "win32":
+            possible_ffmpeg_paths.extend([
+                (None, '/opt/homebrew/bin/ffmpeg'),     # Homebrew Apple Silicon
+                (None, '/usr/local/bin/ffmpeg'),        # Homebrew Intel
+                (None, '/usr/bin/ffmpeg'),              # System
+            ])
 
         for label, path in possible_ffmpeg_paths:
             try:
@@ -2922,7 +2936,11 @@ def setup_check():
                 continue
 
         if not ffmpeg_found:
-            checks.append(("❌ ffmpeg", "not found - run: brew install ffmpeg"))
+            install_hint = (
+                "winget install Gyan.FFmpeg" if sys.platform == "win32"
+                else "brew install ffmpeg"
+            )
+            checks.append(("❌ ffmpeg", f"not found - run: {install_hint}"))
     except Exception as e:
         checks.append(("❌ ffmpeg", f"Error: {e}"))
     
@@ -2963,9 +2981,19 @@ def setup_check():
     except ImportError:
         checks.append(("❌ ollama-python", "pip install ollama"))
 
-    # Check if whisper model is downloaded (pywhispercpp stores in ~/Library/Application Support/pywhispercpp/models/)
-    whisper_model_path = Path.home() / "Library" / "Application Support" / "pywhispercpp" / "models"
-    whisper_models = list(whisper_model_path.glob("ggml-*.bin")) if whisper_model_path.exists() else []
+    # Check if whisper model is downloaded. pywhispercpp uses platformdirs, so
+    # the cache dir varies per OS — check the canonical location for each.
+    whisper_candidates = [
+        Path.home() / "Library" / "Application Support" / "pywhispercpp" / "models",
+        Path(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local"))) / "pywhispercpp" / "models",
+        Path(os.environ.get("XDG_DATA_HOME", str(Path.home() / ".local" / "share"))) / "pywhispercpp" / "models",
+    ]
+    whisper_models = []
+    for whisper_model_path in whisper_candidates:
+        if whisper_model_path.exists():
+            whisper_models = list(whisper_model_path.glob("ggml-*.bin"))
+            if whisper_models:
+                break
     if whisper_models:
         model_name = whisper_models[0].stem.replace("ggml-", "")
         checks.append(("✅ whisper-model", f"{model_name} downloaded"))

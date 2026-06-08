@@ -7,6 +7,7 @@ eliminating the need for users to install Ollama separately.
 
 import logging
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -14,6 +15,9 @@ from pathlib import Path
 from typing import Optional, Tuple
 
 logger = logging.getLogger(__name__)
+
+# Platform-specific executable suffix (PyInstaller and Ollama both append .exe on Windows).
+_EXE_SUFFIX = ".exe" if sys.platform == "win32" else ""
 
 # Ollama download URL for macOS
 OLLAMA_DOWNLOAD_URL = "https://github.com/ollama/ollama/releases/download/v0.16.3/ollama-darwin.tgz"
@@ -26,23 +30,25 @@ def get_bundled_ollama_dir() -> Optional[Path]:
     Returns:
         Path to the ollama directory, or None if not found
     """
+    binary_name = f"ollama{_EXE_SUFFIX}"
+
     # When running from PyInstaller bundle
     if getattr(sys, 'frozen', False):
         # PyInstaller sets _MEIPASS to the temp directory where files are extracted
         base_path = Path(sys._MEIPASS)
         ollama_dir = base_path / 'ollama'
-        if ollama_dir.exists():
+        if (ollama_dir / binary_name).exists():
             return ollama_dir
 
         # Also check relative to executable
         exe_dir = Path(sys.executable).parent
         ollama_dir = exe_dir / 'ollama'
-        if ollama_dir.exists():
+        if (ollama_dir / binary_name).exists():
             return ollama_dir
 
     # Development mode - check bin directory
     dev_ollama_dir = Path(__file__).parent.parent / 'bin'
-    if dev_ollama_dir.exists() and (dev_ollama_dir / 'ollama').exists():
+    if (dev_ollama_dir / binary_name).exists():
         return dev_ollama_dir
 
     return None
@@ -59,35 +65,37 @@ def get_ollama_binary() -> Optional[Path]:
     Returns:
         Path to ollama binary, or None if not found
     """
+    binary_name = f"ollama{_EXE_SUFFIX}"
+
     # Check bundled first
     bundled_dir = get_bundled_ollama_dir()
     if bundled_dir:
-        ollama_path = bundled_dir / 'ollama'
+        ollama_path = bundled_dir / binary_name
         if ollama_path.exists():
             logger.info(f"Using bundled Ollama: {ollama_path}")
             return ollama_path
 
-    # Fall back to system Ollama
-    system_paths = [
-        '/opt/homebrew/bin/ollama',  # Homebrew on Apple Silicon
-        '/usr/local/bin/ollama',     # Homebrew on Intel
-        '/usr/bin/ollama',           # System installation
-    ]
+    # Check PATH first (shutil.which is cross-platform; honours PATHEXT on Windows)
+    on_path = shutil.which("ollama")
+    if on_path:
+        logger.info(f"Using system Ollama from PATH: {on_path}")
+        return Path(on_path)
 
-    # Check PATH first
-    try:
-        result = subprocess.run(['which', 'ollama'], capture_output=True, text=True, timeout=5)
-        if result.returncode == 0:
-            path = Path(result.stdout.strip())
-            if path.exists():
-                logger.info(f"Using system Ollama from PATH: {path}")
-                return path
-    except Exception:
-        pass
+    # Fall back to common system install locations
+    if sys.platform == "win32":
+        local_app = os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local"))
+        system_paths = [
+            Path(local_app) / "Programs" / "Ollama" / "ollama.exe",
+            Path(os.environ.get("ProgramFiles", "C:/Program Files")) / "Ollama" / "ollama.exe",
+        ]
+    else:
+        system_paths = [
+            Path("/opt/homebrew/bin/ollama"),  # Homebrew on Apple Silicon
+            Path("/usr/local/bin/ollama"),     # Homebrew on Intel
+            Path("/usr/bin/ollama"),           # System installation
+        ]
 
-    # Check common locations
-    for path_str in system_paths:
-        path = Path(path_str)
+    for path in system_paths:
         if path.exists():
             logger.info(f"Using system Ollama: {path}")
             return path
@@ -109,20 +117,30 @@ def get_ollama_env() -> dict:
 
     bundled_dir = get_bundled_ollama_dir()
     if bundled_dir:
-        # Add bundled directory to library path for dylibs
         ollama_dir_str = str(bundled_dir)
 
-        # macOS uses DYLD_LIBRARY_PATH
-        existing = env.get('DYLD_LIBRARY_PATH', '')
-        if existing:
-            env['DYLD_LIBRARY_PATH'] = f"{ollama_dir_str}:{existing}"
+        if sys.platform == "darwin":
+            # macOS uses DYLD_LIBRARY_PATH for dylib resolution
+            existing = env.get('DYLD_LIBRARY_PATH', '')
+            env['DYLD_LIBRARY_PATH'] = (
+                f"{ollama_dir_str}:{existing}" if existing else ollama_dir_str
+            )
+            # Metal library only exists on the mac bundle
+            env['MLX_METAL_PATH'] = str(bundled_dir / 'mlx.metallib')
+            logger.debug(f"Set DYLD_LIBRARY_PATH: {env['DYLD_LIBRARY_PATH']}")
+        elif sys.platform == "win32":
+            # Windows uses PATH for DLL resolution; ollama's GPU libs live under
+            # ollama/lib/ollama/ (preserved by stenoai.spec's recursive walk).
+            existing = env.get('PATH', '')
+            env['PATH'] = (
+                f"{ollama_dir_str};{existing}" if existing else ollama_dir_str
+            )
         else:
-            env['DYLD_LIBRARY_PATH'] = ollama_dir_str
-
-        # Also set for Metal library
-        env['MLX_METAL_PATH'] = str(bundled_dir / 'mlx.metallib')
-
-        logger.debug(f"Set DYLD_LIBRARY_PATH: {env['DYLD_LIBRARY_PATH']}")
+            # Linux: LD_LIBRARY_PATH for .so resolution
+            existing = env.get('LD_LIBRARY_PATH', '')
+            env['LD_LIBRARY_PATH'] = (
+                f"{ollama_dir_str}:{existing}" if existing else ollama_dir_str
+            )
 
     return env
 
@@ -189,15 +207,23 @@ def start_ollama_server(wait: bool = True, timeout: int = 30) -> bool:
     try:
         env = get_ollama_env()
 
-        # Start Ollama server in background
+        # Start Ollama server in background, detached from this process so it
+        # outlives the short-lived CLI invocation that spawns it. start_new_session
+        # is POSIX-only; on Windows the equivalent is CREATE_NEW_PROCESS_GROUP.
         logger.info(f"Starting Ollama server: {ollama_binary}")
-        proc = subprocess.Popen(
-            [str(ollama_binary), 'serve'],
-            env=env,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True  # Detach from parent process
-        )
+        popen_kwargs: dict = {
+            "env": env,
+            "stdout": subprocess.DEVNULL,
+            "stderr": subprocess.DEVNULL,
+        }
+        if sys.platform == "win32":
+            popen_kwargs["creationflags"] = (
+                subprocess.CREATE_NEW_PROCESS_GROUP  # type: ignore[attr-defined]
+                | getattr(subprocess, "DETACHED_PROCESS", 0)
+            )
+        else:
+            popen_kwargs["start_new_session"] = True
+        proc = subprocess.Popen([str(ollama_binary), 'serve'], **popen_kwargs)
         _write_pid(proc.pid)
 
         if not wait:

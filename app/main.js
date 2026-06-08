@@ -121,12 +121,13 @@ function registerShortcutProtocolClient() {
 
 // Backend executable path - always use bundled stenoai
 function getBackendPath() {
+  const exe = process.platform === 'win32' ? 'stenoai.exe' : 'stenoai';
   if (app.isPackaged) {
     // Production: bundled in app resources
-    return path.join(process.resourcesPath, 'stenoai', 'stenoai');
+    return path.join(process.resourcesPath, 'stenoai', exe);
   } else {
     // Development: use local build
-    return path.join(__dirname, '..', 'dist', 'stenoai', 'stenoai');
+    return path.join(__dirname, '..', 'dist', 'stenoai', exe);
   }
 }
 
@@ -1072,9 +1073,16 @@ ipcMain.on('shortcut-renderer-ready', () => {
   flushShortcutQueue();
 });
 
-// Microphone permission handlers
+// Microphone permission handlers.
+// systemPreferences.getMediaAccessStatus / askForMediaAccess are macOS-only.
+// On Windows and Linux the OS handles mic permission at the WASAPI/ALSA layer
+// and there is no programmatic prompt — report 'granted' so the renderer
+// stops gating recording on a permission that doesn't exist.
 ipcMain.handle('check-microphone-permission', async () => {
   try {
+    if (process.platform !== 'darwin') {
+      return { success: true, status: 'granted' };
+    }
     const status = systemPreferences.getMediaAccessStatus('microphone');
     console.log('Microphone permission status:', status);
     return { success: true, status };
@@ -1086,6 +1094,9 @@ ipcMain.handle('check-microphone-permission', async () => {
 
 ipcMain.handle('request-microphone-permission', async () => {
   try {
+    if (process.platform !== 'darwin') {
+      return { success: true, granted: true };
+    }
     console.log('Requesting microphone permission...');
     const granted = await systemPreferences.askForMediaAccess('microphone');
     console.log('Microphone permission granted:', granted);
@@ -3171,17 +3182,16 @@ ipcMain.handle('setup-system-check', async () => {
       return { success: false, error: 'Python 3 not found. Please install Python 3.8+' };
     }
     
-    // Create required directories - match Python logic for DMG vs development
-    const os = require('os');
-    const currentPath = __dirname;
+    // Create required directories. Mirror src/config.get_user_data_dir() so the
+    // Electron and Python sides agree on the storage root on every OS.
+    //   macOS:   ~/Library/Application Support/stenoai
+    //   Windows: %APPDATA%/stenoai
+    //   Linux:   ~/.config/stenoai (electron's appData)
     let baseDir;
-    
-    // Detect if running from app bundle (DMG install) or development
-    if (currentPath.includes('StenoAI.app') || currentPath.includes('Applications')) {
-      // DMG/Production: Use Application Support folder
-      baseDir = path.join(os.homedir(), 'Library', 'Application Support', 'stenoai');
+    if (app.isPackaged) {
+      baseDir = path.join(app.getPath('appData'), 'stenoai');
     } else {
-      // Development: Use project relative paths  
+      // Development: Use project relative paths
       baseDir = path.join(__dirname, '..');
     }
     
@@ -3909,14 +3919,19 @@ ipcMain.handle('setup-ollama-and-model', async () => {
       sendDebugLog(`Could not read AI provider, proceeding with local setup: ${e.message}`);
     }
 
-    // Check macOS version — bundled Ollama requires macOS 14 (Sonoma) or later
-    const macosRelease = os.release(); // e.g. "23.1.0" for macOS 14.1
-    const darwinMajor = parseInt(macosRelease.split('.')[0], 10);
-    // Darwin 23 = macOS 14 (Sonoma), Darwin 22 = macOS 13 (Ventura), etc.
-    if (darwinMajor < 23) {
-      const macosVersion = darwinMajor >= 22 ? '13 (Ventura)' : darwinMajor >= 21 ? '12 (Monterey)' : `(Darwin ${darwinMajor})`;
-      sendDebugLog(`macOS ${macosVersion} detected — Ollama requires macOS 14 (Sonoma) or later`);
-      return { success: false, error: 'StenoAI requires macOS 14 (Sonoma) or later for local AI summarization. Please update your macOS or use a remote Ollama server in Settings.' };
+    // Check macOS version — bundled Ollama requires macOS 14 (Sonoma) or later.
+    // os.release() reports the kernel version, which is Darwin on mac but the
+    // Windows NT build on Windows; gate the version check to darwin so a non-mac
+    // OS doesn't get rejected by the < 23 comparison.
+    if (process.platform === 'darwin') {
+      const macosRelease = os.release(); // e.g. "23.1.0" for macOS 14.1
+      const darwinMajor = parseInt(macosRelease.split('.')[0], 10);
+      // Darwin 23 = macOS 14 (Sonoma), Darwin 22 = macOS 13 (Ventura), etc.
+      if (darwinMajor < 23) {
+        const macosVersion = darwinMajor >= 22 ? '13 (Ventura)' : darwinMajor >= 21 ? '12 (Monterey)' : `(Darwin ${darwinMajor})`;
+        sendDebugLog(`macOS ${macosVersion} detected — Ollama requires macOS 14 (Sonoma) or later`);
+        return { success: false, error: 'StenoAI requires macOS 14 (Sonoma) or later for local AI summarization. Please update your macOS or use a remote Ollama server in Settings.' };
+      }
     }
 
     sendDebugLog('Locating bundled Ollama...');
@@ -4488,12 +4503,15 @@ async function ensureOllamaRunning() {
       return true; // Service is running
     }
 
-    // Service not running, try to start it
-    // Check macOS version — bundled Ollama requires macOS 14 (Sonoma) or later
-    const macRelease = os.release();
-    if (parseInt(macRelease.split('.')[0], 10) < 23) {
-      sendDebugLog('macOS version too old for bundled Ollama — requires macOS 14 (Sonoma) or later');
-      return false;
+    // Service not running, try to start it.
+    // The macOS-14 gate only applies to mac (os.release() is the NT build on
+    // Windows, which would always trigger the < 23 check).
+    if (process.platform === 'darwin') {
+      const macRelease = os.release();
+      if (parseInt(macRelease.split('.')[0], 10) < 23) {
+        sendDebugLog('macOS version too old for bundled Ollama — requires macOS 14 (Sonoma) or later');
+        return false;
+      }
     }
 
     const ollamaPath = await findOllamaExecutable();
@@ -5643,7 +5661,9 @@ ipcMain.handle('pull-model', async (event, modelName) => {
   }
 });
 
-// Helper to build env vars for running the bundled Ollama binary directly
+// Helper to build env vars for running the bundled Ollama binary directly.
+// Mirrors src/ollama_manager.get_ollama_env() so the dylib/DLL search path
+// is set correctly per-OS.
 function getOllamaEnv() {
   let ollamaDir;
   if (app.isPackaged) {
@@ -5652,21 +5672,30 @@ function getOllamaEnv() {
     ollamaDir = path.join(__dirname, '..', 'bin');
   }
   const env = { ...process.env };
-  const existing = env.DYLD_LIBRARY_PATH || '';
-  env.DYLD_LIBRARY_PATH = existing ? `${ollamaDir}:${existing}` : ollamaDir;
-  env.MLX_METAL_PATH = path.join(ollamaDir, 'mlx.metallib');
+  if (process.platform === 'darwin') {
+    const existing = env.DYLD_LIBRARY_PATH || '';
+    env.DYLD_LIBRARY_PATH = existing ? `${ollamaDir}:${existing}` : ollamaDir;
+    env.MLX_METAL_PATH = path.join(ollamaDir, 'mlx.metallib');
+  } else if (process.platform === 'win32') {
+    const existing = env.PATH || '';
+    env.PATH = existing ? `${ollamaDir};${existing}` : ollamaDir;
+  } else {
+    const existing = env.LD_LIBRARY_PATH || '';
+    env.LD_LIBRARY_PATH = existing ? `${ollamaDir}:${existing}` : ollamaDir;
+  }
   return env;
 }
 
 // Helper function to find Ollama executable (bundled only)
 async function findOllamaExecutable() {
+  const exe = process.platform === 'win32' ? 'ollama.exe' : 'ollama';
   let bundledOllamaPath;
   if (app.isPackaged) {
     // Production: bundled inside PyInstaller _internal directory
-    bundledOllamaPath = path.join(process.resourcesPath, 'stenoai', '_internal', 'ollama', 'ollama');
+    bundledOllamaPath = path.join(process.resourcesPath, 'stenoai', '_internal', 'ollama', exe);
   } else {
     // Development: in project bin/ directory
-    bundledOllamaPath = path.join(__dirname, '..', 'bin', 'ollama');
+    bundledOllamaPath = path.join(__dirname, '..', 'bin', exe);
   }
 
   if (fs.existsSync(bundledOllamaPath)) {

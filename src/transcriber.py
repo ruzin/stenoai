@@ -99,19 +99,26 @@ def _resolve_ffmpeg() -> Optional[str]:
     with _FFMPEG_PATH_LOCK:
         if _FFMPEG_PATH_CACHE is not None:
             return _FFMPEG_PATH_CACHE
+        import shutil
+        exe_suffix = ".exe" if sys.platform == "win32" else ""
+        binary_name = f"ffmpeg{exe_suffix}"
         candidates: list[str] = []
         if getattr(sys, 'frozen', False):
             exe_dir = Path(sys.executable).parent
             candidates.extend([
-                str(exe_dir / 'ffmpeg'),
-                str(exe_dir / '_internal' / 'ffmpeg'),
+                str(exe_dir / binary_name),
+                str(exe_dir / '_internal' / binary_name),
             ])
-        candidates.extend([
-            'ffmpeg',
-            '/opt/homebrew/bin/ffmpeg',
-            '/usr/local/bin/ffmpeg',
-            '/usr/bin/ffmpeg',
-        ])
+        # PATH (cross-platform; honours PATHEXT on Windows)
+        on_path = shutil.which("ffmpeg")
+        if on_path:
+            candidates.append(on_path)
+        if sys.platform != "win32":
+            candidates.extend([
+                '/opt/homebrew/bin/ffmpeg',
+                '/usr/local/bin/ffmpeg',
+                '/usr/bin/ffmpeg',
+            ])
         for cand in candidates:
             try:
                 r = subprocess.run([cand, '-version'], capture_output=True, timeout=5)
@@ -429,30 +436,33 @@ class WhisperTranscriber:
         in ``transcribe_diarised`` still calls ffmpeg with a `pan` filter to
         separate the mic and system channels.
         """
+        exe_suffix = ".exe" if sys.platform == "win32" else ""
+        binary_name = f"ffmpeg{exe_suffix}"
         possible_ffmpeg_paths = []
 
         if getattr(sys, 'frozen', False):
             exe_dir = Path(sys.executable).parent
-            root_ffmpeg = exe_dir / 'ffmpeg'
+            root_ffmpeg = exe_dir / binary_name
             if root_ffmpeg.exists():
                 possible_ffmpeg_paths.append(str(root_ffmpeg))
             if hasattr(sys, '_MEIPASS'):
-                meipass_ffmpeg = Path(sys._MEIPASS) / 'ffmpeg'
+                meipass_ffmpeg = Path(sys._MEIPASS) / binary_name
                 if meipass_ffmpeg.exists():
                     possible_ffmpeg_paths.append(str(meipass_ffmpeg))
-            internal_ffmpeg = exe_dir / '_internal' / 'ffmpeg'
+            internal_ffmpeg = exe_dir / '_internal' / binary_name
             if internal_ffmpeg.exists():
                 possible_ffmpeg_paths.append(str(internal_ffmpeg))
         else:
-            dev_ffmpeg = Path(__file__).parent.parent / 'bin' / 'ffmpeg'
+            dev_ffmpeg = Path(__file__).parent.parent / 'bin' / binary_name
             if dev_ffmpeg.exists():
                 possible_ffmpeg_paths.append(str(dev_ffmpeg))
 
-        possible_ffmpeg_paths.extend([
-            '/opt/homebrew/bin/ffmpeg',
-            '/usr/local/bin/ffmpeg',
-            '/usr/bin/ffmpeg',
-        ])
+        if sys.platform != "win32":
+            possible_ffmpeg_paths.extend([
+                '/opt/homebrew/bin/ffmpeg',
+                '/usr/local/bin/ffmpeg',
+                '/usr/bin/ffmpeg',
+            ])
 
         try:
             subprocess.run(['ffmpeg', '-version'], capture_output=True, timeout=5, check=True)

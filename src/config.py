@@ -6,6 +6,8 @@ Handles storing and loading user preferences like model selection.
 
 import json
 import logging
+import os
+import sys
 import uuid
 from pathlib import Path
 from typing import Optional, Dict, Any
@@ -13,6 +15,35 @@ from typing import Optional, Dict, Any
 from src.whisper_models import SUPPORTED_WHISPER_MODELS as _WHISPER_REGISTRY
 
 logger = logging.getLogger(__name__)
+
+
+def get_user_data_dir() -> Path:
+    """Per-OS user data directory for stenoai when running as a frozen bundle.
+
+    macOS:   ~/Library/Application Support/stenoai
+    Windows: %APPDATA%/stenoai  (Roaming)
+    Linux:   $XDG_DATA_HOME/stenoai or ~/.local/share/stenoai
+    """
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "stenoai"
+    if sys.platform == "win32":
+        base = os.environ.get("APPDATA")
+        return (Path(base) if base else Path.home() / "AppData" / "Roaming") / "stenoai"
+    base = os.environ.get("XDG_DATA_HOME")
+    return (Path(base) if base else Path.home() / ".local" / "share") / "stenoai"
+
+
+def is_bundled() -> bool:
+    """True when running from a PyInstaller-frozen bundle.
+
+    The legacy "StenoAI.app"/"Applications" string check was a mac-only safety
+    net; sys.frozen is the canonical PyInstaller marker on every platform, with
+    the path check kept as a belt-and-braces for mac-source-in-Applications.
+    """
+    if getattr(sys, "frozen", False):
+        return True
+    path = str(Path(__file__))
+    return "StenoAI.app" in path or "Applications" in path
 
 
 class Config:
@@ -149,10 +180,8 @@ class Config:
             config_path: Path to config file. If None, uses default location.
         """
         if config_path is None:
-            import sys as _sys
-            if getattr(_sys, 'frozen', False) or "StenoAI.app" in str(Path(__file__)) or "Applications" in str(Path(__file__)):
-                # Bundled (PyInstaller dev or production): ~/Library/Application Support/stenoai
-                base_dir = Path.home() / "Library" / "Application Support" / "stenoai"
+            if is_bundled():
+                base_dir = get_user_data_dir()
             else:
                 # Source dev: project root
                 base_dir = Path(__file__).parent.parent
@@ -716,16 +745,16 @@ def get_data_dirs() -> Dict[str, Path]:
 
     Returns dict with keys: recordings, transcripts, output.
     Uses custom storage_path from config if set, otherwise falls back to
-    production (~/Library/Application Support/stenoai/) or development paths.
+    the per-OS user data dir (see get_user_data_dir) when bundled, or the
+    repo root when running from source.
     """
     config = get_config()
     custom = config.get_storage_path()
 
-    import sys as _sys
     if custom:
         base = Path(custom)
-    elif getattr(_sys, 'frozen', False) or "StenoAI.app" in str(Path(__file__)) or "Applications" in str(Path(__file__)):
-        base = Path.home() / "Library" / "Application Support" / "stenoai"
+    elif is_bundled():
+        base = get_user_data_dir()
     else:
         base = Path(__file__).parent.parent  # project root in dev (source)
 
