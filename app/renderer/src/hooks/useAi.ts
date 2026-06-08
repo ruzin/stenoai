@@ -85,6 +85,23 @@ export function useSetCloudModel() {
   });
 }
 
+export function useSetBedrockRegion() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (region: string) => unwrap(await ipc().ai.setBedrockRegion(region)),
+    onSuccess: () => qc.invalidateQueries({ queryKey: aiKeys.provider() }),
+  });
+}
+
+export function useSetBedrockInferenceProfile() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (profile: string) =>
+      unwrap(await ipc().ai.setBedrockInferenceProfile(profile)),
+    onSuccess: () => qc.invalidateQueries({ queryKey: aiKeys.provider() }),
+  });
+}
+
 export function useTestCloudApi() {
   return useMutation({
     mutationFn: async () => unwrap(await ipc().ai.testCloudApi()),

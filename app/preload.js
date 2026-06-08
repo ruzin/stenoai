@@ -221,6 +221,8 @@ const stenoai = {
     setCloudApiKey: (key) => invoke('set-cloud-api-key', key),
     setCloudProvider: (p) => invoke('set-cloud-provider', p),
     setCloudModel: (m) => invoke('set-cloud-model', m),
+    setBedrockRegion: (region) => invoke('set-bedrock-region', region),
+    setBedrockInferenceProfile: (profile) => invoke('set-bedrock-inference-profile', profile),
     testCloudApi: () => invoke('test-cloud-api'),
   },
 
