@@ -4,32 +4,30 @@ Mirrors ``src/whisper_models.py`` so the Settings / Setup IPC handlers
 can list both engines through one shape — name, size, description,
 ``is_installed`` — without branching on engine in the renderer.
 
-Parakeet TDT v3 is the only model today; a future English-only TDT v2
-variant would slot in as a sibling entry here, with the same id-keyed
-``is_installed`` lookup.
-
-Downloads are not byte-quantised. ``parakeet-mlx.from_pretrained`` pulls
-multiple files from the HuggingFace snapshot, and threading custom tqdm
-progress through ``huggingface_hub`` isn't worth the wire complexity
-for a ~600 MB one-time download — the Setup wizard already shows an
-indeterminate state for the Ollama pull, so the UX is consistent.
+The active model id comes from ``src.parakeet`` which dispatches
+between the MLX backend (mac) and the ONNX backend (Windows / Linux).
+The user-facing name and behaviour are the same on every platform;
+only the underlying HuggingFace repo (and thus the on-disk size +
+cache layout) differs. Sizes here reflect the int8-quantised ONNX
+encoder on Windows and the float16 MLX weights on mac.
 """
 from __future__ import annotations
 
 import logging
 import os
+import sys
 from pathlib import Path
 from typing import Callable, Optional
+
+from src.parakeet import DEFAULT_MODEL_ID  # platform-dispatched
 
 logger = logging.getLogger(__name__)
 
 
-DEFAULT_MODEL_ID = "mlx-community/parakeet-tdt-0.6b-v3"
-
 SUPPORTED_PARAKEET_MODELS: dict[str, dict] = {
     DEFAULT_MODEL_ID: {
         "name": "Parakeet TDT v3",
-        "size": "572MB",
+        "size": "670MB" if sys.platform != "darwin" else "572MB",
         "description": (
             "Highest quality. Supports live transcription in English "
             "and 25 European languages — Spanish, French, German, "

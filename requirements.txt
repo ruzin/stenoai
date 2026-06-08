@@ -4,19 +4,25 @@ sounddevice>=0.4.6
 # the floor is the only real constraint now.
 numpy>=2.0,<3.0
 # parakeet-mlx is Apple-Silicon-only (its `mlx` transitive dep has no
-# x86_64 wheels). As of v0.4.0 we ship Apple-Silicon-only DMGs, so the
-# dep is unconditional — pip on Intel / Linux will fail with a clear
-# ResolutionImpossible, matching the "this project is arm64-Mac only"
-# stance from the release notes.
-parakeet-mlx>=0.5.0
+# x86_64 wheels). Gated to darwin so Windows / Linux installs don't
+# trip a ResolutionImpossible.
+parakeet-mlx>=0.5.0; sys_platform == 'darwin'
+# onnx-asr is the cross-platform Parakeet backend. Used on Windows and
+# Linux where parakeet-mlx can't install. Wraps the istupakov/parakeet-tdt-0.6b-v3-onnx
+# weights (int8 quantised, ~670 MB) via ONNX Runtime CPU; pure Python,
+# no PyTorch, no full NeMo toolkit. The [cpu] extra pins onnxruntime,
+# [hub] pulls huggingface_hub so model snapshots download on first use.
+onnx-asr[cpu,hub]>=0.11.0; sys_platform != 'darwin'
 # Silero VAD runs via onnxruntime directly (we ship the .onnx file in
 # src/data/). The official silero-vad pip package would pull in torch
 # and torchaudio (~1 GB), which would balloon the DMG — onnxruntime
-# CPU is a few MB and runs the same model.
+# CPU is a few MB and runs the same model. Listed unconditionally
+# because mac needs it independently of onnx-asr's transitive pull.
 onnxruntime>=1.17
 # pywhispercpp is still used by src/transcriber.py for the post-stop
-# batch pipeline. Will be removed once the transcriber rewrite
-# (parakeet for batch too) lands — until then this is the safety net.
+# batch pipeline AND as the user-selectable engine for languages
+# Parakeet can't speak (Chinese, Japanese, Korean, Arabic, Hindi, …).
+# Cross-platform — Windows wheels are published.
 pywhispercpp>=1.2.0
 ollama>=0.1.7
 click>=8.1.0

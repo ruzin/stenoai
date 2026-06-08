@@ -7,9 +7,14 @@ distributed with the Electron app, eliminating the need for users to have
 Python installed.
 
 Includes:
-- Parakeet TDT v3 (via parakeet-mlx) for transcription (~50MB code, ~600MB model downloaded on first use)
-- Bundled Ollama binary for summarization (~220MB)
-- MLX runtime for Apple Silicon inference
+- Parakeet TDT v3 for transcription. On Apple Silicon via parakeet-mlx
+  (MLX runtime). On Windows / Linux via onnx-asr (ONNX Runtime, CPU).
+  Both ship ~50 MB of bundled code; the ~600 MB (MLX fp16) or ~670 MB
+  (ONNX int8) weights download on first use.
+- whisper.cpp (pywhispercpp) as the user-selectable engine for languages
+  Parakeet can't speak (Chinese, Japanese, Korean, Arabic, Hindi, …) and
+  for the legacy post-stop batch pipeline.
+- Bundled Ollama binary for summarization (~220MB).
 
 No external dependencies required - users only need to download LLM + ASR models.
 
@@ -23,33 +28,27 @@ The bundled executable will be in dist/stenoai/
 import sys
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules, collect_dynamic_libs
 
+# Apple Silicon uses parakeet-mlx for ASR; Windows / Linux use onnx-asr via
+# ONNX Runtime. The two backends live in src/_parakeet_{mlx,onnx}.py and
+# src/parakeet.py dispatches between them at import time. We skip MLX hidden
+# imports off-darwin so PyInstaller doesn't blow up trying to find a module
+# that isn't installed.
+_IS_DARWIN = sys.platform == "darwin"
+
 # Collect all hidden imports
 hiddenimports = [
-    # Parakeet MLX (ASR)
-    'parakeet_mlx',
-    'parakeet_mlx.audio',
-    'parakeet_mlx.tokenizer',
-    'parakeet_mlx.attention',
-    'parakeet_mlx.cache',
-
-    # MLX runtime
-    'mlx',
-    'mlx.core',
-    'mlx.nn',
-    'mlx.utils',
-
-    # whisper.cpp bindings — still used by the post-stop batch pipeline.
-    # Will be dropped once transcriber.py is rewritten to use Parakeet
-    # for batch transcription too.
+    # whisper.cpp bindings — still used by the post-stop batch pipeline AND
+    # as the user-selectable engine for non-European languages (Chinese,
+    # Japanese, Korean, Arabic, Hindi, …) that Parakeet can't speak.
     'pywhispercpp',
     'pywhispercpp.model',
     'pywhispercpp.constants',
 
-    # HuggingFace hub (parakeet-mlx pulls weights through this)
+    # HuggingFace hub (both ASR backends pull weights through this)
     'huggingface_hub',
 
-    # ONNX Runtime — runs the bundled Silero VAD model directly. We avoid
-    # the silero-vad pip package because it imports torch at module load.
+    # ONNX Runtime — runs the bundled Silero VAD model directly on every
+    # platform; runs the Parakeet weights too on Windows / Linux via onnx-asr.
     'onnxruntime',
     'onnxruntime.capi',
 
@@ -90,16 +89,41 @@ hiddenimports = [
     'multiprocessing',
 ]
 
+if _IS_DARWIN:
+    # Parakeet MLX (ASR) + MLX runtime — Apple Silicon only
+    hiddenimports += [
+        'parakeet_mlx',
+        'parakeet_mlx.audio',
+        'parakeet_mlx.tokenizer',
+        'parakeet_mlx.attention',
+        'parakeet_mlx.cache',
+        'mlx',
+        'mlx.core',
+        'mlx.nn',
+        'mlx.utils',
+    ]
+else:
+    # onnx-asr (ASR via ONNX Runtime) — Windows / Linux. The package is laid
+    # out so the top-level `onnx_asr` import pulls everything user-facing;
+    # collect_submodules below catches the lazily-imported model adapters.
+    hiddenimports += [
+        'onnx_asr',
+    ]
+
 # Collect submodules — parakeet-mlx + mlx + huggingface_hub all have
 # late-bound imports that PyInstaller's static analysis misses, and a partial
 # bundle silently breaks at runtime ("module not found" deep inside model
 # load). collect_submodules is the safe sledgehammer.
 hiddenimports += collect_submodules('pydantic')
 hiddenimports += collect_submodules('numpy')
-hiddenimports += collect_submodules('parakeet_mlx')
-hiddenimports += collect_submodules('mlx')
 hiddenimports += collect_submodules('huggingface_hub')
 hiddenimports += collect_submodules('onnxruntime')
+
+if _IS_DARWIN:
+    hiddenimports += collect_submodules('parakeet_mlx')
+    hiddenimports += collect_submodules('mlx')
+else:
+    hiddenimports += collect_submodules('onnx_asr')
 
 # Collect data files
 datas = []
@@ -112,9 +136,15 @@ datas += [('src', 'src')]
 # in here when the user runs `dist/stenoai/stenoai spike-parakeet`.
 datas += [('scripts', 'scripts')]
 
-# Collect data files (tokenizers, configs) from parakeet-mlx + mlx.
-# parakeet-mlx ships tokenizer JSON resources that get loaded by path.
-for pkg in ('parakeet_mlx', 'mlx', 'huggingface_hub', 'pywhispercpp', 'onnxruntime'):
+# Collect data files (tokenizers, configs). parakeet-mlx ships tokenizer
+# JSON resources that get loaded by path; onnx-asr ships built-in model
+# alias configs the same way.
+_DATA_PKGS = ['huggingface_hub', 'pywhispercpp', 'onnxruntime']
+if _IS_DARWIN:
+    _DATA_PKGS += ['parakeet_mlx', 'mlx']
+else:
+    _DATA_PKGS += ['onnx_asr']
+for pkg in _DATA_PKGS:
     try:
         datas += collect_data_files(pkg)
     except Exception:
@@ -123,9 +153,15 @@ for pkg in ('parakeet_mlx', 'mlx', 'huggingface_hub', 'pywhispercpp', 'onnxrunti
 # Collect dynamic libraries — MLX ships compiled Metal kernels (.metallib)
 # and a libmlx dylib. Without collect_dynamic_libs the bundle imports MLX
 # but bombs the first time it touches a Metal op. pywhispercpp ships
-# libwhisper.dylib via the same mechanism.
+# libwhisper.dylib via the same mechanism. onnxruntime ships its native
+# session DLLs on Windows; PyInstaller's hidden-import / collect-all
+# gotcha for onnxruntime is well-documented (microsoft/onnxruntime#25193)
+# so we always run collect_dynamic_libs on it.
 binaries = []
-for pkg in ('mlx', 'parakeet_mlx', 'pywhispercpp', 'onnxruntime'):
+_DYLIB_PKGS = ['pywhispercpp', 'onnxruntime']
+if _IS_DARWIN:
+    _DYLIB_PKGS += ['mlx', 'parakeet_mlx']
+for pkg in _DYLIB_PKGS:
     try:
         binaries += collect_dynamic_libs(pkg)
     except Exception:
