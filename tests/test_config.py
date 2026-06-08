@@ -152,5 +152,70 @@ class ConfigKeepRecordingsTests(unittest.TestCase):
             self.assertFalse(reloaded.get_keep_recordings())
 
 
+class ConfigBedrockSettingsTests(unittest.TestCase):
+    def test_default_bedrock_region_is_us_east_1(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config = Config(config_path=Path(tmp_dir) / "config.json")
+            self.assertEqual(config.get_bedrock_region(), "us-east-1")
+
+    def test_set_bedrock_region_persists_and_trims(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "config.json"
+            config = Config(config_path=path)
+            self.assertTrue(config.set_bedrock_region("  eu-west-1  "))
+            self.assertEqual(config.get_bedrock_region(), "eu-west-1")
+            reloaded = Config(config_path=path)
+            self.assertEqual(reloaded.get_bedrock_region(), "eu-west-1")
+
+    def test_set_bedrock_region_rejects_empty(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config = Config(config_path=Path(tmp_dir) / "config.json")
+            # Seed a known good value so we can assert it isn't clobbered.
+            config.set_bedrock_region("ap-southeast-2")
+            self.assertFalse(config.set_bedrock_region(""))
+            self.assertFalse(config.set_bedrock_region("   "))
+            self.assertEqual(config.get_bedrock_region(), "ap-southeast-2")
+
+    def test_default_inference_profile_is_empty_string(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config = Config(config_path=Path(tmp_dir) / "config.json")
+            self.assertEqual(config.get_bedrock_inference_profile(), "")
+
+    def test_set_inference_profile_round_trip(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "config.json"
+            config = Config(config_path=path)
+            profile = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+            self.assertTrue(config.set_bedrock_inference_profile(profile))
+            self.assertEqual(config.get_bedrock_inference_profile(), profile)
+            reloaded = Config(config_path=path)
+            self.assertEqual(reloaded.get_bedrock_inference_profile(), profile)
+
+    def test_empty_inference_profile_clears_value(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config = Config(config_path=Path(tmp_dir) / "config.json")
+            config.set_bedrock_inference_profile("us.anthropic.claude-x-v1:0")
+            self.assertTrue(config.set_bedrock_inference_profile(""))
+            self.assertEqual(config.get_bedrock_inference_profile(), "")
+
+    def test_bedrock_is_a_valid_cloud_provider(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config = Config(config_path=Path(tmp_dir) / "config.json")
+            self.assertIn("bedrock", config.VALID_CLOUD_PROVIDERS)
+            self.assertTrue(config.set_cloud_provider("bedrock"))
+            self.assertEqual(config.get_cloud_provider(), "bedrock")
+
+    def test_bedrock_has_default_cloud_model(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config = Config(config_path=Path(tmp_dir) / "config.json")
+            config.set_cloud_provider("bedrock")
+            # CLOUD_MODEL_DEFAULTS entry surfaces as the get_cloud_model
+            # fallback when no model has been remembered for this provider yet.
+            self.assertEqual(
+                config.get_cloud_model(),
+                "anthropic.claude-haiku-4-5-20251001-v1:0",
+            )
+
+
 if __name__ == "__main__":
     unittest.main()

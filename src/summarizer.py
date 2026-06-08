@@ -35,6 +35,10 @@ class OllamaSummarizer:
         self.cloud_provider = None
         self.ollama_process = None
         self.remote_url = config.get_remote_ollama_url()
+        # Bedrock-specific state. Lazily populated only when cloud_provider == 'bedrock'.
+        self.bedrock_api_key: Optional[str] = None
+        self.bedrock_region: str = ""
+        self.bedrock_inference_profile: str = ""
 
         if self.ai_provider == "adapter":
             # Adapter mode: route every AI request through the customer's
@@ -72,6 +76,21 @@ class OllamaSummarizer:
                     raise ImportError("anthropic package is required for Anthropic cloud mode. pip install anthropic")
                 self.anthropic_client = Anthropic(api_key=cloud_api_key)
                 logger.info(f"Anthropic provider initialized: model={self.model_name}")
+            elif self.cloud_provider == "bedrock":
+                # No SDK — we call Bedrock Converse directly over HTTPS with
+                # the bearer-token API key. Avoids boto3 (~10 MB) and the
+                # SigV4 signing machinery; the only thing we lose is the
+                # SDK's built-in retry / endpoint discovery, both of which
+                # we already handle in _bedrock_chat.
+                self.bedrock_api_key = cloud_api_key
+                self.bedrock_region = config.get_bedrock_region()
+                self.bedrock_inference_profile = config.get_bedrock_inference_profile()
+                logger.info(
+                    "Bedrock provider initialized: model=%s region=%s profile=%s",
+                    self.model_name,
+                    self.bedrock_region,
+                    self.bedrock_inference_profile or "(none)",
+                )
             else:
                 try:
                     from openai import OpenAI
@@ -325,6 +344,8 @@ class OllamaSummarizer:
         """
         if self.cloud_provider == "anthropic":
             return self._anthropic_chat(prompt, timeout_seconds)
+        if self.cloud_provider == "bedrock":
+            return self._bedrock_chat(prompt, timeout_seconds)
         return self._openai_chat(prompt, timeout_seconds)
 
     def _openai_chat(self, prompt: str, timeout_seconds: int = 300) -> str:
@@ -484,6 +505,110 @@ class OllamaSummarizer:
                 if attempt == max_retries - 1:
                     raise
         raise RuntimeError("Anthropic chat failed after all retries")
+
+    def _bedrock_chat(self, prompt: str, timeout_seconds: int = 300) -> str:
+        """Send a chat request via the AWS Bedrock Converse API.
+
+        Uses the Bedrock long-term API key (bearer token) directly — no
+        boto3, no SigV4 signing. Posts to
+        ``bedrock-runtime.{region}.amazonaws.com/model/{modelId}/converse``
+        with ``Authorization: Bearer <key>``. When an inference profile ID
+        is configured it replaces ``modelId`` in the URL so Bedrock can
+        route the request across regions.
+
+        Retry policy mirrors _anthropic_chat: 3 attempts with a 5 s gap,
+        and we short-circuit on auth failures (401/403) because retrying
+        a wrong key is pointless and slow.
+        """
+        import urllib.request
+        import urllib.error
+        import urllib.parse
+        import json as _json
+
+        if not self.bedrock_api_key:
+            raise RuntimeError("Bedrock API key is not configured.")
+        if not self.bedrock_region:
+            raise RuntimeError("Bedrock region is not configured.")
+
+        # Inference profile wins when set — same wire shape, different URL
+        # path. urllib.parse.quote keeps the ":0" version suffix intact
+        # (it's not a path separator, just a delimiter in the Bedrock ID).
+        target_id = self.bedrock_inference_profile or self.model_name
+        encoded_id = urllib.parse.quote(target_id, safe=":.-")
+        url = (
+            f"https://bedrock-runtime.{self.bedrock_region}.amazonaws.com"
+            f"/model/{encoded_id}/converse"
+        )
+        body = _json.dumps({
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [{"text": prompt}],
+                }
+            ],
+            # Same ceiling as the Anthropic direct path. Bedrock caps per-
+            # model; if the model has a lower max it'll truncate, not error.
+            "inferenceConfig": {"maxTokens": 8192},
+        }).encode("utf-8")
+        headers = {
+            "content-type": "application/json",
+            "authorization": f"Bearer {self.bedrock_api_key}",
+        }
+
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                if attempt > 0:
+                    logger.info(f"Bedrock API retry attempt {attempt + 1}/{max_retries}")
+                    time.sleep(5)
+                req = urllib.request.Request(url, data=body, headers=headers, method="POST")
+                with urllib.request.urlopen(req, timeout=timeout_seconds) as resp:
+                    payload = _json.loads(resp.read().decode("utf-8"))
+                # Converse response shape:
+                #   { "output": { "message": { "content": [ { "text": "..." } ] } }, ... }
+                # The content array can hold multiple blocks (e.g. tool_use,
+                # reasoning), but for plain prompts the first text block is
+                # the answer. Concatenate all text blocks defensively in
+                # case future models return multiple.
+                msg = (payload.get("output") or {}).get("message") or {}
+                content_blocks = msg.get("content") or []
+                texts = [
+                    (block.get("text") or "")
+                    for block in content_blocks
+                    if isinstance(block, dict) and block.get("text")
+                ]
+                joined = "".join(texts).strip()
+                if not joined:
+                    raise RuntimeError("Bedrock returned empty response")
+                return joined
+            except urllib.error.HTTPError as e:
+                # 401/403 = bad credentials, 404 = wrong region or model id.
+                # None of these recover with retries — abort early so the
+                # user sees the actual error rather than 15 s of silence.
+                err_body = ""
+                try:
+                    err_body = e.read().decode("utf-8", errors="replace")[:500]
+                except Exception:
+                    pass
+                if e.code in (401, 403):
+                    raise RuntimeError(
+                        f"Bedrock rejected the API key ({e.code}). "
+                        f"Verify the key has bedrock:InvokeModel access in {self.bedrock_region}."
+                    )
+                if e.code == 404:
+                    raise RuntimeError(
+                        f"Bedrock could not find model '{target_id}' in {self.bedrock_region}. "
+                        f"Check the model id and region, or set a cross-region inference profile. "
+                        f"Detail: {err_body}"
+                    )
+                logger.error(f"Bedrock API attempt {attempt + 1} failed: HTTP {e.code} {err_body}")
+                if attempt == max_retries - 1:
+                    raise RuntimeError(f"Bedrock HTTP {e.code}: {err_body}")
+            except Exception as e:
+                logger.error(f"Bedrock API attempt {attempt + 1} failed: {e}")
+                if attempt == max_retries - 1:
+                    raise
+        raise RuntimeError("Bedrock chat failed after all retries")
 
     def _create_permissive_prompt(self, transcript: str, language: str = "en", notes: str = None) -> str:
         """

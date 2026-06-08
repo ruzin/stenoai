@@ -553,7 +553,26 @@ class Config:
     # --- AI provider settings ---
 
     VALID_AI_PROVIDERS = ("local", "remote", "cloud", "adapter")
-    VALID_CLOUD_PROVIDERS = ("openai", "anthropic", "custom")
+    VALID_CLOUD_PROVIDERS = ("openai", "anthropic", "bedrock", "custom")
+
+    # AWS Bedrock has ~30 regions; we surface the common ones in the UI but
+    # accept any value as set_bedrock_region trusts the caller. Defaulting to
+    # us-east-1 because that's where new Bedrock features land first and the
+    # widest model selection lives.
+    DEFAULT_BEDROCK_REGION = "us-east-1"
+
+    # Claude on Bedrock — curated dropdown for the Settings UI. Bedrock model
+    # IDs are versioned (`:0`, `:1`, …) and prefixed with the model provider
+    # (`anthropic.`); cross-region inference profiles override these at call
+    # time when set. Keep this list small and current; users who want a model
+    # not on the list can paste it into the "Custom…" entry.
+    SUPPORTED_BEDROCK_MODELS = (
+        "anthropic.claude-sonnet-4-5-20250929-v2:0",
+        "anthropic.claude-haiku-4-5-20251001-v1:0",
+        "anthropic.claude-opus-4-1-20250805-v1:0",
+        "anthropic.claude-3-5-sonnet-20241022-v2:0",
+        "anthropic.claude-3-5-haiku-20241022-v1:0",
+    )
 
     def get_ai_provider(self) -> str:
         """Get the configured AI provider ('local', 'remote', 'cloud', or
@@ -613,13 +632,56 @@ class Config:
     CLOUD_MODEL_DEFAULTS = {
         "openai": "gpt-4o-mini",
         "anthropic": "claude-haiku-4-5-20251001",
+        "bedrock": "anthropic.claude-haiku-4-5-20251001-v1:0",
         "custom": "gpt-4o-mini",
     }
 
     def get_cloud_provider(self) -> str:
-        """Get the cloud provider type ('openai', 'anthropic', or 'custom')."""
+        """Get the cloud provider type. One of VALID_CLOUD_PROVIDERS; falls
+        back to 'openai' for unknown values (e.g. config from a future
+        version with a provider this build doesn't know about)."""
         value = self._config.get("cloud_provider", "openai")
         return value if value in self.VALID_CLOUD_PROVIDERS else "openai"
+
+    # --- Bedrock-specific knobs ---
+    # Stored as plain config (not env-var-secret like the API key) because
+    # region + inference profile are not credentials. The API key still
+    # flows through STENOAI_CLOUD_API_KEY exactly like the other providers.
+
+    def get_bedrock_region(self) -> str:
+        """AWS region used as the Bedrock endpoint host. Defaults to us-east-1
+        when unset. Cross-region inference profiles override which regions
+        actually serve traffic but the request still has to land somewhere."""
+        value = self._config.get("bedrock_region")
+        if not isinstance(value, str) or not value.strip():
+            return self.DEFAULT_BEDROCK_REGION
+        return value.strip()
+
+    def set_bedrock_region(self, region: str) -> bool:
+        """Persist the AWS region. Accepts any non-empty string — Bedrock
+        validates the region on the wire, so a typo surfaces as a clear
+        404 / DNS error at request time rather than silently here."""
+        cleaned = (region or "").strip()
+        if not cleaned:
+            logger.error("Bedrock region cannot be empty")
+            return False
+        self._config["bedrock_region"] = cleaned
+        return self._save()
+
+    def get_bedrock_inference_profile(self) -> str:
+        """Optional cross-region inference profile ID, e.g.
+        'us.anthropic.claude-haiku-4-5-20251001-v1:0'. When set this is used
+        as the modelId in the Converse URL path so Bedrock routes the
+        request across the profile's regions instead of pinning to one.
+        Empty means 'use the bare model id'."""
+        value = self._config.get("bedrock_inference_profile", "")
+        return value if isinstance(value, str) else ""
+
+    def set_bedrock_inference_profile(self, profile: str) -> bool:
+        """Persist the inference profile. Empty string clears it — equivalent
+        to 'use the bare model id'."""
+        self._config["bedrock_inference_profile"] = (profile or "").strip()
+        return self._save()
 
     def set_cloud_provider(self, provider: str) -> bool:
         """Set the cloud provider type."""
