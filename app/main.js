@@ -6149,6 +6149,13 @@ function startGoogleAuth() {
       shell.openExternal(authUrl);
     });
 
+    // 60s, not 5min. A real Google OAuth flow (consent + maybe MFA)
+    // completes in seconds. The old 5-minute ceiling left users staring
+    // at "Connecting…" for 5 full minutes if they closed the browser tab
+    // — the inline Cancel button in the nudge mitigates this, but the
+    // tighter ceiling is the safety net for users who walk away. The
+    // org-SSO flow elsewhere in this file is a different beast and keeps
+    // its own (longer) timeout.
     timeoutId = setTimeout(() => {
       if (server.listening) {
         server.close();
@@ -6468,6 +6475,7 @@ function startOutlookAuth() {
       shell.openExternal(authUrl);
     });
 
+    // See the Google counterpart for the 60s-vs-5min rationale.
     timeoutId = setTimeout(() => {
       if (server.listening) {
         server.close();
