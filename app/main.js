@@ -6194,6 +6194,13 @@ function startGoogleAuth() {
     // its own (longer) timeout.
     timeoutId = setTimeout(() => {
       if (server.listening) {
+        // Set the closure flag BEFORE close+clear+reject so an in-flight
+        // request handler (mid-await on exchangeCodeForTokens) sees the
+        // cancellation when it resumes and discards the tokens instead
+        // of writing them to disk. Without this, a race between Google's
+        // /token response and our 60 s timeout produces a "ghost"
+        // connection seconds after the user was told it timed out.
+        isCancelled = true;
         server.close();
         clearActive();
         reject(new Error('Timed out — no response from Google.'));
@@ -6517,9 +6524,11 @@ function startOutlookAuth() {
       shell.openExternal(authUrl);
     });
 
-    // See the Google counterpart for the 60s-vs-5min rationale.
+    // See the Google counterpart for the 60s-vs-5min rationale AND the
+    // isCancelled-before-clearActive race fix.
     timeoutId = setTimeout(() => {
       if (server.listening) {
+        isCancelled = true;
         server.close();
         clearActive();
         reject(new Error('Timed out — no response from Outlook.'));
