@@ -12,6 +12,8 @@
     "postinstall": "node scripts/patch-electron-dev.js",
     "start": "npm run build:renderer && electron .",
     "start:nobuild": "electron .",
+    "start:empty": "../dev/scripts/empty-state.sh --quit-app && npm start",
+    "start:restore": "../dev/scripts/empty-state.sh --restore --quit-app && npm start",
     "dev:renderer": "vite",
     "build:renderer": "vite build",
     "typecheck:renderer": "tsc -p renderer/tsconfig.json --noEmit",

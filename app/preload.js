@@ -229,11 +229,13 @@ const stenoai = {
   calendar: {
     google: {
       connect: () => invoke('google-auth-start'),
+      cancel: () => invoke('google-auth-cancel'),
       status: () => invoke('google-auth-status'),
       disconnect: () => invoke('google-auth-disconnect'),
     },
     outlook: {
       connect: () => invoke('outlook-auth-start'),
+      cancel: () => invoke('outlook-auth-cancel'),
       status: () => invoke('outlook-auth-status'),
       disconnect: () => invoke('outlook-auth-disconnect'),
     },
