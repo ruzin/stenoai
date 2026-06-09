@@ -6247,7 +6247,13 @@ function refreshAccessToken(refreshToken) {
 
 // ── Google Calendar: Fetch Events ───────────────────────────────────────
 
-function fetchCalendarEvents(accessToken, maxResults = 7, signal) {
+// 50 covers a busy week (~7/day) without bloating the response. The previous
+// cap of 7 was set when the carousel showed top-3 today only — but a single
+// all-day block + a few morning meetings would burn through the cap before
+// noon, hiding everything past lunch. Renderer-side pagination + the "today
+// only" filter handle the visual slicing; the fetch just needs to return
+// enough raw events to draw from.
+function fetchCalendarEvents(accessToken, maxResults = 50, signal) {
   return new Promise((resolve, reject) => {
     const now = new Date();
     const weekAhead = new Date(now);
@@ -6527,7 +6533,9 @@ function refreshOutlookAccessToken(refreshToken) {
 
 // ── Outlook Calendar: Fetch Events ──────────────────────────────────────
 
-function fetchOutlookCalendarEvents(accessToken, maxResults = 7, signal) {
+// Mirrors fetchCalendarEvents — 50 events to comfortably cover a week without
+// clipping mid-day. See that function's comment for rationale.
+function fetchOutlookCalendarEvents(accessToken, maxResults = 50, signal) {
   return new Promise((resolve, reject) => {
     const now = new Date();
     const weekAhead = new Date(now);
@@ -6747,7 +6755,18 @@ function normalizeCalendarEvent(event) {
     if (Array.isArray(event.attendees) && event.attendees.length > 0) {
       const self = event.attendees.find((a) => a && a.self === true);
       if (self) {
-        responseStatus = self.organizer ? 'organizer' : mapGoogleResponse(self.responseStatus);
+        // A declined response wins over the organizer flag — if the user
+        // organised a meeting and then later declined their own attendance
+        // (Google lets you do this), we want the event dropped just like
+        // any other declined invite. The previous short-circuit
+        // (`self.organizer ? 'organizer' : …`) silently kept declined-by-
+        // organizer events in the carousel.
+        const raw = mapGoogleResponse(self.responseStatus);
+        if (raw === 'declined') {
+          responseStatus = 'declined';
+        } else {
+          responseStatus = self.organizer ? 'organizer' : raw;
+        }
       } else {
         responseStatus = 'unknown';
       }
