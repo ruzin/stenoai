@@ -919,64 +919,64 @@ if (!gotSingleInstanceLock) {
   });
 
   app.whenReady().then(async () => {
-    // Set application menu with Help > Learn More
-    const appMenu = Menu.buildFromTemplate([
-      {
-        // Custom appMenu to add Settings… with the conventional ⌘, shortcut
-        // (the default `{ role: 'appMenu' }` doesn't include Settings). Mirrors
-        // the tray's Settings item — both fire the same `tray-open-settings`
-        // IPC so the renderer wiring stays in one place.
-        label: app.name,
-        submenu: [
-          { role: 'about' },
-          { type: 'separator' },
-          {
-            label: 'Settings…',
-            accelerator: 'CmdOrCtrl+,',
-            click: () => {
-              showAndFocusWindow();
-              if (mainWindow) {
-                mainWindow.webContents.send('tray-open-settings');
-              }
-            }
-          },
-          { type: 'separator' },
-          { role: 'services' },
-          { type: 'separator' },
-          { role: 'hide' },
-          { role: 'hideOthers' },
-          { role: 'unhide' },
-          { type: 'separator' },
-          { role: 'quit' }
-        ]
-      },
-      { role: 'fileMenu' },
-      { role: 'editMenu' },
-      { role: 'viewMenu' },
-      { role: 'windowMenu' },
-      {
-        role: 'help',
-        submenu: [
-          {
-            label: 'Learn More',
-            click: () => {
-              shell.openExternal('https://github.com/ruzin/stenoai');
-            }
-          },
-          {
-            label: 'Report a Bug',
-            click: () => {
-              shell.openExternal('https://discord.gg/DZ6vcQnxxu');
-            }
-          }
-        ]
+    // Application menu. macOS uses the global menu bar with mac-only roles
+    // (services/hide/unhide). Windows/Linux get a slimmer, platform-correct
+    // menu — kept (editing accelerators, Settings, Help) but hidden by default
+    // via autoHideMenuBar so it doesn't clash with the app's custom toolbar;
+    // Alt reveals it (standard Windows behaviour).
+    const settingsItem = {
+      label: 'Settings…',
+      accelerator: 'CmdOrCtrl+,',
+      click: () => {
+        showAndFocusWindow();
+        if (mainWindow) {
+          mainWindow.webContents.send('tray-open-settings');
+        }
       }
-    ]);
-    // The menu's roles (services/hide/unhide/…) are macOS conventions and a
-    // visible menu bar clashes with the app's custom toolbar on Windows/Linux,
-    // so we only install the application menu on macOS. Editing shortcuts
-    // (Ctrl+C/V/X/A) still work off-mac via Chromium's default handlers.
-    Menu.setApplicationMenu(process.platform === 'darwin' ? appMenu : null);
+    };
+    const helpSubmenu = {
+      role: 'help',
+      submenu: [
+        { label: 'Learn More', click: () => shell.openExternal('https://github.com/ruzin/stenoai') },
+        { label: 'Report a Bug', click: () => shell.openExternal('https://discord.gg/DZ6vcQnxxu') }
+      ]
+    };
+    const appMenu = Menu.buildFromTemplate(
+      process.platform === 'darwin'
+        ? [
+            {
+              // Custom appMenu to add Settings… with the conventional ⌘,
+              // shortcut (the default `{ role: 'appMenu' }` omits Settings).
+              label: app.name,
+              submenu: [
+                { role: 'about' },
+                { type: 'separator' },
+                settingsItem,
+                { type: 'separator' },
+                { role: 'services' },
+                { type: 'separator' },
+                { role: 'hide' },
+                { role: 'hideOthers' },
+                { role: 'unhide' },
+                { type: 'separator' },
+                { role: 'quit' }
+              ]
+            },
+            { role: 'fileMenu' },
+            { role: 'editMenu' },
+            { role: 'viewMenu' },
+            { role: 'windowMenu' },
+            helpSubmenu
+          ]
+        : [
+            { label: '&File', submenu: [settingsItem, { type: 'separator' }, { role: 'quit' }] },
+            { role: 'editMenu' },
+            { role: 'viewMenu' },
+            { role: 'windowMenu' },
+            helpSubmenu
+          ]
+    );
+    Menu.setApplicationMenu(appMenu);
 
     if (process.platform === 'darwin') {
       try {
