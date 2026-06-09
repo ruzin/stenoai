@@ -67,8 +67,8 @@ export function useRecording() {
       const optimisticName = name && name.trim() ? name.trim() : 'Note';
       // Clear any stale draft keyed under this same name. The live-draft
       // store is keyed by sessionName, and the most common case
-      // (default 'Note' or 'Meeting') means back-to-back recordings
-      // collide on the same key. Previously the draft was only cleared
+      // (default 'Note') means back-to-back recordings collide on the
+      // same key. Previously the draft was only cleared
       // on processing-complete, which can land minutes after the user
       // hits '+ New note' — meaning the new recording reads the previous
       // session's notes and shows them in the UI. Clearing here is
@@ -320,8 +320,8 @@ export function useRecordingProcessingEffects() {
         streamCache.delete(summaryFileFromEvent);
       }
       // Clear the live-draft entry for this finished session so the next
-      // "New note" with the same default sessionName ('Meeting' / 'Note')
-      // doesn't inherit the previous title or notes.
+      // "New note" with the same default sessionName ('Note') doesn't
+      // inherit the previous title or notes.
       if (data.sessionName) {
         useLiveDraftStore.getState().clear(data.sessionName);
       }

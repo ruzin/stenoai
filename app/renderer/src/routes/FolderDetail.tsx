@@ -112,7 +112,7 @@ export function FolderDetail({ folderId }: FolderDetailProps) {
                   className="mx-auto max-w-[40ch] text-[13.5px] leading-[1.55]"
                   style={{ color: 'var(--fg-2)' }}
                 >
-                  Meetings you save to this folder will show up here.
+                  Notes you save to this folder will show up here.
                 </div>
               </div>
             ) : (
