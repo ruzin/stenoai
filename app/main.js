@@ -24,8 +24,14 @@ function _logStartupCrash(kind, err) {
     }
   } catch (_) {}
 }
-process.on('uncaughtException', (err) => { _logStartupCrash('uncaughtException', err); process.exit(1); });
-process.on('unhandledRejection', (reason) => { _logStartupCrash('unhandledRejection', reason); });
+// Windows/Linux only: packaged Electron apps surface no stderr there, so this
+// file-based crash log is the only way to see a main-process startup failure.
+// macOS keeps its default behaviour (Electron's error dialog + console) — we
+// don't want to change the signed/notarised mac build's error handling.
+if (process.platform !== 'darwin') {
+  process.on('uncaughtException', (err) => { _logStartupCrash('uncaughtException', err); process.exit(1); });
+  process.on('unhandledRejection', (reason) => { _logStartupCrash('unhandledRejection', reason); });
+}
 
 const path = require('path');
 const { spawn: _spawnRaw, exec } = require('child_process');
@@ -640,6 +646,16 @@ function createWindow(options = {}) {
     height: 800,
     minWidth: 1000,
     minHeight: 600,
+    // Explicit window/taskbar icon on Windows. Relying on the exe-embedded icon
+    // is unreliable (Windows icon cache shows a stale/default icon), so we point
+    // at the bundled .ico directly. macOS uses its .icns via the app bundle.
+    ...(process.platform === 'win32'
+      ? {
+          icon: app.isPackaged
+            ? path.join(process.resourcesPath, 'icon.ico')
+            : path.join(__dirname, 'build', 'icon.ico'),
+        }
+      : {}),
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
