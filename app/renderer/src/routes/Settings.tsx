@@ -750,11 +750,13 @@ function GeneralTab() {
       <SettingRow
         label="Record system audio"
         description={
-          !isMac
-            ? 'Capture audio from virtual meetings (macOS only for now; Windows support is on the roadmap).'
-            : systemAudioSupport.data && !systemAudioSupport.data.supported
+          systemAudioSupport.data && !systemAudioSupport.data.supported
+            ? isMac
               ? `Capture audio from virtual meetings (requires macOS 14.4+, you're on ${systemAudioSupport.data.osVersion || 'an older version'})`
-              : 'Capture audio from virtual meetings (requires macOS 14.4+)'
+              : 'Capture audio from virtual meetings (not supported on this OS).'
+            : systemAudioSupport.data?.experimental
+              ? 'Capture audio from virtual meetings (experimental on Windows — verify your first recording captures system audio).'
+              : 'Capture audio from virtual meetings (requires macOS 14.4+).'
         }
       >
         <Switch
