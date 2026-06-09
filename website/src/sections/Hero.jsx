@@ -60,7 +60,7 @@ export function Hero() {
             transition={{ duration: 0.5, delay: 0.15 }}
             className="flex gap-[10px] flex-wrap"
           >
-            <a href="#download" onClick={() => trackDownload('hero', 'unknown')} className="btn-base btn-primary inline-flex items-center gap-2 no-underline hover:no-underline">
+            <a href={DOWNLOAD_ARM} onClick={() => trackDownload('hero', 'arm64')} className="btn-base btn-primary inline-flex items-center gap-2 no-underline hover:no-underline">
               <Download size={15} aria-hidden="true" /> Download for Mac
             </a>
             <a href="#how" className="btn-base btn-ghost inline-flex items-center gap-2 no-underline hover:no-underline">
