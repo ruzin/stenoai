@@ -114,6 +114,14 @@ if (!app.isPackaged) {
 // at best a no-op, so we don't.
 initMain({ forceCoreAudioTap: process.platform === 'darwin' });
 
+// Windows taskbar identity. Without an explicit AppUserModelID matching the
+// installer's, the taskbar shows a default/Electron icon (and groups the window
+// separately) even when the window icon is correct — it keys off the AUMID, not
+// the window icon. Must match the NSIS shortcut's id (build.appId).
+if (process.platform === 'win32') {
+  try { app.setAppUserModelId('com.stenoai.recorder'); } catch (_) {}
+}
+
 // CoreAudio Process Taps require macOS 14.4+. Returns false on non-macOS or
 // older versions so the renderer can disable the system-audio toggle rather
 // than silently producing dead-channel recordings.
