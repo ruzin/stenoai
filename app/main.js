@@ -6714,7 +6714,11 @@ function mapGoogleResponse(r) {
 
 // Returns null for cancelled events so the caller can drop them. Google marks
 // them with status === 'cancelled'; Outlook with isCancelled === true (carried
-// through from normalizeOutlookEvent).
+// through from normalizeOutlookEvent). Declined events are also dropped here —
+// the renderer used to filter them client-side, but that left any new surface
+// (notifications, auto-detection, future features) one bug away from showing
+// a meeting the user explicitly said "no" to. Dropping at the IPC boundary
+// makes "events" the authoritative "things the user is attending" list.
 function normalizeCalendarEvent(event) {
   if (event.status === 'cancelled' || event.isCancelled === true) return null;
 
@@ -6751,6 +6755,9 @@ function normalizeCalendarEvent(event) {
       responseStatus = 'organizer';
     }
   }
+
+  // Drop events the user explicitly declined — see function header comment.
+  if (responseStatus === 'declined') return null;
 
   return {
     id: event.id,
