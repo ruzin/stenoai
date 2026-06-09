@@ -182,8 +182,7 @@
         }
       ],
       "artifactName": "stenoAI-windows-${version}-${arch}.${ext}",
-      "compression": "store",
-      "signAndEditExecutable": false
+      "compression": "store"
     },
     "nsis": {
       "oneClick": false,
