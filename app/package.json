@@ -97,7 +97,6 @@
   "build": {
     "appId": "com.stenoai.recorder",
     "productName": "Steno",
-    "asar": false,
     "protocols": [
       {
         "name": "Steno Shortcut Links",
@@ -163,6 +162,13 @@
     },
     "win": {
       "icon": "build/icon.ico",
+      "asar": false,
+      "extraResources": [
+        {
+          "from": "build/icon.ico",
+          "to": "icon.ico"
+        }
+      ],
       "target": [
         {
           "target": "nsis",

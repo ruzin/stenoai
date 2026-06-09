@@ -166,7 +166,9 @@ for pkg in _DATA_PKGS:
 # which surfaces as the misleading "onnx-asr is not installed" at first
 # transcription. copy_metadata fixes it. huggingface_hub is copied too since the
 # onnx-asr [hub] download path leans on it.
-_METADATA_PKGS = ['huggingface_hub'] if _IS_DARWIN else ['onnx-asr', 'huggingface_hub']
+# Only needed off-darwin (onnx-asr reads its own version via importlib.metadata
+# at import). macOS gets nothing new here so its bundle is unchanged.
+_METADATA_PKGS = [] if _IS_DARWIN else ['onnx-asr', 'huggingface_hub']
 for pkg in _METADATA_PKGS:
     try:
         datas += copy_metadata(pkg)
