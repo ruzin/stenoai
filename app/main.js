@@ -874,9 +874,8 @@ if (!gotSingleInstanceLock) {
     if (process.platform === 'darwin') {
       try {
         const osVer = process.getSystemVersion();
-        const screenPerm = systemPreferences.getMediaAccessStatus('screen');
         const tapOk = isCoreAudioTapSupported();
-        sendDebugLog(`[sysaudio] macOS ${osVer} — CoreAudio Tap supported=${tapOk}, screen permission=${screenPerm}`);
+        sendDebugLog(`[sysaudio] macOS ${osVer} — CoreAudio Tap supported=${tapOk}`);
       } catch (e) {
         sendDebugLog(`[sysaudio] startup probe failed: ${e.message}`);
       }
@@ -1096,20 +1095,16 @@ ipcMain.handle('request-microphone-permission', async () => {
   }
 });
 
-// Reports whether system-audio capture is available on this OS and what the
-// current Screen Recording permission state is. Used by Settings to disable
-// the toggle on unsupported macOS, and to surface "permission denied" rather
-// than letting the user produce silent recordings.
+// Reports whether system-audio capture is available on this OS. Used by
+// Settings to disable the toggle on unsupported macOS / non-mac platforms.
 ipcMain.handle('get-system-audio-support', async () => {
   try {
     const supported = isCoreAudioTapSupported();
-    let screenPermission = 'unknown';
     let osVersion = '';
     if (process.platform === 'darwin') {
       try { osVersion = process.getSystemVersion(); } catch (_) {}
-      try { screenPermission = systemPreferences.getMediaAccessStatus('screen'); } catch (_) {}
     }
-    return { success: true, supported, osVersion, screenPermission };
+    return { success: true, supported, osVersion };
   } catch (error) {
     return { success: false, error: error.message };
   }
