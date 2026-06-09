@@ -1,6 +1,6 @@
 {
   "name": "stenoai",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "AI powered intelligence layer for confidential conversations",
   "main": "main.js",
   "homepage": "https://github.com/ruzin/stenoai",
@@ -156,6 +156,7 @@
       "extendInfo": {
         "NSMicrophoneUsageDescription": "Steno needs microphone access to record and transcribe meetings.",
         "NSAudioCaptureUsageDescription": "Steno needs audio capture access to record system audio from virtual meetings.",
+        "NSScreenCaptureUsageDescription": "Steno needs screen capture access for the loopback-audio feature detection on macOS.",
         "LSMinimumSystemVersion": "12.3.0"
       }
     },
