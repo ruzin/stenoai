@@ -46,6 +46,16 @@ This app ships as a signed DMG to real users. Before considering any change comp
 - **No shelling out to bundled binaries for operations that have an HTTP/library API**. macOS SIP + Electron hardened runtime strips `DYLD_LIBRARY_PATH` from child processes. Use the `ollama` Python package (HTTP API) for model operations, not `subprocess.run([ollama_path, ...])`. The only acceptable use of the Ollama binary is `ollama serve` (starting the server), which is covered by the `com.apple.security.cs.allow-dyld-environment-variables` entitlement.
 - **No bare `exit()` in Python code**. PyInstaller bundles don't have `exit` as a builtin. Always use `sys.exit()`.
 
+## Cross-Platform (macOS + Windows)
+The app ships on **macOS** (primary, signed + notarised DMG) **and Windows** (alpha, NSIS installer). **Any change to shared code must be considered for both platforms** — a fix for one can silently break or regress the other. The macOS build is the stable, signed one; never let a Windows fix change it.
+
+- **Gate platform-specific code on `process.platform`** (JS) / `sys.platform` (Python). Don't apply a platform-only change globally. Examples of macOS-only things that must be gated: `titleBarStyle: 'hiddenInset'` + traffic-light insets (the 82px `sb-top` / toggle offset, behind `html.is-mac`), the `services`/`hide`/`unhide` menu roles, `forceCoreAudioTap`, `app.dock`/dock-icon APIs, `askForMediaAccess`. Windows-only: `windowsHide` on spawns, `setAppUserModelId`, `taskkill` tree-kill, the explicit `BrowserWindow` icon.
+- **electron-builder config is per-platform.** `asar: false` lives in the `win` block only — macOS keeps `asar` (its signing/notarisation integrity depends on it). Put platform-specific build options in the `mac`/`win` blocks, not top-level.
+- **Paths must be cross-platform.** Use `os.pathsep` (not `:`), `src.config.get_user_data_dir()` (Python) and `getUserDataDir()` (main.js) — never hardcode `~/Library/Application Support/...`. The `.exe` suffix + `shutil.which` for bundled binaries.
+- **Transcription backend dispatches by platform**: macOS uses `parakeet-mlx` (Apple Silicon GPU); Windows/Linux use `onnx-asr` (ONNX Runtime, CPU) — both behind `src/parakeet.py`. Call sites must not branch on engine. Windows is CPU-only today (slower; DirectML is a tracked follow-up).
+- **PyInstaller spec (`stenoai.spec`) is conditional per `sys.platform`** — MLX hidden-imports/dylibs on darwin, onnx-asr + `copy_metadata('onnx-asr')` + onnxruntime DLLs off-darwin; UPX off and Ollama GPU libs pruned on Windows. Keep new bundling additions gated so they don't bloat or break the other platform's bundle.
+- **Verify both.** Windows is built + smoke-tested in CI (`.github/workflows/build-windows.yml`, includes `onnx-selftest`); macOS via `build-release.yml`. When you can't test the other platform locally, at minimum confirm the change is correctly gated.
+
 ## Brand Colors
 Paper + ink — a cream page with deep ink text. The logo
 (`website/public/stenoai-logo.svg`) is `#1B1B19` ink on `#FAF9F5` paper.
