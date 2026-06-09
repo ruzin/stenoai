@@ -10,8 +10,17 @@ interface UpcomingCardProps {
 }
 
 export function UpcomingCard({ event }: UpcomingCardProps) {
-  const relative = relativeLabel(event.start);
-  const meta = formatMeta(event.start, event.end, relative.state);
+  // All-day events (OOO, conference day) don't have a meaningful "in 22 hrs"
+  // / "started 108 min ago" because the start is 00:00 in some timezone and
+  // the end is 23:59. Short-circuit to a flat "All day" label so the card
+  // still slots into the Upcoming list visually but doesn't lie about timing.
+  const isAllDay = event.is_all_day === true;
+  const relative = isAllDay
+    ? ({ prefix: null, value: 'All day', urgent: false, state: 'later' } as const)
+    : relativeLabel(event.start);
+  const meta = isAllDay
+    ? ({ primary: 'Today', timeRange: '' } as const)
+    : formatMeta(event.start, event.end, relative.state);
   const meetingUrl = event.meeting_url?.trim();
   const recording = useRecording();
   const isLive = relative.state === 'now';

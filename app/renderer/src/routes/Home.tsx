@@ -157,16 +157,6 @@ export function Home({ mode }: HomeProps) {
     });
   }, [calendar.data, upcomingTickMs]);
 
-  // Same gating as Home's empty-state CTA and UpcomingCard's onStart:
-  // block only when actively recording; 'processing' is fine — the
-  // previous note keeps summarising in the background queue while a
-  // new recording starts.
-  const canStartNewRecording =
-    recording.status !== 'recording' && recording.status !== 'paused';
-  const onStartAllDay = (title: string) => {
-    if (!canStartNewRecording) return;
-    void recording.startRecording(title);
-  };
   const [allDayExpanded, setAllDayExpanded] = React.useState(false);
 
   // Three meetings is the sweet spot — fits the visible card height without
@@ -453,8 +443,6 @@ export function Home({ mode }: HomeProps) {
                 events={allDayToday}
                 expanded={allDayExpanded}
                 onToggle={() => setAllDayExpanded((v) => !v)}
-                onStart={onStartAllDay}
-                canStart={canStartNewRecording}
               />
               <div className="flex flex-col gap-2">
                 {upcomingVisible.map((event) => (
@@ -471,8 +459,6 @@ export function Home({ mode }: HomeProps) {
                 events={allDayToday}
                 expanded={allDayExpanded}
                 onToggle={() => setAllDayExpanded((v) => !v)}
-                onStart={onStartAllDay}
-                canStart={canStartNewRecording}
               />
               <div className="flex flex-col gap-2">
                 <UpcomingCard event={tomorrowPreview} />
@@ -487,8 +473,6 @@ export function Home({ mode }: HomeProps) {
                 events={allDayToday}
                 expanded={allDayExpanded}
                 onToggle={() => setAllDayExpanded((v) => !v)}
-                onStart={onStartAllDay}
-                canStart={canStartNewRecording}
               />
             </section>
           )}
@@ -607,49 +591,29 @@ interface AllDayInlineProps {
   events: CalendarEvent[];
   expanded: boolean;
   onToggle: () => void;
-  onStart: (title: string) => void;
-  /** Permission to start a new recording — true when idle OR processing
-   *  (a previous note still summarising in the background queue doesn't
-   *  block a new recording). False only when a recording is actively
-   *  in progress (recording / paused). */
-  canStart: boolean;
 }
 
-function AllDayInline({
-  events,
-  expanded,
-  onToggle,
-  onStart,
-  canStart,
-}: AllDayInlineProps) {
+function AllDayInline({ events, expanded, onToggle }: AllDayInlineProps) {
   if (events.length === 0) return null;
   return (
-    <div
-      className="mb-2 flex flex-col gap-1 text-xs"
-      style={{ color: 'var(--fg-2)' }}
-    >
+    <div className="mb-2 flex flex-col gap-2">
       <button
         type="button"
         onClick={onToggle}
         aria-expanded={expanded}
-        className="-mx-1 self-start rounded px-1 py-0.5 transition-colors hover:bg-[color:var(--surface-hover)]"
+        className="-mx-1 self-start rounded px-1 py-0.5 text-xs transition-colors hover:bg-[color:var(--surface-hover)]"
+        style={{ color: 'var(--fg-2)' }}
       >
         + {events.length} all-day event{events.length === 1 ? '' : 's'} today
       </button>
       {expanded && (
-        <div className="flex flex-col items-start gap-0.5 pl-3">
+        // Render as full UpcomingCards so all-day events match the visual
+        // language of the timed carousel below. UpcomingCard short-circuits
+        // its time labelling for is_all_day events — see component for the
+        // 'All day' / 'Today' branch.
+        <div className="flex flex-col gap-2">
           {events.map((e) => (
-            <button
-              key={e.id}
-              type="button"
-              onClick={() => onStart(e.title)}
-              disabled={!canStart}
-              title={`Start recording: ${e.title}`}
-              className="-mx-1 rounded px-1 py-0.5 transition-colors hover:bg-[color:var(--surface-hover)] disabled:opacity-50 disabled:hover:bg-transparent"
-              style={{ color: 'var(--fg-1)' }}
-            >
-              {e.title}
-            </button>
+            <UpcomingCard key={e.id} event={e} />
           ))}
         </div>
       )}
