@@ -22,10 +22,12 @@ BRANCH=""
 OUT_DIR=""
 WAIT=1
 
+need_val() { [[ $# -ge 2 && -n "$2" ]] || { echo "error: $1 requires a value" >&2; exit 2; }; }
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    -b|--branch) BRANCH="$2"; shift 2 ;;
-    -o|--out)    OUT_DIR="$2"; shift 2 ;;
+    -b|--branch) need_val "$@"; BRANCH="$2"; shift 2 ;;
+    -o|--out)    need_val "$@"; OUT_DIR="$2"; shift 2 ;;
     --no-wait)   WAIT=0; shift ;;
     -h|--help)   sed -n '2,20p' "$0"; exit 0 ;;
     *) echo "Unknown option: $1" >&2; exit 2 ;;
@@ -80,10 +82,13 @@ if ! gh run watch "$run_id" --exit-status; then
   exit 1
 fi
 
-echo "==> Build succeeded. Downloading artifacts to: $OUT_DIR"
-rm -rf "$OUT_DIR"
-mkdir -p "$OUT_DIR"
-gh run download "$run_id" -D "$OUT_DIR"
+# Download into a per-run subfolder so re-runs don't mix, and so we never
+# touch (let alone recursively delete) the user-supplied --out directory.
+DEST="$OUT_DIR/run-$run_id"
+echo "==> Build succeeded. Downloading artifacts to: $DEST"
+mkdir -p "$DEST"
+gh run download "$run_id" -D "$DEST"
+OUT_DIR="$DEST"
 
 echo ""
 echo "==> Done. Windows artifacts:"
