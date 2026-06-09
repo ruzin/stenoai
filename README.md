@@ -49,23 +49,16 @@ If you're looking for a hosted desktop recording API, consider checking out [Rec
 
 ## Features
 
-- **Privacy-first** — 100% on-device; your recordings, transcripts, and summaries never leave your Mac
-- **Live transcription** — Real-time on-screen text as you speak via Parakeet TDT v3 on Apple Silicon (MLX). Granola-style chat-bubble view with You / Others attribution.
-- **Auto start/stop meetings** — Steno notifies you when a meeting starts and offers to take notes, then offers to summarise when it ends (Granola-style)
-- **In-app note-taking** — Jot notes while you record; they're folded straight into the AI summary
-- **Ask your meetings** — Natural-language Q&A across a single note or your entire library via the Chat tab (summary, key topics, full transcript)
-- **System audio capture** — Record both sides of virtual meetings, headphones on, no extra setup. Native Core Audio Tap on macOS 14.4+ with automatic fallback on older versions
-- **Speaker diarisation** — `[You]` vs `[Others]` labels live during the recording and on the final transcript
-- **Multi-language** — Parakeet covers 25 European languages with live transcription; Whisper handles 99 languages (incl. Chinese, Japanese, Arabic, Hindi) post-stop
-- **Markdown notes** — Summaries and transcripts saved as clean Markdown you can edit, search, or sync
-- **Choose your transcription engine** — Settings → Transcribe lets you pick Parakeet (default) or Whisper, with in-app downloads and a progress bar
-- **Crash-safe recording** — If Steno is force-quit mid-recording, the orphan recorder subprocess is detected and cleaned up on the next launch
-- **Auto-updates** — New versions download in the background and install on next quit; a top-right toast lets you know when one's ready
-- **macOS Shortcuts** — Start and stop recordings via `stenoai://` deep links for calendar-driven automation
-- **Remote Ollama server** — Offload summarisation to a beefier Mac or workstation on your network
-- **Bring your own cloud model** — Optional OpenAI, Anthropic, AWS Bedrock (Claude — incl. application inference profile ARNs for governed AWS environments), or custom API endpoint for users who prefer a hosted LLM
-- **Organisation AI** — On managed deployments, sign in to your org's Steno adapter and AI routes through it automatically — no local API key, no setup
-- **Under the hood** — Local transcription via Parakeet TDT v3 (MLX) or whisper.cpp, summarisation via bundled Ollama (5 models to choose from)
+- **Privacy-first** — 100% on-device; your recordings, transcripts, and summaries never leave your Mac.
+- **Live transcription with speaker labels** — Real-time on-screen text as you speak via Parakeet TDT v3 on Apple Silicon (MLX). Granola-style chat-bubble view with `[You]` vs `[Others]` attribution live during the recording and on the final transcript.
+- **Auto start/stop meetings** — Steno notices when a meeting starts and offers to take notes, then offers to summarise when it ends. Granola-style frictionless capture.
+- **System audio capture** — Record both sides of virtual meetings, headphones on, no extra setup or virtual cable. Native Core Audio Tap on macOS 14.4+.
+- **In-app note-taking** — Jot notes while you record; they're folded straight into the AI summary alongside the transcript.
+- **Ask your meetings** — Natural-language Q&A across a single note *or* your entire library via the Chat tab. Pulls from summary, key topics, and the full transcript.
+- **Multi-language (25 live, 99 total)** — Parakeet covers 25 European languages with live transcription; Whisper handles 99 languages including Chinese, Japanese, Arabic, and Hindi post-stop.
+- **Markdown ownership** — Summaries and transcripts save as clean Markdown you can edit, search, or sync to whatever knowledge base you live in.
+- **Bring your own cloud model** — Optional OpenAI, Anthropic, AWS Bedrock (Claude — including application inference profile ARNs for governed AWS environments), or custom API endpoint for users who prefer a hosted LLM.
+- **Organisation AI** — On managed deployments, sign in to your org's Steno adapter and AI routes through it automatically — no local API key, no per-user setup.
 
 ## macOS Shortcuts (Optional)
 
