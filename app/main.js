@@ -648,6 +648,10 @@ function createWindow(options = {}) {
       scrollBounce: true,
     },
     titleBarStyle: 'hiddenInset',
+    // Windows/Linux render the Electron application menu as an in-window menu
+    // bar (File/Edit/View/…); macOS puts it in the global bar. Hide it off-mac
+    // so the app keeps its clean custom-toolbar look (Alt still reveals it).
+    autoHideMenuBar: true,
     show: false,
     backgroundColor: '#FAF9F5',
     // React UI renders the macOS traffic lights inside the sidebar's top
@@ -968,7 +972,11 @@ if (!gotSingleInstanceLock) {
         ]
       }
     ]);
-    Menu.setApplicationMenu(appMenu);
+    // The menu's roles (services/hide/unhide/…) are macOS conventions and a
+    // visible menu bar clashes with the app's custom toolbar on Windows/Linux,
+    // so we only install the application menu on macOS. Editing shortcuts
+    // (Ctrl+C/V/X/A) still work off-mac via Chromium's default handlers.
+    Menu.setApplicationMenu(process.platform === 'darwin' ? appMenu : null);
 
     if (process.platform === 'darwin') {
       try {
