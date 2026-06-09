@@ -3,6 +3,7 @@ import { motion as Motion } from "framer-motion";
 import { trackDownload } from "../analytics";
 
 const DOWNLOAD_ARM = "https://github.com/ruzin/stenoai/releases/latest/download/stenoAI-macos-arm64.dmg";
+const DOWNLOAD_WIN = "https://github.com/ruzin/stenoai/releases/latest/download/stenoAI-windows-x64.exe";
 
 export function CTAFooter() {
   return (
@@ -42,10 +43,17 @@ export function CTAFooter() {
               >
                 <Download size={15} aria-hidden="true" /> Download for Apple Silicon
               </a>
+              <a
+                href={DOWNLOAD_WIN}
+                onClick={() => trackDownload('cta_footer', 'win-x64')}
+                className="btn-base btn-ghost no-underline"
+              >
+                <Download size={15} aria-hidden="true" /> Download for Windows (alpha)
+              </a>
             </div>
 
             <p className="mt-5 text-[13px]" style={{ color: "var(--primary-fg)", opacity: 0.5 }}>
-              Apple Silicon Mac (M1 or later) · macOS 12 or later · Requires ~4 GB for default model
+              macOS 12+ (Apple Silicon) · Windows 10/11 (x64, alpha — unsigned) · ~4 GB for the default model
             </p>
           </div>
         </Motion.div>

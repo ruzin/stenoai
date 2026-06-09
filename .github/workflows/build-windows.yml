@@ -183,6 +183,12 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="${GITHUB_REF_NAME}"
+          # Stable, versionless alias for the website/README "Download for
+          # Windows" link (mirrors the macOS DMG rename in build-release.yml).
+          # The versioned .exe stays too — electron-updater's latest.yml
+          # references it by its versioned name for auto-update.
+          VER_EXE=$(ls app/dist/*-x64.exe | grep -v 'stenoAI-windows-x64.exe' | head -1)
+          cp "$VER_EXE" "app/dist/stenoAI-windows-x64.exe"
           # Wait up to ~30 min for build-release.yml to create the release.
           for i in $(seq 1 60); do
             if gh release view "$TAG" >/dev/null 2>&1; then
