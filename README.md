@@ -179,6 +179,23 @@ Download the latest release (**Apple Silicon Mac, macOS 12 Monterey or later**):
 
 You can run it locally as well (see below) if you don't want to install a DMG.
 
+### Windows (alpha)
+
+Windows 10/11 (x64) is supported in **alpha**, with the full pipeline verified working: record → live Parakeet transcription → batch transcript → Ollama summary, **including system-audio loopback capture with `[You]`/`[Others]` diarisation**.
+
+**Install:** download **`stenoAI-windows-x64.exe`** from the [latest release](https://github.com/ruzin/stenoai/releases/latest) and run it — it installs per-user (no admin needed) and creates Start-menu/desktop shortcuts. On first launch, Windows SmartScreen warns because the alpha is unsigned — click **More info → Run anyway**. The first-run setup wizard then downloads the transcription model (~670 MB) and the summarisation model (~2 GB).
+
+> Before the first tagged Windows release lands, grab the installer from the [Windows build workflow](https://github.com/ruzin/stenoai/actions/workflows/build-windows.yml): sign in to GitHub, open the latest green run, download the `stenoai-windows` artifact, and run the `.exe` inside.
+
+Known alpha limitations:
+
+- **Unsigned** — SmartScreen warns on first launch; we'll code-sign before 1.0.
+- **CPU-only summarisation** — the bundled Ollama runs on CPU (the NVIDIA GPU libraries are excluded to keep the download small); a separate GPU build is a follow-up. Transcription is CPU on every platform regardless.
+- **Auto-update** is wired (NSIS + `latest.yml`) but updates are unsigned until code signing is in place.
+- **Transcription** runs through `onnx-asr` (ONNX Runtime) instead of MLX, with the same Parakeet model and behaviour as macOS. Whisper is also available as an engine option.
+
+Issues + feedback welcome on the GitHub issues tracker.
+
 ## Local Development/Use Locally
 
 ### Prerequisites

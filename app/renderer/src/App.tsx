@@ -113,6 +113,45 @@ export function App() {
     }
   }, [recording.isLoading, recording.status, route]);
 
+  // First-run onboarding: auto-open the setup wizard when no transcription
+  // model is installed yet (Parakeet or any Whisper). This was wired in the
+  // pre-React renderer and dropped in the rewrite. parakeet-status /
+  // whisper-list read on-disk state (no running service needed), so it's a
+  // reliable "needs setup" signal. We only redirect from a neutral landing
+  // route and never while recording/processing, so we don't yank the user out
+  // of anything in flight. Runs once.
+  const didSetupGateRef = React.useRef(false);
+  React.useEffect(() => {
+    if (didSetupGateRef.current) return;
+    if (recording.isLoading) return;
+    const onNeutralRoute = route === '/' || route === '' || route === '/meetings';
+    const busy =
+      recording.status === 'recording' ||
+      recording.status === 'paused' ||
+      recording.status === 'processing';
+    if (!onNeutralRoute || busy) return;
+    didSetupGateRef.current = true;
+    (async () => {
+      try {
+        const [parakeet, whisper] = await Promise.all([
+          ipc().parakeetModels.status(),
+          ipc().whisperModels.list(),
+        ]);
+        const parakeetInstalled = parakeet.success && parakeet.installed === true;
+        const anyWhisperInstalled =
+          whisper.success &&
+          Object.values(whisper.supported_models ?? {}).some(
+            (m) => (m as { installed?: boolean }).installed === true,
+          );
+        if (!parakeetInstalled && !anyWhisperInstalled) {
+          navigate('/setup');
+        }
+      } catch {
+        // Best-effort onboarding gate; never block the app on it.
+      }
+    })();
+  }, [recording.isLoading, recording.status, route]);
+
   // ⌘K — focus sidebar search. Capture-phase listener so it wins over nested
   // handlers; fires even when focus is in a form control (the search input
   // itself is exempt by the data-sidebar-search check).

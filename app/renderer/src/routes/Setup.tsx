@@ -26,7 +26,7 @@ import {
   useTestCloudApi,
 } from '@/hooks/useAi';
 import { ipc, type CloudProvider } from '@/lib/ipc';
-import { cn } from '@/lib/utils';
+import { cn, isMac } from '@/lib/utils';
 
 type StepStatus = 'waiting' | 'running' | 'done' | 'failed';
 
@@ -114,8 +114,9 @@ export function Setup() {
 
   const checkMic = useCheckMicPermission();
   const requestMic = useRequestMicPermission();
-  // Step 2 installs Parakeet TDT v3 (~572 MB) by default — the active engine
-  // for fresh installs. Existing Whisper users get skipped past this step in
+  // Step 2 installs Parakeet TDT v3 by default — the active engine for fresh
+  // installs. Size differs by backend (MLX ~572 MB on mac, ONNX int8 ~670 MB
+  // on Windows/Linux). Existing Whisper users get skipped past this step in
   // runSetup() once we see their model is already on disk; see the
   // parakeet-status + list-whisper-models precheck below.
   const parakeetStep = useSetupStep('parakeet');
@@ -191,7 +192,13 @@ export function Setup() {
           const granted = await requestMic.mutateAsync();
           if (granted) setStatus('microphone', 'done', 'Permission granted');
           else {
-            setStatus('microphone', 'failed', 'Permission denied. Grant it in System Settings.');
+            setStatus(
+              'microphone',
+              'failed',
+              isMac
+                ? 'Permission denied. Grant it in System Settings.'
+                : 'Permission denied. Grant it in Settings > Privacy & security > Microphone.',
+            );
             setRunning(false);
             return;
           }
@@ -217,7 +224,7 @@ export function Setup() {
         if (parakeetInstalled || anyWhisperInstalled) {
           setStatus('transcription', 'done', 'Transcription model ready');
         } else {
-          setStatus('transcription', 'running', 'Downloading Parakeet TDT v3 (~572 MB)...');
+          setStatus('transcription', 'running', `Downloading Parakeet TDT v3 (${isMac ? '~572 MB' : '~670 MB'})...`);
           await parakeetStep.mutateAsync();
           setStatus('transcription', 'done', 'Transcription model ready');
         }
@@ -286,7 +293,7 @@ export function Setup() {
       description:
         summaryMode === 'cloud'
           ? 'Cloud API — fast, no download'
-          : 'Local model (~2 GB) — private, runs on your Mac',
+          : 'Local model (~2 GB) — private, runs on your device',
       icon: summaryMode === 'cloud' ? Cloud : Zap,
       status: statuses.ollama,
       detail: details.ollama,
@@ -438,8 +445,8 @@ export function Setup() {
                     spellCheck={false}
                   />
                   <Muted className="mt-1 text-[11px]">
-                    Stored locally on this Mac. Never synced or sent anywhere
-                    except the provider you select.
+                    Stored locally on this device. Never synced or sent
+                    anywhere except the provider you select.
                   </Muted>
                 </div>
               </div>

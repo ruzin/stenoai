@@ -11,11 +11,12 @@ import {
 import {
   useSetSystemAudio,
   useSystemAudioSetting,
+  useSystemAudioSupport,
 } from '@/hooks/useSettings';
 import type { RecordingStatus } from '@/hooks/useRecording';
 import { useTheme } from '@/hooks/useTheme';
 import { useRoute, navigate } from '@/lib/router';
-import { cn } from '@/lib/utils';
+import { cn, isMac } from '@/lib/utils';
 
 interface MainToolbarProps {
   recordingStatus: RecordingStatus;
@@ -46,8 +47,9 @@ export function MainToolbar({
   const isChatRoute = route === '/chat' || route.startsWith('/chat/');
   const showChatPrimary = isChatRoute && !isRecording;
 
-  // Matches sb-top padding-left (82px clears macOS traffic lights)
-  const toggleLeft = 82;
+  // Matches sb-top padding-left: 82px clears the macOS traffic lights; on
+  // Windows/Linux there are none, so align to the sidebar's left edge.
+  const toggleLeft = isMac ? 82 : 16;
 
   return (
     <div
@@ -159,7 +161,13 @@ export function MainToolbar({
 function RecordingOptionsPopover() {
   const systemAudio = useSystemAudioSetting();
   const setSystemAudio = useSetSystemAudio();
+  const systemAudioSupport = useSystemAudioSupport();
   const enabled = systemAudio.data ?? false;
+  // Show the toggle wherever loopback capture is available (macOS 14.4+ or
+  // Windows 10+), not just on mac. Hidden while support is still loading or
+  // on unsupported OSes.
+  const showSystemAudio = systemAudioSupport.data?.supported === true;
+  const experimental = systemAudioSupport.data?.experimental === true;
 
   return (
     <Popover>
@@ -183,32 +191,40 @@ function RecordingOptionsPopover() {
             </p>
           </div>
 
-          <div
-            className="flex items-start gap-3 rounded-md border p-3"
-            style={{ borderColor: 'var(--border-subtle)' }}
-          >
-            <Monitor className="mt-0.5 size-4 flex-shrink-0 text-muted-foreground" />
-            <div className="flex-1 space-y-0.5">
-              <div className="flex items-center justify-between gap-2">
-                <label
-                  htmlFor="maintoolbar-system-audio"
-                  className="text-sm font-medium"
-                >
-                  Record system audio
-                </label>
-                <Switch
-                  id="maintoolbar-system-audio"
-                  checked={enabled}
-                  disabled={systemAudio.isLoading || setSystemAudio.isPending}
-                  onCheckedChange={(v) => setSystemAudio.mutate(v)}
-                />
+          {showSystemAudio && (
+            <div
+              className="flex items-start gap-3 rounded-md border p-3"
+              style={{ borderColor: 'var(--border-subtle)' }}
+            >
+              <Monitor className="mt-0.5 size-4 flex-shrink-0 text-muted-foreground" />
+              <div className="flex-1 space-y-0.5">
+                <div className="flex items-center justify-between gap-2">
+                  <label
+                    htmlFor="maintoolbar-system-audio"
+                    className="text-sm font-medium"
+                  >
+                    Record system audio
+                    {experimental && (
+                      <span className="ml-1.5 text-[10px] uppercase tracking-wide text-muted-foreground">
+                        Experimental
+                      </span>
+                    )}
+                  </label>
+                  <Switch
+                    id="maintoolbar-system-audio"
+                    checked={enabled}
+                    disabled={systemAudio.isLoading || setSystemAudio.isPending}
+                    onCheckedChange={(v) => setSystemAudio.mutate(v)}
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {experimental
+                    ? 'Capture both sides of calls (experimental on Windows). Verify your first recording captures system audio.'
+                    : 'Capture both sides of calls on macOS. Grants microphone permission on first use.'}
+                </p>
               </div>
-              <p className="text-xs text-muted-foreground">
-                Capture both sides of calls on macOS. Grants microphone
-                permission on first use.
-              </p>
             </div>
-          </div>
+          )}
         </div>
       </PopoverContent>
     </Popover>

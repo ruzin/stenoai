@@ -134,10 +134,6 @@
         "filter": [
           "trayIcon*.png"
         ]
-      },
-      {
-        "from": "../bin/mic-monitor",
-        "to": "mic-monitor"
       }
     ],
     "mac": {
@@ -153,12 +149,50 @@
       "gatekeeperAssess": false,
       "identity": "Skrape Limited (HSDX294RG4)",
       "notarize": true,
+      "extraResources": [
+        {
+          "from": "../bin/mic-monitor",
+          "to": "mic-monitor"
+        }
+      ],
       "extendInfo": {
         "NSMicrophoneUsageDescription": "Steno needs microphone access to record and transcribe meetings.",
         "NSAudioCaptureUsageDescription": "Steno needs audio capture access to record system audio from virtual meetings.",
         "NSScreenCaptureUsageDescription": "Steno needs screen capture access for the loopback-audio feature detection on macOS.",
         "LSMinimumSystemVersion": "12.3.0"
       }
+    },
+    "win": {
+      "icon": "build/icon.ico",
+      "asar": false,
+      "extraResources": [
+        {
+          "from": "build/icon.ico",
+          "to": "icon.ico"
+        }
+      ],
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        },
+        {
+          "target": "zip",
+          "arch": ["x64"]
+        }
+      ],
+      "artifactName": "stenoAI-windows-${version}-${arch}.${ext}",
+      "compression": "store",
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Steno",
+      "deleteAppDataOnUninstall": false
     },
     "dmg": {
       "title": "Steno Installer",

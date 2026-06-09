@@ -28,6 +28,15 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+# Force UTF-8 on stdout/stderr so emoji and non-ASCII prints don't crash under
+# Windows' default cp1252 codepage. Must run before any print() in this module.
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, OSError):
+        pass
+
 # Wire stdlib SSL up to certifi's CA bundle before anything tries to make
 # an HTTPS call. PyInstaller's compiled-in cert paths don't exist on a
 # customer's Mac, so without this the adapter request in summarizer.py
@@ -1189,6 +1198,40 @@ def parakeet_status_cmd():
     }))
 
 
+@cli.command(name='onnx-selftest')
+def onnx_selftest_cmd():
+    """Prove ONNX Runtime's native libraries load + run inside the bundle.
+
+    CI's other smoke tests (``parakeet-status``) only touch a Python id
+    string and never construct an InferenceSession, so a missing or broken
+    onnxruntime native DLL — the well-documented PyInstaller-on-Windows
+    gotcha (microsoft/onnxruntime#25193) — would still build green and only
+    fail at the user's first transcription. This loads the bundled Silero
+    VAD model (a few hundred KB, no network) and runs one inference, which
+    forces the native session libs to load and execute. The same DLLs back
+    the onnx-asr Parakeet path on Windows/Linux, so a pass here means the
+    ASR session libs are present too.
+
+    Prints ``ONNX_SELFTEST_OK`` and exits 0 on success; prints the error and
+    exits 1 on any failure so CI fails the build.
+    """
+    try:
+        import numpy as np
+        from src.silero_vad import SileroVAD, VAD_CHUNK_SAMPLES
+        vad = SileroVAD()
+        prob = vad.predict(np.zeros((VAD_CHUNK_SAMPLES,), dtype=np.float32))
+        # On non-darwin the Parakeet backend is onnx-asr. Importing it here
+        # catches bundling gaps the VAD check misses — notably onnx_asr's
+        # `importlib.metadata.version("onnx-asr")` at import, which needs the
+        # package metadata copied into the bundle (copy_metadata in the spec).
+        if sys.platform != "darwin":
+            import onnx_asr  # noqa: F401
+        print(f"ONNX_SELFTEST_OK prob={float(prob):.4f}")
+    except Exception as e:
+        print(f"ONNX_SELFTEST_FAIL: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
 @cli.command(name='warmup-parakeet')
 def warmup_parakeet_cmd():
     """Pre-load Parakeet weights to warm the OS page cache.
@@ -2206,8 +2249,9 @@ def list_meetings():
     # so meetings stored before the path change remain visible
     custom = get_config().get_storage_path()
     if custom:
-        if "StenoAI.app" in str(Path(__file__)) or "Applications" in str(Path(__file__)):
-            default_output = Path.home() / "Library" / "Application Support" / "stenoai" / "output"
+        from src.config import is_bundled, get_user_data_dir
+        if is_bundled():
+            default_output = get_user_data_dir() / "output"
         else:
             default_output = Path(__file__).parent / "output"
         if default_output.exists():
@@ -2784,8 +2828,9 @@ def list_failed():
         seen_files.add(f.resolve())
     custom = get_config().get_storage_path()
     if custom:
-        if "StenoAI.app" in str(Path(__file__)) or "Applications" in str(Path(__file__)):
-            default_output = Path.home() / "Library" / "Application Support" / "stenoai" / "output"
+        from src.config import is_bundled, get_user_data_dir
+        if is_bundled():
+            default_output = get_user_data_dir() / "output"
         else:
             default_output = Path(__file__).parent / "output"
         if default_output.exists():
@@ -2892,23 +2937,26 @@ def setup_check():
     try:
         ffmpeg_found = False
         possible_ffmpeg_paths = []
+        ffmpeg_exe_suffix = ".exe" if sys.platform == "win32" else ""
+        ffmpeg_binary = f"ffmpeg{ffmpeg_exe_suffix}"
 
         # Check bundled ffmpeg (PyInstaller bundle)
         if getattr(sys, 'frozen', False):
             exe_dir = Path(sys.executable).parent
             for candidate in [
-                exe_dir / 'ffmpeg',                    # bundle root (stenoai.spec places it at '.')
-                exe_dir / '_internal' / 'ffmpeg',      # _internal subdirectory
+                exe_dir / ffmpeg_binary,                # bundle root (stenoai.spec places it at '.')
+                exe_dir / '_internal' / ffmpeg_binary,  # _internal subdirectory
             ]:
                 if candidate.exists():
                     possible_ffmpeg_paths.append(('bundled', str(candidate)))
 
-        possible_ffmpeg_paths.extend([
-            (None, 'ffmpeg'),                          # PATH
-            (None, '/opt/homebrew/bin/ffmpeg'),         # Homebrew Apple Silicon
-            (None, '/usr/local/bin/ffmpeg'),            # Homebrew Intel
-            (None, '/usr/bin/ffmpeg'),                  # System
-        ])
+        possible_ffmpeg_paths.append((None, 'ffmpeg'))  # PATH (Windows resolves via PATHEXT)
+        if sys.platform != "win32":
+            possible_ffmpeg_paths.extend([
+                (None, '/opt/homebrew/bin/ffmpeg'),     # Homebrew Apple Silicon
+                (None, '/usr/local/bin/ffmpeg'),        # Homebrew Intel
+                (None, '/usr/bin/ffmpeg'),              # System
+            ])
 
         for label, path in possible_ffmpeg_paths:
             try:
@@ -2922,7 +2970,11 @@ def setup_check():
                 continue
 
         if not ffmpeg_found:
-            checks.append(("❌ ffmpeg", "not found - run: brew install ffmpeg"))
+            install_hint = (
+                "winget install Gyan.FFmpeg" if sys.platform == "win32"
+                else "brew install ffmpeg"
+            )
+            checks.append(("❌ ffmpeg", f"not found - run: {install_hint}"))
     except Exception as e:
         checks.append(("❌ ffmpeg", f"Error: {e}"))
     
@@ -2963,9 +3015,19 @@ def setup_check():
     except ImportError:
         checks.append(("❌ ollama-python", "pip install ollama"))
 
-    # Check if whisper model is downloaded (pywhispercpp stores in ~/Library/Application Support/pywhispercpp/models/)
-    whisper_model_path = Path.home() / "Library" / "Application Support" / "pywhispercpp" / "models"
-    whisper_models = list(whisper_model_path.glob("ggml-*.bin")) if whisper_model_path.exists() else []
+    # Check if whisper model is downloaded. pywhispercpp uses platformdirs, so
+    # the cache dir varies per OS — check the canonical location for each.
+    whisper_candidates = [
+        Path.home() / "Library" / "Application Support" / "pywhispercpp" / "models",
+        Path(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local"))) / "pywhispercpp" / "models",
+        Path(os.environ.get("XDG_DATA_HOME", str(Path.home() / ".local" / "share"))) / "pywhispercpp" / "models",
+    ]
+    whisper_models = []
+    for whisper_model_path in whisper_candidates:
+        if whisper_model_path.exists():
+            whisper_models = list(whisper_model_path.glob("ggml-*.bin"))
+            if whisper_models:
+                break
     if whisper_models:
         model_name = whisper_models[0].stem.replace("ggml-", "")
         checks.append(("✅ whisper-model", f"{model_name} downloaded"))

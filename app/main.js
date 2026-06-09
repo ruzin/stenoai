@@ -3,8 +3,76 @@ const { app, BrowserWindow, ipcMain, dialog, shell, systemPreferences, globalSho
 // Prevent EPIPE crashes when stdout/stderr pipe is broken (e.g. launching terminal closed)
 process.stdout?.on('error', () => {});
 process.stderr?.on('error', () => {});
+
+// --- Early crash logger ---------------------------------------------------
+// Packaged Electron apps on Windows surface no stderr/console, so a main-process
+// exception during startup just looks like "nothing happens" (silent exit 1).
+// Persist any uncaught error to a file we can read afterwards. Registered before
+// the first heavy require so it also catches module-load failures. We log then
+// exit(1) to preserve the original crash behaviour.
+function _logStartupCrash(kind, err) {
+  try {
+    const _fs = require('fs');
+    const _os = require('os');
+    const _path = require('path');
+    const stamp = new Date().toISOString();
+    const detail = (err && (err.stack || err.message)) || String(err);
+    const line = `[${stamp}] ${kind}: ${detail}\n`;
+    for (const dir of [_os.tmpdir(), process.env.APPDATA, _os.homedir()]) {
+      if (!dir) continue;
+      try { _fs.appendFileSync(_path.join(dir, 'steno-crash.log'), line); break; } catch (_) {}
+    }
+  } catch (_) {}
+}
+// Windows/Linux only: packaged Electron apps surface no stderr there, so this
+// file-based crash log is the only way to see a main-process startup failure.
+// macOS keeps its default behaviour (Electron's error dialog + console) — we
+// don't want to change the signed/notarised mac build's error handling.
+if (process.platform !== 'darwin') {
+  process.on('uncaughtException', (err) => { _logStartupCrash('uncaughtException', err); process.exit(1); });
+  process.on('unhandledRejection', (reason) => { _logStartupCrash('unhandledRejection', reason); });
+}
+
 const path = require('path');
-const { spawn, exec } = require('child_process');
+const { spawn: _spawnRaw, exec } = require('child_process');
+
+// Wrap spawn so every backend / ollama launch defaults to windowsHide:true.
+// The PyInstaller backend (stenoai.exe) and bundled ollama.exe are console
+// subsystem binaries; without this Electron pops a visible console window on
+// Windows for every recording, live-transcribe, query, and the long-lived
+// `ollama serve` keeps one open for the whole session. No-op on macOS/Linux.
+// Callers can still override by passing an explicit windowsHide.
+function spawn(command, args, options) {
+  if (Array.isArray(args) || args === undefined || args === null) {
+    return _spawnRaw(command, args, { windowsHide: true, ...(options || {}) });
+  }
+  // 2-arg form: spawn(command, options)
+  return _spawnRaw(command, { windowsHide: true, ...args });
+}
+
+// Terminate a process AND its child processes. On Windows `process.kill(pid)`
+// only kills the named process, orphaning its children — `ollama serve` spawns
+// per-model "runner" subprocesses that would leak after quit. `taskkill /T`
+// walks the whole tree. On POSIX we keep the existing SIGTERM -> SIGKILL
+// escalation (ollama tears its runners down on SIGTERM there). Synchronous on
+// Windows (execFileSync) so it completes during the app's will-quit handler.
+function killProcessTree(pid) {
+  if (!pid) return;
+  if (process.platform === 'win32') {
+    try {
+      require('child_process').execFileSync(
+        'taskkill',
+        ['/PID', String(pid), '/T', '/F'],
+        { windowsHide: true, stdio: 'ignore' },
+      );
+    } catch (_) {}
+    return;
+  }
+  try { process.kill(pid, 'SIGTERM'); } catch (_) {}
+  setTimeout(() => {
+    try { process.kill(pid, 'SIGKILL'); } catch (_) {}
+  }, 1000);
+}
 const fs = require('fs');
 const https = require('https');
 const http = require('http');
@@ -40,7 +108,19 @@ if (!app.isPackaged) {
 // returning silent right channels in our tests on macOS 26; CoreAudio Tap
 // matches Meetily's default and is the path our Info.plist + entitlements
 // are prepared for. Older macOS (< 14.4) is gated out at the UI layer.
-initMain({ forceCoreAudioTap: true });
+// Only force the macOS CoreAudio tap on darwin. forceCoreAudioTap appends a
+// macOS-only Chromium feature flag (MacCatapSystemAudioLoopbackCapture) — on
+// Windows that's irrelevant (Chromium uses WASAPI loopback) and passing it is
+// at best a no-op, so we don't.
+initMain({ forceCoreAudioTap: process.platform === 'darwin' });
+
+// Windows taskbar identity. Without an explicit AppUserModelID matching the
+// installer's, the taskbar shows a default/Electron icon (and groups the window
+// separately) even when the window icon is correct — it keys off the AUMID, not
+// the window icon. Must match the NSIS shortcut's id (build.appId).
+if (process.platform === 'win32') {
+  try { app.setAppUserModelId('com.stenoai.recorder'); } catch (_) {}
+}
 
 // CoreAudio Process Taps require macOS 14.4+. Returns false on non-macOS or
 // older versions so the renderer can disable the system-audio toggle rather
@@ -54,6 +134,38 @@ function isCoreAudioTapSupported() {
   } catch (_) {
     return false;
   }
+}
+
+// Whether system-audio (loopback) capture is available on this OS at all.
+// macOS: CoreAudio Process Tap (14.4+). Windows: electron-audio-loopback uses
+// Chromium's WASAPI loopback on Windows 10+ (both Win10 and Win11 report major
+// version 10). Linux: not wired. Drives the Settings/MainToolbar toggle.
+function isSystemAudioSupported() {
+  if (process.platform === 'darwin') return isCoreAudioTapSupported();
+  if (process.platform === 'win32') {
+    try {
+      const maj = parseInt(process.getSystemVersion().split('.')[0], 10) || 0;
+      return maj >= 10;
+    } catch (_) {
+      return true; // assume a modern Windows if the version probe fails
+    }
+  }
+  return false;
+}
+
+// Per-OS user data dir, mirroring src/config.get_user_data_dir(). Used by the
+// few synchronous config reads on the Electron side so they resolve the right
+// path on Windows/Linux instead of the macOS literal.
+function getUserDataDir() {
+  if (process.platform === 'darwin') {
+    return path.join(os.homedir(), 'Library', 'Application Support', 'stenoai');
+  }
+  if (process.platform === 'win32') {
+    const base = process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming');
+    return path.join(base, 'stenoai');
+  }
+  const base = process.env.XDG_DATA_HOME || path.join(os.homedir(), '.local', 'share');
+  return path.join(base, 'stenoai');
 }
 
 let mainWindow;
@@ -121,12 +233,13 @@ function registerShortcutProtocolClient() {
 
 // Backend executable path - always use bundled stenoai
 function getBackendPath() {
+  const exe = process.platform === 'win32' ? 'stenoai.exe' : 'stenoai';
   if (app.isPackaged) {
     // Production: bundled in app resources
-    return path.join(process.resourcesPath, 'stenoai', 'stenoai');
+    return path.join(process.resourcesPath, 'stenoai', exe);
   } else {
     // Development: use local build
-    return path.join(__dirname, '..', 'dist', 'stenoai', 'stenoai');
+    return path.join(__dirname, '..', 'dist', 'stenoai', exe);
   }
 }
 
@@ -541,6 +654,16 @@ function createWindow(options = {}) {
     height: 800,
     minWidth: 1000,
     minHeight: 600,
+    // Explicit window/taskbar icon on Windows. Relying on the exe-embedded icon
+    // is unreliable (Windows icon cache shows a stale/default icon), so we point
+    // at the bundled .ico directly. macOS uses its .icns via the app bundle.
+    ...(process.platform === 'win32'
+      ? {
+          icon: app.isPackaged
+            ? path.join(process.resourcesPath, 'icon.ico')
+            : path.join(__dirname, 'build', 'icon.ico'),
+        }
+      : {}),
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -549,6 +672,10 @@ function createWindow(options = {}) {
       scrollBounce: true,
     },
     titleBarStyle: 'hiddenInset',
+    // Windows/Linux render the Electron application menu as an in-window menu
+    // bar (File/Edit/View/…); macOS puts it in the global bar. Hide it off-mac
+    // so the app keeps its clean custom-toolbar look (Alt still reveals it).
+    autoHideMenuBar: true,
     show: false,
     backgroundColor: '#FAF9F5',
     // React UI renders the macOS traffic lights inside the sidebar's top
@@ -816,59 +943,63 @@ if (!gotSingleInstanceLock) {
   });
 
   app.whenReady().then(async () => {
-    // Set application menu with Help > Learn More
-    const appMenu = Menu.buildFromTemplate([
-      {
-        // Custom appMenu to add Settings… with the conventional ⌘, shortcut
-        // (the default `{ role: 'appMenu' }` doesn't include Settings). Mirrors
-        // the tray's Settings item — both fire the same `tray-open-settings`
-        // IPC so the renderer wiring stays in one place.
-        label: app.name,
-        submenu: [
-          { role: 'about' },
-          { type: 'separator' },
-          {
-            label: 'Settings…',
-            accelerator: 'CmdOrCtrl+,',
-            click: () => {
-              showAndFocusWindow();
-              if (mainWindow) {
-                mainWindow.webContents.send('tray-open-settings');
-              }
-            }
-          },
-          { type: 'separator' },
-          { role: 'services' },
-          { type: 'separator' },
-          { role: 'hide' },
-          { role: 'hideOthers' },
-          { role: 'unhide' },
-          { type: 'separator' },
-          { role: 'quit' }
-        ]
-      },
-      { role: 'fileMenu' },
-      { role: 'editMenu' },
-      { role: 'viewMenu' },
-      { role: 'windowMenu' },
-      {
-        role: 'help',
-        submenu: [
-          {
-            label: 'Learn More',
-            click: () => {
-              shell.openExternal('https://github.com/ruzin/stenoai');
-            }
-          },
-          {
-            label: 'Report a Bug',
-            click: () => {
-              shell.openExternal('https://discord.gg/DZ6vcQnxxu');
-            }
-          }
-        ]
+    // Application menu. macOS uses the global menu bar with mac-only roles
+    // (services/hide/unhide). Windows/Linux get a slimmer, platform-correct
+    // menu — kept (editing accelerators, Settings, Help) but hidden by default
+    // via autoHideMenuBar so it doesn't clash with the app's custom toolbar;
+    // Alt reveals it (standard Windows behaviour).
+    const settingsItem = {
+      label: 'Settings…',
+      accelerator: 'CmdOrCtrl+,',
+      click: () => {
+        showAndFocusWindow();
+        if (mainWindow) {
+          mainWindow.webContents.send('tray-open-settings');
+        }
       }
-    ]);
+    };
+    const helpSubmenu = {
+      role: 'help',
+      submenu: [
+        { label: 'Learn More', click: () => shell.openExternal('https://github.com/ruzin/stenoai') },
+        { label: 'Report a Bug', click: () => shell.openExternal('https://discord.gg/DZ6vcQnxxu') }
+      ]
+    };
+    const appMenu = Menu.buildFromTemplate(
+      process.platform === 'darwin'
+        ? [
+            {
+              // Custom appMenu to add Settings… with the conventional ⌘,
+              // shortcut (the default `{ role: 'appMenu' }` omits Settings).
+              label: app.name,
+              submenu: [
+                { role: 'about' },
+                { type: 'separator' },
+                settingsItem,
+                { type: 'separator' },
+                { role: 'services' },
+                { type: 'separator' },
+                { role: 'hide' },
+                { role: 'hideOthers' },
+                { role: 'unhide' },
+                { type: 'separator' },
+                { role: 'quit' }
+              ]
+            },
+            { role: 'fileMenu' },
+            { role: 'editMenu' },
+            { role: 'viewMenu' },
+            { role: 'windowMenu' },
+            helpSubmenu
+          ]
+        : [
+            { label: '&File', submenu: [settingsItem, { type: 'separator' }, { role: 'quit' }] },
+            { role: 'editMenu' },
+            { role: 'viewMenu' },
+            { role: 'windowMenu' },
+            helpSubmenu
+          ]
+    );
     Menu.setApplicationMenu(appMenu);
 
     if (process.platform === 'darwin') {
@@ -1014,21 +1145,17 @@ if (!gotSingleInstanceLock) {
     }
     // Kill Ollama on quit. The process may have been started by Electron or
     // the Python backend — both write the PID to ollama.pid in _internal/.
+    // killProcessTree tears down ollama's child runner subprocesses too, so
+    // they don't orphan on Windows.
     const pidFile = path.join(getBackendCwd(), '_internal', 'ollama.pid');
     try {
       const pid = parseInt(require('fs').readFileSync(pidFile, 'utf8').trim(), 10);
-      if (pid) {
-        process.kill(pid, 'SIGTERM');
-        // Give it a moment to shut down, then force-kill if still alive
-        setTimeout(() => {
-          try { process.kill(pid, 'SIGKILL'); } catch (_) {}
-        }, 1000);
-      }
+      if (pid) killProcessTree(pid);
       require('fs').unlinkSync(pidFile);
     } catch (_) {}
     // Also kill if Electron spawned it directly
     if (ollamaPid) {
-      try { process.kill(ollamaPid, 'SIGTERM'); } catch (_) {}
+      killProcessTree(ollamaPid);
       ollamaPid = null;
     }
     await shutdownTelemetry();
@@ -1071,9 +1198,16 @@ ipcMain.on('shortcut-renderer-ready', () => {
   flushShortcutQueue();
 });
 
-// Microphone permission handlers
+// Microphone permission handlers.
+// systemPreferences.getMediaAccessStatus / askForMediaAccess are macOS-only.
+// On Windows and Linux the OS handles mic permission at the WASAPI/ALSA layer
+// and there is no programmatic prompt — report 'granted' so the renderer
+// stops gating recording on a permission that doesn't exist.
 ipcMain.handle('check-microphone-permission', async () => {
   try {
+    if (process.platform !== 'darwin') {
+      return { success: true, status: 'granted' };
+    }
     const status = systemPreferences.getMediaAccessStatus('microphone');
     console.log('Microphone permission status:', status);
     return { success: true, status };
@@ -1085,6 +1219,9 @@ ipcMain.handle('check-microphone-permission', async () => {
 
 ipcMain.handle('request-microphone-permission', async () => {
   try {
+    if (process.platform !== 'darwin') {
+      return { success: true, granted: true };
+    }
     console.log('Requesting microphone permission...');
     const granted = await systemPreferences.askForMediaAccess('microphone');
     console.log('Microphone permission granted:', granted);
@@ -1099,12 +1236,19 @@ ipcMain.handle('request-microphone-permission', async () => {
 // Settings to disable the toggle on unsupported macOS / non-mac platforms.
 ipcMain.handle('get-system-audio-support', async () => {
   try {
-    const supported = isCoreAudioTapSupported();
+    const supported = isSystemAudioSupported();
+    // Windows loopback works but is pending hardware verification, so the UI
+    // labels it experimental and ships it opt-in (default off).
+    const experimental = process.platform === 'win32';
+    let screenPermission = 'unknown';
     let osVersion = '';
     if (process.platform === 'darwin') {
       try { osVersion = process.getSystemVersion(); } catch (_) {}
+      try { screenPermission = systemPreferences.getMediaAccessStatus('screen'); } catch (_) {}
+    } else {
+      try { osVersion = process.getSystemVersion(); } catch (_) {}
     }
-    return { success: true, supported, osVersion };
+    return { success: true, supported, experimental, platform: process.platform, osVersion, screenPermission };
   } catch (error) {
     return { success: false, error: error.message };
   }
@@ -1520,6 +1664,7 @@ ipcMain.on('query-transcript-stream', (event, queryId, summaryFile, question) =>
     proc = require('child_process').spawn(backendPath, ['query-streaming', summaryFile, '-q', question], {
       env,
       cwd: getBackendCwd(),
+      windowsHide: true,
     });
   } catch (err) {
     event.sender.send('query-done', { queryId, success: false, error: err.message });
@@ -1614,7 +1759,7 @@ ipcMain.on('chat-global-stream', (event, queryId, question, folderId) => {
     proc = require('child_process').spawn(
       getBackendPath(),
       args,
-      { env, cwd: getBackendCwd() },
+      { env, cwd: getBackendCwd(), windowsHide: true },
     );
   } catch (err) {
     event.sender.send('query-done', { queryId, success: false, error: err.message });
@@ -2026,13 +2171,20 @@ ipcMain.handle('get-queue-status', async () => {
 // stringify safely to bytes via the same write() call. No-op if the
 // sidecar isn't running (e.g. spawn failed, or recording ended).
 ipcMain.on('live-transcribe-chunk', (event, payload) => {
-  if (!liveTranscribeProcess || liveTranscribeProcess.killed) return;
+  const proc = liveTranscribeProcess;
+  if (!proc || proc.killed) return;
   if (!payload) return;
+  // Teardown race: on stop we end/kill the sidecar, but the renderer may push
+  // one more in-flight chunk → an async "write after end" error. Skip the write
+  // once stdin is no longer writable so we don't log a spurious error on every
+  // recording stop.
+  const stdin = proc.stdin;
+  if (!stdin || stdin.destroyed || stdin.writableEnded || !stdin.writable) return;
   // Renderer side sends an ArrayBuffer; Electron's IPC layer hands us a
   // Buffer here. If a TypedArray slipped through, normalise.
   const buf = Buffer.isBuffer(payload) ? payload : Buffer.from(payload);
   try {
-    liveTranscribeProcess.stdin.write(buf);
+    stdin.write(buf);
   } catch (e) {
     // EPIPE means Python exited (e.g. crashed). Drop silently; the exit
     // handler will null out the process ref.
@@ -2230,16 +2382,21 @@ function stopLiveTranscribe() {
 }
 
 function loadSystemAudioEnabled() {
-  if (!isCoreAudioTapSupported()) return false;
+  if (!isSystemAudioSupported()) return false;
+  // Default differs by platform: macOS ships system audio ON (CoreAudio tap is
+  // verified); Windows ships it OFF (opt-in/experimental — see src/config.py).
+  const defaultOn = process.platform === 'darwin';
   try {
-    const cfgPath = path.join(os.homedir(), 'Library', 'Application Support', 'stenoai', 'config.json');
-    if (!fs.existsSync(cfgPath)) return true; // new install → CoreAudio default
+    const cfgPath = path.join(getUserDataDir(), 'config.json');
+    if (!fs.existsSync(cfgPath)) return defaultOn; // new install
     const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf-8'));
-    // `false` only when the user has explicitly opted out; an absent key
-    // means "haven't been asked yet" → treat as the new default.
-    return cfg.system_audio_enabled !== false;
+    // Honour an explicit boolean; an absent key means "haven't been asked
+    // yet" → fall back to the platform default.
+    return typeof cfg.system_audio_enabled === 'boolean'
+      ? cfg.system_audio_enabled
+      : defaultOn;
   } catch (_) {
-    return false;
+    return defaultOn;
   }
 }
 
@@ -2251,7 +2408,7 @@ function loadSystemAudioEnabled() {
 // Config._migrate_transcription_engine.
 function loadTranscriptionEngine() {
   try {
-    const cfgPath = path.join(os.homedir(), 'Library', 'Application Support', 'stenoai', 'config.json');
+    const cfgPath = path.join(getUserDataDir(), 'config.json');
     if (!fs.existsSync(cfgPath)) return 'parakeet';
     const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf-8'));
     const engine = cfg.transcription_engine;
@@ -2267,7 +2424,7 @@ function loadTranscriptionEngine() {
 // the truth lives in one place.
 function loadAutoDetectMeetingsEnabled() {
   try {
-    const cfgPath = path.join(os.homedir(), 'Library', 'Application Support', 'stenoai', 'config.json');
+    const cfgPath = path.join(getUserDataDir(), 'config.json');
     if (!fs.existsSync(cfgPath)) return true;
     const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf-8'));
     return cfg.auto_detect_meetings_enabled !== false;
@@ -3166,17 +3323,16 @@ ipcMain.handle('setup-system-check', async () => {
       return { success: false, error: 'Python 3 not found. Please install Python 3.8+' };
     }
     
-    // Create required directories - match Python logic for DMG vs development
-    const os = require('os');
-    const currentPath = __dirname;
+    // Create required directories. Mirror src/config.get_user_data_dir() so the
+    // Electron and Python sides agree on the storage root on every OS.
+    //   macOS:   ~/Library/Application Support/stenoai
+    //   Windows: %APPDATA%/stenoai
+    //   Linux:   ~/.config/stenoai (electron's appData)
     let baseDir;
-    
-    // Detect if running from app bundle (DMG install) or development
-    if (currentPath.includes('StenoAI.app') || currentPath.includes('Applications')) {
-      // DMG/Production: Use Application Support folder
-      baseDir = path.join(os.homedir(), 'Library', 'Application Support', 'stenoai');
+    if (app.isPackaged) {
+      baseDir = path.join(app.getPath('appData'), 'stenoai');
     } else {
-      // Development: Use project relative paths  
+      // Development: Use project relative paths
       baseDir = path.join(__dirname, '..');
     }
     
@@ -3506,7 +3662,16 @@ function setupAutoUpdater() {
   });
 
   autoUpdater.on('error', (err) => {
-    sendDebugLog(`Auto-updater error: ${err.message}`);
+    const msg = (err && err.message) || String(err);
+    // Until a release carrying this platform's update feed (latest.yml on
+    // Windows) is published, the updater 404s on the feed file. That's an
+    // expected transitional state, not a real failure — log it quietly so it
+    // doesn't read as a scary stack trace for alpha testers.
+    if (/latest(-mac)?\.yml/i.test(msg) && /(404|cannot find)/i.test(msg)) {
+      sendDebugLog('Auto-updater: no update feed published for this release yet — skipping.');
+      return;
+    }
+    sendDebugLog(`Auto-updater error: ${msg}`);
   });
 
   // Check on launch (after a short delay to not block startup)
@@ -3904,14 +4069,19 @@ ipcMain.handle('setup-ollama-and-model', async () => {
       sendDebugLog(`Could not read AI provider, proceeding with local setup: ${e.message}`);
     }
 
-    // Check macOS version — bundled Ollama requires macOS 14 (Sonoma) or later
-    const macosRelease = os.release(); // e.g. "23.1.0" for macOS 14.1
-    const darwinMajor = parseInt(macosRelease.split('.')[0], 10);
-    // Darwin 23 = macOS 14 (Sonoma), Darwin 22 = macOS 13 (Ventura), etc.
-    if (darwinMajor < 23) {
-      const macosVersion = darwinMajor >= 22 ? '13 (Ventura)' : darwinMajor >= 21 ? '12 (Monterey)' : `(Darwin ${darwinMajor})`;
-      sendDebugLog(`macOS ${macosVersion} detected — Ollama requires macOS 14 (Sonoma) or later`);
-      return { success: false, error: 'StenoAI requires macOS 14 (Sonoma) or later for local AI summarization. Please update your macOS or use a remote Ollama server in Settings.' };
+    // Check macOS version — bundled Ollama requires macOS 14 (Sonoma) or later.
+    // os.release() reports the kernel version, which is Darwin on mac but the
+    // Windows NT build on Windows; gate the version check to darwin so a non-mac
+    // OS doesn't get rejected by the < 23 comparison.
+    if (process.platform === 'darwin') {
+      const macosRelease = os.release(); // e.g. "23.1.0" for macOS 14.1
+      const darwinMajor = parseInt(macosRelease.split('.')[0], 10);
+      // Darwin 23 = macOS 14 (Sonoma), Darwin 22 = macOS 13 (Ventura), etc.
+      if (darwinMajor < 23) {
+        const macosVersion = darwinMajor >= 22 ? '13 (Ventura)' : darwinMajor >= 21 ? '12 (Monterey)' : `(Darwin ${darwinMajor})`;
+        sendDebugLog(`macOS ${macosVersion} detected — Ollama requires macOS 14 (Sonoma) or later`);
+        return { success: false, error: 'StenoAI requires macOS 14 (Sonoma) or later for local AI summarization. Please update your macOS or use a remote Ollama server in Settings.' };
+      }
     }
 
     sendDebugLog('Locating bundled Ollama...');
@@ -4483,12 +4653,15 @@ async function ensureOllamaRunning() {
       return true; // Service is running
     }
 
-    // Service not running, try to start it
-    // Check macOS version — bundled Ollama requires macOS 14 (Sonoma) or later
-    const macRelease = os.release();
-    if (parseInt(macRelease.split('.')[0], 10) < 23) {
-      sendDebugLog('macOS version too old for bundled Ollama — requires macOS 14 (Sonoma) or later');
-      return false;
+    // Service not running, try to start it.
+    // The macOS-14 gate only applies to mac (os.release() is the NT build on
+    // Windows, which would always trigger the < 23 check).
+    if (process.platform === 'darwin') {
+      const macRelease = os.release();
+      if (parseInt(macRelease.split('.')[0], 10) < 23) {
+        sendDebugLog('macOS version too old for bundled Ollama — requires macOS 14 (Sonoma) or later');
+        return false;
+      }
     }
 
     const ollamaPath = await findOllamaExecutable();
@@ -5706,7 +5879,9 @@ ipcMain.handle('pull-model', async (event, modelName) => {
   }
 });
 
-// Helper to build env vars for running the bundled Ollama binary directly
+// Helper to build env vars for running the bundled Ollama binary directly.
+// Mirrors src/ollama_manager.get_ollama_env() so the dylib/DLL search path
+// is set correctly per-OS.
 function getOllamaEnv() {
   let ollamaDir;
   if (app.isPackaged) {
@@ -5715,21 +5890,30 @@ function getOllamaEnv() {
     ollamaDir = path.join(__dirname, '..', 'bin');
   }
   const env = { ...process.env };
-  const existing = env.DYLD_LIBRARY_PATH || '';
-  env.DYLD_LIBRARY_PATH = existing ? `${ollamaDir}:${existing}` : ollamaDir;
-  env.MLX_METAL_PATH = path.join(ollamaDir, 'mlx.metallib');
+  if (process.platform === 'darwin') {
+    const existing = env.DYLD_LIBRARY_PATH || '';
+    env.DYLD_LIBRARY_PATH = existing ? `${ollamaDir}:${existing}` : ollamaDir;
+    env.MLX_METAL_PATH = path.join(ollamaDir, 'mlx.metallib');
+  } else if (process.platform === 'win32') {
+    const existing = env.PATH || '';
+    env.PATH = existing ? `${ollamaDir};${existing}` : ollamaDir;
+  } else {
+    const existing = env.LD_LIBRARY_PATH || '';
+    env.LD_LIBRARY_PATH = existing ? `${ollamaDir}:${existing}` : ollamaDir;
+  }
   return env;
 }
 
 // Helper function to find Ollama executable (bundled only)
 async function findOllamaExecutable() {
+  const exe = process.platform === 'win32' ? 'ollama.exe' : 'ollama';
   let bundledOllamaPath;
   if (app.isPackaged) {
     // Production: bundled inside PyInstaller _internal directory
-    bundledOllamaPath = path.join(process.resourcesPath, 'stenoai', '_internal', 'ollama', 'ollama');
+    bundledOllamaPath = path.join(process.resourcesPath, 'stenoai', '_internal', 'ollama', exe);
   } else {
     // Development: in project bin/ directory
-    bundledOllamaPath = path.join(__dirname, '..', 'bin', 'ollama');
+    bundledOllamaPath = path.join(__dirname, '..', 'bin', exe);
   }
 
   if (fs.existsSync(bundledOllamaPath)) {

@@ -33,6 +33,20 @@ case "$(uname -s)" in
         echo "ffmpeg downloaded"
         cd - > /dev/null
         ;;
+    MINGW*|MSYS*|CYGWIN*)
+        # Windows (running under Git Bash on windows-latest CI or MSYS). Use
+        # BtbN's static GPL build — one self-contained ffmpeg.exe, no DLLs.
+        FFMPEG_URL="https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip"
+        mkdir -p "$BIN_DIR"
+        curl -L "$FFMPEG_URL" -o "$BIN_DIR/ffmpeg.zip"
+        cd "$BIN_DIR"
+        # Zip nests under a versioned dir; pull just ffmpeg.exe into bin/.
+        unzip -o ffmpeg.zip -d ffmpeg-extract > /dev/null
+        find ffmpeg-extract -name 'ffmpeg.exe' -exec mv {} . \;
+        rm -rf ffmpeg-extract ffmpeg.zip
+        echo "ffmpeg.exe downloaded"
+        cd - > /dev/null
+        ;;
     *)
         echo "Note: ffmpeg not auto-downloaded for this platform. Please install manually."
         ;;

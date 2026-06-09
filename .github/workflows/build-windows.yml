@@ -1,0 +1,209 @@
+name: Build Windows installer
+
+# End-to-end Windows build: PyInstaller backend (with onnx-asr Parakeet + whisper.cpp)
+# + Electron NSIS installer + zip. Runs on every push to feat/windows-port-v2 so
+# we can iterate quickly, and on tag pushes so released versions get a Windows
+# asset uploaded alongside the macOS DMG produced by build-release.yml.
+#
+# Code signing is intentionally off for the alpha — installers ship unsigned
+# and trigger SmartScreen on first run. Add WINDOWS_CERT secrets + the signing
+# step before the public 1.0.
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feat/windows-port-v2
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: app/package-lock.json
+
+      - name: Get version from package.json
+        id: package_version
+        working-directory: app
+        shell: pwsh
+        run: |
+          $version = (Get-Content -Raw package.json | ConvertFrom-Json).version
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Install Python dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          # requirements.txt uses sys_platform markers — parakeet-mlx is darwin-only,
+          # onnx-asr installs here. pip resolves the right set automatically.
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Download bundled binaries (Ollama Windows + ffmpeg.exe)
+        shell: bash
+        run: |
+          chmod +x scripts/download-ollama.sh
+          ./scripts/download-ollama.sh
+
+      - name: List bin/ contents
+        shell: pwsh
+        run: |
+          Get-ChildItem bin -Recurse | Select-Object FullName, Length | Format-Table -AutoSize
+
+      - name: Build Python backend with PyInstaller
+        shell: pwsh
+        run: |
+          pyinstaller stenoai.spec --noconfirm
+          Get-ChildItem dist/stenoai | Select-Object Name, Length | Format-Table
+
+      - name: Smoke-test bundled CLI
+        shell: pwsh
+        run: |
+          ./dist/stenoai/stenoai.exe --help
+          # setup-check exits non-zero when whisper model isn't pre-downloaded,
+          # which is expected on a fresh CI runner. We just want to confirm the
+          # bundle loads + runs to completion without crashing on missing DLLs
+          # or import errors. `2>&1` merges stderr so we capture import noise too.
+          ./dist/stenoai/stenoai.exe setup-check 2>&1
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "setup-check exited with $LASTEXITCODE (expected when models not downloaded yet)"
+          }
+
+      - name: Verify Parakeet ONNX backend wires up
+        shell: pwsh
+        run: |
+          # parakeet-status calls into the dispatcher, which on Windows must
+          # return the ONNX model id (istupakov/parakeet-tdt-0.6b-v3-onnx).
+          # Doesn't download weights — is_installed() only checks the HF cache.
+          $out = ./dist/stenoai/stenoai.exe parakeet-status
+          Write-Host "parakeet-status: $out"
+          if ($out -notmatch 'onnx') {
+            Write-Error "Expected ONNX-backed Parakeet model id, got: $out"
+            exit 1
+          }
+
+      - name: Verify ONNX Runtime native libs load + run
+        shell: pwsh
+        run: |
+          # parakeet-status only checks a model-id string and never builds an
+          # InferenceSession, so it can't catch a missing/broken onnxruntime
+          # native DLL (microsoft/onnxruntime#25193). onnx-selftest loads the
+          # bundled Silero VAD model and runs one inference — proving the native
+          # session libs (shared with the onnx-asr Parakeet path) load + execute
+          # in the frozen bundle. No network / weight download required.
+          $out = ./dist/stenoai/stenoai.exe onnx-selftest
+          Write-Host "onnx-selftest: $out"
+          if ($out -notmatch 'ONNX_SELFTEST_OK') {
+            Write-Error "ONNX Runtime self-test failed: $out"
+            exit 1
+          }
+
+      - name: Install Electron dependencies
+        working-directory: app
+        run: npm ci
+
+      - name: Build Electron installer (unsigned)
+        working-directory: app
+        shell: pwsh
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: |
+          npm run build:renderer
+          # Don't fail the job on the ONE known NSIS failure — makensis can't
+          # mmap the app .7z on the runner (`installSection.nsh on line 66` /
+          # "failed creating mmap"). The zip target is the alpha deliverable;
+          # NSIS is best-effort for now. We tolerate *only* that signature —
+          # any other electron-builder failure must still fail the job so a
+          # real regression doesn't ship a green build with a broken/absent
+          # installer.
+          npx electron-builder --win --publish=never 2>&1 | Tee-Object -FilePath builder.log
+          $builderExit = $LASTEXITCODE
+          $zipBuilt = Test-Path 'dist\stenoAI-windows-*.zip'
+          $log = Get-Content builder.log -Raw -ErrorAction SilentlyContinue
+          $knownNsisFailure = ($log -match 'failed creating mmap') -or ($log -match 'installSection\.nsh.*line 66')
+          if ($builderExit -ne 0 -and $zipBuilt -and $knownNsisFailure) {
+            Write-Host "electron-builder hit the known NSIS makensis mmap failure but the zip artefact was produced — treating as success."
+            exit 0
+          }
+          if ($builderExit -ne 0) {
+            Write-Host "electron-builder exited with $builderExit (zipBuilt=$zipBuilt, knownNsisFailure=$knownNsisFailure) — failing the job."
+            exit $builderExit
+          }
+
+      - name: Show built artifacts
+        if: always()
+        shell: pwsh
+        run: |
+          Get-ChildItem app/dist | Select-Object Name, Length | Format-Table -AutoSize
+
+      - name: Upload Windows artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stenoai-windows-${{ steps.package_version.outputs.version }}
+          path: |
+            app/dist/*.exe
+            app/dist/*.zip
+            app/dist/*.yml
+            app/dist/*.blockmap
+          retention-days: 14
+          if-no-files-found: warn
+
+      # Tag-driven release: attach the Windows auto-update assets to the
+      # GitHub Release so electron-updater can serve updates on Windows.
+      # build-release.yml (macOS) is the canonical release *creator* (its
+      # softprops/action-gh-release job sets the body/name from the tag).
+      # We only *upload* assets to that existing release here — never create
+      # it — so there's no race on body/name. We wait for the macOS job to
+      # create the release first (notarization makes it slower than this
+      # build), then upload latest.yml (the updater manifest), the NSIS .exe
+      # it references, the .blockmap (differential updates), and the zip.
+      - name: Attach Windows assets to the release (tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          # Stable, versionless alias for the website/README "Download for
+          # Windows" link (mirrors the macOS DMG rename in build-release.yml).
+          # The versioned .exe stays too — electron-updater's latest.yml
+          # references it by its versioned name for auto-update.
+          VER_EXE=$(ls app/dist/*-x64.exe | grep -v 'stenoAI-windows-x64.exe' | head -1)
+          cp "$VER_EXE" "app/dist/stenoAI-windows-x64.exe"
+          # Wait up to ~30 min for build-release.yml to create the release.
+          for i in $(seq 1 60); do
+            if gh release view "$TAG" >/dev/null 2>&1; then
+              echo "Release $TAG exists — uploading Windows auto-update assets."
+              gh release upload "$TAG" \
+                app/dist/latest.yml \
+                app/dist/*-x64.exe \
+                app/dist/*.blockmap \
+                app/dist/*-x64.zip \
+                --clobber
+              echo "Uploaded Windows assets to release $TAG."
+              exit 0
+            fi
+            echo "Release $TAG not created yet (attempt $i/60) — waiting 30s…"
+            sleep 30
+          done
+          echo "Release $TAG never appeared after ~30 min — failing so we notice."
+          exit 1

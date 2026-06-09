@@ -34,7 +34,7 @@ import {
   getDebugLogs,
   subscribeDebugLogs,
 } from '@/lib/debugLogs';
-import { cn } from '@/lib/utils';
+import { cn, isMac } from '@/lib/utils';
 import { useTheme } from '@/hooks/useTheme';
 import {
   useAppVersion,
@@ -751,8 +751,12 @@ function GeneralTab() {
         label="Record system audio"
         description={
           systemAudioSupport.data && !systemAudioSupport.data.supported
-            ? `Capture audio from virtual meetings (requires macOS 14.4+, you're on ${systemAudioSupport.data.osVersion || 'an older version'})`
-            : 'Capture audio from virtual meetings (requires macOS 14.4+)'
+            ? isMac
+              ? `Capture audio from virtual meetings (requires macOS 14.4+, you're on ${systemAudioSupport.data.osVersion || 'an older version'})`
+              : 'Capture audio from virtual meetings (not supported on this OS).'
+            : systemAudioSupport.data?.experimental
+              ? 'Capture audio from virtual meetings (experimental on Windows — verify your first recording captures system audio).'
+              : 'Capture audio from virtual meetings (requires macOS 14.4+).'
         }
       >
         <Switch
@@ -804,17 +808,22 @@ function GeneralTab() {
         </div>
       </SettingRow>
 
-      <SettingRow
-        label="Hide dock icon"
-        description="Run as menu bar app only"
-        noBorder
-      >
-        <Switch
-          checked={dockIcon.data ?? false}
-          onCheckedChange={(v) => setDockIcon.mutate(v)}
-          disabled={dockIcon.data === undefined}
-        />
-      </SettingRow>
+      {/* Dock + menu bar are macOS-only concepts and the apply logic in
+          main.js is darwin-gated, so the toggle is a no-op off-mac. Hide it
+          entirely on Windows/Linux rather than show a broken control. */}
+      {isMac && (
+        <SettingRow
+          label="Hide dock icon"
+          description="Run as menu bar app only"
+          noBorder
+        >
+          <Switch
+            checked={dockIcon.data ?? false}
+            onCheckedChange={(v) => setDockIcon.mutate(v)}
+            disabled={dockIcon.data === undefined}
+          />
+        </SettingRow>
+      )}
     </section>
   );
 }
@@ -901,7 +910,7 @@ function AiTab() {
     <section data-settings-tab="ai">
       <SettingRow
         label="AI provider"
-        description="Where models run. Local keeps all data on your Mac."
+        description="Where models run. Local keeps all data on your device."
       >
         <Select
           value={current}
@@ -914,7 +923,7 @@ function AiTab() {
           <SelectContent className="w-72">
             <SelectItem
               value="local"
-              description="Runs entirely on your Mac. Private and free, no internet required."
+              description="Runs entirely on your device. Private and free, no internet required."
             >
               Local (on-device)
             </SelectItem>
