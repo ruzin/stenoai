@@ -25,8 +25,7 @@ import {
   useRecordingProcessingEffects,
 } from '@/hooks/useRecording';
 import { useSystemAudioCapture } from '@/hooks/useSystemAudioCapture';
-import { useCalendarEvents, calendarKeys } from '@/hooks/useCalendarEvents';
-import { useQueryClient } from '@tanstack/react-query';
+import { useCalendarEvents } from '@/hooks/useCalendarEvents';
 import { navigate, useRoute, rememberNonSettingsRoute } from '@/lib/router';
 import { ipc } from '@/lib/ipc';
 import { primeDebugLogs } from '@/lib/debugLogs';
@@ -70,19 +69,6 @@ export function App() {
   React.useEffect(() => {
     rememberNonSettingsRoute(route);
   }, [route]);
-
-  // Stealth-refresh the calendar on every route change so when the user
-  // navigates back to Home, events they added elsewhere are already there.
-  // React Query's in-flight request dedup throttles spam — rapid nav
-  // back-and-forth only produces one underlying API call until it
-  // resolves, so we don't need a manual `stale: true` gate here.
-  const qc = useQueryClient();
-  React.useEffect(() => {
-    void qc.refetchQueries({
-      queryKey: calendarKeys.events(),
-      type: 'active',
-    });
-  }, [route, qc]);
 
   // Cold-reload mid-processing: if we restart the app while the backend is
   // still summarizing, drop the user on /meetings/processing so they don't
