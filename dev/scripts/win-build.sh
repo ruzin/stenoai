@@ -91,3 +91,13 @@ echo "==> Done. Windows artifacts:"
 find "$OUT_DIR" -maxdepth 2 -type f \( -name '*.exe' -o -name '*.zip' \) -print | sed 's/^/    /'
 echo ""
 echo "Drag the .exe (or unzip the .zip) into your Windows VM to test."
+
+# Open the folder that actually holds the .exe (gh nests it one level down)
+# so it's ready to drag into the VM. Falls back to the output dir.
+exe_dir="$(find "$OUT_DIR" -maxdepth 2 -type f -name '*.exe' -print -quit | xargs -I{} dirname {} 2>/dev/null)"
+[[ -z "$exe_dir" ]] && exe_dir="$OUT_DIR"
+case "$(uname -s)" in
+  Darwin) open "$exe_dir" ;;
+  Linux)  command -v xdg-open >/dev/null && xdg-open "$exe_dir" >/dev/null 2>&1 || true ;;
+  MINGW*|MSYS*|CYGWIN*) explorer "$(cygpath -w "$exe_dir" 2>/dev/null || echo "$exe_dir")" || true ;;
+esac
