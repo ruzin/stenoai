@@ -439,8 +439,8 @@ export function Setup() {
                     spellCheck={false}
                   />
                   <Muted className="mt-1 text-[11px]">
-                    Stored locally on this Mac. Never synced or sent anywhere
-                    except the provider you select.
+                    Stored locally on this device. Never synced or sent
+                    anywhere except the provider you select.
                   </Muted>
                 </div>
               </div>

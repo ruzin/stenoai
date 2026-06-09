@@ -623,7 +623,7 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
             </DialogTitle>
             <DialogDescription>
               The shared copy will be removed from your organisation. Your
-              local note stays on this Mac. You can re-share at any time.
+              local note stays on this device. You can re-share at any time.
             </DialogDescription>
           </DialogHeader>
           {shareError && (

@@ -199,7 +199,7 @@ export function OrgSharedDetail({ id }: { id: string }) {
               {meeting.data.has_artifact && (
                 <>
                   <span>·</span>
-                  <span title="Body lives in your org's S3 bucket; the adapter fetched it server-side. Never written to this Mac.">
+                  <span title="Body lives in your org's S3 bucket; the adapter fetched it server-side. Never written to this device.">
                     from S3
                   </span>
                 </>

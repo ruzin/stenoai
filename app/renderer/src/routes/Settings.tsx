@@ -806,17 +806,22 @@ function GeneralTab() {
         </div>
       </SettingRow>
 
-      <SettingRow
-        label="Hide dock icon"
-        description="Run as menu bar app only"
-        noBorder
-      >
-        <Switch
-          checked={dockIcon.data ?? false}
-          onCheckedChange={(v) => setDockIcon.mutate(v)}
-          disabled={dockIcon.data === undefined}
-        />
-      </SettingRow>
+      {/* Dock + menu bar are macOS-only concepts and the apply logic in
+          main.js is darwin-gated, so the toggle is a no-op off-mac. Hide it
+          entirely on Windows/Linux rather than show a broken control. */}
+      {isMac && (
+        <SettingRow
+          label="Hide dock icon"
+          description="Run as menu bar app only"
+          noBorder
+        >
+          <Switch
+            checked={dockIcon.data ?? false}
+            onCheckedChange={(v) => setDockIcon.mutate(v)}
+            disabled={dockIcon.data === undefined}
+          />
+        </SettingRow>
+      )}
     </section>
   );
 }
