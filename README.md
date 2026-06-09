@@ -41,10 +41,10 @@
 If you're looking for a hosted desktop recording API, consider checking out [Recall.ai](https://www.recall.ai/product/desktop-recording-sdk?utm_source=github&utm_medium=sponsorship&utm_campaign=ruzin-stenoai), an API that records Zoom, Google Meet, Microsoft Teams, in-person meetings, and more.
 
 ## 📢 What's New
+- **2026-06-09** 🪟 Windows alpha — Steno now runs on Windows 10/11 (x64). Record, live Parakeet transcription, summaries, and system-audio diarisation all work; ships as an unsigned installer for now (SmartScreen warns on first launch), with transcription on CPU via ONNX Runtime.
 - **2026-06-09** ☁️ AWS Bedrock as a cloud AI provider — Bring your own Bedrock API key to route summaries through Claude on AWS. Application inference profile ARNs work too, so governed environments with IAM policies that allow `bedrock:InvokeModel` on application profiles only are supported out of the box.
 - **2026-06-09** 📅 Calendar polish round — Cancellable Google + Outlook OAuth from the calendar nudge, declined events drop at the IPC boundary (covers organiser-then-declined edge case), 3-per-page `<` / `>` pagination on busy days, full-card rendering for all-day blocks, and a 2-minute background poll that survives route changes.
 - **2026-06-07** 🎙️ Live transcription with Parakeet TDT v3 — Real-time on-screen transcripts during recording via Apple Silicon's MLX backend. Sentences appear as you speak in a Granola-style chat-bubble view; speakers are attributed to You vs Others in real time.
-- **2026-06-07** 🎛️ Choose your transcription engine — Settings → Transcribe now offers Parakeet (default, live + post-stop, 25 European languages) or Whisper (post-stop only, 99 languages incl. Chinese, Japanese, Arabic, Hindi). Existing Whisper users keep Whisper; new installs default to Parakeet.
 
 
 ## Features
