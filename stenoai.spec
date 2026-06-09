@@ -26,7 +26,7 @@ The bundled executable will be in dist/stenoai/
 """
 
 import sys
-from PyInstaller.utils.hooks import collect_data_files, collect_submodules, collect_dynamic_libs
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules, collect_dynamic_libs, copy_metadata
 
 # Apple Silicon uses parakeet-mlx for ASR; Windows / Linux use onnx-asr via
 # ONNX Runtime. The two backends live in src/_parakeet_{mlx,onnx}.py and
@@ -156,6 +156,20 @@ else:
 for pkg in _DATA_PKGS:
     try:
         datas += collect_data_files(pkg)
+    except Exception:
+        pass
+
+# Copy package metadata (.dist-info) for packages that read their own version
+# via importlib.metadata at import time. onnx_asr/__init__.py does
+# `__version__ = importlib.metadata.version("onnx-asr")` on import — without the
+# bundled metadata that raises PackageNotFoundError (an ImportError subclass),
+# which surfaces as the misleading "onnx-asr is not installed" at first
+# transcription. copy_metadata fixes it. huggingface_hub is copied too since the
+# onnx-asr [hub] download path leans on it.
+_METADATA_PKGS = ['huggingface_hub'] if _IS_DARWIN else ['onnx-asr', 'huggingface_hub']
+for pkg in _METADATA_PKGS:
+    try:
+        datas += copy_metadata(pkg)
     except Exception:
         pass
 

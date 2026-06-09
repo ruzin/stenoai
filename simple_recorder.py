@@ -1220,6 +1220,12 @@ def onnx_selftest_cmd():
         from src.silero_vad import SileroVAD, VAD_CHUNK_SAMPLES
         vad = SileroVAD()
         prob = vad.predict(np.zeros((VAD_CHUNK_SAMPLES,), dtype=np.float32))
+        # On non-darwin the Parakeet backend is onnx-asr. Importing it here
+        # catches bundling gaps the VAD check misses — notably onnx_asr's
+        # `importlib.metadata.version("onnx-asr")` at import, which needs the
+        # package metadata copied into the bundle (copy_metadata in the spec).
+        if sys.platform != "darwin":
+            import onnx_asr  # noqa: F401
         print(f"ONNX_SELFTEST_OK prob={float(prob):.4f}")
     except Exception as e:
         print(f"ONNX_SELFTEST_FAIL: {e}", file=sys.stderr)
