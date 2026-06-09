@@ -84,7 +84,7 @@ export function FolderDetail({ folderId }: FolderDetailProps) {
                   className="text-sm font-medium tracking-[-0.005em]"
                   style={{ color: 'var(--fg-1)', fontFamily: 'var(--font-sans)' }}
                 >
-                  Meetings
+                  Notes
                 </h2>
                 <span
                   className="text-[12.5px] tabular-nums"
