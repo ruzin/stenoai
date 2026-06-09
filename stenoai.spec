@@ -177,15 +177,29 @@ for pkg in _DYLIB_PKGS:
         pass
 
 # Bundle Ollama binary and libraries.
-# Walk bin/ recursively — Ollama for Windows ships GPU libs under lib/ollama/
-# that must be preserved relative to ollama.exe.
+# Walk bin/ recursively — Ollama for Windows ships its runner libs under
+# lib/ollama/ that must be preserved relative to ollama.exe.
 import os
+
+# Ollama's Windows bundle ships GPU runner libs under lib/ollama/{cuda_v12,
+# cuda_v13,vulkan,rocm}. They're NVIDIA-/discrete-GPU-only and add ~2.7 GB
+# (cuda_v12/ggml-cuda.dll alone is 1.6 GB) — dead weight on the CPU-only path:
+# transcription is ONNX-CPU, and the bundled Ollama summarises on the CPU
+# runner (ggml-cpu-*.dll / ggml-base.dll, which we keep). Skipping them takes
+# the Windows download from ~3.1 GB to ~0.6 GB and lets the NSIS installer
+# build (makensis can't mmap a multi-GB app .7z). GPU acceleration for NVIDIA
+# users is a tracked follow-up (separate build/pack). No-op on macOS — these
+# dirs don't exist there.
+_OLLAMA_GPU_MARKERS = ('lib/ollama/cuda', 'lib/ollama/rocm', 'lib/ollama/vulkan')
 ollama_bin_dir = os.path.join(SPECPATH, 'bin')
 if os.path.exists(ollama_bin_dir):
     for root, _dirs, files in os.walk(ollama_bin_dir):
         for filename in files:
             filepath = os.path.join(root, filename)
             rel = os.path.relpath(filepath, ollama_bin_dir)
+            rel_fs = rel.replace(os.sep, '/').lower()
+            if any(marker in rel_fs for marker in _OLLAMA_GPU_MARKERS):
+                continue  # skip GPU runner libs (CUDA/ROCm/Vulkan)
             rel_dir = os.path.dirname(rel)
             base = os.path.basename(filename).lower()
             if base in ('ffmpeg', 'ffmpeg.exe'):
