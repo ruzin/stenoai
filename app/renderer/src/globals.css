@@ -294,12 +294,16 @@
     animation: record-pulse 1.6s ease-out infinite;
   }
 
-  /* Sidebar top band — traffic-light region */
+  /* Sidebar top band — traffic-light region. Default (Windows/Linux) aligns to
+     the edge; macOS insets 82px to clear the traffic lights (html.is-mac). */
   .sb-top {
     display: flex; align-items: center;
-    padding: 14px 12px 6px 82px;
+    padding: 14px 12px 6px 16px;
     -webkit-app-region: drag;
     flex-shrink: 0;
+  }
+  html.is-mac .sb-top {
+    padding-left: 82px;
   }
   .sb-top > * { -webkit-app-region: no-drag; }
 

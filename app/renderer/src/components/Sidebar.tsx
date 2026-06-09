@@ -46,8 +46,10 @@ export interface SidebarContextAction {
 // sessionStorage so collapsed state resets to open on every app restart
 const COLLAPSED_KEY = 'steno-sidebar-collapsed';
 const WIDTH_KEY = 'steno-sidebar-width';
-const DEFAULT_WIDTH = 270;
 const MIN_WIDTH = 220;
+// Fresh installs open at the narrowest width; existing users keep their saved
+// width (localStorage). Only affects first launch.
+const DEFAULT_WIDTH = MIN_WIDTH;
 const MAX_WIDTH = 480;
 
 // Module-level singleton store. useState hooks on these values are not enough:

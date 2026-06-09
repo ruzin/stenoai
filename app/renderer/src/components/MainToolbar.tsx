@@ -16,7 +16,7 @@ import {
 import type { RecordingStatus } from '@/hooks/useRecording';
 import { useTheme } from '@/hooks/useTheme';
 import { useRoute, navigate } from '@/lib/router';
-import { cn } from '@/lib/utils';
+import { cn, isMac } from '@/lib/utils';
 
 interface MainToolbarProps {
   recordingStatus: RecordingStatus;
@@ -47,8 +47,9 @@ export function MainToolbar({
   const isChatRoute = route === '/chat' || route.startsWith('/chat/');
   const showChatPrimary = isChatRoute && !isRecording;
 
-  // Matches sb-top padding-left (82px clears macOS traffic lights)
-  const toggleLeft = 82;
+  // Matches sb-top padding-left: 82px clears the macOS traffic lights; on
+  // Windows/Linux there are none, so align to the sidebar's left edge.
+  const toggleLeft = isMac ? 82 : 16;
 
   return (
     <div
