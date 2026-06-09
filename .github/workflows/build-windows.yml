@@ -167,10 +167,37 @@ jobs:
           retention-days: 14
           if-no-files-found: warn
 
-      # Tag-driven releases: don't auto-attach to the GitHub release because
-      # build-release.yml (macOS) is creating it in parallel and the two
-      # softprops/action-gh-release jobs can race on body / name. For now,
-      # tag runs leave Windows assets as workflow artifacts (retention 14
-      # days above). After the first stable Windows release, switch to
-      # downloading the Windows artifact from the release job in
-      # build-release.yml so there's one canonical attach step.
+      # Tag-driven release: attach the Windows auto-update assets to the
+      # GitHub Release so electron-updater can serve updates on Windows.
+      # build-release.yml (macOS) is the canonical release *creator* (its
+      # softprops/action-gh-release job sets the body/name from the tag).
+      # We only *upload* assets to that existing release here — never create
+      # it — so there's no race on body/name. We wait for the macOS job to
+      # create the release first (notarization makes it slower than this
+      # build), then upload latest.yml (the updater manifest), the NSIS .exe
+      # it references, the .blockmap (differential updates), and the zip.
+      - name: Attach Windows assets to the release (tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          # Wait up to ~30 min for build-release.yml to create the release.
+          for i in $(seq 1 60); do
+            if gh release view "$TAG" >/dev/null 2>&1; then
+              echo "Release $TAG exists — uploading Windows auto-update assets."
+              gh release upload "$TAG" \
+                app/dist/latest.yml \
+                app/dist/*-x64.exe \
+                app/dist/*.blockmap \
+                app/dist/*-x64.zip \
+                --clobber
+              echo "Uploaded Windows assets to release $TAG."
+              exit 0
+            fi
+            echo "Release $TAG not created yet (attempt $i/60) — waiting 30s…"
+            sleep 30
+          done
+          echo "Release $TAG never appeared after ~30 min — failing so we notice."
+          exit 1
