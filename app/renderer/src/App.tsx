@@ -71,17 +71,16 @@ export function App() {
     rememberNonSettingsRoute(route);
   }, [route]);
 
-  // Stealth-refresh the calendar on route change so when the user navigates
-  // back to Home, events they added elsewhere are already there. `stale:
-  // true` respects the 60 s staleTime on useCalendarEvents, so rapid
-  // back-and-forth between routes doesn't spam the provider API — only
-  // the first nav after data crosses 60 s actually fires a refetch.
+  // Stealth-refresh the calendar on every route change so when the user
+  // navigates back to Home, events they added elsewhere are already there.
+  // React Query's in-flight request dedup throttles spam — rapid nav
+  // back-and-forth only produces one underlying API call until it
+  // resolves, so we don't need a manual `stale: true` gate here.
   const qc = useQueryClient();
   React.useEffect(() => {
     void qc.refetchQueries({
       queryKey: calendarKeys.events(),
       type: 'active',
-      stale: true,
     });
   }, [route, qc]);
 
