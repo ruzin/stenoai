@@ -14,9 +14,18 @@ export const calendarKeys = {
   outlook: () => [...calendarKeys.all, 'outlook'] as const,
 };
 
-export function useCalendarEvents() {
+/**
+ * Mount the Google + Outlook auth-change → calendar-cache-invalidate
+ * subscriptions. Call from App.tsx ONLY. Every additional caller would
+ * add a duplicate listener pair and a redundant invalidateQueries per
+ * auth event.
+ *
+ * Split out from useCalendarEvents so that route-level callers can keep
+ * subscribing to the data via useQuery (sharing the cache via the
+ * `events` queryKey) without each one re-registering the IPC bus.
+ */
+export function useCalendarAuthBus() {
   const qc = useQueryClient();
-
   React.useEffect(() => {
     const off = [
       ipc().on.googleAuthChanged(() => {
@@ -28,7 +37,9 @@ export function useCalendarEvents() {
     ];
     return () => off.forEach((fn) => fn());
   }, [qc]);
+}
 
+export function useCalendarEvents() {
   return useQuery<CalendarState>({
     queryKey: calendarKeys.events(),
     queryFn: async (): Promise<CalendarState> => {

@@ -5363,7 +5363,20 @@ ipcMain.handle('get-ai-provider', async () => {
       );
       try {
         await restorePreAdapterProvider();
-        jsonData.ai_provider = target;
+        // restorePreAdapterProvider swallows its own internal
+        // set-ai-provider failure (it just logs and returns), so a
+        // successful return doesn't guarantee the Python config was
+        // actually written. Re-read the truth from Python and only
+        // patch the response if the restore landed — otherwise return
+        // the unchanged 'adapter' value so the renderer doesn't show
+        // a state that diverges from disk.
+        const verifyResult = await runPythonScript('simple_recorder.py', ['get-ai-provider'], true);
+        const verified = JSON.parse(verifyResult.trim());
+        if (verified.ai_provider && verified.ai_provider !== 'adapter') {
+          jsonData.ai_provider = verified.ai_provider;
+        } else {
+          sendDebugLog(`Stale-adapter recovery did not write — Python still on '${verified.ai_provider}'.`);
+        }
       } catch (e) {
         sendDebugLog(`Stale-adapter recovery failed: ${e.message}`);
         // Leave jsonData.ai_provider as 'adapter' — the next AI call
