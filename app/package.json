@@ -97,6 +97,7 @@
   "build": {
     "appId": "com.stenoai.recorder",
     "productName": "Steno",
+    "asar": false,
     "protocols": [
       {
         "name": "Steno Shortcut Links",
