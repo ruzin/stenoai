@@ -2150,13 +2150,20 @@ ipcMain.handle('get-queue-status', async () => {
 // stringify safely to bytes via the same write() call. No-op if the
 // sidecar isn't running (e.g. spawn failed, or recording ended).
 ipcMain.on('live-transcribe-chunk', (event, payload) => {
-  if (!liveTranscribeProcess || liveTranscribeProcess.killed) return;
+  const proc = liveTranscribeProcess;
+  if (!proc || proc.killed) return;
   if (!payload) return;
+  // Teardown race: on stop we end/kill the sidecar, but the renderer may push
+  // one more in-flight chunk → an async "write after end" error. Skip the write
+  // once stdin is no longer writable so we don't log a spurious error on every
+  // recording stop.
+  const stdin = proc.stdin;
+  if (!stdin || stdin.destroyed || stdin.writableEnded || !stdin.writable) return;
   // Renderer side sends an ArrayBuffer; Electron's IPC layer hands us a
   // Buffer here. If a TypedArray slipped through, normalise.
   const buf = Buffer.isBuffer(payload) ? payload : Buffer.from(payload);
   try {
-    liveTranscribeProcess.stdin.write(buf);
+    stdin.write(buf);
   } catch (e) {
     // EPIPE means Python exited (e.g. crashed). Drop silently; the exit
     // handler will null out the process ref.
@@ -3634,7 +3641,16 @@ function setupAutoUpdater() {
   });
 
   autoUpdater.on('error', (err) => {
-    sendDebugLog(`Auto-updater error: ${err.message}`);
+    const msg = (err && err.message) || String(err);
+    // Until a release carrying this platform's update feed (latest.yml on
+    // Windows) is published, the updater 404s on the feed file. That's an
+    // expected transitional state, not a real failure — log it quietly so it
+    // doesn't read as a scary stack trace for alpha testers.
+    if (/latest(-mac)?\.yml/i.test(msg) && /(404|cannot find)/i.test(msg)) {
+      sendDebugLog('Auto-updater: no update feed published for this release yet — skipping.');
+      return;
+    }
+    sendDebugLog(`Auto-updater error: ${msg}`);
   });
 
   // Check on launch (after a short delay to not block startup)
