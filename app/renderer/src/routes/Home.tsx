@@ -244,6 +244,15 @@ export function Home({ mode }: HomeProps) {
     return null;
   }, [googlePending, outlookPending, lastStartedProvider]);
   const startConnect = (provider: 'google' | 'outlook') => {
+    // In-flight guard: drop rapid duplicate clicks before React has
+    // flushed isPending through to the disabled-button check. Without
+    // this, two clicks within the React commit cycle both pass and
+    // fire two mutate()s — the main-process startGoogleAuth /
+    // startOutlookAuth call cancels the previous flow at the top, so
+    // the user only sees one OAuth tab, but the renderer briefly ends
+    // up with both connect mutations in flight and the Cancel row
+    // gets confused about which provider it's cancelling.
+    if (googlePending || outlookPending) return;
     setLastStartedProvider(provider);
     if (provider === 'google') googleAuth.connect.mutate();
     else outlookAuth.connect.mutate();
