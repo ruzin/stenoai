@@ -37,12 +37,15 @@ export function useCalendarEvents() {
       if ('needsAuth' in res) return { needsAuth: true, events: [] };
       throw new Error(res.error);
     },
-    // Poll every 5 minutes so the user doesn't have to hit the refresh icon
-    // to see meetings added after the app launched. 5 min is comfortably
-    // below the granularity of "is this happening soon" decisions, and the
-    // API call is cheap.
-    refetchInterval: 5 * 60 * 1000,
+    // Poll every 2 minutes so events the user adds in their calendar app
+    // surface here in roughly the time it takes to switch context, without
+    // hammering the provider API. Combined with the route-change refetch
+    // in App.tsx and refetchOnWindowFocus, the user almost never sees a
+    // stale carousel — but the 60 s staleTime below de-dupes refetches so
+    // rapid navigation doesn't fire one fetch per nav.
+    refetchInterval: 2 * 60 * 1000,
     refetchOnWindowFocus: true,
+    staleTime: 60 * 1000,
   });
 }
 

@@ -25,7 +25,8 @@ import {
   useRecordingProcessingEffects,
 } from '@/hooks/useRecording';
 import { useSystemAudioCapture } from '@/hooks/useSystemAudioCapture';
-import { useCalendarEvents } from '@/hooks/useCalendarEvents';
+import { useCalendarEvents, calendarKeys } from '@/hooks/useCalendarEvents';
+import { useQueryClient } from '@tanstack/react-query';
 import { navigate, useRoute, rememberNonSettingsRoute } from '@/lib/router';
 import { ipc } from '@/lib/ipc';
 import { primeDebugLogs } from '@/lib/debugLogs';
@@ -69,6 +70,20 @@ export function App() {
   React.useEffect(() => {
     rememberNonSettingsRoute(route);
   }, [route]);
+
+  // Stealth-refresh the calendar on route change so when the user navigates
+  // back to Home, events they added elsewhere are already there. `stale:
+  // true` respects the 60 s staleTime on useCalendarEvents, so rapid
+  // back-and-forth between routes doesn't spam the provider API — only
+  // the first nav after data crosses 60 s actually fires a refetch.
+  const qc = useQueryClient();
+  React.useEffect(() => {
+    void qc.refetchQueries({
+      queryKey: calendarKeys.events(),
+      type: 'active',
+      stale: true,
+    });
+  }, [route, qc]);
 
   // Cold-reload mid-processing: if we restart the app while the backend is
   // still summarizing, drop the user on /meetings/processing so they don't
