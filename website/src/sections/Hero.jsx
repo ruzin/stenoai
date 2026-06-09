@@ -15,6 +15,14 @@ function detectOS() {
   if (typeof navigator === "undefined") return "mac";
   const hint = navigator.userAgentData?.platform || navigator.platform || "";
   const ua = navigator.userAgent || "";
+  // Mobile/touch devices can't run the desktop app. iOS UAs contain
+  // "like Mac OS X" (and iPadOS reports platform "MacIntel"), which would
+  // otherwise match the mac check — guard them first and fall through to
+  // "other" so phones/tablets see both CTAs rather than a bogus Mac-only one.
+  const isIOS =
+    /iphone|ipad|ipod/i.test(ua) ||
+    (/mac/i.test(hint) && navigator.maxTouchPoints > 1);
+  if (isIOS || /android/i.test(ua)) return "other";
   if (/win/i.test(hint) || /windows/i.test(ua)) return "windows";
   if (/mac/i.test(hint) || /mac os/i.test(ua)) return "mac";
   return "other";
