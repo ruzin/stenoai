@@ -175,8 +175,5 @@ CODE_REVIEW.md
 SESSION_LOG.md
 FEATURES.md
 
-# Prompt testing outputs
-prompt_tests/outputs/
-
 # Bundled Ollama binary (downloaded during build)
 bin/
