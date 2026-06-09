@@ -93,7 +93,14 @@ jobs:
 
     - name: Build and notarize DMG for ${{ matrix.arch }}
       working-directory: app
-      run: npm run ${{ matrix.build_cmd }}
+      # --publish=never is critical: electron-builder has a `publish` config
+      # (github provider) and GH_TOKEN in env, so without this it auto-creates
+      # a DRAFT GitHub release for the tag and uploads the DMG there. That draft
+      # is redundant — the real release is created by the `release` job below
+      # (softprops/action-gh-release) from the CI artifacts — and worse, the
+      # Windows job (build-windows.yml) would race and upload its .exe onto that
+      # stray draft instead of the published release, 404'ing the website link.
+      run: npm run ${{ matrix.build_cmd }} -- --publish=never
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         APPLE_ID: ${{ secrets.APPLE_ID }}

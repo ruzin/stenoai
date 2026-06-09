@@ -189,10 +189,18 @@ jobs:
           # references it by its versioned name for auto-update.
           VER_EXE=$(ls app/dist/*-x64.exe | grep -v 'stenoAI-windows-x64.exe' | head -1)
           cp "$VER_EXE" "app/dist/stenoAI-windows-x64.exe"
-          # Wait up to ~30 min for build-release.yml to create the release.
+          # Wait up to ~30 min for build-release.yml to create the PUBLISHED
+          # release, then upload to it. We resolve the tag via the REST
+          # /releases/tags/:tag endpoint, which only ever returns the published
+          # (non-draft) release — never a draft. This is deliberate: if any
+          # stray draft for this tag exists, `gh release view/upload <tag>`
+          # would happily match it and our .exe would land on the draft instead
+          # of the release users actually download (a 404 on the website link).
+          # build-release.yml now passes --publish=never so no such draft should
+          # exist, but matching non-draft-only here makes that guarantee robust.
           for i in $(seq 1 60); do
-            if gh release view "$TAG" >/dev/null 2>&1; then
-              echo "Release $TAG exists — uploading Windows auto-update assets."
+            if gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" >/dev/null 2>&1; then
+              echo "Published release $TAG exists — uploading Windows auto-update assets."
               gh release upload "$TAG" \
                 app/dist/latest.yml \
                 app/dist/*-x64.exe \
@@ -202,8 +210,8 @@ jobs:
               echo "Uploaded Windows assets to release $TAG."
               exit 0
             fi
-            echo "Release $TAG not created yet (attempt $i/60) — waiting 30s…"
+            echo "Published release $TAG not created yet (attempt $i/60) — waiting 30s…"
             sleep 30
           done
-          echo "Release $TAG never appeared after ~30 min — failing so we notice."
+          echo "Published release $TAG never appeared after ~30 min — failing so we notice."
           exit 1

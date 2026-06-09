@@ -1,9 +1,24 @@
 import { useState, useEffect } from "react";
-import { Download, ArrowRight, ShieldCheck, Lock, Cpu } from "lucide-react";
+import { Download, ShieldCheck, Lock, Cpu } from "lucide-react";
 import { motion as Motion } from "framer-motion";
 import { trackDownload } from "../analytics";
 
 const DOWNLOAD_ARM = "https://github.com/ruzin/stenoai/releases/latest/download/stenoAI-macos-arm64.dmg";
+const DOWNLOAD_WIN = "https://github.com/ruzin/stenoai/releases/latest/download/stenoAI-windows-x64.exe";
+
+const DL_MAC = { href: DOWNLOAD_ARM, arch: "arm64", label: "Download for Mac" };
+const DL_WIN = { href: DOWNLOAD_WIN, arch: "win-x64", label: "Download for Windows (alpha)" };
+
+// Best-effort client OS detection. Defaults to Mac (the primary, stable
+// build) for the first paint and for any non-Windows/non-Mac visitor.
+function detectOS() {
+  if (typeof navigator === "undefined") return "mac";
+  const hint = navigator.userAgentData?.platform || navigator.platform || "";
+  const ua = navigator.userAgent || "";
+  if (/win/i.test(hint) || /windows/i.test(ua)) return "windows";
+  if (/mac/i.test(hint) || /mac os/i.test(ua)) return "mac";
+  return "other";
+}
 
 function fmt(s) {
   const h = String(Math.floor(s / 3600)).padStart(2, "0");
@@ -14,11 +29,23 @@ function fmt(s) {
 
 export function Hero() {
   const [seconds, setSeconds] = useState(862);
+  const [os, setOs] = useState("mac");
 
   useEffect(() => {
     const t = setInterval(() => setSeconds((s) => s + 1), 1000);
     return () => clearInterval(t);
   }, []);
+
+  useEffect(() => {
+    setOs(detectOS());
+  }, []);
+
+  // Primary button follows the visitor's OS. When we're sure of the OS
+  // (detected mac or windows) we show only that one button; when it's
+  // unknown we offer both so the visitor can pick.
+  const primary = os === "windows" ? DL_WIN : DL_MAC;
+  const secondary = os === "windows" ? DL_MAC : DL_WIN;
+  const showSecondary = os === "other";
 
   return (
     <section className="pt-[40px] pb-[56px] md:pt-[56px] md:pb-[80px]">
@@ -60,12 +87,14 @@ export function Hero() {
             transition={{ duration: 0.5, delay: 0.15 }}
             className="flex gap-[10px] flex-wrap"
           >
-            <a href={DOWNLOAD_ARM} onClick={() => trackDownload('hero', 'arm64')} className="btn-base btn-primary inline-flex items-center gap-2 no-underline hover:no-underline">
-              <Download size={15} aria-hidden="true" /> Download for Mac
+            <a href={primary.href} onClick={() => trackDownload('hero', primary.arch)} className="btn-base btn-primary inline-flex items-center gap-2 no-underline hover:no-underline">
+              <Download size={15} aria-hidden="true" /> {primary.label}
             </a>
-            <a href="#how" className="btn-base btn-ghost inline-flex items-center gap-2 no-underline hover:no-underline">
-              See how it works <ArrowRight size={15} aria-hidden="true" />
-            </a>
+            {showSecondary && (
+              <a href={secondary.href} onClick={() => trackDownload('hero', secondary.arch)} className="btn-base btn-ghost inline-flex items-center gap-2 no-underline hover:no-underline">
+                <Download size={15} aria-hidden="true" /> {secondary.label}
+              </a>
+            )}
           </Motion.div>
 
           <Motion.div
