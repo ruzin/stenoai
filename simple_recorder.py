@@ -1198,6 +1198,34 @@ def parakeet_status_cmd():
     }))
 
 
+@cli.command(name='onnx-selftest')
+def onnx_selftest_cmd():
+    """Prove ONNX Runtime's native libraries load + run inside the bundle.
+
+    CI's other smoke tests (``parakeet-status``) only touch a Python id
+    string and never construct an InferenceSession, so a missing or broken
+    onnxruntime native DLL — the well-documented PyInstaller-on-Windows
+    gotcha (microsoft/onnxruntime#25193) — would still build green and only
+    fail at the user's first transcription. This loads the bundled Silero
+    VAD model (a few hundred KB, no network) and runs one inference, which
+    forces the native session libs to load and execute. The same DLLs back
+    the onnx-asr Parakeet path on Windows/Linux, so a pass here means the
+    ASR session libs are present too.
+
+    Prints ``ONNX_SELFTEST_OK`` and exits 0 on success; prints the error and
+    exits 1 on any failure so CI fails the build.
+    """
+    try:
+        import numpy as np
+        from src.silero_vad import SileroVAD, VAD_CHUNK_SAMPLES
+        vad = SileroVAD()
+        prob = vad.predict(np.zeros((VAD_CHUNK_SAMPLES,), dtype=np.float32))
+        print(f"ONNX_SELFTEST_OK prob={float(prob):.4f}")
+    except Exception as e:
+        print(f"ONNX_SELFTEST_FAIL: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
 @cli.command(name='warmup-parakeet')
 def warmup_parakeet_cmd():
     """Pre-load Parakeet weights to warm the OS page cache.

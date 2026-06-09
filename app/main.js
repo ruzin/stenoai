@@ -19,6 +19,30 @@ function spawn(command, args, options) {
   // 2-arg form: spawn(command, options)
   return _spawnRaw(command, { windowsHide: true, ...args });
 }
+
+// Terminate a process AND its child processes. On Windows `process.kill(pid)`
+// only kills the named process, orphaning its children — `ollama serve` spawns
+// per-model "runner" subprocesses that would leak after quit. `taskkill /T`
+// walks the whole tree. On POSIX we keep the existing SIGTERM -> SIGKILL
+// escalation (ollama tears its runners down on SIGTERM there). Synchronous on
+// Windows (execFileSync) so it completes during the app's will-quit handler.
+function killProcessTree(pid) {
+  if (!pid) return;
+  if (process.platform === 'win32') {
+    try {
+      require('child_process').execFileSync(
+        'taskkill',
+        ['/PID', String(pid), '/T', '/F'],
+        { windowsHide: true, stdio: 'ignore' },
+      );
+    } catch (_) {}
+    return;
+  }
+  try { process.kill(pid, 'SIGTERM'); } catch (_) {}
+  setTimeout(() => {
+    try { process.kill(pid, 'SIGKILL'); } catch (_) {}
+  }, 1000);
+}
 const fs = require('fs');
 const https = require('https');
 const http = require('http');
@@ -1030,21 +1054,17 @@ if (!gotSingleInstanceLock) {
     }
     // Kill Ollama on quit. The process may have been started by Electron or
     // the Python backend — both write the PID to ollama.pid in _internal/.
+    // killProcessTree tears down ollama's child runner subprocesses too, so
+    // they don't orphan on Windows.
     const pidFile = path.join(getBackendCwd(), '_internal', 'ollama.pid');
     try {
       const pid = parseInt(require('fs').readFileSync(pidFile, 'utf8').trim(), 10);
-      if (pid) {
-        process.kill(pid, 'SIGTERM');
-        // Give it a moment to shut down, then force-kill if still alive
-        setTimeout(() => {
-          try { process.kill(pid, 'SIGKILL'); } catch (_) {}
-        }, 1000);
-      }
+      if (pid) killProcessTree(pid);
       require('fs').unlinkSync(pidFile);
     } catch (_) {}
     // Also kill if Electron spawned it directly
     if (ollamaPid) {
-      try { process.kill(ollamaPid, 'SIGTERM'); } catch (_) {}
+      killProcessTree(ollamaPid);
       ollamaPid = null;
     }
     await shutdownTelemetry();
