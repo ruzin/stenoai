@@ -78,7 +78,9 @@ if (!app.isPackaged) {
 // returning silent right channels in our tests on macOS 26; CoreAudio Tap
 // matches Meetily's default and is the path our Info.plist + entitlements
 // are prepared for. Older macOS (< 14.4) is gated out at the UI layer.
-initMain({ forceCoreAudioTap: true });
+// Only force the tap on macOS — on Windows it's irrelevant (Chromium uses
+// WASAPI loopback) and passing it would be a no-op at best.
+initMain({ forceCoreAudioTap: process.platform === 'darwin' });
 
 // CoreAudio Process Taps require macOS 14.4+. Returns false on non-macOS or
 // older versions so the renderer can disable the system-audio toggle rather
@@ -92,6 +94,38 @@ function isCoreAudioTapSupported() {
   } catch (_) {
     return false;
   }
+}
+
+// Whether system-audio (loopback) capture is available on this OS at all.
+// macOS: CoreAudio Process Tap (14.4+). Windows: electron-audio-loopback uses
+// Chromium's WASAPI loopback on Windows 10+ (both Win10 and Win11 report major
+// version 10). Linux: not wired. Drives the Settings/MainToolbar toggle.
+function isSystemAudioSupported() {
+  if (process.platform === 'darwin') return isCoreAudioTapSupported();
+  if (process.platform === 'win32') {
+    try {
+      const maj = parseInt(process.getSystemVersion().split('.')[0], 10) || 0;
+      return maj >= 10;
+    } catch (_) {
+      return true; // assume a modern Windows if the version probe fails
+    }
+  }
+  return false;
+}
+
+// Per-OS user data dir, mirroring src/config.get_user_data_dir(). Used by the
+// few synchronous config reads on the Electron side so they resolve the right
+// path on Windows/Linux instead of the macOS literal.
+function getUserDataDir() {
+  if (process.platform === 'darwin') {
+    return path.join(os.homedir(), 'Library', 'Application Support', 'stenoai');
+  }
+  if (process.platform === 'win32') {
+    const base = process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming');
+    return path.join(base, 'stenoai');
+  }
+  const base = process.env.XDG_DATA_HOME || path.join(os.homedir(), '.local', 'share');
+  return path.join(base, 'stenoai');
 }
 
 let mainWindow;
@@ -1147,14 +1181,19 @@ ipcMain.handle('request-microphone-permission', async () => {
 // than letting the user produce silent recordings.
 ipcMain.handle('get-system-audio-support', async () => {
   try {
-    const supported = isCoreAudioTapSupported();
+    const supported = isSystemAudioSupported();
+    // Windows loopback works but is pending hardware verification, so the UI
+    // labels it experimental and ships it opt-in (default off).
+    const experimental = process.platform === 'win32';
     let screenPermission = 'unknown';
     let osVersion = '';
     if (process.platform === 'darwin') {
       try { osVersion = process.getSystemVersion(); } catch (_) {}
       try { screenPermission = systemPreferences.getMediaAccessStatus('screen'); } catch (_) {}
+    } else {
+      try { osVersion = process.getSystemVersion(); } catch (_) {}
     }
-    return { success: true, supported, osVersion, screenPermission };
+    return { success: true, supported, experimental, platform: process.platform, osVersion, screenPermission };
   } catch (error) {
     return { success: false, error: error.message };
   }
@@ -2281,16 +2320,21 @@ function stopLiveTranscribe() {
 }
 
 function loadSystemAudioEnabled() {
-  if (!isCoreAudioTapSupported()) return false;
+  if (!isSystemAudioSupported()) return false;
+  // Default differs by platform: macOS ships system audio ON (CoreAudio tap is
+  // verified); Windows ships it OFF (opt-in/experimental — see src/config.py).
+  const defaultOn = process.platform === 'darwin';
   try {
-    const cfgPath = path.join(os.homedir(), 'Library', 'Application Support', 'stenoai', 'config.json');
-    if (!fs.existsSync(cfgPath)) return true; // new install → CoreAudio default
+    const cfgPath = path.join(getUserDataDir(), 'config.json');
+    if (!fs.existsSync(cfgPath)) return defaultOn; // new install
     const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf-8'));
-    // `false` only when the user has explicitly opted out; an absent key
-    // means "haven't been asked yet" → treat as the new default.
-    return cfg.system_audio_enabled !== false;
+    // Honour an explicit boolean; an absent key means "haven't been asked
+    // yet" → fall back to the platform default.
+    return typeof cfg.system_audio_enabled === 'boolean'
+      ? cfg.system_audio_enabled
+      : defaultOn;
   } catch (_) {
-    return false;
+    return defaultOn;
   }
 }
 
@@ -2302,7 +2346,7 @@ function loadSystemAudioEnabled() {
 // Config._migrate_transcription_engine.
 function loadTranscriptionEngine() {
   try {
-    const cfgPath = path.join(os.homedir(), 'Library', 'Application Support', 'stenoai', 'config.json');
+    const cfgPath = path.join(getUserDataDir(), 'config.json');
     if (!fs.existsSync(cfgPath)) return 'parakeet';
     const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf-8'));
     const engine = cfg.transcription_engine;
@@ -2318,7 +2362,7 @@ function loadTranscriptionEngine() {
 // the truth lives in one place.
 function loadAutoDetectMeetingsEnabled() {
   try {
-    const cfgPath = path.join(os.homedir(), 'Library', 'Application Support', 'stenoai', 'config.json');
+    const cfgPath = path.join(getUserDataDir(), 'config.json');
     if (!fs.existsSync(cfgPath)) return true;
     const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf-8'));
     return cfg.auto_detect_meetings_enabled !== false;

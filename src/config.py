@@ -287,10 +287,14 @@ class Config:
             "model": self.DEFAULT_MODEL,
             "notifications_enabled": True,
             "telemetry_enabled": True,
-            # Default ON — CoreAudio Process Tap captures system audio
-            # alongside the mic on macOS 14.4+. Older macOS auto-falls back
-            # to mic-only via main.js's loadSystemAudioEnabled() OS gate.
-            "system_audio_enabled": True,
+            # Default ON on macOS — CoreAudio Process Tap captures system
+            # audio alongside the mic on macOS 14.4+. Older macOS auto-falls
+            # back to mic-only via main.js's loadSystemAudioEnabled() OS gate.
+            # Default OFF on Windows/Linux: the cross-platform loopback path
+            # (electron-audio-loopback / Chromium WASAPI) works but is still
+            # pending hardware verification, so it ships opt-in/experimental —
+            # users enable it explicitly in Settings.
+            "system_audio_enabled": sys.platform == "darwin",
             # Default ON — surfaces a "Meeting detected" notification when
             # any non-Steno app starts capturing the mic. Helper is gated
             # to macOS 14+ in main.js; users can flip off in Settings.
