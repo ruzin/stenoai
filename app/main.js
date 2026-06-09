@@ -5349,6 +5349,34 @@ ipcMain.handle('get-ai-provider', async () => {
     const jsonData = JSON.parse(result.trim());
     // Override cloud_api_key_set with safeStorage check
     jsonData.cloud_api_key_set = hasCloudApiKey();
+
+    // Stale-adapter recovery. The existing JWT-expiry / 401 / explicit-
+    // logout paths all call restorePreAdapterProvider, but there's a
+    // gap: if the org_session.json file goes missing without one of
+    // those triggers firing (manually deleted, migrated config without
+    // session, crashed mid-sign-out), the Python config stays on
+    // 'adapter' and the next AI call dies with "adapter not configured".
+    // Treat the first get-ai-provider read on startup as the
+    // reconciliation point: if Python says adapter but no session backs
+    // it, restore the pre-adapter provider and reflect the new value in
+    // this response so the renderer's first paint is already consistent
+    // and the next AI call lands on a working provider.
+    if (jsonData.ai_provider === 'adapter' && !loadOrgSession()) {
+      const target = loadPreAdapterProvider() || 'local';
+      sendDebugLog(
+        `Stale adapter detected: ai_provider='adapter' but no org session backing it. Restoring to '${target}'.`,
+      );
+      try {
+        await restorePreAdapterProvider();
+        jsonData.ai_provider = target;
+      } catch (e) {
+        sendDebugLog(`Stale-adapter recovery failed: ${e.message}`);
+        // Leave jsonData.ai_provider as 'adapter' — the next AI call
+        // will fail with the existing "adapter not configured" error,
+        // which is the pre-fix behaviour, not a regression.
+      }
+    }
+
     return { success: true, ...jsonData };
   } catch (error) {
     sendDebugLog(`Error getting AI provider: ${error.message}`);
