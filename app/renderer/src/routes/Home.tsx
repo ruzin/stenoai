@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Calendar, PencilLine, RefreshCw, Search, Square, X } from 'lucide-react';
+import { Calendar, ChevronLeft, ChevronRight, PencilLine, RefreshCw, Search, Square, X } from 'lucide-react';
 import { shortcut } from '@/lib/utils';
 import { MeetingsShell } from '@/components/MeetingsShell';
 import { UpcomingCard } from '@/components/home/UpcomingCard';
@@ -168,6 +168,31 @@ export function Home({ mode }: HomeProps) {
     void recording.startRecording(title);
   };
   const [allDayExpanded, setAllDayExpanded] = React.useState(false);
+
+  // Three meetings is the sweet spot — fits the visible card height without
+  // crowding, matches Granola's pattern. Earlier-than-now events have
+  // already been filtered out, so page 0 always shows "next up".
+  const UPCOMING_PAGE_SIZE = 3;
+  const upcomingPageCount = Math.max(
+    1,
+    Math.ceil(upcomingToday.length / UPCOMING_PAGE_SIZE),
+  );
+  const [upcomingPage, setUpcomingPage] = React.useState(0);
+  // Clamp the page when the list shrinks underneath us — e.g. an event
+  // ends and rolls off, or the user reloads the calendar with fewer
+  // entries. Without this the user could be stuck on an empty page 3
+  // after the count drops to 5.
+  React.useEffect(() => {
+    if (upcomingPage >= upcomingPageCount) {
+      setUpcomingPage(Math.max(0, upcomingPageCount - 1));
+    }
+  }, [upcomingPage, upcomingPageCount]);
+  const upcomingVisible = upcomingToday.slice(
+    upcomingPage * UPCOMING_PAGE_SIZE,
+    (upcomingPage + 1) * UPCOMING_PAGE_SIZE,
+  );
+  const canPagePrev = upcomingPage > 0;
+  const canPageNext = upcomingPage < upcomingPageCount - 1;
 
   const previous = meetings.data ?? [];
 
@@ -383,16 +408,45 @@ export function Home({ mode }: HomeProps) {
                 title="Upcoming"
                 count={upcomingToday.length}
                 action={
-                  <button
-                    type="button"
-                    className="inline-flex items-center rounded p-1 transition-colors hover:bg-[color:var(--surface-hover)] disabled:opacity-50"
-                    title="Check for new calendar events"
-                    onClick={() => calendar.refetch()}
-                    disabled={calendar.isFetching}
-                    style={{ color: 'var(--fg-2)' }}
-                  >
-                    <RefreshCw className={`size-[14px] ${calendar.isFetching ? 'animate-spin' : ''}`} />
-                  </button>
+                  // Outer gap separates the page-nav cluster from the
+                  // refresh button so they read as two distinct groups.
+                  // Inner cluster keeps < and > tight against each other.
+                  <div className="flex items-center gap-1.5">
+                    {upcomingPageCount > 1 && (
+                      <div className="flex items-center gap-0.5">
+                        <button
+                          type="button"
+                          className="inline-flex items-center rounded p-1 transition-colors hover:bg-[color:var(--surface-hover)] disabled:opacity-30 disabled:hover:bg-transparent"
+                          title="Previous"
+                          onClick={() => setUpcomingPage((p) => Math.max(0, p - 1))}
+                          disabled={!canPagePrev}
+                          style={{ color: 'var(--fg-2)' }}
+                        >
+                          <ChevronLeft className="size-[14px]" />
+                        </button>
+                        <button
+                          type="button"
+                          className="inline-flex items-center rounded p-1 transition-colors hover:bg-[color:var(--surface-hover)] disabled:opacity-30 disabled:hover:bg-transparent"
+                          title="Next"
+                          onClick={() => setUpcomingPage((p) => Math.min(upcomingPageCount - 1, p + 1))}
+                          disabled={!canPageNext}
+                          style={{ color: 'var(--fg-2)' }}
+                        >
+                          <ChevronRight className="size-[14px]" />
+                        </button>
+                      </div>
+                    )}
+                    <button
+                      type="button"
+                      className="inline-flex items-center rounded p-1 transition-colors hover:bg-[color:var(--surface-hover)] disabled:opacity-50"
+                      title="Check for new calendar events"
+                      onClick={() => calendar.refetch()}
+                      disabled={calendar.isFetching}
+                      style={{ color: 'var(--fg-2)' }}
+                    >
+                      <RefreshCw className={`size-[14px] ${calendar.isFetching ? 'animate-spin' : ''}`} />
+                    </button>
+                  </div>
                 }
               />
               <AllDayInline
@@ -403,7 +457,7 @@ export function Home({ mode }: HomeProps) {
                 canStart={canStartNewRecording}
               />
               <div className="flex flex-col gap-2">
-                {upcomingToday.map((event) => (
+                {upcomingVisible.map((event) => (
                   <UpcomingCard key={event.id} event={event} />
                 ))}
               </div>
