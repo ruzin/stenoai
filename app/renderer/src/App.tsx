@@ -25,6 +25,7 @@ import {
   useRecordingProcessingEffects,
 } from '@/hooks/useRecording';
 import { useSystemAudioCapture } from '@/hooks/useSystemAudioCapture';
+import { useCalendarEvents } from '@/hooks/useCalendarEvents';
 import { navigate, useRoute, rememberNonSettingsRoute } from '@/lib/router';
 import { ipc } from '@/lib/ipc';
 import { primeDebugLogs } from '@/lib/debugLogs';
@@ -53,6 +54,14 @@ export function App() {
   useRecordingEvents();
   useRecordingProcessingEffects();
   useSystemAudioCapture();
+  // Mount the calendar query at the App level so its 5 min polling and
+  // window-focus refetch keep ticking across route changes. Without this
+  // the subscription unmounts whenever the user navigates away from Home
+  // (or Settings, which is the other consumer), and the user comes back
+  // to a cache that's only as fresh as the last visit. Home.tsx /
+  // Settings.tsx still call useCalendarEvents() — React Query shares the
+  // observer + cache, so this is one query, not three.
+  useCalendarEvents();
 
   // Track the last non-settings route so the sidebar Settings toggle and the
   // Settings page's Back button can return the user to where they came from
