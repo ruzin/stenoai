@@ -192,7 +192,13 @@ export function Setup() {
           const granted = await requestMic.mutateAsync();
           if (granted) setStatus('microphone', 'done', 'Permission granted');
           else {
-            setStatus('microphone', 'failed', 'Permission denied. Grant it in System Settings.');
+            setStatus(
+              'microphone',
+              'failed',
+              isMac
+                ? 'Permission denied. Grant it in System Settings.'
+                : 'Permission denied. Grant it in Settings > Privacy & security > Microphone.',
+            );
             setRunning(false);
             return;
           }
