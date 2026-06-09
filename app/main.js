@@ -3,6 +3,30 @@ const { app, BrowserWindow, ipcMain, dialog, shell, systemPreferences, globalSho
 // Prevent EPIPE crashes when stdout/stderr pipe is broken (e.g. launching terminal closed)
 process.stdout?.on('error', () => {});
 process.stderr?.on('error', () => {});
+
+// --- Early crash logger ---------------------------------------------------
+// Packaged Electron apps on Windows surface no stderr/console, so a main-process
+// exception during startup just looks like "nothing happens" (silent exit 1).
+// Persist any uncaught error to a file we can read afterwards. Registered before
+// the first heavy require so it also catches module-load failures. We log then
+// exit(1) to preserve the original crash behaviour.
+function _logStartupCrash(kind, err) {
+  try {
+    const _fs = require('fs');
+    const _os = require('os');
+    const _path = require('path');
+    const stamp = new Date().toISOString();
+    const detail = (err && (err.stack || err.message)) || String(err);
+    const line = `[${stamp}] ${kind}: ${detail}\n`;
+    for (const dir of [_os.tmpdir(), process.env.APPDATA, _os.homedir()]) {
+      if (!dir) continue;
+      try { _fs.appendFileSync(_path.join(dir, 'steno-crash.log'), line); break; } catch (_) {}
+    }
+  } catch (_) {}
+}
+process.on('uncaughtException', (err) => { _logStartupCrash('uncaughtException', err); process.exit(1); });
+process.on('unhandledRejection', (reason) => { _logStartupCrash('unhandledRejection', reason); });
+
 const path = require('path');
 const { spawn: _spawnRaw, exec } = require('child_process');
 
@@ -78,7 +102,11 @@ if (!app.isPackaged) {
 // returning silent right channels in our tests on macOS 26; CoreAudio Tap
 // matches Meetily's default and is the path our Info.plist + entitlements
 // are prepared for. Older macOS (< 14.4) is gated out at the UI layer.
-initMain({ forceCoreAudioTap: true });
+// Only force the macOS CoreAudio tap on darwin. forceCoreAudioTap appends a
+// macOS-only Chromium feature flag (MacCatapSystemAudioLoopbackCapture) — on
+// Windows that's irrelevant (Chromium uses WASAPI loopback) and passing it is
+// at best a no-op, so we don't.
+initMain({ forceCoreAudioTap: process.platform === 'darwin' });
 
 // CoreAudio Process Taps require macOS 14.4+. Returns false on non-macOS or
 // older versions so the renderer can disable the system-audio toggle rather
