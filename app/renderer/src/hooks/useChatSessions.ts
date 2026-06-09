@@ -154,8 +154,14 @@ export function useChatSessions(summaryFile: string | null, meetingName?: string
         updatedAt: now,
       };
       const current = readLatest();
-      await persist({ sessions: [session, ...current.sessions] });
+      // Switch the view to the new empty session immediately. persist() awaits
+      // the disk write (ipc().chat.save), which is slow enough on some machines
+      // (e.g. Windows) that waiting for it leaves the previous conversation on
+      // screen — looking like "New chat" did nothing. setActiveId + the cache
+      // update inside persist both run before persist's first await, so React
+      // batches them into one clean switch to the empty session.
       setActiveId(session.id);
+      await persist({ sessions: [session, ...current.sessions] });
       return session.id;
     },
     [persist, readLatest, summaryFile],
