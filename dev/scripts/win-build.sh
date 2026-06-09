@@ -130,11 +130,23 @@ if (Test-Path \$userDesktop) { \$dest = "\$userDesktop/$blob" } else { \$dest = 
 \$f = Get-Item \$dest
 Write-Output "DOWNLOADED \$(\$f.FullName) \$(\$f.Length) bytes"
 PSEOF
+  # `az vm run-command invoke` exits 0 even when the PowerShell script throws —
+  # the failure shows up in the returned message, not the exit code. So capture
+  # the output and confirm the success marker (with the expected byte count)
+  # before claiming the installer is on the VM, rather than logging success
+  # unconditionally and misleading a manual test.
   echo "==> Downloading onto the VM Desktop (runs on the VM)..."
-  az vm run-command invoke -g "$VM_RG" -n "$vm" --command-id RunPowerShellScript \
-    --scripts @"$ps" --query "value[0].message" -o tsv 2>/dev/null | sed 's/^/    /' || true
+  local size result
+  size="$(stat -f%z "$exe" 2>/dev/null || stat -c%s "$exe" 2>/dev/null || echo "")"
+  result="$(az vm run-command invoke -g "$VM_RG" -n "$vm" --command-id RunPowerShellScript \
+    --scripts @"$ps" --query "value[0].message" -o tsv 2>/dev/null || true)"
   rm -f "$ps"
-  echo "==> Pushed to '$vm'. Install it from the Desktop."
+  echo "$result" | sed 's/^/    /'
+  if echo "$result" | grep -q "DOWNLOADED .*${size:-} bytes"; then
+    echo "==> Pushed to '$vm'. Install it from the Desktop."
+  else
+    echo "==> WARNING: VM push did not confirm — the .exe may NOT be on the VM (see output above). Local copy: $exe" >&2
+  fi
 }
 
 echo "==> Triggering $WORKFLOW on branch '$BRANCH'"
