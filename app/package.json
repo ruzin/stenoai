@@ -1,6 +1,6 @@
 {
   "name": "stenoai",
-  "version": "0.4.0",
+  "version": "0.4.2",
   "description": "AI powered intelligence layer for confidential conversations",
   "main": "main.js",
   "homepage": "https://github.com/ruzin/stenoai",
@@ -12,6 +12,8 @@
     "postinstall": "node scripts/patch-electron-dev.js",
     "start": "npm run build:renderer && electron .",
     "start:nobuild": "electron .",
+    "start:empty": "../dev/scripts/empty-state.sh --quit-app && npm start",
+    "start:restore": "../dev/scripts/empty-state.sh --restore --quit-app && npm start",
     "dev:renderer": "vite",
     "build:renderer": "vite build",
     "typecheck:renderer": "tsc -p renderer/tsconfig.json --noEmit",
@@ -156,7 +158,7 @@
       "extendInfo": {
         "NSMicrophoneUsageDescription": "Steno needs microphone access to record and transcribe meetings.",
         "NSAudioCaptureUsageDescription": "Steno needs audio capture access to record system audio from virtual meetings.",
-        "NSScreenCaptureUsageDescription": "Steno needs screen capture access to record system audio on macOS versions older than 14.4.",
+        "NSScreenCaptureUsageDescription": "Steno needs screen capture access for the loopback-audio feature detection on macOS.",
         "LSMinimumSystemVersion": "12.3.0"
       }
     },

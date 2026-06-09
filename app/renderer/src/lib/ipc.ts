@@ -731,11 +731,13 @@ export interface StenoaiBridge {
   calendar: {
     google: {
       connect: RequestFn<[], Result<Record<string, never>>>;
+      cancel: RequestFn<[], Result<{ cancelled: boolean }>>;
       status: RequestFn<[], AuthStatusResponse>;
       disconnect: RequestFn<[], Result<Record<string, never>>>;
     };
     outlook: {
       connect: RequestFn<[], Result<Record<string, never>>>;
+      cancel: RequestFn<[], Result<{ cancelled: boolean }>>;
       status: RequestFn<[], AuthStatusResponse>;
       disconnect: RequestFn<[], Result<Record<string, never>>>;
     };

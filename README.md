@@ -7,7 +7,7 @@
 </div>
 
 <p align="center">
-  <a href="https://github.com/ruzin/stenoai/actions/workflows/build-release.yml"><img src="https://img.shields.io/github/actions/workflow/status/ruzin/stenoai/build-release.yml?branch=main&style=for-the-badge" alt="Build"></a>
+  <a href="https://github.com/ruzin/stenoai/actions/workflows/build-release.yml"><img src="https://img.shields.io/github/actions/workflow/status/ruzin/stenoai/build-release.yml?style=for-the-badge" alt="Build"></a>
   <a href="https://github.com/ruzin/stenoai/releases"><img src="https://img.shields.io/github/v/release/ruzin/stenoai?style=for-the-badge" alt="Release"></a>
   <a href="https://discord.gg/DZ6vcQnxxu"><img src="https://img.shields.io/badge/Discord-Join%20Server-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue?style=for-the-badge" alt="License"></a>
@@ -41,31 +41,24 @@
 If you're looking for a hosted desktop recording API, consider checking out [Recall.ai](https://www.recall.ai/product/desktop-recording-sdk?utm_source=github&utm_medium=sponsorship&utm_campaign=ruzin-stenoai), an API that records Zoom, Google Meet, Microsoft Teams, in-person meetings, and more.
 
 ## 📢 What's New
+- **2026-06-09** ☁️ AWS Bedrock as a cloud AI provider — Bring your own Bedrock API key to route summaries through Claude on AWS. Application inference profile ARNs work too, so governed environments with IAM policies that allow `bedrock:InvokeModel` on application profiles only are supported out of the box.
+- **2026-06-09** 📅 Calendar polish round — Cancellable Google + Outlook OAuth from the calendar nudge, declined events drop at the IPC boundary (covers organiser-then-declined edge case), 3-per-page `<` / `>` pagination on busy days, full-card rendering for all-day blocks, and a 2-minute background poll that survives route changes.
 - **2026-06-07** 🎙️ Live transcription with Parakeet TDT v3 — Real-time on-screen transcripts during recording via Apple Silicon's MLX backend. Sentences appear as you speak in a Granola-style chat-bubble view; speakers are attributed to You vs Others in real time.
 - **2026-06-07** 🎛️ Choose your transcription engine — Settings → Transcribe now offers Parakeet (default, live + post-stop, 25 European languages) or Whisper (post-stop only, 99 languages incl. Chinese, Japanese, Arabic, Hindi). Existing Whisper users keep Whisper; new installs default to Parakeet.
-- **2026-06-07** 🛟 Crash recovery for stuck recordings — If Steno is force-quit mid-recording, the orphan recorder subprocess is detected and reaped on the next launch so the mic isn't left hot writing audio to disk.
-- **2026-06-07** 📅 Cleaner Home Upcoming — Cancelled, declined, and all-day events are filtered out so they don't crowd real meetings. Locale-aware times (`11:30 PM` in US, `23:30` in EU) and "Ends in 5 min" / "Started 12 min ago" labels for in-progress events.
 
 
 ## Features
 
-- **Privacy-first** — 100% on-device; your recordings, transcripts, and summaries never leave your Mac
-- **Live transcription** — Real-time on-screen text as you speak via Parakeet TDT v3 on Apple Silicon (MLX). Granola-style chat-bubble view with You / Others attribution.
-- **Auto start/stop meetings** — Steno notifies you when a meeting starts and offers to take notes, then offers to summarise when it ends (Granola-style)
-- **In-app note-taking** — Jot notes while you record; they're folded straight into the AI summary
-- **Ask your meetings** — Natural-language Q&A across a single note or your entire library via the Chat tab (summary, key topics, full transcript)
-- **System audio capture** — Record both sides of virtual meetings, headphones on, no extra setup. Native Core Audio Tap on macOS 14.4+ with automatic fallback on older versions
-- **Speaker diarisation** — `[You]` vs `[Others]` labels live during the recording and on the final transcript
-- **Multi-language** — Parakeet covers 25 European languages with live transcription; Whisper handles 99 languages (incl. Chinese, Japanese, Arabic, Hindi) post-stop
-- **Markdown notes** — Summaries and transcripts saved as clean Markdown you can edit, search, or sync
-- **Choose your transcription engine** — Settings → Transcribe lets you pick Parakeet (default) or Whisper, with in-app downloads and a progress bar
-- **Crash-safe recording** — If Steno is force-quit mid-recording, the orphan recorder subprocess is detected and cleaned up on the next launch
-- **Auto-updates** — New versions download in the background and install on next quit; a top-right toast lets you know when one's ready
-- **macOS Shortcuts** — Start and stop recordings via `stenoai://` deep links for calendar-driven automation
-- **Remote Ollama server** — Offload summarisation to a beefier Mac or workstation on your network
-- **Bring your own cloud model** — Optional OpenAI, Anthropic, or custom API endpoint for users who prefer a hosted LLM
-- **Organisation AI** — On managed deployments, sign in to your org's Steno adapter and AI routes through it automatically — no local API key, no setup
-- **Under the hood** — Local transcription via Parakeet TDT v3 (MLX) or whisper.cpp, summarisation via bundled Ollama (5 models to choose from)
+- **Privacy-first** — 100% on-device; your recordings, transcripts, and summaries never leave your Mac.
+- **Live transcription with speaker labels** — Real-time on-screen text as you speak via Parakeet TDT v3 on Apple Silicon (MLX). Granola-style chat-bubble view with `[You]` vs `[Others]` attribution live during the recording and on the final transcript.
+- **Auto start/stop meetings** — Steno notices when a meeting starts and offers to take notes, then offers to summarise when it ends. Granola-style frictionless capture.
+- **System audio capture** — Record both sides of virtual meetings, headphones on, no extra setup or virtual cable. Native Core Audio Tap on macOS 14.4+.
+- **In-app note-taking** — Jot notes while you record; they're folded straight into the AI summary alongside the transcript.
+- **Ask your meetings** — Natural-language Q&A across a single note *or* your entire library via the Chat tab. Pulls from summary, key topics, and the full transcript.
+- **Multi-language (25 live, 99 total)** — Parakeet covers 25 European languages with live transcription; Whisper handles 99 languages including Chinese, Japanese, Arabic, and Hindi post-stop.
+- **Markdown ownership** — Summaries and transcripts save as clean Markdown you can edit, search, or sync to whatever knowledge base you live in.
+- **Bring your own cloud model** — Optional OpenAI, Anthropic, AWS Bedrock (Claude — including application inference profile ARNs for governed AWS environments), or custom API endpoint for users who prefer a hosted LLM.
+- **Organisation AI** — On managed deployments, sign in to your org's Steno adapter and AI routes through it automatically — no local API key, no per-user setup.
 
 ## macOS Shortcuts (Optional)
 

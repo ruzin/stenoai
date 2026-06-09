@@ -53,10 +53,6 @@ jobs:
       run: echo "version=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
 
     - name: Install Python dependencies
-      env:
-        # Honored by pip's build-isolation envs when building sdists from source
-        # (e.g. pywhispercpp on the Intel runner). See build-constraints.txt.
-        PIP_CONSTRAINT: ${{ github.workspace }}/build-constraints.txt
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt

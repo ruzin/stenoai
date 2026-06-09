@@ -3708,15 +3708,12 @@ def test_cloud_api():
             # answer Converse?". Send a 1-token ping to the configured model.
             import urllib.request
             import urllib.error
-            import urllib.parse
+            from src.summarizer import bedrock_converse_url
             region = config.get_bedrock_region()
             profile = config.get_bedrock_inference_profile()
             model_id = config.get_cloud_model()
             target = profile or model_id
-            url = (
-                f"https://bedrock-runtime.{region}.amazonaws.com"
-                f"/model/{urllib.parse.quote(target, safe=':.-')}/converse"
-            )
+            url = bedrock_converse_url(region, target)
             body = json.dumps({
                 "messages": [{"role": "user", "content": [{"text": "hi"}]}],
                 "inferenceConfig": {"maxTokens": 1},

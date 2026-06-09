@@ -1005,9 +1005,8 @@ if (!gotSingleInstanceLock) {
     if (process.platform === 'darwin') {
       try {
         const osVer = process.getSystemVersion();
-        const screenPerm = systemPreferences.getMediaAccessStatus('screen');
         const tapOk = isCoreAudioTapSupported();
-        sendDebugLog(`[sysaudio] macOS ${osVer} — CoreAudio Tap supported=${tapOk}, screen permission=${screenPerm}`);
+        sendDebugLog(`[sysaudio] macOS ${osVer} — CoreAudio Tap supported=${tapOk}`);
       } catch (e) {
         sendDebugLog(`[sysaudio] startup probe failed: ${e.message}`);
       }
@@ -1233,10 +1232,8 @@ ipcMain.handle('request-microphone-permission', async () => {
   }
 });
 
-// Reports whether system-audio capture is available on this OS and what the
-// current Screen Recording permission state is. Used by Settings to disable
-// the toggle on unsupported macOS, and to surface "permission denied" rather
-// than letting the user produce silent recordings.
+// Reports whether system-audio capture is available on this OS. Used by
+// Settings to disable the toggle on unsupported macOS / non-mac platforms.
 ipcMain.handle('get-system-audio-support', async () => {
   try {
     const supported = isSystemAudioSupported();
@@ -5520,6 +5517,47 @@ ipcMain.handle('get-ai-provider', async () => {
     const jsonData = JSON.parse(result.trim());
     // Override cloud_api_key_set with safeStorage check
     jsonData.cloud_api_key_set = hasCloudApiKey();
+
+    // Stale-adapter recovery. The existing JWT-expiry / 401 / explicit-
+    // logout paths all call restorePreAdapterProvider, but there's a
+    // gap: if the org_session.json file goes missing without one of
+    // those triggers firing (manually deleted, migrated config without
+    // session, crashed mid-sign-out), the Python config stays on
+    // 'adapter' and the next AI call dies with "adapter not configured".
+    // Treat the first get-ai-provider read on startup as the
+    // reconciliation point: if Python says adapter but no session backs
+    // it, restore the pre-adapter provider and reflect the new value in
+    // this response so the renderer's first paint is already consistent
+    // and the next AI call lands on a working provider.
+    if (jsonData.ai_provider === 'adapter' && !loadOrgSession()) {
+      const target = loadPreAdapterProvider() || 'local';
+      sendDebugLog(
+        `Stale adapter detected: ai_provider='adapter' but no org session backing it. Restoring to '${target}'.`,
+      );
+      try {
+        await restorePreAdapterProvider();
+        // restorePreAdapterProvider swallows its own internal
+        // set-ai-provider failure (it just logs and returns), so a
+        // successful return doesn't guarantee the Python config was
+        // actually written. Re-read the truth from Python and only
+        // patch the response if the restore landed — otherwise return
+        // the unchanged 'adapter' value so the renderer doesn't show
+        // a state that diverges from disk.
+        const verifyResult = await runPythonScript('simple_recorder.py', ['get-ai-provider'], true);
+        const verified = JSON.parse(verifyResult.trim());
+        if (verified.ai_provider && verified.ai_provider !== 'adapter') {
+          jsonData.ai_provider = verified.ai_provider;
+        } else {
+          sendDebugLog(`Stale-adapter recovery did not write — Python still on '${verified.ai_provider}'.`);
+        }
+      } catch (e) {
+        sendDebugLog(`Stale-adapter recovery failed: ${e.message}`);
+        // Leave jsonData.ai_provider as 'adapter' — the next AI call
+        // will fail with the existing "adapter not configured" error,
+        // which is the pre-fix behaviour, not a regression.
+      }
+    }
+
     return { success: true, ...jsonData };
   } catch (error) {
     sendDebugLog(`Error getting AI provider: ${error.message}`);
@@ -6197,13 +6235,41 @@ function deleteOutlookTokens() {
 
 // ── Google Calendar: OAuth2 Flow with PKCE ──────────────────────────────
 
+// Tracks an in-flight OAuth handshake so `google-auth-cancel` can close
+// the loopback server and reject the pending promise — otherwise the
+// user is stuck on "Connecting…" until the timeout fires.
+let activeGoogleAuth = null;
+
+function cancelActiveGoogleAuth() {
+  if (!activeGoogleAuth) return false;
+  const handle = activeGoogleAuth;
+  activeGoogleAuth = null;
+  if (handle.timeoutId) clearTimeout(handle.timeoutId);
+  // Flip the closure flag first so an in-flight token exchange knows to
+  // throw away its result instead of saving tokens.
+  if (handle.markCancelled) handle.markCancelled();
+  try { handle.server.close(); } catch (_) {}
+  handle.reject(new Error('Cancelled'));
+  return true;
+}
+
 function startGoogleAuth() {
   return new Promise((resolve, reject) => {
+    // If a previous click is still pending, abort it before starting a
+    // new flow — keeps state from desyncing if the user double-clicks.
+    cancelActiveGoogleAuth();
+
     // Generate PKCE code verifier and challenge
     const codeVerifier = crypto.randomBytes(32).toString('base64url');
     const codeChallenge = crypto.createHash('sha256').update(codeVerifier).digest('base64url');
     const state = crypto.randomBytes(16).toString('hex');
     let timeoutId = null;
+    let isCancelled = false;
+    const clearActive = () => {
+      if (activeGoogleAuth && activeGoogleAuth.server === server) {
+        activeGoogleAuth = null;
+      }
+    };
 
     // Start temporary HTTP server on loopback for OAuth redirect
     const server = http.createServer(async (req, res) => {
@@ -6230,6 +6296,7 @@ function startGoogleAuth() {
           res.end('<html><body><h2>Authorization denied</h2><p>You can close this tab.</p></body></html>');
           server.close();
           if (timeoutId) clearTimeout(timeoutId);
+          clearActive();
           reject(new Error(`Auth denied: ${error}`));
           return;
         }
@@ -6243,6 +6310,17 @@ function startGoogleAuth() {
         // Exchange code for tokens
         const port = server.address().port;
         const tokens = await exchangeCodeForTokens(code, codeVerifier, port);
+        // The user may have cancelled while we were waiting on Google's
+        // /token endpoint. Discard the tokens rather than silently
+        // persist them — otherwise the next calendar poll would surface
+        // a "ghost" connection seconds after the user said "Cancel".
+        // Still respond to the open browser tab so it doesn't spin
+        // forever — the request only ends when we write a body.
+        if (isCancelled) {
+          res.writeHead(200, { 'Content-Type': 'text/html' });
+          res.end('<html><body style="font-family: -apple-system, sans-serif; text-align: center; padding: 60px;"><h2>Cancelled</h2><p>You can close this tab.</p></body></html>');
+          return;
+        }
         saveGoogleTokens(tokens);
 
         res.writeHead(200, { 'Content-Type': 'text/html' });
@@ -6250,6 +6328,7 @@ function startGoogleAuth() {
 
         server.close();
         if (timeoutId) clearTimeout(timeoutId);
+        clearActive();
 
         // Notify renderer and bring app to foreground
         if (mainWindow && !mainWindow.isDestroyed()) {
@@ -6264,6 +6343,7 @@ function startGoogleAuth() {
         res.end('<html><body><h2>Authentication failed</h2><p>Please try again.</p></body></html>');
         server.close();
         if (timeoutId) clearTimeout(timeoutId);
+        clearActive();
         reject(err);
       }
     });
@@ -6289,12 +6369,33 @@ function startGoogleAuth() {
       shell.openExternal(authUrl);
     });
 
+    // 60s, not 5min. A real Google OAuth flow (consent + maybe MFA)
+    // completes in seconds. The old 5-minute ceiling left users staring
+    // at "Connecting…" for 5 full minutes if they closed the browser tab
+    // — the inline Cancel button in the nudge mitigates this, but the
+    // tighter ceiling is the safety net for users who walk away. The
+    // org-SSO flow elsewhere in this file is a different beast and keeps
+    // its own (longer) timeout.
     timeoutId = setTimeout(() => {
       if (server.listening) {
+        // Set the closure flag BEFORE close+clear+reject so an in-flight
+        // request handler (mid-await on exchangeCodeForTokens) sees the
+        // cancellation when it resumes and discards the tokens instead
+        // of writing them to disk. Without this, a race between Google's
+        // /token response and our 60 s timeout produces a "ghost"
+        // connection seconds after the user was told it timed out.
+        isCancelled = true;
         server.close();
-        reject(new Error('OAuth timeout: no response within 5 minutes'));
+        clearActive();
+        reject(new Error('Timed out — no response from Google.'));
       }
-    }, 5 * 60 * 1000);
+    }, 60 * 1000);
+    activeGoogleAuth = {
+      server,
+      reject,
+      timeoutId,
+      markCancelled: () => { isCancelled = true; },
+    };
   });
 }
 
@@ -6429,7 +6530,13 @@ function refreshAccessToken(refreshToken) {
 
 // ── Google Calendar: Fetch Events ───────────────────────────────────────
 
-function fetchCalendarEvents(accessToken, maxResults = 7, signal) {
+// 50 covers a busy week (~7/day) without bloating the response. The previous
+// cap of 7 was set when the carousel showed top-3 today only — but a single
+// all-day block + a few morning meetings would burn through the cap before
+// noon, hiding everything past lunch. Renderer-side pagination + the "today
+// only" filter handle the visual slicing; the fetch just needs to return
+// enough raw events to draw from.
+function fetchCalendarEvents(accessToken, maxResults = 50, signal) {
   return new Promise((resolve, reject) => {
     const now = new Date();
     const weekAhead = new Date(now);
@@ -6477,12 +6584,34 @@ function fetchCalendarEvents(accessToken, maxResults = 7, signal) {
 
 // ── Outlook Calendar: OAuth2 Flow with PKCE ─────────────────────────────
 
+// Mirror of activeGoogleAuth — see comment there.
+let activeOutlookAuth = null;
+
+function cancelActiveOutlookAuth() {
+  if (!activeOutlookAuth) return false;
+  const handle = activeOutlookAuth;
+  activeOutlookAuth = null;
+  if (handle.timeoutId) clearTimeout(handle.timeoutId);
+  if (handle.markCancelled) handle.markCancelled();
+  try { handle.server.close(); } catch (_) {}
+  handle.reject(new Error('Cancelled'));
+  return true;
+}
+
 function startOutlookAuth() {
   return new Promise((resolve, reject) => {
+    cancelActiveOutlookAuth();
+
     const codeVerifier = crypto.randomBytes(32).toString('base64url');
     const codeChallenge = crypto.createHash('sha256').update(codeVerifier).digest('base64url');
     const state = crypto.randomBytes(16).toString('hex');
     let timeoutId = null;
+    let isCancelled = false;
+    const clearActive = () => {
+      if (activeOutlookAuth && activeOutlookAuth.server === server) {
+        activeOutlookAuth = null;
+      }
+    };
 
     const server = http.createServer(async (req, res) => {
       try {
@@ -6509,6 +6638,7 @@ function startOutlookAuth() {
           res.end('<html><body><h2>Authorization denied</h2><p>You can close this tab.</p></body></html>');
           server.close();
           if (timeoutId) clearTimeout(timeoutId);
+          clearActive();
           reject(new Error(`Auth denied: ${error}`));
           return;
         }
@@ -6521,6 +6651,14 @@ function startOutlookAuth() {
 
         const port = server.address().port;
         const tokens = await exchangeOutlookCodeForTokens(code, codeVerifier, port);
+        // See the Google counterpart — discard tokens if the user
+        // cancelled while we awaited Microsoft's /token endpoint, and
+        // still send a response so the open browser tab doesn't hang.
+        if (isCancelled) {
+          res.writeHead(200, { 'Content-Type': 'text/html' });
+          res.end('<html><body style="font-family: -apple-system, sans-serif; text-align: center; padding: 60px;"><h2>Cancelled</h2><p>You can close this tab.</p></body></html>');
+          return;
+        }
         saveOutlookTokens(tokens);
 
         res.writeHead(200, { 'Content-Type': 'text/html' });
@@ -6528,6 +6666,7 @@ function startOutlookAuth() {
 
         server.close();
         if (timeoutId) clearTimeout(timeoutId);
+        clearActive();
 
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send('outlook-auth-changed');
@@ -6541,6 +6680,7 @@ function startOutlookAuth() {
         res.end('<html><body><h2>Authentication failed</h2><p>Please try again.</p></body></html>');
         server.close();
         if (timeoutId) clearTimeout(timeoutId);
+        clearActive();
         reject(err);
       }
     });
@@ -6568,12 +6708,22 @@ function startOutlookAuth() {
       shell.openExternal(authUrl);
     });
 
+    // See the Google counterpart for the 60s-vs-5min rationale AND the
+    // isCancelled-before-clearActive race fix.
     timeoutId = setTimeout(() => {
       if (server.listening) {
+        isCancelled = true;
         server.close();
-        reject(new Error('OAuth timeout: no response within 5 minutes'));
+        clearActive();
+        reject(new Error('Timed out — no response from Outlook.'));
       }
-    }, 5 * 60 * 1000);
+    }, 60 * 1000);
+    activeOutlookAuth = {
+      server,
+      reject,
+      timeoutId,
+      markCancelled: () => { isCancelled = true; },
+    };
   });
 }
 
@@ -6709,7 +6859,9 @@ function refreshOutlookAccessToken(refreshToken) {
 
 // ── Outlook Calendar: Fetch Events ──────────────────────────────────────
 
-function fetchOutlookCalendarEvents(accessToken, maxResults = 7, signal) {
+// Mirrors fetchCalendarEvents — 50 events to comfortably cover a week without
+// clipping mid-day. See that function's comment for rationale.
+function fetchOutlookCalendarEvents(accessToken, maxResults = 50, signal) {
   return new Promise((resolve, reject) => {
     const now = new Date();
     const weekAhead = new Date(now);
@@ -6848,6 +7000,11 @@ ipcMain.handle('google-auth-status', async () => {
   }
 });
 
+ipcMain.handle('google-auth-cancel', async () => {
+  const cancelled = cancelActiveGoogleAuth();
+  return { success: true, cancelled };
+});
+
 ipcMain.handle('google-auth-disconnect', async () => {
   try {
     // Best-effort token revocation
@@ -6896,7 +7053,11 @@ function mapGoogleResponse(r) {
 
 // Returns null for cancelled events so the caller can drop them. Google marks
 // them with status === 'cancelled'; Outlook with isCancelled === true (carried
-// through from normalizeOutlookEvent).
+// through from normalizeOutlookEvent). Declined events are also dropped here —
+// the renderer used to filter them client-side, but that left any new surface
+// (notifications, auto-detection, future features) one bug away from showing
+// a meeting the user explicitly said "no" to. Dropping at the IPC boundary
+// makes "events" the authoritative "things the user is attending" list.
 function normalizeCalendarEvent(event) {
   if (event.status === 'cancelled' || event.isCancelled === true) return null;
 
@@ -6925,7 +7086,18 @@ function normalizeCalendarEvent(event) {
     if (Array.isArray(event.attendees) && event.attendees.length > 0) {
       const self = event.attendees.find((a) => a && a.self === true);
       if (self) {
-        responseStatus = self.organizer ? 'organizer' : mapGoogleResponse(self.responseStatus);
+        // A declined response wins over the organizer flag — if the user
+        // organised a meeting and then later declined their own attendance
+        // (Google lets you do this), we want the event dropped just like
+        // any other declined invite. The previous short-circuit
+        // (`self.organizer ? 'organizer' : …`) silently kept declined-by-
+        // organizer events in the carousel.
+        const raw = mapGoogleResponse(self.responseStatus);
+        if (raw === 'declined') {
+          responseStatus = 'declined';
+        } else {
+          responseStatus = self.organizer ? 'organizer' : raw;
+        }
       } else {
         responseStatus = 'unknown';
       }
@@ -6933,6 +7105,9 @@ function normalizeCalendarEvent(event) {
       responseStatus = 'organizer';
     }
   }
+
+  // Drop events the user explicitly declined — see function header comment.
+  if (responseStatus === 'declined') return null;
 
   return {
     id: event.id,
@@ -7077,6 +7252,11 @@ ipcMain.handle('outlook-auth-status', async () => {
   } catch (error) {
     return { success: false, connected: false };
   }
+});
+
+ipcMain.handle('outlook-auth-cancel', async () => {
+  const cancelled = cancelActiveOutlookAuth();
+  return { success: true, cancelled };
 });
 
 ipcMain.handle('outlook-auth-disconnect', async () => {
