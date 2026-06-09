@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Calendar, ChevronRight, PencilLine, RefreshCw, Search, Square, X } from 'lucide-react';
+import { Calendar, ChevronLeft, ChevronRight, PencilLine, RefreshCw, Search, Square, X } from 'lucide-react';
 import { shortcut } from '@/lib/utils';
 import { MeetingsShell } from '@/components/MeetingsShell';
 import { UpcomingCard } from '@/components/home/UpcomingCard';
@@ -157,17 +157,32 @@ export function Home({ mode }: HomeProps) {
     });
   }, [calendar.data, upcomingTickMs]);
 
-  // Same gating as Home's empty-state CTA and UpcomingCard's onStart:
-  // block only when actively recording; 'processing' is fine — the
-  // previous note keeps summarising in the background queue while a
-  // new recording starts.
-  const canStartNewRecording =
-    recording.status !== 'recording' && recording.status !== 'paused';
-  const onStartAllDay = (title: string) => {
-    if (!canStartNewRecording) return;
-    void recording.startRecording(title);
-  };
   const [allDayExpanded, setAllDayExpanded] = React.useState(false);
+
+  // Three meetings is the sweet spot — fits the visible card height without
+  // crowding, matches Granola's pattern. Earlier-than-now events have
+  // already been filtered out, so page 0 always shows "next up".
+  const UPCOMING_PAGE_SIZE = 3;
+  const upcomingPageCount = Math.max(
+    1,
+    Math.ceil(upcomingToday.length / UPCOMING_PAGE_SIZE),
+  );
+  const [upcomingPage, setUpcomingPage] = React.useState(0);
+  // Clamp the page when the list shrinks underneath us — e.g. an event
+  // ends and rolls off, or the user reloads the calendar with fewer
+  // entries. Without this the user could be stuck on an empty page 3
+  // after the count drops to 5.
+  React.useEffect(() => {
+    if (upcomingPage >= upcomingPageCount) {
+      setUpcomingPage(Math.max(0, upcomingPageCount - 1));
+    }
+  }, [upcomingPage, upcomingPageCount]);
+  const upcomingVisible = upcomingToday.slice(
+    upcomingPage * UPCOMING_PAGE_SIZE,
+    (upcomingPage + 1) * UPCOMING_PAGE_SIZE,
+  );
+  const canPagePrev = upcomingPage > 0;
+  const canPageNext = upcomingPage < upcomingPageCount - 1;
 
   const previous = meetings.data ?? [];
 
@@ -229,6 +244,15 @@ export function Home({ mode }: HomeProps) {
     return null;
   }, [googlePending, outlookPending, lastStartedProvider]);
   const startConnect = (provider: 'google' | 'outlook') => {
+    // In-flight guard: drop rapid duplicate clicks before React has
+    // flushed isPending through to the disabled-button check. Without
+    // this, two clicks within the React commit cycle both pass and
+    // fire two mutate()s — the main-process startGoogleAuth /
+    // startOutlookAuth call cancels the previous flow at the top, so
+    // the user only sees one OAuth tab, but the renderer briefly ends
+    // up with both connect mutations in flight and the Cancel row
+    // gets confused about which provider it's cancelling.
+    if (googlePending || outlookPending) return;
     setLastStartedProvider(provider);
     if (provider === 'google') googleAuth.connect.mutate();
     else outlookAuth.connect.mutate();
@@ -479,27 +503,54 @@ export function Home({ mode }: HomeProps) {
                 title="Upcoming"
                 count={upcomingToday.length}
                 action={
-                  <button
-                    type="button"
-                    className="inline-flex items-center rounded p-1 transition-colors hover:bg-[color:var(--surface-hover)] disabled:opacity-50"
-                    title="Check for new calendar events"
-                    onClick={() => calendar.refetch()}
-                    disabled={calendar.isFetching}
-                    style={{ color: 'var(--fg-2)' }}
-                  >
-                    <RefreshCw className={`size-[14px] ${calendar.isFetching ? 'animate-spin' : ''}`} />
-                  </button>
+                  // Outer gap separates the page-nav cluster from the
+                  // refresh button so they read as two distinct groups.
+                  // Inner cluster keeps < and > tight against each other.
+                  <div className="flex items-center gap-1.5">
+                    {upcomingPageCount > 1 && (
+                      <div className="flex items-center gap-0.5">
+                        <button
+                          type="button"
+                          className="inline-flex items-center rounded p-1 transition-colors hover:bg-[color:var(--surface-hover)] disabled:opacity-30 disabled:hover:bg-transparent"
+                          title="Previous"
+                          onClick={() => setUpcomingPage((p) => Math.max(0, p - 1))}
+                          disabled={!canPagePrev}
+                          style={{ color: 'var(--fg-2)' }}
+                        >
+                          <ChevronLeft className="size-[14px]" />
+                        </button>
+                        <button
+                          type="button"
+                          className="inline-flex items-center rounded p-1 transition-colors hover:bg-[color:var(--surface-hover)] disabled:opacity-30 disabled:hover:bg-transparent"
+                          title="Next"
+                          onClick={() => setUpcomingPage((p) => Math.min(upcomingPageCount - 1, p + 1))}
+                          disabled={!canPageNext}
+                          style={{ color: 'var(--fg-2)' }}
+                        >
+                          <ChevronRight className="size-[14px]" />
+                        </button>
+                      </div>
+                    )}
+                    <button
+                      type="button"
+                      className="inline-flex items-center rounded p-1 transition-colors hover:bg-[color:var(--surface-hover)] disabled:opacity-50"
+                      title="Check for new calendar events"
+                      onClick={() => calendar.refetch()}
+                      disabled={calendar.isFetching}
+                      style={{ color: 'var(--fg-2)' }}
+                    >
+                      <RefreshCw className={`size-[14px] ${calendar.isFetching ? 'animate-spin' : ''}`} />
+                    </button>
+                  </div>
                 }
               />
               <AllDayInline
                 events={allDayToday}
                 expanded={allDayExpanded}
                 onToggle={() => setAllDayExpanded((v) => !v)}
-                onStart={onStartAllDay}
-                canStart={canStartNewRecording}
               />
               <div className="flex flex-col gap-2">
-                {upcomingToday.map((event) => (
+                {upcomingVisible.map((event) => (
                   <UpcomingCard key={event.id} event={event} />
                 ))}
               </div>
@@ -513,8 +564,6 @@ export function Home({ mode }: HomeProps) {
                 events={allDayToday}
                 expanded={allDayExpanded}
                 onToggle={() => setAllDayExpanded((v) => !v)}
-                onStart={onStartAllDay}
-                canStart={canStartNewRecording}
               />
               <div className="flex flex-col gap-2">
                 <UpcomingCard event={tomorrowPreview} />
@@ -529,8 +578,6 @@ export function Home({ mode }: HomeProps) {
                 events={allDayToday}
                 expanded={allDayExpanded}
                 onToggle={() => setAllDayExpanded((v) => !v)}
-                onStart={onStartAllDay}
-                canStart={canStartNewRecording}
               />
             </section>
           )}
@@ -649,49 +696,29 @@ interface AllDayInlineProps {
   events: CalendarEvent[];
   expanded: boolean;
   onToggle: () => void;
-  onStart: (title: string) => void;
-  /** Permission to start a new recording — true when idle OR processing
-   *  (a previous note still summarising in the background queue doesn't
-   *  block a new recording). False only when a recording is actively
-   *  in progress (recording / paused). */
-  canStart: boolean;
 }
 
-function AllDayInline({
-  events,
-  expanded,
-  onToggle,
-  onStart,
-  canStart,
-}: AllDayInlineProps) {
+function AllDayInline({ events, expanded, onToggle }: AllDayInlineProps) {
   if (events.length === 0) return null;
   return (
-    <div
-      className="mb-2 flex flex-col gap-1 text-xs"
-      style={{ color: 'var(--fg-2)' }}
-    >
+    <div className="mb-2 flex flex-col gap-2">
       <button
         type="button"
         onClick={onToggle}
         aria-expanded={expanded}
-        className="-mx-1 self-start rounded px-1 py-0.5 transition-colors hover:bg-[color:var(--surface-hover)]"
+        className="-mx-1 self-start rounded px-1 py-0.5 text-xs transition-colors hover:bg-[color:var(--surface-hover)]"
+        style={{ color: 'var(--fg-2)' }}
       >
         + {events.length} all-day event{events.length === 1 ? '' : 's'} today
       </button>
       {expanded && (
-        <div className="flex flex-col items-start gap-0.5 pl-3">
+        // Render as full UpcomingCards so all-day events match the visual
+        // language of the timed carousel below. UpcomingCard short-circuits
+        // its time labelling for is_all_day events — see component for the
+        // 'All day' / 'Today' branch.
+        <div className="flex flex-col gap-2">
           {events.map((e) => (
-            <button
-              key={e.id}
-              type="button"
-              onClick={() => onStart(e.title)}
-              disabled={!canStart}
-              title={`Start recording: ${e.title}`}
-              className="-mx-1 rounded px-1 py-0.5 transition-colors hover:bg-[color:var(--surface-hover)] disabled:opacity-50 disabled:hover:bg-transparent"
-              style={{ color: 'var(--fg-1)' }}
-            >
-              {e.title}
-            </button>
+            <UpcomingCard key={e.id} event={e} />
           ))}
         </div>
       )}

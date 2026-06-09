@@ -16,6 +16,32 @@ from . import ollama_manager
 logger = logging.getLogger(__name__)
 
 
+def bedrock_converse_url(region: str, target_id: str) -> str:
+    """Build the Bedrock Converse REST URL for a region + model/profile id.
+
+    Centralised so the live summarisation path (``_bedrock_chat``) and the
+    Settings → Test connection path (``simple_recorder.test_cloud_api``)
+    can't drift on the URL-encoding rules — the original release shipped
+    with one site only and we got bitten by it.
+
+    URL-encoding subtlety: the safe set MUST include ``/`` alongside the
+    ``:.-`` already needed for system-profile and bare-model ids, because
+    application inference profile ARNs (the standard shape in governed
+    AWS environments) contain a path-style segment:
+
+        arn:aws:bedrock:eu-west-2:…:application-inference-profile/abc123
+                                                                 ^
+
+    Bedrock's REST router rejects the percent-encoded form (``%2F``) with
+    HTTP 400 "The provided model identifier is invalid". Keeping ``/``
+    literal lets ARNs flow through; non-ARN ids (no slashes) are
+    unaffected because there's nothing to leave alone.
+    """
+    import urllib.parse
+    encoded = urllib.parse.quote(target_id, safe=":.-/")
+    return f"https://bedrock-runtime.{region}.amazonaws.com/model/{encoded}/converse"
+
+
 class OllamaSummarizer:
     def __init__(self, model_name: Optional[str] = None):
         """
@@ -522,7 +548,6 @@ class OllamaSummarizer:
         """
         import urllib.request
         import urllib.error
-        import urllib.parse
         import json as _json
 
         if not self.bedrock_api_key:
@@ -531,14 +556,12 @@ class OllamaSummarizer:
             raise RuntimeError("Bedrock region is not configured.")
 
         # Inference profile wins when set — same wire shape, different URL
-        # path. urllib.parse.quote keeps the ":0" version suffix intact
-        # (it's not a path separator, just a delimiter in the Bedrock ID).
+        # path. URL construction (including the safe-set quirks needed for
+        # application inference profile ARNs) lives in bedrock_converse_url
+        # at module level so this site and simple_recorder.test_cloud_api
+        # can't drift.
         target_id = self.bedrock_inference_profile or self.model_name
-        encoded_id = urllib.parse.quote(target_id, safe=":.-")
-        url = (
-            f"https://bedrock-runtime.{self.bedrock_region}.amazonaws.com"
-            f"/model/{encoded_id}/converse"
-        )
+        url = bedrock_converse_url(self.bedrock_region, target_id)
         body = _json.dumps({
             "messages": [
                 {

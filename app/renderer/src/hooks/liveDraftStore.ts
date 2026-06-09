@@ -22,7 +22,7 @@ interface LiveDraftStore {
   setTitle: (sessionName: string, title: string) => void;
   setNotes: (sessionName: string, notes: string) => void;
   /** Drop the draft for a finished session so the next "New note" with the
-   *  same sessionName (e.g. the default 'Meeting' / 'Note') starts clean. */
+   *  same sessionName (e.g. the default 'Note') starts clean. */
   clear: (sessionName: string) => void;
   /** Put a previously-snapshot draft back. Used to undo a speculative
    *  `clear()` when the action that motivated it (e.g. start-recording IPC)

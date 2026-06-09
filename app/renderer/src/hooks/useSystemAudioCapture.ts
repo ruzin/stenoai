@@ -479,7 +479,15 @@ export function useSystemAudioCapture() {
         bridge.recording.reportSystemAudioState(false);
         return;
       }
-      const name = sessionNameRef.current ?? 'Meeting';
+      // Match useRecording.startRecording's 'Note' placeholder so the
+      // Python post-processor's AI-rename regex
+      //   ^(Meeting|Note)(-[A-Z0-9]{6})?$
+      // catches both code paths the same way. Previously this fell back
+      // to 'Meeting', so a system-audio recording whose sessionName
+      // never landed would persist as "Meeting" while a mic-only
+      // recording from the same UI flow persisted as "Note" — visible
+      // inconsistency in the user's notes list.
+      const name = sessionNameRef.current ?? 'Note';
       await new Promise<void>((resolve) => {
         recorder.onstop = async () => {
           try {
