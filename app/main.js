@@ -1,9 +1,4 @@
-// DEBUG: startup beacon — pinpoints how far main.js gets on Windows before a
-// silent exit. Writes to %TEMP%\steno-boot.log. Remove after launch debugging.
-const __boot = (m) => { try { const f = require('fs'), p = require('path'), o = require('os'); f.appendFileSync(p.join(o.tmpdir(), 'steno-boot.log'), `[${new Date().toISOString()}] ${m}\n`); } catch (_) {} };
-__boot('1: main.js top (before electron require)');
 const { app, BrowserWindow, ipcMain, dialog, shell, systemPreferences, globalShortcut, safeStorage, Tray, Menu, nativeImage, Notification } = require('electron');
-__boot('2: electron required');
 
 // Prevent EPIPE crashes when stdout/stderr pipe is broken (e.g. launching terminal closed)
 process.stdout?.on('error', () => {});
@@ -111,9 +106,7 @@ if (!app.isPackaged) {
 // macOS-only Chromium feature flag (MacCatapSystemAudioLoopbackCapture) — on
 // Windows that's irrelevant (Chromium uses WASAPI loopback) and passing it is
 // at best a no-op, so we don't.
-__boot('3: before initMain');
 initMain({ forceCoreAudioTap: process.platform === 'darwin' });
-__boot('4: after initMain');
 
 // CoreAudio Process Taps require macOS 14.4+. Returns false on non-macOS or
 // older versions so the renderer can disable the system-audio toggle rather
@@ -145,7 +138,6 @@ const SHORTCUT_PROTOCOL = 'stenoai';
 const SHORTCUT_HOST = 'record';
 const SHORTCUT_SESSION_NAME_MAX_LENGTH = 120;
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
-__boot('5: singleInstanceLock=' + gotSingleInstanceLock);
 
 function extractShortcutUrlFromArgv(argv = []) {
   return argv.find(arg => typeof arg === 'string' && arg.startsWith(`${SHORTCUT_PROTOCOL}://`));
@@ -609,7 +601,6 @@ function validateSafeFilePath(filepath, allowedBaseDirs) {
 }
 
 function createWindow(options = {}) {
-  __boot('8: createWindow() entered');
   rendererShortcutReady = false;
 
   const windowOpts = {
@@ -892,7 +883,6 @@ if (!gotSingleInstanceLock) {
   });
 
   app.whenReady().then(async () => {
-    __boot('6: whenReady entered');
     // Set application menu with Help > Learn More
     const appMenu = Menu.buildFromTemplate([
       {
@@ -1001,9 +991,7 @@ if (!gotSingleInstanceLock) {
       }
     }
 
-    __boot('7: before createWindow()');
     createWindow();
-    __boot('9: after createWindow()');
     if (!IS_E2E) createTray();
     setupAutoUpdater();
     setupAutoMeetingDetector();
