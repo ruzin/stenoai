@@ -4,7 +4,21 @@ const { app, BrowserWindow, ipcMain, dialog, shell, systemPreferences, globalSho
 process.stdout?.on('error', () => {});
 process.stderr?.on('error', () => {});
 const path = require('path');
-const { spawn, exec } = require('child_process');
+const { spawn: _spawnRaw, exec } = require('child_process');
+
+// Wrap spawn so every backend / ollama launch defaults to windowsHide:true.
+// The PyInstaller backend (stenoai.exe) and bundled ollama.exe are console
+// subsystem binaries; without this Electron pops a visible console window on
+// Windows for every recording, live-transcribe, query, and the long-lived
+// `ollama serve` keeps one open for the whole session. No-op on macOS/Linux.
+// Callers can still override by passing an explicit windowsHide.
+function spawn(command, args, options) {
+  if (Array.isArray(args) || args === undefined || args === null) {
+    return _spawnRaw(command, args, { windowsHide: true, ...(options || {}) });
+  }
+  // 2-arg form: spawn(command, options)
+  return _spawnRaw(command, { windowsHide: true, ...args });
+}
 const fs = require('fs');
 const https = require('https');
 const http = require('http');
@@ -1536,6 +1550,7 @@ ipcMain.on('query-transcript-stream', (event, queryId, summaryFile, question) =>
     proc = require('child_process').spawn(backendPath, ['query-streaming', summaryFile, '-q', question], {
       env,
       cwd: getBackendCwd(),
+      windowsHide: true,
     });
   } catch (err) {
     event.sender.send('query-done', { queryId, success: false, error: err.message });
@@ -1630,7 +1645,7 @@ ipcMain.on('chat-global-stream', (event, queryId, question, folderId) => {
     proc = require('child_process').spawn(
       getBackendPath(),
       args,
-      { env, cwd: getBackendCwd() },
+      { env, cwd: getBackendCwd(), windowsHide: true },
     );
   } catch (err) {
     event.sender.send('query-done', { queryId, success: false, error: err.message });

@@ -299,6 +299,10 @@ def _group_tokens_into_sentences(tokens: list, timestamps: list) -> list[dict]:
         end = _ts_end(ts)
         if current_start is None:
             current_start = start
+            # Seed current_end from the segment start so a segment whose tokens
+            # all carry end==0.0 (unrecognised timestamp shape) never emits an
+            # end < start span to diarisation/summarisation.
+            current_end = start
         current_tokens.append(tok_str)
         current_end = end if end > current_end else current_end
         if _SENTENCE_END.search(tok_str):

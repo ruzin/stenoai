@@ -485,7 +485,9 @@ class WhisperTranscriber:
             ffmpeg_dir = os.path.dirname(ffmpeg_found_path)
             current_path = os.environ.get('PATH', '')
             if ffmpeg_dir not in current_path:
-                os.environ['PATH'] = f"{ffmpeg_dir}:{current_path}"
+                # os.pathsep is ':' on POSIX and ';' on Windows — hardcoding ':'
+                # corrupts PATH on Windows so the prepended dir never resolves.
+                os.environ['PATH'] = f"{ffmpeg_dir}{os.pathsep}{current_path}"
                 logger.info(f"Added {ffmpeg_dir} to PATH")
         else:
             logger.warning("ffmpeg not found - stereo diarisation will fall back to mono")

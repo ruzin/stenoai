@@ -903,7 +903,7 @@ function AiTab() {
     <section data-settings-tab="ai">
       <SettingRow
         label="AI provider"
-        description="Where models run. Local keeps all data on your Mac."
+        description="Where models run. Local keeps all data on your device."
       >
         <Select
           value={current}
@@ -916,7 +916,7 @@ function AiTab() {
           <SelectContent className="w-72">
             <SelectItem
               value="local"
-              description="Runs entirely on your Mac. Private and free, no internet required."
+              description="Runs entirely on your device. Private and free, no internet required."
             >
               Local (on-device)
             </SelectItem>

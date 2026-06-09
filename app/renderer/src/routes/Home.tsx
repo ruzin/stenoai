@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { Calendar, PencilLine, RefreshCw, Search, Square, X } from 'lucide-react';
-import { shortcut } from '@/lib/utils';
+import { isMac, shortcut } from '@/lib/utils';
 import { MeetingsShell } from '@/components/MeetingsShell';
 import { UpcomingCard } from '@/components/home/UpcomingCard';
 import { PreviousRow } from '@/components/home/PreviousRow';
@@ -320,7 +320,7 @@ export function Home({ mode }: HomeProps) {
               style={{ color: 'var(--fg-2)' }}
             >
               Capture your first meeting — transcription and summaries happen
-              locally on your Mac.
+              locally on your device.
             </p>
             <p className="text-sm" style={{ color: 'var(--fg-muted)' }}>
               Always get consent when transcribing others.
@@ -340,8 +340,8 @@ export function Home({ mode }: HomeProps) {
               style={{ color: 'var(--fg-muted)' }}
             >
               <span>Quick start:</span>
-              <KbdKey>⌘</KbdKey>
-              <KbdKey>⇧</KbdKey>
+              <KbdKey>{isMac ? '⌘' : 'Ctrl'}</KbdKey>
+              <KbdKey>{isMac ? '⇧' : 'Shift'}</KbdKey>
               <KbdKey>R</KbdKey>
               <span>from anywhere</span>
             </p>

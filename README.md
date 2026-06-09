@@ -194,7 +194,7 @@ Caveats to know going in:
 
 - **SmartScreen warning on first launch.** The alpha is unsigned. Click **More info → Run anyway** to launch. We'll sign the build before 1.0.
 - **Mic-only recording.** System-audio (loopback) capture isn't shipped yet on Windows — the "Record system audio" toggle is hidden. Recordings capture only the microphone; diarisation degrades to single-speaker as a result.
-- **CPU-only Parakeet via ONNX Runtime.** Transcription works the same as on mac but runs through `onnx-asr` instead of MLX. A ~670 MB Parakeet weight file downloads on first record.
+- **CPU-only Parakeet via ONNX Runtime.** Transcription works the same as on mac but runs through `onnx-asr` instead of MLX. A ~670 MB Parakeet weight file downloads during first-run setup (with a progress step in the wizard).
 - **Auto-update isn't wired yet on Windows.** Check back here for the next zip.
 
 Issues + feedback welcome on the GitHub issues tracker.

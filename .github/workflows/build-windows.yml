@@ -111,20 +111,24 @@ jobs:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
         run: |
           npm run build:renderer
-          # Don't fail the job if NSIS makensis trips on mmap — the zip
-          # target is the alpha deliverable; NSIS is best-effort for now.
-          # The known failure is `installSection.nsh on line 66`. As long
-          # as the zip exists when electron-builder exits, treat the
-          # step as successful so downstream artefact upload still runs.
-          npx electron-builder --win --publish=never
+          # Don't fail the job on the ONE known NSIS failure — makensis can't
+          # mmap the app .7z on the runner (`installSection.nsh on line 66` /
+          # "failed creating mmap"). The zip target is the alpha deliverable;
+          # NSIS is best-effort for now. We tolerate *only* that signature —
+          # any other electron-builder failure must still fail the job so a
+          # real regression doesn't ship a green build with a broken/absent
+          # installer.
+          npx electron-builder --win --publish=never 2>&1 | Tee-Object -FilePath builder.log
           $builderExit = $LASTEXITCODE
           $zipBuilt = Test-Path 'dist\stenoAI-windows-*.zip'
-          if ($builderExit -ne 0 -and $zipBuilt) {
-            Write-Host "electron-builder exited with $builderExit but zip artefact was produced — treating as success (likely NSIS makensis mmap failure)."
+          $log = Get-Content builder.log -Raw -ErrorAction SilentlyContinue
+          $knownNsisFailure = ($log -match 'failed creating mmap') -or ($log -match 'installSection\.nsh.*line 66')
+          if ($builderExit -ne 0 -and $zipBuilt -and $knownNsisFailure) {
+            Write-Host "electron-builder hit the known NSIS makensis mmap failure but the zip artefact was produced — treating as success."
             exit 0
           }
           if ($builderExit -ne 0) {
-            Write-Host "electron-builder exited with $builderExit and no zip was produced — failing the job."
+            Write-Host "electron-builder exited with $builderExit (zipBuilt=$zipBuilt, knownNsisFailure=$knownNsisFailure) — failing the job."
             exit $builderExit
           }
 
