@@ -176,6 +176,31 @@ class HandleTranscriptionFailureTests(unittest.TestCase):
             self.assertIn("Transcription failed", parsed["summary"])
             self.assertIn("preserved", parsed["summary"])
 
+    def test_multiline_error_does_not_corrupt_frontmatter(self):
+        """A multi-line exception message must collapse to a single line so the
+        YAML frontmatter round-trips cleanly through _parse_meeting_markdown."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            out_dir = Path(tmp_dir) / "output"
+            out_dir.mkdir()
+            audio = _make_audio_file(tmp_dir, "session.webm")
+            recorder = SimpleRecorder.__new__(SimpleRecorder)
+            recorder.output_dir = out_dir
+            transcript_data = {
+                "duration_seconds": 60.0,
+                "configured_language": "en",
+                "transcription_failed": True,
+                "error": "RuntimeError: boom\nTraceback line 1\nTraceback line 2",
+            }
+            recorder._handle_transcription_failure(
+                audio, "Crashy meeting", transcript_data, notes_text=None
+            )
+            parsed = _parse_meeting_markdown(out_dir / f"{audio.stem}_summary.md")
+        self.assertTrue(parsed["session_info"]["transcription_failed"])
+        self.assertNotIn("\n", parsed["session_info"]["error"])
+        self.assertIn("boom", parsed["session_info"]["error"])
+        # The honest summary message still parses intact.
+        self.assertIn("Transcription failed", parsed["summary"])
+
     def test_normal_meeting_has_no_failure_markers(self):
         """Regression: a normal (non-failure) meeting's session_info must not
         gain the failure keys, so existing consumers are unchanged."""

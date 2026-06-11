@@ -307,31 +307,37 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
               </TooltipTrigger>
               <TooltipContent side="bottom">{copied ? 'Copied!' : 'Copy notes'}</TooltipContent>
             </Tooltip>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <ActionIconButton
-                  label="Regenerate notes"
-                  onClick={() => {
-                    setStreamText('');
-                    setStreamPhase('analyzing');
-                    streamCache.set(summaryFile, { text: '', phase: 'analyzing' });
-                    reprocess.mutate({ summaryFile, regenTitle: false, name: info.name });
-                  }}
-                  disabled={reprocess.isPending || streamPhase !== 'idle'}
-                >
-                  <RefreshCw
-                    className={cn(
-                      'size-[13px]',
-                      (reprocess.isPending ||
-                        streamPhase === 'analyzing' ||
-                        streamPhase === 'generating') &&
-                        'animate-spin',
-                    )}
-                  />
-                </ActionIconButton>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">Regenerate notes</TooltipContent>
-            </Tooltip>
+            {/* Regenerate re-runs summarisation on the existing transcript.
+                A transcription-failure note has no transcript, so reprocess
+                would exit non-zero and strand the UI on a spinner — hide it
+                until a real re-transcribe-from-audio retry ships. */}
+            {!info.transcription_failed && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <ActionIconButton
+                    label="Regenerate notes"
+                    onClick={() => {
+                      setStreamText('');
+                      setStreamPhase('analyzing');
+                      streamCache.set(summaryFile, { text: '', phase: 'analyzing' });
+                      reprocess.mutate({ summaryFile, regenTitle: false, name: info.name });
+                    }}
+                    disabled={reprocess.isPending || streamPhase !== 'idle'}
+                  >
+                    <RefreshCw
+                      className={cn(
+                        'size-[13px]',
+                        (reprocess.isPending ||
+                          streamPhase === 'analyzing' ||
+                          streamPhase === 'generating') &&
+                          'animate-spin',
+                      )}
+                    />
+                  </ActionIconButton>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">Regenerate notes</TooltipContent>
+              </Tooltip>
+            )}
             <Popover>
               <PopoverTrigger asChild>
                 <button

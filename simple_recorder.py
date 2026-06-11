@@ -553,7 +553,10 @@ Transcript:
           ``SAVED:`` (so the renderer still navigates to the marked meeting).
         """
         error = str(transcript_data.get("error") or "transcription failed")
-        short_error = error[:200]
+        # Collapse whitespace/newlines: the error becomes a single-line YAML
+        # frontmatter scalar, and a literal newline would break the round-trip
+        # through _parse_meeting_markdown.
+        short_error = " ".join(error.split())[:200]
         summary_path = self.output_dir / f"{audio_path.stem}_summary.md"
         processed_at = datetime.now().isoformat()
         duration_seconds = transcript_data.get("duration_seconds")
