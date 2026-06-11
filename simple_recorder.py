@@ -1094,8 +1094,21 @@ def process_streaming(audio_file, name, notes):
             except Exception as e:
                 logger.warning(f"Failed to read notes file: {e}")
 
-        # Step 1: Transcribe
-        transcript_data = await recorder.transcribe_audio(audio_file, name)
+        # Step 1: Transcribe. HEARTBEAT: lines are a liveness signal for the
+        # Electron inactivity watchdog — without them a long transcription is
+        # silent on stdout until TRANSCRIPTION_COMPLETE and indistinguishable
+        # from a hung process. Electron routes them to the debug log.
+        from src.parakeet import set_chunk_heartbeat
+
+        def _heartbeat_sink(done, total):
+            print(f"HEARTBEAT:transcribe:{done}/{total}", flush=True)
+
+        print("HEARTBEAT:transcribe:start", flush=True)
+        set_chunk_heartbeat(_heartbeat_sink)
+        try:
+            transcript_data = await recorder.transcribe_audio(audio_file, name)
+        finally:
+            set_chunk_heartbeat(None)
 
         # A transcription crash (e.g. an MLX OOM on a long system-audio
         # recording) is not silence — preserve the audio and save a marked,

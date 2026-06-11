@@ -1522,17 +1522,18 @@ ipcMain.handle('reprocess-meeting', async (event, summaryFile, regenerateTitle, 
 
       let stderrBuf = '';
 
-      const procTimeout = setTimeout(() => {
-        console.error('reprocess timed out after 30 minutes, killing');
-        proc.kill();
-      }, 30 * 60 * 1000);
+      // Liveness watchdog — see makeInactivityWatchdog. Summary CHUNK:
+      // lines (and HEARTBEAT: lines if a retranscribe is ever added here)
+      // keep resetting it, so only a genuinely hung process gets killed.
+      const watchdog = makeInactivityWatchdog(proc, TRANSCRIBE_INACTIVITY_MS, 'reprocess');
 
       proc.on('error', (err) => {
-        clearTimeout(procTimeout);
+        watchdog.clear();
         reject(new Error(`reprocess spawn error: ${err.message}`));
       });
 
       proc.stdout.on('data', (data) => {
+        watchdog.reset();
         const text = data.toString();
         text.split('\n').forEach(line => {
           if (line.startsWith('CHUNK:')) {
@@ -1559,6 +1560,7 @@ ipcMain.handle('reprocess-meeting', async (event, summaryFile, regenerateTitle, 
       });
 
       proc.stderr.on('data', (data) => {
+        watchdog.reset();
         const msg = data.toString().trim();
         if (msg) {
           stderrBuf += msg + '\n';
@@ -1567,7 +1569,7 @@ ipcMain.handle('reprocess-meeting', async (event, summaryFile, regenerateTitle, 
       });
 
       proc.on('close', (code) => {
-        clearTimeout(procTimeout);
+        watchdog.clear();
         if (code === 0) {
           console.log(`✅ Completed reprocessing: ${sessionName}`);
           if (mainWindow && !mainWindow.isDestroyed()) {
@@ -2713,6 +2715,42 @@ function getRecordingElapsedSeconds() {
   );
 }
 
+// Inactivity watchdog for long-running backend subprocesses (transcribe +
+// summarise). A fixed kill-timeout punishes slow-but-alive work — a 3-hour
+// meeting transcribing on a cold or CPU-only machine can legitimately run
+// past 30 minutes — while no timeout at all wedges the processing queue
+// forever behind a hung process. Instead we kill only after a window with
+// zero stdout/stderr activity. The Python pipeline emits HEARTBEAT: lines
+// per transcription chunk precisely so this timer keeps resetting while
+// real work is happening. 8 minutes covers a cold model load plus a stalled
+// chunk with margin, and still reaps a truly hung process ~4x faster than
+// the old fixed 30-minute timer.
+const TRANSCRIBE_INACTIVITY_MS = 8 * 60 * 1000;
+
+function makeInactivityWatchdog(proc, ms, label) {
+  let timer = null;
+  const arm = () => {
+    timer = setTimeout(() => {
+      console.error(`${label} produced no output for ${Math.round(ms / 60000)} minutes, killing`);
+      sendDebugLog(`${label} inactive for ${Math.round(ms / 60000)} minutes — killing process`);
+      try { proc.kill(); } catch (e) { /* process already gone */ }
+    }, ms);
+  };
+  arm();
+  return {
+    // Any stdout/stderr activity proves liveness — push the deadline out.
+    reset() {
+      if (timer === null) return; // cleared (process closed) — don't re-arm
+      clearTimeout(timer);
+      arm();
+    },
+    clear() {
+      if (timer !== null) clearTimeout(timer);
+      timer = null;
+    }
+  };
+}
+
 // Processing queue management
 async function processNextInQueue() {
   if (isProcessing || processingQueue.length === 0) {
@@ -2751,18 +2789,18 @@ async function processNextInQueue() {
       // surfaces the failure honestly instead of as a normal saved note.
       let transcriptionFailedMsg = null;
 
-      // Timeout: kill process if it runs longer than 30 minutes
-      const procTimeout = setTimeout(() => {
-        console.error('process-streaming timed out after 30 minutes, killing');
-        proc.kill();
-      }, 30 * 60 * 1000);
+      // Liveness watchdog: kills the process only after a window of zero
+      // output. HEARTBEAT:/CHUNK: lines from the backend keep it alive, so
+      // a long transcription on a slow machine is never killed mid-work.
+      const watchdog = makeInactivityWatchdog(proc, TRANSCRIBE_INACTIVITY_MS, 'process-streaming');
 
       proc.on('error', (err) => {
-        clearTimeout(procTimeout);
+        watchdog.clear();
         reject(new Error(`process-streaming spawn error: ${err.message}`));
       });
 
       proc.stdout.on('data', (data) => {
+        watchdog.reset();
         const text = data.toString();
         // Parse protocol lines
         text.split('\n').forEach(line => {
@@ -2791,6 +2829,10 @@ async function processNextInQueue() {
             transcriptionFailedMsg = line.slice('TRANSCRIPTION_FAILED:'.length).trim();
             sendDebugLog(`Transcription failed (audio preserved): ${transcriptionFailedMsg}`);
             trackEvent('transcription_completed', { success: false });
+          } else if (line.startsWith('HEARTBEAT:')) {
+            // Liveness signal only — already reset the watchdog above;
+            // log it for debugging but never forward to the renderer.
+            sendDebugLog(line.trim());
           } else if (line.trim()) {
             sendDebugLog(line.trim());
           }
@@ -2798,6 +2840,7 @@ async function processNextInQueue() {
       });
 
       proc.stderr.on('data', (data) => {
+        watchdog.reset();
         const msg = data.toString().trim();
         if (msg) {
           stderrBuf += msg + '\n';
@@ -2806,7 +2849,7 @@ async function processNextInQueue() {
       });
 
       proc.on('close', (code) => {
-        clearTimeout(procTimeout);
+        watchdog.clear();
         if (code === 0) {
           console.log(`✅ Completed streaming processing: ${currentProcessingJob.sessionName}`);
           const sessionNameAtClose = currentProcessingJob.sessionName;

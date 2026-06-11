@@ -21,6 +21,11 @@ from __future__ import annotations
 
 import sys
 
+# Chunk-progress liveness signal. Lives in src._heartbeat (see its docstring
+# for why it isn't defined here) and is re-exported so callers keep a single
+# import surface for the ASR layer.
+from src._heartbeat import set_chunk_heartbeat  # noqa: F401
+
 if sys.platform == "darwin":
     from src._parakeet_mlx import (  # noqa: F401
         DEFAULT_MODEL_ID,
@@ -51,6 +56,7 @@ __all__ = [
     "SUPPORTS_PARTIALS",
     "ensure_loaded",
     "model_sample_rate",
+    "set_chunk_heartbeat",
     "transcribe_file",
     "transcribe_samples",
 ]

@@ -23,6 +23,8 @@ import threading
 from pathlib import Path
 from typing import Optional
 
+from src._heartbeat import _emit_heartbeat
+
 logger = logging.getLogger(__name__)
 
 # Multilingual TDT v3 — covers the 25 European languages Parakeet supports
@@ -134,14 +136,38 @@ def transcribe_file(
 
     model = _load_model(model_id)
     logger.info("Transcribing (batch file): %s", audio_path)
+
+    # Per-chunk liveness signal for the Electron inactivity watchdog. The
+    # pinned parakeet-mlx calls chunk_callback(end_sample, total_samples)
+    # after each window, but the signature has varied across versions —
+    # accept anything and never let a mismatch raise into the decode loop.
+    def _heartbeat_cb(*args, **kwargs):
+        try:
+            done = int(args[0]) if len(args) >= 1 else 0
+            total = int(args[1]) if len(args) >= 2 else 0
+        except (TypeError, ValueError):
+            done, total = 0, 0
+        _emit_heartbeat(done, total)
+
     # Always chunk: the library merges the windows back into one AlignedResult
     # with global timestamps, so _result_to_dict is unaffected, and short files
     # (< one chunk) just transcribe in a single window for free.
-    result = model.transcribe(
-        str(audio_path),
-        chunk_duration=PARAKEET_CHUNK_DURATION_S,
-        overlap_duration=PARAKEET_CHUNK_OVERLAP_S,
-    )
+    try:
+        result = model.transcribe(
+            str(audio_path),
+            chunk_duration=PARAKEET_CHUNK_DURATION_S,
+            overlap_duration=PARAKEET_CHUNK_OVERLAP_S,
+            chunk_callback=_heartbeat_cb,
+        )
+    except TypeError:
+        # A parakeet-mlx version without the chunk_callback kwarg. Losing the
+        # heartbeat is acceptable; losing transcription is not.
+        logger.warning("parakeet-mlx transcribe() rejected chunk_callback; retrying without")
+        result = model.transcribe(
+            str(audio_path),
+            chunk_duration=PARAKEET_CHUNK_DURATION_S,
+            overlap_duration=PARAKEET_CHUNK_OVERLAP_S,
+        )
     return _result_to_dict(result, language)
 
 
