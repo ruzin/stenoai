@@ -1,9 +1,10 @@
 name: Build Windows installer
 
 # End-to-end Windows build: PyInstaller backend (with onnx-asr Parakeet + whisper.cpp)
-# + Electron NSIS installer + zip. Runs on every push to feat/windows-port-v2 so
-# we can iterate quickly, and on tag pushes so released versions get a Windows
-# asset uploaded alongside the macOS DMG produced by build-release.yml.
+# + Electron NSIS installer + zip. Runs on PRs that touch the Python backend /
+# spec (see the paths filter below), on pushes to main, and on tag pushes so
+# released versions get a Windows asset uploaded alongside the macOS DMG
+# produced by build-release.yml. Also dispatchable manually for any branch.
 #
 # Code signing is intentionally off for the alpha — installers ship unsigned
 # and trigger SmartScreen on first run. Add WINDOWS_CERT secrets + the signing
@@ -13,9 +14,17 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - feat/windows-port-v2
+      - main
     tags:
       - 'v*.*.*'
+  pull_request:
+    # Only run on PRs that could affect the Windows backend/bundle, so the
+    # heavy build stays off renderer-only and macOS-only PRs.
+    paths:
+      - '**.py'
+      - 'requirements.txt'
+      - 'stenoai.spec'
+      - '.github/workflows/build-windows.yml'
 
 permissions:
   contents: write
