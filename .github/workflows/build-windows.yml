@@ -117,7 +117,10 @@ jobs:
           # native DLL (microsoft/onnxruntime#25193). onnx-selftest loads the
           # bundled Silero VAD model and runs one inference — proving the native
           # session libs (shared with the onnx-asr Parakeet path) load + execute
-          # in the frozen bundle. No network / weight download required.
+          # in the frozen bundle. It also drives the long-file windowing path
+          # over a >120 s synthetic array (stub recogniser, since the 670 MB ASR
+          # weights aren't in CI) to catch a windowing/numpy bundling regression.
+          # No network / weight download required.
           $out = ./dist/stenoai/stenoai.exe onnx-selftest
           Write-Host "onnx-selftest: $out"
           if ($out -notmatch 'ONNX_SELFTEST_OK') {

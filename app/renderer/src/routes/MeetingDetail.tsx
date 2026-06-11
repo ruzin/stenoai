@@ -275,6 +275,8 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
   const keyPoints = meeting.key_points ?? [];
   const actionItems = asStringArray(meeting.action_items);
   const discussionAreas = asDiscussionAreas(meeting.discussion_areas);
+  const transcriptionFailed = Boolean(meeting.session_info.transcription_failed);
+  const transcriptionError = meeting.session_info.error?.trim();
 
   return (
     <article data-testid="meeting-detail" className="space-y-9">
@@ -305,31 +307,37 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
               </TooltipTrigger>
               <TooltipContent side="bottom">{copied ? 'Copied!' : 'Copy notes'}</TooltipContent>
             </Tooltip>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <ActionIconButton
-                  label="Regenerate notes"
-                  onClick={() => {
-                    setStreamText('');
-                    setStreamPhase('analyzing');
-                    streamCache.set(summaryFile, { text: '', phase: 'analyzing' });
-                    reprocess.mutate({ summaryFile, regenTitle: false, name: info.name });
-                  }}
-                  disabled={reprocess.isPending || streamPhase !== 'idle'}
-                >
-                  <RefreshCw
-                    className={cn(
-                      'size-[13px]',
-                      (reprocess.isPending ||
-                        streamPhase === 'analyzing' ||
-                        streamPhase === 'generating') &&
-                        'animate-spin',
-                    )}
-                  />
-                </ActionIconButton>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">Regenerate notes</TooltipContent>
-            </Tooltip>
+            {/* Regenerate re-runs summarisation on the existing transcript.
+                A transcription-failure note has no transcript, so reprocess
+                would exit non-zero and strand the UI on a spinner — hide it
+                until a real re-transcribe-from-audio retry ships. */}
+            {!info.transcription_failed && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <ActionIconButton
+                    label="Regenerate notes"
+                    onClick={() => {
+                      setStreamText('');
+                      setStreamPhase('analyzing');
+                      streamCache.set(summaryFile, { text: '', phase: 'analyzing' });
+                      reprocess.mutate({ summaryFile, regenTitle: false, name: info.name });
+                    }}
+                    disabled={reprocess.isPending || streamPhase !== 'idle'}
+                  >
+                    <RefreshCw
+                      className={cn(
+                        'size-[13px]',
+                        (reprocess.isPending ||
+                          streamPhase === 'analyzing' ||
+                          streamPhase === 'generating') &&
+                          'animate-spin',
+                      )}
+                    />
+                  </ActionIconButton>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">Regenerate notes</TooltipContent>
+              </Tooltip>
+            )}
             <Popover>
               <PopoverTrigger asChild>
                 <button
@@ -518,7 +526,38 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
         <StreamingView text={streamText} phase={streamPhase} />
       ) : (
         <div className="flex flex-col gap-9">
-          {summary ? (
+          {transcriptionFailed ? (
+            <section
+              className="flex flex-col gap-2 rounded-lg p-4"
+              style={{
+                background: 'var(--surface-raised)',
+                border: '1px solid var(--border-subtle, var(--surface-raised))',
+              }}
+              data-testid="transcription-failed-notice"
+            >
+              <div
+                className="text-[15px] font-medium"
+                style={{ color: 'var(--fg-1)' }}
+              >
+                Transcription failed
+              </div>
+              <p
+                className="text-[14px] leading-[1.6]"
+                style={{ color: 'var(--fg-2)', maxWidth: '64ch' }}
+              >
+                No notes could be generated for this recording. Your audio was
+                preserved (not deleted), so nothing was lost.
+              </p>
+              {transcriptionError && (
+                <p
+                  className="text-[12.5px] leading-[1.5]"
+                  style={{ color: 'var(--fg-2)', opacity: 0.8 }}
+                >
+                  Details: {transcriptionError}
+                </p>
+              )}
+            </section>
+          ) : summary ? (
             <section className="flex flex-col gap-3">
               <SectionTitle>Summary</SectionTitle>
               <div data-testid="tab-summary-content">

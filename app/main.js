@@ -2744,6 +2744,12 @@ async function processNextInQueue() {
       // Without this the renderer-driven (system audio) flow leaves the
       // user stranded on /meetings/processing after the summary streams in.
       let savedSummaryFile = null;
+      // Captured from `TRANSCRIPTION_FAILED:<msg>` — the Python pipeline
+      // gracefully marks a transcription crash (e.g. an OOM on a long file),
+      // preserves the audio, and still emits SAVED: for a reprocessable
+      // meeting. We thread the flag into processing-complete so the renderer
+      // surfaces the failure honestly instead of as a normal saved note.
+      let transcriptionFailedMsg = null;
 
       // Timeout: kill process if it runs longer than 30 minutes
       const procTimeout = setTimeout(() => {
@@ -2781,6 +2787,10 @@ async function processNextInQueue() {
           } else if (line.startsWith('SAVED:')) {
             savedSummaryFile = line.slice(6).trim();
             sendDebugLog(`Summary saved: ${savedSummaryFile}`);
+          } else if (line.startsWith('TRANSCRIPTION_FAILED:')) {
+            transcriptionFailedMsg = line.slice('TRANSCRIPTION_FAILED:'.length).trim();
+            sendDebugLog(`Transcription failed (audio preserved): ${transcriptionFailedMsg}`);
+            trackEvent('transcription_completed', { success: false });
           } else if (line.trim()) {
             sendDebugLog(line.trim());
           }
@@ -2830,8 +2840,12 @@ async function processNextInQueue() {
                 mainWindow.webContents.send('processing-complete', {
                   success: true,
                   sessionName: sessionNameAtClose,
-                  message: 'Processing completed successfully',
-                  meetingData: processedMeeting
+                  message: transcriptionFailedMsg
+                    ? 'Transcription failed; recording preserved (not deleted)'
+                    : 'Processing completed successfully',
+                  meetingData: processedMeeting,
+                  transcriptionFailed: Boolean(transcriptionFailedMsg),
+                  transcriptionError: transcriptionFailedMsg || undefined
                 });
               }
             })
@@ -2843,7 +2857,11 @@ async function processNextInQueue() {
                 mainWindow.webContents.send('processing-complete', {
                   success: true,
                   sessionName: sessionNameAtClose,
-                  message: 'Processing completed successfully'
+                  message: transcriptionFailedMsg
+                    ? 'Transcription failed; recording preserved (not deleted)'
+                    : 'Processing completed successfully',
+                  transcriptionFailed: Boolean(transcriptionFailedMsg),
+                  transcriptionError: transcriptionFailedMsg || undefined
                 });
               }
             });
@@ -2858,19 +2876,14 @@ async function processNextInQueue() {
     console.error(`❌ Processing failed for ${currentProcessingJob.sessionName}:`, error);
     trackEvent('error_occurred', { error_type: 'processing_queue' });
 
-    // The Python success path unlinks the source audio when keep_recordings
-    // is OFF. A processing crash never reaches that branch, so without this
-    // cleanup the failed .webm/.wav lingers forever even though the user
-    // opted not to keep recordings. Mirror the same gate here.
-    try {
-      const keepResult = await runPythonScript('simple_recorder.py', ['get-keep-recordings'], true);
-      const keep = JSON.parse(keepResult.trim())?.keep_recordings === true;
-      if (!keep && currentProcessingJob.audioFile && fs.existsSync(currentProcessingJob.audioFile)) {
-        fs.unlinkSync(currentProcessingJob.audioFile);
-        sendDebugLog(`Cleaned up failed-processing audio: ${currentProcessingJob.audioFile}`);
-      }
-    } catch (cleanupErr) {
-      sendDebugLog(`Failed-processing cleanup error: ${cleanupErr.message}`);
+    // A processing crash (e.g. a metal::malloc OOM that SIGABRTs the
+    // subprocess with a non-zero exit before Python can mark the failure)
+    // means the transcript was never produced. DO NOT delete the source
+    // audio here — it's the only copy and the user's retry material.
+    // Preserving it regardless of keep_recordings mirrors the Python
+    // failure path, which also keeps the audio.
+    if (currentProcessingJob.audioFile && fs.existsSync(currentProcessingJob.audioFile)) {
+      sendDebugLog(`Preserved audio after processing failure: ${currentProcessingJob.audioFile}`);
     }
 
     if (mainWindow && !mainWindow.isDestroyed()) {
@@ -5182,10 +5195,15 @@ ipcMain.handle('show-silence-auto-stop-notification', async (_event, payload) =>
 ipcMain.handle('show-note-ready-notification', async (_event, payload) => {
   try {
     if (!(await notificationsEnabled())) return { success: true };
-    const { title } = payload || {};
+    const { title, failed } = payload || {};
+    // Be honest when transcription crashed: don't tell the user their note
+    // is "ready". The recording was preserved (not deleted) and the note
+    // explains the failure on open.
     const notif = new Notification({
-      title: 'Note ready',
-      body: title || 'Your note has finished processing',
+      title: failed ? 'Transcription failed' : 'Note ready',
+      body: failed
+        ? 'Your recording was preserved — open the note for details.'
+        : (title || 'Your note has finished processing'),
     });
     notif.on('click', () => {
       if (mainWindow && !mainWindow.isDestroyed()) {

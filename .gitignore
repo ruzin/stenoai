@@ -178,3 +178,6 @@ FEATURES.md
 
 # Bundled Ollama binary (downloaded during build)
 bin/
+
+# Local ollama runtime pid (dev scratch)
+ollama.pid

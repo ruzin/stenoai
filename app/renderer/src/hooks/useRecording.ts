@@ -338,7 +338,13 @@ export function useRecordingProcessingEffects() {
         const title = newMeeting.session_info.name || 'Untitled note';
         const body = composeShareBody(newMeeting);
         const transcript = pickTranscriptForShare(newMeeting);
-        if (body) {
+        // Never auto-backup a transcription failure — it has no real notes,
+        // only the failure message, and shouldn't propagate to the org. Check
+        // both the event flag and the authoritative meeting marker.
+        const isFailedNote =
+          Boolean(data.transcriptionFailed) ||
+          Boolean(newMeeting.session_info.transcription_failed);
+        if (body && !isFailedNote) {
           ipc()
             .org.tryAutoBackup({
               summaryFile: newSummaryFile,
@@ -421,7 +427,12 @@ export function useRecordingProcessingEffects() {
           // firing this IPC would be a wasted poll. The gate stays
           // single-source-of-truth in main.
           void ipc()
-            .settings.showNoteReadyNotification({ title })
+            .settings.showNoteReadyNotification({
+              title,
+              failed:
+                Boolean(data.transcriptionFailed) ||
+                Boolean(data.meetingData?.session_info.transcription_failed),
+            })
             .catch(() => {
               // Notification failure isn't fatal — the note is still
               // visible in Home + sidebar. Don't bubble up.

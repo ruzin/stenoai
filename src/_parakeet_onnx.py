@@ -30,6 +30,7 @@ from __future__ import annotations
 import logging
 import re
 import threading
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
 
@@ -55,6 +56,20 @@ SUPPORTS_PARTIALS = True
 
 # Parakeet TDT v3 expects 16 kHz mono input regardless of backend.
 _SAMPLE_RATE = 16000
+
+# Batch-file chunking. onnx-asr has no built-in chunk_duration, so long files
+# would feed one giant array to the ORT session and balloon memory the same way
+# the MLX path SIGABRTs on metal::malloc. We window the audio manually in
+# transcribe_file, recognize each window, then offset + dedupe the token
+# timestamps back into one global result. Kept equal to the MLX backend's
+# constants (see _parakeet_mlx) so long-meeting behaviour matches per-platform.
+PARAKEET_CHUNK_DURATION_S = 60.0
+PARAKEET_CHUNK_OVERLAP_S = 15.0
+
+# When deduping the overlap region between adjacent windows, a token whose
+# global start lands within this epsilon of the last committed token's end is
+# treated as the same token re-emitted in the overlap, not a new one.
+_DEDUPE_EPSILON_S = 0.1
 
 # (text-only, with-timestamps) pair, keyed by model_id. Two adapter objects
 # wrap the same underlying ORT session — onnx-asr's adapter is lightweight,
@@ -156,10 +171,25 @@ def transcribe_file(
 
     _, ts_model = _load_model(model_id)
     logger.info("Transcribing (batch file): %s", audio_path)
-    # onnx-asr accepts a path string or numpy array for `waveform`; we pass
-    # the string so it handles the file open + resample to 16 kHz internally.
-    result = ts_model.recognize(str(audio_path), sample_rate=_SAMPLE_RATE)
-    return _result_to_dict(result, language)
+
+    samples = _load_wav_16k_mono(audio_path)
+    if samples is None:
+        # Unexpected header (not 16 kHz / 16-bit PCM, or unreadable). Let
+        # onnx-asr open + resample the file itself in a single, non-chunked
+        # pass — the pre-chunking behaviour. The diarisation splitter always
+        # hands us 16 kHz mono PCM, so this fallback is rare and the large-file
+        # memory risk it carries effectively never fires in the common path.
+        result = ts_model.recognize(str(audio_path), sample_rate=_SAMPLE_RATE)
+        return _result_to_dict(result, language)
+
+    chunk_samples = int(PARAKEET_CHUNK_DURATION_S * _SAMPLE_RATE)
+    if len(samples) <= chunk_samples:
+        # Short-file fast path: one window, no offset/dedupe bookkeeping.
+        result = ts_model.recognize(samples, sample_rate=_SAMPLE_RATE)
+        return _result_to_dict(result, language)
+
+    merged = _transcribe_windows(ts_model, samples)
+    return _result_to_dict(merged, language)
 
 
 # ---------------------------------------------------------------------------
@@ -356,3 +386,140 @@ def _empty_result() -> dict:
         "detected_language": None,
         "detected_language_probability": None,
     }
+
+
+# ---------------------------------------------------------------------------
+# Manual long-file windowing (onnx-asr has no built-in chunk_duration)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class _SimpleResult:
+    """Minimal stand-in for onnx-asr's TimestampedResult.
+
+    Exposes just the three attributes ``_result_to_dict`` /
+    ``_group_tokens_into_sentences`` read — ``text``, ``tokens``,
+    ``timestamps`` — so a merged multi-window transcript flows through the
+    exact same shaping path as a single-window TimestampedResult.
+    """
+    text: str
+    tokens: list
+    timestamps: list
+
+
+def _load_wav_16k_mono(audio_path: Path):
+    """Load a WAV as a mono float32 numpy array, or ``None`` if the header
+    isn't the 16 kHz / 16-bit PCM the diarisation splitter produces.
+
+    Returning ``None`` signals ``transcribe_file`` to fall back to onnx-asr's
+    own path-based open + resample (a single, non-chunked pass) rather than
+    guessing at an unexpected format. Stereo is downmixed by averaging.
+    """
+    import wave
+
+    import numpy as np
+
+    try:
+        with wave.open(str(audio_path), "rb") as wf:
+            n_channels = wf.getnchannels()
+            sampwidth = wf.getsampwidth()
+            framerate = wf.getframerate()
+            n_frames = wf.getnframes()
+            if sampwidth != 2 or framerate != _SAMPLE_RATE:
+                return None
+            raw = wf.readframes(n_frames)
+    except (wave.Error, EOFError, OSError) as e:
+        logger.warning("Could not read WAV %s for chunking: %s", audio_path, e)
+        return None
+
+    if not raw:
+        return None
+    samples = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
+    if n_channels > 1:
+        # Interleaved frames → average channels down to mono.
+        samples = samples.reshape(-1, n_channels).mean(axis=1)
+    return samples
+
+
+def _transcribe_windows(ts_model: Any, samples) -> _SimpleResult:
+    """Window ``samples`` into overlapping chunks, recognise each, and merge
+    the token-level results into one ``_SimpleResult`` with global timestamps.
+
+    Each window's local timestamps are offset by the window's start time; the
+    overlap region between adjacent windows is deduped by dropping any token
+    whose global start lands before the last committed token's end (minus an
+    epsilon). A single window whose ``recognize`` raises is logged and skipped,
+    so one bad window degrades to a small gap rather than failing the whole
+    meeting — but if *every* window fails (a broken model/session), we raise so
+    the caller marks it a transcription failure instead of returning an empty
+    result that would be mislabelled as silence.
+    """
+    chunk_samples = int(PARAKEET_CHUNK_DURATION_S * _SAMPLE_RATE)
+    step_samples = int((PARAKEET_CHUNK_DURATION_S - PARAKEET_CHUNK_OVERLAP_S) * _SAMPLE_RATE)
+    if step_samples <= 0:
+        # Defensive: overlap >= chunk would make us never advance.
+        step_samples = chunk_samples
+
+    merged_tokens: list = []
+    merged_timestamps: list = []
+    last_end = -1.0
+    windows_attempted = 0
+    windows_recognized = 0
+    last_error: Optional[Exception] = None
+
+    for start in range(0, len(samples), step_samples):
+        window = samples[start:start + chunk_samples]
+        if len(window) == 0:
+            break
+        chunk_start_s = start / _SAMPLE_RATE
+        windows_attempted += 1
+        try:
+            result = ts_model.recognize(window, sample_rate=_SAMPLE_RATE)
+        except Exception as e:
+            last_error = e
+            logger.warning("ONNX window at %.1fs failed, skipping: %s", chunk_start_s, e)
+            if start + chunk_samples >= len(samples):
+                break
+            continue
+        windows_recognized += 1
+
+        tokens = list(getattr(result, "tokens", None) or [])
+        timestamps = list(getattr(result, "timestamps", None) or [])
+        if len(tokens) != len(timestamps):
+            # Can't align tokens to times for this window — skip it cleanly
+            # rather than emit corrupt global timestamps.
+            logger.warning(
+                "ONNX window at %.1fs had %d tokens / %d timestamps, skipping",
+                chunk_start_s, len(tokens), len(timestamps),
+            )
+            if start + chunk_samples >= len(samples):
+                break
+            continue
+
+        for tok, ts in zip(tokens, timestamps):
+            g_start = _ts_start(ts) + chunk_start_s
+            g_end = _ts_end(ts) + chunk_start_s
+            # Drop the overlap-region re-transcription: the previous window
+            # already committed these seconds.
+            if g_start < last_end - _DEDUPE_EPSILON_S:
+                continue
+            merged_tokens.append(tok)
+            merged_timestamps.append((g_start, g_end))
+            if g_end > last_end:
+                last_end = g_end
+
+        if start + chunk_samples >= len(samples):
+            break
+
+    # Every window's recognize() raised → this is a real transcription failure,
+    # not silence. Raise so transcribe_file → transcribe_audio tags it
+    # transcription_failed and preserves the audio, rather than returning an
+    # empty result the pipeline would mislabel as "No speech detected".
+    if windows_attempted > 0 and windows_recognized == 0:
+        raise RuntimeError(
+            f"all {windows_attempted} ONNX transcription windows failed"
+        ) from last_error
+
+    text = "".join(
+        tok if isinstance(tok, str) else str(tok) for tok in merged_tokens
+    ).strip()
+    return _SimpleResult(text=text, tokens=merged_tokens, timestamps=merged_timestamps)

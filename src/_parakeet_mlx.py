@@ -36,6 +36,19 @@ DEFAULT_MODEL_ID = "mlx-community/parakeet-tdt-0.6b-v3"
 # flag is False — see src/whispercpp.py for the rationale.
 SUPPORTS_PARTIALS = True
 
+# Batch-file chunking. Without it, parakeet-mlx builds the full mel + decode
+# graph for the entire file in one shot: a 33-min meeting tries to allocate
+# ~40 GB on MLX and SIGABRTs in metal::malloc, so long meetings came back as
+# a fake-empty "no audio" transcript. With chunk_duration set, the library
+# windows the audio, overlaps each window, and merges tokens with corrected
+# global timestamps (merge_longest_contiguous) — peak memory stays bounded
+# to one window. 60 s is a conservative balance: well below the previously
+# guessed 120 s, and informed by OpenOats running 30 s on this same
+# Parakeet-MLX engine. The overlap is stitched back out by the library merge.
+# Kept equal to the ONNX backend's constants so behaviour matches per-platform.
+PARAKEET_CHUNK_DURATION_S = 60.0
+PARAKEET_CHUNK_OVERLAP_S = 15.0
+
 _MODEL_CACHE: dict[str, object] = {}
 _MODEL_LOCK = threading.Lock()
 
@@ -121,7 +134,14 @@ def transcribe_file(
 
     model = _load_model(model_id)
     logger.info("Transcribing (batch file): %s", audio_path)
-    result = model.transcribe(str(audio_path))
+    # Always chunk: the library merges the windows back into one AlignedResult
+    # with global timestamps, so _result_to_dict is unaffected, and short files
+    # (< one chunk) just transcribe in a single window for free.
+    result = model.transcribe(
+        str(audio_path),
+        chunk_duration=PARAKEET_CHUNK_DURATION_S,
+        overlap_duration=PARAKEET_CHUNK_OVERLAP_S,
+    )
     return _result_to_dict(result, language)
 
 
