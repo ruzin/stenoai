@@ -233,7 +233,7 @@ function LiveTranscriptBodyState({ status, error, segments, filtering, slow }: B
   if (status === 'loading') {
     return (
       <EmptyState
-        title="Loading speech model…"
+        title="Preparing transcription…"
         subtitle={
           slow
             ? 'Still warming up — first launch can take a moment. Audio is being captured.'

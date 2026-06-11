@@ -33,11 +33,25 @@ export function LiveDock() {
   // sidecar, so its status would sit at 'loading' forever. Only meaningful
   // while actively recording.
   const live = useLiveTranscript(liveAvailable ? recording.sessionName : null);
-  const preparing = isRecording && live.status === 'loading';
-  const prepareLabel = preparing
+  const loadingModel = isRecording && live.status === 'loading';
+  // Delay the pill label by ~500ms so a warm-cache load (the common case
+  // after the offline-loading fix) goes straight to "Recording" with no
+  // "Preparing…" flash. Labels stay short and glanceable — the full
+  // reassurance sentence lives in the transcript panel — so swapping the
+  // label doesn't resize/reflow the centered dock.
+  const [showPreparing, setShowPreparing] = React.useState(false);
+  React.useEffect(() => {
+    if (!loadingModel) return;
+    const id = window.setTimeout(() => setShowPreparing(true), 500);
+    return () => {
+      window.clearTimeout(id);
+      setShowPreparing(false);
+    };
+  }, [loadingModel]);
+  const prepareLabel = showPreparing
     ? live.slow
-      ? 'Still preparing — first launch can take a moment'
-      : 'Preparing transcription…'
+      ? 'Still preparing…'
+      : 'Preparing…'
     : null;
 
   const onPauseToggle = () => {

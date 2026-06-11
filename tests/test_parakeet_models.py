@@ -39,10 +39,13 @@ class MaybeEnableOfflineTests(unittest.TestCase):
 
     def test_does_not_override_explicit_operator_value(self):
         os.environ["HF_HUB_OFFLINE"] = "0"
+        os.environ["TRANSFORMERS_OFFLINE"] = "0"
         with patch("src.parakeet_models.is_installed", return_value=True):
             parakeet_models.maybe_enable_offline("some/model")
-        # setdefault must leave an explicit debug override (e.g. =0) intact.
+        # setdefault must leave explicit debug overrides (e.g. =0) intact for
+        # both flags.
         self.assertEqual(os.environ.get("HF_HUB_OFFLINE"), "0")
+        self.assertEqual(os.environ.get("TRANSFORMERS_OFFLINE"), "0")
 
 
 if __name__ == "__main__":

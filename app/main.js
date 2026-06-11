@@ -879,12 +879,14 @@ function spawnParakeetWarmup() {
 }
 
 function rewarmParakeet(reason) {
-  if (loadTranscriptionEngine() !== 'parakeet') return;
-  // Don't compete with an active recording — the model is already resident in
-  // the recording subprocess, so a re-warm would only duplicate the mmap.
+  // Cheap in-memory guards first, so a throttled or mid-recording focus event
+  // doesn't pay the loadTranscriptionEngine() file read. Don't compete with an
+  // active recording — the model is already resident in the recording
+  // subprocess, so a re-warm would only duplicate the mmap.
   if (currentRecordingProcess !== null || systemAudioRecordingActive || liveTranscribeProcess) return;
   const now = Date.now();
   if (now - lastParakeetWarmupAt < PARAKEET_REWARM_THROTTLE_MS) return;
+  if (loadTranscriptionEngine() !== 'parakeet') return;
   lastParakeetWarmupAt = now;
   sendDebugLog(`[parakeet-warmup] re-warm (${reason})`);
   spawnParakeetWarmup();
@@ -2329,6 +2331,9 @@ function spawnLiveTranscribe(sessionName) {
     liveTranscribeProcess = null;
     liveTranscribeSessionName = null;
     liveTranscribeStdoutBuf = '';
+    // Clear the load clock if the sidecar died before LIVE_READY, so a later
+    // path can't log a duration against this stale stamp.
+    parakeetLoadStartedAt = 0;
   });
 
   liveTranscribeProcess.on('error', (err) => {

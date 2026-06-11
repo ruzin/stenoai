@@ -151,14 +151,18 @@ export function useLiveTranscript(sessionName: string | null): UseLiveTranscript
 
   // Flip `slow` once the model has been loading past the soft threshold. The
   // 2s mark is where an unavoidable cold load stops reading as a blink and
-  // starts feeling like a hang. Resets whenever we leave the loading state
-  // (ready/error/new session), so it only ever describes the current load.
+  // starts feeling like a hang. The timer (and its reset) live off the effect
+  // body — set on timeout, cleared on leaving the loading state — so we never
+  // call setState synchronously during render. `sessionName` in the deps
+  // restarts the clock for each new recording.
   const [slow, setSlow] = React.useState(false);
   React.useEffect(() => {
-    setSlow(false);
     if (status !== 'loading') return;
     const id = window.setTimeout(() => setSlow(true), 2000);
-    return () => window.clearTimeout(id);
+    return () => {
+      window.clearTimeout(id);
+      setSlow(false);
+    };
   }, [status, sessionName]);
 
   return { status, segments, error, slow };

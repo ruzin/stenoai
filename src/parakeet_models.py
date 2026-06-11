@@ -75,6 +75,11 @@ def is_installed(model_id: str = DEFAULT_MODEL_ID) -> bool:
     Checks the HuggingFace cache directly so we don't import parakeet-mlx
     (and trigger model loading) just to answer the question — Settings polls
     this on tab load and the import cost would visibly stall the UI.
+
+    MUST stay free of any ``huggingface_hub`` import: ``maybe_enable_offline``
+    sets ``HF_HUB_OFFLINE`` and relies on the hub being import-deferred until
+    ``_load_model`` runs. Importing the hub here would snapshot the env too
+    early and silently defeat offline mode.
     """
     cache_dir = _hf_cache_dir_for(model_id)
     snapshots = cache_dir / "snapshots"
