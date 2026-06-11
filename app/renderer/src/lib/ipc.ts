@@ -581,6 +581,9 @@ export interface StenoaiBridge {
     pause: RequestFn<[], PauseRecordingResponse>;
     resume: RequestFn<[], ResumeRecordingResponse>;
     reportSystemAudioState: SendFn<[active: boolean]>;
+    /** Hint that a recording may be imminent so main can re-warm the Parakeet
+     *  model. Throttled main-side. Fire-and-forget. */
+    hintWarmup: SendFn<[]>;
     enableLoopbackAudio: RequestFn<[], void>;
     disableLoopbackAudio: RequestFn<[], void>;
     getSystemAudioSupport: RequestFn<

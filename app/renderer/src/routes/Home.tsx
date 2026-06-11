@@ -15,7 +15,7 @@ import {
   useOutlookCalendarAuth,
 } from '@/hooks/useCalendarEvents';
 import { useFolders } from '@/hooks/useFolders';
-import type { CalendarEvent, Meeting } from '@/lib/ipc';
+import { ipc, type CalendarEvent, type Meeting } from '@/lib/ipc';
 import { navigate } from '@/lib/router';
 
 interface HomeProps {
@@ -58,6 +58,15 @@ export function Home({ mode }: HomeProps) {
     if (mode !== 'home') return;
     const id = setInterval(() => setUpcomingTickMs(Date.now()), 60_000);
     return () => clearInterval(id);
+  }, [mode]);
+
+  // Landing on Home is a recording-intent signal — nudge main to re-warm the
+  // Parakeet model so the first record isn't a cold load. Fire-and-forget;
+  // main throttles + skips while recording, so calling on every Home entry is
+  // safe.
+  React.useEffect(() => {
+    if (mode !== 'home') return;
+    ipc().recording.hintWarmup();
   }, [mode]);
 
   // Today's relevant events: anything that overlaps with today AND

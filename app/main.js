@@ -738,6 +738,10 @@ function createWindow(options = {}) {
     }
   });
 
+  // Returning to the window is the strongest "about to record" signal — keep
+  // the Parakeet model hot. Throttled + recording-guarded inside rewarmParakeet.
+  mainWindow.on('focus', () => rewarmParakeet('window-focus'));
+
   mainWindow.on('closed', () => {
     mainWindow = null;
     rendererShortcutReady = false;
@@ -845,9 +849,53 @@ function updateTrayMenu() {
   tray.setContextMenu(contextMenu);
 }
 
+// ── Parakeet warm-up ────────────────────────────────────────────────────
+// The backend is stateless, so the model is reloaded once per recording
+// subprocess. We pre-load it into the OS page cache at launch and again at
+// recording-intent moments — the page cache can be evicted hours after
+// launch, which is a big part of "first record is sometimes slow." Re-warming
+// on window focus / activate / a renderer hint keeps it hot right before the
+// user records. Module-scoped so createWindow's focus handler can reach it.
+let lastParakeetWarmupAt = 0;
+const PARAKEET_REWARM_THROTTLE_MS = 5 * 60 * 1000;
+// Stamped when a live transcription subprocess spawns; logged against
+// LIVE_READY to measure real model-load latency in the field.
+let parakeetLoadStartedAt = 0;
+
+function spawnParakeetWarmup() {
+  try {
+    const warmupProc = spawn(getBackendPath(), ['warmup-parakeet'], {
+      cwd: getBackendCwd(),
+      stdio: 'ignore',
+      windowsHide: true,
+    });
+    warmupProc.unref();
+    warmupProc.on('error', (err) => {
+      sendDebugLog(`[parakeet-warmup] spawn failed (non-fatal): ${err.message}`);
+    });
+  } catch (e) {
+    sendDebugLog(`[parakeet-warmup] startup error (non-fatal): ${e.message}`);
+  }
+}
+
+function rewarmParakeet(reason) {
+  // Cheap in-memory guards first, so a throttled or mid-recording focus event
+  // doesn't pay the loadTranscriptionEngine() file read. Don't compete with an
+  // active recording — the model is already resident in the recording
+  // subprocess, so a re-warm would only duplicate the mmap.
+  if (currentRecordingProcess !== null || systemAudioRecordingActive || liveTranscribeProcess) return;
+  const now = Date.now();
+  if (now - lastParakeetWarmupAt < PARAKEET_REWARM_THROTTLE_MS) return;
+  if (loadTranscriptionEngine() !== 'parakeet') return;
+  lastParakeetWarmupAt = now;
+  sendDebugLog(`[parakeet-warmup] re-warm (${reason})`);
+  spawnParakeetWarmup();
+}
+
 if (!gotSingleInstanceLock) {
   app.quit();
 } else {
+  ipcMain.on('warmup-parakeet-hint', () => rewarmParakeet('renderer-hint'));
   app.on('second-instance', (event, argv) => {
     const shortcutUrl = extractShortcutUrlFromArgv(argv);
     if (shortcutUrl) {
@@ -1050,18 +1098,8 @@ if (!gotSingleInstanceLock) {
     // (Parakeet model would be downloading or absent) and gated on
     // model presence by the CLI command itself (no-ops when missing).
     if (loadTranscriptionEngine() === 'parakeet') {
-      try {
-        const warmupProc = spawn(getBackendPath(), ['warmup-parakeet'], {
-          cwd: getBackendCwd(),
-          stdio: 'ignore',
-        });
-        warmupProc.unref();
-        warmupProc.on('error', (err) => {
-          sendDebugLog(`[parakeet-warmup] spawn failed (non-fatal): ${err.message}`);
-        });
-      } catch (e) {
-        sendDebugLog(`[parakeet-warmup] startup error (non-fatal): ${e.message}`);
-      }
+      lastParakeetWarmupAt = Date.now();
+      spawnParakeetWarmup();
     }
 
     createWindow();
@@ -1178,6 +1216,7 @@ if (!gotSingleInstanceLock) {
   });
 
   app.on('activate', () => {
+    rewarmParakeet('activate');
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore();
       // Only show if the window has finished its initial load.
@@ -2259,6 +2298,7 @@ function spawnLiveTranscribe(sessionName) {
   const env = Object.keys(aiEnv).length > 0
     ? { ...require('process').env, ...aiEnv }
     : undefined;
+  parakeetLoadStartedAt = Date.now();
   liveTranscribeProcess = spawn(getBackendPath(), ['transcribe-stream'], {
     cwd: getBackendCwd(),
     env,
@@ -2291,6 +2331,9 @@ function spawnLiveTranscribe(sessionName) {
     liveTranscribeProcess = null;
     liveTranscribeSessionName = null;
     liveTranscribeStdoutBuf = '';
+    // Clear the load clock if the sidecar died before LIVE_READY, so a later
+    // path can't log a duration against this stale stamp.
+    parakeetLoadStartedAt = 0;
   });
 
   liveTranscribeProcess.on('error', (err) => {
@@ -2326,6 +2369,10 @@ function spawnLiveTranscribe(sessionName) {
 function handleLiveTranscribeLine(line) {
   const sessionName = liveTranscribeSessionName;
   if (line.startsWith('LIVE_READY:')) {
+    if (parakeetLoadStartedAt) {
+      sendDebugLog(`[parakeet-load] model ready in ${Date.now() - parakeetLoadStartedAt}ms (transcribe-stream)`);
+      parakeetLoadStartedAt = 0;
+    }
     liveTranscriptState.ready = true;
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('live-transcript-ready', { sessionName });
@@ -2927,6 +2974,9 @@ ipcMain.handle('start-recording-ui', async (_, sessionName) => {
     // the WAV via WhisperTranscriber.
     const recordArgs = ['record', '7200', actualSessionName];
     if (liveEnabled) recordArgs.push('--live');
+    // Only the --live (Parakeet) path emits LIVE_READY; stamp the load clock
+    // so we can log model-load latency against it below.
+    if (liveEnabled) parakeetLoadStartedAt = Date.now();
     currentRecordingProcess = spawn(getBackendPath(), recordArgs, {
       cwd: getBackendCwd(),
       env: Object.keys(recordEnv).length > 0 ? { ...require('process').env, ...recordEnv } : undefined
@@ -2991,6 +3041,10 @@ ipcMain.handle('start-recording-ui', async (_, sessionName) => {
         } else if (line.startsWith('LIVE_READY:')) {
           // Model finished loading — UI uses this to swap "Loading…" for
           // the empty consent-only state.
+          if (parakeetLoadStartedAt) {
+            sendDebugLog(`[parakeet-load] model ready in ${Date.now() - parakeetLoadStartedAt}ms (record --live)`);
+            parakeetLoadStartedAt = 0;
+          }
           liveTranscriptState.ready = true;
           if (mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.webContents.send('live-transcript-ready', {

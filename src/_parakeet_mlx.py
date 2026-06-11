@@ -59,6 +59,13 @@ def _load_model(model_id: str):
         cached = _MODEL_CACHE.get(model_id)
         if cached is not None:
             return cached
+        # Force offline resolution when the model is already cached so this
+        # load makes no HuggingFace Hub network call. MUST run before the hub
+        # is imported transitively by parakeet-mlx — huggingface_hub reads
+        # HF_HUB_OFFLINE at import time. Gated on is_installed inside, so a
+        # fresh download is left online.
+        from src.parakeet_models import maybe_enable_offline
+        maybe_enable_offline(model_id)
         try:
             from parakeet_mlx import from_pretrained
         except ImportError as e:

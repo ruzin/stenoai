@@ -107,6 +107,10 @@ const stenoai = {
     pickAudioFile: () => invoke('select-audio-file'),
     getQueue: () => invoke('get-queue-status'),
     getDir: () => invoke('get-recordings-dir'),
+    // Hint that a recording may be imminent (e.g. user landed on Home) so
+    // main can re-warm the Parakeet model into the OS page cache. Throttled
+    // main-side; safe to call freely. Fire-and-forget.
+    hintWarmup: () => send('warmup-parakeet-hint'),
   },
 
   liveTranscript: {

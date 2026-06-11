@@ -75,6 +75,11 @@ def is_installed(model_id: str = DEFAULT_MODEL_ID) -> bool:
     Checks the HuggingFace cache directly so we don't import parakeet-mlx
     (and trigger model loading) just to answer the question — Settings polls
     this on tab load and the import cost would visibly stall the UI.
+
+    MUST stay free of any ``huggingface_hub`` import: ``maybe_enable_offline``
+    sets ``HF_HUB_OFFLINE`` and relies on the hub being import-deferred until
+    ``_load_model`` runs. Importing the hub here would snapshot the env too
+    early and silently defeat offline mode.
     """
     cache_dir = _hf_cache_dir_for(model_id)
     snapshots = cache_dir / "snapshots"
@@ -84,6 +89,34 @@ def is_installed(model_id: str = DEFAULT_MODEL_ID) -> bool:
         if snap.is_dir() and any(snap.iterdir()):
             return True
     return False
+
+
+def maybe_enable_offline(model_id: str = DEFAULT_MODEL_ID) -> bool:
+    """Force fully-offline HuggingFace resolution when the model is already
+    on disk, so loading a cached model makes ZERO network calls (and can't
+    hang on a flaky network). Returns whether offline mode was enabled.
+
+    ``huggingface_hub`` reads ``HF_HUB_OFFLINE`` once, at import time, so this
+    must run BEFORE the hub is first imported. The backends call it at the top
+    of ``_load_model``, immediately before importing parakeet-mlx / onnx-asr,
+    which is the latest-safe and only symmetric point.
+
+    Gated on ``is_installed`` so a first-ever run (model absent) is left
+    online and ``download`` proceeds normally — offline-loading a
+    just-downloaded model is correct. Edge case: ``is_installed`` only checks
+    that a snapshot dir is non-empty, so a corrupt/partial snapshot would read
+    as installed and offline mode would then block a repair re-fetch. Low
+    probability and accepted — the existing code already trusts
+    ``is_installed``.
+
+    ``setdefault`` so an operator who explicitly exported ``HF_HUB_OFFLINE=0``
+    for debugging isn't overridden.
+    """
+    if not is_installed(model_id):
+        return False
+    os.environ.setdefault("HF_HUB_OFFLINE", "1")
+    os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+    return True
 
 
 def download(

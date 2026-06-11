@@ -84,6 +84,13 @@ def _load_model(model_id: str) -> tuple[Any, Any]:
         cached = _MODEL_CACHE.get(model_id)
         if cached is not None:
             return cached
+        # Force offline resolution when the model is already cached so this
+        # load makes no HuggingFace Hub network call. MUST run before onnx-asr
+        # (and thus huggingface_hub) is imported — HF_HUB_OFFLINE is read at
+        # import time. Gated on is_installed inside, so a fresh download is
+        # left online.
+        from src.parakeet_models import maybe_enable_offline
+        maybe_enable_offline(model_id)
         try:
             import onnx_asr
         except ImportError as e:
