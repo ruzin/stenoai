@@ -692,7 +692,20 @@ class WhisperTranscriber:
             logger.error(f"Error during transcription: {e}")
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
-            return None
+            # A crash here (e.g. an MLX metal::malloc OOM on a long file) is NOT
+            # silence. Return a tagged dict so callers can preserve the audio and
+            # surface a real, reprocessable error instead of saving a fake-empty
+            # meeting. `None` stays reserved for the missing-file case above so
+            # existing "None means no file" callers are unchanged.
+            return {
+                "text": None,
+                "segments": [],
+                "duration_seconds": None,
+                "detected_language": None,
+                "detected_language_probability": None,
+                "transcription_failed": True,
+                "error": str(e),
+            }
 
     def _split_stereo_to_channels(self, audio_filepath: Path) -> Tuple[Optional[Path], Optional[Path], Optional[float]]:
         """Detect stereo and split into mono mic + system channel files.
@@ -825,11 +838,16 @@ class WhisperTranscriber:
             system_segments: list[dict] = []
             detected_language = None
             detected_language_probability = None
+            channel_failed = False
+            channel_error: Optional[str] = None
 
             if mic_has_audio:
                 logger.info("Transcribing mic channel (You)...")
                 mic_result = self.transcribe_audio(mic_path, language)
-                if mic_result and mic_result.get("text"):
+                if mic_result and mic_result.get("transcription_failed"):
+                    channel_failed = True
+                    channel_error = channel_error or mic_result.get("error")
+                elif mic_result and mic_result.get("text"):
                     mic_segments = mic_result.get("segments") or []
                     if not detected_language and mic_result.get("detected_language"):
                         detected_language = mic_result["detected_language"]
@@ -840,13 +858,32 @@ class WhisperTranscriber:
             if system_has_audio:
                 logger.info("Transcribing system channel (Others)...")
                 sys_result = self.transcribe_audio(system_path, language)
-                if sys_result and sys_result.get("text"):
+                if sys_result and sys_result.get("transcription_failed"):
+                    channel_failed = True
+                    channel_error = channel_error or sys_result.get("error")
+                elif sys_result and sys_result.get("text"):
                     system_segments = sys_result.get("segments") or []
                     if not detected_language and sys_result.get("detected_language"):
                         detected_language = sys_result["detected_language"]
                         detected_language_probability = sys_result.get("detected_language_probability")
             else:
                 logger.info("System channel is silent, skipping")
+
+            # A crash on either channel is not silence. Bail before assembling a
+            # transcript so the caller preserves the audio and surfaces a real
+            # error instead of saving a partial/fake-empty meeting.
+            if channel_failed:
+                logger.error("Diarised transcription failed on a channel: %s", channel_error)
+                return {
+                    "text": None,
+                    "diarised_text": None,
+                    "is_diarised": False,
+                    "duration_seconds": duration,
+                    "detected_language": detected_language,
+                    "detected_language_probability": detected_language_probability,
+                    "transcription_failed": True,
+                    "error": channel_error or "transcription failed",
+                }
 
             # Speaker-bleed correction runs in two passes:
             #

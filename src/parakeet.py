@@ -24,6 +24,8 @@ import sys
 if sys.platform == "darwin":
     from src._parakeet_mlx import (  # noqa: F401
         DEFAULT_MODEL_ID,
+        PARAKEET_CHUNK_DURATION_S,
+        PARAKEET_CHUNK_OVERLAP_S,
         SUPPORTS_PARTIALS,
         ensure_loaded,
         model_sample_rate,
@@ -33,6 +35,8 @@ if sys.platform == "darwin":
 else:
     from src._parakeet_onnx import (  # noqa: F401
         DEFAULT_MODEL_ID,
+        PARAKEET_CHUNK_DURATION_S,
+        PARAKEET_CHUNK_OVERLAP_S,
         SUPPORTS_PARTIALS,
         ensure_loaded,
         model_sample_rate,
@@ -42,6 +46,8 @@ else:
 
 __all__ = [
     "DEFAULT_MODEL_ID",
+    "PARAKEET_CHUNK_DURATION_S",
+    "PARAKEET_CHUNK_OVERLAP_S",
     "SUPPORTS_PARTIALS",
     "ensure_loaded",
     "model_sample_rate",

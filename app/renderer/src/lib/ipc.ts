@@ -442,6 +442,12 @@ export interface ProcessingCompleteEvent {
    *  app-level cleanup find the matching streamCache entry to clear
    *  even when MeetingDetail unmounted mid-reprocess. */
   summaryFile?: string;
+  /** Set when the backend gracefully marked a transcription crash: the
+   *  audio was preserved and a reprocessable meeting was saved, so the
+   *  flow still succeeds (success: true) but the renderer should surface
+   *  the failure honestly rather than treat it as a normal note. */
+  transcriptionFailed?: boolean;
+  transcriptionError?: string;
 }
 export interface QueryChunkEvent {
   queryId: string;

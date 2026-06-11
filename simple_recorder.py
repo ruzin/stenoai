@@ -113,6 +113,30 @@ def _atomic_write_json(path: Path, payload) -> None:
         raise
 
 
+def _render_frontmatter(meta: dict) -> list[str]:
+    """Render a meeting .md YAML frontmatter block (including the enclosing
+    ``---`` fences) from a flat dict, with the type-specific scalar
+    formatting the streaming save paths use.
+
+    Shared by ``process_recording_streaming``, ``process_streaming`` and the
+    transcription-failure writer so the frontmatter format stays in one place.
+    ``bool`` is checked before ``int`` because ``bool`` is an ``int`` subclass.
+    """
+    lines = ['---']
+    for k, v in meta.items():
+        if v is None:
+            lines.append(f'{k}: null')
+        elif isinstance(v, bool):
+            lines.append(f'{k}: {"true" if v else "false"}')
+        elif isinstance(v, int):
+            lines.append(f'{k}: {v}')
+        else:
+            escaped = str(v).replace('\\', '\\\\').replace('"', '\\"')
+            lines.append(f'{k}: "{escaped}"')
+    lines.append('---')
+    return lines
+
+
 class SimpleRecorder:
     """Simple audio recorder and transcriber."""
     
@@ -362,6 +386,20 @@ class SimpleRecorder:
         # Transcribe with diarisation support (stereo → [You]/[Others])
         transcript_result = self.transcriber.transcribe_diarised(audio_path, language=configured_language)
 
+        # A transcription crash (e.g. an OOM on a long file) is not silence:
+        # propagate the flag and skip writing a normal transcript file so the
+        # caller preserves the audio and saves a marked, reprocessable meeting
+        # instead of a fake-empty one.
+        if isinstance(transcript_result, dict) and transcript_result.get("transcription_failed"):
+            return {
+                "audio_file": str(audio_path),
+                "session_name": session_name,
+                "duration_seconds": transcript_result.get("duration_seconds"),
+                "configured_language": configured_language,
+                "transcription_failed": True,
+                "error": transcript_result.get("error") or "transcription failed",
+            }
+
         # Handle different return types
         duration_seconds = None
         detected_language = None
@@ -493,6 +531,78 @@ Transcript:
                 "action_items": []
             }
     
+    def _handle_transcription_failure(
+        self,
+        audio_path: Path,
+        session_name: str,
+        transcript_data: dict,
+        notes_text: Optional[str] = None,
+    ) -> dict:
+        """Save a marked, reprocessable meeting when transcription crashed.
+
+        A crash (e.g. an MLX OOM on a long file) is not silence. Rather than
+        summarise a fake-empty transcript and delete the recording, we:
+
+        * **preserve** the source audio regardless of ``keep_recordings`` —
+          it's the only copy and the retry material;
+        * **skip** Ollama summarisation entirely;
+        * write a clearly-marked ``<stem>_summary.md`` with
+          ``transcription_failed`` / ``reprocessable`` / ``audio_file`` so the
+          meeting surfaces honestly and can be retried later;
+        * emit ``TRANSCRIPTION_FAILED:`` (for an honest error toast) alongside
+          ``SAVED:`` (so the renderer still navigates to the marked meeting).
+        """
+        error = str(transcript_data.get("error") or "transcription failed")
+        short_error = error[:200]
+        summary_path = self.output_dir / f"{audio_path.stem}_summary.md"
+        processed_at = datetime.now().isoformat()
+        duration_seconds = transcript_data.get("duration_seconds")
+        md_meta = {
+            'title': session_name,
+            'date': processed_at,
+            'duration_seconds': int(duration_seconds) if duration_seconds else None,
+            'language': transcript_data.get("configured_language"),
+            'is_diarised': False,
+            'transcription_failed': True,
+            'reprocessable': True,
+            'audio_file': str(audio_path),
+            'error': short_error,
+        }
+        md_lines = _render_frontmatter(md_meta)
+        md_lines.append('')
+        md_lines.append(
+            'Transcription failed; the recording was preserved and can be retried.'
+        )
+        if notes_text:
+            md_lines.append('')
+            md_lines.append('## User Notes')
+            md_lines.append('')
+            md_lines.append(notes_text)
+        summary_path.write_text('\n'.join(md_lines), encoding='utf-8')
+
+        print(f"⚠️ Transcription failed; preserved audio: {audio_path}")
+        print(f"TRANSCRIPTION_FAILED:{short_error}", flush=True)
+        print(f"SAVED:{summary_path}", flush=True)
+
+        # Clear recording state (the recording itself is done; only its
+        # transcription failed) so a stale state file doesn't linger.
+        state_file = Path("recorder_state.json")
+        if state_file.exists():
+            try:
+                state_file.unlink()
+            except Exception:
+                pass
+
+        return {
+            "session_info": {
+                "name": session_name,
+                "audio_file": str(audio_path),
+                "summary_file": str(summary_path),
+                "transcription_failed": True,
+                "error": short_error,
+            }
+        }
+
     async def process_recording(self, audio_file: str, session_name: str = "Recording", notes_text: Optional[str] = None) -> dict:
         """Complete processing: transcribe + summarize."""
         print(f"🔄 Processing recording: {audio_file}")
@@ -510,6 +620,11 @@ Transcript:
         
         # Step 1: Transcribe (also returns duration from the converted WAV)
         transcript_data = await self.transcribe_audio(audio_file, session_name)
+
+        # A transcription crash is not silence — preserve the audio and save a
+        # marked, reprocessable meeting instead of summarising a fake-empty one.
+        if transcript_data.get("transcription_failed"):
+            return self._handle_transcription_failure(audio_path, session_name, transcript_data, notes_text)
 
         # Determine duration: use transcriber's value (works for all formats)
         duration_seconds = transcript_data.get("duration_seconds")
@@ -623,6 +738,12 @@ Transcript:
 
         # Step 1: Transcribe
         transcript_data = await self.transcribe_audio(audio_file, session_name)
+
+        # A transcription crash is not silence — preserve the audio and save a
+        # marked, reprocessable meeting instead of summarising a fake-empty one.
+        if transcript_data.get("transcription_failed"):
+            return self._handle_transcription_failure(audio_path, session_name, transcript_data, notes_text)
+
         transcript_text = transcript_data.get("transcript_text", "")
         diarised_text = transcript_data.get("diarised_text")
         text_for_summary = diarised_text or transcript_text
@@ -678,7 +799,6 @@ Transcript:
         # Step 5: Save as .md (primary format for new meetings)
         summary_path = self.output_dir / f"{audio_path.stem}_summary.md"
         processed_at = datetime.now().isoformat()
-        md_lines = ['---']
         md_meta = {
             'title': session_name,
             'date': processed_at,
@@ -686,17 +806,7 @@ Transcript:
             'language': output_language,
             'is_diarised': transcript_data.get('is_diarised', False),
         }
-        for k, v in md_meta.items():
-            if v is None:
-                md_lines.append(f'{k}: null')
-            elif isinstance(v, bool):
-                md_lines.append(f'{k}: {"true" if v else "false"}')
-            elif isinstance(v, int):
-                md_lines.append(f'{k}: {v}')
-            else:
-                escaped = str(v).replace('\\', '\\\\').replace('"', '\\"')
-                md_lines.append(f'{k}: "{escaped}"')
-        md_lines.append('---')
+        md_lines = _render_frontmatter(md_meta)
         md_lines.append('')
         md_lines.append(streamed_md)
         md_lines.append('')
@@ -970,6 +1080,14 @@ def process_streaming(audio_file, name, notes):
 
         # Step 1: Transcribe
         transcript_data = await recorder.transcribe_audio(audio_file, name)
+
+        # A transcription crash (e.g. an MLX OOM on a long system-audio
+        # recording) is not silence — preserve the audio and save a marked,
+        # reprocessable meeting instead of summarising a fake-empty one.
+        if transcript_data.get("transcription_failed"):
+            recorder._handle_transcription_failure(Path(audio_file), name, transcript_data, notes_text)
+            return
+
         transcript_text = transcript_data.get("transcript_text", "")
         diarised_text = transcript_data.get("diarised_text")
         text_for_summary = diarised_text or transcript_text
@@ -1026,7 +1144,6 @@ def process_streaming(audio_file, name, notes):
         # Save as .md only (primary format for new meetings)
         summary_path = summary_path.with_suffix('.md')
         processed_at = datetime.now().isoformat()
-        md_lines = ['---']
         md_meta = {
             'title': session_name,
             'date': processed_at,
@@ -1034,17 +1151,7 @@ def process_streaming(audio_file, name, notes):
             'language': output_language,
             'is_diarised': transcript_data.get('is_diarised', False),
         }
-        for k, v in md_meta.items():
-            if v is None:
-                md_lines.append(f'{k}: null')
-            elif isinstance(v, bool):
-                md_lines.append(f'{k}: {"true" if v else "false"}')
-            elif isinstance(v, int):
-                md_lines.append(f'{k}: {v}')
-            else:
-                escaped = str(v).replace('\\', '\\\\').replace('"', '\\"')
-                md_lines.append(f'{k}: "{escaped}"')
-        md_lines.append('---')
+        md_lines = _render_frontmatter(md_meta)
         md_lines.append('')
         md_lines.append(streamed_md)
         md_lines.append('')
@@ -1226,7 +1333,35 @@ def onnx_selftest_cmd():
         # package metadata copied into the bundle (copy_metadata in the spec).
         if sys.platform != "darwin":
             import onnx_asr  # noqa: F401
-        print(f"ONNX_SELFTEST_OK prob={float(prob):.4f}")
+
+        # Long-file windowing self-check. The actual ASR weights (670 MB)
+        # aren't in CI, so we can't recognise real audio here — but we CAN
+        # prove the manual windowing in _parakeet_onnx.transcribe_file slices
+        # a >120 s array into multiple windows and merges them, end-to-end in
+        # the frozen bundle, by driving it with a stub recogniser. This catches
+        # a numpy/slicing bundling gap or a windowing regression offline.
+        from src import _parakeet_onnx as _onnx
+        long_samples = np.zeros(130 * _onnx._SAMPLE_RATE, dtype=np.float32)
+
+        class _CountingModel:
+            def __init__(self):
+                self.calls = 0
+
+            def recognize(self, window, sample_rate=None):
+                self.calls += 1
+                from types import SimpleNamespace
+                return SimpleNamespace(text="", tokens=[], timestamps=[])
+
+        counter = _CountingModel()
+        merged = _onnx._transcribe_windows(counter, long_samples)
+        if counter.calls < 2:
+            raise RuntimeError(
+                f"windowing produced {counter.calls} window(s) for a 130 s array; expected >= 2"
+            )
+        if not isinstance(merged, _onnx._SimpleResult):
+            raise RuntimeError("windowing did not return a _SimpleResult")
+
+        print(f"ONNX_SELFTEST_OK prob={float(prob):.4f} windows={counter.calls}")
     except Exception as e:
         print(f"ONNX_SELFTEST_FAIL: {e}", file=sys.stderr)
         sys.exit(1)
