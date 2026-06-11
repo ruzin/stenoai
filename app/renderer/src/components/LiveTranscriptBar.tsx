@@ -40,7 +40,7 @@ export function LiveTranscriptBar() {
   const isRecording = recording.status === 'recording';
   const stopped = !paused && !isRecording;
 
-  const { status, segments, error } = useLiveTranscript(sessionName);
+  const { status, segments, error, slow } = useLiveTranscript(sessionName);
 
   const open = useLiveTranscriptOpen((s) => s.open);
   const setOpen = useLiveTranscriptOpen((s) => s.setOpen);
@@ -164,6 +164,7 @@ export function LiveTranscriptBar() {
             error={error}
             segments={filtered}
             filtering={query.trim().length > 0}
+            slow={slow}
           />
         </div>
 
@@ -215,9 +216,10 @@ interface BodyStateProps {
   error: { stage: string; message?: string } | null;
   segments: ReturnType<typeof useLiveTranscript>['segments'];
   filtering: boolean;
+  slow: boolean;
 }
 
-function LiveTranscriptBodyState({ status, error, segments, filtering }: BodyStateProps) {
+function LiveTranscriptBodyState({ status, error, segments, filtering, slow }: BodyStateProps) {
   if (status === 'error' && error) {
     return (
       <EmptyState
@@ -232,7 +234,11 @@ function LiveTranscriptBodyState({ status, error, segments, filtering }: BodySta
     return (
       <EmptyState
         title="Loading speech model…"
-        subtitle="Parakeet is warming up. Audio is being captured."
+        subtitle={
+          slow
+            ? 'Still warming up — first launch can take a moment. Audio is being captured.'
+            : 'Parakeet is warming up. Audio is being captured.'
+        }
       />
     );
   }

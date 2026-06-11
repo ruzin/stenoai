@@ -2,6 +2,7 @@ import * as React from 'react';
 import { Pause, Play, Square } from 'lucide-react';
 import { AudioWave } from '@/components/AudioWave';
 import { useRecording } from '@/hooks/useRecording';
+import { useLiveTranscript } from '@/hooks/useLiveTranscript';
 import { useLiveTranscriptOpen } from '@/hooks/liveTranscriptOpenStore';
 import { useTranscriptionEngine } from '@/hooks/useModels';
 import { formatElapsed } from '@/lib/utils';
@@ -26,6 +27,19 @@ export function LiveDock() {
   const isRecording = recording.status === 'recording';
   const stopped = !paused && !isRecording;
 
+  // Surface model warm-up on the pill itself, since the transcript panel
+  // (which already shows a loading state) is usually closed while recording.
+  // Gated to Parakeet via `liveAvailable` — Whisper never spawns the live
+  // sidecar, so its status would sit at 'loading' forever. Only meaningful
+  // while actively recording.
+  const live = useLiveTranscript(liveAvailable ? recording.sessionName : null);
+  const preparing = isRecording && live.status === 'loading';
+  const prepareLabel = preparing
+    ? live.slow
+      ? 'Still preparing — first launch can take a moment'
+      : 'Preparing transcription…'
+    : null;
+
   const onPauseToggle = () => {
     if (paused) void recording.resumeRecording();
     else if (isRecording) void recording.pauseRecording();
@@ -49,6 +63,7 @@ export function LiveDock() {
           paused={paused}
           stopped={stopped}
           elapsedSeconds={recording.elapsed}
+          prepareLabel={prepareLabel}
         />
         {/* Transcript toggle — Parakeet only. Whisper recordings have no
             live drawer (post-stop pipeline produces the final transcript
@@ -118,12 +133,23 @@ function RecordingPill({
   paused,
   stopped,
   elapsedSeconds,
+  prepareLabel,
 }: {
   paused: boolean;
   stopped: boolean;
   elapsedSeconds: number;
+  prepareLabel?: string | null;
 }) {
-  const label = stopped ? 'Processing' : paused ? 'Paused' : 'Recording';
+  // While the model warms, the recording is already capturing audio — keep
+  // the wave + elapsed timer and only swap the label so the user sees we're
+  // recording but transcription isn't live yet.
+  const label = prepareLabel
+    ? prepareLabel
+    : stopped
+      ? 'Processing'
+      : paused
+        ? 'Paused'
+        : 'Recording';
   const active = !stopped;
   return (
     <span

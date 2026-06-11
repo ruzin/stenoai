@@ -14,6 +14,10 @@ export interface UseLiveTranscriptResult {
   /** Last error reported by the Python consumer (model load failure, MLX
    *  missing, etc.). Null on success. */
   error: { stage: string; message?: string } | null;
+  /** True once the model has been in `loading` for longer than the soft
+   *  threshold (~2s) — lets the UI soften "preparing" copy to acknowledge
+   *  an unavoidable cold load rather than looking frozen. */
+  slow: boolean;
 }
 
 /**
@@ -145,5 +149,17 @@ export function useLiveTranscript(sessionName: string | null): UseLiveTranscript
         ? 'streaming'
         : 'loading';
 
-  return { status, segments, error };
+  // Flip `slow` once the model has been loading past the soft threshold. The
+  // 2s mark is where an unavoidable cold load stops reading as a blink and
+  // starts feeling like a hang. Resets whenever we leave the loading state
+  // (ready/error/new session), so it only ever describes the current load.
+  const [slow, setSlow] = React.useState(false);
+  React.useEffect(() => {
+    setSlow(false);
+    if (status !== 'loading') return;
+    const id = window.setTimeout(() => setSlow(true), 2000);
+    return () => window.clearTimeout(id);
+  }, [status, sessionName]);
+
+  return { status, segments, error, slow };
 }
