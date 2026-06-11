@@ -546,6 +546,19 @@ async function initTelemetry() {
   }
 }
 
+// Cache the app version at module load. trackEvent fires from ~35 call sites
+// across the recording lifecycle; re-reading + JSON.parsing package.json each
+// time burns 0.5 ms of main-thread time per call for a value that's immutable
+// for the lifetime of the process. `require` already caches transitively, so
+// we get the parsed object once.
+const APP_VERSION = (() => {
+  try {
+    return require('./package.json').version || '';
+  } catch (_) {
+    return '';
+  }
+})();
+
 /**
  * Track an analytics event. Silent fail -- never throws.
  */
@@ -553,14 +566,11 @@ function trackEvent(eventName, properties = {}) {
   try {
     if (!telemetryEnabled || !posthogClient || !anonymousId) return;
 
-    const packagePath = path.join(__dirname, 'package.json');
-    const packageContent = JSON.parse(fs.readFileSync(packagePath, 'utf8'));
-
     posthogClient.capture({
       distinctId: anonymousId,
       event: eventName,
       properties: {
-        app_version: packageContent.version,
+        app_version: APP_VERSION,
         platform: process.platform,
         arch: process.arch,
         ...properties

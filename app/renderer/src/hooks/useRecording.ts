@@ -14,6 +14,52 @@ export type RecordingStatus = 'idle' | 'recording' | 'paused' | 'processing';
 
 const queueKey = ['recording', 'queue'] as const;
 
+// ── Shared window-visibility subscription ───────────────────────────────
+//
+// `useRecording` is consumed by 12+ components. If each consumer manages
+// its own `visibilitychange` listener + useState, we end up with N
+// listeners on `document` and N re-renders per consumer on every
+// visibility flip. Hoist to module scope: one listener total, broadcast
+// to subscribers via `useSyncExternalStore` so React still re-renders
+// each consumer correctly.
+const visibilitySubscribers = new Set<() => void>();
+let visibilityListenerInstalled = false;
+
+function ensureVisibilityListener() {
+  if (visibilityListenerInstalled || typeof document === 'undefined') return;
+  document.addEventListener('visibilitychange', () => {
+    for (const cb of visibilitySubscribers) cb();
+  });
+  visibilityListenerInstalled = true;
+}
+
+function subscribeVisibility(callback: () => void): () => void {
+  ensureVisibilityListener();
+  visibilitySubscribers.add(callback);
+  return () => {
+    visibilitySubscribers.delete(callback);
+  };
+}
+
+function getVisibilitySnapshot(): boolean {
+  return typeof document !== 'undefined'
+    ? document.visibilityState === 'visible'
+    : true;
+}
+
+// SSR fallback. Renderer-only today, but keeps useSyncExternalStore happy.
+function getVisibilityServerSnapshot(): boolean {
+  return true;
+}
+
+function useIsWindowVisible(): boolean {
+  return React.useSyncExternalStore(
+    subscribeVisibility,
+    getVisibilitySnapshot,
+    getVisibilityServerSnapshot,
+  );
+}
+
 /** Stable empty-Set sentinel so consumers (useMeetings) don't see a
  *  fresh reference each render when there are no active reprocesses —
  *  keeps their useMemo deps shallow-equal and avoids re-mapping the
@@ -23,6 +69,11 @@ const EMPTY_REPROCESS_SET: ReadonlySet<string> = new Set<string>();
 export function useRecording() {
   const qc = useQueryClient();
 
+  // Backed by a shared module-level listener (see useIsWindowVisible at
+  // the top of this file) so 12+ useRecording consumers don't each
+  // attach their own document listener.
+  const isVisible = useIsWindowVisible();
+
   const queue = useQuery({
     queryKey: queueKey,
     queryFn: async () => {
@@ -30,7 +81,14 @@ export function useRecording() {
       if (!res.success) throw new Error(res.error);
       return res;
     },
-    refetchInterval: (query) => (query.state.data?.hasRecording ? 1000 : 2000),
+    refetchInterval: (query) => {
+      // Hidden: 10s regardless of state. The user can't see a 1s update
+      // anyway; when they bring the window back, react-query's
+      // refetchOnWindowFocus + the visibilitychange listener flipping
+      // isVisible will both trigger a fresh fetch.
+      if (!isVisible) return 10_000;
+      return query.state.data?.hasRecording ? 1000 : 2000;
+    },
   });
 
   const status: RecordingStatus = React.useMemo(() => {
