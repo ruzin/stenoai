@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell, systemPreferences, globalShortcut, safeStorage, Tray, Menu, nativeImage, Notification } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, systemPreferences, globalShortcut, safeStorage, Tray, Menu, nativeImage, Notification, powerMonitor } = require('electron');
 
 // Prevent EPIPE crashes when stdout/stderr pipe is broken (e.g. launching terminal closed)
 process.stdout?.on('error', () => {});
@@ -1106,6 +1106,11 @@ if (!gotSingleInstanceLock) {
     if (!IS_E2E) createTray();
     setupAutoUpdater();
     setupAutoMeetingDetector();
+
+    // Auto-pause active recordings when the machine sleeps (lid close etc.)
+    // and offer a Resume prompt on wake — see autoPauseForSleep.
+    powerMonitor.on('suspend', autoPauseForSleep);
+    powerMonitor.on('resume', promptResumeAfterWake);
     const protocolRegistered = registerShortcutProtocolClient();
     sendDebugLog(`Protocol handler registration (${SHORTCUT_PROTOCOL}): ${protocolRegistered}`);
 
@@ -3281,6 +3286,78 @@ ipcMain.handle('start-recording-ui', async (_, sessionName) => {
   }
 });
 
+// ── Auto-pause on system sleep ──
+// Closing the laptop lid (or any suspend) used to leave an active recording
+// "running" with a broken audio stream. We pause on suspend and deliberately
+// do NOT auto-resume on wake — waking the machine doesn't mean the meeting
+// is still going. Instead a notification offers Resume, reusing the same
+// auto-resume-requested renderer affordance as meeting-end auto-pause.
+//
+// Mode × platform matrix:
+// - backend (mic-only) mode, macOS/Linux: SIGUSR1 to the record subprocess
+//   (same as pause-recording-ui) + markRecordingPaused.
+// - backend mode, Windows: SIGUSR1 is unsupported (mirrors the
+//   pause-recording-ui gate) — log and skip; acceptable for alpha.
+// - system-audio mode, both OSes: markRecordingPaused + auto-pause-requested
+//   to the renderer, which pauses its MediaRecorder (possibly only after
+//   wake — the renderer is suspended too — but nothing records during sleep
+//   either way).
+let pausedBySleep = false;
+
+function autoPauseForSleep() {
+  try {
+    if (recordingRuntimeState.isPaused) return;
+    const hasBackendRecording = currentRecordingProcess !== null;
+    if (!hasBackendRecording && !systemAudioRecordingActive) return;
+
+    if (hasBackendRecording) {
+      if (process.platform === 'win32') {
+        sendDebugLog('[power] suspend during recording — pause unsupported on Windows backend mode, skipping');
+        return;
+      }
+      sendDebugLog('[power] system suspend — pausing recording (SIGUSR1)');
+      currentRecordingProcess.kill('SIGUSR1');
+      markRecordingPaused();
+    } else {
+      sendDebugLog('[power] system suspend — pausing system-audio recording');
+      markRecordingPaused();
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('auto-pause-requested');
+      }
+    }
+    pausedBySleep = true;
+  } catch (e) {
+    sendDebugLog(`[power] auto-pause on suspend failed: ${e.message}`);
+  }
+}
+
+function promptResumeAfterWake() {
+  if (!pausedBySleep) return;
+  pausedBySleep = false;
+  if (!recordingRuntimeState.isPaused) return;
+  sendDebugLog('[power] system resumed — recording stays paused, offering Resume');
+  showSleepPausedNotification();
+}
+
+function showSleepPausedNotification() {
+  const notif = new Notification({
+    title: 'Recording paused',
+    body: 'Paused while your computer was asleep. Resume to keep capturing.',
+    // `actions` renders on macOS only; the click handler below covers
+    // Windows, where the whole notification is the affordance.
+    actions: [{ type: 'button', text: 'Resume' }],
+  });
+  const resume = () => {
+    sendDebugLog('[power] user chose to resume after wake');
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('auto-resume-requested');
+    }
+  };
+  notif.on('action', (_evt, _index) => resume());
+  notif.on('click', resume);
+  notif.show();
+}
+
 ipcMain.handle('pause-recording-ui', async () => {
   try {
     // Mic-only mode: signal the Python `record` subprocess directly.
@@ -3313,6 +3390,8 @@ ipcMain.handle('pause-recording-ui', async () => {
 
 ipcMain.handle('resume-recording-ui', async () => {
   try {
+    // Any resume (manual or notification-driven) ends the sleep-pause state.
+    pausedBySleep = false;
     if (currentRecordingProcess) {
       if (process.platform === 'win32') {
         return { success: false, error: 'Resume not supported on Windows' };
@@ -3338,6 +3417,9 @@ ipcMain.handle('resume-recording-ui', async () => {
 
 ipcMain.handle('stop-recording-ui', async () => {
   try {
+    // Stopping ends any sleep-pause state — don't prompt Resume on a
+    // recording that no longer exists.
+    pausedBySleep = false;
     // Always clear system-audio active state. The renderer's stopCapture flow
     // also reports false, but races (renderer already torn down, recorder
     // errored before reportSystemAudioState) can leave this stuck true and
