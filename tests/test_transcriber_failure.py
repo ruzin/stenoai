@@ -110,7 +110,7 @@ class TranscribeDiarisedFailureTests(unittest.TestCase):
             "detected_language": None,
         }
 
-        def fake_transcribe(path, language="en"):
+        def fake_transcribe(path, language="en", _preprocessed=False):
             return failed if path == mic else ok
 
         with tempfile.TemporaryDirectory() as tmp_dir:

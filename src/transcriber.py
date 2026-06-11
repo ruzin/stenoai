@@ -71,6 +71,20 @@ PER_SEGMENT_BLEED_WINDOW_S = 3.0
 # still catches catastrophic bleed where every line is short.
 PER_SEGMENT_BLEED_MIN_CHARS = 15
 
+# Audio pre-processing before batch transcription. A gentle high-pass strips
+# low-frequency rumble (HVAC, desk thumps, handling noise) below the voice
+# band, and single-pass loudness normalization lifts quiet stretches toward a
+# consistent level — cleaner input improves ASR accuracy and reduces
+# hallucination on near-silent passages. Single-pass (dynamic) loudnorm is
+# deliberate: the two-pass variant would double decode time for marginal gain.
+AUDIO_HIGHPASS_HZ = 90
+AUDIO_LOUDNORM = "I=-16:TP=-1.5:LRA=11"
+
+# ffmpeg wall-clock cap for the pre-processing pass. Decode+filter+encode of
+# 16 kHz mono runs far faster than realtime (~30 s for a 3-hour meeting);
+# 10 minutes is generous headroom before we give up and use the original.
+AUDIO_PREPROCESS_TIMEOUT_S = 600
+
 # RMS energy gate for "channel has speech". Intentionally low (-70 dB) so
 # headphones-mode mic recordings — captured at much lower amplitude than
 # speakers-mode — still pass. The model handles low-amplitude speech fine;
@@ -130,6 +144,11 @@ def _resolve_ffmpeg() -> Optional[str]:
                 continue
         logger.warning("ffmpeg not found in any candidate location")
         return None
+
+
+def _audio_filter_chain() -> str:
+    """The ffmpeg ``-af`` chain applied to mono audio before transcription."""
+    return f"highpass=f={AUDIO_HIGHPASS_HZ},loudnorm={AUDIO_LOUDNORM}"
 
 
 def _parse_channels_from_ffmpeg_stderr(stderr: str) -> Optional[int]:
@@ -492,6 +511,46 @@ class WhisperTranscriber:
         else:
             logger.warning("ffmpeg not found - stereo diarisation will fall back to mono")
 
+    def _preprocess_audio(self, audio_filepath: Path) -> Tuple[Path, bool]:
+        """Clean mono audio before transcription: high-pass + loudnorm.
+
+        Returns ``(path_to_transcribe, is_temp)``. On any problem — ffmpeg
+        missing, non-zero exit, timeout — falls back to ``(original, False)``
+        so pre-processing can never fail a meeting. The caller owns deleting
+        the temp file when ``is_temp`` is True.
+        """
+        ffmpeg = _resolve_ffmpeg()
+        if not ffmpeg:
+            logger.info("ffmpeg unavailable; skipping audio pre-processing")
+            return audio_filepath, False
+
+        temp_path = Path(tempfile.gettempdir()) / f"stenoai_prep_{audio_filepath.stem}.wav"
+        try:
+            result = subprocess.run(
+                [ffmpeg, '-y', '-i', str(audio_filepath),
+                 '-af', _audio_filter_chain(),
+                 '-ar', '16000', '-ac', '1', '-c:a', 'pcm_s16le',
+                 str(temp_path)],
+                capture_output=True,
+                timeout=AUDIO_PREPROCESS_TIMEOUT_S,
+            )
+            if result.returncode == 0 and temp_path.exists() and temp_path.stat().st_size > 0:
+                logger.info("Audio pre-processed (highpass + loudnorm): %s", temp_path.name)
+                return temp_path, True
+            logger.warning(
+                "Audio pre-processing failed (rc=%s); using original audio: %s",
+                result.returncode, result.stderr.decode(errors='replace')[-300:],
+            )
+        except Exception as e:
+            logger.warning("Audio pre-processing error; using original audio: %s", e)
+        # Clean up any partial output from the failed pass.
+        try:
+            if temp_path.exists():
+                temp_path.unlink()
+        except OSError:
+            pass
+        return audio_filepath, False
+
     # ------------------------------------------------------------------
     # Core: run Parakeet on a WAV path, return our normalised dict shape.
     # ------------------------------------------------------------------
@@ -650,17 +709,27 @@ class WhisperTranscriber:
     # Public batch API (back-compat with the whisper-era surface).
     # ------------------------------------------------------------------
 
-    def transcribe_audio(self, audio_filepath: Path, language: str = "en") -> Optional[dict]:
+    def transcribe_audio(
+        self,
+        audio_filepath: Path,
+        language: str = "en",
+        _preprocessed: bool = False,
+    ) -> Optional[dict]:
         """Transcribe a single-channel (or mono-mixed) audio file.
 
         Returns ``None`` if the file is missing or too small to transcribe;
         otherwise a dict with ``text`` / ``segments`` / ``duration_seconds`` /
         ``detected_language`` / ``detected_language_probability``.
+
+        ``_preprocessed`` marks input that is already cleaned (the diarised
+        path's split channels are 16 kHz mono + high-passed by the split
+        ffmpeg pass) so the mono pre-processing pass isn't applied twice.
         """
         if not audio_filepath.exists():
             logger.error(f"Audio file not found: {audio_filepath}")
             return None
 
+        preprocess_temp: Optional[Path] = None
         try:
             logger.info(f"Transcribing audio file: {audio_filepath}")
             file_size = audio_filepath.stat().st_size
@@ -675,7 +744,13 @@ class WhisperTranscriber:
                     "detected_language_probability": None,
                 }
 
-            result = self._run_backend(audio_filepath, language)
+            transcribe_path = audio_filepath
+            if not _preprocessed:
+                transcribe_path, is_temp = self._preprocess_audio(audio_filepath)
+                if is_temp:
+                    preprocess_temp = transcribe_path
+
+            result = self._run_backend(transcribe_path, language)
 
             transcript = result.get("text")
             logger.info(f"Transcription completed. Length: {len(transcript) if transcript else 0} characters")
@@ -706,6 +781,12 @@ class WhisperTranscriber:
                 "transcription_failed": True,
                 "error": str(e),
             }
+        finally:
+            if preprocess_temp is not None:
+                try:
+                    preprocess_temp.unlink()
+                except OSError:
+                    pass
 
     def _split_stereo_to_channels(self, audio_filepath: Path) -> Tuple[Optional[Path], Optional[Path], Optional[float]]:
         """Detect stereo and split into mono mic + system channel files.
@@ -753,9 +834,14 @@ class WhisperTranscriber:
 
         try:
             for ch_idx, out_path in [(0, mic_path), (1, system_path)]:
+                # High-pass only on the diarised path — deliberately NO
+                # per-channel loudnorm: normalising each channel separately
+                # would erase the relative-RMS difference that
+                # _drop_per_segment_bleed uses to tell the direct signal
+                # from its attenuated echo on the other channel.
                 result = subprocess.run(
                     [ffmpeg, '-y', '-i', str(audio_filepath),
-                     '-af', f'pan=mono|c0=c{ch_idx}',
+                     '-af', f'pan=mono|c0=c{ch_idx},highpass=f={AUDIO_HIGHPASS_HZ}',
                      '-ar', '16000', '-ac', '1', '-c:a', 'pcm_s16le',
                      str(out_path)],
                     capture_output=True, timeout=120
@@ -841,9 +927,11 @@ class WhisperTranscriber:
             channel_failed = False
             channel_error: Optional[str] = None
 
+            # Split channels are already 16 kHz mono + high-passed by the
+            # split ffmpeg pass above — skip the mono pre-processing pass.
             if mic_has_audio:
                 logger.info("Transcribing mic channel (You)...")
-                mic_result = self.transcribe_audio(mic_path, language)
+                mic_result = self.transcribe_audio(mic_path, language, _preprocessed=True)
                 if mic_result and mic_result.get("transcription_failed"):
                     channel_failed = True
                     channel_error = channel_error or mic_result.get("error")
@@ -857,7 +945,7 @@ class WhisperTranscriber:
 
             if system_has_audio:
                 logger.info("Transcribing system channel (Others)...")
-                sys_result = self.transcribe_audio(system_path, language)
+                sys_result = self.transcribe_audio(system_path, language, _preprocessed=True)
                 if sys_result and sys_result.get("transcription_failed"):
                     channel_failed = True
                     channel_error = channel_error or sys_result.get("error")
