@@ -447,6 +447,37 @@ class WhisperTranscriber:
         self.model = WhisperCppModel(self.model_size, n_threads=n_threads)
         logger.info("whisper.cpp model loaded (threads=%d)", n_threads)
 
+    def _build_whisper_fallback(self) -> bool:
+        """Try to stand up whisper.cpp as a crash-recovery fallback engine.
+
+        Returns True only when a retry on whisper.cpp is actually possible:
+        the active backend is Parakeet, pywhispercpp is importable, and the
+        ggml weight for ``self.model_size`` is ALREADY on disk. The
+        is_installed gate is load-bearing — constructing pywhispercpp's
+        Model for a missing weight auto-downloads ~466 MB, which must never
+        happen implicitly in a failure path (offline machines, metered
+        connections). Any error means "no fallback", never a crash.
+        """
+        try:
+            if self.backend != "parakeet-tdt-v3" or not WHISPER_CPP_AVAILABLE:
+                return False
+            if self.model is not None:
+                # Already loaded by a previous fallback (e.g. the first
+                # diarised channel) — reuse it.
+                return True
+            from src import whisper_models
+            if not whisper_models.is_installed(self.model_size):
+                logger.info(
+                    "whisper.cpp fallback unavailable: model %r not installed",
+                    self.model_size,
+                )
+                return False
+            self._load_whisper_cpp()
+            return True
+        except Exception as e:
+            logger.warning("whisper.cpp fallback unavailable: %s", e)
+            return False
+
     def _ensure_ffmpeg_in_path(self) -> None:
         """Make sure ffmpeg is reachable from $PATH for the stereo split.
 
@@ -750,7 +781,23 @@ class WhisperTranscriber:
                 if is_temp:
                     preprocess_temp = transcribe_path
 
-            result = self._run_backend(transcribe_path, language)
+            try:
+                result = self._run_backend(transcribe_path, language)
+                result.setdefault("engine", self.backend)
+            except Exception as primary_error:
+                # A mid-inference crash (e.g. an MLX metal abort) on the
+                # primary engine. Retry ONCE on whisper.cpp — but only when
+                # the weight is already installed (_build_whisper_fallback
+                # never triggers a download). Otherwise re-raise into the
+                # honest transcription_failed path below.
+                if not self._build_whisper_fallback():
+                    raise
+                logger.warning(
+                    "Primary engine crashed (%s); retrying once on whisper.cpp",
+                    primary_error,
+                )
+                result = self._run_whisper_cpp(transcribe_path, language)
+                result["engine"] = "whisper.cpp-fallback"
 
             transcript = result.get("text")
             logger.info(f"Transcription completed. Length: {len(transcript) if transcript else 0} characters")
@@ -924,6 +971,7 @@ class WhisperTranscriber:
             system_segments: list[dict] = []
             detected_language = None
             detected_language_probability = None
+            engine = None
             channel_failed = False
             channel_error: Optional[str] = None
 
@@ -940,6 +988,8 @@ class WhisperTranscriber:
                     if not detected_language and mic_result.get("detected_language"):
                         detected_language = mic_result["detected_language"]
                         detected_language_probability = mic_result.get("detected_language_probability")
+                    if not engine:
+                        engine = mic_result.get("engine")
             else:
                 logger.info("Mic channel is silent, skipping")
 
@@ -954,6 +1004,8 @@ class WhisperTranscriber:
                     if not detected_language and sys_result.get("detected_language"):
                         detected_language = sys_result["detected_language"]
                         detected_language_probability = sys_result.get("detected_language_probability")
+                    if not engine:
+                        engine = sys_result.get("engine")
             else:
                 logger.info("System channel is silent, skipping")
 
@@ -1043,6 +1095,7 @@ class WhisperTranscriber:
                 "duration_seconds": duration,
                 "detected_language": detected_language,
                 "detected_language_probability": detected_language_probability,
+                "engine": engine or self.backend,
             }
         finally:
             # Clean up temp channel files
