@@ -570,8 +570,16 @@ Transcript:
         }
         md_lines = _render_frontmatter(md_meta)
         md_lines.append('')
+        # Write the message under a `## Summary` heading so it survives
+        # _parse_meeting_markdown (which only captures text under `## `
+        # sections) and renders as the meeting's summary instead of a blank
+        # note. Copy is honest about current capability: the audio is
+        # preserved, but there is no in-app retry yet (tracked follow-up).
+        md_lines.append('## Summary')
+        md_lines.append('')
         md_lines.append(
-            'Transcription failed; the recording was preserved and can be retried.'
+            'Transcription failed, so no notes were generated for this recording. '
+            'Your audio was preserved (not deleted), so nothing was lost.'
         )
         if notes_text:
             md_lines.append('')
@@ -2336,14 +2344,27 @@ def _parse_meeting_markdown(md_path):
                 'analysis': '\n'.join(topic_lines).strip()
             })
 
+    session_info = {
+        'name': meta.get('title', md_path.stem),
+        'processed_at': meta.get('date', ''),
+        'duration_seconds': meta.get('duration_seconds'),
+        'summary_file': str(md_path),
+        'output_language': meta.get('language'),
+    }
+    # A meeting whose transcription crashed carries these markers so the UI
+    # can render an honest failure state (and a future retry) rather than a
+    # blank note. Only thread them through when present so normal meetings'
+    # session_info shape is unchanged.
+    if meta.get('transcription_failed'):
+        session_info['transcription_failed'] = True
+        session_info['reprocessable'] = bool(meta.get('reprocessable'))
+        if meta.get('audio_file'):
+            session_info['audio_file'] = meta.get('audio_file')
+        if meta.get('error'):
+            session_info['error'] = meta.get('error')
+
     return {
-        'session_info': {
-            'name': meta.get('title', md_path.stem),
-            'processed_at': meta.get('date', ''),
-            'duration_seconds': meta.get('duration_seconds'),
-            'summary_file': str(md_path),
-            'output_language': meta.get('language'),
-        },
+        'session_info': session_info,
         'summary': sections.get('summary', ''),
         'participants': participants,
         'discussion_areas': discussion_areas,

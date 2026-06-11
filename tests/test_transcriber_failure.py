@@ -13,7 +13,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from simple_recorder import SimpleRecorder
+from simple_recorder import SimpleRecorder, _parse_meeting_markdown
 from src.transcriber import WhisperTranscriber
 
 
@@ -157,9 +157,43 @@ class HandleTranscriptionFailureTests(unittest.TestCase):
             self.assertIn("transcription_failed: true", body)
             self.assertIn("reprocessable: true", body)
             self.assertIn(str(audio), body)
-            self.assertIn("the recording was preserved", body)
+            self.assertIn("## Summary", body)
+            self.assertIn("preserved", body)
             # Return payload signals failure to the caller.
             self.assertTrue(result["session_info"]["transcription_failed"])
+
+            # Round-trip through the meeting parser: the failure markers and the
+            # honest message must survive so the renderer can show them instead
+            # of a blank note. (This is the gap that produced a blank "No summary
+            # available" meeting before the parser propagated these fields.)
+            parsed = _parse_meeting_markdown(summary_path)
+            self.assertTrue(parsed["session_info"]["transcription_failed"])
+            self.assertTrue(parsed["session_info"]["reprocessable"])
+            self.assertEqual(parsed["session_info"]["audio_file"], str(audio))
+            self.assertIn("metal::malloc", parsed["session_info"]["error"])
+            # The honest message is captured as the meeting summary (written
+            # under a ## Summary heading), not silently dropped.
+            self.assertIn("Transcription failed", parsed["summary"])
+            self.assertIn("preserved", parsed["summary"])
+
+    def test_normal_meeting_has_no_failure_markers(self):
+        """Regression: a normal (non-failure) meeting's session_info must not
+        gain the failure keys, so existing consumers are unchanged."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            md_path = Path(tmp_dir) / "normal_summary.md"
+            md_path.write_text(
+                "---\n"
+                'title: "Weekly sync"\n'
+                "date: 2026-06-11\n"
+                "is_diarised: false\n"
+                "---\n\n"
+                "## Summary\n\nWe discussed the roadmap.\n\n"
+                "## Transcript\n\nHello everyone.\n",
+                encoding="utf-8",
+            )
+            parsed = _parse_meeting_markdown(md_path)
+        self.assertNotIn("transcription_failed", parsed["session_info"])
+        self.assertEqual(parsed["summary"], "We discussed the roadmap.")
 
 
 if __name__ == "__main__":

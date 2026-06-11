@@ -20,6 +20,12 @@ export interface SessionInfo {
   updated_at?: string;
   duration_seconds?: number;
   folders?: string[];
+  /** Set when transcription crashed (e.g. an OOM): the recording was
+   *  preserved instead of deleted and no real summary exists. The detail
+   *  view renders an honest failure state instead of an empty note. */
+  transcription_failed?: boolean;
+  reprocessable?: boolean;
+  error?: string;
 }
 
 export interface Meeting {
@@ -710,7 +716,7 @@ export interface StenoaiBridge {
       Result<Record<string, never>>
     >;
     showNoteReadyNotification: RequestFn<
-      [payload: { title: string }],
+      [payload: { title: string; failed?: boolean }],
       Result<Record<string, never>>
     >;
     getLanguage: RequestFn<[], GetLanguageResponse>;

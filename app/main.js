@@ -2841,7 +2841,7 @@ async function processNextInQueue() {
                   success: true,
                   sessionName: sessionNameAtClose,
                   message: transcriptionFailedMsg
-                    ? 'Transcription failed; recording preserved for retry'
+                    ? 'Transcription failed; recording preserved (not deleted)'
                     : 'Processing completed successfully',
                   meetingData: processedMeeting,
                   transcriptionFailed: Boolean(transcriptionFailedMsg),
@@ -2858,7 +2858,7 @@ async function processNextInQueue() {
                   success: true,
                   sessionName: sessionNameAtClose,
                   message: transcriptionFailedMsg
-                    ? 'Transcription failed; recording preserved for retry'
+                    ? 'Transcription failed; recording preserved (not deleted)'
                     : 'Processing completed successfully',
                   transcriptionFailed: Boolean(transcriptionFailedMsg),
                   transcriptionError: transcriptionFailedMsg || undefined
@@ -5195,10 +5195,15 @@ ipcMain.handle('show-silence-auto-stop-notification', async (_event, payload) =>
 ipcMain.handle('show-note-ready-notification', async (_event, payload) => {
   try {
     if (!(await notificationsEnabled())) return { success: true };
-    const { title } = payload || {};
+    const { title, failed } = payload || {};
+    // Be honest when transcription crashed: don't tell the user their note
+    // is "ready". The recording was preserved (not deleted) and the note
+    // explains the failure on open.
     const notif = new Notification({
-      title: 'Note ready',
-      body: title || 'Your note has finished processing',
+      title: failed ? 'Transcription failed' : 'Note ready',
+      body: failed
+        ? 'Your recording was preserved — open the note for details.'
+        : (title || 'Your note has finished processing'),
     });
     notif.on('click', () => {
       if (mainWindow && !mainWindow.isDestroyed()) {
