@@ -234,6 +234,21 @@ class TranscribeWindowsMergeTests(unittest.TestCase):
         merged = onnx_backend._transcribe_windows(model, self._eighty_seconds())
         self.assertEqual(merged.tokens, ["Hello", " world."])
 
+    def test_all_windows_failing_raises_not_empty(self):
+        # A broken model/session where EVERY window raises is a real failure,
+        # not silence — _transcribe_windows must raise so the caller marks it
+        # transcription_failed rather than returning an empty (silent) result.
+        model = _FakeTsModel([
+            RuntimeError("window 0 dead"),
+            RuntimeError("window 1 dead"),
+            RuntimeError("window 2 dead"),
+            RuntimeError("window 3 dead"),
+            RuntimeError("window 4 dead"),
+            RuntimeError("window 5 dead"),
+        ])
+        with self.assertRaises(RuntimeError):
+            onnx_backend._transcribe_windows(model, self._eighty_seconds())
+
     def test_mismatched_window_tokens_skipped(self):
         # A window whose tokens/timestamps lengths disagree is dropped cleanly
         # rather than emitting corrupt global timestamps.

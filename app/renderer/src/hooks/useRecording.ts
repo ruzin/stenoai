@@ -427,7 +427,12 @@ export function useRecordingProcessingEffects() {
           // firing this IPC would be a wasted poll. The gate stays
           // single-source-of-truth in main.
           void ipc()
-            .settings.showNoteReadyNotification({ title, failed: data.transcriptionFailed })
+            .settings.showNoteReadyNotification({
+              title,
+              failed:
+                Boolean(data.transcriptionFailed) ||
+                Boolean(data.meetingData?.session_info.transcription_failed),
+            })
             .catch(() => {
               // Notification failure isn't fatal — the note is still
               // visible in Home + sidebar. Don't bubble up.

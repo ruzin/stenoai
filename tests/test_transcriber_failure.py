@@ -161,6 +161,10 @@ class HandleTranscriptionFailureTests(unittest.TestCase):
             self.assertIn("preserved", body)
             # Return payload signals failure to the caller.
             self.assertTrue(result["session_info"]["transcription_failed"])
+            # transcript_file must be present (empty) — the record/process CLI
+            # handlers read it unconditionally; a missing key would KeyError and
+            # turn the graceful failure into a non-zero crash.
+            self.assertEqual(result["session_info"]["transcript_file"], "")
 
             # Round-trip through the meeting parser: the failure markers and the
             # honest message must survive so the renderer can show them instead

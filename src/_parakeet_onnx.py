@@ -447,9 +447,11 @@ def _transcribe_windows(ts_model: Any, samples) -> _SimpleResult:
     Each window's local timestamps are offset by the window's start time; the
     overlap region between adjacent windows is deduped by dropping any token
     whose global start lands before the last committed token's end (minus an
-    epsilon). A window whose ``recognize`` raises is logged and skipped, so a
-    single bad window degrades to a small gap rather than failing the whole
-    meeting.
+    epsilon). A single window whose ``recognize`` raises is logged and skipped,
+    so one bad window degrades to a small gap rather than failing the whole
+    meeting — but if *every* window fails (a broken model/session), we raise so
+    the caller marks it a transcription failure instead of returning an empty
+    result that would be mislabelled as silence.
     """
     chunk_samples = int(PARAKEET_CHUNK_DURATION_S * _SAMPLE_RATE)
     step_samples = int((PARAKEET_CHUNK_DURATION_S - PARAKEET_CHUNK_OVERLAP_S) * _SAMPLE_RATE)
@@ -460,19 +462,25 @@ def _transcribe_windows(ts_model: Any, samples) -> _SimpleResult:
     merged_tokens: list = []
     merged_timestamps: list = []
     last_end = -1.0
+    windows_attempted = 0
+    windows_recognized = 0
+    last_error: Optional[Exception] = None
 
     for start in range(0, len(samples), step_samples):
         window = samples[start:start + chunk_samples]
         if len(window) == 0:
             break
         chunk_start_s = start / _SAMPLE_RATE
+        windows_attempted += 1
         try:
             result = ts_model.recognize(window, sample_rate=_SAMPLE_RATE)
         except Exception as e:
+            last_error = e
             logger.warning("ONNX window at %.1fs failed, skipping: %s", chunk_start_s, e)
             if start + chunk_samples >= len(samples):
                 break
             continue
+        windows_recognized += 1
 
         tokens = list(getattr(result, "tokens", None) or [])
         timestamps = list(getattr(result, "timestamps", None) or [])
@@ -501,6 +509,15 @@ def _transcribe_windows(ts_model: Any, samples) -> _SimpleResult:
 
         if start + chunk_samples >= len(samples):
             break
+
+    # Every window's recognize() raised → this is a real transcription failure,
+    # not silence. Raise so transcribe_file → transcribe_audio tags it
+    # transcription_failed and preserves the audio, rather than returning an
+    # empty result the pipeline would mislabel as "No speech detected".
+    if windows_attempted > 0 and windows_recognized == 0:
+        raise RuntimeError(
+            f"all {windows_attempted} ONNX transcription windows failed"
+        ) from last_error
 
     text = "".join(
         tok if isinstance(tok, str) else str(tok) for tok in merged_tokens

@@ -608,6 +608,11 @@ Transcript:
             "session_info": {
                 "name": session_name,
                 "audio_file": str(audio_path),
+                # No transcript was produced, but callers (the `record`/process
+                # CLI handlers) read this key unconditionally — keep it present
+                # and empty so a failure doesn't KeyError and turn a graceful
+                # exit into a non-zero crash.
+                "transcript_file": "",
                 "summary_file": str(summary_path),
                 "transcription_failed": True,
                 "error": short_error,
