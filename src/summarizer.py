@@ -16,6 +16,27 @@ from . import ollama_manager
 logger = logging.getLogger(__name__)
 
 
+# Context handling for the bundled LOCAL Ollama only. Small local models
+# default to a tiny context (~2-4k tokens), so a long meeting's transcript
+# silently overruns it and the summary covers only the start of the meeting.
+# Two local-only measures fix that without touching cloud/remote/adapter
+# providers (frontier cloud windows fit whole meetings; a remote Ollama's
+# host owns its own num_ctx):
+#
+# * ``LOCAL_OLLAMA_NUM_CTX`` is passed as a benign options hint to the local
+#   chat calls so the model actually uses an 8k window.
+# * ``LOCAL_TRANSCRIPT_CHAR_CAP`` bounds the transcript itself: ~(8192 ctx
+#   - ~1500 prompt/response tokens) * ~4 chars/token. Over-cap transcripts
+#   keep the head and tail (60/40) joined by an explicit marker — head+tail
+#   rather than head-only so the meeting's close and action items survive.
+LOCAL_OLLAMA_NUM_CTX = 8192
+LOCAL_TRANSCRIPT_CHAR_CAP = 24000
+LOCAL_TRANSCRIPT_TRUNCATION_NOTE = (
+    "\n\n[... transcript truncated to fit the local model's context window — "
+    "use a cloud model in Settings for full-length summaries ...]\n\n"
+)
+
+
 def bedrock_converse_url(region: str, target_id: str) -> str:
     """Build the Bedrock Converse REST URL for a region + model/profile id.
 
@@ -633,11 +654,52 @@ class OllamaSummarizer:
                     raise
         raise RuntimeError("Bedrock chat failed after all retries")
 
+    def _is_local_ollama(self) -> bool:
+        """True only for the bundled local Ollama — the one provider whose
+        context window we own. adapter/cloud/remote manage their own."""
+        return self.ai_provider not in ("adapter", "cloud", "remote")
+
+    def _local_chat_options(self) -> Optional[Dict[str, Any]]:
+        """Options for ``client.chat`` — num_ctx hint for local Ollama only.
+
+        Returns ``None`` (the ollama client's default) for remote so the
+        remote host's own configuration stays authoritative.
+        """
+        if self._is_local_ollama():
+            return {"num_ctx": LOCAL_OLLAMA_NUM_CTX}
+        return None
+
+    def _cap_transcript_for_local(self, transcript: str) -> str:
+        """Bound a transcript to the local model's context budget.
+
+        No-op for cloud/remote/adapter providers and for transcripts under
+        the cap. Over the cap, keeps the first 60% + last 40% of the budget
+        joined by an explicit truncation note — see the constants block at
+        the top of this module for the rationale.
+        """
+        if not self._is_local_ollama():
+            return transcript
+        if not transcript or len(transcript) <= LOCAL_TRANSCRIPT_CHAR_CAP:
+            return transcript
+        head_budget = int(LOCAL_TRANSCRIPT_CHAR_CAP * 0.6)
+        tail_budget = LOCAL_TRANSCRIPT_CHAR_CAP - head_budget
+        logger.info(
+            "Transcript (%d chars) exceeds local context cap (%d); "
+            "keeping head %d + tail %d chars",
+            len(transcript), LOCAL_TRANSCRIPT_CHAR_CAP, head_budget, tail_budget,
+        )
+        return (
+            transcript[:head_budget]
+            + LOCAL_TRANSCRIPT_TRUNCATION_NOTE
+            + transcript[-tail_budget:]
+        )
+
     def _create_permissive_prompt(self, transcript: str, language: str = "en", notes: str = None) -> str:
         """
         Create an enhanced prompt with discussion_areas and improved extraction.
         Uses more examples in schema to permit more detailed summaries.
         """
+        transcript = self._cap_transcript_for_local(transcript)
         # Build language instruction
         if language and language not in ("en", "auto"):
             from .config import get_config
@@ -811,6 +873,7 @@ Return ONLY the response in this exact JSON format:
                                     'content': prompt
                                 }
                             ],
+                            options=self._local_chat_options(),
                         )
                         break  # Success, exit retry loop
 
@@ -942,6 +1005,7 @@ Return ONLY the response in this exact JSON format:
     
     def _create_markdown_prompt(self, transcript: str, language: str = "en", notes: str = None) -> str:
         """Create a prompt that asks the LLM to output markdown directly."""
+        transcript = self._cap_transcript_for_local(transcript)
         # Language instruction. The four ## section headers must stay in English
         # because simple_recorder._parse_streamed_markdown matches on them
         # literally; the body content is what gets translated.
@@ -1071,6 +1135,7 @@ TRANSCRIPT:
                     model=self.model_name,
                     messages=[{'role': 'user', 'content': prompt}],
                     stream=True,
+                    options=self._local_chat_options(),
                 )
                 for chunk in response:
                     content = chunk.get('message', {}).get('content', '')
