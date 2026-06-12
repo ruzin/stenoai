@@ -41,10 +41,10 @@
 If you're looking for a hosted desktop recording API, consider checking out [Recall.ai](https://www.recall.ai/product/desktop-recording-sdk?utm_source=github&utm_medium=sponsorship&utm_campaign=ruzin-stenoai), an API that records Zoom, Google Meet, Microsoft Teams, in-person meetings, and more.
 
 ## 📢 What's New
+- **2026-06-12** 🛡️ Stability round — recordings auto-pause when you close the lid (with a Resume prompt on wake), long meetings on slow machines are never killed mid-transcription, a Parakeet crash now recovers via whisper.cpp, and audio is cleaned (high-pass + loudness normalization) before transcription for better accuracy.
+- **2026-06-12** 🧠 Long meetings transcribe reliably — chunked transcription fixes the out-of-memory crash on 30+ minute recordings, and if transcription ever fails your audio is preserved and the meeting is marked for reprocessing instead of saving as empty.
+- **2026-06-11** ⚡ Faster recording start — Parakeet now loads offline-first (no network round-trip when the model is already installed) and pre-warms in the background, so your first words land in the live transcript sooner.
 - **2026-06-09** 🪟 Windows alpha — Steno now runs on Windows 10/11 (x64). Record, live Parakeet transcription, summaries, and system-audio diarisation all work; ships as an unsigned installer for now (SmartScreen warns on first launch), with transcription on CPU via ONNX Runtime.
-- **2026-06-09** ☁️ AWS Bedrock as a cloud AI provider — Bring your own Bedrock API key to route summaries through Claude on AWS. Application inference profile ARNs work too, so governed environments with IAM policies that allow `bedrock:InvokeModel` on application profiles only are supported out of the box.
-- **2026-06-09** 📅 Calendar polish round — Cancellable Google + Outlook OAuth from the calendar nudge, declined events drop at the IPC boundary (covers organiser-then-declined edge case), 3-per-page `<` / `>` pagination on busy days, full-card rendering for all-day blocks, and a 2-minute background poll that survives route changes.
-- **2026-06-07** 🎙️ Live transcription with Parakeet TDT v3 — Real-time on-screen transcripts during recording via Apple Silicon's MLX backend. Sentences appear as you speak in a Granola-style chat-bubble view; speakers are attributed to You vs Others in real time.
 
 
 ## Features
