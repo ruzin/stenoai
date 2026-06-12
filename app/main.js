@@ -5817,6 +5817,16 @@ function reconcileAiProviderWithOrgSession() {
     return Promise.resolve(null);
   }
   return enqueueProviderStateOp(async () => {
+    // Re-check the memo now that we actually run: a burst of callers with a
+    // cold memo enqueues several runs, and by the time the later ones
+    // execute, the first has already confirmed consistency — skip their
+    // subprocess spawns instead of repeating the full check serially.
+    if (
+      lastConsistentCheck.generation === orgSessionGeneration &&
+      Date.now() - lastConsistentCheck.at < RECONCILE_CONSISTENT_TTL_MS
+    ) {
+      return null;
+    }
     const genAtRead = orgSessionGeneration;
     const { session, exists, decryptFailed } = loadOrgSessionEx();
     if (decryptFailed) return null; // transient — never act on it
@@ -5895,12 +5905,22 @@ async function doRestorePreAdapterProvider() {
   }
   const restored = loadPreAdapterProvider() || 'local';
   sendDebugLog(`Org sign-out: restoring ai_provider from adapter to ${restored}`);
+  let restoreLanded = true;
   try {
-    await runPythonScript('simple_recorder.py', ['set-ai-provider', restored]);
+    const out = await runPythonScript('simple_recorder.py', ['set-ai-provider', restored]);
+    // The CLI prints {"success": false} with exit 0 on a failed config
+    // save — treat that as a failure, same as the relock path does.
+    const jsonMatch = out.match(/\{.*\}/s);
+    if (jsonMatch && JSON.parse(jsonMatch[0]).success === false) {
+      throw new Error('set-ai-provider reported a failed config save');
+    }
   } catch (e) {
+    restoreLanded = false;
     sendDebugLog(`restore to ${restored} failed: ${e.message}`);
   }
-  clearPreAdapterProvider();
+  // Keep the marker when the restore didn't land — it's the only record
+  // of the user's pre-adapter choice, and a later retry needs it.
+  if (restoreLanded) clearPreAdapterProvider();
 }
 
 ipcMain.handle('get-ai-provider', async () => {
@@ -5939,36 +5959,44 @@ ipcMain.handle('get-ai-provider', async () => {
 ipcMain.handle('set-ai-provider', async (event, provider) => {
   try {
     sendDebugLog(`Setting AI provider to: ${provider}`);
-    if (provider !== 'adapter') {
-      // Hard lock: while a valid org session exists the provider is
-      // managed by the organisation. The Settings picker is disabled too —
-      // this backstops any other IPC caller and future UI paths, and it
-      // leaves the restore marker untouched. Fail closed on a decrypt
-      // failure (locked keychain): the user IS signed in, the session is
-      // just transiently unreadable, and letting the switch through would
-      // have the next reconcile fight them.
-      const { session, decryptFailed } = loadOrgSessionEx();
-      const sessionValid = Boolean(
-        session && session.adapterUrl && session.token && !isJwtExpired(session.token)
-      );
-      if (sessionValid || decryptFailed) {
-        sendDebugLog(`Org lock: rejecting set-ai-provider ${provider} (${decryptFailed ? 'session unreadable' : 'org session active'})`);
-        return {
-          success: false,
-          managedByOrg: true,
-          error: 'AI provider is managed by your organisation while you are signed in.',
-        };
+    // Queued so a manual write can't interleave with an in-flight
+    // reconcile or sign-out restore (last-writer-wins races on the same
+    // config value); the org-lock gate is evaluated inside the op so it
+    // sees post-queue session state.
+    return await enqueueProviderStateOp(async () => {
+      if (provider !== 'adapter') {
+        // Hard lock: while a valid org session exists the provider is
+        // managed by the organisation. The Settings picker is disabled
+        // too — this backstops any other IPC caller and future UI paths,
+        // and it leaves the restore marker untouched. Fail closed on a
+        // decrypt failure (locked keychain): the user IS signed in, the
+        // session is just transiently unreadable, and letting the switch
+        // through would have the next reconcile fight them.
+        const { session, decryptFailed } = loadOrgSessionEx();
+        const sessionValid = Boolean(
+          session && session.adapterUrl && session.token && !isJwtExpired(session.token)
+        );
+        if (sessionValid || decryptFailed) {
+          sendDebugLog(`Org lock: rejecting set-ai-provider ${provider} (${decryptFailed ? 'session unreadable' : 'org session active'})`);
+          return {
+            success: false,
+            managedByOrg: true,
+            error: 'AI provider is managed by your organisation while you are signed in.',
+          };
+        }
+        // A manual switch away from 'adapter' invalidates the pre-adapter
+        // marker — without this, a user who auto-switched on sign-in and
+        // then manually moved to a different provider would still be
+        // restored to the stale "before adapter" value on sign-out.
+        clearPreAdapterProvider();
       }
-      // A manual switch away from 'adapter' invalidates the pre-adapter
-      // marker — without this, a user who auto-switched on sign-in and
-      // then manually moved to a different provider would still be
-      // restored to the stale "before adapter" value on sign-out.
-      clearPreAdapterProvider();
-    }
-    const result = await runPythonScript('simple_recorder.py', ['set-ai-provider', provider]);
-    const jsonMatch = result.match(/\{.*\}/s);
-    if (jsonMatch) return JSON.parse(jsonMatch[0]);
-    return { success: true, ai_provider: provider };
+      // Provider state is changing under the memo's feet.
+      lastConsistentCheck = { generation: -1, at: 0 };
+      const result = await runPythonScript('simple_recorder.py', ['set-ai-provider', provider]);
+      const jsonMatch = result.match(/\{.*\}/s);
+      if (jsonMatch) return JSON.parse(jsonMatch[0]);
+      return { success: true, ai_provider: provider };
+    });
   } catch (error) {
     sendDebugLog(`Error setting AI provider: ${error.message}`);
     return { success: false, error: error.message };
