@@ -70,6 +70,21 @@ class CorruptConfigTests(unittest.TestCase):
             # In-memory we run on defaults.
             self.assertEqual(config.get_ai_provider(), "local")
 
+    def test_non_dict_json_takes_corrupt_path(self):
+        # `null` and `[]` parse as valid JSON but would crash every config
+        # accessor — they must route through the corrupt-file recovery too.
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "config.json"
+            path.write_text("null")
+
+            with patch("src.config.time.sleep"):
+                config = Config(config_path=path)
+
+            self.assertTrue(config._load_failed)
+            self.assertEqual(path.read_text(), "null")
+            self.assertTrue((Path(tmp_dir) / "config.json.corrupt").exists())
+            self.assertEqual(config.get_ai_provider(), "local")
+
     def test_torn_read_retry_heals(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             path = Path(tmp_dir) / "config.json"

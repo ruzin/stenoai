@@ -5781,13 +5781,43 @@ function clearPreAdapterProvider() {
 // and adapterFetch's 401 path (clear session + restore provider), and
 // acting on it from two places would race.
 //
-// Coalesced: concurrent triggers (get-ai-provider, org-status, startup,
-// sign-in) share one in-flight run. Returns the provider as re-read from
-// disk after any write — never an assumed value.
-let aiProviderReconcileInFlight = null;
+// Serialized, not merely coalesced: every provider-state mutation (this
+// reconcile AND the sign-out restore) runs through one queue, so a sign-out's
+// restore can never interleave with an in-flight reconcile's write — the
+// race that could strand ai_provider='adapter' with no session, or clobber
+// the restore marker. Late callers get a FRESH run that starts after the
+// previous one finishes, so a sign-in that lands while a pre-sign-in run is
+// in flight still gets post-sign-in truth.
+let providerStateQueue = Promise.resolve();
+function enqueueProviderStateOp(op) {
+  const run = providerStateQueue.then(op);
+  // Keep the chain alive whether the op resolves or rejects.
+  providerStateQueue = run.then(() => undefined, () => undefined);
+  return run;
+}
+
+// Bumped whenever the org session file changes (save or clear) so a queued
+// reconcile can detect that the session it read mid-run is no longer
+// current and abort its write instead of acting on stale state.
+let orgSessionGeneration = 0;
+
+// Memo of the last reconcile that confirmed session/provider consistency.
+// org-status is refetched on focus/mount by the sidebar; without this every
+// refetch would spawn a Python subprocess (~100-300ms PyInstaller startup)
+// for a no-op check. The memoed fast path returns null ("nothing to
+// change") so callers never patch their response from a possibly-stale memo.
+let lastConsistentCheck = { generation: -1, at: 0 };
+const RECONCILE_CONSISTENT_TTL_MS = 30_000;
+
 function reconcileAiProviderWithOrgSession() {
-  if (aiProviderReconcileInFlight) return aiProviderReconcileInFlight;
-  aiProviderReconcileInFlight = (async () => {
+  if (
+    lastConsistentCheck.generation === orgSessionGeneration &&
+    Date.now() - lastConsistentCheck.at < RECONCILE_CONSISTENT_TTL_MS
+  ) {
+    return Promise.resolve(null);
+  }
+  return enqueueProviderStateOp(async () => {
+    const genAtRead = orgSessionGeneration;
     const { session, exists, decryptFailed } = loadOrgSessionEx();
     if (decryptFailed) return null; // transient — never act on it
     const current = await readAiProvider();
@@ -5795,6 +5825,10 @@ function reconcileAiProviderWithOrgSession() {
       session && session.adapterUrl && session.token && !isJwtExpired(session.token)
     );
     if (sessionValid && current !== 'adapter') {
+      if (orgSessionGeneration !== genAtRead) {
+        sendDebugLog('Org lock: session changed mid-reconcile; aborting relock');
+        return null;
+      }
       // Seed the restore marker only when none exists: in a drift repair
       // `current` may be a wiped-to-default 'local' while the marker still
       // holds the user's true pre-sign-in choice (e.g. 'cloud').
@@ -5802,25 +5836,38 @@ function reconcileAiProviderWithOrgSession() {
       if (!hadMarker) savePreAdapterProvider(current);
       sendDebugLog(`Org lock: switching ai_provider from ${current} to adapter (org session active)`);
       try {
-        await runPythonScript('simple_recorder.py', ['set-ai-provider', 'adapter']);
+        const out = await runPythonScript('simple_recorder.py', ['set-ai-provider', 'adapter']);
+        // The CLI prints {"success": false} with exit 0 on a failed config
+        // save — surface that as a failure too, not just spawn errors.
+        const jsonMatch = out.match(/\{.*\}/s);
+        if (jsonMatch && JSON.parse(jsonMatch[0]).success === false) {
+          throw new Error('set-ai-provider reported a failed config save');
+        }
       } catch (e) {
         sendDebugLog(`Org lock: switch to adapter failed: ${e.message}`);
         // Don't leave a marker WE created if the switch never landed; a
         // pre-existing marker stays — it still describes the user's choice.
         if (!hadMarker) clearPreAdapterProvider();
+        return await readAiProvider();
       }
-      return await readAiProvider();
+      const settled = await readAiProvider();
+      if (orgSessionGeneration === genAtRead && settled === 'adapter') {
+        lastConsistentCheck = { generation: orgSessionGeneration, at: Date.now() };
+      }
+      return settled;
     }
     if (!exists && current === 'adapter') {
+      if (orgSessionGeneration !== genAtRead) return null;
       sendDebugLog('Org lock: ai_provider=adapter but no org session backing it; restoring pre-adapter provider');
-      await restorePreAdapterProvider();
+      // Direct call, not the queued wrapper — we already hold the queue.
+      await doRestorePreAdapterProvider();
       return await readAiProvider();
     }
+    if (orgSessionGeneration === genAtRead) {
+      lastConsistentCheck = { generation: orgSessionGeneration, at: Date.now() };
+    }
     return current;
-  })().finally(() => {
-    aiProviderReconcileInFlight = null;
   });
-  return aiProviderReconcileInFlight;
 }
 
 // Wired into the org sign-in flows (password + Google SSO). Kept as a named
@@ -5832,7 +5879,15 @@ async function autoSwitchToAdapterOnSignIn() {
 // On sign-out (or stale-session clear), restore the pre-adapter provider
 // if we still have it. Falls back to 'local' if the marker is missing
 // (e.g. user manually switched to adapter without coming via auto-switch).
-async function restorePreAdapterProvider() {
+// Serialized on the same queue as the reconcile so the two state machines
+// can't interleave; doRestorePreAdapterProvider is the unqueued body, used
+// by the reconcile when it already holds the queue.
+function restorePreAdapterProvider() {
+  return enqueueProviderStateOp(doRestorePreAdapterProvider);
+}
+
+async function doRestorePreAdapterProvider() {
+  lastConsistentCheck = { generation: -1, at: 0 }; // state is changing
   const current = await readAiProvider();
   if (current !== 'adapter') {
     clearPreAdapterProvider(); // tidy: if not on adapter, the marker is stale
@@ -5886,12 +5941,18 @@ ipcMain.handle('set-ai-provider', async (event, provider) => {
     sendDebugLog(`Setting AI provider to: ${provider}`);
     if (provider !== 'adapter') {
       // Hard lock: while a valid org session exists the provider is
-      // managed by the organisation. Reject the change (the Settings
-      // picker is disabled too — this is defense in depth for CLI/IPC
-      // paths) and leave the restore marker untouched.
-      const session = loadOrgSession();
-      if (session && session.adapterUrl && session.token && !isJwtExpired(session.token)) {
-        sendDebugLog(`Org lock: rejecting set-ai-provider ${provider} while org session is active`);
+      // managed by the organisation. The Settings picker is disabled too —
+      // this backstops any other IPC caller and future UI paths, and it
+      // leaves the restore marker untouched. Fail closed on a decrypt
+      // failure (locked keychain): the user IS signed in, the session is
+      // just transiently unreadable, and letting the switch through would
+      // have the next reconcile fight them.
+      const { session, decryptFailed } = loadOrgSessionEx();
+      const sessionValid = Boolean(
+        session && session.adapterUrl && session.token && !isJwtExpired(session.token)
+      );
+      if (sessionValid || decryptFailed) {
+        sendDebugLog(`Org lock: rejecting set-ai-provider ${provider} (${decryptFailed ? 'session unreadable' : 'org session active'})`);
         return {
           success: false,
           managedByOrg: true,
@@ -7651,6 +7712,7 @@ function saveOrgSession(session) {
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     const encrypted = safeStorage.encryptString(JSON.stringify(session));
     fs.writeFileSync(getOrgSessionPath(), encrypted);
+    orgSessionGeneration++;
     return true;
   } catch (e) {
     console.error('Failed to save org session:', e.message);
@@ -7691,6 +7753,7 @@ function clearOrgSession() {
   try {
     const p = getOrgSessionPath();
     if (fs.existsSync(p)) fs.unlinkSync(p);
+    orgSessionGeneration++;
     return true;
   } catch (e) {
     return false;
@@ -7861,7 +7924,15 @@ ipcMain.handle('org-status', async () => {
   const knownBefore = hasOrgEverBeenSignedIn();
   if (session && !knownBefore) markOrgKnown();
   const everSignedIn = knownBefore || Boolean(session);
-  if (!session) return { signedIn: false, everSignedIn };
+  if (!session) {
+    // The session file may have vanished without a sign-out/expiry trigger
+    // (crashed mid-sign-out, manual delete) while Python still says
+    // 'adapter' — heal that here too, not just in get-ai-provider. The
+    // reconcile no-ops on decrypt failures, so a locked keychain landing
+    // in this branch changes nothing.
+    reconcileAiProviderWithOrgSession().catch(() => {});
+    return { signedIn: false, everSignedIn };
+  }
   // Previously this returned signedIn:true as long as the session file
   // existed, even if the JWT had long since expired. The renderer would
   // happily show a "signed in" sticker until the user actually triggered
@@ -7876,9 +7947,9 @@ ipcMain.handle('org-status', async () => {
     return { signedIn: false, everSignedIn };
   }
   // Hard lock: heal any provider drift while the session is valid.
-  // Fire-and-forget — this handler is hot (sidebar polls it) and must
-  // not block on a Python subprocess; the reconcile is coalesced so
-  // repeated calls share one run.
+  // Fire-and-forget — this handler is hot (the sidebar refetches it on
+  // focus/mount) and must not block on a Python subprocess; the memoed
+  // fast path makes repeated consistent checks free.
   reconcileAiProviderWithOrgSession().catch(() => {});
   return {
     signedIn: true,

@@ -962,7 +962,11 @@ function AiTab() {
       {current === 'cloud' && <CloudProviderConfig />}
       {current === 'adapter' && <AdapterProviderInfo signedIn={orgSignedIn} />}
 
-      {current !== 'cloud' && current !== 'adapter' && (
+      {/* orgSignedIn check: while locked, the provider is (or is about to
+          be reconciled to) 'adapter' — never show a local model list under
+          the "Managed by your organisation" copy, even if the cached
+          provider value is momentarily stale. */}
+      {current !== 'cloud' && current !== 'adapter' && !orgSignedIn && (
         <>
           <SectionHeading>Model</SectionHeading>
           <ModelList />

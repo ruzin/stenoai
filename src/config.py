@@ -23,13 +23,14 @@ logger = logging.getLogger(__name__)
 def _atomic_write_json(path: Path, payload) -> None:
     """Write `payload` as JSON to `path` atomically.
 
-    Same tempfile + os.replace pattern as recorder_state.json (see
-    simple_recorder._atomic_write_json — duplicated here because
-    simple_recorder imports this module, not the other way around).
-    config.json is read by many concurrent CLI subprocesses; a plain
-    truncate-and-rewrite lets a reader see a torn file, fall back to
-    defaults, and (pre-fix) persist those defaults over the user's
-    real settings.
+    Same tempfile + os.replace pattern as simple_recorder._atomic_write_json
+    (recorder_state.json / summary JSON). Kept as a separate copy for now to
+    avoid churn in the recorder-state write path; consolidating both into a
+    shared src helper (and giving recorder_state the PermissionError retry
+    below) is a tracked follow-up. config.json is read by many concurrent
+    CLI subprocesses; a plain truncate-and-rewrite lets a reader see a torn
+    file, fall back to defaults, and (pre-fix) persist those defaults over
+    the user's real settings.
     """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -337,6 +338,10 @@ class Config:
             try:
                 with open(self.config_path, 'r') as f:
                     config = json.load(f)
+                    if not isinstance(config, dict):
+                        # `null` / `[]` parse fine but crash every get/set
+                        # later; route them through the corrupt-file path.
+                        raise ValueError("config.json root is not an object")
                     logger.info(f"Loaded config from {self.config_path}")
                     return config
             except Exception as e:
