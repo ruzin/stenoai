@@ -778,7 +778,9 @@ function parseMarkdownBlocks(text: string): MarkdownBlock[] {
       flushBullets();
     } else {
       flushBullets();
-      blocks.push({ type: 'paragraph', text: line });
+      // Strip blockquote markers (e.g. the local-model truncation note,
+      // "> Note: …") rather than rendering a literal "> " prefix.
+      blocks.push({ type: 'paragraph', text: line.replace(/^>\s+/, '') });
     }
   }
   flushBullets();
