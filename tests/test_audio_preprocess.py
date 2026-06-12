@@ -108,6 +108,28 @@ class PreprocessAudioTests(unittest.TestCase):
                 out_path.unlink()
 
 
+class ConvertTo16khzSkipTests(unittest.TestCase):
+    def test_already_16k_mono_pcm_is_not_reconverted(self):
+        """The whisper.cpp fallback receives _preprocess_audio's 16 kHz mono
+        temp — a second ffmpeg decode+encode of an identical format must be
+        skipped."""
+        import wave
+
+        transcriber = _build_transcriber()
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            audio = Path(tmp_dir) / "prep.wav"
+            with wave.open(str(audio), "wb") as wf:
+                wf.setnchannels(1)
+                wf.setsampwidth(2)
+                wf.setframerate(16000)
+                wf.writeframes(b"\x00\x00" * 32000)  # 2 s
+            with patch.object(transcriber_mod.subprocess, "run") as run_mock:
+                out_path, duration = transcriber._convert_to_16khz(audio)
+            run_mock.assert_not_called()
+            self.assertEqual(out_path, audio)
+            self.assertAlmostEqual(duration, 2.0)
+
+
 class TranscribeAudioPreprocessIntegrationTests(unittest.TestCase):
     def test_temp_cleaned_after_successful_transcription(self):
         transcriber = _build_transcriber()

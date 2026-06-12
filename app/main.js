@@ -1108,9 +1108,13 @@ if (!gotSingleInstanceLock) {
     setupAutoMeetingDetector();
 
     // Auto-pause active recordings when the machine sleeps (lid close etc.)
-    // and offer a Resume prompt on wake — see autoPauseForSleep.
+    // and offer a Resume prompt on wake — see autoPauseForSleep. Processing
+    // watchdogs are frozen across the sleep so their deadline can't elapse
+    // while the subprocess is suspended — see makeInactivityWatchdog.
     powerMonitor.on('suspend', autoPauseForSleep);
+    powerMonitor.on('suspend', freezeInactivityWatchdogsForSleep);
     powerMonitor.on('resume', promptResumeAfterWake);
+    powerMonitor.on('resume', thawInactivityWatchdogsAfterWake);
     const protocolRegistered = registerShortcutProtocolClient();
     sendDebugLog(`Protocol handler registration (${SHORTCUT_PROTOCOL}): ${protocolRegistered}`);
 
@@ -2732,28 +2736,66 @@ function getRecordingElapsedSeconds() {
 // the old fixed 30-minute timer.
 const TRANSCRIBE_INACTIVITY_MS = 8 * 60 * 1000;
 
+// Live watchdogs, frozen across system sleep. Node's timer clock advances
+// during sleep on Apple Silicon and Windows, so a lid-close while processing
+// would otherwise fire the inactivity deadline the moment the machine wakes —
+// killing a suspended-but-healthy subprocess before it gets a chance to emit
+// its next heartbeat. Freezing on 'suspend' (before sleep, so there's no race
+// with an already-expired timer on wake) and re-arming on 'resume' gives the
+// resumed process a full fresh window.
+const activeInactivityWatchdogs = new Set();
+
 function makeInactivityWatchdog(proc, ms, label) {
   let timer = null;
   const arm = () => {
     timer = setTimeout(() => {
+      timer = null;
+      activeInactivityWatchdogs.delete(watchdog);
       console.error(`${label} produced no output for ${Math.round(ms / 60000)} minutes, killing`);
       sendDebugLog(`${label} inactive for ${Math.round(ms / 60000)} minutes — killing process`);
       try { proc.kill(); } catch (e) { /* process already gone */ }
     }, ms);
   };
-  arm();
-  return {
+  const watchdog = {
     // Any stdout/stderr activity proves liveness — push the deadline out.
     reset() {
-      if (timer === null) return; // cleared (process closed) — don't re-arm
+      if (timer === null) return; // fired, cleared, or frozen — don't re-arm
       clearTimeout(timer);
       arm();
+    },
+    // System sleep: stop the clock entirely (keeps membership in the set).
+    freeze() {
+      if (timer !== null) {
+        clearTimeout(timer);
+        timer = null;
+      }
+    },
+    // System wake: restart with a full window. Only re-arms frozen watchdogs
+    // still in the set — a cleared/fired one stays dead.
+    thaw() {
+      if (timer === null && activeInactivityWatchdogs.has(watchdog)) arm();
     },
     clear() {
       if (timer !== null) clearTimeout(timer);
       timer = null;
+      activeInactivityWatchdogs.delete(watchdog);
     }
   };
+  arm();
+  activeInactivityWatchdogs.add(watchdog);
+  return watchdog;
+}
+
+function freezeInactivityWatchdogsForSleep() {
+  if (activeInactivityWatchdogs.size === 0) return;
+  sendDebugLog(`[power] system suspending — freezing ${activeInactivityWatchdogs.size} inactivity watchdog(s)`);
+  for (const wd of activeInactivityWatchdogs) wd.freeze();
+}
+
+function thawInactivityWatchdogsAfterWake() {
+  if (activeInactivityWatchdogs.size === 0) return;
+  sendDebugLog(`[power] system resumed — re-arming ${activeInactivityWatchdogs.size} inactivity watchdog(s)`);
+  for (const wd of activeInactivityWatchdogs) wd.thaw();
 }
 
 // Processing queue management
@@ -2835,9 +2877,15 @@ async function processNextInQueue() {
             sendDebugLog(`Transcription failed (audio preserved): ${transcriptionFailedMsg}`);
             trackEvent('transcription_completed', { success: false });
           } else if (line.startsWith('HEARTBEAT:')) {
-            // Liveness signal only — already reset the watchdog above;
-            // log it for debugging but never forward to the renderer.
-            sendDebugLog(line.trim());
+            // Liveness signal — its real job (resetting the watchdog) already
+            // happened at the top of this handler. Forward to the debug log
+            // sparsely (start/non-numeric beats, every 10th chunk, and the
+            // final one) so a 3-hour meeting doesn't flood the debug console
+            // with ~180 near-identical lines.
+            const hb = line.trim().match(/:(\d+)\/(\d+)$/);
+            if (!hb || hb[1] === hb[2] || Number(hb[1]) % 10 === 0) {
+              sendDebugLog(line.trim());
+            }
           } else if (line.trim()) {
             sendDebugLog(line.trim());
           }
@@ -3303,6 +3351,17 @@ ipcMain.handle('start-recording-ui', async (_, sessionName) => {
 //   wake — the renderer is suspended too — but nothing records during sleep
 //   either way).
 let pausedBySleep = false;
+// Live "Recording paused / Resume" notification, so a manual resume/stop can
+// dismiss it — a stale banner clicked later would fire auto-resume-requested
+// at a recording in a different state.
+let sleepPausedNotif = null;
+
+function closeSleepPausedNotification() {
+  if (sleepPausedNotif) {
+    try { sleepPausedNotif.close(); } catch (_) {}
+    sleepPausedNotif = null;
+  }
+}
 
 function autoPauseForSleep() {
   try {
@@ -3340,6 +3399,7 @@ function promptResumeAfterWake() {
 }
 
 function showSleepPausedNotification() {
+  closeSleepPausedNotification();
   const notif = new Notification({
     title: 'Recording paused',
     body: 'Paused while your computer was asleep. Resume to keep capturing.',
@@ -3348,6 +3408,7 @@ function showSleepPausedNotification() {
     actions: [{ type: 'button', text: 'Resume' }],
   });
   const resume = () => {
+    sleepPausedNotif = null;
     sendDebugLog('[power] user chose to resume after wake');
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('auto-resume-requested');
@@ -3356,6 +3417,7 @@ function showSleepPausedNotification() {
   notif.on('action', (_evt, _index) => resume());
   notif.on('click', resume);
   notif.show();
+  sleepPausedNotif = notif;
 }
 
 ipcMain.handle('pause-recording-ui', async () => {
@@ -3392,6 +3454,7 @@ ipcMain.handle('resume-recording-ui', async () => {
   try {
     // Any resume (manual or notification-driven) ends the sleep-pause state.
     pausedBySleep = false;
+    closeSleepPausedNotification();
     if (currentRecordingProcess) {
       if (process.platform === 'win32') {
         return { success: false, error: 'Resume not supported on Windows' };
@@ -3420,6 +3483,7 @@ ipcMain.handle('stop-recording-ui', async () => {
     // Stopping ends any sleep-pause state — don't prompt Resume on a
     // recording that no longer exists.
     pausedBySleep = false;
+    closeSleepPausedNotification();
     // Always clear system-audio active state. The renderer's stopCapture flow
     // also reports false, but races (renderer already torn down, recorder
     // errored before reportSystemAudioState) can leave this stuck true and

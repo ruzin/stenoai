@@ -489,8 +489,10 @@ def _transcribe_windows(ts_model: Any, samples) -> _SimpleResult:
         windows_recognized += 1
         # Liveness signal for the Electron inactivity watchdog — a long
         # meeting recognising window-by-window on CPU is alive, not hung.
-        # ``windows_attempted`` (not recognized) so `done` tracks progress
-        # through the file even when an earlier window failed and was skipped.
+        # Failed windows emit nothing (they skip via `continue` above, and
+        # failing fast costs little liveness); emitting ``windows_attempted``
+        # means `done` jumps past them on the next success, so the counter
+        # still tracks position in the file rather than just successes.
         _emit_heartbeat(windows_attempted, total_windows)
 
         tokens = list(getattr(result, "tokens", None) or [])

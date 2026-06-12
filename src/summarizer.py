@@ -29,11 +29,25 @@ logger = logging.getLogger(__name__)
 #   - ~1500 prompt/response tokens) * ~4 chars/token. Over-cap transcripts
 #   keep the head and tail (60/40) joined by an explicit marker — head+tail
 #   rather than head-only so the meeting's close and action items survive.
+#   (The 4 chars/token heuristic under-counts CJK text, which can still
+#   overflow; an acceptable approximation for the default path.)
+#
+# The in-prompt marker is deliberately neutral — a small model treats it as
+# a gap in the conversation. The user-facing explanation is appended
+# deterministically to the streamed summary (see
+# ``summarize_transcript_streaming``) rather than trusted to the model to
+# echo, which would be both unreliable and an invitation to garble it into
+# the summary body.
 LOCAL_OLLAMA_NUM_CTX = 8192
 LOCAL_TRANSCRIPT_CHAR_CAP = 24000
 LOCAL_TRANSCRIPT_TRUNCATION_NOTE = (
-    "\n\n[... transcript truncated to fit the local model's context window — "
-    "use a cloud model in Settings for full-length summaries ...]\n\n"
+    "\n\n[... middle portion of the transcript omitted ...]\n\n"
+)
+LOCAL_TRUNCATION_USER_NOTE = (
+    "\n\n> Note: this meeting was longer than the local AI model's context "
+    "window, so the summary is based on the beginning and end of the "
+    "transcript. For full-length summaries, switch to a cloud model in "
+    "Settings.\n"
 )
 
 
@@ -669,17 +683,24 @@ class OllamaSummarizer:
             return {"num_ctx": LOCAL_OLLAMA_NUM_CTX}
         return None
 
+    def _transcript_over_local_cap(self, transcript: str) -> bool:
+        """True when ``_cap_transcript_for_local`` would truncate — i.e. the
+        user-facing truncation note should accompany the summary."""
+        return (
+            self._is_local_ollama()
+            and bool(transcript)
+            and len(transcript) > LOCAL_TRANSCRIPT_CHAR_CAP
+        )
+
     def _cap_transcript_for_local(self, transcript: str) -> str:
         """Bound a transcript to the local model's context budget.
 
         No-op for cloud/remote/adapter providers and for transcripts under
         the cap. Over the cap, keeps the first 60% + last 40% of the budget
-        joined by an explicit truncation note — see the constants block at
-        the top of this module for the rationale.
+        joined by a neutral gap marker — see the constants block at the top
+        of this module for the rationale.
         """
-        if not self._is_local_ollama():
-            return transcript
-        if not transcript or len(transcript) <= LOCAL_TRANSCRIPT_CHAR_CAP:
+        if not self._transcript_over_local_cap(transcript):
             return transcript
         head_budget = int(LOCAL_TRANSCRIPT_CHAR_CAP * 0.6)
         tail_budget = LOCAL_TRANSCRIPT_CHAR_CAP - head_budget
@@ -1137,10 +1158,17 @@ TRANSCRIPT:
                     stream=True,
                     options=self._local_chat_options(),
                 )
+                yielded_any = False
                 for chunk in response:
                     content = chunk.get('message', {}).get('content', '')
                     if content:
+                        yielded_any = True
                         yield content
+                # The transcript was capped for the local model's context —
+                # tell the user deterministically rather than hoping the
+                # model echoes the in-prompt gap marker.
+                if yielded_any and self._transcript_over_local_cap(transcript):
+                    yield LOCAL_TRUNCATION_USER_NOTE
             except Exception as e:
                 logger.error(f"Ollama streaming failed: {e}")
                 return
@@ -1312,6 +1340,12 @@ TITLE:"""
             return None
 
     def _build_query_prompt(self, transcript: str, question: str, language: str = "en") -> str:
+        # Same local-context discipline as the summary prompt builders: a
+        # long meeting silently overruns a small local model's window and
+        # the answer would be computed against only the head of the
+        # transcript with no indication. Head+tail beats silent overrun,
+        # though an answer living in the omitted middle is still possible.
+        transcript = self._cap_transcript_for_local(transcript)
         if language and language not in ("en", "auto"):
             from .config import get_config
             language_name = get_config().get_language_name(language)
@@ -1387,6 +1421,7 @@ ANSWER:"""
                     model=self.model_name,
                     messages=[{"role": "user", "content": prompt}],
                     stream=True,
+                    options=self._local_chat_options(),
                 )
                 for chunk in stream:
                     content = chunk['message']['content']
@@ -1444,6 +1479,7 @@ ANSWER:"""
                                     'content': prompt
                                 }
                             ],
+                            options=self._local_chat_options(),
                         )
                         break
 

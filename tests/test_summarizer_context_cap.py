@@ -7,12 +7,14 @@ and only local chat calls get the num_ctx options hint.
 """
 
 import unittest
+import unittest.mock
 from unittest.mock import MagicMock
 
 from src.summarizer import (
     LOCAL_OLLAMA_NUM_CTX,
     LOCAL_TRANSCRIPT_CHAR_CAP,
     LOCAL_TRANSCRIPT_TRUNCATION_NOTE,
+    LOCAL_TRUNCATION_USER_NOTE,
     OllamaSummarizer,
 )
 
@@ -108,6 +110,80 @@ class NumCtxOptionsTests(unittest.TestCase):
         list(s.summarize_transcript_streaming("short transcript"))
         kwargs = s.client.chat.call_args.kwargs
         self.assertIsNone(kwargs.get("options"))
+
+
+class DeterministicUserNoteTests(unittest.TestCase):
+    """The user-facing truncation note is appended deterministically to the
+    streamed summary — never trusted to the model to echo the in-prompt
+    gap marker."""
+
+    def _stream(self, s, transcript):
+        s._ensure_ollama_ready = MagicMock()
+        s.client.chat.return_value = iter([{"message": {"content": "summary text"}}])
+        return list(s.summarize_transcript_streaming(transcript))
+
+    def test_note_appended_when_local_and_truncated(self):
+        s = _build_summarizer("local")
+        chunks = self._stream(s, _long_transcript())
+        self.assertEqual(chunks[-1], LOCAL_TRUNCATION_USER_NOTE)
+
+    def test_no_note_when_local_and_short(self):
+        s = _build_summarizer("local")
+        chunks = self._stream(s, "short transcript")
+        self.assertNotIn(LOCAL_TRUNCATION_USER_NOTE, chunks)
+
+    def test_no_note_when_stream_yielded_nothing(self):
+        # A failed/empty stream must not produce a summary consisting of
+        # only the truncation note.
+        s = _build_summarizer("local")
+        s._ensure_ollama_ready = MagicMock()
+        s.client.chat.return_value = iter([])
+        chunks = list(s.summarize_transcript_streaming(_long_transcript()))
+        self.assertEqual(chunks, [])
+
+    def test_no_note_for_remote(self):
+        s = _build_summarizer("remote")
+        chunks = self._stream(s, _long_transcript())
+        self.assertNotIn(LOCAL_TRUNCATION_USER_NOTE, chunks)
+
+
+class QueryPathContextTests(unittest.TestCase):
+    """The query/chat path gets the same local-context discipline as the
+    summary path: capped prompt + num_ctx options for local only."""
+
+    def test_query_prompt_caps_for_local(self):
+        s = _build_summarizer("local")
+        prompt = s._build_query_prompt(_long_transcript(), "what happened?")
+        self.assertIn(LOCAL_TRANSCRIPT_TRUNCATION_NOTE, prompt)
+
+    def test_query_prompt_full_for_cloud(self):
+        s = _build_summarizer("cloud")
+        prompt = s._build_query_prompt(_long_transcript(), "what happened?")
+        self.assertNotIn(LOCAL_TRANSCRIPT_TRUNCATION_NOTE, prompt)
+        self.assertIn("TAIL-MARKER", prompt)
+
+    def test_streaming_query_passes_num_ctx_for_local(self):
+        import src.summarizer as summarizer_mod
+        s = _build_summarizer("local")
+        s._ensure_ollama_ready = MagicMock()
+        fake_client = MagicMock()
+        fake_client.chat.return_value = iter([{"message": {"content": "answer"}}])
+        with unittest.mock.patch.object(
+            summarizer_mod.ollama, "Client", return_value=fake_client
+        ):
+            chunks = list(s.query_transcript_streaming("a transcript", "q?"))
+        self.assertEqual(chunks, ["answer"])
+        kwargs = fake_client.chat.call_args.kwargs
+        self.assertEqual(kwargs.get("options"), {"num_ctx": LOCAL_OLLAMA_NUM_CTX})
+
+    def test_nonstreaming_query_passes_num_ctx_for_local(self):
+        s = _build_summarizer("local")
+        s._ensure_ollama_ready = MagicMock()
+        s.client.chat.return_value = {"message": {"content": "answer"}}
+        out = s.query_transcript("a transcript", "q?")
+        self.assertEqual(out, "answer")
+        kwargs = s.client.chat.call_args.kwargs
+        self.assertEqual(kwargs.get("options"), {"num_ctx": LOCAL_OLLAMA_NUM_CTX})
 
 
 if __name__ == "__main__":

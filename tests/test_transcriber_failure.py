@@ -217,6 +217,46 @@ class WhisperFallbackTests(unittest.TestCase):
         self.assertEqual(out.get("engine"), "whisper.cpp-fallback")
 
 
+class WhisperHeartbeatTests(unittest.TestCase):
+    """The whisper.cpp path — including the crash-recovery fallback — must
+    emit heartbeats too, or the Electron inactivity watchdog can kill the
+    very retry it is meant to allow."""
+
+    def test_run_whisper_cpp_emits_per_segment_heartbeat(self):
+        import wave
+        from types import SimpleNamespace
+
+        from src import _heartbeat
+
+        beats = []
+        _heartbeat.set_chunk_heartbeat(lambda d, t: beats.append((d, t)))
+        self.addCleanup(_heartbeat.set_chunk_heartbeat, None)
+
+        transcriber = _build_transcriber()
+
+        def fake_transcribe(media=None, new_segment_callback=None, **params):
+            # Simulate whisper.cpp invoking the callback once per segment.
+            self.assertIsNotNone(new_segment_callback)
+            new_segment_callback(object())
+            new_segment_callback(object())
+            return []
+
+        # A real function (not a MagicMock) so inspect.signature sees the
+        # new_segment_callback parameter the way it does on pywhispercpp.
+        transcriber.model = SimpleNamespace(transcribe=fake_transcribe)
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            audio = Path(tmp_dir) / "audio.wav"
+            with wave.open(str(audio), "wb") as wf:
+                wf.setnchannels(1)
+                wf.setsampwidth(2)
+                wf.setframerate(16000)
+                wf.writeframes(b"\x00\x00" * 16000)
+            transcriber._run_whisper_cpp(audio, language="en")
+
+        self.assertEqual(beats, [(1, 0), (2, 0)])
+
+
 class TranscribeDiarisedFailureTests(unittest.TestCase):
     def test_mono_fallback_propagates_failed_flag(self):
         transcriber = _build_transcriber()

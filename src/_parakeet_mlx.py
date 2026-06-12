@@ -18,6 +18,7 @@ architecture.
 
 from __future__ import annotations
 
+import inspect
 import logging
 import threading
 from pathlib import Path
@@ -149,25 +150,29 @@ def transcribe_file(
             done, total = 0, 0
         _emit_heartbeat(done, total)
 
+    # Probe by signature rather than catching TypeError around the call —
+    # a broad catch would silently re-run an hour of GPU work (and mask a
+    # genuine TypeError from inside the decode loop) on the rare version
+    # without the kwarg. Losing the heartbeat is acceptable; losing (or
+    # doubling) transcription is not.
+    extra_kwargs = {}
+    try:
+        if "chunk_callback" in inspect.signature(model.transcribe).parameters:
+            extra_kwargs["chunk_callback"] = _heartbeat_cb
+        else:
+            logger.warning("parakeet-mlx transcribe() has no chunk_callback; no heartbeat")
+    except (TypeError, ValueError):
+        pass
+
     # Always chunk: the library merges the windows back into one AlignedResult
     # with global timestamps, so _result_to_dict is unaffected, and short files
     # (< one chunk) just transcribe in a single window for free.
-    try:
-        result = model.transcribe(
-            str(audio_path),
-            chunk_duration=PARAKEET_CHUNK_DURATION_S,
-            overlap_duration=PARAKEET_CHUNK_OVERLAP_S,
-            chunk_callback=_heartbeat_cb,
-        )
-    except TypeError:
-        # A parakeet-mlx version without the chunk_callback kwarg. Losing the
-        # heartbeat is acceptable; losing transcription is not.
-        logger.warning("parakeet-mlx transcribe() rejected chunk_callback; retrying without")
-        result = model.transcribe(
-            str(audio_path),
-            chunk_duration=PARAKEET_CHUNK_DURATION_S,
-            overlap_duration=PARAKEET_CHUNK_OVERLAP_S,
-        )
+    result = model.transcribe(
+        str(audio_path),
+        chunk_duration=PARAKEET_CHUNK_DURATION_S,
+        overlap_duration=PARAKEET_CHUNK_OVERLAP_S,
+        **extra_kwargs,
+    )
     return _result_to_dict(result, language)
 
 

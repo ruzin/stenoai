@@ -27,6 +27,7 @@ ASR engine would now strictly remove real speech without preventing
 anything; the model is the source of truth.
 """
 
+import inspect
 import logging
 import os
 import re
@@ -36,6 +37,8 @@ import tempfile
 import threading
 from pathlib import Path
 from typing import Optional, Tuple
+
+from src._heartbeat import _emit_heartbeat
 
 logger = logging.getLogger(__name__)
 
@@ -627,16 +630,29 @@ class WhisperTranscriber:
     def _convert_to_16khz(self, audio_filepath: Path) -> tuple[Path, Optional[float]]:
         """Convert audio to 16 kHz mono WAV for whisper.cpp via ffmpeg.
 
-        Used only on the whisper.cpp fallback path (Intel Macs). Parakeet's
-        ``transcribe_file`` accepts arbitrary formats via librosa, so the
-        Parakeet path doesn't need this step.
+        Used only on the whisper.cpp path. Parakeet's ``transcribe_file``
+        accepts arbitrary formats via librosa, so the Parakeet path doesn't
+        need this step.
         """
         import wave
+
+        # Already 16 kHz mono PCM — e.g. produced by _preprocess_audio (the
+        # whisper.cpp crash-fallback receives that temp) or the diarised
+        # channel split. Skip the second full decode+encode.
+        try:
+            with wave.open(str(audio_filepath), 'rb') as wf:
+                if (wf.getframerate() == 16000 and wf.getnchannels() == 1
+                        and wf.getsampwidth() == 2):
+                    return audio_filepath, wf.getnframes() / wf.getframerate()
+        except Exception:
+            pass  # not a readable WAV — fall through to ffmpeg
+
+        ffmpeg = _resolve_ffmpeg() or 'ffmpeg'
         temp_dir = tempfile.gettempdir()
         converted_path = Path(temp_dir) / f"stenoai_16khz_{audio_filepath.stem}.wav"
         try:
             result = subprocess.run(
-                ['ffmpeg', '-y', '-i', str(audio_filepath),
+                [ffmpeg, '-y', '-i', str(audio_filepath),
                  '-ar', '16000', '-ac', '1', '-c:a', 'pcm_s16le',
                  str(converted_path)],
                 capture_output=True,
@@ -694,6 +710,24 @@ class WhisperTranscriber:
             transcribe_kwargs = {"media": str(converted_path)}
             if resolved_language and resolved_language != "auto":
                 transcribe_kwargs["language"] = resolved_language
+            # Per-segment heartbeat: keeps the Electron inactivity watchdog
+            # alive on this path too — including when whisper.cpp runs as
+            # the crash-recovery fallback for a long meeting on a slow
+            # machine, which would otherwise be minutes of stdout silence.
+            # Probed by signature so an API change degrades to no heartbeat
+            # rather than a TypeError mid-failure-recovery.
+            try:
+                if "new_segment_callback" in inspect.signature(self.model.transcribe).parameters:
+                    segment_count = 0
+
+                    def _on_segment(_segment):
+                        nonlocal segment_count
+                        segment_count += 1
+                        _emit_heartbeat(segment_count, 0)  # total unknown
+
+                    transcribe_kwargs["new_segment_callback"] = _on_segment
+            except (TypeError, ValueError):
+                pass
             segments = self.model.transcribe(**transcribe_kwargs)
 
             # Dedup whisper.cpp loop hallucinations: 5+ consecutive identical
