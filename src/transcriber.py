@@ -558,7 +558,14 @@ class WhisperTranscriber:
             logger.info("ffmpeg unavailable; skipping audio pre-processing")
             return audio_filepath, False
 
-        temp_path = Path(tempfile.gettempdir()) / f"stenoai_prep_{audio_filepath.stem}.wav"
+        # mkstemp (not a name derived from the input stem) so concurrent CLI
+        # invocations over same-named files can't overwrite or unlink each
+        # other's pre-processed audio mid-transcription.
+        fd, temp_name = tempfile.mkstemp(
+            prefix=f"stenoai_prep_{audio_filepath.stem}_", suffix=".wav"
+        )
+        os.close(fd)
+        temp_path = Path(temp_name)
         try:
             result = subprocess.run(
                 [ffmpeg, '-y', '-i', str(audio_filepath),

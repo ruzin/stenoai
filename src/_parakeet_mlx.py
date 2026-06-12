@@ -161,8 +161,11 @@ def transcribe_file(
             extra_kwargs["chunk_callback"] = _heartbeat_cb
         else:
             logger.warning("parakeet-mlx transcribe() has no chunk_callback; no heartbeat")
-    except (TypeError, ValueError):
-        pass
+    except (TypeError, ValueError) as e:
+        # Un-inspectable callable (C extension / odd wrapper). Transcription
+        # proceeds without a heartbeat — log it, or a watchdog timeout on a
+        # long meeting would be undiagnosable from the logs.
+        logger.warning("Could not probe parakeet-mlx transcribe() signature (%s); no heartbeat", e)
 
     # Always chunk: the library merges the windows back into one AlignedResult
     # with global timestamps, so _result_to_dict is unaffected, and short files
