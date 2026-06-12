@@ -5801,6 +5801,16 @@ function enqueueProviderStateOp(op) {
 // current and abort its write instead of acting on stale state.
 let orgSessionGeneration = 0;
 
+// Start of the current decrypt-failure streak (null while reads succeed or
+// no session file exists). Distinguishes a transiently locked keychain
+// (seconds-to-minutes after boot/wake) from a session that will never
+// decrypt again (corrupt file, lost keychain entry after an OS reinstall) —
+// the org-lock gate fails closed only inside this grace window, so a
+// permanently unreadable session can't lock the user out of provider
+// changes forever.
+let orgSessionDecryptFailingSince = null;
+const DECRYPT_FAILURE_GRACE_MS = 10 * 60 * 1000;
+
 // Memo of the last reconcile that confirmed session/provider consistency.
 // org-status is refetched on focus/mount by the sidebar; without this every
 // refetch would spawn a Python subprocess (~100-300ms PyInstaller startup)
@@ -5809,22 +5819,36 @@ let orgSessionGeneration = 0;
 let lastConsistentCheck = { generation: -1, at: 0 };
 const RECONCILE_CONSISTENT_TTL_MS = 30_000;
 
-function reconcileAiProviderWithOrgSession() {
-  if (
+function reconcileAiProviderWithOrgSession(opts = {}) {
+  const { knownProvider } = opts;
+  const memoFresh = () =>
     lastConsistentCheck.generation === orgSessionGeneration &&
-    Date.now() - lastConsistentCheck.at < RECONCILE_CONSISTENT_TTL_MS
-  ) {
-    return Promise.resolve(null);
+    Date.now() - lastConsistentCheck.at < RECONCILE_CONSISTENT_TTL_MS;
+  let bypassMemo = false;
+  if (memoFresh()) {
+    if (knownProvider === undefined) return Promise.resolve(null);
+    // The caller just read the provider from disk (get-ai-provider passes
+    // its own response in). Cross-check it against the session file — a
+    // sync read, no subprocess — so external drift inside the memo's TTL
+    // (terminal CLI call, hand-edited config) is caught immediately
+    // instead of after the memo expires.
+    const { exists, decryptFailed } = loadOrgSessionEx();
+    const consistent = decryptFailed
+      ? true // transient — never act on it
+      : exists
+        ? knownProvider === 'adapter'
+        : knownProvider !== 'adapter';
+    if (consistent) return Promise.resolve(null);
+    bypassMemo = true;
   }
   return enqueueProviderStateOp(async () => {
     // Re-check the memo now that we actually run: a burst of callers with a
     // cold memo enqueues several runs, and by the time the later ones
     // execute, the first has already confirmed consistency — skip their
     // subprocess spawns instead of repeating the full check serially.
-    if (
-      lastConsistentCheck.generation === orgSessionGeneration &&
-      Date.now() - lastConsistentCheck.at < RECONCILE_CONSISTENT_TTL_MS
-    ) {
+    // Skipped when this run was enqueued BECAUSE of a memo-contradicting
+    // drift observation — that drift still needs repairing.
+    if (!bypassMemo && memoFresh()) {
       return null;
     }
     const genAtRead = orgSessionGeneration;
@@ -5940,7 +5964,12 @@ ipcMain.handle('get-ai-provider', async () => {
     // reconcile re-reads the provider from disk after any write, so the
     // patched response never diverges from what Python persisted.
     try {
-      const reconciled = await reconcileAiProviderWithOrgSession();
+      // knownProvider lets the reconcile detect drift even inside its
+      // consistency-memo window — this handler already paid for a fresh
+      // disk read, so the cross-check costs nothing.
+      const reconciled = await reconcileAiProviderWithOrgSession({
+        knownProvider: jsonData.ai_provider,
+      });
       if (reconciled && reconciled !== jsonData.ai_provider) {
         jsonData.ai_provider = reconciled;
       }
@@ -5976,7 +6005,18 @@ ipcMain.handle('set-ai-provider', async (event, provider) => {
         const sessionValid = Boolean(
           session && session.adapterUrl && session.token && !isJwtExpired(session.token)
         );
-        if (sessionValid || decryptFailed) {
+        // Fail closed on decrypt failure only inside the grace window — a
+        // streak that has lasted longer than a keychain-unlock plausibly
+        // can means the session will never decrypt again, and rejecting
+        // forever would dead-end the user.
+        const decryptRecentlyFailed =
+          decryptFailed &&
+          orgSessionDecryptFailingSince !== null &&
+          Date.now() - orgSessionDecryptFailingSince < DECRYPT_FAILURE_GRACE_MS;
+        if (decryptFailed && !decryptRecentlyFailed) {
+          sendDebugLog(`Org lock: allowing set-ai-provider ${provider} — session unreadable for >${DECRYPT_FAILURE_GRACE_MS / 60000}min, treating as dead`);
+        }
+        if (sessionValid || decryptRecentlyFailed) {
           sendDebugLog(`Org lock: rejecting set-ai-provider ${provider} (${decryptFailed ? 'session unreadable' : 'org session active'})`);
           return {
             success: false,
@@ -7758,15 +7798,20 @@ function saveOrgSession(session) {
 // downgrade signed-in users to local AI via the stale-adapter recovery.
 function loadOrgSessionEx() {
   const p = getOrgSessionPath();
-  if (!fs.existsSync(p)) return { session: null, exists: false, decryptFailed: false };
+  if (!fs.existsSync(p)) {
+    orgSessionDecryptFailingSince = null;
+    return { session: null, exists: false, decryptFailed: false };
+  }
   try {
     const encrypted = fs.readFileSync(p);
+    orgSessionDecryptFailingSince = null;
     return {
       session: JSON.parse(safeStorage.decryptString(encrypted)),
       exists: true,
       decryptFailed: false,
     };
   } catch (e) {
+    if (orgSessionDecryptFailingSince === null) orgSessionDecryptFailingSince = Date.now();
     console.error('Failed to load org session:', e.message);
     sendDebugLog(`org session present but unreadable (keychain locked?): ${e.message}`);
     return { session: null, exists: true, decryptFailed: true };

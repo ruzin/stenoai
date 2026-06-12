@@ -23,14 +23,15 @@ logger = logging.getLogger(__name__)
 def _atomic_write_json(path: Path, payload) -> None:
     """Write `payload` as JSON to `path` atomically.
 
-    Same tempfile + os.replace pattern as simple_recorder._atomic_write_json
-    (recorder_state.json / summary JSON). Kept as a separate copy for now to
-    avoid churn in the recorder-state write path; consolidating both into a
-    shared src helper (and giving recorder_state the PermissionError retry
-    below) is a tracked follow-up. config.json is read by many concurrent
-    CLI subprocesses; a plain truncate-and-rewrite lets a reader see a torn
-    file, fall back to defaults, and (pre-fix) persist those defaults over
-    the user's real settings.
+    The shared atomic writer for every JSON file the CLI persists —
+    config.json here, recorder_state.json and the final summary JSON via
+    the re-export in simple_recorder. tempfile + os.replace in the same
+    directory keeps the rename a single filesystem operation on POSIX and
+    Windows, so a crash mid-write leaves the prior file intact rather
+    than a half-written one. config.json in particular is read by many
+    concurrent CLI subprocesses; a plain truncate-and-rewrite lets a
+    reader see a torn file, fall back to defaults, and (pre-fix) persist
+    those defaults over the user's real settings.
     """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
