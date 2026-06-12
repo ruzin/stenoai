@@ -1274,8 +1274,14 @@ TRANSCRIPT:
             # The deterministic truncation note may trail the streamed
             # summary — strip it so "switch to a cloud model in Settings"
             # can't distract a small model into titling the meeting after it.
-            if summary and LOCAL_TRUNCATION_USER_NOTE.strip() in summary:
-                summary = summary.replace(LOCAL_TRUNCATION_USER_NOTE.strip(), '').strip()
+            # Both forms: raw ("> Note: …", from streamed_md) and folded
+            # (no blockquote marker, from a parsed summary via regen-title).
+            if summary:
+                raw_note = LOCAL_TRUNCATION_USER_NOTE.strip()
+                folded_note = raw_note.lstrip('> ').strip()
+                for form in (raw_note, folded_note):
+                    if form in summary:
+                        summary = summary.replace(form, '').strip()
             # Use summary if available, otherwise fall back to first part of transcript
             context = summary if summary else transcript[:2000]
             if not context or context.strip() == "":
