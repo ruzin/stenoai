@@ -7804,12 +7804,13 @@ function loadOrgSessionEx() {
   }
   try {
     const encrypted = fs.readFileSync(p);
+    // Decrypt + parse BEFORE clearing the streak — clearing first would
+    // reset it moments before the decrypt throws, and the catch below
+    // would restamp it to now on every call, so the grace window could
+    // never elapse and the org lock would stay fail-closed forever.
+    const session = JSON.parse(safeStorage.decryptString(encrypted));
     orgSessionDecryptFailingSince = null;
-    return {
-      session: JSON.parse(safeStorage.decryptString(encrypted)),
-      exists: true,
-      decryptFailed: false,
-    };
+    return { session, exists: true, decryptFailed: false };
   } catch (e) {
     if (orgSessionDecryptFailingSince === null) orgSessionDecryptFailingSince = Date.now();
     console.error('Failed to load org session:', e.message);
