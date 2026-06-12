@@ -3381,7 +3381,10 @@ def list_models():
         result = {
             "current_model": current_model,
             "supported_models": models,
-            "provider": "local"
+            # The actual configured provider ('local', 'cloud', 'adapter').
+            # This used to be hardcoded "local", which made debug logs claim
+            # a local provider while summaries went through the org adapter.
+            "provider": provider
         }
 
     print(json.dumps(result, indent=2))
