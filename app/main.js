@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell, systemPreferences, globalShortcut, safeStorage, Tray, Menu, nativeImage, Notification } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, systemPreferences, globalShortcut, safeStorage, Tray, Menu, nativeImage, Notification, powerMonitor } = require('electron');
 
 // Prevent EPIPE crashes when stdout/stderr pipe is broken (e.g. launching terminal closed)
 process.stdout?.on('error', () => {});
@@ -1106,6 +1106,15 @@ if (!gotSingleInstanceLock) {
     if (!IS_E2E) createTray();
     setupAutoUpdater();
     setupAutoMeetingDetector();
+
+    // Auto-pause active recordings when the machine sleeps (lid close etc.)
+    // and offer a Resume prompt on wake — see autoPauseForSleep. Processing
+    // watchdogs are frozen across the sleep so their deadline can't elapse
+    // while the subprocess is suspended — see makeInactivityWatchdog.
+    powerMonitor.on('suspend', autoPauseForSleep);
+    powerMonitor.on('suspend', freezeInactivityWatchdogsForSleep);
+    powerMonitor.on('resume', promptResumeAfterWake);
+    powerMonitor.on('resume', thawInactivityWatchdogsAfterWake);
     const protocolRegistered = registerShortcutProtocolClient();
     sendDebugLog(`Protocol handler registration (${SHORTCUT_PROTOCOL}): ${protocolRegistered}`);
 
@@ -1522,17 +1531,18 @@ ipcMain.handle('reprocess-meeting', async (event, summaryFile, regenerateTitle, 
 
       let stderrBuf = '';
 
-      const procTimeout = setTimeout(() => {
-        console.error('reprocess timed out after 30 minutes, killing');
-        proc.kill();
-      }, 30 * 60 * 1000);
+      // Liveness watchdog — see makeInactivityWatchdog. Summary CHUNK:
+      // lines (and HEARTBEAT: lines if a retranscribe is ever added here)
+      // keep resetting it, so only a genuinely hung process gets killed.
+      const watchdog = makeInactivityWatchdog(proc, TRANSCRIBE_INACTIVITY_MS, 'reprocess');
 
       proc.on('error', (err) => {
-        clearTimeout(procTimeout);
+        watchdog.clear();
         reject(new Error(`reprocess spawn error: ${err.message}`));
       });
 
       proc.stdout.on('data', (data) => {
+        watchdog.reset();
         const text = data.toString();
         text.split('\n').forEach(line => {
           if (line.startsWith('CHUNK:')) {
@@ -1559,6 +1569,7 @@ ipcMain.handle('reprocess-meeting', async (event, summaryFile, regenerateTitle, 
       });
 
       proc.stderr.on('data', (data) => {
+        watchdog.reset();
         const msg = data.toString().trim();
         if (msg) {
           stderrBuf += msg + '\n';
@@ -1567,7 +1578,7 @@ ipcMain.handle('reprocess-meeting', async (event, summaryFile, regenerateTitle, 
       });
 
       proc.on('close', (code) => {
-        clearTimeout(procTimeout);
+        watchdog.clear();
         if (code === 0) {
           console.log(`✅ Completed reprocessing: ${sessionName}`);
           if (mainWindow && !mainWindow.isDestroyed()) {
@@ -2713,6 +2724,89 @@ function getRecordingElapsedSeconds() {
   );
 }
 
+// Inactivity watchdog for long-running backend subprocesses (transcribe +
+// summarise). A fixed kill-timeout punishes slow-but-alive work — a 3-hour
+// meeting transcribing on a cold or CPU-only machine can legitimately run
+// past 30 minutes — while no timeout at all wedges the processing queue
+// forever behind a hung process. Instead we kill only after a window with
+// zero stdout/stderr activity. The Python pipeline emits HEARTBEAT: lines
+// per transcription chunk precisely so this timer keeps resetting while
+// real work is happening. 8 minutes covers a cold model load plus a stalled
+// chunk with margin, and still reaps a truly hung process ~4x faster than
+// the old fixed 30-minute timer.
+const TRANSCRIBE_INACTIVITY_MS = 8 * 60 * 1000;
+
+// Live watchdogs, frozen across system sleep. Node's timer clock advances
+// during sleep on Apple Silicon and Windows, so a lid-close while processing
+// would otherwise fire the inactivity deadline the moment the machine wakes —
+// killing a suspended-but-healthy subprocess before it gets a chance to emit
+// its next heartbeat. Freezing on 'suspend' (before sleep, so there's no race
+// with an already-expired timer on wake) and re-arming on 'resume' gives the
+// resumed process a full fresh window.
+const activeInactivityWatchdogs = new Set();
+// True between powerMonitor 'suspend' and 'resume'. A watchdog created in
+// the suspend→sleep gap (the queue can start its next job there) must not
+// arm — its deadline would include the slept wall-clock and fire on wake.
+let systemSuspendedForWatchdogs = false;
+
+function makeInactivityWatchdog(proc, ms, label) {
+  let timer = null;
+  const arm = () => {
+    timer = setTimeout(() => {
+      timer = null;
+      activeInactivityWatchdogs.delete(watchdog);
+      console.error(`${label} produced no output for ${Math.round(ms / 60000)} minutes, killing`);
+      sendDebugLog(`${label} inactive for ${Math.round(ms / 60000)} minutes — killing process`);
+      try { proc.kill(); } catch (e) { /* process already gone */ }
+    }, ms);
+  };
+  const watchdog = {
+    // Any stdout/stderr activity proves liveness — push the deadline out.
+    reset() {
+      if (timer === null) return; // fired, cleared, or frozen — don't re-arm
+      clearTimeout(timer);
+      arm();
+    },
+    // System sleep: stop the clock entirely (keeps membership in the set).
+    freeze() {
+      if (timer !== null) {
+        clearTimeout(timer);
+        timer = null;
+      }
+    },
+    // System wake: restart with a full window. Unconditional re-arm for set
+    // members (an already-armed timer just gets a fresh, generous window);
+    // a cleared/fired watchdog left the set and stays dead.
+    thaw() {
+      if (!activeInactivityWatchdogs.has(watchdog)) return;
+      if (timer !== null) clearTimeout(timer);
+      arm();
+    },
+    clear() {
+      if (timer !== null) clearTimeout(timer);
+      timer = null;
+      activeInactivityWatchdogs.delete(watchdog);
+    }
+  };
+  if (!systemSuspendedForWatchdogs) arm(); // else thaw() arms on wake
+  activeInactivityWatchdogs.add(watchdog);
+  return watchdog;
+}
+
+function freezeInactivityWatchdogsForSleep() {
+  systemSuspendedForWatchdogs = true;
+  if (activeInactivityWatchdogs.size === 0) return;
+  sendDebugLog(`[power] system suspending — freezing ${activeInactivityWatchdogs.size} inactivity watchdog(s)`);
+  for (const wd of activeInactivityWatchdogs) wd.freeze();
+}
+
+function thawInactivityWatchdogsAfterWake() {
+  systemSuspendedForWatchdogs = false;
+  if (activeInactivityWatchdogs.size === 0) return;
+  sendDebugLog(`[power] system resumed — re-arming ${activeInactivityWatchdogs.size} inactivity watchdog(s)`);
+  for (const wd of activeInactivityWatchdogs) wd.thaw();
+}
+
 // Processing queue management
 async function processNextInQueue() {
   if (isProcessing || processingQueue.length === 0) {
@@ -2750,19 +2844,22 @@ async function processNextInQueue() {
       // meeting. We thread the flag into processing-complete so the renderer
       // surfaces the failure honestly instead of as a normal saved note.
       let transcriptionFailedMsg = null;
+      // Last time a HEARTBEAT: line was forwarded to the debug log (the
+      // watchdog reset itself is unconditional). 0 → log the first one.
+      let lastHeartbeatLogAt = 0;
 
-      // Timeout: kill process if it runs longer than 30 minutes
-      const procTimeout = setTimeout(() => {
-        console.error('process-streaming timed out after 30 minutes, killing');
-        proc.kill();
-      }, 30 * 60 * 1000);
+      // Liveness watchdog: kills the process only after a window of zero
+      // output. HEARTBEAT:/CHUNK: lines from the backend keep it alive, so
+      // a long transcription on a slow machine is never killed mid-work.
+      const watchdog = makeInactivityWatchdog(proc, TRANSCRIBE_INACTIVITY_MS, 'process-streaming');
 
       proc.on('error', (err) => {
-        clearTimeout(procTimeout);
+        watchdog.clear();
         reject(new Error(`process-streaming spawn error: ${err.message}`));
       });
 
       proc.stdout.on('data', (data) => {
+        watchdog.reset();
         const text = data.toString();
         // Parse protocol lines
         text.split('\n').forEach(line => {
@@ -2791,6 +2888,18 @@ async function processNextInQueue() {
             transcriptionFailedMsg = line.slice('TRANSCRIPTION_FAILED:'.length).trim();
             sendDebugLog(`Transcription failed (audio preserved): ${transcriptionFailedMsg}`);
             trackEvent('transcription_completed', { success: false });
+          } else if (line.startsWith('HEARTBEAT:')) {
+            // Liveness signal — its real job (resetting the watchdog) already
+            // happened at the top of this handler. Throttle debug-log output
+            // by TIME, not beat value: the MLX backend reports sample counts
+            // and whisper.cpp reports segment counts, so any value-based
+            // filter floods on at least one backend. One line per ~30 s keeps
+            // a 3-hour meeting to a handful of entries.
+            const now = Date.now();
+            if (now - lastHeartbeatLogAt >= 30_000) {
+              lastHeartbeatLogAt = now;
+              sendDebugLog(line.trim());
+            }
           } else if (line.trim()) {
             sendDebugLog(line.trim());
           }
@@ -2798,6 +2907,7 @@ async function processNextInQueue() {
       });
 
       proc.stderr.on('data', (data) => {
+        watchdog.reset();
         const msg = data.toString().trim();
         if (msg) {
           stderrBuf += msg + '\n';
@@ -2806,7 +2916,7 @@ async function processNextInQueue() {
       });
 
       proc.on('close', (code) => {
-        clearTimeout(procTimeout);
+        watchdog.clear();
         if (code === 0) {
           console.log(`✅ Completed streaming processing: ${currentProcessingJob.sessionName}`);
           const sessionNameAtClose = currentProcessingJob.sessionName;
@@ -3238,6 +3348,95 @@ ipcMain.handle('start-recording-ui', async (_, sessionName) => {
   }
 });
 
+// ── Auto-pause on system sleep ──
+// Closing the laptop lid (or any suspend) used to leave an active recording
+// "running" with a broken audio stream. We pause on suspend and deliberately
+// do NOT auto-resume on wake — waking the machine doesn't mean the meeting
+// is still going. Instead a notification offers Resume, reusing the same
+// auto-resume-requested renderer affordance as meeting-end auto-pause.
+//
+// Mode × platform matrix:
+// - backend (mic-only) mode, macOS/Linux: SIGUSR1 to the record subprocess
+//   (same as pause-recording-ui) + markRecordingPaused.
+// - backend mode, Windows: SIGUSR1 is unsupported (mirrors the
+//   pause-recording-ui gate) — log and skip; acceptable for alpha.
+// - system-audio mode, both OSes: markRecordingPaused + auto-pause-requested
+//   to the renderer, which pauses its MediaRecorder (possibly only after
+//   wake — the renderer is suspended too — but nothing records during sleep
+//   either way).
+let pausedBySleep = false;
+// Live "Recording paused / Resume" notification, so a manual resume/stop can
+// dismiss it — a stale banner clicked later would fire auto-resume-requested
+// at a recording in a different state.
+let sleepPausedNotif = null;
+
+function closeSleepPausedNotification() {
+  if (sleepPausedNotif) {
+    try { sleepPausedNotif.close(); } catch (_) {}
+    sleepPausedNotif = null;
+  }
+}
+
+function autoPauseForSleep() {
+  try {
+    if (recordingRuntimeState.isPaused) return;
+    const hasBackendRecording = currentRecordingProcess !== null;
+    if (!hasBackendRecording && !systemAudioRecordingActive) return;
+
+    if (hasBackendRecording) {
+      if (process.platform === 'win32') {
+        sendDebugLog('[power] suspend during recording — pause unsupported on Windows backend mode, skipping');
+        return;
+      }
+      sendDebugLog('[power] system suspend — pausing recording (SIGUSR1)');
+      currentRecordingProcess.kill('SIGUSR1');
+      markRecordingPaused();
+    } else {
+      sendDebugLog('[power] system suspend — pausing system-audio recording');
+      markRecordingPaused();
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('auto-pause-requested');
+      }
+    }
+    pausedBySleep = true;
+  } catch (e) {
+    sendDebugLog(`[power] auto-pause on suspend failed: ${e.message}`);
+  }
+}
+
+function promptResumeAfterWake() {
+  if (!pausedBySleep) return;
+  pausedBySleep = false;
+  if (!recordingRuntimeState.isPaused) return;
+  sendDebugLog('[power] system resumed — recording stays paused, offering Resume');
+  showSleepPausedNotification();
+}
+
+function showSleepPausedNotification() {
+  closeSleepPausedNotification();
+  // Deliberately NOT gated on notificationsEnabled(): unlike the
+  // convenience notifications (meeting detected, note ready), this one is
+  // state-critical — the user believes they're capturing and they are not.
+  const notif = new Notification({
+    title: 'Recording paused',
+    body: 'Paused while your computer was asleep. Resume to keep capturing.',
+    // `actions` renders on macOS only; the click handler below covers
+    // Windows, where the whole notification is the affordance.
+    actions: [{ type: 'button', text: 'Resume' }],
+  });
+  const resume = () => {
+    sleepPausedNotif = null;
+    sendDebugLog('[power] user chose to resume after wake');
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('auto-resume-requested');
+    }
+  };
+  notif.on('action', (_evt, _index) => resume());
+  notif.on('click', resume);
+  notif.show();
+  sleepPausedNotif = notif;
+}
+
 ipcMain.handle('pause-recording-ui', async () => {
   try {
     // Mic-only mode: signal the Python `record` subprocess directly.
@@ -3270,6 +3469,9 @@ ipcMain.handle('pause-recording-ui', async () => {
 
 ipcMain.handle('resume-recording-ui', async () => {
   try {
+    // Any resume (manual or notification-driven) ends the sleep-pause state.
+    pausedBySleep = false;
+    closeSleepPausedNotification();
     if (currentRecordingProcess) {
       if (process.platform === 'win32') {
         return { success: false, error: 'Resume not supported on Windows' };
@@ -3295,6 +3497,10 @@ ipcMain.handle('resume-recording-ui', async () => {
 
 ipcMain.handle('stop-recording-ui', async () => {
   try {
+    // Stopping ends any sleep-pause state — don't prompt Resume on a
+    // recording that no longer exists.
+    pausedBySleep = false;
+    closeSleepPausedNotification();
     // Always clear system-audio active state. The renderer's stopCapture flow
     // also reports false, but races (renderer already torn down, recorder
     // errored before reportSystemAudioState) can leave this stuck true and

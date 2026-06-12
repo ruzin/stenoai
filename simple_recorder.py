@@ -113,6 +113,36 @@ def _atomic_write_json(path: Path, payload) -> None:
         raise
 
 
+def _start_summary_heartbeat(label: str = "summarize", interval_s: int = 60, max_beats: int = 30):
+    """Print ``HEARTBEAT:<label>:<n>`` lines from a daemon thread.
+
+    Covers the silent window between "Generating summary" and the model's
+    first streamed token — prompt eval of a context-capped transcript on a
+    CPU-only machine can exceed the Electron inactivity watchdog's window
+    with zero stdout. Capped at ``max_beats`` so a genuinely hung Ollama
+    can't keep the watchdog alive forever (30 beats ≈ the old fixed 30-min
+    budget). Returns a ``threading.Event``; set it to stop the beats — the
+    caller stops it on the first streamed chunk, after which real output is
+    the liveness signal.
+
+    Single ``sys.stdout.write`` per line (TextIOWrapper writes are locked)
+    so a beat can never tear a concurrently streamed CHUNK: line.
+    """
+    import threading
+
+    stop = threading.Event()
+
+    def _beat():
+        beats = 0
+        while beats < max_beats and not stop.wait(interval_s):
+            beats += 1
+            sys.stdout.write(f"HEARTBEAT:{label}:{beats}\n")
+            sys.stdout.flush()
+
+    threading.Thread(target=_beat, daemon=True, name="summary-heartbeat").start()
+    return stop
+
+
 def _render_frontmatter(meta: dict) -> list[str]:
     """Render a meeting .md YAML frontmatter block (including the enclosing
     ``---`` fences) from a flat dict, with the type-specific scalar
@@ -1094,8 +1124,28 @@ def process_streaming(audio_file, name, notes):
             except Exception as e:
                 logger.warning(f"Failed to read notes file: {e}")
 
-        # Step 1: Transcribe
-        transcript_data = await recorder.transcribe_audio(audio_file, name)
+        # Step 1: Transcribe. HEARTBEAT: lines are a liveness signal for the
+        # Electron inactivity watchdog — without them a long transcription is
+        # silent on stdout until TRANSCRIPTION_COMPLETE and indistinguishable
+        # from a hung process. Electron routes them to the debug log.
+        # A heartbeat must never break transcription — if the registry can't
+        # even import, transcribe without one.
+        try:
+            from src.parakeet import set_chunk_heartbeat
+        except Exception:
+            def set_chunk_heartbeat(_cb):
+                pass
+
+        def _heartbeat_sink(done, total):
+            sys.stdout.write(f"HEARTBEAT:transcribe:{done}/{total}\n")
+            sys.stdout.flush()
+
+        print("HEARTBEAT:transcribe:start", flush=True)
+        set_chunk_heartbeat(_heartbeat_sink)
+        try:
+            transcript_data = await recorder.transcribe_audio(audio_file, name)
+        finally:
+            set_chunk_heartbeat(None)
 
         # A transcription crash (e.g. an MLX OOM on a long system-audio
         # recording) is not silence — preserve the audio and save a marked,
@@ -1126,13 +1176,21 @@ def process_streaming(audio_file, name, notes):
 
         import base64
         streamed_chunks = []
-        for chunk in recorder.summarizer.summarize_transcript_streaming(
-            text_for_summary, duration_minutes, output_language, notes_text
-        ):
-            encoded = base64.b64encode(chunk.encode('utf-8')).decode('ascii')
-            sys.stdout.write(f"CHUNK:{encoded}\n")
-            sys.stdout.flush()
-            streamed_chunks.append(chunk)
+        # Keep the watchdog alive through model load + prompt eval — the
+        # silent stretch before the first streamed token. Stopped on the
+        # first chunk; from then on the chunks themselves are the signal.
+        summary_heartbeat = _start_summary_heartbeat()
+        try:
+            for chunk in recorder.summarizer.summarize_transcript_streaming(
+                text_for_summary, duration_minutes, output_language, notes_text
+            ):
+                summary_heartbeat.set()
+                encoded = base64.b64encode(chunk.encode('utf-8')).decode('ascii')
+                sys.stdout.write(f"CHUNK:{encoded}\n")
+                sys.stdout.flush()
+                streamed_chunks.append(chunk)
+        finally:
+            summary_heartbeat.set()
         streamed_md = ''.join(streamed_chunks)
 
         print("STREAM_COMPLETE", flush=True)
@@ -2528,13 +2586,20 @@ def reprocess(summary_file, regenerate_title):
 
         print("Generating summary...", flush=True)
         streamed_chunks = []
-        for chunk in recorder.summarizer.summarize_transcript_streaming(
-            transcript, duration_minutes, output_language, notes_text
-        ):
-            encoded = base64.b64encode(chunk.encode('utf-8')).decode('ascii')
-            sys.stdout.write(f"CHUNK:{encoded}\n")
-            sys.stdout.flush()
-            streamed_chunks.append(chunk)
+        # Same watchdog-liveness cover as process_streaming: model load +
+        # prompt eval is silent until the first streamed token.
+        summary_heartbeat = _start_summary_heartbeat()
+        try:
+            for chunk in recorder.summarizer.summarize_transcript_streaming(
+                transcript, duration_minutes, output_language, notes_text
+            ):
+                summary_heartbeat.set()
+                encoded = base64.b64encode(chunk.encode('utf-8')).decode('ascii')
+                sys.stdout.write(f"CHUNK:{encoded}\n")
+                sys.stdout.flush()
+                streamed_chunks.append(chunk)
+        finally:
+            summary_heartbeat.set()
         streamed_md = ''.join(streamed_chunks)
 
         print("STREAM_COMPLETE", flush=True)

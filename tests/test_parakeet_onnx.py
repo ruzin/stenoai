@@ -260,6 +260,38 @@ class TranscribeWindowsMergeTests(unittest.TestCase):
         self.assertEqual(merged.tokens, ["Hello", " world."])
 
 
+class TranscribeWindowsHeartbeatTests(unittest.TestCase):
+    """Per-window heartbeat: the liveness signal the Electron inactivity
+    watchdog relies on. One emit per recognized window, ``done`` strictly
+    increasing, failed windows emit nothing."""
+
+    def setUp(self):
+        from src import _heartbeat
+        self.beats = []
+        _heartbeat.set_chunk_heartbeat(lambda done, total: self.beats.append((done, total)))
+        self.addCleanup(_heartbeat.set_chunk_heartbeat, None)
+
+    def _eighty_seconds(self):
+        return np.zeros(80 * onnx_backend._SAMPLE_RATE, dtype=np.float32)
+
+    def test_heartbeat_fires_once_per_window_with_increasing_done(self):
+        model = _FakeTsModel([
+            (["Hello."], [(0.0, 0.5)]),
+            ([" World."], [(20.0, 20.5)]),
+        ])
+        onnx_backend._transcribe_windows(model, self._eighty_seconds())
+        # 80 s at 16 kHz → two 60 s windows stepping by 45 s.
+        self.assertEqual(self.beats, [(1, 2), (2, 2)])
+
+    def test_failed_window_emits_no_heartbeat(self):
+        model = _FakeTsModel([
+            RuntimeError("window 0 dead"),
+            ([" World."], [(20.0, 20.5)]),
+        ])
+        onnx_backend._transcribe_windows(model, self._eighty_seconds())
+        self.assertEqual(self.beats, [(2, 2)])
+
+
 class LoadWav16kMonoTests(unittest.TestCase):
     def _write_wav(self, path, samples_int16, n_channels, framerate):
         with wave.open(str(path), "wb") as wf:

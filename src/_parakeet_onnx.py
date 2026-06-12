@@ -34,6 +34,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
 
+from src._heartbeat import _emit_heartbeat
+
 logger = logging.getLogger(__name__)
 
 # istupakov's canonical ONNX export of NVIDIA's Parakeet TDT v3 0.6B model.
@@ -459,6 +461,10 @@ def _transcribe_windows(ts_model: Any, samples) -> _SimpleResult:
         # Defensive: overlap >= chunk would make us never advance.
         step_samples = chunk_samples
 
+    # Total windows the loop below will attempt: one per step until a window
+    # reaches the end of the samples. Only used for heartbeat progress.
+    total_windows = max(1, -(-(len(samples) - chunk_samples) // step_samples) + 1)
+
     merged_tokens: list = []
     merged_timestamps: list = []
     last_end = -1.0
@@ -481,6 +487,13 @@ def _transcribe_windows(ts_model: Any, samples) -> _SimpleResult:
                 break
             continue
         windows_recognized += 1
+        # Liveness signal for the Electron inactivity watchdog — a long
+        # meeting recognising window-by-window on CPU is alive, not hung.
+        # Failed windows emit nothing (they skip via `continue` above, and
+        # failing fast costs little liveness); emitting ``windows_attempted``
+        # means `done` jumps past them on the next success, so the counter
+        # still tracks position in the file rather than just successes.
+        _emit_heartbeat(windows_attempted, total_windows)
 
         tokens = list(getattr(result, "tokens", None) or [])
         timestamps = list(getattr(result, "timestamps", None) or [])

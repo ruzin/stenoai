@@ -18,10 +18,13 @@ architecture.
 
 from __future__ import annotations
 
+import inspect
 import logging
 import threading
 from pathlib import Path
 from typing import Optional
+
+from src._heartbeat import _emit_heartbeat
 
 logger = logging.getLogger(__name__)
 
@@ -134,6 +137,36 @@ def transcribe_file(
 
     model = _load_model(model_id)
     logger.info("Transcribing (batch file): %s", audio_path)
+
+    # Per-chunk liveness signal for the Electron inactivity watchdog. The
+    # pinned parakeet-mlx calls chunk_callback(end_sample, total_samples)
+    # after each window, but the signature has varied across versions —
+    # accept anything and never let a mismatch raise into the decode loop.
+    def _heartbeat_cb(*args, **kwargs):
+        try:
+            done = int(args[0]) if len(args) >= 1 else 0
+            total = int(args[1]) if len(args) >= 2 else 0
+        except (TypeError, ValueError):
+            done, total = 0, 0
+        _emit_heartbeat(done, total)
+
+    # Probe by signature rather than catching TypeError around the call —
+    # a broad catch would silently re-run an hour of GPU work (and mask a
+    # genuine TypeError from inside the decode loop) on the rare version
+    # without the kwarg. Losing the heartbeat is acceptable; losing (or
+    # doubling) transcription is not.
+    extra_kwargs = {}
+    try:
+        if "chunk_callback" in inspect.signature(model.transcribe).parameters:
+            extra_kwargs["chunk_callback"] = _heartbeat_cb
+        else:
+            logger.warning("parakeet-mlx transcribe() has no chunk_callback; no heartbeat")
+    except (TypeError, ValueError) as e:
+        # Un-inspectable callable (C extension / odd wrapper). Transcription
+        # proceeds without a heartbeat — log it, or a watchdog timeout on a
+        # long meeting would be undiagnosable from the logs.
+        logger.warning("Could not probe parakeet-mlx transcribe() signature (%s); no heartbeat", e)
+
     # Always chunk: the library merges the windows back into one AlignedResult
     # with global timestamps, so _result_to_dict is unaffected, and short files
     # (< one chunk) just transcribe in a single window for free.
@@ -141,6 +174,7 @@ def transcribe_file(
         str(audio_path),
         chunk_duration=PARAKEET_CHUNK_DURATION_S,
         overlap_duration=PARAKEET_CHUNK_OVERLAP_S,
+        **extra_kwargs,
     )
     return _result_to_dict(result, language)
 

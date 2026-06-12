@@ -27,6 +27,7 @@ ASR engine would now strictly remove real speech without preventing
 anything; the model is the source of truth.
 """
 
+import inspect
 import logging
 import os
 import re
@@ -36,6 +37,8 @@ import tempfile
 import threading
 from pathlib import Path
 from typing import Optional, Tuple
+
+from src._heartbeat import _emit_heartbeat
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +73,20 @@ PER_SEGMENT_BLEED_WINDOW_S = 3.0
 # English words, ~5-6 CJK ideographs. The whole-transcript backstop
 # still catches catastrophic bleed where every line is short.
 PER_SEGMENT_BLEED_MIN_CHARS = 15
+
+# Audio pre-processing before batch transcription. A gentle high-pass strips
+# low-frequency rumble (HVAC, desk thumps, handling noise) below the voice
+# band, and single-pass loudness normalization lifts quiet stretches toward a
+# consistent level — cleaner input improves ASR accuracy and reduces
+# hallucination on near-silent passages. Single-pass (dynamic) loudnorm is
+# deliberate: the two-pass variant would double decode time for marginal gain.
+AUDIO_HIGHPASS_HZ = 90
+AUDIO_LOUDNORM = "I=-16:TP=-1.5:LRA=11"
+
+# ffmpeg wall-clock cap for the pre-processing pass. Decode+filter+encode of
+# 16 kHz mono runs far faster than realtime (~30 s for a 3-hour meeting);
+# 10 minutes is generous headroom before we give up and use the original.
+AUDIO_PREPROCESS_TIMEOUT_S = 600
 
 # RMS energy gate for "channel has speech". Intentionally low (-70 dB) so
 # headphones-mode mic recordings — captured at much lower amplitude than
@@ -130,6 +147,11 @@ def _resolve_ffmpeg() -> Optional[str]:
                 continue
         logger.warning("ffmpeg not found in any candidate location")
         return None
+
+
+def _audio_filter_chain() -> str:
+    """The ffmpeg ``-af`` chain applied to mono audio before transcription."""
+    return f"highpass=f={AUDIO_HIGHPASS_HZ},loudnorm={AUDIO_LOUDNORM}"
 
 
 def _parse_channels_from_ffmpeg_stderr(stderr: str) -> Optional[int]:
@@ -428,6 +450,37 @@ class WhisperTranscriber:
         self.model = WhisperCppModel(self.model_size, n_threads=n_threads)
         logger.info("whisper.cpp model loaded (threads=%d)", n_threads)
 
+    def _build_whisper_fallback(self) -> bool:
+        """Try to stand up whisper.cpp as a crash-recovery fallback engine.
+
+        Returns True only when a retry on whisper.cpp is actually possible:
+        the active backend is Parakeet, pywhispercpp is importable, and the
+        ggml weight for ``self.model_size`` is ALREADY on disk. The
+        is_installed gate is load-bearing — constructing pywhispercpp's
+        Model for a missing weight auto-downloads ~466 MB, which must never
+        happen implicitly in a failure path (offline machines, metered
+        connections). Any error means "no fallback", never a crash.
+        """
+        try:
+            if self.backend != "parakeet-tdt-v3" or not WHISPER_CPP_AVAILABLE:
+                return False
+            if self.model is not None:
+                # Already loaded by a previous fallback (e.g. the first
+                # diarised channel) — reuse it.
+                return True
+            from src import whisper_models
+            if not whisper_models.is_installed(self.model_size):
+                logger.info(
+                    "whisper.cpp fallback unavailable: model %r not installed",
+                    self.model_size,
+                )
+                return False
+            self._load_whisper_cpp()
+            return True
+        except Exception as e:
+            logger.warning("whisper.cpp fallback unavailable: %s", e)
+            return False
+
     def _ensure_ffmpeg_in_path(self) -> None:
         """Make sure ffmpeg is reachable from $PATH for the stereo split.
 
@@ -492,6 +545,60 @@ class WhisperTranscriber:
         else:
             logger.warning("ffmpeg not found - stereo diarisation will fall back to mono")
 
+    def _preprocess_audio(self, audio_filepath: Path) -> Tuple[Path, bool]:
+        """Clean mono audio before transcription: high-pass + loudnorm.
+
+        Returns ``(path_to_transcribe, is_temp)``. On any problem — ffmpeg
+        missing, non-zero exit, timeout — falls back to ``(original, False)``
+        so pre-processing can never fail a meeting. The caller owns deleting
+        the temp file when ``is_temp`` is True.
+        """
+        ffmpeg = _resolve_ffmpeg()
+        if not ffmpeg:
+            logger.info("ffmpeg unavailable; skipping audio pre-processing")
+            return audio_filepath, False
+
+        # mkstemp (not a name derived from the input stem) so concurrent CLI
+        # invocations over same-named files can't overwrite or unlink each
+        # other's pre-processed audio mid-transcription. Inside the fail-open
+        # guard: an mkstemp failure (disk full, temp-dir perms) must fall
+        # back to the original audio like every other pre-processing problem,
+        # not fail the meeting.
+        try:
+            fd, temp_name = tempfile.mkstemp(
+                prefix=f"stenoai_prep_{audio_filepath.stem}_", suffix=".wav"
+            )
+            os.close(fd)
+        except OSError as e:
+            logger.warning("Could not create pre-processing temp file; using original audio: %s", e)
+            return audio_filepath, False
+        temp_path = Path(temp_name)
+        try:
+            result = subprocess.run(
+                [ffmpeg, '-y', '-i', str(audio_filepath),
+                 '-af', _audio_filter_chain(),
+                 '-ar', '16000', '-ac', '1', '-c:a', 'pcm_s16le',
+                 str(temp_path)],
+                capture_output=True,
+                timeout=AUDIO_PREPROCESS_TIMEOUT_S,
+            )
+            if result.returncode == 0 and temp_path.exists() and temp_path.stat().st_size > 0:
+                logger.info("Audio pre-processed (highpass + loudnorm): %s", temp_path.name)
+                return temp_path, True
+            logger.warning(
+                "Audio pre-processing failed (rc=%s); using original audio: %s",
+                result.returncode, result.stderr.decode(errors='replace')[-300:],
+            )
+        except Exception as e:
+            logger.warning("Audio pre-processing error; using original audio: %s", e)
+        # Clean up any partial output from the failed pass.
+        try:
+            if temp_path.exists():
+                temp_path.unlink()
+        except OSError:
+            pass
+        return audio_filepath, False
+
     # ------------------------------------------------------------------
     # Core: run Parakeet on a WAV path, return our normalised dict shape.
     # ------------------------------------------------------------------
@@ -537,16 +644,29 @@ class WhisperTranscriber:
     def _convert_to_16khz(self, audio_filepath: Path) -> tuple[Path, Optional[float]]:
         """Convert audio to 16 kHz mono WAV for whisper.cpp via ffmpeg.
 
-        Used only on the whisper.cpp fallback path (Intel Macs). Parakeet's
-        ``transcribe_file`` accepts arbitrary formats via librosa, so the
-        Parakeet path doesn't need this step.
+        Used only on the whisper.cpp path. Parakeet's ``transcribe_file``
+        accepts arbitrary formats via librosa, so the Parakeet path doesn't
+        need this step.
         """
         import wave
+
+        # Already 16 kHz mono PCM — e.g. produced by _preprocess_audio (the
+        # whisper.cpp crash-fallback receives that temp) or the diarised
+        # channel split. Skip the second full decode+encode.
+        try:
+            with wave.open(str(audio_filepath), 'rb') as wf:
+                if (wf.getframerate() == 16000 and wf.getnchannels() == 1
+                        and wf.getsampwidth() == 2):
+                    return audio_filepath, wf.getnframes() / wf.getframerate()
+        except Exception:
+            pass  # not a readable WAV — fall through to ffmpeg
+
+        ffmpeg = _resolve_ffmpeg() or 'ffmpeg'
         temp_dir = tempfile.gettempdir()
         converted_path = Path(temp_dir) / f"stenoai_16khz_{audio_filepath.stem}.wav"
         try:
             result = subprocess.run(
-                ['ffmpeg', '-y', '-i', str(audio_filepath),
+                [ffmpeg, '-y', '-i', str(audio_filepath),
                  '-ar', '16000', '-ac', '1', '-c:a', 'pcm_s16le',
                  str(converted_path)],
                 capture_output=True,
@@ -604,6 +724,24 @@ class WhisperTranscriber:
             transcribe_kwargs = {"media": str(converted_path)}
             if resolved_language and resolved_language != "auto":
                 transcribe_kwargs["language"] = resolved_language
+            # Per-segment heartbeat: keeps the Electron inactivity watchdog
+            # alive on this path too — including when whisper.cpp runs as
+            # the crash-recovery fallback for a long meeting on a slow
+            # machine, which would otherwise be minutes of stdout silence.
+            # Probed by signature so an API change degrades to no heartbeat
+            # rather than a TypeError mid-failure-recovery.
+            try:
+                if "new_segment_callback" in inspect.signature(self.model.transcribe).parameters:
+                    segment_count = 0
+
+                    def _on_segment(_segment):
+                        nonlocal segment_count
+                        segment_count += 1
+                        _emit_heartbeat(segment_count, 0)  # total unknown
+
+                    transcribe_kwargs["new_segment_callback"] = _on_segment
+            except (TypeError, ValueError):
+                pass
             segments = self.model.transcribe(**transcribe_kwargs)
 
             # Dedup whisper.cpp loop hallucinations: 5+ consecutive identical
@@ -650,17 +788,27 @@ class WhisperTranscriber:
     # Public batch API (back-compat with the whisper-era surface).
     # ------------------------------------------------------------------
 
-    def transcribe_audio(self, audio_filepath: Path, language: str = "en") -> Optional[dict]:
+    def transcribe_audio(
+        self,
+        audio_filepath: Path,
+        language: str = "en",
+        _preprocessed: bool = False,
+    ) -> Optional[dict]:
         """Transcribe a single-channel (or mono-mixed) audio file.
 
         Returns ``None`` if the file is missing or too small to transcribe;
         otherwise a dict with ``text`` / ``segments`` / ``duration_seconds`` /
         ``detected_language`` / ``detected_language_probability``.
+
+        ``_preprocessed`` marks input that is already cleaned (the diarised
+        path's split channels are 16 kHz mono + high-passed by the split
+        ffmpeg pass) so the mono pre-processing pass isn't applied twice.
         """
         if not audio_filepath.exists():
             logger.error(f"Audio file not found: {audio_filepath}")
             return None
 
+        preprocess_temp: Optional[Path] = None
         try:
             logger.info(f"Transcribing audio file: {audio_filepath}")
             file_size = audio_filepath.stat().st_size
@@ -675,7 +823,29 @@ class WhisperTranscriber:
                     "detected_language_probability": None,
                 }
 
-            result = self._run_backend(audio_filepath, language)
+            transcribe_path = audio_filepath
+            if not _preprocessed:
+                transcribe_path, is_temp = self._preprocess_audio(audio_filepath)
+                if is_temp:
+                    preprocess_temp = transcribe_path
+
+            try:
+                result = self._run_backend(transcribe_path, language)
+                result.setdefault("engine", self.backend)
+            except Exception as primary_error:
+                # A mid-inference crash (e.g. an MLX metal abort) on the
+                # primary engine. Retry ONCE on whisper.cpp — but only when
+                # the weight is already installed (_build_whisper_fallback
+                # never triggers a download). Otherwise re-raise into the
+                # honest transcription_failed path below.
+                if not self._build_whisper_fallback():
+                    raise
+                logger.warning(
+                    "Primary engine crashed (%s); retrying once on whisper.cpp",
+                    primary_error,
+                )
+                result = self._run_whisper_cpp(transcribe_path, language)
+                result["engine"] = "whisper.cpp-fallback"
 
             transcript = result.get("text")
             logger.info(f"Transcription completed. Length: {len(transcript) if transcript else 0} characters")
@@ -706,6 +876,12 @@ class WhisperTranscriber:
                 "transcription_failed": True,
                 "error": str(e),
             }
+        finally:
+            if preprocess_temp is not None:
+                try:
+                    preprocess_temp.unlink()
+                except OSError:
+                    pass
 
     def _split_stereo_to_channels(self, audio_filepath: Path) -> Tuple[Optional[Path], Optional[Path], Optional[float]]:
         """Detect stereo and split into mono mic + system channel files.
@@ -753,9 +929,14 @@ class WhisperTranscriber:
 
         try:
             for ch_idx, out_path in [(0, mic_path), (1, system_path)]:
+                # High-pass only on the diarised path — deliberately NO
+                # per-channel loudnorm: normalising each channel separately
+                # would erase the relative-RMS difference that
+                # _drop_per_segment_bleed uses to tell the direct signal
+                # from its attenuated echo on the other channel.
                 result = subprocess.run(
                     [ffmpeg, '-y', '-i', str(audio_filepath),
-                     '-af', f'pan=mono|c0=c{ch_idx}',
+                     '-af', f'pan=mono|c0=c{ch_idx},highpass=f={AUDIO_HIGHPASS_HZ}',
                      '-ar', '16000', '-ac', '1', '-c:a', 'pcm_s16le',
                      str(out_path)],
                     capture_output=True, timeout=120
@@ -838,12 +1019,15 @@ class WhisperTranscriber:
             system_segments: list[dict] = []
             detected_language = None
             detected_language_probability = None
+            engine = None
             channel_failed = False
             channel_error: Optional[str] = None
 
+            # Split channels are already 16 kHz mono + high-passed by the
+            # split ffmpeg pass above — skip the mono pre-processing pass.
             if mic_has_audio:
                 logger.info("Transcribing mic channel (You)...")
-                mic_result = self.transcribe_audio(mic_path, language)
+                mic_result = self.transcribe_audio(mic_path, language, _preprocessed=True)
                 if mic_result and mic_result.get("transcription_failed"):
                     channel_failed = True
                     channel_error = channel_error or mic_result.get("error")
@@ -852,12 +1036,14 @@ class WhisperTranscriber:
                     if not detected_language and mic_result.get("detected_language"):
                         detected_language = mic_result["detected_language"]
                         detected_language_probability = mic_result.get("detected_language_probability")
+                    if not engine:
+                        engine = mic_result.get("engine")
             else:
                 logger.info("Mic channel is silent, skipping")
 
             if system_has_audio:
                 logger.info("Transcribing system channel (Others)...")
-                sys_result = self.transcribe_audio(system_path, language)
+                sys_result = self.transcribe_audio(system_path, language, _preprocessed=True)
                 if sys_result and sys_result.get("transcription_failed"):
                     channel_failed = True
                     channel_error = channel_error or sys_result.get("error")
@@ -866,6 +1052,8 @@ class WhisperTranscriber:
                     if not detected_language and sys_result.get("detected_language"):
                         detected_language = sys_result["detected_language"]
                         detected_language_probability = sys_result.get("detected_language_probability")
+                    if not engine:
+                        engine = sys_result.get("engine")
             else:
                 logger.info("System channel is silent, skipping")
 
@@ -955,6 +1143,7 @@ class WhisperTranscriber:
                 "duration_seconds": duration,
                 "detected_language": detected_language,
                 "detected_language_probability": detected_language_probability,
+                "engine": engine or self.backend,
             }
         finally:
             # Clean up temp channel files

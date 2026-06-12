@@ -42,6 +42,10 @@ class TranscribeAudioFailureTests(unittest.TestCase):
             with patch.object(
                 transcriber, "_run_backend",
                 side_effect=RuntimeError("metal::malloc abort"),
+            ), patch.object(
+                # Keep this test machine-independent: whether a whisper.cpp
+                # weight happens to be installed must not change the outcome.
+                transcriber, "_build_whisper_fallback", return_value=False,
             ):
                 out = transcriber.transcribe_audio(audio, language="en")
         self.assertIsInstance(out, dict)
@@ -74,6 +78,183 @@ class TranscribeAudioFailureTests(unittest.TestCase):
         transcriber = _build_transcriber()
         out = transcriber.transcribe_audio(Path("/tmp/does-not-exist.wav"), language="en")
         self.assertIsNone(out)
+
+
+_WHISPER_OK = {
+    "text": "recovered transcript",
+    "segments": [{"text": "recovered transcript", "start": 0.0, "end": 2.0}],
+    "duration_seconds": 2.0,
+    "detected_language": None,
+    "detected_language_probability": None,
+}
+
+
+class WhisperFallbackTests(unittest.TestCase):
+    """Inference-crash fallback to whisper.cpp, gated on an already-installed
+    weight. The gate is load-bearing: a failure path must NEVER trigger
+    pywhispercpp's implicit ~466 MB model download."""
+
+    def _crashing_transcriber(self):
+        transcriber = _build_transcriber()
+        return transcriber
+
+    def test_fallback_recovers_when_model_installed(self):
+        import src.transcriber as transcriber_mod
+        transcriber = self._crashing_transcriber()
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            audio = _make_audio_file(tmp_dir)
+            with patch.object(transcriber_mod, "WHISPER_CPP_AVAILABLE", True), \
+                 patch("src.whisper_models.is_installed", return_value=True), \
+                 patch.object(transcriber, "_load_whisper_cpp") as load_mock, \
+                 patch.object(transcriber, "_run_backend",
+                              side_effect=RuntimeError("metal abort")), \
+                 patch.object(transcriber, "_run_whisper_cpp",
+                              return_value=dict(_WHISPER_OK)):
+                out = transcriber.transcribe_audio(audio, language="en")
+        load_mock.assert_called_once()
+        self.assertEqual(out["text"], "recovered transcript")
+        self.assertEqual(out["engine"], "whisper.cpp-fallback")
+        self.assertNotIn("transcription_failed", out)
+
+    def test_no_download_when_model_not_installed(self):
+        """Honest failure + _load_whisper_cpp never called — proves the
+        fallback can't trigger a download."""
+        import src.transcriber as transcriber_mod
+        transcriber = self._crashing_transcriber()
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            audio = _make_audio_file(tmp_dir)
+            with patch.object(transcriber_mod, "WHISPER_CPP_AVAILABLE", True), \
+                 patch("src.whisper_models.is_installed", return_value=False), \
+                 patch.object(transcriber, "_load_whisper_cpp") as load_mock, \
+                 patch.object(transcriber, "_run_backend",
+                              side_effect=RuntimeError("metal abort")):
+                out = transcriber.transcribe_audio(audio, language="en")
+        load_mock.assert_not_called()
+        self.assertTrue(out.get("transcription_failed"))
+        self.assertIn("metal abort", out.get("error", ""))
+
+    def test_no_fallback_when_pywhispercpp_unavailable(self):
+        import src.transcriber as transcriber_mod
+        transcriber = self._crashing_transcriber()
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            audio = _make_audio_file(tmp_dir)
+            with patch.object(transcriber_mod, "WHISPER_CPP_AVAILABLE", False), \
+                 patch.object(transcriber, "_load_whisper_cpp") as load_mock, \
+                 patch.object(transcriber, "_run_backend",
+                              side_effect=RuntimeError("metal abort")):
+                out = transcriber.transcribe_audio(audio, language="en")
+        load_mock.assert_not_called()
+        self.assertTrue(out.get("transcription_failed"))
+
+    def test_double_crash_returns_honest_failure(self):
+        import src.transcriber as transcriber_mod
+        transcriber = self._crashing_transcriber()
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            audio = _make_audio_file(tmp_dir)
+            with patch.object(transcriber_mod, "WHISPER_CPP_AVAILABLE", True), \
+                 patch("src.whisper_models.is_installed", return_value=True), \
+                 patch.object(transcriber, "_load_whisper_cpp"), \
+                 patch.object(transcriber, "_run_backend",
+                              side_effect=RuntimeError("metal abort")), \
+                 patch.object(transcriber, "_run_whisper_cpp",
+                              side_effect=RuntimeError("whisper also died")):
+                out = transcriber.transcribe_audio(audio, language="en")
+        self.assertTrue(out.get("transcription_failed"))
+        self.assertIsNone(out.get("text"))
+
+    def test_success_is_tagged_with_primary_engine(self):
+        transcriber = self._crashing_transcriber()
+        ok = {
+            "text": "all good",
+            "segments": [],
+            "duration_seconds": 1.0,
+            "detected_language": None,
+            "detected_language_probability": None,
+        }
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            audio = _make_audio_file(tmp_dir)
+            with patch.object(transcriber, "_run_backend", return_value=ok):
+                out = transcriber.transcribe_audio(audio, language="en")
+        self.assertEqual(out["engine"], "parakeet-tdt-v3")
+
+    def test_fallback_not_attempted_when_backend_is_whisper(self):
+        import src.transcriber as transcriber_mod
+        transcriber = self._crashing_transcriber()
+        transcriber.backend = "whisper.cpp"
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            audio = _make_audio_file(tmp_dir)
+            with patch.object(transcriber_mod, "WHISPER_CPP_AVAILABLE", True), \
+                 patch.object(transcriber, "_load_whisper_cpp") as load_mock, \
+                 patch.object(transcriber, "_run_backend",
+                              side_effect=RuntimeError("whisper died")):
+                out = transcriber.transcribe_audio(audio, language="en")
+        load_mock.assert_not_called()
+        self.assertTrue(out.get("transcription_failed"))
+
+    def test_diarised_inherits_fallback_engine(self):
+        """Per-channel crashes recover via the fallback inside
+        transcribe_audio, and the diarised result carries the engine tag."""
+        import src.transcriber as transcriber_mod
+        transcriber = self._crashing_transcriber()
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            audio = _make_audio_file(tmp_dir)
+            # Channel files must really exist — transcribe_audio short-circuits
+            # missing paths to None before the engine ever runs.
+            mic = _make_audio_file(tmp_dir, "stenoai_ch0_x.wav")
+            system = _make_audio_file(tmp_dir, "stenoai_ch1_x.wav")
+            with patch.object(transcriber_mod, "WHISPER_CPP_AVAILABLE", True), \
+                 patch("src.whisper_models.is_installed", return_value=True), \
+                 patch.object(transcriber, "_load_whisper_cpp"), \
+                 patch.object(transcriber, "_split_stereo_to_channels",
+                              return_value=(mic, system, 60.0)), \
+                 patch.object(transcriber, "_check_rms_energy", return_value=True), \
+                 patch.object(transcriber, "_run_backend",
+                              side_effect=RuntimeError("metal abort")), \
+                 patch.object(transcriber, "_run_whisper_cpp",
+                              return_value=dict(_WHISPER_OK)):
+                out = transcriber.transcribe_diarised(audio, language="en")
+        self.assertNotIn("transcription_failed", out)
+        self.assertEqual(out.get("engine"), "whisper.cpp-fallback")
+
+
+class WhisperHeartbeatTests(unittest.TestCase):
+    """The whisper.cpp path — including the crash-recovery fallback — must
+    emit heartbeats too, or the Electron inactivity watchdog can kill the
+    very retry it is meant to allow."""
+
+    def test_run_whisper_cpp_emits_per_segment_heartbeat(self):
+        import wave
+        from types import SimpleNamespace
+
+        from src import _heartbeat
+
+        beats = []
+        _heartbeat.set_chunk_heartbeat(lambda d, t: beats.append((d, t)))
+        self.addCleanup(_heartbeat.set_chunk_heartbeat, None)
+
+        transcriber = _build_transcriber()
+
+        def fake_transcribe(media=None, new_segment_callback=None, **params):
+            # Simulate whisper.cpp invoking the callback once per segment.
+            self.assertIsNotNone(new_segment_callback)
+            new_segment_callback(object())
+            new_segment_callback(object())
+            return []
+
+        # A real function (not a MagicMock) so inspect.signature sees the
+        # new_segment_callback parameter the way it does on pywhispercpp.
+        transcriber.model = SimpleNamespace(transcribe=fake_transcribe)
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            audio = Path(tmp_dir) / "audio.wav"
+            with wave.open(str(audio), "wb") as wf:
+                wf.setnchannels(1)
+                wf.setsampwidth(2)
+                wf.setframerate(16000)
+                wf.writeframes(b"\x00\x00" * 16000)
+            transcriber._run_whisper_cpp(audio, language="en")
+
+        self.assertEqual(beats, [(1, 0), (2, 0)])
 
 
 class TranscribeDiarisedFailureTests(unittest.TestCase):
@@ -110,7 +291,7 @@ class TranscribeDiarisedFailureTests(unittest.TestCase):
             "detected_language": None,
         }
 
-        def fake_transcribe(path, language="en"):
+        def fake_transcribe(path, language="en", _preprocessed=False):
             return failed if path == mic else ok
 
         with tempfile.TemporaryDirectory() as tmp_dir:
