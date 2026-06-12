@@ -560,11 +560,18 @@ class WhisperTranscriber:
 
         # mkstemp (not a name derived from the input stem) so concurrent CLI
         # invocations over same-named files can't overwrite or unlink each
-        # other's pre-processed audio mid-transcription.
-        fd, temp_name = tempfile.mkstemp(
-            prefix=f"stenoai_prep_{audio_filepath.stem}_", suffix=".wav"
-        )
-        os.close(fd)
+        # other's pre-processed audio mid-transcription. Inside the fail-open
+        # guard: an mkstemp failure (disk full, temp-dir perms) must fall
+        # back to the original audio like every other pre-processing problem,
+        # not fail the meeting.
+        try:
+            fd, temp_name = tempfile.mkstemp(
+                prefix=f"stenoai_prep_{audio_filepath.stem}_", suffix=".wav"
+            )
+            os.close(fd)
+        except OSError as e:
+            logger.warning("Could not create pre-processing temp file; using original audio: %s", e)
+            return audio_filepath, False
         temp_path = Path(temp_name)
         try:
             result = subprocess.run(
