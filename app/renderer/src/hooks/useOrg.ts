@@ -47,6 +47,11 @@ export function useOrgSession() {
     const delay = Math.max(0, Math.min(exp * 1000 - Date.now(), MAX_TIMEOUT));
     const id = setTimeout(() => {
       qc.invalidateQueries({ queryKey: orgKeys.status() });
+      // The expiry-triggered org-status call also restores the Python-side
+      // ai_provider, so the provider query must refetch too — otherwise
+      // Settings > AI keeps showing "Organisation" while disk says the
+      // restored provider.
+      qc.invalidateQueries({ queryKey: aiKeys.all });
     }, delay);
     return () => clearTimeout(id);
   }, [exp, qc]);
