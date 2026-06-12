@@ -1149,6 +1149,7 @@ TRANSCRIPT:
                     return
         else:
             # Ollama (local or remote)
+            yielded_any = False
             try:
                 if self.ai_provider != "remote":
                     self._ensure_ollama_ready()
@@ -1158,20 +1159,21 @@ TRANSCRIPT:
                     stream=True,
                     options=self._local_chat_options(),
                 )
-                yielded_any = False
                 for chunk in response:
                     content = chunk.get('message', {}).get('content', '')
                     if content:
                         yielded_any = True
                         yield content
-                # The transcript was capped for the local model's context —
-                # tell the user deterministically rather than hoping the
-                # model echoes the in-prompt gap marker.
-                if yielded_any and self._transcript_over_local_cap(transcript):
-                    yield LOCAL_TRUNCATION_USER_NOTE
             except Exception as e:
+                # Fall through (don't return) so a partial summary still
+                # gets the truncation note below — a truncated AND partial
+                # summary is the case most in need of the caveat.
                 logger.error(f"Ollama streaming failed: {e}")
-                return
+            # The transcript was capped for the local model's context — tell
+            # the user deterministically rather than hoping the model echoes
+            # the in-prompt gap marker.
+            if yielded_any and self._transcript_over_local_cap(transcript):
+                yield LOCAL_TRUNCATION_USER_NOTE
 
     def test_connection(self) -> bool:
         """
@@ -1269,6 +1271,11 @@ TRANSCRIPT:
             A short title string, or None if generation failed
         """
         try:
+            # The deterministic truncation note may trail the streamed
+            # summary — strip it so "switch to a cloud model in Settings"
+            # can't distract a small model into titling the meeting after it.
+            if summary and LOCAL_TRUNCATION_USER_NOTE.strip() in summary:
+                summary = summary.replace(LOCAL_TRUNCATION_USER_NOTE.strip(), '').strip()
             # Use summary if available, otherwise fall back to first part of transcript
             context = summary if summary else transcript[:2000]
             if not context or context.strip() == "":

@@ -2744,6 +2744,10 @@ const TRANSCRIBE_INACTIVITY_MS = 8 * 60 * 1000;
 // with an already-expired timer on wake) and re-arming on 'resume' gives the
 // resumed process a full fresh window.
 const activeInactivityWatchdogs = new Set();
+// True between powerMonitor 'suspend' and 'resume'. A watchdog created in
+// the suspend→sleep gap (the queue can start its next job there) must not
+// arm — its deadline would include the slept wall-clock and fire on wake.
+let systemSuspendedForWatchdogs = false;
 
 function makeInactivityWatchdog(proc, ms, label) {
   let timer = null;
@@ -2770,10 +2774,13 @@ function makeInactivityWatchdog(proc, ms, label) {
         timer = null;
       }
     },
-    // System wake: restart with a full window. Only re-arms frozen watchdogs
-    // still in the set — a cleared/fired one stays dead.
+    // System wake: restart with a full window. Unconditional re-arm for set
+    // members (an already-armed timer just gets a fresh, generous window);
+    // a cleared/fired watchdog left the set and stays dead.
     thaw() {
-      if (timer === null && activeInactivityWatchdogs.has(watchdog)) arm();
+      if (!activeInactivityWatchdogs.has(watchdog)) return;
+      if (timer !== null) clearTimeout(timer);
+      arm();
     },
     clear() {
       if (timer !== null) clearTimeout(timer);
@@ -2781,18 +2788,20 @@ function makeInactivityWatchdog(proc, ms, label) {
       activeInactivityWatchdogs.delete(watchdog);
     }
   };
-  arm();
+  if (!systemSuspendedForWatchdogs) arm(); // else thaw() arms on wake
   activeInactivityWatchdogs.add(watchdog);
   return watchdog;
 }
 
 function freezeInactivityWatchdogsForSleep() {
+  systemSuspendedForWatchdogs = true;
   if (activeInactivityWatchdogs.size === 0) return;
   sendDebugLog(`[power] system suspending — freezing ${activeInactivityWatchdogs.size} inactivity watchdog(s)`);
   for (const wd of activeInactivityWatchdogs) wd.freeze();
 }
 
 function thawInactivityWatchdogsAfterWake() {
+  systemSuspendedForWatchdogs = false;
   if (activeInactivityWatchdogs.size === 0) return;
   sendDebugLog(`[power] system resumed — re-arming ${activeInactivityWatchdogs.size} inactivity watchdog(s)`);
   for (const wd of activeInactivityWatchdogs) wd.thaw();
@@ -2835,6 +2844,9 @@ async function processNextInQueue() {
       // meeting. We thread the flag into processing-complete so the renderer
       // surfaces the failure honestly instead of as a normal saved note.
       let transcriptionFailedMsg = null;
+      // Last time a HEARTBEAT: line was forwarded to the debug log (the
+      // watchdog reset itself is unconditional). 0 → log the first one.
+      let lastHeartbeatLogAt = 0;
 
       // Liveness watchdog: kills the process only after a window of zero
       // output. HEARTBEAT:/CHUNK: lines from the backend keep it alive, so
@@ -2878,12 +2890,14 @@ async function processNextInQueue() {
             trackEvent('transcription_completed', { success: false });
           } else if (line.startsWith('HEARTBEAT:')) {
             // Liveness signal — its real job (resetting the watchdog) already
-            // happened at the top of this handler. Forward to the debug log
-            // sparsely (start/non-numeric beats, every 10th chunk, and the
-            // final one) so a 3-hour meeting doesn't flood the debug console
-            // with ~180 near-identical lines.
-            const hb = line.trim().match(/:(\d+)\/(\d+)$/);
-            if (!hb || hb[1] === hb[2] || Number(hb[1]) % 10 === 0) {
+            // happened at the top of this handler. Throttle debug-log output
+            // by TIME, not beat value: the MLX backend reports sample counts
+            // and whisper.cpp reports segment counts, so any value-based
+            // filter floods on at least one backend. One line per ~30 s keeps
+            // a 3-hour meeting to a handful of entries.
+            const now = Date.now();
+            if (now - lastHeartbeatLogAt >= 30_000) {
+              lastHeartbeatLogAt = now;
               sendDebugLog(line.trim());
             }
           } else if (line.trim()) {
@@ -3400,6 +3414,9 @@ function promptResumeAfterWake() {
 
 function showSleepPausedNotification() {
   closeSleepPausedNotification();
+  // Deliberately NOT gated on notificationsEnabled(): unlike the
+  // convenience notifications (meeting detected, note ready), this one is
+  // state-critical — the user believes they're capturing and they are not.
   const notif = new Notification({
     title: 'Recording paused',
     body: 'Paused while your computer was asleep. Resume to keep capturing.',

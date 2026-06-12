@@ -143,6 +143,31 @@ def _start_summary_heartbeat(label: str = "summarize", interval_s: int = 60, max
     return stop
 
 
+# The deterministic truncation note the local summariser appends to the
+# streamed markdown (src.summarizer.LOCAL_TRUNCATION_USER_NOTE). Detected by
+# prefix rather than importing the constant so the lightweight parse/list
+# paths don't pull in the summarizer module (ollama client etc.).
+_TRUNCATION_NOTE_PREFIX = '> Note: this meeting was longer than the local AI model'
+
+
+def _extract_truncation_note(text: str) -> Optional[str]:
+    """Return the truncation note's content (sans blockquote marker) if the
+    markdown contains one, else None.
+
+    The note trails the last model section in the streamed markdown, so the
+    section parsers drop it from their structured fields; callers fold it
+    into the ``summary`` field instead so it survives into the meeting view,
+    copy, and share — not just the transient streaming view.
+    """
+    if not text:
+        return None
+    for line in text.split('\n'):
+        stripped = line.strip()
+        if stripped.startswith(_TRUNCATION_NOTE_PREFIX):
+            return stripped.lstrip('> ').strip()
+    return None
+
+
 def _render_frontmatter(meta: dict) -> list[str]:
     """Render a meeting .md YAML frontmatter block (including the enclosing
     ``---`` fences) from a flat dict, with the type-specific scalar
@@ -311,8 +336,16 @@ class SimpleRecorder:
         if current_topic_title:
             discussion_areas.append({"title": current_topic_title, "analysis": '\n'.join(current_topic_lines).strip()})
 
+        summary = ' '.join(summary_parts)
+        # Fold the local-model truncation note into the summary so it
+        # survives into the structured view (the section loop above drops
+        # non-bullet lines under ## Action Items, where the note trails).
+        truncation_note = _extract_truncation_note(md_text)
+        if truncation_note and truncation_note not in summary:
+            summary = (summary + '\n\n' + truncation_note).strip()
+
         return {
-            "summary": ' '.join(summary_parts),
+            "summary": summary,
             "participants": participants,
             "discussion_areas": discussion_areas,
             "key_points": key_points,
@@ -2429,9 +2462,17 @@ def _parse_meeting_markdown(md_path):
         if meta.get('error'):
             session_info['error'] = meta.get('error')
 
+    # Fold the local-model truncation note into the summary — same reason as
+    # _parse_streamed_markdown: it trails the last section in the saved body
+    # and would otherwise vanish from the meeting view / copy / share.
+    summary = sections.get('summary', '')
+    truncation_note = _extract_truncation_note(body)
+    if truncation_note and truncation_note not in summary:
+        summary = (summary + '\n\n' + truncation_note).strip()
+
     return {
         'session_info': session_info,
-        'summary': sections.get('summary', ''),
+        'summary': summary,
         'participants': participants,
         'discussion_areas': discussion_areas,
         'key_points': key_points,
