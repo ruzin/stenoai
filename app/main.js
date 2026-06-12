@@ -1107,6 +1107,11 @@ if (!gotSingleInstanceLock) {
     setupAutoUpdater();
     setupAutoMeetingDetector();
 
+    // Hard lock: reconcile ai_provider with the org session once at startup
+    // (belt-and-braces for tray-only starts; the sidebar's org-status call
+    // triggers the same coalesced reconcile). Fire-and-forget.
+    reconcileAiProviderWithOrgSession().catch(() => {});
+
     // Auto-pause active recordings when the machine sleeps (lid close etc.)
     // and offer a Resume prompt on wake — see autoPauseForSleep. Processing
     // watchdogs are frozen across the sleep so their deadline can't elapse
@@ -5759,25 +5764,69 @@ function clearPreAdapterProvider() {
   } catch (_) {}
 }
 
-// Auto-switch helpers wired into the org sign-in / sign-out flow so a
-// user doesn't have to paste an Anthropic key in Settings > AI just to
-// summarise — the adapter brokers AI for them once they're signed in.
-// Switches from ANY non-adapter provider (local / remote / cloud) on
-// sign-in; remembers the previous choice so sign-out restores it. The
-// customer's ask was zero-config for org users, which means even users
-// already on 'cloud' (because they had no other option at the time)
-// shouldn't have to manually toggle to take advantage of the adapter.
+// Bidirectional reconciliation between the org session and the Python-side
+// ai_provider. Hard-lock policy: while a valid org session exists the
+// provider must be 'adapter' — the adapter brokers AI for org users
+// (zero-config was the customer ask), and any drift (a wiped config.json,
+// a hand edit, a CLI call) self-heals on the next check. The reverse
+// direction keeps the old stale-adapter recovery: config says 'adapter'
+// but the session file is genuinely gone → restore the remembered
+// pre-adapter provider so the next AI call doesn't die with "adapter not
+// configured".
+//
+// A safeStorage decrypt failure (locked keychain right after wake, denied
+// prompt) is transient and changes NOTHING — acting on it is how signed-in
+// users used to end up silently summarising on local llama. Expired-but-
+// present sessions are also left alone here: expiry is owned by org-status
+// and adapterFetch's 401 path (clear session + restore provider), and
+// acting on it from two places would race.
+//
+// Coalesced: concurrent triggers (get-ai-provider, org-status, startup,
+// sign-in) share one in-flight run. Returns the provider as re-read from
+// disk after any write — never an assumed value.
+let aiProviderReconcileInFlight = null;
+function reconcileAiProviderWithOrgSession() {
+  if (aiProviderReconcileInFlight) return aiProviderReconcileInFlight;
+  aiProviderReconcileInFlight = (async () => {
+    const { session, exists, decryptFailed } = loadOrgSessionEx();
+    if (decryptFailed) return null; // transient — never act on it
+    const current = await readAiProvider();
+    const sessionValid = Boolean(
+      session && session.adapterUrl && session.token && !isJwtExpired(session.token)
+    );
+    if (sessionValid && current !== 'adapter') {
+      // Seed the restore marker only when none exists: in a drift repair
+      // `current` may be a wiped-to-default 'local' while the marker still
+      // holds the user's true pre-sign-in choice (e.g. 'cloud').
+      const hadMarker = loadPreAdapterProvider() !== null;
+      if (!hadMarker) savePreAdapterProvider(current);
+      sendDebugLog(`Org lock: switching ai_provider from ${current} to adapter (org session active)`);
+      try {
+        await runPythonScript('simple_recorder.py', ['set-ai-provider', 'adapter']);
+      } catch (e) {
+        sendDebugLog(`Org lock: switch to adapter failed: ${e.message}`);
+        // Don't leave a marker WE created if the switch never landed; a
+        // pre-existing marker stays — it still describes the user's choice.
+        if (!hadMarker) clearPreAdapterProvider();
+      }
+      return await readAiProvider();
+    }
+    if (!exists && current === 'adapter') {
+      sendDebugLog('Org lock: ai_provider=adapter but no org session backing it; restoring pre-adapter provider');
+      await restorePreAdapterProvider();
+      return await readAiProvider();
+    }
+    return current;
+  })().finally(() => {
+    aiProviderReconcileInFlight = null;
+  });
+  return aiProviderReconcileInFlight;
+}
+
+// Wired into the org sign-in flows (password + Google SSO). Kept as a named
+// wrapper so the call sites read as intent; the reconcile does the work.
 async function autoSwitchToAdapterOnSignIn() {
-  const current = await readAiProvider();
-  if (current === 'adapter') return;
-  sendDebugLog(`Org sign-in: switching ai_provider from ${current} to adapter (will restore ${current} on sign-out)`);
-  savePreAdapterProvider(current);
-  try {
-    await runPythonScript('simple_recorder.py', ['set-ai-provider', 'adapter']);
-  } catch (e) {
-    sendDebugLog(`auto-switch to adapter failed: ${e.message}`);
-    clearPreAdapterProvider(); // don't leave a stale marker if the switch never landed
-  }
+  await reconcileAiProviderWithOrgSession();
 }
 
 // On sign-out (or stale-session clear), restore the pre-adapter provider
@@ -5806,44 +5855,23 @@ ipcMain.handle('get-ai-provider', async () => {
     // Override cloud_api_key_set with safeStorage check
     jsonData.cloud_api_key_set = hasCloudApiKey();
 
-    // Stale-adapter recovery. The existing JWT-expiry / 401 / explicit-
-    // logout paths all call restorePreAdapterProvider, but there's a
-    // gap: if the org_session.json file goes missing without one of
-    // those triggers firing (manually deleted, migrated config without
-    // session, crashed mid-sign-out), the Python config stays on
-    // 'adapter' and the next AI call dies with "adapter not configured".
-    // Treat the first get-ai-provider read on startup as the
-    // reconciliation point: if Python says adapter but no session backs
-    // it, restore the pre-adapter provider and reflect the new value in
-    // this response so the renderer's first paint is already consistent
-    // and the next AI call lands on a working provider.
-    if (jsonData.ai_provider === 'adapter' && !loadOrgSession()) {
-      const target = loadPreAdapterProvider() || 'local';
-      sendDebugLog(
-        `Stale adapter detected: ai_provider='adapter' but no org session backing it. Restoring to '${target}'.`,
-      );
-      try {
-        await restorePreAdapterProvider();
-        // restorePreAdapterProvider swallows its own internal
-        // set-ai-provider failure (it just logs and returns), so a
-        // successful return doesn't guarantee the Python config was
-        // actually written. Re-read the truth from Python and only
-        // patch the response if the restore landed — otherwise return
-        // the unchanged 'adapter' value so the renderer doesn't show
-        // a state that diverges from disk.
-        const verifyResult = await runPythonScript('simple_recorder.py', ['get-ai-provider'], true);
-        const verified = JSON.parse(verifyResult.trim());
-        if (verified.ai_provider && verified.ai_provider !== 'adapter') {
-          jsonData.ai_provider = verified.ai_provider;
-        } else {
-          sendDebugLog(`Stale-adapter recovery did not write — Python still on '${verified.ai_provider}'.`);
-        }
-      } catch (e) {
-        sendDebugLog(`Stale-adapter recovery failed: ${e.message}`);
-        // Leave jsonData.ai_provider as 'adapter' — the next AI call
-        // will fail with the existing "adapter not configured" error,
-        // which is the pre-fix behaviour, not a regression.
+    // Reconcile the provider with org-session reality before answering, so
+    // the renderer's first paint already reflects a working provider:
+    //  - valid session but provider drifted (wiped config, hand edit, CLI
+    //    call) → relock to 'adapter' (hard-lock policy)
+    //  - provider says 'adapter' but the session file is gone (manually
+    //    deleted, crashed mid-sign-out) → restore the pre-adapter provider
+    // Decrypt failures (locked keychain) deliberately change nothing. The
+    // reconcile re-reads the provider from disk after any write, so the
+    // patched response never diverges from what Python persisted.
+    try {
+      const reconciled = await reconcileAiProviderWithOrgSession();
+      if (reconciled && reconciled !== jsonData.ai_provider) {
+        jsonData.ai_provider = reconciled;
       }
+    } catch (e) {
+      sendDebugLog(`AI provider reconcile failed: ${e.message}`);
+      // Return the unreconciled value — pre-fix behaviour, not a regression.
     }
 
     return { success: true, ...jsonData };
@@ -5856,11 +5884,26 @@ ipcMain.handle('get-ai-provider', async () => {
 ipcMain.handle('set-ai-provider', async (event, provider) => {
   try {
     sendDebugLog(`Setting AI provider to: ${provider}`);
-    // A manual switch away from 'adapter' invalidates the pre-adapter
-    // marker — without this, a user who auto-switched on sign-in and
-    // then manually moved to a different provider would still be
-    // restored to the stale "before adapter" value on sign-out.
-    if (provider !== 'adapter') clearPreAdapterProvider();
+    if (provider !== 'adapter') {
+      // Hard lock: while a valid org session exists the provider is
+      // managed by the organisation. Reject the change (the Settings
+      // picker is disabled too — this is defense in depth for CLI/IPC
+      // paths) and leave the restore marker untouched.
+      const session = loadOrgSession();
+      if (session && session.adapterUrl && session.token && !isJwtExpired(session.token)) {
+        sendDebugLog(`Org lock: rejecting set-ai-provider ${provider} while org session is active`);
+        return {
+          success: false,
+          managedByOrg: true,
+          error: 'AI provider is managed by your organisation while you are signed in.',
+        };
+      }
+      // A manual switch away from 'adapter' invalidates the pre-adapter
+      // marker — without this, a user who auto-switched on sign-in and
+      // then manually moved to a different provider would still be
+      // restored to the stale "before adapter" value on sign-out.
+      clearPreAdapterProvider();
+    }
     const result = await runPythonScript('simple_recorder.py', ['set-ai-provider', provider]);
     const jsonMatch = result.match(/\{.*\}/s);
     if (jsonMatch) return JSON.parse(jsonMatch[0]);
@@ -7615,16 +7658,33 @@ function saveOrgSession(session) {
   }
 }
 
-function loadOrgSession() {
+// Read the org session distinguishing the three states callers care about:
+//   file missing        → { session: null, exists: false, decryptFailed: false }
+//   present, unreadable → { session: null, exists: true,  decryptFailed: true  }
+//   present, readable   → { session,      exists: true,  decryptFailed: false }
+// The middle state matters: safeStorage.decryptString throws while the
+// keychain is locked (right after wake / login, or a denied prompt after an
+// app re-sign) — treating that like "signed out" is exactly what used to
+// downgrade signed-in users to local AI via the stale-adapter recovery.
+function loadOrgSessionEx() {
+  const p = getOrgSessionPath();
+  if (!fs.existsSync(p)) return { session: null, exists: false, decryptFailed: false };
   try {
-    const p = getOrgSessionPath();
-    if (!fs.existsSync(p)) return null;
     const encrypted = fs.readFileSync(p);
-    return JSON.parse(safeStorage.decryptString(encrypted));
+    return {
+      session: JSON.parse(safeStorage.decryptString(encrypted)),
+      exists: true,
+      decryptFailed: false,
+    };
   } catch (e) {
     console.error('Failed to load org session:', e.message);
-    return null;
+    sendDebugLog(`org session present but unreadable (keychain locked?): ${e.message}`);
+    return { session: null, exists: true, decryptFailed: true };
   }
+}
+
+function loadOrgSession() {
+  return loadOrgSessionEx().session;
 }
 
 function clearOrgSession() {
@@ -7815,6 +7875,11 @@ ipcMain.handle('org-status', async () => {
     restorePreAdapterProvider().catch(() => {});
     return { signedIn: false, everSignedIn };
   }
+  // Hard lock: heal any provider drift while the session is valid.
+  // Fire-and-forget — this handler is hot (sidebar polls it) and must
+  // not block on a Python subprocess; the reconcile is coalesced so
+  // repeated calls share one run.
+  reconcileAiProviderWithOrgSession().catch(() => {});
   return {
     signedIn: true,
     everSignedIn,

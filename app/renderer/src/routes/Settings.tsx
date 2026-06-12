@@ -910,12 +910,16 @@ function AiTab() {
     <section data-settings-tab="ai">
       <SettingRow
         label="AI provider"
-        description="Where models run. Local keeps all data on your device."
+        description={
+          orgSignedIn
+            ? "Managed by your organisation while you're signed in. Sign out under Settings > Organisation to change it."
+            : 'Where models run. Local keeps all data on your device.'
+        }
       >
         <Select
           value={current}
           onValueChange={(v) => setProvider.mutate(v as AiProvider)}
-          disabled={!provider.data}
+          disabled={!provider.data || orgSignedIn}
         >
           <SelectTrigger className={cn(COMPACT_TRIGGER, 'min-w-[180px]')}>
             <SelectValue />
