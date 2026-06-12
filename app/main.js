@@ -5733,7 +5733,7 @@ async function readAiProvider() {
 // user manually picks a non-adapter provider — at that point there's
 // no longer a stale value to restore to.
 function getPreAdapterProviderPath() {
-  return path.join(os.homedir(), 'Library', 'Application Support', 'stenoai', '.pre-adapter-provider');
+  return path.join(getUserDataDir(), '.pre-adapter-provider');
 }
 
 function loadPreAdapterProvider() {
@@ -7611,7 +7611,7 @@ ipcMain.handle('outlook-auth-disconnect', async () => {
 // it goes through these IPC handlers.
 
 function getOrgSessionPath() {
-  return path.join(os.homedir(), 'Library', 'Application Support', 'stenoai', '.org-session');
+  return path.join(getUserDataDir(), '.org-session');
 }
 
 // Decode the JWT's payload segment and check whether it's already past its
@@ -7703,7 +7703,7 @@ function clearOrgSession() {
 // nothing; enterprise users get a one-click recovery path after their first
 // connection. Empty file content; existence is the only signal.
 function getOrgKnownMarkerPath() {
-  return path.join(os.homedir(), 'Library', 'Application Support', 'stenoai', '.org-known');
+  return path.join(getUserDataDir(), '.org-known');
 }
 
 function markOrgKnown() {
@@ -7732,7 +7732,7 @@ function hasOrgEverBeenSignedIn() {
 // files stay byte-stable and the share/unshare cycle leaves no residue in
 // the user's notes.
 function getOrgBackupStatePath() {
-  return path.join(os.homedir(), 'Library', 'Application Support', 'stenoai', '.org-backup-state.json');
+  return path.join(getUserDataDir(), '.org-backup-state.json');
 }
 
 function loadOrgBackupState() {
