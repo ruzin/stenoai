@@ -77,8 +77,7 @@ test('@pipeline garbage audio fails honestly and preserves the source; real dir 
   const lines = await page.evaluate(() => (window as StenoWindow).__dl ?? []);
   expect(lines.some((l) => /transcription failed/i.test(l))).toBe(true);
 
-  // Summary marks the failure (not faked silence). Case-insensitive: the YAML
-  // bool may render as true/True.
+  // Summary marks the failure (not faked silence).
   expect(readFileSync(summaryPath, 'utf8')).toMatch(/transcription_failed:\s*true/i);
 
   // Source audio preserved (not deleted), byte-for-byte — the user can reprocess.
