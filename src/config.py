@@ -111,7 +111,12 @@ class Config:
 
     DEFAULT_MODEL = "llama3.2:3b"
 
-    # Supported models with metadata (organized by parameter size, ascending)
+    # Supported models with metadata. Active models first (roughly ascending by
+    # capability/size, default first), deprecated models last — the Settings UI
+    # tucks deprecated entries into a collapsed, dimmed section and only surfaces
+    # one if it's still the user's current model. Deprecated (rather than removed)
+    # so a user already on the model keeps a recognised selection; fully retired
+    # models are dropped from this dict.
     SUPPORTED_MODELS = {
         "llama3.2:3b": {
             "name": "Llama 3.2 3B",
@@ -120,22 +125,6 @@ class Config:
             "description": "Fast and lightweight for quick meetings (default)",
             "speed": "very fast",
             "quality": "good"
-        },
-        "gemma3:4b": {
-            "name": "Gemma 3 4B",
-            "size": "2.5GB",
-            "params": "4B",
-            "description": "Lightweight and efficient",
-            "speed": "fast",
-            "quality": "good"
-        },
-        "gemma4:12b": {
-            "name": "Gemma 4 12B",
-            "size": "7.6GB",
-            "params": "12B",
-            "description": "Large 256K context - best for long meetings",
-            "speed": "medium",
-            "quality": "excellent"
         },
         "gemma4:e2b-it-qat": {
             "name": "Gemma 4 E2B (QAT)",
@@ -153,12 +142,12 @@ class Config:
             "speed": "medium",
             "quality": "excellent"
         },
-        "deepseek-r1:14b": {
-            "name": "DeepSeek R1 14B",
-            "size": "9.0GB",
-            "params": "14B",
-            "description": "Strong reasoning and analysis capabilities",
-            "speed": "fast",
+        "gemma4:12b": {
+            "name": "Gemma 4 12B",
+            "size": "7.6GB",
+            "params": "12B",
+            "description": "Large 256K context - best for long meetings",
+            "speed": "medium",
             "quality": "excellent"
         },
         "gpt-oss:20b": {
@@ -169,21 +158,21 @@ class Config:
             "speed": "medium",
             "quality": "excellent"
         },
-        "qwen3:8b": {
-            "name": "Qwen 3 8B",
-            "size": "4.7GB",
-            "params": "8B",
-            "description": "Replaced by Qwen 3.5 9B",
+        "gemma3:4b": {
+            "name": "Gemma 3 4B",
+            "size": "2.5GB",
+            "params": "4B",
+            "description": "Replaced by Gemma 4 E2B",
             "speed": "fast",
-            "quality": "excellent",
+            "quality": "good",
             "deprecated": True
         },
-        "deepseek-r1:8b": {
-            "name": "DeepSeek R1 8B",
-            "size": "4.7GB",
-            "params": "8B",
-            "description": "Replaced by DeepSeek R1 14B",
-            "speed": "medium",
+        "deepseek-r1:14b": {
+            "name": "DeepSeek R1 14B",
+            "size": "9.0GB",
+            "params": "14B",
+            "description": "Replaced by Gemma 4 12B",
+            "speed": "fast",
             "quality": "excellent",
             "deprecated": True
         }
