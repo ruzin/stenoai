@@ -146,7 +146,36 @@ export function useDeleteMeeting() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (meeting: Meeting) => unwrap(await ipc().meetings.delete(meeting)),
-    onSuccess: () => qc.invalidateQueries({ queryKey: meetingsKeys.all }),
+    // Remove the row from the list immediately. The file deletion itself is
+    // fast (a direct fs unlink in the main process), but the follow-up list
+    // refresh shells out to the bundled backend — a multi-second cold start —
+    // so without this the deleted note lingers on screen, looking like
+    // nothing happened, until the refetch lands. Optimistic removal also
+    // prevents a second delete on the same note (which fails as "already
+    // deleted").
+    onMutate: async (meeting) => {
+      await qc.cancelQueries({ queryKey: meetingsKeys.list() });
+      qc.setQueryData<Meeting[] | undefined>(meetingsKeys.list(), (old) =>
+        old?.filter(
+          (m) => m.session_info.summary_file !== meeting.session_info.summary_file,
+        ),
+      );
+    },
+    onError: (_err, meeting) => {
+      // Re-insert only the meeting that failed to delete, rather than restoring
+      // a whole pre-delete snapshot — a snapshot would clobber a concurrent
+      // in-flight delete's optimistic removal. Order is reconciled by the
+      // onSettled refetch.
+      qc.setQueryData<Meeting[] | undefined>(meetingsKeys.list(), (old) =>
+        !old ||
+        old.some(
+          (m) => m.session_info.summary_file === meeting.session_info.summary_file,
+        )
+          ? old
+          : [...old, meeting],
+      );
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: meetingsKeys.all }),
   });
 }
 
