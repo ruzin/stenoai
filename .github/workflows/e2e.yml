@@ -149,7 +149,7 @@ jobs:
       # The app probes 11434 and skips its own `ollama serve` on a 200, so a real
       # Ollama on the runner would answer instead of a test stub. Kill it first
       # (the org-lock spec doesn't use Ollama, but this keeps T2 setup honest for
-      # the summary specs landing in PR2).
+      # the summary/pipeline specs).
       - name: Ensure no stray Ollama
         run: pkill -f ollama || true
 
@@ -372,8 +372,8 @@ jobs:
 
   # Windows transcription pipeline. Unlike t2-pipeline-macos (whisper, because
   # hosted Macs have no Metal for parakeet-mlx), Windows transcribes with
-  # onnx-asr on CPU — so this runs the REAL parakeet path (STENOAI_E2E_ENGINE
-  # defaults to parakeet). The onnx weights (~670 MB) aren't bundled; cache them
+  # onnx-asr on CPU — so this runs the REAL parakeet path (STENOAI_E2E_ENGINE is
+  # set to parakeet below). The onnx weights (~670 MB) aren't bundled; cache them
   # and pre-download so the spec isn't racing the pull inside its timeout.
   t2-pipeline-windows:
     name: T2 pipeline (transcribe + summarize, Windows)
@@ -407,7 +407,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/huggingface/hub/models--istupakov--parakeet-tdt-0.6b-v3-onnx
-          key: parakeet-tdt-0.6b-v3-onnx
+          key: parakeet-onnx-${{ runner.os }}-tdt-0.6b-v3
 
       - name: Install Electron dependencies
         working-directory: app
