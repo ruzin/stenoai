@@ -224,9 +224,21 @@ jobs:
         run: npm run build:renderer
 
       # Pre-download the model (no-op when the cache restored) so the test isn't
-      # racing a ~572 MB download inside its timeout.
+      # racing a ~572 MB download inside its timeout. download-parakeet-model
+      # exits 0 even on failure (it prints {"success": false}), so verify the
+      # model is actually installed — otherwise the spec would silently skip
+      # green and we'd ship "passing" with zero pipeline coverage.
       - name: Ensure Parakeet model present
-        run: ./dist/stenoai/stenoai download-parakeet-model
+        run: |
+          ./dist/stenoai/stenoai download-parakeet-model
+          ./dist/stenoai/stenoai parakeet-status | grep -q '"installed": true'
+
+      # Playwright exits 0 when --grep matches no tests. Assert the tagged spec
+      # is actually selected so a future rename / dropped @pipeline tag can't
+      # silently run zero tests and pass (the keystone-test-vanishes failure).
+      - name: Guard — @pipeline test is selected
+        working-directory: app
+        run: npm run test:e2e -- --project=t2 --grep @pipeline --list | grep -q '@pipeline'
 
       - name: Run T2 pipeline
         working-directory: app
