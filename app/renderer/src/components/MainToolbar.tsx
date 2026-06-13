@@ -1,5 +1,6 @@
 import * as React from 'react';
-import { MessageSquare, Moon, MoreHorizontal, Monitor, PanelLeftClose, PanelLeftOpen, PencilLine, Sun } from 'lucide-react';
+import { FileAudio, Loader2, MessageSquare, Moon, MoreHorizontal, Monitor, PanelLeftClose, PanelLeftOpen, PencilLine, Sun } from 'lucide-react';
+import type { UseMutationResult } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { AudioWave } from '@/components/AudioWave';
@@ -15,6 +16,7 @@ import {
 } from '@/hooks/useSettings';
 import type { RecordingStatus } from '@/hooks/useRecording';
 import { useTheme } from '@/hooks/useTheme';
+import { useImportAudio } from '@/hooks/useImportAudio';
 import { useRoute, navigate } from '@/lib/router';
 import { cn, isMac } from '@/lib/utils';
 
@@ -51,6 +53,10 @@ export function MainToolbar({
   // Windows/Linux there are none, so align to the sidebar's left edge.
   const toggleLeft = isMac ? 82 : 16;
 
+  // Hoisted here (always mounted) so a long import's onSuccess refresh
+  // still fires even if the user closes the options popover mid-import.
+  const importAudio = useImportAudio();
+
   return (
     <div
       className="flex h-10 items-center justify-between gap-2 px-5 pt-2.5"
@@ -84,7 +90,7 @@ export function MainToolbar({
             <PanelLeftClose className="size-[15px]" />
           )}
         </button>
-        <RecordingOptionsPopover />
+        <RecordingOptionsPopover importAudio={importAudio} disabled={isRecording} />
         <button
           type="button"
           onClick={() => setTheme(resolvedTheme === 'dark' ? 'light' : 'dark')}
@@ -158,7 +164,13 @@ export function MainToolbar({
   );
 }
 
-function RecordingOptionsPopover() {
+function RecordingOptionsPopover({
+  importAudio,
+  disabled,
+}: {
+  importAudio: UseMutationResult<boolean, Error, void>;
+  disabled: boolean;
+}) {
   const systemAudio = useSystemAudioSetting();
   const setSystemAudio = useSetSystemAudio();
   const systemAudioSupport = useSystemAudioSupport();
@@ -219,6 +231,35 @@ function RecordingOptionsPopover() {
               </div>
             </div>
           )}
+
+          <button
+            type="button"
+            disabled={disabled || importAudio.isPending}
+            onClick={() => importAudio.mutate()}
+            className="flex w-full items-start gap-3 rounded-md border p-3 text-left transition-colors hover:bg-[color:var(--surface-hover)] disabled:cursor-not-allowed disabled:opacity-50"
+            style={{ borderColor: 'var(--border-subtle)' }}
+          >
+            {importAudio.isPending ? (
+              <Loader2 className="mt-0.5 size-4 flex-shrink-0 animate-spin text-muted-foreground" />
+            ) : (
+              <FileAudio className="mt-0.5 size-4 flex-shrink-0 text-muted-foreground" />
+            )}
+            <div className="flex-1 space-y-0.5">
+              <p className="text-sm font-medium">
+                {importAudio.isPending ? 'Importing…' : 'Import audio file…'}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {disabled
+                  ? 'Stop the current recording to import a file.'
+                  : 'Transcribe and summarise an existing recording.'}
+              </p>
+              {importAudio.isError && (
+                <p className="text-xs text-muted-foreground">
+                  Couldn’t import that file — see logs for details.
+                </p>
+              )}
+            </div>
+          </button>
         </div>
       </PopoverContent>
     </Popover>

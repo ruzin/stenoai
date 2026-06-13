@@ -10,3 +10,4 @@ export * from './useSettings';
 export * from './useAi';
 export * from './useSetup';
 export * from './useChatSessions';
+export * from './useImportAudio';
