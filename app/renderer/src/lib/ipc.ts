@@ -615,6 +615,8 @@ export interface StenoaiBridge {
     processSystemAudio: RequestFn<[filePath: string, name: string], Result<{ message: string }>>;
     processFile: RequestFn<[filePath: string, name: string], Result<{ message: string }>>;
     pickAudioFile: RequestFn<[], PickAudioFileResponse>;
+    /** Resolve a dropped File's absolute path (Electron 32+ removed File.path). Synchronous. */
+    getPathForFile: (file: File) => string;
     getQueue: RequestFn<[], QueueStatus | { success: false; error: string }>;
     getDir: RequestFn<[], RecordingsDirResponse>;
   };
