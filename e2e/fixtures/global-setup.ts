@@ -15,6 +15,11 @@ export default async function globalSetup(): Promise<void> {
   for (let i = 0; i < 25; i++) {
     const free = await new Promise<boolean>((resolve) => {
       const sock = createConnection({ port: 11434, host: '127.0.0.1' });
+      // Guard against a DROP'd (non-RST) port so a probe can't hang the run.
+      sock.setTimeout(200, () => {
+        sock.destroy();
+        resolve(true);
+      });
       sock.once('connect', () => {
         sock.destroy();
         resolve(false); // something is still listening
@@ -24,4 +29,8 @@ export default async function globalSetup(): Promise<void> {
     if (free) return;
     await new Promise((r) => setTimeout(r, 200));
   }
+  // Surface the failure mode: a server we couldn't kill would let the run
+  // proceed into the same port race this setup exists to prevent.
+  // eslint-disable-next-line no-console
+  console.warn('[e2e:global-setup] port 11434 still busy after ~5s; mock-Ollama bind may race');
 }

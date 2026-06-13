@@ -31,6 +31,10 @@ jobs:
   # Long-meeting chunking smoke. Reuses the Windows backend bundle the suite just
   # built (download-artifact across the reusable-workflow boundary) and the
   # parakeet-onnx model the suite cached, so this adds no extra build/download.
+  # Tradeoff: `needs: suite` couples this to the WHOLE suite passing (you can't
+  # depend on a single job inside a called workflow), so an unrelated flake skips
+  # it. If the suite's flake rate ever makes this un-runnable, inline a
+  # self-contained Windows build like e2e.yml's build-backend-windows does.
   long-meeting-windows:
     name: T3 long-meeting (parakeet onnx, Windows)
     runs-on: windows-latest
