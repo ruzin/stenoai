@@ -20,12 +20,25 @@ import { execSync } from 'child_process';
  * its own model-bearing job and keep the org-lock T2 model-free.
  */
 
+// Engine: parakeet locally (the Mac-divergent path), whisper in CI. GitHub-hosted
+// macOS runners have no Metal GPU, so parakeet-mlx can't load there — whisper.cpp
+// (CPU) exercises the same process-streaming plumbing + HEARTBEAT. Set via env so
+// the spec is unchanged either way.
+const ENGINE: 'parakeet' | 'whisper' =
+  process.env.STENOAI_E2E_ENGINE === 'whisper' ? 'whisper' : 'parakeet';
+const WHISPER_MODEL = 'small'; // smallest registered model (466 MB)
+
 // The preload surface the renderer sees (app/preload.js), narrowed to what this
 // spec drives. e2e/ lives outside renderer/, so window.stenoai isn't ambiently
 // typed here — declare just the slice we use rather than reaching for `any`.
 type StenoWindow = Window & {
   stenoai: {
     parakeetModels: { status: () => Promise<{ installed?: boolean }> };
+    whisperModels: {
+      list: () => Promise<{ supported_models?: Record<string, { installed?: boolean }> }>;
+      set: (name: string) => Promise<unknown>;
+    };
+    transcriptionEngine: { set: (engine: string) => Promise<unknown> };
     recording: { processSystemAudio: (p: string, name: string) => Promise<{ success?: boolean }> };
     on: { debugLog: (cb: (line: unknown) => void) => void };
   };
@@ -53,16 +66,36 @@ test('@pipeline synthetic WAV runs the full pipeline: HEARTBEAT + summary, real 
   try {
     const { page } = await launchApp();
 
-    // Parakeet weights aren't bundled. Without them transcription can't run, and
-    // this is a pipeline smoke, not a model-download test — skip loudly rather
-    // than hang/fail. CI installs the model before this spec.
-    const status = await page.evaluate(() => (window as StenoWindow).stenoai.parakeetModels.status());
-    if (!status?.installed) {
-      // eslint-disable-next-line no-console
-      console.warn('[t2:@pipeline] SKIPPED: Parakeet model not installed on this runner.');
-      test.info().annotations.push({ type: 'skip-reason', description: 'Parakeet model not installed' });
+    // Select the engine in the per-test config (the backend reads it at process
+    // time). For whisper, also pin the small model so we don't need the larger
+    // default.
+    await page.evaluate((e) => (window as StenoWindow).stenoai.transcriptionEngine.set(e), ENGINE);
+    if (ENGINE === 'whisper') {
+      await page.evaluate((m) => (window as StenoWindow).stenoai.whisperModels.set(m), WHISPER_MODEL);
     }
-    test.skip(!status?.installed, 'Parakeet model not installed');
+
+    // Models aren't bundled — they download on use. Without the active engine's
+    // model transcription can't run, and this is a pipeline smoke, not a
+    // model-download test — skip loudly rather than hang/fail. CI installs the
+    // model before this spec.
+    const modelReady =
+      ENGINE === 'whisper'
+        ? await page.evaluate(
+            async (m) =>
+              !!(await (window as StenoWindow).stenoai.whisperModels.list())?.supported_models?.[m]
+                ?.installed,
+            WHISPER_MODEL,
+          )
+        : await page.evaluate(
+            async () =>
+              (await (window as StenoWindow).stenoai.parakeetModels.status())?.installed === true,
+          );
+    if (!modelReady) {
+      // eslint-disable-next-line no-console
+      console.warn(`[t2:@pipeline] SKIPPED: ${ENGINE} model not installed on this runner.`);
+      test.info().annotations.push({ type: 'skip-reason', description: `${ENGINE} model not installed` });
+    }
+    test.skip(!modelReady, `${ENGINE} model not installed`);
 
     // Write the WAV into the temp recordings dir — an allowed base dir now that
     // getAllowedBaseDirs() honors getUserDataDir().

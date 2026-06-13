@@ -176,6 +176,11 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
+  # Uses whisper.cpp (CPU), NOT parakeet-mlx: GitHub-hosted macOS runners are
+  # headless VMs with no Metal GPU, so MLX can't load there ("Failed to load the
+  # default metallib"). The plumbing + HEARTBEAT smoke is engine-agnostic, so
+  # whisper exercises the same process-streaming path. Parakeet is covered on
+  # real Macs locally / via /verify (and a future Metal-capable nightly runner).
   t2-pipeline-macos:
     name: T2 pipeline (transcribe + summarize)
     runs-on: macos-latest
@@ -206,14 +211,14 @@ jobs:
       - name: Ensure no stray Ollama
         run: pkill -f ollama || true
 
-      # Cache the Parakeet weights (~572 MB) so only the first run pays the
-      # download; later runs restore in ~30 s. Keyed on the model id so a model
-      # bump busts the cache. The model is NOT bundled — it downloads on use.
-      - name: Cache Parakeet model
+      # Cache the whisper ggml weights (~466 MB for 'small') so only the first
+      # run pays the download; later runs restore in ~30 s. The model is NOT
+      # bundled — it downloads on use into pywhispercpp's models dir.
+      - name: Cache whisper model
         uses: actions/cache@v4
         with:
-          path: ~/.cache/huggingface
-          key: hf-parakeet-mlx-community-parakeet-tdt-0.6b-v3
+          path: ~/Library/Application Support/pywhispercpp/models
+          key: whisper-small-ggml
 
       - name: Install Electron dependencies
         working-directory: app
@@ -224,14 +229,15 @@ jobs:
         run: npm run build:renderer
 
       # Pre-download the model (no-op when the cache restored) so the test isn't
-      # racing a ~572 MB download inside its timeout. download-parakeet-model
-      # exits 0 even on failure (it prints {"success": false}), so verify the
-      # model is actually installed — otherwise the spec would silently skip
-      # green and we'd ship "passing" with zero pipeline coverage.
-      - name: Ensure Parakeet model present
+      # racing the download inside its timeout. pull-whisper-model exits 0 even
+      # on failure, so verify the model is actually installed — otherwise the
+      # spec would silently skip green and we'd ship "passing" with zero pipeline
+      # coverage.
+      - name: Ensure whisper model present
         run: |
-          ./dist/stenoai/stenoai download-parakeet-model
-          ./dist/stenoai/stenoai parakeet-status | grep -q '"installed": true'
+          ./dist/stenoai/stenoai pull-whisper-model small
+          ./dist/stenoai/stenoai list-whisper-models \
+            | python3 -c "import sys,json; sys.exit(0 if json.load(sys.stdin)['supported_models']['small']['installed'] else 1)"
 
       # Playwright exits 0 when --grep matches no tests. Assert the tagged spec
       # is actually selected so a future rename / dropped @pipeline tag can't
@@ -240,8 +246,10 @@ jobs:
         working-directory: app
         run: npm run test:e2e -- --project=t2 --grep @pipeline --list | grep -q '@pipeline'
 
-      - name: Run T2 pipeline
+      - name: Run T2 pipeline (whisper)
         working-directory: app
+        env:
+          STENOAI_E2E_ENGINE: whisper
         run: npm run test:e2e -- --project=t2 --grep @pipeline
 
       - name: Upload report on failure
