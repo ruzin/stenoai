@@ -355,9 +355,11 @@ jobs:
         working-directory: app
         run: npm run build:renderer
 
+      # Quote '@pipeline': the default Windows shell is pwsh, which treats a bare
+      # @word as splatting ($pipeline) and errors. Single quotes make it literal.
       - name: Run T2 (org-lock, model-free)
         working-directory: app
-        run: npm run test:e2e -- --project=t2 --grep-invert @pipeline
+        run: npm run test:e2e -- --project=t2 --grep-invert '@pipeline'
 
       - name: Upload report on failure
         if: failure()
@@ -433,17 +435,23 @@ jobs:
           }
 
       # Assert the tagged spec is actually selected (Playwright exits 0 on a
-      # zero-match --grep). git bash provides grep on the Windows runner.
+      # zero-match --grep). git bash provides grep on the Windows runner. Capture
+      # --list output first rather than piping into `grep -q`: on Windows the
+      # early pipe-close from `grep -q` makes the node writer crash with EPIPE
+      # (no POSIX SIGPIPE), failing the step even on a match.
       - name: Guard — @pipeline test is selected
         shell: bash
         working-directory: app
-        run: npm run test:e2e -- --project=t2 --grep @pipeline --list | grep -q '@pipeline'
+        run: |
+          out=$(npm run test:e2e -- --project=t2 --grep @pipeline --list)
+          echo "$out" | grep -q '@pipeline'
 
+      # Quote '@pipeline' for the same pwsh-splat reason as the org-lock job.
       - name: Run T2 pipeline (parakeet onnx)
         working-directory: app
         env:
           STENOAI_E2E_ENGINE: parakeet
-        run: npm run test:e2e -- --project=t2 --grep @pipeline
+        run: npm run test:e2e -- --project=t2 --grep '@pipeline'
 
       - name: Upload report on failure
         if: failure()
