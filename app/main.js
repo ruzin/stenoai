@@ -1446,11 +1446,16 @@ ipcMain.handle('get-status', handleGetStatus);
 
 ipcMain.handle('process-recording', async (event, audioFile, sessionName) => {
   try {
-    const env = getAiEnv();
-    const result = await runPythonScript('simple_recorder.py', ['process', audioFile, '--name', sessionName], false, env, 'process-recording');
-    trackEvent('transcription_completed', { success: true });
-    trackEvent('summarization_completed', { success: true });
-    return { success: true, result: result };
+    // Route imported files through the same processing queue a stopped
+    // recording uses, instead of a blocking synchronous run. The import then
+    // surfaces as a processing row (badge + auto-refresh on completion) in
+    // the meeting list and survives the trigger popover closing, rather than
+    // showing no progress until it finishes. addToProcessingQueue spawns
+    // process-streaming (already captured by the #224 processing-log via its
+    // 'process-streaming' label), serialises behind any in-flight job, and
+    // emits 'processing-complete' when done.
+    addToProcessingQueue(audioFile, sessionName, null);
+    return { success: true };
   } catch (error) {
     trackEvent('error_occurred', { error_type: 'process_recording' });
     return { success: false, error: error.message };
@@ -2232,7 +2237,11 @@ ipcMain.handle('get-queue-status', async () => {
     currentReprocesses: Array.from(activeReprocessJobs.values()),
     hasRecording: currentRecordingProcess !== null || systemAudioRecordingActive,
     isPaused: recordingRuntimeState.isPaused,
-    elapsedSeconds: (currentRecordingProcess !== null || systemAudioRecordingActive) ? getRecordingElapsedSeconds() : 0,
+    elapsedSeconds: (currentRecordingProcess !== null || systemAudioRecordingActive)
+      ? getRecordingElapsedSeconds()
+      : (isProcessing && currentProcessingStartedAtMs
+          ? Math.floor((Date.now() - currentProcessingStartedAtMs) / 1000)
+          : 0),
     sessionName: currentRecordingSessionName
   };
 });
@@ -2516,6 +2525,10 @@ let liveTranscribeSessionName = null;
 let liveTranscribeStdoutBuf = '';
 let isProcessing = false;
 let currentProcessingJob = null;
+// Wall-clock start of the in-flight queue job, so the processing timer advances
+// for jobs with no recording elapsed (e.g. an imported file). Recordings keep
+// using their draft start time on the renderer side.
+let currentProcessingStartedAtMs = null;
 // Reprocess runs as a side-channel from the main processing queue (different
 // Python command, started directly from the reprocess-meeting IPC). Tracked
 // here so the renderer can show "this note is being regenerated" on Home
@@ -2679,7 +2692,8 @@ async function processNextInQueue() {
   
   isProcessing = true;
   currentProcessingJob = processingQueue.shift();
-  
+  currentProcessingStartedAtMs = Date.now();
+
   console.log(`🔄 Processing queued job: ${currentProcessingJob.sessionName}`);
   
   try {
@@ -2874,6 +2888,7 @@ async function processNextInQueue() {
   } finally {
     isProcessing = false;
     currentProcessingJob = null;
+    currentProcessingStartedAtMs = null;
     // Process next job in queue
     setTimeout(processNextInQueue, 1000);
   }

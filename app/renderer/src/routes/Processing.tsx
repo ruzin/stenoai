@@ -44,9 +44,12 @@ export function Processing() {
     activeSession ? s.drafts[activeSession] : undefined,
   );
   const startedAt = draft ? new Date(draft.startedAtMs) : null;
+  // Recordings have a live draft to time from. Imported files don't — fall back
+  // to the queue's processing elapsed (get-queue-status), which advances on the
+  // poll, so the timer counts up instead of sticking at 0s.
   const totalElapsedSeconds = startedAt
     ? Math.max(0, Math.floor((Date.now() - startedAt.getTime()) / 1000))
-    : 0;
+    : recording.elapsed;
 
   const [stage, setStage] = React.useState<ProcessingStage>('transcribing');
   const [streamText, setStreamText] = React.useState('');
@@ -370,9 +373,12 @@ export function ProcessingDock() {
     sessionName ? s.drafts[sessionName] : undefined,
   );
   const startedAt = draft ? new Date(draft.startedAtMs) : null;
+  // Recordings have a live draft to time from. Imported files don't — fall back
+  // to the queue's processing elapsed (get-queue-status), which advances on the
+  // poll, so the timer counts up instead of sticking at 0s.
   const totalElapsedSeconds = startedAt
     ? Math.max(0, Math.floor((Date.now() - startedAt.getTime()) / 1000))
-    : 0;
+    : recording.elapsed;
 
   return (
     <div className="flex justify-center pointer-events-none">

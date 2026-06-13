@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { FileAudio, Loader2, MessageSquare, Moon, MoreHorizontal, Monitor, PanelLeftClose, PanelLeftOpen, PencilLine, Sun } from 'lucide-react';
+import { FileAudio, MessageSquare, Moon, MoreHorizontal, Monitor, PanelLeftClose, PanelLeftOpen, PencilLine, Sun } from 'lucide-react';
 import type { UseMutationResult } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
@@ -181,9 +181,13 @@ function RecordingOptionsPopover({
   // renderer forces loopback on there). Also hidden while support is loading
   // or on a Mac without loopback support (pre-14.4).
   const showSystemAudio = isMac && systemAudioSupport.data?.supported === true;
+  // Controlled so the import action can close the popover when it fires — the
+  // import's progress then shows as a processing row in the meeting list,
+  // not in this (now closed) popover.
+  const [open, setOpen] = React.useState(false);
 
   return (
-    <Popover>
+    <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <Button
           variant="ghost"
@@ -234,30 +238,22 @@ function RecordingOptionsPopover({
 
           <button
             type="button"
-            disabled={disabled || importAudio.isPending}
-            onClick={() => importAudio.mutate()}
+            disabled={disabled}
+            onClick={() => {
+              setOpen(false);
+              importAudio.mutate();
+            }}
             className="flex w-full items-start gap-3 rounded-md border p-3 text-left transition-colors hover:bg-[color:var(--surface-hover)] disabled:cursor-not-allowed disabled:opacity-50"
             style={{ borderColor: 'var(--border-subtle)' }}
           >
-            {importAudio.isPending ? (
-              <Loader2 className="mt-0.5 size-4 flex-shrink-0 animate-spin text-muted-foreground" />
-            ) : (
-              <FileAudio className="mt-0.5 size-4 flex-shrink-0 text-muted-foreground" />
-            )}
+            <FileAudio className="mt-0.5 size-4 flex-shrink-0 text-muted-foreground" />
             <div className="flex-1 space-y-0.5">
-              <p className="text-sm font-medium">
-                {importAudio.isPending ? 'Importing…' : 'Import audio file…'}
-              </p>
+              <p className="text-sm font-medium">Import audio file…</p>
               <p className="text-xs text-muted-foreground">
                 {disabled
                   ? 'Stop the current recording to import a file.'
-                  : 'Transcribe and summarise an existing recording.'}
+                  : 'Transcribe and summarise an existing recording. It will appear in the list while it processes.'}
               </p>
-              {importAudio.isError && (
-                <p className="text-xs text-muted-foreground">
-                  Couldn’t import that file — see logs for details.
-                </p>
-              )}
             </div>
           </button>
         </div>
