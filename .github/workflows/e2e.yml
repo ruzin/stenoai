@@ -158,15 +158,85 @@ jobs:
         working-directory: app
         run: npm run build:renderer
 
-      - name: Run T2
+      # Exclude @pipeline — the transcription smoke needs the Parakeet model and
+      # runs in its own model-bearing job (t2-pipeline-macos) so this job stays
+      # fast and model-free.
+      - name: Run T2 (org-lock, model-free)
         working-directory: app
-        run: npm run test:e2e -- --project=t2
+        run: npm run test:e2e -- --project=t2 --grep-invert @pipeline
 
       - name: Upload report on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: e2e-t2-report
+          path: |
+            app/playwright-report
+            app/test-results
+          retention-days: 7
+          if-no-files-found: ignore
+
+  t2-pipeline-macos:
+    name: T2 pipeline (transcribe + summarize)
+    runs-on: macos-latest
+    needs: build-backend-macos
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: app/package-lock.json
+
+      - name: Download backend bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: e2e-backend-macos
+          path: dist/stenoai
+
+      - name: Restore exec bits on bundled binaries
+        run: |
+          find dist/stenoai -type f \( -name stenoai -o -name ffmpeg -o -name ollama \) \
+            -exec chmod +x {} +
+          test -x dist/stenoai/stenoai
+
+      - name: Ensure no stray Ollama
+        run: pkill -f ollama || true
+
+      # Cache the Parakeet weights (~572 MB) so only the first run pays the
+      # download; later runs restore in ~30 s. Keyed on the model id so a model
+      # bump busts the cache. The model is NOT bundled — it downloads on use.
+      - name: Cache Parakeet model
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-parakeet-mlx-community-parakeet-tdt-0.6b-v3
+
+      - name: Install Electron dependencies
+        working-directory: app
+        run: npm ci
+
+      - name: Build renderer
+        working-directory: app
+        run: npm run build:renderer
+
+      # Pre-download the model (no-op when the cache restored) so the test isn't
+      # racing a ~572 MB download inside its timeout.
+      - name: Ensure Parakeet model present
+        run: ./dist/stenoai/stenoai download-parakeet-model
+
+      - name: Run T2 pipeline
+        working-directory: app
+        run: npm run test:e2e -- --project=t2 --grep @pipeline
+
+      - name: Upload report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-t2-pipeline-report
           path: |
             app/playwright-report
             app/test-results

@@ -20,9 +20,32 @@ const OLLAMA_PORT = 11434;
 function startMockOllama() {
   return new Promise((resolve, reject) => {
     const server = http.createServer((req, res) => {
+      // /api/tags — the summarizer's _ensure_model_available() reads each
+      // entry's `model` field (ollama-python maps it there, not `name`); if the
+      // configured model isn't found it tries to PULL it, so we must list it
+      // under `model` or the pull path 404s and crashes summarisation.
       if (req.method === 'GET' && req.url === '/api/tags') {
         res.writeHead(200, { 'content-type': 'application/json' });
-        res.end(JSON.stringify({ models: [{ name: 'llama3.2:3b' }] }));
+        res.end(
+          JSON.stringify({
+            models: [
+              {
+                name: 'llama3.2:3b',
+                model: 'llama3.2:3b',
+                modified_at: '2024-01-01T00:00:00Z',
+                size: 2019393189,
+                digest: 'mock',
+              },
+            ],
+          }),
+        );
+        return;
+      }
+      // /api/pull — defensive: if the model is ever considered missing, answer
+      // a success stream rather than 404 so summarisation doesn't crash.
+      if (req.method === 'POST' && req.url === '/api/pull') {
+        res.writeHead(200, { 'content-type': 'application/x-ndjson' });
+        res.end(JSON.stringify({ status: 'success' }) + '\n');
         return;
       }
       if (req.method === 'POST' && req.url === '/api/chat') {
