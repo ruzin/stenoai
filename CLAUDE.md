@@ -61,14 +61,23 @@ at repo-root `e2e/` (config, fixtures, specs); run it from `app/`.
     `--grep-invert @pipeline` keeps the other T2 specs model-free. A dev machine without the
     active engine's model **skips** it (loudly) rather than failing.
   - **Current specs:** `org-lock.t1`, `org-lock-lifecycle.t2`, and `config-corruption.t2`
-    (model-free, run in `t2-macos`); `transcription-pipeline.t2` and `honest-failure.t2`
-    (tagged `@pipeline`, run in `t2-pipeline-macos`). Engine selection for `@pipeline` specs
-    is shared via `e2e/fixtures/engine.ts`.
+    (model-free, run in `t2-macos` / `t2-windows`); `transcription-pipeline.t2` and
+    `honest-failure.t2` (tagged `@pipeline`, run in `t2-pipeline-macos` /
+    `t2-pipeline-windows`). Engine selection for `@pipeline` specs is shared via
+    `e2e/fixtures/engine.ts`.
+  - **Windows T2:** the same specs run on `windows-latest` via explicit per-OS jobs
+    (`build-backend-windows` → `t2-windows` / `t2-pipeline-windows`). Differences from the
+    macOS jobs: no exec-bit restore (Windows has no exec bit), `taskkill`/`Stop-Process`
+    instead of `pkill`, and the `@pipeline` job uses the REAL parakeet path —
+    `STENOAI_E2E_ENGINE=parakeet` runs onnx-asr on CPU (no Metal needed), caching the
+    `models--istupakov--parakeet-tdt-0.6b-v3-onnx` HF snapshot. org-lock T2 may **skip** on
+    Windows (safeStorage/DPAPI on a headless runner), acceptable while non-blocking.
 - **Isolation keystone:** every test sets `STENOAI_USER_DATA_DIR` to a temp dir, which
   both `getUserDataDir()` (main.js) and `get_user_data_dir()` (`src/config.py`) honor,
   so a test can never read/write the real `~/Library/Application Support/stenoai`. The
   launch fixture (`e2e/fixtures/electron.ts`) waits on `[data-app-ready]` — no fixed
-  timeouts. CI: `.github/workflows/e2e.yml` (T1 on Ubuntu/xvfb, macOS T2; non-blocking).
+  timeouts. CI: `.github/workflows/e2e.yml` (T1 on Ubuntu/xvfb, macOS + Windows T2;
+  non-blocking).
 
 ## Production Readiness
 This app ships as a signed DMG to real users. Before considering any change complete:
