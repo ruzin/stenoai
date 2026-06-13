@@ -2,6 +2,7 @@ import { test, expect } from '../fixtures/electron';
 import { startMockOllama } from '../fixtures/mock-ollama';
 import { makeWav } from '../fixtures/make-wav';
 import { realUserDataDir, fileSig } from '../fixtures/real-user-data';
+import { selectEngine, isEngineModelReady, E2E_ENGINE } from '../fixtures/engine';
 import { mkdirSync, existsSync } from 'fs';
 import path from 'path';
 import { execSync } from 'child_process';
@@ -13,32 +14,17 @@ import { execSync } from 'child_process';
  * summary written into the temp dir, and the real user-data dir untouched.
  *
  * Plumbing + HEARTBEAT only — never asserts transcript text (a sine WAV is
- * non-speech, so Parakeet returns an empty transcript; the pipeline still
- * completes and writes the summary). This is the one genuinely Mac-divergent
- * path (parakeet-mlx), so it needs the Parakeet model present — CI installs it
- * (cached); a dev machine without it skips. Tagged @pipeline so CI can run it in
- * its own model-bearing job and keep the org-lock T2 model-free.
+ * non-speech, so the engine returns an empty transcript; the pipeline still
+ * completes and writes the summary). Engine + model handling lives in
+ * fixtures/engine.ts (parakeet local / whisper CI). Tagged @pipeline so CI runs
+ * it in the model-bearing job and keeps the org-lock T2 model-free.
  */
 
-// Engine: parakeet locally (the Mac-divergent path), whisper in CI. GitHub-hosted
-// macOS runners have no Metal GPU, so parakeet-mlx can't load there — whisper.cpp
-// (CPU) exercises the same process-streaming plumbing + HEARTBEAT. Set via env so
-// the spec is unchanged either way.
-const ENGINE: 'parakeet' | 'whisper' =
-  process.env.STENOAI_E2E_ENGINE === 'whisper' ? 'whisper' : 'parakeet';
-const WHISPER_MODEL = 'small'; // smallest registered model (466 MB)
-
-// The preload surface the renderer sees (app/preload.js), narrowed to what this
-// spec drives. e2e/ lives outside renderer/, so window.stenoai isn't ambiently
-// typed here — declare just the slice we use rather than reaching for `any`.
+// Narrowed preload surface this spec drives directly (engine bits live in
+// fixtures/engine.ts). e2e/ is outside renderer/, so window.stenoai isn't
+// ambiently typed here.
 type StenoWindow = Window & {
   stenoai: {
-    parakeetModels: { status: () => Promise<{ installed?: boolean }> };
-    whisperModels: {
-      list: () => Promise<{ supported_models?: Record<string, { installed?: boolean }> }>;
-      set: (name: string) => Promise<unknown>;
-    };
-    transcriptionEngine: { set: (engine: string) => Promise<unknown> };
     recording: { processSystemAudio: (p: string, name: string) => Promise<{ success?: boolean }> };
     on: { debugLog: (cb: (line: unknown) => void) => void };
   };
@@ -65,37 +51,17 @@ test('@pipeline synthetic WAV runs the full pipeline: HEARTBEAT + summary, real 
 
   try {
     const { page } = await launchApp();
+    await selectEngine(page);
 
-    // Select the engine in the per-test config (the backend reads it at process
-    // time). For whisper, also pin the small model so we don't need the larger
-    // default.
-    await page.evaluate((e) => (window as StenoWindow).stenoai.transcriptionEngine.set(e), ENGINE);
-    if (ENGINE === 'whisper') {
-      await page.evaluate((m) => (window as StenoWindow).stenoai.whisperModels.set(m), WHISPER_MODEL);
-    }
-
-    // Models aren't bundled — they download on use. Without the active engine's
-    // model transcription can't run, and this is a pipeline smoke, not a
-    // model-download test — skip loudly rather than hang/fail. CI installs the
-    // model before this spec.
-    const modelReady =
-      ENGINE === 'whisper'
-        ? await page.evaluate(
-            async (m) =>
-              !!(await (window as StenoWindow).stenoai.whisperModels.list())?.supported_models?.[m]
-                ?.installed,
-            WHISPER_MODEL,
-          )
-        : await page.evaluate(
-            async () =>
-              (await (window as StenoWindow).stenoai.parakeetModels.status())?.installed === true,
-          );
+    // Skip loudly if the active engine's model isn't installed (transcribe would
+    // otherwise auto-download ~0.5 GB). CI installs it before this spec.
+    const modelReady = await isEngineModelReady(page);
     if (!modelReady) {
       // eslint-disable-next-line no-console
-      console.warn(`[t2:@pipeline] SKIPPED: ${ENGINE} model not installed on this runner.`);
-      test.info().annotations.push({ type: 'skip-reason', description: `${ENGINE} model not installed` });
+      console.warn(`[t2:@pipeline] SKIPPED: ${E2E_ENGINE} model not installed on this runner.`);
+      test.info().annotations.push({ type: 'skip-reason', description: `${E2E_ENGINE} model not installed` });
     }
-    test.skip(!modelReady, `${ENGINE} model not installed`);
+    test.skip(!modelReady, `${E2E_ENGINE} model not installed`);
 
     // Write the WAV into the temp recordings dir — an allowed base dir now that
     // getAllowedBaseDirs() honors getUserDataDir().
@@ -114,16 +80,14 @@ test('@pipeline synthetic WAV runs the full pipeline: HEARTBEAT + summary, real 
       });
     });
 
-    // Drive the real streaming pipeline through the app IPC (enqueues
-    // process-streaming on the WAV).
+    // Drive the real streaming pipeline through the app IPC.
     const queued = await page.evaluate(
       (p) => (window as StenoWindow).stenoai.recording.processSystemAudio(p, 'E2E Pipeline'),
       wavPath,
     );
     expect(queued?.success).toBe(true);
 
-    // Completion: the summary .md lands in the temp output dir. Generous timeout
-    // for model load + transcribe + summarise (mock Ollama answers instantly).
+    // Completion: the summary .md lands in the temp output dir.
     const summaryPath = path.join(userDataDir, 'output', 'pipeline_summary.md');
     await expect
       .poll(() => existsSync(summaryPath), { timeout: 120_000, intervals: [1000] })
@@ -138,8 +102,7 @@ test('@pipeline synthetic WAV runs the full pipeline: HEARTBEAT + summary, real 
   } finally {
     await ollama.close();
     // Teardown: the app may have spawned its own `ollama serve` despite the mock
-    // (e.g. a probe race); don't let it outlive the test (PR1 follow-up — the
-    // workflow only pkills BEFORE launch).
+    // (e.g. a probe race); don't let it outlive the test.
     killOllama();
   }
 });

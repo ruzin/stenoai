@@ -60,6 +60,10 @@ at repo-root `e2e/` (config, fixtures, specs); run it from `app/`.
     out: `--grep @pipeline` runs it (CI's `t2-pipeline-macos` job caches a whisper model),
     `--grep-invert @pipeline` keeps the other T2 specs model-free. A dev machine without the
     active engine's model **skips** it (loudly) rather than failing.
+  - **Current specs:** `org-lock.t1`, `org-lock-lifecycle.t2`, and `config-corruption.t2`
+    (model-free, run in `t2-macos`); `transcription-pipeline.t2` and `honest-failure.t2`
+    (tagged `@pipeline`, run in `t2-pipeline-macos`). Engine selection for `@pipeline` specs
+    is shared via `e2e/fixtures/engine.ts`.
 - **Isolation keystone:** every test sets `STENOAI_USER_DATA_DIR` to a temp dir, which
   both `getUserDataDir()` (main.js) and `get_user_data_dir()` (`src/config.py`) honor,
   so a test can never read/write the real `~/Library/Application Support/stenoai`. The
