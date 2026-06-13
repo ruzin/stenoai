@@ -29,8 +29,9 @@ function makeToken() {
 function startMockAdapter() {
   return new Promise((resolve, reject) => {
     const server = http.createServer((req, res) => {
-      let body = '';
-      req.on('data', (c) => (body += c));
+      // Drain the request body (we don't inspect credentials) so 'end' fires;
+      // the mock authenticates structurally, not by content.
+      req.resume();
       req.on('end', () => {
         if (req.method === 'POST' && req.url === '/auth/login') {
           res.writeHead(200, { 'content-type': 'application/json' });

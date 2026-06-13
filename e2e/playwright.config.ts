@@ -25,7 +25,7 @@ export default defineConfig({
     video: 'retain-on-failure',
   },
   projects: [
-    { name: 't1', testMatch: /.*\.t1\.spec\.ts/ },
-    { name: 't2', testMatch: /.*\.t2\.spec\.ts/ },
+    { name: 't1', testMatch: /.*\.t1\.spec\.ts$/ },
+    { name: 't2', testMatch: /.*\.t2\.spec\.ts$/ },
   ],
 });
