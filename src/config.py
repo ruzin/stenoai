@@ -129,6 +129,22 @@ class Config:
             "speed": "fast",
             "quality": "good"
         },
+        "gemma4:12b": {
+            "name": "Gemma 4 12B",
+            "size": "7.6GB",
+            "params": "12B",
+            "description": "Large 256K context - best for long meetings",
+            "speed": "medium",
+            "quality": "excellent"
+        },
+        "gemma4:e2b-it-qat": {
+            "name": "Gemma 4 E2B (QAT)",
+            "size": "4.3GB",
+            "params": "2B",
+            "description": "Lightest Gemma 4, quantization-aware, 128K context",
+            "speed": "fast",
+            "quality": "good"
+        },
         "qwen3.5:9b": {
             "name": "Qwen 3.5 9B",
             "size": "6.6GB",
