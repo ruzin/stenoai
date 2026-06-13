@@ -1,7 +1,7 @@
 import { test, expect } from '../fixtures/electron';
 import { startMockAdapter } from '../fixtures/mock-adapter';
-import { existsSync, readFileSync, statSync } from 'fs';
-import { homedir } from 'os';
+import { realUserDataDir, fileSig } from '../fixtures/real-user-data';
+import { existsSync, readFileSync } from 'fs';
 import path from 'path';
 
 /**
@@ -12,28 +12,6 @@ import path from 'path';
  * A test that fails to isolate but passes is worse than no test, so the real
  * dir is asserted byte-for-byte untouched.
  */
-
-// Mirror app/main.js getUserDataDir() / src/config.get_user_data_dir() for the
-// production (no-override) location, so we can assert it stays untouched.
-function realUserDataDir(): string {
-  if (process.platform === 'darwin') {
-    return path.join(homedir(), 'Library', 'Application Support', 'stenoai');
-  }
-  if (process.platform === 'win32') {
-    const base = process.env.APPDATA || path.join(homedir(), 'AppData', 'Roaming');
-    return path.join(base, 'stenoai');
-  }
-  const base = process.env.XDG_DATA_HOME || path.join(homedir(), '.local', 'share');
-  return path.join(base, 'stenoai');
-}
-
-// Stat signature (exists + mtime + size) so we can prove a file was untouched.
-function fileSig(p: string): string {
-  if (!existsSync(p)) return 'absent';
-  const s = statSync(p);
-  return `${s.mtimeMs}:${s.size}`;
-}
-
 test('real org sign-in persists session + config into the temp dir, real dir untouched', async ({
   launchApp,
   userDataDir,

@@ -158,15 +158,105 @@ jobs:
         working-directory: app
         run: npm run build:renderer
 
-      - name: Run T2
+      # Exclude @pipeline — the transcription smoke needs the Parakeet model and
+      # runs in its own model-bearing job (t2-pipeline-macos) so this job stays
+      # fast and model-free.
+      - name: Run T2 (org-lock, model-free)
         working-directory: app
-        run: npm run test:e2e -- --project=t2
+        run: npm run test:e2e -- --project=t2 --grep-invert @pipeline
 
       - name: Upload report on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: e2e-t2-report
+          path: |
+            app/playwright-report
+            app/test-results
+          retention-days: 7
+          if-no-files-found: ignore
+
+  # Uses whisper.cpp (CPU), NOT parakeet-mlx: GitHub-hosted macOS runners are
+  # headless VMs with no Metal GPU, so MLX can't load there ("Failed to load the
+  # default metallib"). The plumbing + HEARTBEAT smoke is engine-agnostic, so
+  # whisper exercises the same process-streaming path. Parakeet is covered on
+  # real Macs locally / via /verify (and a future Metal-capable nightly runner).
+  t2-pipeline-macos:
+    name: T2 pipeline (transcribe + summarize)
+    runs-on: macos-latest
+    needs: build-backend-macos
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: app/package-lock.json
+
+      - name: Download backend bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: e2e-backend-macos
+          path: dist/stenoai
+
+      - name: Restore exec bits on bundled binaries
+        run: |
+          find dist/stenoai -type f \( -name stenoai -o -name ffmpeg -o -name ollama \) \
+            -exec chmod +x {} +
+          test -x dist/stenoai/stenoai
+
+      - name: Ensure no stray Ollama
+        run: pkill -f ollama || true
+
+      # Cache the whisper ggml weights (~466 MB for 'small') so only the first
+      # run pays the download; later runs restore in ~30 s. The model is NOT
+      # bundled — it downloads on use into pywhispercpp's models dir.
+      - name: Cache whisper model
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Application Support/pywhispercpp/models
+          key: whisper-small-ggml
+
+      - name: Install Electron dependencies
+        working-directory: app
+        run: npm ci
+
+      - name: Build renderer
+        working-directory: app
+        run: npm run build:renderer
+
+      # Pre-download the model (no-op when the cache restored) so the test isn't
+      # racing the download inside its timeout. pull-whisper-model exits 0 even
+      # on failure, so verify the model is actually installed — otherwise the
+      # spec would silently skip green and we'd ship "passing" with zero pipeline
+      # coverage.
+      - name: Ensure whisper model present
+        run: |
+          ./dist/stenoai/stenoai pull-whisper-model small
+          ./dist/stenoai/stenoai list-whisper-models \
+            | python3 -c "import sys,json; sys.exit(0 if json.load(sys.stdin)['supported_models']['small']['installed'] else 1)"
+
+      # Playwright exits 0 when --grep matches no tests. Assert the tagged spec
+      # is actually selected so a future rename / dropped @pipeline tag can't
+      # silently run zero tests and pass (the keystone-test-vanishes failure).
+      - name: Guard — @pipeline test is selected
+        working-directory: app
+        run: npm run test:e2e -- --project=t2 --grep @pipeline --list | grep -q '@pipeline'
+
+      - name: Run T2 pipeline (whisper)
+        working-directory: app
+        env:
+          STENOAI_E2E_ENGINE: whisper
+        run: npm run test:e2e -- --project=t2 --grep @pipeline
+
+      - name: Upload report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-t2-pipeline-report
           path: |
             app/playwright-report
             app/test-results

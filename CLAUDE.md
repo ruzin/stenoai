@@ -52,6 +52,14 @@ at repo-root `e2e/` (config, fixtures, specs); run it from `app/`.
     stubs in `app/e2e-mock-ipc.js`). No Python/Ollama/network — fully hermetic.
   - **T2 — `*.t2.spec.ts`**: the real bundled backend + mock org adapter / Ollama
     (`e2e/fixtures/`). Proves end-to-end wiring.
+  - **`@pipeline` (a T2 spec)**: the transcription→summarize smoke drives a synthetic
+    WAV through the real pipeline and asserts HEARTBEAT + a summary written. The engine is
+    env-selected (`STENOAI_E2E_ENGINE`): **parakeet** locally (the Mac-divergent path) but
+    **whisper** in CI — GitHub-hosted macOS runners have no Metal GPU, so parakeet-mlx can't
+    load there. Models aren't bundled (download on use), so it's tagged `@pipeline` and split
+    out: `--grep @pipeline` runs it (CI's `t2-pipeline-macos` job caches a whisper model),
+    `--grep-invert @pipeline` keeps the other T2 specs model-free. A dev machine without the
+    active engine's model **skips** it (loudly) rather than failing.
 - **Isolation keystone:** every test sets `STENOAI_USER_DATA_DIR` to a temp dir, which
   both `getUserDataDir()` (main.js) and `get_user_data_dir()` (`src/config.py`) honor,
   so a test can never read/write the real `~/Library/Application Support/stenoai`. The

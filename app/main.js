@@ -611,7 +611,12 @@ function getAllowedBaseDirs() {
   const projectRoot = path.join(__dirname, '..');
   const dirs = [
     projectRoot,
-    path.join(os.homedir(), 'Library', 'Application Support', 'stenoai')
+    // getUserDataDir() rather than a macOS literal: cross-platform (the old
+    // hardcoded ~/Library path is wrong on Windows/Linux) and it honors
+    // STENOAI_USER_DATA_DIR. In production this resolves to the same per-OS
+    // data dir as before; under e2e it's the isolated temp dir, so a test can
+    // hand the app a WAV from its temp recordings folder.
+    getUserDataDir()
   ];
   if (_cachedCustomStoragePath) {
     dirs.push(_cachedCustomStoragePath);
