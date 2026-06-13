@@ -16,6 +16,7 @@ will implement exactly what is listed here, exposed through
   - `R→M (invoke)` — `ipcRenderer.invoke(...)` → `ipcMain.handle(...)` request/response
   - `R→M (send)` — `ipcRenderer.send(...)` → `ipcMain.on(...)` fire-and-forget
   - `M→R` — `webContents.send(...)` → `ipcRenderer.on(...)` main-driven event
+  - `R-direct` — synchronous renderer-side call with no IPC hop (an Electron renderer API such as `webUtils` exposed through the bridge). Not every bridge method is an IPC channel.
 - **Needed** — whether the new (React) renderer needs the channel.
   - `yes` — keep and port
   - `drop` — remove (dead listener, unused in renderer, or main-only concern)
@@ -86,6 +87,7 @@ progress events back.
 | `process-system-audio-recording` | R→M invoke | yes | `stenoai.recording.processSystemAudio(filePath, name)` |
 | `process-recording` | R→M invoke | yes | `stenoai.recording.processFile(path, name)` |
 | `select-audio-file` | R→M invoke | yes | `stenoai.recording.pickAudioFile()` |
+| — | R-direct (webUtils) | yes | `stenoai.recording.getPathForFile(file)` — sync; resolves a dropped File's absolute path (Electron 32+ removed `File.path`) |
 | `get-queue-status` | R→M invoke | yes | `stenoai.recording.getQueue()` |
 | `get-recordings-dir` | R→M invoke | yes | `stenoai.recording.getDir()` |
 | `get-live-transcript-state` | R→M invoke | yes | `stenoai.liveTranscript.getState()` |
