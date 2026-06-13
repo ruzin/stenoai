@@ -1,27 +1,26 @@
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation } from '@tanstack/react-query';
 import { ipc } from '@/lib/ipc';
-import { meetingsKeys } from '@/hooks/meetingKeys';
 
 /**
  * Import an existing local audio file into stenoai.
  *
- * Opens the native file picker (`pickAudioFile`), then runs the chosen
- * file through the same `process-recording` backend pipeline a stopped
- * recording uses (`processFile`). The result lands in the meeting list
- * with the user's configured transcription + summary settings. The
- * meeting title defaults to the file's basename (sans extension); the
- * user can rename it afterwards.
+ * Opens the native file picker (`pickAudioFile`), then hands the chosen
+ * file to the backend (`processFile`), which enqueues it on the same
+ * processing queue a stopped recording uses. The import then shows up as a
+ * processing row in the meeting list (with a badge) and becomes a finished
+ * note when summarisation completes. The meeting title defaults to the
+ * file's basename (sans extension); the user can rename it afterwards.
  *
- * `mutateAsync()` resolves to `true` when a file was imported and `false`
+ * Fire-and-forget: `processFile` returns as soon as the file is queued, not
+ * when processing finishes. The processing row appears via the queue poll
+ * and the App-level `processing-complete` listener refreshes the list when
+ * the note is ready, so this hook does no cache invalidation itself.
+ *
+ * `mutateAsync()` resolves to `true` when a file was enqueued and `false`
  * when the user cancelled the picker. A backend failure rejects so the
  * caller can surface an error state.
- *
- * Hoist this hook into an always-mounted component (e.g. MainToolbar) so
- * the `onSuccess` meeting-list invalidation still fires if the UI that
- * triggered it (the options popover) unmounts mid-import.
  */
 export function useImportAudio() {
-  const qc = useQueryClient();
   return useMutation<boolean, Error, void>({
     mutationFn: async (): Promise<boolean> => {
       const picked = await ipc().recording.pickAudioFile();
@@ -35,11 +34,6 @@ export function useImportAudio() {
         throw new Error(result.error ?? 'Import failed');
       }
       return true;
-    },
-    onSuccess: (imported) => {
-      if (imported) {
-        void qc.invalidateQueries({ queryKey: meetingsKeys.all });
-      }
     },
   });
 }
