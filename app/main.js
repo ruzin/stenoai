@@ -157,6 +157,13 @@ function isSystemAudioSupported() {
 // few synchronous config reads on the Electron side so they resolve the right
 // path on Windows/Linux instead of the macOS literal.
 function getUserDataDir() {
+  // E2E isolation: a per-test temp dir set via STENOAI_USER_DATA_DIR must win
+  // for every path this resolves (.org-session, markers, config reads) — the
+  // same dir Electron's app.setPath('userData', …) already honors above. Inert
+  // in production (the var is never set). Mirrors src/config.get_user_data_dir.
+  if (process.env.STENOAI_USER_DATA_DIR) {
+    return process.env.STENOAI_USER_DATA_DIR;
+  }
   if (process.platform === 'darwin') {
     return path.join(os.homedir(), 'Library', 'Application Support', 'stenoai');
   }
@@ -879,6 +886,9 @@ function spawnParakeetWarmup() {
 }
 
 function rewarmParakeet(reason) {
+  // No backend subprocesses under E2E — focus/activate/renderer-hint must not
+  // spawn a warmup against the temp data dir (keeps the test tiers hermetic).
+  if (IS_E2E) return;
   // Cheap in-memory guards first, so a throttled or mid-recording focus event
   // doesn't pay the loadTranscriptionEngine() file read. Don't compete with an
   // active recording — the model is already resident in the recording
@@ -1097,7 +1107,9 @@ if (!gotSingleInstanceLock) {
     // never block window creation on it. Skipped for Whisper users
     // (Parakeet model would be downloading or absent) and gated on
     // model presence by the CLI command itself (no-ops when missing).
-    if (loadTranscriptionEngine() === 'parakeet') {
+    // Skipped under E2E so the mock-IPC (T1) and real-backend (T2) tiers stay
+    // hermetic — no stray backend subprocess touching the temp data dir.
+    if (!IS_E2E && loadTranscriptionEngine() === 'parakeet') {
       lastParakeetWarmupAt = Date.now();
       spawnParakeetWarmup();
     }
@@ -1109,8 +1121,10 @@ if (!gotSingleInstanceLock) {
 
     // Hard lock: reconcile ai_provider with the org session once at startup
     // (belt-and-braces for tray-only starts; the sidebar's org-status call
-    // triggers the same coalesced reconcile). Fire-and-forget.
-    reconcileAiProviderWithOrgSession().catch(() => {});
+    // triggers the same coalesced reconcile). Fire-and-forget. Skipped under
+    // E2E — it spawns the backend, and the test tiers drive provider state via
+    // mock IPC (T1) or on-demand IPC handlers (T2), keeping startup hermetic.
+    if (!IS_E2E) reconcileAiProviderWithOrgSession().catch(() => {});
 
     // Auto-pause active recordings when the machine sleeps (lid close etc.)
     // and offer a Resume prompt on wake — see autoPauseForSleep. Processing
@@ -1123,8 +1137,9 @@ if (!gotSingleInstanceLock) {
     const protocolRegistered = registerShortcutProtocolClient();
     sendDebugLog(`Protocol handler registration (${SHORTCUT_PROTOCOL}): ${protocolRegistered}`);
 
-    // Load hide-dock-icon preference and apply
-    if (process.platform === 'darwin' && app.dock) {
+    // Load hide-dock-icon preference and apply. Skipped under E2E (spawns the
+    // backend; the test tiers don't exercise the dock-icon preference).
+    if (!IS_E2E && process.platform === 'darwin' && app.dock) {
       try {
         const dockResult = await new Promise((resolve, reject) => {
           const proc = spawn(getBackendPath(), ['get-dock-icon'], {
@@ -1153,16 +1168,19 @@ if (!gotSingleInstanceLock) {
     await initTelemetry();
     trackEvent('app_opened');
 
-    // Load custom storage path for file validation
-    try {
-      const spResult = await runPythonScript('simple_recorder.py', ['get-storage-path'], true);
-      const spData = JSON.parse(spResult.trim());
-      if (spData.storage_path) {
-        _cachedCustomStoragePath = spData.storage_path;
-        console.log('Custom storage path loaded:', _cachedCustomStoragePath);
+    // Load custom storage path for file validation. Skipped under E2E (spawns
+    // the backend; the test tiers keep startup backend-free).
+    if (!IS_E2E) {
+      try {
+        const spResult = await runPythonScript('simple_recorder.py', ['get-storage-path'], true);
+        const spData = JSON.parse(spResult.trim());
+        if (spData.storage_path) {
+          _cachedCustomStoragePath = spData.storage_path;
+          console.log('Custom storage path loaded:', _cachedCustomStoragePath);
+        }
+      } catch (e) {
+        // Non-fatal - custom path just won't be cached
       }
-    } catch (e) {
-      // Non-fatal - custom path just won't be cached
     }
 
     // Register global hotkey for toggle recording (Cmd+Shift+R on macOS, Ctrl+Shift+R on Windows/Linux)
