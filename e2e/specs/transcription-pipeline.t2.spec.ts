@@ -3,9 +3,9 @@ import { startMockOllama } from '../fixtures/mock-ollama';
 import { makeWav } from '../fixtures/make-wav';
 import { realUserDataDir, fileSig } from '../fixtures/real-user-data';
 import { selectEngine, isEngineModelReady, E2E_ENGINE } from '../fixtures/engine';
+import { killOllama } from '../fixtures/kill-ollama';
 import { mkdirSync, existsSync } from 'fs';
 import path from 'path';
-import { execSync } from 'child_process';
 
 /**
  * T2 — real-backend transcription pipeline smoke (@pipeline). Drives a synthetic
@@ -106,17 +106,3 @@ test('@pipeline synthetic WAV runs the full pipeline: HEARTBEAT + summary, real 
     killOllama();
   }
 });
-
-function killOllama(): void {
-  // Cross-platform: Windows has no pkill. Kill by image name (the spec has no
-  // PID; app/main.js killProcessTree kills a known PID + tree instead). Enough
-  // to free 11434 so the probe can't hit a stray server. No-ops when nothing
-  // matches (taskkill exits non-zero → swallowed by the catch).
-  const cmd =
-    process.platform === 'win32' ? 'taskkill /F /IM ollama.exe' : 'pkill -f ollama';
-  try {
-    execSync(cmd, { stdio: 'ignore' });
-  } catch {
-    /* nothing matched — fine */
-  }
-}

@@ -72,12 +72,22 @@ at repo-root `e2e/` (config, fixtures, specs); run it from `app/`.
     `STENOAI_E2E_ENGINE=parakeet` runs onnx-asr on CPU (no Metal needed), caching the
     `models--istupakov--parakeet-tdt-0.6b-v3-onnx` HF snapshot. org-lock T2 may **skip** on
     Windows (safeStorage/DPAPI on a headless runner), acceptable while non-blocking.
+  - **T3 — `*.t3.spec.ts` (nightly only):** the heavy `@long-meeting` chunking smoke. Drives a
+    multi-minute WAV (`STENOAI_E2E_LONG_WAV_SECONDS`, default 1200) through the real
+    **parakeet** windowing path (`PARAKEET_CHUNK_DURATION_S` = 60 s, a hard constant) and
+    asserts the pipeline completes. parakeet-only — whisper.cpp doesn't use that path; it
+    `skip`s on whisper. Exercises the long-file chunking **plumbing**, NOT the MLX/Metal OOM
+    (that needs a GPU runner — tracked follow-up). Too slow for per-PR, so it lives in the
+    nightly workflow, not `e2e.yml`.
 - **Isolation keystone:** every test sets `STENOAI_USER_DATA_DIR` to a temp dir, which
   both `getUserDataDir()` (main.js) and `get_user_data_dir()` (`src/config.py`) honor,
   so a test can never read/write the real `~/Library/Application Support/stenoai`. The
-  launch fixture (`e2e/fixtures/electron.ts`) waits on `[data-app-ready]` — no fixed
-  timeouts. CI: `.github/workflows/e2e.yml` (T1 on Ubuntu/xvfb, macOS + Windows T2;
-  non-blocking).
+  launch fixture (`e2e/fixtures/electron.ts`) waits on `[data-app-ready]` (no fixed timeouts)
+  and force-kills the app process tree if a graceful close hangs on teardown (Windows).
+- **CI:** `.github/workflows/e2e.yml` (T1 on Ubuntu/xvfb, macOS + Windows T2; non-blocking,
+  runs per-PR). `.github/workflows/e2e-nightly.yml` (scheduled) reuses that suite via
+  `workflow_call` for flake/drift detection and adds the T3 long-meeting job. A CI-only
+  Playwright `globalSetup` kills a stray Ollama + waits for a clean 11434 before the run.
 
 ## Production Readiness
 This app ships as a signed DMG to real users. Before considering any change complete:

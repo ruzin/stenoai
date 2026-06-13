@@ -19,6 +19,9 @@ name: e2e
 
 on:
   workflow_dispatch:
+  # Callable so the scheduled e2e-nightly workflow can re-run this exact suite
+  # for flake/drift detection without duplicating the job definitions.
+  workflow_call:
   push:
     branches:
       - main
