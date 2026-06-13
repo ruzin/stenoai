@@ -108,8 +108,12 @@ test('@pipeline synthetic WAV runs the full pipeline: HEARTBEAT + summary, real 
 });
 
 function killOllama(): void {
+  // Cross-platform: Windows has no pkill. Mirror app/main.js killProcessTree's
+  // taskkill path. Both no-op cleanly when nothing matches.
+  const cmd =
+    process.platform === 'win32' ? 'taskkill /F /IM ollama.exe' : 'pkill -f ollama';
   try {
-    execSync('pkill -f ollama', { stdio: 'ignore' });
+    execSync(cmd, { stdio: 'ignore' });
   } catch {
     /* nothing matched — fine */
   }
