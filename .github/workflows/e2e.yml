@@ -1,0 +1,173 @@
+name: e2e
+
+# Tiered Playwright e2e (PR1 of the e2e plan). Drives the REAL Electron app.
+# Intentionally NON-BLOCKING: this workflow is not a required status check yet —
+# it is promoted to required in PR4 once it has a green streak. Keeping it
+# advisory now means a flaky launch can't block unrelated merges while the
+# suite earns trust.
+#
+#   t1-renderer (Ubuntu) — renderer-only with mock IPC, no Python bundle. Fast.
+#   build-backend-macos -> t2-macos — real bundled backend + mock org adapter;
+#     proves the keystone path-isolation fix with the live backend.
+#
+# Windows T2, the belt-and-suspenders matrix, and dorny/paths-filter backend
+# gating (a latency optimisation) land in PR3. For now both tiers run on every
+# PR so the keystone isolation fix cannot silently regress.
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  t1-renderer:
+    name: T1 (renderer + mock IPC)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install Electron dependencies
+        working-directory: app
+        run: npm ci
+
+      # Installs the shared libs Electron's Chromium needs on Linux, plus xvfb.
+      - name: Install Linux system deps (+ xvfb)
+        working-directory: app
+        run: npx playwright install-deps
+
+      - name: Build renderer
+        working-directory: app
+        run: npm run build:renderer
+
+      # Electron is headless-hostile on Linux — run under a virtual framebuffer.
+      - name: Run T1 under xvfb
+        working-directory: app
+        run: xvfb-run -a npm run test:e2e -- --project=t1
+
+      - name: Upload report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-t1-report
+          path: |
+            app/playwright-report
+            app/test-results
+          retention-days: 7
+          if-no-files-found: ignore
+
+  build-backend-macos:
+    name: Build backend bundle (macOS)
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: requirements.txt
+
+      # Partial speedup: skips PyInstaller Analysis when spec/deps are unchanged.
+      # Never cache dist/ — that's the artifact we ship to the T2 job.
+      - name: Cache PyInstaller work dir
+        uses: actions/cache@v4
+        with:
+          path: build
+          key: pyinstaller-${{ runner.os }}-${{ hashFiles('stenoai.spec', 'requirements.txt') }}
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Download bundled binaries (Ollama + ffmpeg)
+        run: |
+          chmod +x scripts/download-ollama.sh
+          ./scripts/download-ollama.sh
+
+      - name: Build backend with PyInstaller
+        run: pyinstaller stenoai.spec --noconfirm
+
+      - name: Upload backend bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-backend-macos
+          path: dist/stenoai
+          retention-days: 3
+          if-no-files-found: error
+
+  t2-macos:
+    name: T2 (real backend + mock adapter)
+    runs-on: macos-latest
+    needs: build-backend-macos
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: app/package-lock.json
+
+      - name: Download backend bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: e2e-backend-macos
+          path: dist/stenoai
+
+      # actions/upload-artifact strips the exec bit — without this the app can't
+      # launch the bundled launcher / spawn ffmpeg or ollama (a cryptic-failure
+      # trap, see the plan's risk #3).
+      - name: Restore exec bits on bundled binaries
+        run: |
+          chmod +x dist/stenoai/stenoai
+          chmod +x dist/stenoai/_internal/ffmpeg
+          chmod +x dist/stenoai/_internal/ollama/ollama
+
+      # The app probes 11434 and skips its own `ollama serve` on a 200, so a real
+      # Ollama on the runner would answer instead of a test stub. Kill it first
+      # (the org-lock spec doesn't use Ollama, but this keeps T2 setup honest for
+      # the summary specs landing in PR2).
+      - name: Ensure no stray Ollama
+        run: pkill -f ollama || true
+
+      - name: Install Electron dependencies
+        working-directory: app
+        run: npm ci
+
+      - name: Build renderer
+        working-directory: app
+        run: npm run build:renderer
+
+      - name: Run T2
+        working-directory: app
+        run: npm run test:e2e -- --project=t2
+
+      - name: Upload report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-t2-report
+          path: |
+            app/playwright-report
+            app/test-results
+          retention-days: 7
+          if-no-files-found: ignore

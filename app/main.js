@@ -157,6 +157,13 @@ function isSystemAudioSupported() {
 // few synchronous config reads on the Electron side so they resolve the right
 // path on Windows/Linux instead of the macOS literal.
 function getUserDataDir() {
+  // E2E isolation: a per-test temp dir set via STENOAI_USER_DATA_DIR must win
+  // for every path this resolves (.org-session, markers, config reads) — the
+  // same dir Electron's app.setPath('userData', …) already honors above. Inert
+  // in production (the var is never set). Mirrors src/config.get_user_data_dir.
+  if (process.env.STENOAI_USER_DATA_DIR) {
+    return process.env.STENOAI_USER_DATA_DIR;
+  }
   if (process.platform === 'darwin') {
     return path.join(os.homedir(), 'Library', 'Application Support', 'stenoai');
   }

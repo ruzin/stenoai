@@ -78,6 +78,12 @@ def get_user_data_dir() -> Path:
     Windows: %APPDATA%/stenoai  (Roaming)
     Linux:   $XDG_DATA_HOME/stenoai or ~/.local/share/stenoai
     """
+    # E2E isolation: a per-test temp dir set via STENOAI_USER_DATA_DIR wins for
+    # the backend child too (the Electron parent propagates it via the inherited
+    # env). Symmetric with app/main.js getUserDataDir(). Inert in production.
+    override = os.environ.get("STENOAI_USER_DATA_DIR")
+    if override:
+        return Path(override)
     if sys.platform == "darwin":
         return Path.home() / "Library" / "Application Support" / "stenoai"
     if sys.platform == "win32":
@@ -234,7 +240,10 @@ class Config:
             config_path: Path to config file. If None, uses default location.
         """
         if config_path is None:
-            if is_bundled():
+            # STENOAI_USER_DATA_DIR forces the data dir even from source (e2e
+            # isolation), so the override in get_user_data_dir() is authoritative
+            # whether the backend runs frozen or from source.
+            if is_bundled() or os.environ.get("STENOAI_USER_DATA_DIR"):
                 base_dir = get_user_data_dir()
             else:
                 # Source dev: project root
@@ -920,7 +929,7 @@ def get_data_dirs() -> Dict[str, Path]:
 
     if custom:
         base = Path(custom)
-    elif is_bundled():
+    elif is_bundled() or os.environ.get("STENOAI_USER_DATA_DIR"):
         base = get_user_data_dir()
     else:
         base = Path(__file__).parent.parent  # project root in dev (source)
