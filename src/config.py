@@ -927,9 +927,14 @@ def get_data_dirs() -> Dict[str, Path]:
     config = get_config()
     custom = config.get_storage_path()
 
-    if custom:
+    if os.environ.get("STENOAI_USER_DATA_DIR"):
+        # Keystone: the e2e isolation dir is the hardest override — it must beat
+        # a user's custom storage_path too, so a test can never escape the temp
+        # dir to a real configured recordings/transcripts location.
+        base = get_user_data_dir()
+    elif custom:
         base = Path(custom)
-    elif is_bundled() or os.environ.get("STENOAI_USER_DATA_DIR"):
+    elif is_bundled():
         base = get_user_data_dir()
     else:
         base = Path(__file__).parent.parent  # project root in dev (source)

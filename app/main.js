@@ -886,6 +886,9 @@ function spawnParakeetWarmup() {
 }
 
 function rewarmParakeet(reason) {
+  // No backend subprocesses under E2E — focus/activate/renderer-hint must not
+  // spawn a warmup against the temp data dir (keeps the test tiers hermetic).
+  if (IS_E2E) return;
   // Cheap in-memory guards first, so a throttled or mid-recording focus event
   // doesn't pay the loadTranscriptionEngine() file read. Don't compete with an
   // active recording — the model is already resident in the recording
@@ -1104,7 +1107,9 @@ if (!gotSingleInstanceLock) {
     // never block window creation on it. Skipped for Whisper users
     // (Parakeet model would be downloading or absent) and gated on
     // model presence by the CLI command itself (no-ops when missing).
-    if (loadTranscriptionEngine() === 'parakeet') {
+    // Skipped under E2E so the mock-IPC (T1) and real-backend (T2) tiers stay
+    // hermetic — no stray backend subprocess touching the temp data dir.
+    if (!IS_E2E && loadTranscriptionEngine() === 'parakeet') {
       lastParakeetWarmupAt = Date.now();
       spawnParakeetWarmup();
     }

@@ -33,8 +33,8 @@
     "release:patch": "npm run version:patch && npm run build",
     "release:minor": "npm run version:minor && npm run build",
     "release:major": "npm run version:major && npm run build",
-    "test:e2e": "NODE_PATH=node_modules playwright test --config ../e2e/playwright.config.ts",
-    "test:e2e:update": "NODE_PATH=node_modules playwright test --config ../e2e/playwright.config.ts --update-snapshots"
+    "test:e2e": "cross-env NODE_PATH=node_modules playwright test --config ../e2e/playwright.config.ts",
+    "test:e2e:update": "cross-env NODE_PATH=node_modules playwright test --config ../e2e/playwright.config.ts --update-snapshots"
   },
   "keywords": [
     "audio",
@@ -57,6 +57,7 @@
     "@typescript-eslint/parser": "^8.59.0",
     "@vitejs/plugin-react": "^4.7.0",
     "autoprefixer": "^10.5.0",
+    "cross-env": "^10.1.0",
     "electron": "^42.0.0",
     "electron-builder": "^26.0.0",
     "eslint": "^9.39.4",

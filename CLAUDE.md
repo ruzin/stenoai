@@ -39,6 +39,25 @@ The Electron build pulls the bundled backend from `../dist/stenoai` via `extraRe
 
 For setup from a clean checkout, see `CONTRIBUTING.md` and `README.md`.
 
+### End-to-end tests (Playwright)
+The e2e suite drives the **real Electron app** (real window, real clicks) to catch
+full-app regressions like the org-provider reset before they reach users. It lives
+at repo-root `e2e/` (config, fixtures, specs); run it from `app/`.
+
+- Run the whole suite: `cd app && npm run test:e2e` (needs the renderer built and,
+  for T2, the backend bundle at `dist/stenoai/`).
+- Run one tier: `cd app && npm run test:e2e -- --project=t1` (or `t2`).
+- Tiers are chosen by spec filename:
+  - **T1 — `*.t1.spec.ts`**: renderer-only with mock IPC (`STENOAI_E2E_MOCK_IPC=1`,
+    stubs in `app/e2e-mock-ipc.js`). No Python/Ollama/network — fully hermetic.
+  - **T2 — `*.t2.spec.ts`**: the real bundled backend + mock org adapter / Ollama
+    (`e2e/fixtures/`). Proves end-to-end wiring.
+- **Isolation keystone:** every test sets `STENOAI_USER_DATA_DIR` to a temp dir, which
+  both `getUserDataDir()` (main.js) and `get_user_data_dir()` (`src/config.py`) honor,
+  so a test can never read/write the real `~/Library/Application Support/stenoai`. The
+  launch fixture (`e2e/fixtures/electron.ts`) waits on `[data-app-ready]` — no fixed
+  timeouts. CI: `.github/workflows/e2e.yml` (T1 on Ubuntu/xvfb, macOS T2; non-blocking).
+
 ## Production Readiness
 This app ships as a signed DMG to real users. Before considering any change complete:
 - **Packaged app test**: Dev mode (`npm start`) is not sufficient. Always rebuild the DMG (`npm run build`) and test the installed app from `/Applications`.

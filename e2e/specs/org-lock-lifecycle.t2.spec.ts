@@ -1,6 +1,6 @@
 import { test, expect } from '../fixtures/electron';
 import { startMockAdapter } from '../fixtures/mock-adapter';
-import { existsSync, statSync } from 'fs';
+import { existsSync, readFileSync, statSync } from 'fs';
 import { homedir } from 'os';
 import path from 'path';
 
@@ -49,10 +49,23 @@ test('real org sign-in persists session + config into the temp dir, real dir unt
 
     // safeStorage is required to persist the session. On a headless runner with
     // no usable keyring it is unavailable — skip rather than emit a misleading
-    // red (tracked as a CI-hardening follow-up).
+    // red. A silent skip would make this keystone-proving test "green but never
+    // run", so make it LOUD: warn + annotate so it shows in the CI summary.
+    // TODO(PR4): `security unlock-keychain` on the macOS runner so this always
+    // executes in CI rather than relying on the runner's default keychain state.
     const encryptionAvailable = await app.evaluate(({ safeStorage }) =>
       safeStorage.isEncryptionAvailable(),
     );
+    if (!encryptionAvailable) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        '[t2] SKIPPED keystone proof: safeStorage unavailable — org session cannot persist on this runner.',
+      );
+      test.info().annotations.push({
+        type: 'skip-reason',
+        description: 'safeStorage unavailable; keystone not proven on this runner',
+      });
+    }
     test.skip(!encryptionAvailable, 'safeStorage unavailable on this runner');
 
     await page.evaluate(() => {
@@ -76,10 +89,20 @@ test('real org sign-in persists session + config into the temp dir, real dir unt
       .toBe(true);
 
     // Keystone, Python side: autoSwitchToAdapterOnSignIn() ran the backend,
-    // which wrote config.json into the same temp dir.
+    // which wrote config.json into the same temp dir. Asserting the provider is
+    // 'adapter' ties the write to the keystone path — it's the backend honoring
+    // STENOAI_USER_DATA_DIR that produced this file, not a coincidental temp.
+    const tempConfig = path.join(userDataDir, 'config.json');
+    await expect.poll(() => existsSync(tempConfig), { timeout: 15_000 }).toBe(true);
     await expect
-      .poll(() => existsSync(path.join(userDataDir, 'config.json')), { timeout: 15_000 })
-      .toBe(true);
+      .poll(() => {
+        try {
+          return JSON.parse(readFileSync(tempConfig, 'utf8')).ai_provider;
+        } catch {
+          return undefined;
+        }
+      }, { timeout: 5_000 })
+      .toBe('adapter');
 
     // The real user-data dir's keystone files are byte-for-byte untouched.
     expect(fileSig(realOrgSession)).toBe(realOrgSessionBefore);

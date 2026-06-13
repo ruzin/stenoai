@@ -135,12 +135,13 @@ jobs:
 
       # actions/upload-artifact strips the exec bit — without this the app can't
       # launch the bundled launcher / spawn ffmpeg or ollama (a cryptic-failure
-      # trap, see the plan's risk #3).
+      # trap, see the plan's risk #3). Match by name so the restore is agnostic
+      # to PyInstaller's internal layout (e.g. the _internal/ contents dir).
       - name: Restore exec bits on bundled binaries
         run: |
-          chmod +x dist/stenoai/stenoai
-          chmod +x dist/stenoai/_internal/ffmpeg
-          chmod +x dist/stenoai/_internal/ollama/ollama
+          find dist/stenoai -type f \( -name stenoai -o -name ffmpeg -o -name ollama \) \
+            -exec chmod +x {} +
+          test -x dist/stenoai/stenoai  # fail loud if the launcher didn't get +x
 
       # The app probes 11434 and skips its own `ollama serve` on a 200, so a real
       # Ollama on the runner would answer instead of a test stub. Kill it first
