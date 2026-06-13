@@ -8,6 +8,7 @@ import {
 import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
+import { execSync } from 'child_process';
 
 // Repo-root/app — the Electron app dir (package.json main: main.js). Resolved
 // from this file so the helper works regardless of the cwd Playwright runs in.
@@ -81,10 +82,33 @@ export const test = base.extend<Fixtures>({
     await use(launch);
 
     for (const app of launched) {
+      // app.close() can hang on Windows: the app spawns children (the backend
+      // pipeline subprocess, a stray `ollama serve`) that keep the Electron main
+      // process alive, so a graceful close never returns and Playwright's worker
+      // teardown times out. Race the close with a grace window, then force-kill
+      // the whole process tree. macOS closes well within the window, so the
+      // fallback never fires there.
+      const proc = app.process();
       try {
-        await app.close();
+        await Promise.race([
+          app.close(),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('close-timeout')), 10_000),
+          ),
+        ]);
       } catch {
-        /* already gone */
+        try {
+          const pid = proc?.pid;
+          if (pid) {
+            if (process.platform === 'win32') {
+              execSync(`taskkill /F /T /PID ${pid}`, { stdio: 'ignore' });
+            } else {
+              proc!.kill('SIGKILL');
+            }
+          }
+        } catch {
+          /* already gone */
+        }
       }
     }
   },
