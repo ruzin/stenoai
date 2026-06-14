@@ -68,7 +68,10 @@ at repo-root `e2e/` (config, fixtures, specs); run it from `app/`.
     against the stateful `mock-adapter.js`), plus `summarize-contract.t2` (a
     deterministic `@contract` driving `reprocess` through the capturing
     `mock-ollama.js` to assert the summariser's prompt-build + response-parse — no
-    ASR, no real model) (all model-free, run in `t2-macos` /
+    ASR, no real model), and the calendar/notifications pair `calendar-auth.t2`
+    (auth-status from a local token file + auto-detect-meetings toggle) /
+    `notifications.t2` (the notifications_enabled toggle gating the note-ready /
+    silence notifications via the `shown` signal) (all model-free, run in `t2-macos` /
     `t2-windows`); `transcription-pipeline.t2` and `honest-failure.t2` (tagged
     `@pipeline`, run in `t2-pipeline-macos` / `t2-pipeline-windows`). Engine selection
     for `@pipeline` specs is shared via `e2e/fixtures/engine.ts`; model-free T2 setup
