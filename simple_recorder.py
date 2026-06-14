@@ -19,10 +19,8 @@ import click
 import asyncio
 import logging
 import json
-import os
 import re
 import sys
-import tempfile
 import time
 from datetime import datetime
 from pathlib import Path
@@ -72,45 +70,12 @@ _AUTO_NAMED_PATTERN = re.compile(
     r'|.+ — \d{4}-\d{2}-\d{2} \d{2}:\d{2})$'
 )
 
-def _atomic_write_json(path: Path, payload) -> None:
-    """Write `payload` as JSON to `path` atomically.
-
-    Uses tempfile + os.replace within the same directory so the rename
-    is a single filesystem operation. On POSIX and Windows, os.replace
-    is atomic — a crash mid-write leaves the prior file intact (or
-    nothing, on first write) rather than a half-written file that
-    subsequent reads would misparse.
-
-    Used for `recorder_state.json` (where a corrupt file means we lose
-    track of a live recording) and the final summary JSON (where a
-    corrupt file means a finished meeting's processing is lost).
-    """
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    # NamedTemporaryFile in the same dir guarantees os.replace stays on
-    # one filesystem. delete=False so we can rename rather than auto-clean.
-    tmp = tempfile.NamedTemporaryFile(
-        mode='w',
-        dir=str(path.parent),
-        prefix=f'.{path.name}.',
-        suffix='.tmp',
-        delete=False,
-        encoding='utf-8',
-    )
-    try:
-        with tmp as f:
-            json.dump(payload, f, indent=2)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp.name, path)
-    except Exception:
-        # Best-effort cleanup of the orphan temp file. Don't mask the
-        # original error.
-        try:
-            os.unlink(tmp.name)
-        except OSError:
-            pass
-        raise
+# Shared atomic JSON writer (tempfile + os.replace + Windows PermissionError
+# retry). One implementation for recorder_state.json, the summary JSON, and
+# config.json — re-exported here so existing imports keep working. The
+# canonical copy lives in src.config because this module already imports
+# from src (the reverse import would be circular).
+from src.config import _atomic_write_json  # noqa: E402
 
 
 def _start_summary_heartbeat(label: str = "summarize", interval_s: int = 60, max_beats: int = 30):
@@ -3381,7 +3346,10 @@ def list_models():
         result = {
             "current_model": current_model,
             "supported_models": models,
-            "provider": "local"
+            # The actual configured provider ('local', 'cloud', 'adapter').
+            # This used to be hardcoded "local", which made debug logs claim
+            # a local provider while summaries went through the org adapter.
+            "provider": provider
         }
 
     print(json.dumps(result, indent=2))

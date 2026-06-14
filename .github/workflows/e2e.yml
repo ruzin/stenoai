@@ -1,0 +1,468 @@
+name: e2e
+
+# Tiered Playwright e2e. Drives the REAL Electron app.
+# Intentionally NON-BLOCKING: this workflow is not a required status check yet —
+# it is promoted to required once it has a green streak across the matrix below
+# (a branch-protection change, tracked as a follow-up). Keeping it advisory now
+# means a flaky launch can't block unrelated merges while the suite earns trust.
+#
+#   t1-renderer (Ubuntu) — renderer-only with mock IPC, no Python bundle. Fast.
+#   build-backend-macos   -> t2-macos / t2-pipeline-macos   (whisper, CPU)
+#   build-backend-windows -> t2-windows / t2-pipeline-windows (parakeet onnx, CPU)
+#     real bundled backend + mock org adapter; proves the keystone
+#     path-isolation fix on both shipping platforms.
+#
+# Explicit per-OS jobs (not a strategy.matrix) — mirrors the repo's paradigm and
+# keeps the per-OS differences (exec bit, engine, process-kill, model cache)
+# obvious in the CI logs. Both tiers run on every PR so the keystone isolation
+# fix cannot silently regress on either platform.
+
+on:
+  workflow_dispatch:
+  # Callable so the scheduled e2e-nightly workflow can re-run this exact suite
+  # for flake/drift detection without duplicating the job definitions.
+  workflow_call:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  t1-renderer:
+    name: T1 (renderer + mock IPC)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install Electron dependencies
+        working-directory: app
+        run: npm ci
+
+      # Installs the shared libs Electron's Chromium needs on Linux, plus xvfb.
+      - name: Install Linux system deps (+ xvfb)
+        working-directory: app
+        run: npx playwright install-deps
+
+      - name: Build renderer
+        working-directory: app
+        run: npm run build:renderer
+
+      # Electron is headless-hostile on Linux — run under a virtual framebuffer.
+      - name: Run T1 under xvfb
+        working-directory: app
+        run: xvfb-run -a npm run test:e2e -- --project=t1
+
+      - name: Upload report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-t1-report
+          path: |
+            app/playwright-report
+            app/test-results
+          retention-days: 7
+          if-no-files-found: ignore
+
+  build-backend-macos:
+    name: Build backend bundle (macOS)
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: requirements.txt
+
+      # Partial speedup: skips PyInstaller Analysis when spec/deps are unchanged.
+      # Never cache dist/ — that's the artifact we ship to the T2 job.
+      - name: Cache PyInstaller work dir
+        uses: actions/cache@v4
+        with:
+          path: build
+          key: pyinstaller-${{ runner.os }}-${{ hashFiles('stenoai.spec', 'requirements.txt') }}
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Download bundled binaries (Ollama + ffmpeg)
+        run: |
+          chmod +x scripts/download-ollama.sh
+          ./scripts/download-ollama.sh
+
+      - name: Build backend with PyInstaller
+        run: pyinstaller stenoai.spec --noconfirm
+
+      - name: Upload backend bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-backend-macos
+          path: dist/stenoai
+          retention-days: 3
+          if-no-files-found: error
+
+  t2-macos:
+    name: T2 (real backend + mock adapter)
+    runs-on: macos-latest
+    needs: build-backend-macos
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: app/package-lock.json
+
+      - name: Download backend bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: e2e-backend-macos
+          path: dist/stenoai
+
+      # actions/upload-artifact strips the exec bit — without this the app can't
+      # launch the bundled launcher / spawn ffmpeg or ollama (a cryptic-failure
+      # trap, see the plan's risk #3). Match by name so the restore is agnostic
+      # to PyInstaller's internal layout (e.g. the _internal/ contents dir).
+      - name: Restore exec bits on bundled binaries
+        run: |
+          find dist/stenoai -type f \( -name stenoai -o -name ffmpeg -o -name ollama \) \
+            -exec chmod +x {} +
+          test -x dist/stenoai/stenoai  # fail loud if the launcher didn't get +x
+
+      # The app probes 11434 and skips its own `ollama serve` on a 200, so a real
+      # Ollama on the runner would answer instead of a test stub. Kill it first
+      # (the org-lock spec doesn't use Ollama, but this keeps T2 setup honest for
+      # the summary/pipeline specs).
+      - name: Ensure no stray Ollama
+        run: pkill -f ollama || true
+
+      - name: Install Electron dependencies
+        working-directory: app
+        run: npm ci
+
+      - name: Build renderer
+        working-directory: app
+        run: npm run build:renderer
+
+      # Exclude @pipeline — the transcription smoke needs the Parakeet model and
+      # runs in its own model-bearing job (t2-pipeline-macos) so this job stays
+      # fast and model-free.
+      - name: Run T2 (org-lock, model-free)
+        working-directory: app
+        run: npm run test:e2e -- --project=t2 --grep-invert @pipeline
+
+      - name: Upload report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-t2-report
+          path: |
+            app/playwright-report
+            app/test-results
+          retention-days: 7
+          if-no-files-found: ignore
+
+  # Uses whisper.cpp (CPU), NOT parakeet-mlx: GitHub-hosted macOS runners are
+  # headless VMs with no Metal GPU, so MLX can't load there ("Failed to load the
+  # default metallib"). The plumbing + HEARTBEAT smoke is engine-agnostic, so
+  # whisper exercises the same process-streaming path. Parakeet is covered on
+  # real Macs locally / via /verify (and a future Metal-capable nightly runner).
+  t2-pipeline-macos:
+    name: T2 pipeline (transcribe + summarize)
+    runs-on: macos-latest
+    needs: build-backend-macos
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: app/package-lock.json
+
+      - name: Download backend bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: e2e-backend-macos
+          path: dist/stenoai
+
+      - name: Restore exec bits on bundled binaries
+        run: |
+          find dist/stenoai -type f \( -name stenoai -o -name ffmpeg -o -name ollama \) \
+            -exec chmod +x {} +
+          test -x dist/stenoai/stenoai
+
+      - name: Ensure no stray Ollama
+        run: pkill -f ollama || true
+
+      # Cache the whisper ggml weights (~466 MB for 'small') so only the first
+      # run pays the download; later runs restore in ~30 s. The model is NOT
+      # bundled — it downloads on use into pywhispercpp's models dir.
+      - name: Cache whisper model
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Application Support/pywhispercpp/models
+          key: whisper-small-ggml
+
+      - name: Install Electron dependencies
+        working-directory: app
+        run: npm ci
+
+      - name: Build renderer
+        working-directory: app
+        run: npm run build:renderer
+
+      # Pre-download the model (no-op when the cache restored) so the test isn't
+      # racing the download inside its timeout. pull-whisper-model exits 0 even
+      # on failure, so verify the model is actually installed — otherwise the
+      # spec would silently skip green and we'd ship "passing" with zero pipeline
+      # coverage.
+      - name: Ensure whisper model present
+        run: |
+          ./dist/stenoai/stenoai pull-whisper-model small
+          ./dist/stenoai/stenoai list-whisper-models \
+            | python3 -c "import sys,json; sys.exit(0 if json.load(sys.stdin)['supported_models']['small']['installed'] else 1)"
+
+      # Playwright exits 0 when --grep matches no tests. Assert the tagged spec
+      # is actually selected so a future rename / dropped @pipeline tag can't
+      # silently run zero tests and pass (the keystone-test-vanishes failure).
+      - name: Guard — @pipeline test is selected
+        working-directory: app
+        run: npm run test:e2e -- --project=t2 --grep @pipeline --list | grep -q '@pipeline'
+
+      - name: Run T2 pipeline (whisper)
+        working-directory: app
+        env:
+          STENOAI_E2E_ENGINE: whisper
+        run: npm run test:e2e -- --project=t2 --grep @pipeline
+
+      - name: Upload report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-t2-pipeline-report
+          path: |
+            app/playwright-report
+            app/test-results
+          retention-days: 7
+          if-no-files-found: ignore
+
+  # ---------------------------------------------------------------------------
+  # Windows T2 — same shared-logic + pipeline specs on the other shipping OS.
+  # Self-contained backend build: build-windows.yml doesn't run on PRs and
+  # cross-workflow artifact reuse isn't possible, so we mirror build-backend-macos
+  # here. No exec-bit restore (Windows has no exec bit) and the transcription
+  # engine is onnx-asr (CPU) — which, unlike parakeet-mlx, DOES run on a
+  # GPU-less hosted runner, so the Windows pipeline uses real parakeet-onnx.
+  # ---------------------------------------------------------------------------
+  build-backend-windows:
+    name: Build backend bundle (Windows)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: requirements.txt
+
+      - name: Cache PyInstaller work dir
+        uses: actions/cache@v4
+        with:
+          path: build
+          key: pyinstaller-${{ runner.os }}-${{ hashFiles('stenoai.spec', 'requirements.txt') }}
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      # download-ollama.sh is a bash script; git bash is present on the runner.
+      - name: Download bundled binaries (Ollama + ffmpeg)
+        shell: bash
+        run: |
+          chmod +x scripts/download-ollama.sh
+          ./scripts/download-ollama.sh
+
+      - name: Build backend with PyInstaller
+        run: pyinstaller stenoai.spec --noconfirm
+
+      - name: Upload backend bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-backend-windows
+          path: dist/stenoai
+          retention-days: 3
+          if-no-files-found: error
+
+  t2-windows:
+    name: T2 (real backend + mock adapter, Windows)
+    runs-on: windows-latest
+    needs: build-backend-windows
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: app/package-lock.json
+
+      - name: Download backend bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: e2e-backend-windows
+          path: dist/stenoai
+
+      # No exec-bit restore: Windows has no exec bit (the macOS jobs need it
+      # because upload-artifact strips +x). Stop any stray Ollama so the app's
+      # 11434 probe can't answer against a pre-existing server (taskkill is the
+      # Windows analog of the macOS pkill).
+      - name: Ensure no stray Ollama
+        shell: pwsh
+        run: Stop-Process -Name ollama -Force -ErrorAction SilentlyContinue
+
+      - name: Install Electron dependencies
+        working-directory: app
+        run: npm ci
+
+      - name: Build renderer
+        working-directory: app
+        run: npm run build:renderer
+
+      # Quote '@pipeline': the default Windows shell is pwsh, which treats a bare
+      # @word as splatting ($pipeline) and errors. Single quotes make it literal.
+      - name: Run T2 (org-lock, model-free)
+        working-directory: app
+        run: npm run test:e2e -- --project=t2 --grep-invert '@pipeline'
+
+      - name: Upload report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-t2-windows-report
+          path: |
+            app/playwright-report
+            app/test-results
+          retention-days: 7
+          if-no-files-found: ignore
+
+  # Windows transcription pipeline. Unlike t2-pipeline-macos (whisper, because
+  # hosted Macs have no Metal for parakeet-mlx), Windows transcribes with
+  # onnx-asr on CPU — so this runs the REAL parakeet path (STENOAI_E2E_ENGINE is
+  # set to parakeet below). The onnx weights (~670 MB) aren't bundled; cache them
+  # and pre-download so the spec isn't racing the pull inside its timeout.
+  t2-pipeline-windows:
+    name: T2 pipeline (transcribe + summarize, Windows)
+    runs-on: windows-latest
+    needs: build-backend-windows
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: app/package-lock.json
+
+      - name: Download backend bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: e2e-backend-windows
+          path: dist/stenoai
+
+      - name: Ensure no stray Ollama
+        shell: pwsh
+        run: Stop-Process -Name ollama -Force -ErrorAction SilentlyContinue
+
+      # Cache the parakeet-onnx snapshot in the HuggingFace hub cache (HF's
+      # default, used by parakeet_models._hf_cache_dir_for). Only the first run
+      # pays the ~670 MB download; later runs restore in seconds.
+      - name: Cache parakeet ONNX model
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface/hub/models--istupakov--parakeet-tdt-0.6b-v3-onnx
+          key: parakeet-onnx-${{ runner.os }}-tdt-0.6b-v3
+
+      - name: Install Electron dependencies
+        working-directory: app
+        run: npm ci
+
+      - name: Build renderer
+        working-directory: app
+        run: npm run build:renderer
+
+      # Pre-download the model (no-op when the cache restored), then verify it's
+      # actually installed. download-parakeet-model exits 0 even on a failed pull
+      # (it reports via JSON), so the parakeet-status guard prevents the spec
+      # from silently skipping green with zero pipeline coverage — mirrors the
+      # whisper guard in t2-pipeline-macos.
+      - name: Ensure parakeet model present
+        shell: pwsh
+        run: |
+          ./dist/stenoai/stenoai.exe download-parakeet-model
+          $status = ./dist/stenoai/stenoai.exe parakeet-status | ConvertFrom-Json
+          if (-not $status.installed) {
+            Write-Error "Parakeet ONNX model not installed after download"
+            exit 1
+          }
+
+      # Assert the tagged spec is actually selected (Playwright exits 0 on a
+      # zero-match --grep). git bash provides grep on the Windows runner. Capture
+      # --list output first rather than piping into `grep -q`: on Windows the
+      # early pipe-close from `grep -q` makes the node writer crash with EPIPE
+      # (no POSIX SIGPIPE), failing the step even on a match.
+      - name: Guard — @pipeline test is selected
+        shell: bash
+        working-directory: app
+        run: |
+          out=$(npm run test:e2e -- --project=t2 --grep @pipeline --list)
+          echo "$out" | grep -q '@pipeline'
+
+      # Quote '@pipeline' for the same pwsh-splat reason as the org-lock job.
+      - name: Run T2 pipeline (parakeet onnx)
+        working-directory: app
+        env:
+          STENOAI_E2E_ENGINE: parakeet
+        run: npm run test:e2e -- --project=t2 --grep '@pipeline'
+
+      - name: Upload report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-t2-pipeline-windows-report
+          path: |
+            app/playwright-report
+            app/test-results
+          retention-days: 7
+          if-no-files-found: ignore

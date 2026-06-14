@@ -36,6 +36,10 @@ export function App() {
   React.useLayoutEffect(() => {
     if (typeof window !== 'undefined' && window.stenoai) {
       ipc().window.readyToShow();
+      // Deterministic launch gate for e2e: the suite waits on [data-app-ready]
+      // instead of a fixed timeout. Set alongside the existing readiness signal
+      // so there is one readiness path with two observers (main + Playwright).
+      document.documentElement.dataset.appReady = '1';
     }
   }, []);
 

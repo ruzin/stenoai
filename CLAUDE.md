@@ -39,6 +39,56 @@ The Electron build pulls the bundled backend from `../dist/stenoai` via `extraRe
 
 For setup from a clean checkout, see `CONTRIBUTING.md` and `README.md`.
 
+### End-to-end tests (Playwright)
+The e2e suite drives the **real Electron app** (real window, real clicks) to catch
+full-app regressions like the org-provider reset before they reach users. It lives
+at repo-root `e2e/` (config, fixtures, specs); run it from `app/`.
+
+- Run the whole suite: `cd app && npm run test:e2e` (needs the renderer built and,
+  for T2, the backend bundle at `dist/stenoai/`).
+- Run one tier: `cd app && npm run test:e2e -- --project=t1` (or `t2`).
+- Tiers are chosen by spec filename:
+  - **T1 — `*.t1.spec.ts`**: renderer-only with mock IPC (`STENOAI_E2E_MOCK_IPC=1`,
+    stubs in `app/e2e-mock-ipc.js`). No Python/Ollama/network — fully hermetic.
+  - **T2 — `*.t2.spec.ts`**: the real bundled backend + mock org adapter / Ollama
+    (`e2e/fixtures/`). Proves end-to-end wiring.
+  - **`@pipeline` (a T2 spec)**: the transcription→summarize smoke drives a synthetic
+    WAV through the real pipeline and asserts HEARTBEAT + a summary written. The engine is
+    env-selected (`STENOAI_E2E_ENGINE`): **parakeet** locally (the Mac-divergent path) but
+    **whisper** in CI — GitHub-hosted macOS runners have no Metal GPU, so parakeet-mlx can't
+    load there. Models aren't bundled (download on use), so it's tagged `@pipeline` and split
+    out: `--grep @pipeline` runs it (CI's `t2-pipeline-macos` job caches a whisper model),
+    `--grep-invert @pipeline` keeps the other T2 specs model-free. A dev machine without the
+    active engine's model **skips** it (loudly) rather than failing.
+  - **Current specs:** `org-lock.t1`, `org-lock-lifecycle.t2`, and `config-corruption.t2`
+    (model-free, run in `t2-macos` / `t2-windows`); `transcription-pipeline.t2` and
+    `honest-failure.t2` (tagged `@pipeline`, run in `t2-pipeline-macos` /
+    `t2-pipeline-windows`). Engine selection for `@pipeline` specs is shared via
+    `e2e/fixtures/engine.ts`.
+  - **Windows T2:** the same specs run on `windows-latest` via explicit per-OS jobs
+    (`build-backend-windows` → `t2-windows` / `t2-pipeline-windows`). Differences from the
+    macOS jobs: no exec-bit restore (Windows has no exec bit), `taskkill`/`Stop-Process`
+    instead of `pkill`, and the `@pipeline` job uses the REAL parakeet path —
+    `STENOAI_E2E_ENGINE=parakeet` runs onnx-asr on CPU (no Metal needed), caching the
+    `models--istupakov--parakeet-tdt-0.6b-v3-onnx` HF snapshot. org-lock T2 may **skip** on
+    Windows (safeStorage/DPAPI on a headless runner), acceptable while non-blocking.
+  - **T3 — `*.t3.spec.ts` (nightly only):** the heavy `@long-meeting` chunking smoke. Drives a
+    multi-minute WAV (`STENOAI_E2E_LONG_WAV_SECONDS`, default 1200) through the real
+    **parakeet** windowing path (`PARAKEET_CHUNK_DURATION_S` = 60 s, a hard constant) and
+    asserts the pipeline completes. parakeet-only — whisper.cpp doesn't use that path; it
+    `skip`s on whisper. Exercises the long-file chunking **plumbing**, NOT the MLX/Metal OOM
+    (that needs a GPU runner — tracked follow-up). Too slow for per-PR, so it lives in the
+    nightly workflow, not `e2e.yml`.
+- **Isolation keystone:** every test sets `STENOAI_USER_DATA_DIR` to a temp dir, which
+  both `getUserDataDir()` (main.js) and `get_user_data_dir()` (`src/config.py`) honor,
+  so a test can never read/write the real `~/Library/Application Support/stenoai`. The
+  launch fixture (`e2e/fixtures/electron.ts`) waits on `[data-app-ready]` (no fixed timeouts)
+  and force-kills the app process tree if a graceful close hangs on teardown (Windows).
+- **CI:** `.github/workflows/e2e.yml` (T1 on Ubuntu/xvfb, macOS + Windows T2; non-blocking,
+  runs per-PR). `.github/workflows/e2e-nightly.yml` (scheduled) reuses that suite via
+  `workflow_call` for flake/drift detection and adds the T3 long-meeting job. A CI-only
+  Playwright `globalSetup` kills a stray Ollama + waits for a clean 11434 before the run.
+
 ## Production Readiness
 This app ships as a signed DMG to real users. Before considering any change complete:
 - **Packaged app test**: Dev mode (`npm start`) is not sufficient. Always rebuild the DMG (`npm run build`) and test the installed app from `/Applications`.

@@ -144,9 +144,11 @@ node_modules/
 app/node_modules/
 e2e/node_modules
 
-# Playwright
+# Playwright (test:e2e runs with cwd=app/, so reports land under app/)
 e2e/test-results/
 e2e/playwright-report/
+app/test-results/
+app/playwright-report/
 
 # IDE
 .vscode/
@@ -181,3 +183,6 @@ bin/
 
 # Local ollama runtime pid (dev scratch)
 ollama.pid
+
+# Local design reference library (cloned, not vendored)
+.reference/

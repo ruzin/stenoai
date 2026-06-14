@@ -7,7 +7,10 @@ Handles storing and loading user preferences like model selection.
 import json
 import logging
 import os
+import shutil
 import sys
+import tempfile
+import time
 import uuid
 from pathlib import Path
 from typing import Optional, Dict, Any
@@ -17,6 +20,57 @@ from src.whisper_models import SUPPORTED_WHISPER_MODELS as _WHISPER_REGISTRY
 logger = logging.getLogger(__name__)
 
 
+def _atomic_write_json(path: Path, payload) -> None:
+    """Write `payload` as JSON to `path` atomically.
+
+    The shared atomic writer for every JSON file the CLI persists —
+    config.json here, recorder_state.json and the final summary JSON via
+    the re-export in simple_recorder. tempfile + os.replace in the same
+    directory keeps the rename a single filesystem operation on POSIX and
+    Windows, so a crash mid-write leaves the prior file intact rather
+    than a half-written one. config.json in particular is read by many
+    concurrent CLI subprocesses; a plain truncate-and-rewrite lets a
+    reader see a torn file, fall back to defaults, and (pre-fix) persist
+    those defaults over the user's real settings.
+    """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = tempfile.NamedTemporaryFile(
+        mode='w',
+        dir=str(path.parent),
+        prefix=f'.{path.name}.',
+        suffix='.tmp',
+        delete=False,
+        encoding='utf-8',
+    )
+    try:
+        json.dump(payload, tmp, indent=2)
+        tmp.flush()
+        os.fsync(tmp.fileno())
+        tmp.close()
+        # Windows can transiently refuse the replace while another
+        # process holds the destination open for read; a couple of
+        # short retries cover that without a platform gate.
+        for attempt in range(3):
+            try:
+                os.replace(tmp.name, path)
+                return
+            except PermissionError:
+                if attempt == 2:
+                    raise
+                time.sleep(0.05)
+    except Exception:
+        try:
+            tmp.close()
+        except Exception:
+            pass
+        try:
+            os.unlink(tmp.name)
+        except OSError:
+            pass
+        raise
+
+
 def get_user_data_dir() -> Path:
     """Per-OS user data directory for stenoai when running as a frozen bundle.
 
@@ -24,6 +78,12 @@ def get_user_data_dir() -> Path:
     Windows: %APPDATA%/stenoai  (Roaming)
     Linux:   $XDG_DATA_HOME/stenoai or ~/.local/share/stenoai
     """
+    # E2E isolation: a per-test temp dir set via STENOAI_USER_DATA_DIR wins for
+    # the backend child too (the Electron parent propagates it via the inherited
+    # env). Symmetric with app/main.js getUserDataDir(). Inert in production.
+    override = os.environ.get("STENOAI_USER_DATA_DIR")
+    if override:
+        return Path(override)
     if sys.platform == "darwin":
         return Path.home() / "Library" / "Application Support" / "stenoai"
     if sys.platform == "win32":
@@ -51,7 +111,12 @@ class Config:
 
     DEFAULT_MODEL = "llama3.2:3b"
 
-    # Supported models with metadata (organized by parameter size, ascending)
+    # Supported models with metadata. Active models first (roughly ascending by
+    # capability/size, default first), deprecated models last — the Settings UI
+    # tucks deprecated entries into a collapsed, dimmed section and only surfaces
+    # one if it's still the user's current model. Deprecated (rather than removed)
+    # so a user already on the model keeps a recognised selection; fully retired
+    # models are dropped from this dict.
     SUPPORTED_MODELS = {
         "llama3.2:3b": {
             "name": "Llama 3.2 3B",
@@ -61,11 +126,11 @@ class Config:
             "speed": "very fast",
             "quality": "good"
         },
-        "gemma3:4b": {
-            "name": "Gemma 3 4B",
-            "size": "2.5GB",
-            "params": "4B",
-            "description": "Lightweight and efficient",
+        "gemma4:e2b-it-qat": {
+            "name": "Gemma 4 E2B (QAT)",
+            "size": "4.3GB",
+            "params": "2B",
+            "description": "Lightest Gemma 4, quantization-aware, 128K context",
             "speed": "fast",
             "quality": "good"
         },
@@ -77,12 +142,12 @@ class Config:
             "speed": "medium",
             "quality": "excellent"
         },
-        "deepseek-r1:14b": {
-            "name": "DeepSeek R1 14B",
-            "size": "9.0GB",
-            "params": "14B",
-            "description": "Strong reasoning and analysis capabilities",
-            "speed": "fast",
+        "gemma4:12b": {
+            "name": "Gemma 4 12B",
+            "size": "7.6GB",
+            "params": "12B",
+            "description": "Large 256K context - best for long meetings",
+            "speed": "medium",
             "quality": "excellent"
         },
         "gpt-oss:20b": {
@@ -93,21 +158,21 @@ class Config:
             "speed": "medium",
             "quality": "excellent"
         },
-        "qwen3:8b": {
-            "name": "Qwen 3 8B",
-            "size": "4.7GB",
-            "params": "8B",
-            "description": "Replaced by Qwen 3.5 9B",
+        "gemma3:4b": {
+            "name": "Gemma 3 4B",
+            "size": "2.5GB",
+            "params": "4B",
+            "description": "Replaced by Gemma 4 E2B",
             "speed": "fast",
-            "quality": "excellent",
+            "quality": "good",
             "deprecated": True
         },
-        "deepseek-r1:8b": {
-            "name": "DeepSeek R1 8B",
-            "size": "4.7GB",
-            "params": "8B",
-            "description": "Replaced by DeepSeek R1 14B",
-            "speed": "medium",
+        "deepseek-r1:14b": {
+            "name": "DeepSeek R1 14B",
+            "size": "9.0GB",
+            "params": "14B",
+            "description": "Replaced by Gemma 4 12B",
+            "speed": "fast",
             "quality": "excellent",
             "deprecated": True
         }
@@ -180,7 +245,10 @@ class Config:
             config_path: Path to config file. If None, uses default location.
         """
         if config_path is None:
-            if is_bundled():
+            # STENOAI_USER_DATA_DIR forces the data dir even from source (e2e
+            # isolation), so the override in get_user_data_dir() is authoritative
+            # whether the backend runs frozen or from source.
+            if is_bundled() or os.environ.get("STENOAI_USER_DATA_DIR"):
                 base_dir = get_user_data_dir()
             else:
                 # Source dev: project root
@@ -196,6 +264,10 @@ class Config:
         # "fresh install" from "loaded existing file" by inspecting self._config
         # alone (whisper_model and friends are in the defaults dict).
         self._existed_at_load = self.config_path.exists()
+        # Set by _load() when an existing config file could not be parsed.
+        # Migrations check it so a corrupt (or torn, mid-write) read never
+        # gets its in-memory defaults persisted over the recoverable file.
+        self._load_failed = False
         self._config: Dict[str, Any] = self._load()
         self._migrate_cloud_model_map()
         self._migrate_whisper_model()
@@ -210,6 +282,8 @@ class Config:
         Asian-language workflows aren't silently swapped under them; the
         Settings → Transcribe tab is how they opt into Parakeet.
         """
+        if self._load_failed:
+            return  # never persist defaults over a corrupt-but-recoverable file
         if self._config.get("transcription_engine") in self.VALID_TRANSCRIPTION_ENGINES:
             return
         self._config["transcription_engine"] = (
@@ -225,6 +299,8 @@ class Config:
         - Any other previously-supported but now-retired tier
           (tiny/base/medium/large-v3) → 'small' (the safe default).
         """
+        if self._load_failed:
+            return  # never persist defaults over a corrupt-but-recoverable file
         current = self._config.get("whisper_model")
         if current is None or current in self.SUPPORTED_WHISPER_MODELS:
             return
@@ -239,14 +315,18 @@ class Config:
         'cloud_models' map. Runs at load time (before any setters can change
         the provider) so the legacy value is correctly attributed to whichever
         provider was active when it was last saved."""
+        if self._load_failed:
+            # _load() returned defaults for a corrupt-but-present file. The
+            # defaults carry a legacy 'cloud_model', so without this guard the
+            # migration below would _save() and overwrite the recoverable file.
+            self._config["cloud_models"] = {}
+            return
         if isinstance(self._config.get("cloud_models"), dict):
             return  # Already migrated.
         legacy = self._config.get("cloud_model")
         has_legacy_value = isinstance(legacy, str) and legacy.strip()
         if not has_legacy_value:
-            # Nothing to migrate. Don't write — if _load() returned defaults
-            # because the existing file was corrupt/unreadable, persisting an
-            # empty cloud_models map would overwrite the recoverable file.
+            # Nothing to migrate; don't write just to persist an empty map.
             self._config["cloud_models"] = {}
             return
         current_provider = self._config.get("cloud_provider", "openai")
@@ -256,25 +336,53 @@ class Config:
         self._save()
 
     def _load(self) -> Dict[str, Any]:
-        """Load configuration from file."""
+        """Load configuration from file.
+
+        A parse failure on an existing file is retried once (a torn read
+        racing a writer heals in milliseconds). If it still fails, the
+        corrupt file is backed up to config.json.corrupt and we run on
+        in-memory defaults with self._load_failed set — migrations skip
+        writing so the original on disk stays recoverable.
+        """
         if not self.config_path.exists():
             logger.info(f"Config file not found, creating default at {self.config_path}")
             return self._get_default_config()
 
+        last_error = None
+        for attempt in range(2):
+            try:
+                with open(self.config_path, 'r') as f:
+                    config = json.load(f)
+                    if not isinstance(config, dict):
+                        # `null` / `[]` parse fine but crash every get/set
+                        # later; route them through the corrupt-file path.
+                        raise ValueError("config.json root is not an object")
+                    logger.info(f"Loaded config from {self.config_path}")
+                    return config
+            except Exception as e:
+                last_error = e
+                if attempt == 0:
+                    time.sleep(0.2)
+
+        self._load_failed = True
+        backup_path = self.config_path.with_name(self.config_path.name + ".corrupt")
         try:
-            with open(self.config_path, 'r') as f:
-                config = json.load(f)
-                logger.info(f"Loaded config from {self.config_path}")
-                return config
-        except Exception as e:
-            logger.error(f"Error loading config: {e}, using defaults")
-            return self._get_default_config()
+            shutil.copy2(self.config_path, backup_path)
+            logger.error(
+                f"Error loading config: {last_error}. Using defaults in memory; "
+                f"corrupt file backed up to {backup_path}"
+            )
+        except Exception as backup_error:
+            logger.error(
+                f"Error loading config: {last_error}. Using defaults in memory; "
+                f"backup to {backup_path} also failed: {backup_error}"
+            )
+        return self._get_default_config()
 
     def _save(self) -> bool:
-        """Save configuration to file."""
+        """Save configuration to file (atomic tempfile + os.replace)."""
         try:
-            with open(self.config_path, 'w') as f:
-                json.dump(self._config, f, indent=2)
+            _atomic_write_json(self.config_path, self._config)
             logger.info(f"Saved config to {self.config_path}")
             return True
         except Exception as e:
@@ -824,7 +932,12 @@ def get_data_dirs() -> Dict[str, Path]:
     config = get_config()
     custom = config.get_storage_path()
 
-    if custom:
+    if os.environ.get("STENOAI_USER_DATA_DIR"):
+        # Keystone: the e2e isolation dir is the hardest override — it must beat
+        # a user's custom storage_path too, so a test can never escape the temp
+        # dir to a real configured recordings/transcripts location.
+        base = get_user_data_dir()
+    elif custom:
         base = Path(custom)
     elif is_bundled():
         base = get_user_data_dir()
