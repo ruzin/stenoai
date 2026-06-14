@@ -61,8 +61,9 @@ at repo-root `e2e/` (config, fixtures, specs); run it from `app/`.
     `--grep-invert @pipeline` keeps the other T2 specs model-free. A dev machine without the
     active engine's model **skips** it (loudly) rather than failing.
   - **Current specs:** `org-lock.t1`, `shared-notes-policy.t1`, `org-lock-lifecycle.t2`,
-    `config-corruption.t2`, and the core-loop trio `recording-lifecycle.t2` /
-    `meetings-crud.t2` / `folders-crud.t2` (all model-free, run in `t2-macos` /
+    `config-corruption.t2`, the core-loop trio `recording-lifecycle.t2` /
+    `meetings-crud.t2` / `folders-crud.t2`, and the config trio `settings-roundtrip.t2` /
+    `ai-provider.t2` / `model-management.t2` (all model-free, run in `t2-macos` /
     `t2-windows`); `transcription-pipeline.t2` and `honest-failure.t2` (tagged
     `@pipeline`, run in `t2-pipeline-macos` / `t2-pipeline-windows`). Engine selection
     for `@pipeline` specs is shared via `e2e/fixtures/engine.ts`; model-free T2 setup
@@ -70,7 +71,10 @@ at repo-root `e2e/` (config, fixtures, specs); run it from `app/`.
     `e2e/fixtures/user-config.ts`. The core-loop specs drive the preload IPC bridge and
     assert backend state on disk — `recording-lifecycle` exercises the
     start/pause/resume/stop state machine via the renderer-driven (no-device, no-model)
-    path and skips loudly where `isSystemAudioSupported()` is false.
+    path and skips loudly where `isSystemAudioSupported()` is false. The config trio
+    asserts get/set round-trips persist to the right `config.json` keys (settings),
+    the provider matrix + encrypted cloud key (ai-provider), and the deterministic
+    model list/status/set surface (model-management) — pulls stay in `@pipeline`.
   - **Windows T2:** the same specs run on `windows-latest` via explicit per-OS jobs
     (`build-backend-windows` → `t2-windows` / `t2-pipeline-windows`). Differences from the
     macOS jobs: no exec-bit restore (Windows has no exec bit), `taskkill`/`Stop-Process`

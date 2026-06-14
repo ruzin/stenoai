@@ -7,6 +7,17 @@ import path from 'path';
  * mirroring how config-corruption.t2 pre-seeds config.json.
  */
 
+/** Read <userDataDir>/config.json (returns {} if absent/unreadable). */
+export function readUserConfig(userDataDir: string): Record<string, unknown> {
+  const cfgPath = path.join(userDataDir, 'config.json');
+  if (!existsSync(cfgPath)) return {};
+  try {
+    return JSON.parse(readFileSync(cfgPath, 'utf8')) as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+}
+
 /** Merge a partial config into <userDataDir>/config.json, creating it if absent. */
 export function writeUserConfig(
   userDataDir: string,
