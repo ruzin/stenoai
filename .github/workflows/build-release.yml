@@ -15,7 +15,45 @@ permissions:
   contents: write
 
 jobs:
+  # Backstop gate. The real release gate is e2e-release-gate.yml on the release/*
+  # branch (full matrix, run BEFORE the tag). This is defense-in-depth for the
+  # case where a tag is pushed without going through that branch gate: a fast,
+  # hermetic T1 smoke (renderer + mock IPC, no Python backend, no models, no
+  # network) that build-macos depends on, so we can't sign + ship on a broken
+  # renderer / IPC contract. Deliberately T1-only — the heavy backend/model/ML
+  # coverage belongs to the branch gate + nightly, not the critical release path.
+  gate-smoke:
+    name: Release gate smoke (T1)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install Electron dependencies
+        working-directory: app
+        run: npm ci
+
+      - name: Install Linux system deps (+ xvfb)
+        working-directory: app
+        run: npx playwright install-deps
+
+      - name: Build renderer
+        working-directory: app
+        run: npm run build:renderer
+
+      - name: Run T1 under xvfb
+        working-directory: app
+        run: xvfb-run -a npm run test:e2e -- --project=t1
+
   build-macos:
+    needs: gate-smoke
     # Apple-Silicon only as of v0.4.0. macOS 26 (Tahoe) drops Intel and
     # our headline transcription engine (Parakeet TDT v3 via MLX) is
     # Apple-Silicon only, so the Intel build was shipping a degraded
