@@ -44,6 +44,15 @@ The e2e suite drives the **real Electron app** (real window, real clicks) to cat
 full-app regressions like the org-provider reset before they reach users. It lives
 at repo-root `e2e/` (config, fixtures, specs); run it from `app/`.
 
+**Standing rule — keep coverage current:** when you add or materially change a
+user-facing feature, add or update its e2e spec in the **same** change. Prefer a
+model-free T2 spec that drives the `window.stenoai.<group>` preload bridge and
+asserts backend state on disk (config/files/JSON), using the existing specs +
+`e2e/fixtures/` helpers as templates — only reach for a UI/T1 spec when the
+interaction itself is the risk, and keep model/network-bearing assertions in the
+`@pipeline`/nightly lanes. This applies to luffy-built work too (CLAUDE.md
+overrides luffy's test-level defaults); the QA review lens checks for it.
+
 - Run the whole suite: `cd app && npm run test:e2e` (needs the renderer built and,
   for T2, the backend bundle at `dist/stenoai/`).
 - Run one tier: `cd app && npm run test:e2e -- --project=t1` (or `t2`).
