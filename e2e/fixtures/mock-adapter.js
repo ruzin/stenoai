@@ -2,10 +2,11 @@
 // handlers call against a signed-in adapter, with just enough state to drive the
 // CRUD + share/unshare lifecycle deterministically — no real backend, no AWS/S3.
 //
-// Backwards compatible with the original sign-in-only mock (org-lock-lifecycle.t2,
-// shared-notes-policy): POST /auth/login still returns a structurally valid HS256
-// JWT in the { token, email, name, org_id } envelope (app/main.js ~8071) and
-// GET /policy still returns the enterprise policy. It NEVER returns 401 (that
+// Backwards compatible with the original sign-in-only mock (org-lock-lifecycle.t2
+// is the only other real-adapter consumer; shared-notes-policy is a T1 mock-IPC
+// spec that doesn't touch this): POST /auth/login still returns a structurally
+// valid HS256 JWT in the { token, email, name, org_id } envelope (app/main.js
+// ~8071) and GET /policy still returns the enterprise policy. It NEVER returns 401 (that
 // would trip the app's real sign-out path mid-test). Listens on an ephemeral
 // loopback port; the caller passes the returned url as the adapter URL.
 //
@@ -46,7 +47,7 @@ const json = (res, status, body) => {
  * Start the mock adapter on an ephemeral loopback port.
  * @param {object} [opts]
  * @param {object} [opts.policy] override the /policy response.
- * @returns {Promise<{ url: string, close: () => Promise<void>, meetingCount: () => number, s3Puts: () => number }>}
+ * @returns {Promise<{ url: string, close: () => Promise<void>, s3Puts: () => number }>}
  */
 function startMockAdapter(opts = {}) {
   const policy = opts.policy || { auto_share_default: true, shared_notes_enabled: true };
@@ -142,7 +143,6 @@ function startMockAdapter(opts = {}) {
       resolve({
         url: baseUrl,
         close: () => new Promise((r) => server.close(() => r())),
-        meetingCount: () => meetings.size,
         s3Puts: () => s3PutCount,
       });
     });
