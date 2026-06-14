@@ -8583,6 +8583,19 @@ ipcMain.handle('org-try-auto-backup', async (_event, payload) => {
     const session = loadOrgSession();
     if (!session) return { attempted: false, reason: 'not-signed-in' };
 
+    // Close the sign-in seeding race (cubic P1): the sign-in handler seeds
+    // the auto-backup default fire-and-forget, so a recording that finishes
+    // right after sign-in could reach this gate before the org's
+    // auto_share_default has been written — and the read below treats an
+    // unset pref as enabled (!== false), which would auto-share against an
+    // org policy of auto_share_default=false. seedOrgAutoBackupDefault is
+    // idempotent (writes only when no pref exists, swallows its own errors),
+    // so awaiting it here deterministically materialises the policy default
+    // before we decide. The adapter is necessarily reachable on the path
+    // that actually uploads, so this fetch is the same reachability the
+    // share itself needs.
+    await seedOrgAutoBackupDefault();
+
     // Fail closed: any error / unparseable output treats the toggle as
     // disabled. A privacy + sharing setting should never default ON via a
     // transient read failure — if the user enabled it, they can do so
