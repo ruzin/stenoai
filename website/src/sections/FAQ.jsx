@@ -4,7 +4,7 @@ import { AnimatePresence, motion as Motion } from "framer-motion";
 
 const faqs = [
   { q: "What's included for free?", a: "Unlimited local transcription and summarization. No account, no tier, no upsell. Steno is open source. You can build and run it yourself if you prefer." },
-  { q: "Which AI models can I use?", a: "Five open-weight models: Llama 3.2 3B, Gemma 3 4B, Qwen 3.5 9B, DeepSeek-R1 14B, and GPT-OSS 20B. All run locally, on device." },
+  { q: "Which AI models can I use?", a: "Five open-weight models: Llama 3.2 3B, Gemma 4 E2B, Qwen 3.5 9B, Gemma 4 12B, and GPT-OSS 20B. All run locally, on device." },
   { q: "Is my data really private?", a: "Yes. Steno makes no network requests after install. The source is open, so you can verify it yourself, or have your security team do so." },
   { q: "How accurate is the transcription?", a: "Steno uses Parakeet TDT v3 for live transcription (25 European languages) and Whisper for languages outside that set, including Chinese, Japanese, Arabic, Korean, and Hindi (99 languages total). Results depend on audio clarity — quiet rooms and good microphones produce the best outcomes." },
   { q: "What Mac do I need?", a: "Apple Silicon Mac (M1 or later) running macOS 12 (Monterey) or later. The app runs comfortably on an M1 MacBook Air. Intel Macs are no longer supported as of v0.4.0 — Intel users should stay on v0.3.8." },

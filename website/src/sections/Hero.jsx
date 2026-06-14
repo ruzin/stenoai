@@ -75,7 +75,7 @@ export function Hero() {
               maxWidth: "14ch",
             }}
           >
-            AI for your confidential conversations.
+            Sovereign AI for your confidential conversations.
           </Motion.h1>
 
           <Motion.p
@@ -86,7 +86,7 @@ export function Hero() {
             style={{ maxWidth: "44ch" }}
           >
             Steno is the AI powered intelligence layer for all your confidential conversations.
-            No cloud, no usage limits and no bots joining your calls.
+            No cloud, no usage limits and full control of your data.
           </Motion.p>
 
           <Motion.div

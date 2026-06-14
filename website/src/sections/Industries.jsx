@@ -30,12 +30,18 @@ export function Industries() {
               margin: "0 0 20px",
             }}
           >
-            When privacy isn't optional.
+            Sovereign AI for confidential conversations.
           </h2>
           <p className="text-fg-2 text-lg leading-[1.55]">
             If your meetings contain confidential data, you can't send audio to a third party.
             Steno is built for people who understand this.
           </p>
+          <a
+            href="mailto:chantelle@stenoai.co?subject=Steno%20demo%20request&body=Hi%20Steno%20team%2C%0A%0AWe%27d%20like%20to%20see%20a%20demo.%0A%0AOrganisation%3A%20%0ATeam%20size%3A%20%0AUse%20case%3A%20%0A%0AThanks%2C"
+            className="btn-base btn-primary inline-flex items-center gap-2 no-underline hover:no-underline mt-7"
+          >
+            Contact us for a demo
+          </a>
         </Motion.div>
 
         <div className="flex flex-col">

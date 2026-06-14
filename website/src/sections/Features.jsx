@@ -1,13 +1,13 @@
-import { Workflow, NotebookPen, MessageSquare, ShieldOff, Layers, HardDrive } from "lucide-react";
+import { Workflow, Landmark, NotebookPen, MessageSquare, ShieldOff, Layers } from "lucide-react";
 import { motion as Motion } from "framer-motion";
 
 const feats = [
   { icon: <Workflow size={18} aria-hidden="true" />, title: "AI agent ready", body: "Summaries and notes save as plain Markdown. Pipe them into the AI agent, vault, or workflow your team already runs." },
+  { icon: <Landmark size={18} aria-hidden="true" />, title: "Sovereign AI", body: "You own the entire stack — models and data stay on your device or network, under your control. Works offline on planes, in hospitals and restricted areas." },
   { icon: <NotebookPen size={18} aria-hidden="true" />, title: "AI notepad", body: "Jot notes during a recording. They're merged with the transcript to shape the AI summary." },
   { icon: <MessageSquare size={18} aria-hidden="true" />, title: "Ask your meetings", body: "Chat with your meetings or across your entire meeting history. Surface decisions, themes, and follow-ups." },
   { icon: <ShieldOff size={18} aria-hidden="true" />, title: "No data leaves", body: "Zero network requests after install. Verified by inspectable, open-source code you can audit yourself." },
   { icon: <Layers size={18} aria-hidden="true" />, title: "99 languages", body: "Whisper auto-detects the language spoken. Works equally well across multilingual meetings." },
-  { icon: <HardDrive size={18} aria-hidden="true" />, title: "Runs offline", body: "No internet required after the initial model download. Works on planes, in hospitals, anywhere." },
 ];
 
 export function Features() {

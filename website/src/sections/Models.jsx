@@ -3,11 +3,11 @@ import { Check } from "lucide-react";
 import { motion as Motion } from "framer-motion";
 
 const models = [
-  { id: "llama3.2:3b",     label: "Llama 3.2",   detail: "3B · Fast" },
-  { id: "gemma3:4b",       label: "Gemma 3",      detail: "4B · Balanced" },
-  { id: "qwen3.5:9b",      label: "Qwen 3.5",     detail: "9B · Smart" },
-  { id: "deepseek-r1:14b", label: "DeepSeek R1",  detail: "14B · Reasoning" },
-  { id: "gpt-oss:20b",     label: "GPT-OSS",      detail: "20B · Capable" },
+  { id: "llama3.2:3b",        label: "Llama 3.2",   detail: "3B · Fast" },
+  { id: "gemma4:e2b-it-qat",  label: "Gemma 4 E2B", detail: "2B · Light" },
+  { id: "qwen3.5:9b",         label: "Qwen 3.5",    detail: "9B · Smart" },
+  { id: "gemma4:12b",         label: "Gemma 4",     detail: "12B · Long meetings" },
+  { id: "gpt-oss:20b",        label: "GPT-OSS",     detail: "20B · Capable" },
 ];
 
 export function Models() {

@@ -34,7 +34,7 @@ export function Nav() {
         <div className="hidden md:flex gap-7 items-center">
           <a href="#how" className="text-fg-2 text-sm no-underline hover:text-fg-1 transition-colors">How it works</a>
           <a href="#features" className="text-fg-2 text-sm no-underline hover:text-fg-1 transition-colors">Features</a>
-          <a href="#industries" className="text-fg-2 text-sm no-underline hover:text-fg-1 transition-colors">Who it's for</a>
+          <a href="#industries" className="text-fg-2 text-sm no-underline hover:text-fg-1 transition-colors">Enterprise</a>
           <a href="#faq" className="text-fg-2 text-sm no-underline hover:text-fg-1 transition-colors">FAQ</a>
         </div>
 

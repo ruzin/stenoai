@@ -12,7 +12,7 @@ const steps = [
     n: "02",
     icon: <FileText size={18} aria-hidden="true" />,
     title: "Transcribe",
-    body: "Whisper.cpp converts audio to text entirely on device. Ninety-nine languages, auto-detected. Apple Silicon runs it fast.",
+    body: "Parakeet TDT v3 transcribes live as you speak, entirely on device. Whisper.cpp covers 99 languages, auto-detected. Fast on Apple Silicon, and runs on Windows too.",
   },
   {
     n: "03",
