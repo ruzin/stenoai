@@ -662,14 +662,22 @@ async function copyImportIntoRecordings(srcPath) {
   const dir = resolveRecordingsDir();
   const ext = path.extname(srcPath);
   const stem = path.basename(srcPath, ext);
-  let dest = path.join(dir, `${stem}${ext}`);
-  let n = 1;
-  while (fs.existsSync(dest)) {
-    dest = path.join(dir, `${stem}-${n}${ext}`);
-    n += 1;
+  // COPYFILE_EXCL makes each attempt atomic: the copy fails with EEXIST rather
+  // than overwriting an existing file, so two concurrent imports that share a
+  // basename can't clobber each other. (An existsSync-then-copyFile check would
+  // have a TOCTOU window where both pick the same dest before either creates
+  // it.) On EEXIST we bump the suffix and retry. On APFS the copy is a
+  // near-instant copy-on-write clone.
+  for (let n = 0; ; n += 1) {
+    const dest = path.join(dir, n === 0 ? `${stem}${ext}` : `${stem}-${n}${ext}`);
+    try {
+      await fs.promises.copyFile(srcPath, dest, fs.constants.COPYFILE_EXCL);
+      return dest;
+    } catch (err) {
+      if (err.code === 'EEXIST') continue;
+      throw err;
+    }
   }
-  await fs.promises.copyFile(srcPath, dest);
-  return dest;
 }
 
 /**
