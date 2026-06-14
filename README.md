@@ -41,10 +41,10 @@
 If you're looking for a hosted desktop recording API, consider checking out [Recall.ai](https://www.recall.ai/product/desktop-recording-sdk?utm_source=github&utm_medium=sponsorship&utm_campaign=ruzin-stenoai), an API that records Zoom, Google Meet, Microsoft Teams, in-person meetings, and more.
 
 ## 📢 What's New
+- **2026-06-15** 🛠️ Reliability + cross-platform fixes — saving meeting notes now writes to the right place (it was failing silently in the packaged app), and Windows now stores recordings, cloud keys, and calendar tokens in the correct location, with existing credentials migrating forward seamlessly on upgrade. Under the hood: a comprehensive end-to-end test suite + a pre-release gate now guard every release.
 - **2026-06-14** 🧠 Gemma 4 summary models — Google's Gemma 4 is now selectable as a local summarization model: **Gemma 4 12B** (256K context, great for long meetings) or the lightweight **Gemma 4 E2B (QAT)** for memory-constrained machines. Both run fully on-device via the bundled Ollama (updated to run them).
 - **2026-06-12** 🛡️ Stability round — recordings auto-pause when you close the lid (with a Resume prompt on wake), long meetings on slow machines are never killed mid-transcription, a Parakeet crash now recovers via whisper.cpp, and audio is cleaned (high-pass + loudness normalization) before transcription for better accuracy.
 - **2026-06-12** 🧠 Long meetings transcribe reliably — chunked transcription fixes the out-of-memory crash on 30+ minute recordings, and if transcription ever fails your audio is preserved and the meeting is marked for reprocessing instead of saving as empty.
-- **2026-06-11** ⚡ Faster recording start — Parakeet now loads offline-first (no network round-trip when the model is already installed) and pre-warms in the background, so your first words land in the live transcript sooner.
 
 
 ## Features
