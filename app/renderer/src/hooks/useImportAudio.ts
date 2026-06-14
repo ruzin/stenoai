@@ -26,6 +26,23 @@ export async function importAudioFile(filePath: string): Promise<void> {
 }
 
 /**
+ * Surface an import that failed to even enqueue (e.g. the copy-into-recordings
+ * step threw, or the backend rejected the file). Shared by the picker and
+ * drag-drop so a foreground import failure isn't swallowed by a bare
+ * `console.error`. In-flight processing crashes are surfaced separately by the
+ * App-level `processing-complete` handler; this covers the enqueue failure that
+ * never produces a processing row. Reuses the note-ready notification channel
+ * (`hardFailure`) since there's no in-app toast surface.
+ */
+export function notifyImportFailed(title: string): void {
+  void ipc()
+    .settings.showNoteReadyNotification({ title, failed: true, hardFailure: true })
+    .catch(() => {
+      // Notification failure isn't fatal and there's nothing to fall back to.
+    });
+}
+
+/**
  * Import an existing local audio file via the native file picker.
  *
  * `mutateAsync()` resolves to `true` when a file was enqueued and `false`
@@ -39,14 +56,23 @@ export function useImportAudio() {
         // User cancelled the dialog (or selected nothing) — not an error.
         return false;
       }
-      await importAudioFile(picked.filePath);
+      try {
+        await importAudioFile(picked.filePath);
+      } catch (err) {
+        // The popover has already closed, so there's no inline slot — fire the
+        // failure notification with the title we still have in scope.
+        notifyImportFailed(basenameStem(picked.filePath));
+        throw err;
+      }
       return true;
     },
   });
 }
 
 // Formats the backend (librosa/ffmpeg) can decode. Used to filter dropped files
-// so non-audio drops are ignored.
+// so non-audio drops are ignored. MUST stay in sync with
+// IMPORT_AUDIO_EXTENSIONS in app/main.js (the file-picker dialog filter) — the
+// two live in different processes, so the list is mirrored rather than shared.
 const AUDIO_EXTENSIONS = [
   'wav', 'mp3', 'm4a', 'aac', 'webm', 'aiff', 'aif', 'flac', 'ogg', 'caf',
   'mp4', 'mov',
@@ -60,7 +86,7 @@ export function isAudioFile(name: string): boolean {
 }
 
 /** Filename without directory or extension: `/a/b/Talk.m4a` -> `Talk`. */
-function basenameStem(filePath: string): string {
+export function basenameStem(filePath: string): string {
   const base = filePath.split(/[\\/]/).pop() ?? filePath;
   const dot = base.lastIndexOf('.');
   return dot > 0 ? base.slice(0, dot) : base;

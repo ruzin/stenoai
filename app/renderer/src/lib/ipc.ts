@@ -613,7 +613,10 @@ export interface StenoaiBridge {
       Result<{ filePath: string }>
     >;
     processSystemAudio: RequestFn<[filePath: string, name: string], Result<{ message: string }>>;
-    processFile: RequestFn<[filePath: string, name: string], Result<{ message: string }>>;
+    // Fire-and-forget: the handler copies the file into recordings/ and queues
+    // it (addToProcessingQueue), then resolves immediately with no payload —
+    // it does NOT wait for transcription. Progress shows as a processing row.
+    processFile: RequestFn<[filePath: string, name: string], Result<Record<string, never>>>;
     pickAudioFile: RequestFn<[], PickAudioFileResponse>;
     /** Resolve a dropped File's absolute path (Electron 32+ removed File.path). Synchronous. */
     getPathForFile: (file: File) => string;
@@ -718,7 +721,7 @@ export interface StenoaiBridge {
       Result<Record<string, never>>
     >;
     showNoteReadyNotification: RequestFn<
-      [payload: { title: string; failed?: boolean }],
+      [payload: { title: string; failed?: boolean; hardFailure?: boolean }],
       Result<Record<string, never>>
     >;
     getLanguage: RequestFn<[], GetLanguageResponse>;

@@ -249,7 +249,7 @@ function RecordingOptionsPopover({
               setOpen(false);
               importAudio.mutate();
             }}
-            className="flex w-full items-start gap-3 rounded-md border p-3 text-left transition-colors hover:bg-[color:var(--surface-hover)] disabled:cursor-not-allowed disabled:opacity-50"
+            className="flex w-full items-start gap-3 rounded-md border p-3 text-left transition-colors hover:bg-[color:var(--surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
             style={{ borderColor: 'var(--border-subtle)' }}
           >
             <FileAudio className="mt-0.5 size-4 flex-shrink-0 text-muted-foreground" />
