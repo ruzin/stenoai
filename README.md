@@ -41,10 +41,10 @@
 If you're looking for a hosted desktop recording API, consider checking out [Recall.ai](https://www.recall.ai/product/desktop-recording-sdk?utm_source=github&utm_medium=sponsorship&utm_campaign=ruzin-stenoai), an API that records Zoom, Google Meet, Microsoft Teams, in-person meetings, and more.
 
 ## 📢 What's New
+- **2026-06-14** 🧠 Gemma 4 summary models — Google's Gemma 4 is now selectable as a local summarization model: **Gemma 4 12B** (256K context, great for long meetings) or the lightweight **Gemma 4 E2B (QAT)** for memory-constrained machines. Both run fully on-device via the bundled Ollama (updated to run them).
 - **2026-06-12** 🛡️ Stability round — recordings auto-pause when you close the lid (with a Resume prompt on wake), long meetings on slow machines are never killed mid-transcription, a Parakeet crash now recovers via whisper.cpp, and audio is cleaned (high-pass + loudness normalization) before transcription for better accuracy.
 - **2026-06-12** 🧠 Long meetings transcribe reliably — chunked transcription fixes the out-of-memory crash on 30+ minute recordings, and if transcription ever fails your audio is preserved and the meeting is marked for reprocessing instead of saving as empty.
 - **2026-06-11** ⚡ Faster recording start — Parakeet now loads offline-first (no network round-trip when the model is already installed) and pre-warms in the background, so your first words land in the live transcript sooner.
-- **2026-06-09** 🪟 Windows alpha — Steno now runs on Windows 10/11 (x64). Record, live Parakeet transcription, summaries, and system-audio diarisation all work; ships as an unsigned installer for now (SmartScreen warns on first launch), with transcription on CPU via ONNX Runtime.
 
 
 ## Features
@@ -143,9 +143,9 @@ Have questions or suggestions? [Join our Discord](https://discord.gg/DZ6vcQnxxu)
 
 **Summarization Models** (Ollama):
 - `llama3.2:3b` (2GB): Fast and lightweight for quick meetings **(default)**
-- `gemma3:4b` (2.5GB): Lightweight and efficient
+- `gemma4:e2b-it-qat` (4.3GB): Lightest Gemma 4, quantization-aware — good for memory-constrained machines (128K context)
 - `qwen3.5:9b` (6.6GB): Excellent at structured output and action items
-- `deepseek-r1:14b` (9.0GB): Strong reasoning and analysis capabilities
+- `gemma4:12b` (7.6GB): Gemma 4 with a 256K context — best for long meetings
 - `gpt-oss:20b` (14GB): OpenAI open-weight model with reasoning capabilities
 
 ## Future Roadmap
