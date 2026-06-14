@@ -159,17 +159,18 @@ Releases are automated via `.github/workflows/build-release.yml`. Never create r
    - One-line summary at the top.
    - Headline features grouped under `### Section` headers (e.g., "System audio", "UX polish", "Under the hood", "Fixes").
    - Migration/upgrade notes if anything changed paths, identifiers, defaults, or requires user action.
-6. **Create an annotated tag** on `main` with the release notes as the tag message. **Always pass `--cleanup=whitespace`** — without it, `git tag -F` strips every line starting with `#`, which silently deletes Markdown `### Section` headers from the release body:
+6. **Run the release gate (blocks the tag).** Push a `release/v<version>` branch — `git push origin main:refs/heads/release/v0.3.0` — to trigger `.github/workflows/e2e-release-gate.yml`, which runs the full e2e matrix (T1 + macOS/Windows T2 + `@pipeline` + the `@long-meeting` T3 smoke). **Do not create the tag until this run is green.** The gate runs on the branch, before the immutable tag exists, so a failure is fixed-and-re-pushed rather than leaving a half-released tag. (You can also dry-run it via `workflow_dispatch`.) `build-release.yml` additionally runs a fast T1 backstop smoke (`gate-smoke`) before signing, but that is defense-in-depth — the branch gate is the real signal.
+7. **Create an annotated tag** on `main` with the release notes as the tag message. **Always pass `--cleanup=whitespace`** — without it, `git tag -F` strips every line starting with `#`, which silently deletes Markdown `### Section` headers from the release body:
    ```
    git tag -a v0.3.0 --cleanup=whitespace -F /path/to/notes.md
    git push origin v0.3.0
    ```
    (If using `-m` instead of `-F`, pass `--cleanup=whitespace` anyway — the comment-stripping default applies to both.)
-7. The tag push triggers the workflow which:
+8. The tag push triggers the workflow which:
    - Builds signed + notarized DMGs for both arm64 and x64
    - Creates a GitHub Release with the tag message as the body
    - Uploads both DMGs as release assets
-8. Do NOT build DMGs locally for releases, do NOT use `gh release create` manually.
+9. Do NOT build DMGs locally for releases, do NOT use `gh release create` manually.
 
 ## Session Logging
 When the user says "log session" or similar (e.g., "update session log", "document this session"):

@@ -1,0 +1,122 @@
+name: e2e-release-gate
+
+# Pre-tag release gate. The full e2e suite, run BEFORE the immutable version tag
+# exists, so a regression in any covered area blocks the release instead of
+# reaching users.
+#
+# Why a release/* branch and not build-release.yml: build-release.yml triggers on
+# `git push tag vX.Y.Z` — by then the tag is already created, so a failing gate
+# there would leave a "tag exists but release failed" mess to unwind. Gating on
+# the release branch puts the green/red signal in front of the human BEFORE they
+# cut the tag. Release flow (see CLAUDE.md "Release Process"):
+#   1. branch  release/vX.Y.Z  off main
+#   2. this workflow runs the full matrix
+#   3. tag ONLY once it is green  ->  build-release.yml builds + ships
+#
+# Unlike e2e.yml (advisory/non-blocking per-PR), the human treats THIS run as a
+# hard prerequisite for the tag. The jobs themselves fail on any spec failure, so
+# the workflow conclusion is the gate.
+#
+# Manually triggerable (workflow_dispatch) to dry-run the gate without a branch.
+
+on:
+  push:
+    branches:
+      - 'release/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # Full per-PR suite: T1 (Ubuntu) + macOS/Windows T2 (model-free) + macOS/Windows
+  # @pipeline (transcribe + summarize). Reused verbatim via `uses:` so there's no
+  # job duplication and the gate can never drift from what PRs run.
+  suite:
+    name: Full suite (release gate)
+    uses: ./.github/workflows/e2e.yml
+
+  # Heavy long-meeting chunking smoke (T3) — too slow for per-PR, but a release
+  # must not ship a broken long-file path. Mirrors e2e-nightly.yml's job: reuses
+  # the Windows backend bundle + parakeet-onnx model the suite just built/cached
+  # (download-artifact across the reusable-workflow boundary), so it adds no extra
+  # build/download. `needs: suite` couples it to the whole suite passing — correct
+  # for a gate (you don't tag on a partial pass anyway).
+  long-meeting-windows:
+    name: T3 long-meeting (parakeet onnx, Windows)
+    runs-on: windows-latest
+    needs: suite
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: app/package-lock.json
+
+      - name: Download backend bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: e2e-backend-windows
+          path: dist/stenoai
+
+      - name: Ensure no stray Ollama
+        shell: pwsh
+        run: Stop-Process -Name ollama -Force -ErrorAction SilentlyContinue
+
+      # Same key as e2e.yml's t2-pipeline-windows, so the model the suite
+      # downloaded this run restores here instead of pulling the ~670 MB snapshot.
+      - name: Cache parakeet ONNX model
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface/hub/models--istupakov--parakeet-tdt-0.6b-v3-onnx
+          key: parakeet-onnx-${{ runner.os }}-tdt-0.6b-v3
+
+      - name: Install Electron dependencies
+        working-directory: app
+        run: npm ci
+
+      - name: Build renderer
+        working-directory: app
+        run: npm run build:renderer
+
+      - name: Ensure parakeet model present
+        shell: pwsh
+        run: |
+          ./dist/stenoai/stenoai.exe download-parakeet-model
+          $status = ./dist/stenoai/stenoai.exe parakeet-status | ConvertFrom-Json
+          if (-not $status.installed) {
+            Write-Error "Parakeet ONNX model not installed after download"
+            exit 1
+          }
+
+      # Assert the tagged spec is selected (Playwright exits 0 on a zero-match
+      # --grep). Capture first, then grep — `grep -q`'s early pipe-close crashes
+      # the node writer with EPIPE on Windows. A dropped @long-meeting tag must
+      # fail the gate, not silently run zero tests and pass green.
+      - name: Guard — @long-meeting test is selected
+        shell: bash
+        working-directory: app
+        run: |
+          out=$(npm run test:e2e -- --project=t3 --grep @long-meeting --list)
+          echo "$out" | grep -q '@long-meeting'
+
+      - name: Run T3 long-meeting (parakeet onnx)
+        working-directory: app
+        env:
+          STENOAI_E2E_ENGINE: parakeet
+        run: npm run test:e2e -- --project=t3 --grep '@long-meeting'
+
+      - name: Upload report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-release-t3-long-meeting-report
+          path: |
+            app/playwright-report
+            app/test-results
+          retention-days: 7
+          if-no-files-found: ignore
