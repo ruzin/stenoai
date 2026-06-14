@@ -1,6 +1,7 @@
 import { test, expect } from '../fixtures/electron';
 import { realUserDataDir, fileSig } from '../fixtures/real-user-data';
-import { readFileSync, existsSync } from 'fs';
+import { readUserConfig } from '../fixtures/user-config';
+import { existsSync } from 'fs';
 import path from 'path';
 
 /**
@@ -45,11 +46,6 @@ type StenoWindow = Window & {
 const getProvider = (page: import('@playwright/test').Page) =>
   page.evaluate(() => (window as StenoWindow).stenoai.ai.getProvider());
 
-function readConfig(userDataDir: string): Record<string, unknown> {
-  const p = path.join(userDataDir, 'config.json');
-  if (!existsSync(p)) return {};
-  return JSON.parse(readFileSync(p, 'utf8')) as Record<string, unknown>;
-}
 
 test('provider switch + cloud/bedrock config persist and round-trip through get-ai-provider', async ({
   launchApp,
@@ -69,7 +65,7 @@ test('provider switch + cloud/bedrock config persist and round-trip through get-
       (p) => (window as StenoWindow).stenoai.ai.setProvider(p),
       provider,
     );
-    await expect.poll(() => readConfig(userDataDir).ai_provider).toBe(provider);
+    await expect.poll(() => readUserConfig(userDataDir).ai_provider).toBe(provider);
     expect((await getProvider(page)).ai_provider).toBe(provider);
   }
 
@@ -151,5 +147,5 @@ test('cloud API key is stored encrypted (safeStorage) in the temp dir, not confi
   // ...the snapshot reports it set...
   await expect.poll(async () => (await getProvider(page)).cloud_api_key_set).toBe(true);
   // ...and the plaintext key never appears in config.json.
-  expect(JSON.stringify(readConfig(userDataDir))).not.toContain('sk-e2e-secret-123');
+  expect(JSON.stringify(readUserConfig(userDataDir))).not.toContain('sk-e2e-secret-123');
 });

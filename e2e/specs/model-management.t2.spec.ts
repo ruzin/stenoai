@@ -1,7 +1,6 @@
 import { test, expect } from '../fixtures/electron';
 import { realUserDataDir, fileSig } from '../fixtures/real-user-data';
-import { readFileSync, existsSync } from 'fs';
-import path from 'path';
+import { readUserConfig } from '../fixtures/user-config';
 
 /**
  * T2 — model management (the deterministic, model-free subset). Covers the
@@ -41,11 +40,6 @@ type StenoWindow = Window & {
   };
 };
 
-function readConfig(userDataDir: string): Record<string, unknown> {
-  const p = path.join(userDataDir, 'config.json');
-  if (!existsSync(p)) return {};
-  return JSON.parse(readFileSync(p, 'utf8')) as Record<string, unknown>;
-}
 
 /** Every entry in a supported-models map must carry a boolean `installed` flag. */
 function assertInstalledShape(models: Record<string, ModelInfo> | undefined) {
@@ -72,7 +66,7 @@ test('summary model set persists to config.model and round-trips through get-cur
   expect(before.model).toBeTruthy();
 
   await page.evaluate(() => (window as StenoWindow).stenoai.models.set('llama3.2:1b'));
-  await expect.poll(() => readConfig(userDataDir).model).toBe('llama3.2:1b');
+  await expect.poll(() => readUserConfig(userDataDir).model).toBe('llama3.2:1b');
   await expect
     .poll(async () => (await page.evaluate(() => (window as StenoWindow).stenoai.models.getCurrent())).model)
     .toBe('llama3.2:1b');
@@ -97,7 +91,7 @@ test('whisper models: list reports installed flags; set persists to config.whisp
   // set-whisper-model validates against those) and set it; it persists + the
   // list's current model follows.
   await page.evaluate(() => (window as StenoWindow).stenoai.whisperModels.set('large-v3-turbo'));
-  await expect.poll(() => readConfig(userDataDir).whisper_model).toBe('large-v3-turbo');
+  await expect.poll(() => readUserConfig(userDataDir).whisper_model).toBe('large-v3-turbo');
   await expect
     .poll(async () => (await page.evaluate(() => (window as StenoWindow).stenoai.whisperModels.list())).current_model)
     .toBe('large-v3-turbo');

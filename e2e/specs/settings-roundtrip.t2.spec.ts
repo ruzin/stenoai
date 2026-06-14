@@ -1,6 +1,7 @@
 import { test, expect } from '../fixtures/electron';
 import { realUserDataDir, fileSig } from '../fixtures/real-user-data';
-import { readFileSync, existsSync } from 'fs';
+import { readUserConfig } from '../fixtures/user-config';
+import { existsSync } from 'fs';
 import path from 'path';
 
 /**
@@ -49,17 +50,13 @@ const CASES: Case[] = [
   { kind: 'keepRecordings', value: true, configKey: 'keep_recordings' },
   { kind: 'silenceEnabled', value: false, configKey: 'silence_auto_stop_enabled' },
   { kind: 'silenceMinutes', value: 15, configKey: 'silence_auto_stop_minutes' },
-  { kind: 'systemAudio', value: true, configKey: 'system_audio_enabled' },
+  // false flips the macOS default (true) so this has teeth on the primary signed
+  // platform — asserting `true` there would pass even if the setter no-oped.
+  { kind: 'systemAudio', value: false, configKey: 'system_audio_enabled' },
   { kind: 'telemetry', value: false, configKey: 'telemetry_enabled' },
   { kind: 'transcriptionEngine', value: 'whisper', configKey: 'transcription_engine' },
   { kind: 'dockIcon', value: true, configKey: 'hide_dock_icon' },
 ];
-
-function readConfig(userDataDir: string): Record<string, unknown> {
-  const p = path.join(userDataDir, 'config.json');
-  if (!existsSync(p)) return {};
-  return JSON.parse(readFileSync(p, 'utf8')) as Record<string, unknown>;
-}
 
 function applySetting(
   page: import('@playwright/test').Page,
@@ -106,7 +103,7 @@ test('settings setters persist each value to the right config.json key; real dir
   for (const { kind, value, configKey } of CASES) {
     await applySetting(page, kind, value);
     await expect
-      .poll(() => readConfig(userDataDir)[configKey], {
+      .poll(() => readUserConfig(userDataDir)[configKey], {
         message: `${kind} -> config.${configKey}`,
       })
       .toBe(value);
@@ -132,7 +129,7 @@ test('set-storage-path persists the path and provisions its data subdirs', async
   );
   expect(res.success).toBe(true);
 
-  await expect.poll(() => readConfig(userDataDir).storage_path).toBe(target);
+  await expect.poll(() => readUserConfig(userDataDir).storage_path).toBe(target);
   for (const sub of ['recordings', 'transcripts', 'output']) {
     expect(existsSync(path.join(target, sub))).toBe(true);
   }
