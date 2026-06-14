@@ -633,7 +633,9 @@ function resolveRecordingsDir() {
   if (_cachedCustomStoragePath) {
     dir = path.join(_cachedCustomStoragePath, 'recordings');
   } else if (app.isPackaged) {
-    dir = path.join(os.homedir(), 'Library', 'Application Support', 'stenoai', 'recordings');
+    // getUserDataDir() (not a macOS literal) so the packaged path is correct on
+    // Windows (%APPDATA%/stenoai) too; identical on macOS.
+    dir = path.join(getUserDataDir(), 'recordings');
   } else {
     dir = path.join(__dirname, '..', 'recordings');
   }
@@ -1986,7 +1988,13 @@ ipcMain.handle('load-chat-sessions', async () => {
 
 ipcMain.handle('save-meeting-notes', async (event, sessionName, notes) => {
   try {
-    const outputDir = path.join(getBackendCwd(), '_internal', 'output');
+    // Write into the user-data output dir — the SAME dir Python's get_data_dirs()
+    // uses (custom storage if set, else getUserDataDir(), which honors
+    // STENOAI_USER_DATA_DIR). The old getBackendCwd()/_internal/output target was
+    // INSIDE the app bundle: read-only in a packaged/signed app (so saving notes
+    // failed for real users on macOS + Windows), and a dir the Python pipeline
+    // never reads notes from, so reprocess's _load_user_notes couldn't find them.
+    const outputDir = path.join(_cachedCustomStoragePath || getUserDataDir(), 'output');
     if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
     const safeName = sessionName.replace(/[^a-zA-Z0-9_-]/g, '_');
     const notesFile = path.join(outputDir, `${safeName}_notes.txt`);
@@ -4788,7 +4796,10 @@ ipcMain.handle('get-storage-path', async () => {
     const customPath = jsonData.storage_path && jsonData.storage_path.trim()
       ? jsonData.storage_path
       : null;
-    const defaultPath = path.join(os.homedir(), 'Library', 'Application Support', 'stenoai');
+    // getUserDataDir() so the "where your data lives" path shown in Settings is
+    // correct on Windows (%APPDATA%/stenoai), not a macOS literal. It already
+    // resolves to the per-OS .../stenoai dir.
+    const defaultPath = getUserDataDir();
     return {
       success: true,
       storage_path: customPath || defaultPath,
@@ -5683,7 +5694,13 @@ ipcMain.handle('set-user-name', async (event, name) => {
 // AI Provider IPC handlers
 
 function getCloudKeyPath() {
-  return path.join(os.homedir(), 'Library', 'Application Support', 'stenoai', '.cloud-api-key');
+  // Use getUserDataDir() like every other app-managed file (.org-session,
+  // .pre-adapter-provider, config.json). The old hardcoded
+  // ~/Library/Application Support literal was macOS-only (wrong dir on Windows)
+  // and ignored the STENOAI_USER_DATA_DIR e2e override, so the encrypted cloud
+  // key escaped test isolation into the real user dir. On real macOS this
+  // resolves to the identical path, so existing keys are unaffected.
+  return path.join(getUserDataDir(), '.cloud-api-key');
 }
 
 function saveCloudApiKey(key) {
@@ -6184,7 +6201,8 @@ ipcMain.handle('get-recordings-dir', async () => {
     if (jsonData.storage_path) {
       recordingsDir = path.join(jsonData.storage_path, 'recordings');
     } else if (app.isPackaged) {
-      recordingsDir = path.join(os.homedir(), 'Library', 'Application Support', 'stenoai', 'recordings');
+      // getUserDataDir() for the correct Windows path (%APPDATA%); identical on macOS.
+      recordingsDir = path.join(getUserDataDir(), 'recordings');
     } else {
       recordingsDir = path.join(__dirname, '..', 'recordings');
     }
@@ -6629,7 +6647,11 @@ ipcMain.handle('open-external', async (event, url) => {
 // ── Google Calendar: Token Storage ──────────────────────────────────────
 
 function getTokenFilePath() {
-  return path.join(os.homedir(), 'Library', 'Application Support', 'stenoai', '.google-tokens');
+  // getUserDataDir() like every other app-managed file — the old hardcoded
+  // ~/Library/Application Support literal was macOS-only (wrong dir on Windows)
+  // and ignored the STENOAI_USER_DATA_DIR e2e override. Resolves identically on
+  // real macOS, so existing tokens are unaffected.
+  return path.join(getUserDataDir(), '.google-tokens');
 }
 
 function saveGoogleTokens(tokens) {
@@ -6674,7 +6696,9 @@ function deleteGoogleTokens() {
 // ── Outlook Calendar: Token Storage ─────────────────────────────────────
 
 function getOutlookTokenFilePath() {
-  return path.join(os.homedir(), 'Library', 'Application Support', 'stenoai', '.outlook-tokens');
+  // See getTokenFilePath — route through getUserDataDir() for cross-platform +
+  // e2e isolation; identical path on real macOS.
+  return path.join(getUserDataDir(), '.outlook-tokens');
 }
 
 function saveOutlookTokens(tokens) {
