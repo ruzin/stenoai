@@ -6,8 +6,9 @@ const LATE_FLOOR_MS = 10 * 60 * 1000;
 /**
  * Find the calendar event the user is most likely "in" right now.
  *
- * INTENTIONAL DUPLICATION: this algorithm is mirrored byte-for-byte in
- * `app/main.js` → `pickCurrentCalendarEvent`. The main process can't
+ * INTENTIONAL DUPLICATION: this algorithm is kept in lockstep with
+ * `app/main.js` → `pickCurrentCalendarEvent` (same constants, filters, and
+ * tie-break order). The main process can't
  * import renderer ESM modules and the renderer can't import from main,
  * so the two surfaces (hero copy here + auto-detect-meeting
  * notification there) keep their own copy. If you change the constants
@@ -40,6 +41,13 @@ export function pickInProgressEvent(
   for (const e of events) {
     if (!e || typeof e.start !== 'string' || typeof e.end !== 'string') continue;
     if (!e.start.includes('T') || !e.end.includes('T')) continue;
+    // Match main.js's pickCurrentCalendarEvent: an all-day block spans
+    // midnight→midnight and would mistag every recording all day, and a
+    // declined meeting is one the user said no to. The 'T' guard above only
+    // catches date-only all-day events (Google); Outlook emits all-day with a
+    // T00:00:00 datetime, so the explicit is_all_day flag is load-bearing.
+    if (e.is_all_day === true) continue;
+    if (e.response_status === 'declined') continue;
     const startMs = new Date(e.start).getTime();
     const endMs = new Date(e.end).getTime();
     if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) continue;

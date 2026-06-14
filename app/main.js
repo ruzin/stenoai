@@ -7435,8 +7435,9 @@ ipcMain.handle('get-calendar-events', async () => {
 });
 
 // Pick the calendar event most likely to be the one the user is joining now.
-// INTENTIONAL DUPLICATION: this algorithm is mirrored byte-for-byte in
-// `app/renderer/src/lib/calendar.ts` → `pickInProgressEvent`. The two
+// INTENTIONAL DUPLICATION: this algorithm is kept in lockstep with
+// `app/renderer/src/lib/calendar.ts` → `pickInProgressEvent` (same
+// constants, filters, and tie-break order). The two
 // surfaces (auto-detect-meeting notification here + hero copy in the
 // renderer) keep their own copy because main and renderer can't share
 // ESM modules. If you change the constants or matching rules, update
