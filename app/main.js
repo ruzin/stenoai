@@ -5683,7 +5683,13 @@ ipcMain.handle('set-user-name', async (event, name) => {
 // AI Provider IPC handlers
 
 function getCloudKeyPath() {
-  return path.join(os.homedir(), 'Library', 'Application Support', 'stenoai', '.cloud-api-key');
+  // Use getUserDataDir() like every other app-managed file (.org-session,
+  // .pre-adapter-provider, config.json). The old hardcoded
+  // ~/Library/Application Support literal was macOS-only (wrong dir on Windows)
+  // and ignored the STENOAI_USER_DATA_DIR e2e override, so the encrypted cloud
+  // key escaped test isolation into the real user dir. On real macOS this
+  // resolves to the identical path, so existing keys are unaffected.
+  return path.join(getUserDataDir(), '.cloud-api-key');
 }
 
 function saveCloudApiKey(key) {
