@@ -12,6 +12,7 @@ import type {
 export const orgKeys = {
   all: ['org'] as const,
   status: () => [...orgKeys.all, 'status'] as const,
+  policy: () => [...orgKeys.all, 'policy'] as const,
   meetings: () => [...orgKeys.all, 'meetings'] as const,
   meeting: (id: string) => [...orgKeys.all, 'meeting', id] as const,
   autoBackup: () => [...orgKeys.all, 'auto-backup'] as const,
@@ -57,6 +58,32 @@ export function useOrgSession() {
   }, [exp, qc]);
 
   return query;
+}
+
+/** Enterprise policy from the adapter (GET /policy). Fetched once the user
+ *  is signed in and used to shape the UI: whether to show the Shared notes
+ *  tab + cross-folder chat (`shared_notes_enabled`) and the seed value for
+ *  the auto-backup toggle (`auto_share_default`, applied on sign-in in main).
+ *  The adapter also enforces shared_notes_enabled server-side, so the UI
+ *  gate is defense-in-depth, not the only line. Consumers should treat a
+ *  not-yet-loaded policy as feature-enabled (`!== false`) to preserve the
+ *  historical default while the one-shot fetch is in flight. */
+export function useOrgPolicy(enabled = true) {
+  return useQuery({
+    queryKey: orgKeys.policy(),
+    queryFn: async () => unwrap(await ipc().org.getPolicy()).policy,
+    enabled,
+    staleTime: 60_000,
+  });
+}
+
+/** Convenience boolean for the most common gate: is the cross-user Shared
+ *  notes feature available? Defaults to true while the policy loads or when
+ *  signed out, matching the adapter's default and avoiding a hide flicker
+ *  for the common (enabled) case. */
+export function useSharedNotesEnabled(signedIn: boolean): boolean {
+  const policy = useOrgPolicy(signedIn);
+  return policy.data?.shared_notes_enabled !== false;
 }
 
 // Sign-in / sign-out auto-switches the Python-side ai_provider (between

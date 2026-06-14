@@ -271,6 +271,7 @@ const stenoai = {
     unshareBySummary: (summaryFile) => invoke('org-unshare-by-summary', summaryFile),
     getAutoBackup: () => invoke('org-get-auto-backup'),
     setAutoBackup: (enabled) => invoke('org-set-auto-backup', enabled),
+    getPolicy: () => invoke('org-get-policy'),
     tryAutoBackup: (payload) => invoke('org-try-auto-backup', payload),
     aiChat: (payload) => invoke('org-ai-chat', payload),
     /** Fire-and-forget streaming start. Chunks arrive via query-chunk +

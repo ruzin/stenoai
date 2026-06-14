@@ -9,6 +9,7 @@ import { Home } from '@/routes/Home';
 import { MeetingDetail } from '@/routes/MeetingDetail';
 import { FolderDetail } from '@/routes/FolderDetail';
 import { OrgShared, OrgSharedDetail } from '@/routes/OrgShared';
+import { useOrgSession, useSharedNotesEnabled } from '@/hooks/useOrg';
 import { Recording } from '@/routes/Recording';
 import { Processing, ProcessingDock } from '@/routes/Processing';
 import { AskBar, TranscriptBar } from '@/components/AskBar';
@@ -229,6 +230,12 @@ function LiveRecordingDock() {
 }
 
 function RouteView({ route }: { route: string }) {
+  // Enterprise can hide the Shared notes feature. Gate the /org/shared
+  // routes on it so a stale nav or deep-link can't reach the browse view
+  // or its detail (the detail is what wires the cross-folder AskBar chat).
+  const orgSession = useOrgSession();
+  const sharedNotesEnabled = useSharedNotesEnabled(orgSession.data?.signedIn ?? false);
+
   if (route === '/dev' || route.startsWith('/dev/')) return <Sandbox />;
   // Match deep-links like /settings?tab=organisation too — the Settings
   // component reads the tab param off the route on mount.
@@ -249,8 +256,9 @@ function RouteView({ route }: { route: string }) {
     const folderId = safeDecode(route.slice('/folders/'.length));
     return <FolderDetail folderId={folderId} />;
   }
-  if (route === '/org/shared') return <OrgShared />;
-  if (route.startsWith('/org/shared/')) {
+  if (route === '/org/shared' || route.startsWith('/org/shared/')) {
+    if (!sharedNotesEnabled) return <Home mode="home" />;
+    if (route === '/org/shared') return <OrgShared />;
     const id = safeDecode(route.slice('/org/shared/'.length));
     return <OrgSharedDetail id={id} />;
   }

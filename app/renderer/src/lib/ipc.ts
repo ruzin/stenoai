@@ -228,6 +228,18 @@ export type OrgTryAutoBackupResponse =
 export type GetOrgAutoBackupResponse = Result<{ org_auto_backup_enabled: boolean }>;
 export type SetOrgAutoBackupResponse = Result<{ org_auto_backup_enabled: boolean }>;
 
+/** Enterprise policy published by the adapter (GET /policy). The desktop
+ *  honors these in the UI; the adapter also enforces shared_notes_enabled
+ *  server-side (a disabled feature collapses /meetings to owner-only). */
+export interface OrgPolicy {
+  /** Initial on-state for the auto-backup toggle, seeded on first sign-in. */
+  auto_share_default: boolean;
+  /** When false, hide the Shared notes tab + cross-folder chat. */
+  shared_notes_enabled: boolean;
+}
+
+export type GetOrgPolicyResponse = Result<{ policy: OrgPolicy }>;
+
 export type OrgGetBackupStateResponse = Result<{
   shared: boolean;
   meeting_id: string | null;
@@ -820,6 +832,7 @@ export interface StenoaiBridge {
     unshareBySummary: RequestFn<[summaryFile: string], OrgUnshareBySummaryResponse>;
     getAutoBackup: RequestFn<[], GetOrgAutoBackupResponse>;
     setAutoBackup: RequestFn<[enabled: boolean], SetOrgAutoBackupResponse>;
+    getPolicy: RequestFn<[], GetOrgPolicyResponse>;
     tryAutoBackup: RequestFn<[payload: OrgTryAutoBackupPayload], OrgTryAutoBackupResponse>;
     aiChat: RequestFn<[payload: OrgChatPayload], OrgChatResponse>;
     chatStream: SendFn<[streamId: string, payload: OrgChatPayload]>;

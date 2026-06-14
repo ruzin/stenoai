@@ -8092,6 +8092,9 @@ ipcMain.handle('org-login', async (_event, payload) => {
     markOrgKnown();
     // Fire-and-forget — sign-in shouldn't wait on a config write.
     autoSwitchToAdapterOnSignIn().catch(() => {});
+    // Seed the auto-backup toggle from the org's auto_share_default (only
+    // if the user hasn't set it). Fire-and-forget for the same reason.
+    seedOrgAutoBackupDefault().catch(() => {});
     return {
       success: true,
       signedIn: true,
@@ -8286,6 +8289,9 @@ ipcMain.handle('org-sso-google-start', async (_event, payload) => {
     markOrgKnown();
     // Fire-and-forget — sign-in shouldn't wait on a config write.
     autoSwitchToAdapterOnSignIn().catch(() => {});
+    // Seed the auto-backup toggle from the org's auto_share_default (only
+    // if the user hasn't set it). Fire-and-forget for the same reason.
+    seedOrgAutoBackupDefault().catch(() => {});
     return {
       success: true,
       signedIn: true,
@@ -8526,6 +8532,38 @@ ipcMain.handle('org-set-auto-backup', async (_event, enabled) => {
     return { success: false, error: e.message };
   }
 });
+
+// Enterprise policy published by the adapter (GET /policy, authenticated).
+// Shape: { auto_share_default, shared_notes_enabled }. The desktop honors
+// these in the UI; the adapter also enforces the security-relevant half
+// (shared_notes_enabled) server-side.
+async function fetchOrgPolicy() {
+  return adapterFetch('/policy');
+}
+
+ipcMain.handle('org-get-policy', async () => {
+  try {
+    const policy = await fetchOrgPolicy();
+    return { success: true, policy };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+// Seed the local auto-backup toggle from the adapter's auto_share_default
+// on sign-in. "Default only" contract: Python only writes the value when
+// the user has no stored preference, so an explicit user choice is never
+// clobbered on a later sign-in. Fire-and-forget — on any failure the
+// historical default (true) stays in place.
+async function seedOrgAutoBackupDefault() {
+  try {
+    const policy = await fetchOrgPolicy();
+    const def = policy?.auto_share_default !== false; // default true
+    await runPythonScript('simple_recorder.py', ['seed-org-auto-backup', def ? 'True' : 'False']);
+  } catch (e) {
+    sendDebugLog('seed-org-auto-backup-default: ' + (e?.message || e));
+  }
+}
 
 // Single-shot auto-backup gateway. The renderer fires this once per
 // processing-complete event; main does all the gating (signed in + toggle

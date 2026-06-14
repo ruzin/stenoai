@@ -107,6 +107,13 @@ function install({ ipcMain }) {
   // permissive { success: true } — enough to keep invoke() from rejecting.
   const DEFAULTS = {
     'get-app-version': '0.0.0-e2e',
+    // Fires on first paint once signed in (Sidebar + RouteView gate the
+    // Shared notes feature on it). Default to feature-enabled to match the
+    // adapter's default and keep the org-lock spec's UI unchanged.
+    'org-get-policy': {
+      success: true,
+      policy: { auto_share_default: true, shared_notes_enabled: true },
+    },
     'list-meetings': { success: true, meetings: [] },
     'list-folders': { success: true, folders: [] },
     'get-calendar-events': { success: true, events: [] },
