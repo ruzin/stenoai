@@ -12,7 +12,7 @@ import type {
 export const orgKeys = {
   all: ['org'] as const,
   status: () => [...orgKeys.all, 'status'] as const,
-  policy: () => [...orgKeys.all, 'policy'] as const,
+  policy: (orgId?: string) => [...orgKeys.all, 'policy', orgId ?? 'none'] as const,
   meetings: () => [...orgKeys.all, 'meetings'] as const,
   meeting: (id: string) => [...orgKeys.all, 'meeting', id] as const,
   autoBackup: () => [...orgKeys.all, 'auto-backup'] as const,
@@ -60,51 +60,50 @@ export function useOrgSession() {
   return query;
 }
 
-/** Enterprise policy from the adapter (GET /policy). Fetched once the user
- *  is signed in and used to shape the UI: whether to show the Shared notes
- *  tab + cross-folder chat (`shared_notes_enabled`) and the seed value for
- *  the auto-backup toggle (`auto_share_default`, applied on sign-in in main).
- *  The adapter also enforces shared_notes_enabled server-side, so the UI
- *  gate is defense-in-depth, not the only line. Consumers should treat a
- *  not-yet-loaded policy as feature-enabled (`!== false`) to preserve the
- *  historical default while the one-shot fetch is in flight. */
-export function useOrgPolicy(enabled = true) {
+/** Enterprise policy from the adapter (GET /policy). Fetched once the user is
+ *  signed in and used to shape the UI: whether to show the Shared notes tab +
+ *  cross-folder chat (`shared_notes_enabled`) and the seed value for the
+ *  auto-backup toggle (`auto_share_default`, applied on sign-in in main). The
+ *  adapter also enforces shared_notes_enabled server-side, so the UI gate is
+ *  defense-in-depth, not the only line.
+ *
+ *  The query is keyed by `org_id`: a different org is a different cache entry,
+ *  so a *previous* org's cached policy can never satisfy the gate before the
+ *  current org's fetch lands (the stale-cross-org-cache concern). Within one
+ *  org, the cache is reused — reconnecting the same org shows its (correct)
+ *  policy immediately with no refetch flash. */
+export function useOrgPolicy() {
+  const session = useOrgSession();
+  const orgId = session.data?.signedIn ? session.data.orgId : undefined;
   return useQuery({
-    queryKey: orgKeys.policy(),
+    queryKey: orgKeys.policy(orgId),
     queryFn: async () => unwrap(await ipc().org.getPolicy()).policy,
-    enabled,
+    enabled: Boolean(orgId),
     staleTime: 60_000,
   });
 }
 
 /** Gate for the cross-user Shared notes feature (tab + browse routes).
  *
- *  - `enabled` — render the feature. Held `false` while the policy is still
- *    loading so a disabled org never flashes the tab/route on before the
- *    one-shot fetch resolves; flips true only once we positively know the
- *    feature is on (or the fetch errored — fail-open for the UI, since the
- *    adapter still enforces owner-only server-side either way).
- *  - `resolved` — the policy has produced a verdict (success or error).
- *    Callers use this to tell "still loading" apart from "known disabled"
- *    so a redirect only fires once the answer is in, not mid-load.
+ *  - `enabled` — render the feature. Held `false` until the current org's
+ *    policy fetch resolves, so a disabled org never flashes the tab/route on
+ *    before we know; flips true only once we positively know the feature is on
+ *    (or the fetch errored — fail-open for the UI, since the adapter still
+ *    enforces owner-only server-side either way).
+ *  - `resolved` — the policy produced a verdict (success or error) for the
+ *    current org. Callers use this to tell "still loading" apart from "known
+ *    disabled" so a redirect only fires once the answer is in, not mid-load.
  *
- *  Failing closed while loading (rather than the old default-true) trades a
- *  one-frame delay before the tab appears for an enabled org against never
- *  flashing it for a disabled one — the latter is the case that matters.
- *
- *  Keyed on `isFetchedAfterMount`, not `isSuccess`: the policy query cache is
- *  shared and survives sign-out (invalidate keeps stale data until refetch),
- *  so a *previous* org's cached "enabled" could otherwise satisfy the gate
- *  before this session's fetch lands — flashing the tab for an org that
- *  disabled it. isFetchedAfterMount is only true once a fetch has completed
- *  since this observer mounted, so stale cross-session cache can't leak in. */
+ *  Because the query is keyed per-org (see useOrgPolicy), `isSuccess` here can
+ *  only mean *this* org's policy resolved — there's no cross-org cache to leak
+ *  a stale "enabled" through, so the simple success check is both correct and
+ *  reliable (an over-strict isFetchedAfterMount check hid the tab even for
+ *  enabled orgs whose policy was already cache-fresh). */
 export function useSharedNotesGate(signedIn: boolean): { enabled: boolean; resolved: boolean } {
-  const policy = useOrgPolicy(signedIn);
-  const resolved = !signedIn || policy.isError || policy.isFetchedAfterMount;
+  const policy = useOrgPolicy();
+  const resolved = !signedIn || policy.isSuccess || policy.isError;
   const enabled =
-    signedIn &&
-    (policy.isError ||
-      (policy.isFetchedAfterMount && policy.data?.shared_notes_enabled !== false));
+    signedIn && resolved && policy.data?.shared_notes_enabled !== false;
   return { enabled, resolved };
 }
 

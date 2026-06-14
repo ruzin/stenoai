@@ -109,10 +109,14 @@ function install({ ipcMain }) {
     'get-app-version': '0.0.0-e2e',
     // Fires on first paint once signed in (Sidebar + RouteView gate the
     // Shared notes feature on it). Default to feature-enabled to match the
-    // adapter's default and keep the org-lock spec's UI unchanged.
+    // adapter's default and keep the org-lock spec's UI unchanged. A spec can
+    // drive the hidden path by launching with STENOAI_E2E_SHARED_NOTES=0.
     'org-get-policy': {
       success: true,
-      policy: { auto_share_default: true, shared_notes_enabled: true },
+      policy: {
+        auto_share_default: true,
+        shared_notes_enabled: process.env.STENOAI_E2E_SHARED_NOTES !== '0',
+      },
     },
     'list-meetings': { success: true, meetings: [] },
     'list-folders': { success: true, folders: [] },
