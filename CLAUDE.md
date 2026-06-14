@@ -71,7 +71,9 @@ at repo-root `e2e/` (config, fixtures, specs); run it from `app/`.
     ASR, no real model), and the calendar/notifications pair `calendar-auth.t2`
     (auth-status from a local token file + auto-detect-meetings toggle) /
     `notifications.t2` (the notifications_enabled toggle gating the note-ready /
-    silence notifications via the `shown` signal) (all model-free, run in `t2-macos` /
+    silence notifications via the `shown` signal), and the onboarding/updates pair
+    `setup-check.t2` (the setup-wizard allGood + checks contract) / `announcements.t2`
+    (the local announcements feed + version stamp) (all model-free, run in `t2-macos` /
     `t2-windows`); `transcription-pipeline.t2` and `honest-failure.t2` (tagged
     `@pipeline`, run in `t2-pipeline-macos` / `t2-pipeline-windows`). Engine selection
     for `@pipeline` specs is shared via `e2e/fixtures/engine.ts`; model-free T2 setup
