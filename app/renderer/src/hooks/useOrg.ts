@@ -77,13 +77,26 @@ export function useOrgPolicy(enabled = true) {
   });
 }
 
-/** Convenience boolean for the most common gate: is the cross-user Shared
- *  notes feature available? Defaults to true while the policy loads or when
- *  signed out, matching the adapter's default and avoiding a hide flicker
- *  for the common (enabled) case. */
-export function useSharedNotesEnabled(signedIn: boolean): boolean {
+/** Gate for the cross-user Shared notes feature (tab + browse routes).
+ *
+ *  - `enabled` — render the feature. Held `false` while the policy is still
+ *    loading so a disabled org never flashes the tab/route on before the
+ *    one-shot fetch resolves; flips true only once we positively know the
+ *    feature is on (or the fetch errored — fail-open for the UI, since the
+ *    adapter still enforces owner-only server-side either way).
+ *  - `resolved` — the policy has produced a verdict (success or error).
+ *    Callers use this to tell "still loading" apart from "known disabled"
+ *    so a redirect only fires once the answer is in, not mid-load.
+ *
+ *  Failing closed while loading (rather than the old default-true) trades a
+ *  one-frame delay before the tab appears for an enabled org against never
+ *  flashing it for a disabled one — the latter is the case that matters. */
+export function useSharedNotesGate(signedIn: boolean): { enabled: boolean; resolved: boolean } {
   const policy = useOrgPolicy(signedIn);
-  return policy.data?.shared_notes_enabled !== false;
+  const resolved = !signedIn || policy.isSuccess || policy.isError;
+  const enabled =
+    signedIn && resolved && policy.data?.shared_notes_enabled !== false;
+  return { enabled, resolved };
 }
 
 // Sign-in / sign-out auto-switches the Python-side ai_provider (between
