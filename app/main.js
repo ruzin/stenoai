@@ -5693,6 +5693,31 @@ ipcMain.handle('set-user-name', async (event, name) => {
 
 // AI Provider IPC handlers
 
+// One-time forward-migration of an app-managed credential from its pre-fix
+// hardcoded location. Before the getUserDataDir() path fix, the cloud key and
+// calendar tokens were written to a hardcoded ~/Library/Application Support
+// literal — correct on macOS (so this is a NO-OP there: legacy === current), but
+// a bogus dir on Windows. If a user configured cloud/calendar on an older Windows
+// build, copy that file forward to the current path so they don't have to
+// re-enter. safeStorage/DPAPI is user-scoped (not path-scoped), so the copied
+// ciphertext still decrypts. Best-effort + non-destructive (copy, leave legacy).
+//
+// HARD GUARD: never run under the STENOAI_USER_DATA_DIR e2e override — otherwise
+// a test would pull the dev's REAL ~/Library credential into the temp dir.
+function migrateLegacyCredentialFile(currentPath, filename) {
+  if (process.env.STENOAI_USER_DATA_DIR) return;
+  if (fs.existsSync(currentPath)) return;
+  const legacy = path.join(os.homedir(), 'Library', 'Application Support', 'stenoai', filename);
+  if (legacy === currentPath || !fs.existsSync(legacy)) return;
+  try {
+    fs.mkdirSync(path.dirname(currentPath), { recursive: true });
+    fs.copyFileSync(legacy, currentPath);
+    console.log(`Migrated ${filename} forward from the legacy path`);
+  } catch (e) {
+    console.error(`Legacy ${filename} migration failed (best-effort):`, e.message);
+  }
+}
+
 function getCloudKeyPath() {
   // Use getUserDataDir() like every other app-managed file (.org-session,
   // .pre-adapter-provider, config.json). The old hardcoded
@@ -5721,6 +5746,7 @@ function saveCloudApiKey(key) {
 function loadCloudApiKey() {
   try {
     const keyPath = getCloudKeyPath();
+    migrateLegacyCredentialFile(keyPath, '.cloud-api-key');
     if (!fs.existsSync(keyPath)) return null;
     const encrypted = fs.readFileSync(keyPath);
     return safeStorage.decryptString(encrypted);
@@ -6671,6 +6697,7 @@ function saveGoogleTokens(tokens) {
 function loadGoogleTokens() {
   try {
     const tokenPath = getTokenFilePath();
+    migrateLegacyCredentialFile(tokenPath, '.google-tokens');
     if (!fs.existsSync(tokenPath)) return null;
     const encrypted = fs.readFileSync(tokenPath);
     const decrypted = safeStorage.decryptString(encrypted);
@@ -6718,6 +6745,7 @@ function saveOutlookTokens(tokens) {
 function loadOutlookTokens() {
   try {
     const tokenPath = getOutlookTokenFilePath();
+    migrateLegacyCredentialFile(tokenPath, '.outlook-tokens');
     if (!fs.existsSync(tokenPath)) return null;
     const encrypted = fs.readFileSync(tokenPath);
     const decrypted = safeStorage.decryptString(encrypted);
