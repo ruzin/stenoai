@@ -93,6 +93,10 @@ test('@contract reprocess builds a transcript-bearing prompt and parses the repl
     expect(prompt).toContain('we ship the release on Friday');
     expect(prompt).toContain('budget is fifty thousand');
 
+    // Exactly one summarise call (regenTitle=false → no separate title call) —
+    // pins that reprocess didn't double-summarise.
+    expect(ollama.chatCalls()).toBe(1);
+
     // Keystone: the real user-data dir is byte-for-byte untouched.
     expect(fileSig(realUserDataDir())).toBe(realDirBefore);
   } finally {
