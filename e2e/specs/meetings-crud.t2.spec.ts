@@ -87,6 +87,7 @@ test('folder membership: add/remove a meeting writes the top-level folders array
   launchApp,
   userDataDir,
 }) => {
+  const realDirBefore = fileSig(realUserDataDir());
   const file = writeMeetingSummary(userDataDir, 'gamma', { name: 'Gamma Planning' });
   const { page } = await launchApp();
 
@@ -119,12 +120,16 @@ test('folder membership: add/remove a meeting writes the top-level folders array
   );
   expect(remove.success).toBe(true);
   await expect.poll(() => readSummary(file).folders).not.toContain(folderId);
+
+  // Keystone: the real user-data dir is byte-for-byte untouched.
+  expect(fileSig(realUserDataDir())).toBe(realDirBefore);
 });
 
 test('save-meeting-notes returns a written path with the note body', async ({
   launchApp,
   userDataDir,
 }) => {
+  const realDirBefore = fileSig(realUserDataDir());
   writeMeetingSummary(userDataDir, 'delta', { name: 'Delta Notes' });
   const { page } = await launchApp();
 
@@ -149,4 +154,8 @@ test('save-meeting-notes returns a written path with the note body', async ({
     // file lingers in the build tree and accumulates across retries/runs.
     if (res.path) rmSync(res.path, { force: true });
   }
+
+  // Keystone: save-notes escapes to the bundle dir (the bug above), but the real
+  // user-data dir must still be byte-for-byte untouched.
+  expect(fileSig(realUserDataDir())).toBe(realDirBefore);
 });
