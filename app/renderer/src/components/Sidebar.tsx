@@ -15,7 +15,7 @@ import { navigate, rememberNonSettingsRoute, toggleSettings } from '@/lib/router
 import { cn, shortcut } from '@/lib/utils';
 import { LucideIcon, IconPicker } from '@/components/IconPicker';
 import { useUpdateFolderIcon } from '@/hooks/useFolders';
-import { useOrgLogout, useOrgSession } from '@/hooks/useOrg';
+import { useOrgLogout, useOrgSession, useSharedNotesGate } from '@/hooks/useOrg';
 
 export interface SidebarMeeting {
   summaryFile: string;
@@ -178,6 +178,10 @@ export function Sidebar({
   const orgSession = useOrgSession();
   const orgLogout = useOrgLogout();
   const orgSignedIn = orgSession.data?.signedIn ?? false;
+  // Enterprise can hide the Shared notes feature (tab + cross-folder chat).
+  // `enabled` stays false until policy resolves, so the tab doesn't flash in
+  // then vanish for an org that has the feature turned off.
+  const sharedNotes = useSharedNotesGate(orgSignedIn);
   // Malformed % escapes throw URIError. Guard so a bad route can't crash
   // the entire sidebar render.
   const activeFolderId = React.useMemo<string | null>(() => {
@@ -401,7 +405,7 @@ export function Sidebar({
             <span className="flex-1 truncate">Chat</span>
           </button>
 
-          {orgSignedIn && (
+          {sharedNotes.enabled && (
             <button
               type="button"
               className={cn('sb-row', isOrgSharedActive && 'active')}

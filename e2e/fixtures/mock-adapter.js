@@ -43,6 +43,13 @@ function startMockAdapter() {
               org_id: 'org-e2e',
             }),
           );
+        } else if (req.method === 'GET' && req.url === '/policy') {
+          // Enterprise policy the desktop fetches on sign-in (auto-share
+          // seed) and to gate the Shared notes feature. Defaults here.
+          res.writeHead(200, { 'content-type': 'application/json' });
+          res.end(
+            JSON.stringify({ auto_share_default: true, shared_notes_enabled: true }),
+          );
         } else {
           res.writeHead(404, { 'content-type': 'application/json' });
           res.end(JSON.stringify({ detail: 'mock: not found' }));

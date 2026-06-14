@@ -8092,6 +8092,9 @@ ipcMain.handle('org-login', async (_event, payload) => {
     markOrgKnown();
     // Fire-and-forget — sign-in shouldn't wait on a config write.
     autoSwitchToAdapterOnSignIn().catch(() => {});
+    // Seed the auto-backup toggle from the org's auto_share_default (only
+    // if the user hasn't set it). Fire-and-forget for the same reason.
+    seedOrgAutoBackupDefault().catch(() => {});
     return {
       success: true,
       signedIn: true,
@@ -8286,6 +8289,9 @@ ipcMain.handle('org-sso-google-start', async (_event, payload) => {
     markOrgKnown();
     // Fire-and-forget — sign-in shouldn't wait on a config write.
     autoSwitchToAdapterOnSignIn().catch(() => {});
+    // Seed the auto-backup toggle from the org's auto_share_default (only
+    // if the user hasn't set it). Fire-and-forget for the same reason.
+    seedOrgAutoBackupDefault().catch(() => {});
     return {
       success: true,
       signedIn: true,
@@ -8527,6 +8533,38 @@ ipcMain.handle('org-set-auto-backup', async (_event, enabled) => {
   }
 });
 
+// Enterprise policy published by the adapter (GET /policy, authenticated).
+// Shape: { auto_share_default, shared_notes_enabled }. The desktop honors
+// these in the UI; the adapter also enforces the security-relevant half
+// (shared_notes_enabled) server-side.
+async function fetchOrgPolicy() {
+  return adapterFetch('/policy');
+}
+
+ipcMain.handle('org-get-policy', async () => {
+  try {
+    const policy = await fetchOrgPolicy();
+    return { success: true, policy };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+// Seed the local auto-backup toggle from the adapter's auto_share_default
+// on sign-in. "Default only" contract: Python only writes the value when
+// the user has no stored preference, so an explicit user choice is never
+// clobbered on a later sign-in. Fire-and-forget — on any failure the
+// historical default (true) stays in place.
+async function seedOrgAutoBackupDefault() {
+  try {
+    const policy = await fetchOrgPolicy();
+    const def = policy?.auto_share_default !== false; // default true
+    await runPythonScript('simple_recorder.py', ['seed-org-auto-backup', def ? 'True' : 'False']);
+  } catch (e) {
+    sendDebugLog('seed-org-auto-backup-default: ' + (e?.message || e));
+  }
+}
+
 // Single-shot auto-backup gateway. The renderer fires this once per
 // processing-complete event; main does all the gating (signed in + toggle
 // on + not previously attempted) so the renderer doesn't have to chain
@@ -8544,6 +8582,19 @@ ipcMain.handle('org-try-auto-backup', async (_event, payload) => {
 
     const session = loadOrgSession();
     if (!session) return { attempted: false, reason: 'not-signed-in' };
+
+    // Close the sign-in seeding race (cubic P1): the sign-in handler seeds
+    // the auto-backup default fire-and-forget, so a recording that finishes
+    // right after sign-in could reach this gate before the org's
+    // auto_share_default has been written — and the read below treats an
+    // unset pref as enabled (!== false), which would auto-share against an
+    // org policy of auto_share_default=false. seedOrgAutoBackupDefault is
+    // idempotent (writes only when no pref exists, swallows its own errors),
+    // so awaiting it here deterministically materialises the policy default
+    // before we decide. The adapter is necessarily reachable on the path
+    // that actually uploads, so this fetch is the same reachability the
+    // share itself needs.
+    await seedOrgAutoBackupDefault();
 
     // Fail closed: any error / unparseable output treats the toggle as
     // disabled. A privacy + sharing setting should never default ON via a

@@ -134,6 +134,33 @@ class ConfigAutoDetectMeetingsTests(unittest.TestCase):
             self.assertTrue(reloaded.get_auto_detect_meetings_enabled())
 
 
+class ConfigOrgAutoBackupTests(unittest.TestCase):
+    def test_default_auto_backup_is_true(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config = Config(config_path=Path(tmp_dir) / "config.json")
+            self.assertTrue(config.get_org_auto_backup_enabled())
+
+    def test_seed_applies_default_when_no_preference(self):
+        """First sign-in seeds the org's auto_share_default into config."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "config.json"
+            config = Config(config_path=path)
+            self.assertFalse(config.seed_org_auto_backup_default(False))
+            self.assertFalse(config.get_org_auto_backup_enabled())
+            reloaded = Config(config_path=path)
+            self.assertFalse(reloaded.get_org_auto_backup_enabled())
+
+    def test_seed_does_not_clobber_explicit_user_choice(self):
+        """Once the user sets the toggle, a later seed must not overwrite it —
+        the enterprise sets the default only, the user's choice wins."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config = Config(config_path=Path(tmp_dir) / "config.json")
+            self.assertTrue(config.set_org_auto_backup_enabled(True))
+            # Org default is False, but the user already chose True.
+            self.assertTrue(config.seed_org_auto_backup_default(False))
+            self.assertTrue(config.get_org_auto_backup_enabled())
+
+
 class ConfigKeepRecordingsTests(unittest.TestCase):
     def test_default_keep_recordings_is_false(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

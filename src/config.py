@@ -554,6 +554,18 @@ class Config:
         self._config["org_auto_backup_enabled"] = enabled
         return self._save()
 
+    def seed_org_auto_backup_default(self, default: bool) -> bool:
+        """Seed the auto-backup preference from the enterprise adapter's
+        `auto_share_default` policy, but ONLY if the user has no stored
+        preference yet. This is the "set the default only" contract: the
+        org decides the initial on/off state for a brand-new user, after
+        which any explicit toggle by the user wins and is never clobbered
+        by a later sign-in. Returns the effective value."""
+        if "org_auto_backup_enabled" not in self._config:
+            self._config["org_auto_backup_enabled"] = bool(default)
+            self._save()
+        return self._config["org_auto_backup_enabled"]
+
 
     def get_keep_recordings(self) -> bool:
         """Get whether audio recordings should be kept after processing."""

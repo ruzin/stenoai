@@ -9,6 +9,7 @@ import { Home } from '@/routes/Home';
 import { MeetingDetail } from '@/routes/MeetingDetail';
 import { FolderDetail } from '@/routes/FolderDetail';
 import { OrgShared, OrgSharedDetail } from '@/routes/OrgShared';
+import { useOrgSession, useSharedNotesGate } from '@/hooks/useOrg';
 import { Recording } from '@/routes/Recording';
 import { Processing, ProcessingDock } from '@/routes/Processing';
 import { AskBar, TranscriptBar } from '@/components/AskBar';
@@ -229,6 +230,24 @@ function LiveRecordingDock() {
 }
 
 function RouteView({ route }: { route: string }) {
+  // Enterprise can hide the Shared notes feature. Gate the /org/shared
+  // routes on it so a stale nav or deep-link can't reach the browse view
+  // or its detail (the detail is what wires the cross-folder AskBar chat).
+  const orgSession = useOrgSession();
+  const sharedNotes = useSharedNotesGate(orgSession.data?.signedIn ?? false);
+
+  // If we're sitting on a Shared notes route that policy has now resolved as
+  // disabled, redirect to Home rather than rendering Home in place — keeps
+  // the URL and content in agreement (and the sidebar active-state correct).
+  // Gated on `resolved` so this only fires once we *know* it's disabled, not
+  // during the initial load. Effect, never navigate() during render.
+  const onOrgSharedRoute = route === '/org/shared' || route.startsWith('/org/shared/');
+  React.useEffect(() => {
+    if (onOrgSharedRoute && sharedNotes.resolved && !sharedNotes.enabled) {
+      navigate('/');
+    }
+  }, [onOrgSharedRoute, sharedNotes.resolved, sharedNotes.enabled]);
+
   if (route === '/dev' || route.startsWith('/dev/')) return <Sandbox />;
   // Match deep-links like /settings?tab=organisation too — the Settings
   // component reads the tab param off the route on mount.
@@ -249,8 +268,11 @@ function RouteView({ route }: { route: string }) {
     const folderId = safeDecode(route.slice('/folders/'.length));
     return <FolderDetail folderId={folderId} />;
   }
-  if (route === '/org/shared') return <OrgShared />;
-  if (route.startsWith('/org/shared/')) {
+  if (route === '/org/shared' || route.startsWith('/org/shared/')) {
+    // Not yet known-enabled (still loading, or disabled): show Home. The
+    // effect above redirects to '/' once the policy resolves to disabled.
+    if (!sharedNotes.enabled) return <Home mode="home" />;
+    if (route === '/org/shared') return <OrgShared />;
     const id = safeDecode(route.slice('/org/shared/'.length));
     return <OrgSharedDetail id={id} />;
   }

@@ -3463,6 +3463,18 @@ def set_org_auto_backup(enabled):
 
 
 @cli.command()
+@click.argument('default', type=bool)
+def seed_org_auto_backup(default):
+    """Seed org auto-backup from the adapter's auto_share_default policy,
+    only when the user has no stored preference yet (set-the-default-only)."""
+    from src.config import get_config
+
+    config = get_config()
+    effective = config.seed_org_auto_backup_default(default)
+    print(json.dumps({"success": True, "org_auto_backup_enabled": effective}))
+
+
+@cli.command()
 @click.argument('enabled', type=bool)
 def set_dock_icon(enabled):
     """Set hide-dock-icon preference (True/False)"""
