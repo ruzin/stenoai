@@ -62,8 +62,10 @@ at repo-root `e2e/` (config, fixtures, specs); run it from `app/`.
     active engine's model **skips** it (loudly) rather than failing.
   - **Current specs:** `org-lock.t1`, `shared-notes-policy.t1`, `org-lock-lifecycle.t2`,
     `config-corruption.t2`, the core-loop trio `recording-lifecycle.t2` /
-    `meetings-crud.t2` / `folders-crud.t2`, and the config trio `settings-roundtrip.t2` /
-    `ai-provider.t2` / `model-management.t2` (all model-free, run in `t2-macos` /
+    `meetings-crud.t2` / `folders-crud.t2`, the config trio `settings-roundtrip.t2` /
+    `ai-provider.t2` / `model-management.t2`, and the chat/org pair `chat-sessions.t2`
+    (local session persistence) / `org-crud.t2` (meeting CRUD + share/unshare + ai-chat
+    against the stateful `mock-adapter.js`) (all model-free, run in `t2-macos` /
     `t2-windows`); `transcription-pipeline.t2` and `honest-failure.t2` (tagged
     `@pipeline`, run in `t2-pipeline-macos` / `t2-pipeline-windows`). Engine selection
     for `@pipeline` specs is shared via `e2e/fixtures/engine.ts`; model-free T2 setup
