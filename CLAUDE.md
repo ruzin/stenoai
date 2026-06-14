@@ -65,7 +65,10 @@ at repo-root `e2e/` (config, fixtures, specs); run it from `app/`.
     `meetings-crud.t2` / `folders-crud.t2`, the config trio `settings-roundtrip.t2` /
     `ai-provider.t2` / `model-management.t2`, and the chat/org pair `chat-sessions.t2`
     (local session persistence) / `org-crud.t2` (meeting CRUD + share/unshare + ai-chat
-    against the stateful `mock-adapter.js`) (all model-free, run in `t2-macos` /
+    against the stateful `mock-adapter.js`), plus `summarize-contract.t2` (a
+    deterministic `@contract` driving `reprocess` through the capturing
+    `mock-ollama.js` to assert the summariser's prompt-build + response-parse — no
+    ASR, no real model) (all model-free, run in `t2-macos` /
     `t2-windows`); `transcription-pipeline.t2` and `honest-failure.t2` (tagged
     `@pipeline`, run in `t2-pipeline-macos` / `t2-pipeline-windows`). Engine selection
     for `@pipeline` specs is shared via `e2e/fixtures/engine.ts`; model-free T2 setup
