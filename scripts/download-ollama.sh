@@ -4,7 +4,7 @@
 
 set -e
 
-OLLAMA_VERSION="v0.17.5"
+OLLAMA_VERSION="v0.30.8"
 BIN_DIR="$(cd "$(dirname "$0")/.." && pwd)/bin"
 
 # --- Download ffmpeg ---

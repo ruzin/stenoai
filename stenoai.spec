@@ -197,15 +197,18 @@ for pkg in _DYLIB_PKGS:
 # lib/ollama/ that must be preserved relative to ollama.exe.
 import os
 
-# Ollama's Windows bundle ships GPU runner libs under lib/ollama/{cuda_v12,
-# cuda_v13,vulkan,rocm}. They're NVIDIA-/discrete-GPU-only and add ~2.7 GB
-# (cuda_v12/ggml-cuda.dll alone is 1.6 GB) — dead weight on the CPU-only path:
+# Ollama's Windows bundle ships GPU runner libs under lib/ollama/. As of
+# v0.30.8 that's lib/ollama/{cuda_v12,cuda_v13,vulkan} (rocm is no longer
+# shipped). They're NVIDIA-/discrete-GPU-only and add multiple GB
+# (each cuda_v*/ggml-cuda.dll is ~1.6 GB) — dead weight on the CPU-only path:
 # transcription is ONNX-CPU, and the bundled Ollama summarises on the CPU
-# runner (ggml-cpu-*.dll / ggml-base.dll, which we keep). Skipping them takes
-# the Windows download from ~3.1 GB to ~0.6 GB and lets the NSIS installer
-# build (makensis can't mmap a multi-GB app .7z). GPU acceleration for NVIDIA
-# users is a tracked follow-up (separate build/pack). No-op on macOS — these
-# dirs don't exist there.
+# runner (ggml-cpu-*.dll / ggml-base.dll, which we keep). Skipping them keeps
+# the Windows bundle small enough for the NSIS installer to build (makensis
+# can't mmap a multi-GB app .7z). GPU acceleration for NVIDIA users is a
+# tracked follow-up (separate build/pack). The substring markers match any
+# cuda_vNN dir; rocm is kept as a defensive marker in case a future Ollama
+# re-adds it. No-op on macOS — these dirs don't exist there (Metal is built
+# into the darwin binary + its mlx_metal_v3/ runner, which we keep).
 _OLLAMA_GPU_MARKERS = ('lib/ollama/cuda', 'lib/ollama/rocm', 'lib/ollama/vulkan')
 ollama_bin_dir = os.path.join(SPECPATH, 'bin')
 if os.path.exists(ollama_bin_dir):
