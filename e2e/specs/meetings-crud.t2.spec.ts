@@ -1,7 +1,7 @@
 import { test, expect } from '../fixtures/electron';
 import { realUserDataDir, fileSig } from '../fixtures/real-user-data';
 import { writeMeetingSummary } from '../fixtures/user-config';
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync, existsSync, rmSync } from 'fs';
 
 /**
  * T2 — meetings CRUD + folder membership. Pre-seeds known `*_summary.json` docs
@@ -133,13 +133,20 @@ test('save-meeting-notes returns a written path with the note body', async ({
     (n) => (window as StenoWindow).stenoai.meetings.saveNotes('Delta Notes', n),
     note,
   );
-  expect(res.success).toBe(true);
-  // NOTE: save-meeting-notes currently writes to getBackendCwd()/_internal/output
-  // (the bundle dir), NOT the user-data output dir — so we assert via the returned
-  // path rather than the temp dir. That location mismatch (notes saved where the
-  // Python pipeline doesn't read them, into a read-only bundle when packaged) is a
-  // pre-existing bug tracked separately, out of scope for this coverage PR.
-  expect(res.path).toBeTruthy();
-  expect(existsSync(res.path!)).toBe(true);
-  expect(readFileSync(res.path!, 'utf8')).toBe(note);
+  try {
+    expect(res.success).toBe(true);
+    // NOTE: save-meeting-notes currently writes to getBackendCwd()/_internal/output
+    // (the bundle dir), NOT the user-data output dir — so we assert via the returned
+    // path rather than the temp dir. That location mismatch (notes saved where the
+    // Python pipeline doesn't read them, into a read-only bundle when packaged) is a
+    // pre-existing bug tracked separately, out of scope for this coverage PR.
+    expect(res.path).toBeTruthy();
+    expect(existsSync(res.path!)).toBe(true);
+    expect(readFileSync(res.path!, 'utf8')).toBe(note);
+  } finally {
+    // This is the one write in the PR that escapes STENOAI_USER_DATA_DIR (per the
+    // bug above). Clean it up so the suite stays hermetic — otherwise the note
+    // file lingers in the build tree and accumulates across retries/runs.
+    if (res.path) rmSync(res.path, { force: true });
+  }
 });
