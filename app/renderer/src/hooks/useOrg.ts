@@ -90,12 +90,21 @@ export function useOrgPolicy(enabled = true) {
  *
  *  Failing closed while loading (rather than the old default-true) trades a
  *  one-frame delay before the tab appears for an enabled org against never
- *  flashing it for a disabled one — the latter is the case that matters. */
+ *  flashing it for a disabled one — the latter is the case that matters.
+ *
+ *  Keyed on `isFetchedAfterMount`, not `isSuccess`: the policy query cache is
+ *  shared and survives sign-out (invalidate keeps stale data until refetch),
+ *  so a *previous* org's cached "enabled" could otherwise satisfy the gate
+ *  before this session's fetch lands — flashing the tab for an org that
+ *  disabled it. isFetchedAfterMount is only true once a fetch has completed
+ *  since this observer mounted, so stale cross-session cache can't leak in. */
 export function useSharedNotesGate(signedIn: boolean): { enabled: boolean; resolved: boolean } {
   const policy = useOrgPolicy(signedIn);
-  const resolved = !signedIn || policy.isSuccess || policy.isError;
+  const resolved = !signedIn || policy.isError || policy.isFetchedAfterMount;
   const enabled =
-    signedIn && resolved && policy.data?.shared_notes_enabled !== false;
+    signedIn &&
+    (policy.isError ||
+      (policy.isFetchedAfterMount && policy.data?.shared_notes_enabled !== false));
   return { enabled, resolved };
 }
 
