@@ -641,6 +641,37 @@ function resolveRecordingsDir() {
   return dir;
 }
 
+// Copy an externally-imported audio file into Steno's own recordings/ dir
+// before it enters the processing pipeline. process-streaming deletes the
+// source after a successful transcribe whenever keep_recordings is off (the
+// default), so transcribing an import in place would silently delete the
+// user's original (e.g. ~/Desktop/interview.m4a). Copying first means the
+// unlink only ever touches our own copy. The collision-safe filename also
+// stops two imports that share a basename from overwriting each other's
+// {stem}_summary.md. The displayed title comes from the caller's sessionName,
+// not this (possibly de-duplicated) filename, so the user still sees "interview".
+async function copyImportIntoRecordings(srcPath) {
+  const dir = resolveRecordingsDir();
+  const ext = path.extname(srcPath);
+  const stem = path.basename(srcPath, ext);
+  // COPYFILE_EXCL makes each attempt atomic: the copy fails with EEXIST rather
+  // than overwriting an existing file, so two concurrent imports that share a
+  // basename can't clobber each other. (An existsSync-then-copyFile check would
+  // have a TOCTOU window where both pick the same dest before either creates
+  // it.) On EEXIST we bump the suffix and retry. On APFS the copy is a
+  // near-instant copy-on-write clone.
+  for (let n = 0; ; n += 1) {
+    const dest = path.join(dir, n === 0 ? `${stem}${ext}` : `${stem}-${n}${ext}`);
+    try {
+      await fs.promises.copyFile(srcPath, dest, fs.constants.COPYFILE_EXCL);
+      return dest;
+    } catch (err) {
+      if (err.code === 'EEXIST') continue;
+      throw err;
+    }
+  }
+}
+
 /**
  * Validate that a file path is within allowed directories (security)
  * Prevents path traversal attacks by ensuring files are only accessed
@@ -1477,11 +1508,20 @@ ipcMain.handle('get-status', handleGetStatus);
 
 ipcMain.handle('process-recording', async (event, audioFile, sessionName) => {
   try {
-    const env = getAiEnv();
-    const result = await runPythonScript('simple_recorder.py', ['process', audioFile, '--name', sessionName], false, env);
-    trackEvent('transcription_completed', { success: true });
-    trackEvent('summarization_completed', { success: true });
-    return { success: true, result: result };
+    // Route imported files through the same processing queue a stopped
+    // recording uses, instead of a blocking synchronous run. The import then
+    // surfaces as a processing row (badge + auto-refresh on completion) in
+    // the meeting list and survives the trigger popover closing, rather than
+    // showing no progress until it finishes. addToProcessingQueue spawns
+    // process-streaming, serialises behind any in-flight job, and emits
+    // 'processing-complete' when done.
+    //
+    // Copy the import into our recordings/ dir first: process-streaming
+    // unlinks the source after a successful transcribe (keep_recordings
+    // defaults off), so queueing the user's original path would delete it.
+    const queuedFile = await copyImportIntoRecordings(audioFile);
+    addToProcessingQueue(queuedFile, sessionName, null);
+    return { success: true };
   } catch (error) {
     trackEvent('error_occurred', { error_type: 'process_recording' });
     return { success: false, error: error.message };
@@ -1497,11 +1537,21 @@ ipcMain.handle('test-system', async () => {
   }
 });
 
+// Audio/video container formats the backend (librosa/ffmpeg) can decode.
+// MUST stay in sync with AUDIO_EXTENSIONS in
+// app/renderer/src/hooks/useImportAudio.ts — the picker (here) and drag-drop
+// (there) live in different processes, so the list is mirrored rather than
+// shared. Keep both edits together.
+const IMPORT_AUDIO_EXTENSIONS = [
+  'wav', 'mp3', 'm4a', 'aac', 'webm', 'aiff', 'aif', 'flac', 'ogg', 'caf',
+  'mp4', 'mov',
+];
+
 ipcMain.handle('select-audio-file', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
     properties: ['openFile'],
     filters: [
-      { name: 'Audio Files', extensions: ['wav', 'mp3', 'm4a', 'aac', 'webm'] }
+      { name: 'Audio Files', extensions: IMPORT_AUDIO_EXTENSIONS }
     ]
   });
   
@@ -2248,7 +2298,11 @@ ipcMain.handle('get-queue-status', async () => {
     currentReprocesses: Array.from(activeReprocessJobs.values()),
     hasRecording: currentRecordingProcess !== null || systemAudioRecordingActive,
     isPaused: recordingRuntimeState.isPaused,
-    elapsedSeconds: (currentRecordingProcess !== null || systemAudioRecordingActive) ? getRecordingElapsedSeconds() : 0,
+    elapsedSeconds: (currentRecordingProcess !== null || systemAudioRecordingActive)
+      ? getRecordingElapsedSeconds()
+      : (isProcessing && currentProcessingStartedAtMs
+          ? Math.floor((Date.now() - currentProcessingStartedAtMs) / 1000)
+          : 0),
     sessionName: currentRecordingSessionName
   };
 });
@@ -2680,6 +2734,10 @@ let liveTranscribeSessionName = null;
 let liveTranscribeStdoutBuf = '';
 let isProcessing = false;
 let currentProcessingJob = null;
+// Wall-clock start of the in-flight queue job, so the processing timer advances
+// for jobs with no recording elapsed (e.g. an imported file). Recordings keep
+// using their draft start time on the renderer side.
+let currentProcessingStartedAtMs = null;
 // Reprocess runs as a side-channel from the main processing queue (different
 // Python command, started directly from the reprocess-meeting IPC). Tracked
 // here so the renderer can show "this note is being regenerated" on Home
@@ -2843,7 +2901,8 @@ async function processNextInQueue() {
   
   isProcessing = true;
   currentProcessingJob = processingQueue.shift();
-  
+  currentProcessingStartedAtMs = Date.now();
+
   console.log(`🔄 Processing queued job: ${currentProcessingJob.sessionName}`);
   
   try {
@@ -3034,6 +3093,7 @@ async function processNextInQueue() {
   } finally {
     isProcessing = false;
     currentProcessingJob = null;
+    currentProcessingStartedAtMs = null;
     // Process next job in queue
     setTimeout(processNextInQueue, 1000);
   }
@@ -5429,15 +5489,27 @@ ipcMain.handle('show-silence-auto-stop-notification', async (_event, payload) =>
 ipcMain.handle('show-note-ready-notification', async (_event, payload) => {
   try {
     if (!(await notificationsEnabled())) return { success: true };
-    const { title, failed } = payload || {};
-    // Be honest when transcription crashed: don't tell the user their note
-    // is "ready". The recording was preserved (not deleted) and the note
-    // explains the failure on open.
+    const { title, failed, hardFailure } = payload || {};
+    // Three honest states:
+    //  - hardFailure: processing crashed (or an import never enqueued) so no
+    //    note was written — there's nothing to "open". Keep the message
+    //    neutral: it's shared by recording crashes, import crashes and import
+    //    enqueue failures, and over-promising ("audio kept") is either hollow
+    //    (no UI surfaces the orphaned audio) or wrong (enqueue failure).
+    //  - failed: a graceful transcription failure DID write a marked note —
+    //    the recording was preserved and the note explains it on open.
+    //  - otherwise: the note is genuinely ready.
     const notif = new Notification({
-      title: failed ? 'Transcription failed' : 'Note ready',
-      body: failed
-        ? 'Your recording was preserved — open the note for details.'
-        : (title || 'Your note has finished processing'),
+      title: hardFailure
+        ? 'Processing failed'
+        : failed
+          ? 'Transcription failed'
+          : 'Note ready',
+      body: hardFailure
+        ? `Steno couldn't process ${title ? `"${title}"` : 'your note'}.`
+        : failed
+          ? 'Your recording was preserved — open the note for details.'
+          : (title || 'Your note has finished processing'),
     });
     notif.on('click', () => {
       if (mainWindow && !mainWindow.isDestroyed()) {

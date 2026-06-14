@@ -1030,40 +1030,6 @@ def stop():
         sys.exit(1)
 
 
-@cli.command()
-@click.argument('audio_file', default='')
-@click.option('--name', '-n', default='Recording', help='Session name for the recording')
-@click.option('--notes', default=None, help='Path to user notes file')
-def process(audio_file, name, notes):
-    """Process audio file: transcribe + summarize"""
-
-    async def run_process():
-        recorder = SimpleRecorder()
-
-        # Read user notes if provided
-        notes_text = None
-        if notes:
-            try:
-                notes_text = Path(notes).read_text(encoding='utf-8').strip()
-                if notes_text:
-                    logger.info(f"Loaded user notes ({len(notes_text)} chars)")
-            except Exception as e:
-                logger.warning(f"Failed to read notes file: {e}")
-
-        try:
-            result = await recorder.process_recording(audio_file, name, notes_text=notes_text)
-            
-            print("SUCCESS: Processing complete!")
-            print(f"Transcript: {result['session_info']['transcript_file']}")
-            print(f"Summary: {result['session_info']['summary_file']}")
-            
-        except Exception as e:
-            print(f"ERROR: {e}")
-            sys.exit(1)
-    
-    asyncio.run(run_process())
-
-
 @cli.command(name='process-streaming')
 @click.argument('audio_file', default='')
 @click.option('--name', '-n', default='Recording', help='Session name')

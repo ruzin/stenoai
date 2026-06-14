@@ -7,7 +7,7 @@
  * doc is a contract break — update both in the same commit.
  */
 
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 const VERSION = 1;
 
@@ -105,6 +105,10 @@ const stenoai = {
     processSystemAudio: (filePath, name) => invoke('process-system-audio-recording', filePath, name),
     processFile: (filePath, name) => invoke('process-recording', filePath, name),
     pickAudioFile: () => invoke('select-audio-file'),
+    // Electron 32+ removed File.path; webUtils.getPathForFile resolves the
+    // absolute path of a dropped File so drag-and-drop import can reuse the
+    // same processFile pipeline as the picker.
+    getPathForFile: (file) => webUtils.getPathForFile(file),
     getQueue: () => invoke('get-queue-status'),
     getDir: () => invoke('get-recordings-dir'),
     // Hint that a recording may be imminent (e.g. user landed on Home) so
