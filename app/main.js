@@ -5392,7 +5392,10 @@ ipcMain.handle('set-silence-auto-stop-minutes', async (_event, minutes) => {
 // auto-detect recordings, "Note" for the default placeholder.
 ipcMain.handle('show-silence-auto-stop-notification', async (_event, payload) => {
   try {
-    if (!(await notificationsEnabled())) return { success: true };
+    // `shown` reflects whether the notifications_enabled toggle let it through —
+    // the observable signal callers (and e2e) use to confirm gating, since a
+    // native banner isn't otherwise inspectable.
+    if (!(await notificationsEnabled())) return { success: true, shown: false };
     // Back-compat: earlier callers passed `minutes` as a number directly.
     // Accept both shapes so older renderer bundles don't crash this handler
     // until they're rebuilt.
@@ -5412,7 +5415,7 @@ ipcMain.handle('show-silence-auto-stop-notification', async (_event, payload) =>
       }
     });
     notif.show();
-    return { success: true };
+    return { success: true, shown: true };
   } catch (e) {
     sendDebugLog(`Failed to show silence auto-stop notification: ${e.message}`);
     return { success: false, error: e.message };
@@ -5428,7 +5431,8 @@ ipcMain.handle('show-silence-auto-stop-notification', async (_event, payload) =>
 // recording another note back-to-back) is worse than no navigation.
 ipcMain.handle('show-note-ready-notification', async (_event, payload) => {
   try {
-    if (!(await notificationsEnabled())) return { success: true };
+    // `shown` = passed the notifications_enabled gate (see show-silence-auto-stop).
+    if (!(await notificationsEnabled())) return { success: true, shown: false };
     const { title, failed } = payload || {};
     // Be honest when transcription crashed: don't tell the user their note
     // is "ready". The recording was preserved (not deleted) and the note
@@ -5446,7 +5450,7 @@ ipcMain.handle('show-note-ready-notification', async (_event, payload) => {
       }
     });
     notif.show();
-    return { success: true };
+    return { success: true, shown: true };
   } catch (e) {
     sendDebugLog(`Failed to show note-ready notification: ${e.message}`);
     return { success: false, error: e.message };
@@ -6635,7 +6639,11 @@ ipcMain.handle('open-external', async (event, url) => {
 // ── Google Calendar: Token Storage ──────────────────────────────────────
 
 function getTokenFilePath() {
-  return path.join(os.homedir(), 'Library', 'Application Support', 'stenoai', '.google-tokens');
+  // getUserDataDir() like every other app-managed file — the old hardcoded
+  // ~/Library/Application Support literal was macOS-only (wrong dir on Windows)
+  // and ignored the STENOAI_USER_DATA_DIR e2e override. Resolves identically on
+  // real macOS, so existing tokens are unaffected.
+  return path.join(getUserDataDir(), '.google-tokens');
 }
 
 function saveGoogleTokens(tokens) {
@@ -6680,7 +6688,9 @@ function deleteGoogleTokens() {
 // ── Outlook Calendar: Token Storage ─────────────────────────────────────
 
 function getOutlookTokenFilePath() {
-  return path.join(os.homedir(), 'Library', 'Application Support', 'stenoai', '.outlook-tokens');
+  // See getTokenFilePath — route through getUserDataDir() for cross-platform +
+  // e2e isolation; identical path on real macOS.
+  return path.join(getUserDataDir(), '.outlook-tokens');
 }
 
 function saveOutlookTokens(tokens) {
