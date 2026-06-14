@@ -2,22 +2,33 @@
 // src/ollama_manager.py checks http://127.0.0.1:11434/api/tags first and skips
 // starting its own `ollama serve` on a 200 (ollama_manager.py ~148), so
 // prebinding here keeps the real/ bundled Ollama out of the test. Answers
-// /api/tags and a minimal streaming NDJSON /api/chat.
+// /api/tags, /api/pull, and a streaming NDJSON /api/chat.
 //
 // Bind is hard by design (listen throws on EADDRINUSE): if a real Ollama is
 // already answering on 11434 the test would silently hit the live LLM instead
 // of this stub, so T2 setup must `pkill -f ollama` first (the bind then proves
 // the port is ours). Used by the summary/transcription specs from PR2 on; the
 // PR1 org-lock spec doesn't exercise Ollama and so doesn't start it.
+//
+// Contract testing (Phase 4): pass { chatReply } to return a fixed assistant
+// message instead of the default 'ok', and read lastChatPrompt() to assert what
+// prompt the summarizer built (e.g. that it embedded the transcript). Default
+// behaviour is unchanged, so the existing @pipeline specs are unaffected.
 const http = require('http');
 
 const OLLAMA_PORT = 11434;
 
 /**
  * Start the mock Ollama on 11434.
- * @returns {Promise<{ close: () => Promise<void> }>}
+ * @param {object} [opts]
+ * @param {string} [opts.chatReply='ok'] assistant content returned by /api/chat.
+ * @returns {Promise<{ close: () => Promise<void>, lastChatPrompt: () => string|null, chatCalls: () => number }>}
  */
-function startMockOllama() {
+function startMockOllama(opts = {}) {
+  const chatReply = opts.chatReply ?? 'ok';
+  let lastChatPrompt = null;
+  let chatCalls = 0;
+
   return new Promise((resolve, reject) => {
     const server = http.createServer((req, res) => {
       // /api/tags — the summarizer's _ensure_model_available() reads each
@@ -49,13 +60,28 @@ function startMockOllama() {
         return;
       }
       if (req.method === 'POST' && req.url === '/api/chat') {
-        res.writeHead(200, { 'content-type': 'application/x-ndjson' });
-        res.write(
-          JSON.stringify({ message: { role: 'assistant', content: 'ok' }, done: false }) + '\n',
-        );
-        res.end(
-          JSON.stringify({ message: { role: 'assistant', content: '' }, done: true }) + '\n',
-        );
+        // Capture the prompt so a contract test can assert what was sent (the
+        // summarizer sends messages:[{role:'user', content:<prompt+transcript>}]).
+        const chunks = [];
+        req.on('data', (c) => chunks.push(c));
+        req.on('end', () => {
+          chatCalls++;
+          try {
+            const body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
+            const msgs = Array.isArray(body.messages) ? body.messages : [];
+            lastChatPrompt = msgs.length ? String(msgs[msgs.length - 1].content || '') : '';
+          } catch {
+            lastChatPrompt = '';
+          }
+          res.writeHead(200, { 'content-type': 'application/x-ndjson' });
+          res.write(
+            JSON.stringify({ message: { role: 'assistant', content: chatReply }, done: false }) +
+              '\n',
+          );
+          res.end(
+            JSON.stringify({ message: { role: 'assistant', content: '' }, done: true }) + '\n',
+          );
+        });
         return;
       }
       res.writeHead(404, { 'content-type': 'application/json' });
@@ -64,7 +90,11 @@ function startMockOllama() {
     // No EADDRINUSE swallow — a bind failure is a real signal (live Ollama up).
     server.on('error', reject);
     server.listen(OLLAMA_PORT, '127.0.0.1', () => {
-      resolve({ close: () => new Promise((r) => server.close(() => r())) });
+      resolve({
+        close: () => new Promise((r) => server.close(() => r())),
+        lastChatPrompt: () => lastChatPrompt,
+        chatCalls: () => chatCalls,
+      });
     });
   });
 }
