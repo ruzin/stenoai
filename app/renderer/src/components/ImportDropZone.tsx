@@ -1,7 +1,13 @@
 import * as React from 'react';
-import { FileAudio } from 'lucide-react';
+import { Ban, FileAudio } from 'lucide-react';
 import { ipc } from '@/lib/ipc';
-import { importAudioFile, isAudioFile } from '@/hooks/useImportAudio';
+import {
+  basenameStem,
+  importAudioFile,
+  isAudioFile,
+  notifyImportFailed,
+} from '@/hooks/useImportAudio';
+import { useRecording } from '@/hooks/useRecording';
 
 /**
  * Full-window drag-and-drop target for importing audio files. Mounted once at
@@ -12,10 +18,22 @@ import { importAudioFile, isAudioFile } from '@/hooks/useImportAudio';
  * Electron 32+ removed `File.path`, so the absolute path is resolved via
  * `webUtils.getPathForFile` through the preload bridge. Imports are
  * fire-and-forget — each file lands as a processing row in the meeting list
- * (the queue serialises them); failures are logged.
+ * (the queue serialises them); enqueue failures fire a notification.
+ *
+ * Disabled while a recording is in progress: processNextInQueue only gates on
+ * isProcessing, so dropping mid-recording would start a transcription
+ * concurrent with the live session (OOM/contention risk on Apple Silicon).
+ * This mirrors the picker button's `disabled={isRecording}` guard.
  */
 export function ImportDropZone() {
   const [dragging, setDragging] = React.useState(false);
+
+  // The window-level listeners are bound once, so read the live recording
+  // status through a ref rather than re-binding on every status change.
+  const { status } = useRecording();
+  const isRecording = status === 'recording' || status === 'paused';
+  const isRecordingRef = React.useRef(isRecording);
+  isRecordingRef.current = isRecording;
 
   React.useEffect(() => {
     if (typeof window === 'undefined' || !window.stenoai) return;
@@ -47,6 +65,10 @@ export function ImportDropZone() {
       e.preventDefault();
       depth = 0;
       setDragging(false);
+      // Mirror the picker's guard: never start an import concurrent with a
+      // live recording. The overlay already shows the "stop recording" state,
+      // so silently ignoring the drop here is the right call.
+      if (isRecordingRef.current) return;
       const files = Array.from(e.dataTransfer!.files);
       for (const file of files) {
         if (!isAudioFile(file.name)) continue;
@@ -55,6 +77,7 @@ export function ImportDropZone() {
         void importAudioFile(path).catch((err) => {
           // eslint-disable-next-line no-console
           console.error('[importDropZone] import failed', err);
+          notifyImportFailed(basenameStem(file.name));
         });
       }
     };
@@ -76,20 +99,36 @@ export function ImportDropZone() {
   return (
     <div
       // pointer-events:none so the overlay never intercepts the drop — the
-      // window-level listeners handle it.
-      className="fixed inset-0 z-50 flex items-center justify-center"
-      style={{ background: 'rgba(0, 0, 0, 0.35)', pointerEvents: 'none' }}
+      // window-level listeners handle it. Ink-based scrim + ~120ms fade match
+      // the design system (mirrors DialogOverlay) rather than a hard pop.
+      className="fixed inset-0 z-50 flex items-center justify-center bg-ink-900/40 backdrop-blur-sm animate-in fade-in-0 duration-fast ease-steno"
+      style={{ pointerEvents: 'none' }}
     >
+      {/* Two visually distinct states so the blocked overlay never reads as a
+          live drop target. Active: dashed border + audio icon = "drop here".
+          Blocked (recording): solid border + ban icon + muted text = "not a
+          target". Neutral palette only (paper+ink), so "blocked" is signalled
+          by the ban glyph + muting, not a warning colour. */}
       <div
-        className="flex flex-col items-center gap-3 rounded-2xl border-2 border-dashed px-12 py-10"
+        className={
+          isRecording
+            ? 'flex flex-col items-center gap-3 rounded-xl border-2 px-12 py-10 opacity-90'
+            : 'flex flex-col items-center gap-3 rounded-xl border-2 border-dashed px-12 py-10'
+        }
         style={{
           borderColor: 'var(--border-subtle)',
           background: 'var(--surface-raised)',
-          color: 'var(--fg-1)',
+          color: isRecording ? 'var(--fg-2)' : 'var(--fg-1)',
         }}
       >
-        <FileAudio className="size-8 text-muted-foreground" />
-        <p className="text-sm font-medium">Drop audio to import</p>
+        {isRecording ? (
+          <Ban className="size-8 text-muted-foreground" />
+        ) : (
+          <FileAudio className="size-8 text-muted-foreground" />
+        )}
+        <p className="text-sm font-medium">
+          {isRecording ? 'Stop recording to import' : 'Drop audio to import'}
+        </p>
       </div>
     </div>
   );

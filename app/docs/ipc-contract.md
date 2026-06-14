@@ -85,7 +85,7 @@ progress events back.
 | `resume-recording-ui` | R→M invoke | yes | `stenoai.recording.resume()` |
 | `system-audio-recording-state` | R→M send | yes | `stenoai.recording.reportSystemAudioState(active)` |
 | `process-system-audio-recording` | R→M invoke | yes | `stenoai.recording.processSystemAudio(filePath, name)` |
-| `process-recording` | R→M invoke | yes | `stenoai.recording.processFile(path, name)` |
+| `process-recording` | R→M invoke | yes | `stenoai.recording.processFile(path, name)` — imports a local file: copies it into `recordings/` then **queues** it (fire-and-forget, resolves before transcription; progress shows as a processing row) |
 | `select-audio-file` | R→M invoke | yes | `stenoai.recording.pickAudioFile()` |
 | — | R-direct (webUtils) | yes | `stenoai.recording.getPathForFile(file)` — sync; resolves a dropped File's absolute path (Electron 32+ removed `File.path`) |
 | `get-queue-status` | R→M invoke | yes | `stenoai.recording.getQueue()` |
@@ -389,7 +389,7 @@ are string-cased (`"True"`/`"False"`) — that translation lives in main.js.
 | `set-silence-auto-stop-enabled` | R→M invoke | yes | `stenoai.settings.setSilenceAutoStopEnabled(b)` |
 | `set-silence-auto-stop-minutes` | R→M invoke | yes | `stenoai.settings.setSilenceAutoStopMinutes(n)` |
 | `show-silence-auto-stop-notification` | R→M invoke | yes | `stenoai.settings.showSilenceAutoStopNotification({ minutes, sessionName })` |
-| `show-note-ready-notification` | R→M invoke | yes | `stenoai.settings.showNoteReadyNotification({ title })` |
+| `show-note-ready-notification` | R→M invoke | yes | `stenoai.settings.showNoteReadyNotification({ title, failed?, hardFailure? })` — `failed`: graceful transcription failure (marked note written); `hardFailure`: processing crash / import that never enqueued (no note) |
 | `get-telemetry` / `set-telemetry` | R→M invoke | yes | `stenoai.settings.getTelemetry()` / `setTelemetry(b)` |
 | `get-dock-icon` / `set-dock-icon` | R→M invoke | yes | `stenoai.settings.getDockIcon()` / `setDockIcon(b)` |
 | `get-system-audio` / `set-system-audio` | R→M invoke | yes | `stenoai.settings.getSystemAudio()` / `setSystemAudio(b)` |
