@@ -196,7 +196,7 @@ export function Hero() {
           <div className="mt-3 flex items-center gap-1.5 text-fg-muted text-[12px]">
             <Cpu size={12} aria-hidden="true" />
             Summarized locally with{" "}
-            <code style={{ fontFamily: "var(--font-mono)", fontSize: 11 }}>gemma3:4b</code>
+            <code style={{ fontFamily: "var(--font-mono)", fontSize: 11 }}>gemma4:12b</code>
           </div>
         </Motion.div>
 
