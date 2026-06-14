@@ -5393,8 +5393,9 @@ ipcMain.handle('set-silence-auto-stop-minutes', async (_event, minutes) => {
 ipcMain.handle('show-silence-auto-stop-notification', async (_event, payload) => {
   try {
     // `shown` reflects whether the notifications_enabled toggle let it through —
-    // the observable signal callers (and e2e) use to confirm gating, since a
-    // native banner isn't otherwise inspectable.
+    // the observable signal e2e uses to confirm gating, since a native banner
+    // isn't otherwise inspectable. Additive (renderer only reads `success`); not
+    // in the typed renderer Result<> — intentional, don't drop it as dead code.
     if (!(await notificationsEnabled())) return { success: true, shown: false };
     // Back-compat: earlier callers passed `minutes` as a number directly.
     // Accept both shapes so older renderer bundles don't crash this handler
