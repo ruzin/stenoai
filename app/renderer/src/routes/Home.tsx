@@ -16,6 +16,7 @@ import {
 } from '@/hooks/useCalendarEvents';
 import { useFolders } from '@/hooks/useFolders';
 import { ipc, type CalendarEvent, type Meeting } from '@/lib/ipc';
+import { pickInProgressEvent } from '@/lib/calendar';
 import { navigate } from '@/lib/router';
 
 interface HomeProps {
@@ -56,6 +57,10 @@ export function Home({ mode }: HomeProps) {
   const [upcomingTickMs, setUpcomingTickMs] = React.useState<number>(() => Date.now());
   React.useEffect(() => {
     if (mode !== 'home') return;
+    // Refresh immediately on (re)entering Home, otherwise the hero copy
+    // is whatever `upcomingTickMs` was when the user last navigated away
+    // — potentially many minutes stale until the 60s interval fires.
+    setUpcomingTickMs(Date.now());
     const id = setInterval(() => setUpcomingTickMs(Date.now()), 60_000);
     return () => clearInterval(id);
   }, [mode]);
@@ -411,7 +416,52 @@ export function Home({ mode }: HomeProps) {
   const emptyStateCalendarNudge = renderCalendarNudge(false);
   const homeCalendarNudge = renderCalendarNudge(true);
 
-  const greeting = `Ready to capture beautiful notes`;
+  // Hero state inputs. All recompute on the existing 60s tick — no new
+  // intervals. `inProgressEvent` uses the same matching window as the
+  // backend's auto-detect (5 min early grace, 10 min late floor) so the
+  // hero copy and the "Meeting detected" notification agree.
+  const inProgressEvent = React.useMemo<CalendarEvent | null>(() => {
+    if (!calendar.data || calendar.data.needsAuth) return null;
+    return pickInProgressEvent(calendar.data.events, new Date(upcomingTickMs));
+  }, [calendar.data, upcomingTickMs]);
+
+  // `upcomingToday` is already all-day/declined/NaN-filtered and sorted by
+  // start ascending, so the soonest still-future event is just the first one
+  // that starts after now — no need to re-apply the guards here.
+  const nextSoonEvent = React.useMemo<CalendarEvent | null>(
+    () =>
+      upcomingToday.find((e) => new Date(e.start).getTime() > upcomingTickMs) ??
+      null,
+    [upcomingToday, upcomingTickMs],
+  );
+
+  // Whether we have live calendar data to reason about. Distinguishes a
+  // genuinely clear day (connected, no events) from "no calendar connected"
+  // so the hero only claims "Clear day ahead" when it actually knows.
+  const calendarConnected = !!calendar.data && !calendar.data.needsAuth;
+
+  const heroState = React.useMemo(
+    () => ({
+      status: recording.status,
+      sessionName: recording.sessionName,
+      inProgressEvent,
+      nextSoonEvent,
+      tomorrowPreview,
+      calendarConnected,
+      now: upcomingTickMs,
+    }),
+    [
+      recording.status,
+      recording.sessionName,
+      inProgressEvent,
+      nextSoonEvent,
+      tomorrowPreview,
+      calendarConnected,
+      upcomingTickMs,
+    ],
+  );
+  const greeting = heroHeadline(heroState);
+  const heroSub = heroSubtitle(heroState);
   const dateStr = new Date().toLocaleDateString(undefined, {
     weekday: 'long',
     month: 'long',
@@ -497,7 +547,7 @@ export function Home({ mode }: HomeProps) {
                 className="max-w-[52ch] text-sm leading-[1.55]"
                 style={{ color: 'var(--fg-2)' }}
               >
-                {`Start recording from the top-right, or from anywhere with ${shortcut('⌘⇧R', 'Ctrl+Shift+R')}.`}
+                {heroSub}
               </p>
             </div>
           )}
@@ -700,7 +750,6 @@ function SectionHead({ title, count, action }: SectionHeadProps) {
   );
 }
 
-
 interface AllDayInlineProps {
   events: CalendarEvent[];
   expanded: boolean;
@@ -733,6 +782,138 @@ function AllDayInline({ events, expanded, onToggle }: AllDayInlineProps) {
       )}
     </div>
   );
+}
+
+// Default subtitle — also used as the empty/idle fallback. Cached so it
+// renders the same string each call without rebuilding the shortcut.
+const RECORD_SHORTCUT = shortcut('⌘⇧R', 'Ctrl+Shift+R');
+const RECORDING_HINT = `Start recording from the top-right, or from anywhere with ${RECORD_SHORTCUT}.`;
+
+// Cached at module load to avoid rebuilding on every render. We don't
+// react to system-locale changes mid-session — that would require a full
+// app relaunch on macOS anyway, and creating an Intl.DateTimeFormat per
+// render isn't free. If we ever start supporting in-app locale toggles
+// we'd need to move this inside the function.
+const HERO_TIME_FMT = new Intl.DateTimeFormat(undefined, {
+  hour: 'numeric',
+  minute: '2-digit',
+});
+
+const HOUR_MS = 60 * 60 * 1000;
+const MIN_MS = 60 * 1000;
+
+interface HeroState {
+  status: 'idle' | 'recording' | 'paused' | 'processing';
+  sessionName: string | null;
+  inProgressEvent: CalendarEvent | null;
+  nextSoonEvent: CalendarEvent | null;
+  tomorrowPreview: CalendarEvent | null;
+  calendarConnected: boolean;
+  now: number;
+}
+
+// True only when `now` is inside the event's real [start, end) — i.e. the
+// meeting has actually started. `pickInProgressEvent` also returns events in
+// the 5-min early-join grace and the late-join floor, which are the right
+// targets for the "start recording" CTA but must NOT drive present-tense
+// copy like "In a meeting now" (the meeting may not have begun yet).
+function eventIsNow(e: CalendarEvent, nowMs: number): boolean {
+  const startMs = new Date(e.start).getTime();
+  const endMs = new Date(e.end).getTime();
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) return false;
+  return startMs <= nowMs && nowMs < endMs;
+}
+
+// Headline. Recording state always wins over calendar state — when the
+// user is recording / paused / processing they want status, not a
+// schedule. Idle falls through to the calendar-driven copy.
+function heroHeadline(s: HeroState): string {
+  switch (s.status) {
+    case 'recording':
+      return 'Recording';
+    case 'paused':
+      return 'Recording paused';
+    case 'processing':
+      return 'Processing your note';
+  }
+  // Only present-tense when the meeting has truly started — not during the
+  // early-join grace, which would tell the user they're "in" a meeting that
+  // hasn't begun. The pre-start case falls through to "Next meeting in N min".
+  if (s.inProgressEvent && eventIsNow(s.inProgressEvent, s.now)) {
+    return 'In a meeting now';
+  }
+  if (s.nextSoonEvent) {
+    const startMs = new Date(s.nextSoonEvent.start).getTime();
+    if (!Number.isNaN(startMs)) {
+      const deltaMs = startMs - s.now;
+      // Compute mins first and gate on the rounded value: Math.ceil rounds
+      // anything in (59 min, 60 min) up to 60, and "60 mins" reads
+      // unnaturally — fall straight through to "1 hr" instead. The
+      // Math.max(1) keeps the headline non-zero in the last 30 seconds
+      // before start.
+      const mins = Math.max(1, Math.ceil(deltaMs / MIN_MS));
+      if (mins < 60) return `Next meeting in ${mins} min${mins === 1 ? '' : 's'}`;
+      const hrs = Math.max(1, Math.round(deltaMs / HOUR_MS));
+      return `Next meeting in ${hrs} hr${hrs === 1 ? '' : 's'}`;
+    }
+  }
+  // Reaching here means nothing is live or upcoming today. Only call the day
+  // "clear" when the calendar is actually connected — otherwise we don't know,
+  // so keep the neutral invitation.
+  if (s.calendarConnected) return 'Clear day ahead';
+  return 'Ready to capture beautiful notes';
+}
+
+// Subtitle. Mirrors the headline cases. Keeps the recording shortcut hint
+// as the default fallback so the page always tells the user how to act.
+function heroSubtitle(s: HeroState): string {
+  if (s.status === 'recording') {
+    // Source of truth for "what we're capturing" is the active session
+    // name — the user may have started a recording titled after one
+    // event while a different calendar event is also concurrently in
+    // progress, and the subtitle should reflect what they actually hit
+    // record on. ⌘⇧R is a record-toggle per main.js's global shortcut
+    // so "to stop" is accurate when already recording.
+    const title =
+      s.sessionName?.trim() || s.inProgressEvent?.title?.trim() || 'In progress';
+    return `${title} · ${RECORD_SHORTCUT} to stop`;
+  }
+  if (s.status === 'paused') {
+    // ⌘⇧R is a record-toggle: while paused it STOPS (finalizes) the recording
+    // rather than resuming. Resume is a click-only action on the bottom bar,
+    // so point there instead of advertising a shortcut that would end the note.
+    return 'Recording paused. Tap resume on the bar below to continue.';
+  }
+  if (s.status === 'processing') {
+    return `We'll have your note ready in a moment.`;
+  }
+  // Only when the meeting has truly started (mirrors the headline gate) — the
+  // pre-start grace falls through to the timed "starts at …" line below.
+  if (s.inProgressEvent && eventIsNow(s.inProgressEvent, s.now)) {
+    return `Press ${RECORD_SHORTCUT} to start recording — or tap a meeting card below.`;
+  }
+  if (s.nextSoonEvent) {
+    const startMs = new Date(s.nextSoonEvent.start).getTime();
+    if (!Number.isNaN(startMs)) {
+      // Mirror the headline's `mins < 60` threshold (Math.ceil-based) so the
+      // title-at-time line and the "Next meeting in N min" headline flip to
+      // the hours wording at the same instant.
+      const mins = Math.max(1, Math.ceil((startMs - s.now) / MIN_MS));
+      if (mins < 60) {
+        const at = HERO_TIME_FMT.format(new Date(startMs));
+        return `${s.nextSoonEvent.title} at ${at} — ${RECORD_SHORTCUT} when you're ready.`;
+      }
+    }
+    return RECORDING_HINT;
+  }
+  if (s.tomorrowPreview) {
+    const startMs = new Date(s.tomorrowPreview.start).getTime();
+    if (!Number.isNaN(startMs)) {
+      const at = HERO_TIME_FMT.format(new Date(startMs));
+      return `Next up: ${s.tomorrowPreview.title} tomorrow at ${at}.`;
+    }
+  }
+  return RECORDING_HINT;
 }
 
 function firstFolderName(

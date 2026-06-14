@@ -339,8 +339,15 @@
     letter-spacing: -0.025em;
     color: var(--fg-1);
     font-weight: 400;
+    /* Headline copy reacts to recording + calendar state; soften the
+       theme/colour swap so light/dark mode toggle isn't a hard pop. The
+       text content swap itself still pops — CSS can't tween text. */
+    transition: color var(--dur-fast) var(--ease);
   }
-  .home-hello .faint { color: var(--fg-2); }
+  .home-hello .faint {
+    color: var(--fg-2);
+    transition: color var(--dur-fast) var(--ease);
+  }
 
   /* Upcoming card — 3-column grid */
   .upcoming-card {
