@@ -3985,7 +3985,30 @@ ipcMain.handle('setup-ollama-and-model', async () => {
       }
       sendDebugLog('Warning: Ollama may not be fully ready, attempting pull anyway...');
     }
-    
+
+    // #123: don't re-download the default if the connected Ollama already has a
+    // supported model. The backend matches installed models against the supported
+    // registry (single source of truth in config.py); on a hit we set it active
+    // and skip the pull entirely, so the default Local path needs no network for
+    // anyone with a usable Ollama already set up. Best-effort: any failure here
+    // falls through to the normal download below.
+    try {
+      const resolvedRaw = await runPythonScript('simple_recorder.py', ['resolve-setup-model'], true);
+      const resolved = JSON.parse(resolvedRaw.trim());
+      if (resolved && resolved.installed) {
+        sendDebugLog(`Found already-installed model "${resolved.installed}" — skipping download`);
+        try {
+          await runPythonScript('simple_recorder.py', ['set-model', resolved.installed], true);
+        } catch (e) {
+          // Non-fatal -- config write is best-effort, same as the pull path.
+        }
+        trackEvent('setup_completed', { step: 'ollama_existing_model' });
+        return { success: true, message: `Using already-installed model ${resolved.installed}` };
+      }
+    } catch (e) {
+      sendDebugLog(`Could not check for installed models, proceeding to download: ${e.message}`);
+    }
+
     sendDebugLog('Downloading AI model (this may take several minutes)...');
     sendDebugLog(`POST http://127.0.0.1:11434/api/pull {name: "${DEFAULT_AI_MODEL}"}`);
 
