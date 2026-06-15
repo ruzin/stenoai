@@ -146,6 +146,15 @@ export function useDeleteMeeting() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (meeting: Meeting) => unwrap(await ipc().meetings.delete(meeting)),
+    // Cancel any in-flight meetings-list refetch before touching the cache. A
+    // refetch already running when the delete fires was scanned by the backend
+    // *before* the file was removed, so its (stale) response would re-introduce
+    // the deleted row if it landed after the setQueryData below. The many
+    // meetingsKeys.all invalidations elsewhere (processing-complete, update,
+    // reprocess, folder edits) make such an overlap reachable. Cancelling drops
+    // that stale response without kicking off a new fetch, so we still avoid the
+    // backend re-scan this hook exists to remove.
+    onMutate: () => qc.cancelQueries({ queryKey: meetingsKeys.list() }),
     // The deleted file is known, so drop just that row from the list cache
     // instead of invalidating — a full `invalidateQueries` re-runs the backend
     // `list-meetings` scan (a Python subprocess + whole-directory re-read) only
