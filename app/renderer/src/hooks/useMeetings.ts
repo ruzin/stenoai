@@ -163,7 +163,14 @@ export function useDeleteMeeting() {
     // update from this single write too. Removing on success (not optimistically
     // in onMutate) means a failed delete simply leaves the row in place — no
     // snapshot/rollback, so concurrent deletes can't clobber each other.
-    onSuccess: (_data, meeting) => {
+    onSuccess: async (_data, meeting) => {
+      // Cancel again here: the onMutate cancel only covers refetches already
+      // running at mutation start, but a fresh list refetch can be triggered
+      // *during* the (fast) delete IPC and would land after the write below.
+      // The setQueryData filter handles a stale response that lands before this
+      // point; cancelling handles one that would land after. Together they close
+      // the clobber window without a reconciling backend re-scan.
+      await qc.cancelQueries({ queryKey: meetingsKeys.list() });
       const deletedFile = meeting.session_info.summary_file;
       qc.setQueryData<Meeting[]>(meetingsKeys.list(), (prev) =>
         prev ? prev.filter((m) => m.session_info.summary_file !== deletedFile) : prev,
