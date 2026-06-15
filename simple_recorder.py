@@ -3890,9 +3890,12 @@ def test_remote_ollama(url):
 # Model families OpenAI's /models endpoint mixes in alongside chat models —
 # embeddings, speech, image and moderation. Excluded so the Settings model
 # picker only offers models that actually answer chat completions (#198).
+# NB: no "search" marker — the *-search-preview models are chat-completion
+# models (web-search-grounded), and "search" is also a substring of
+# "deep-research", so excluding it would drop real chat/reasoning models.
 _OPENAI_NON_CHAT_MARKERS = (
     "embedding", "whisper", "tts", "audio", "realtime",
-    "moderation", "dall-e", "image", "transcribe", "search", "codex",
+    "moderation", "dall-e", "image", "transcribe", "codex",
 )
 
 

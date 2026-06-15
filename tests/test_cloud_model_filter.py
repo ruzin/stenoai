@@ -26,6 +26,14 @@ class OpenAIChatModelFilterTests(unittest.TestCase):
             "o3",
             "o3-mini",
             "o4-mini",
+            # web-search-grounded chat models — served via chat completions, so
+            # the "search" substring must NOT exclude them (#198 follow-up).
+            "gpt-4o-search-preview",
+            "gpt-4o-mini-search-preview",
+            # deep-research reasoning models pass the o\\d gate; "research"
+            # contains "search", so they must not be excluded either.
+            "o3-deep-research",
+            "o4-mini-deep-research",
         ]:
             self.assertTrue(_is_openai_chat_model(model_id), msg=model_id)
 
