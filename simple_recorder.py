@@ -3887,6 +3887,32 @@ def test_remote_ollama(url):
         print(json.dumps({"success": False, "error": str(e)}))
 
 
+# Model families OpenAI's /models endpoint mixes in alongside chat models —
+# embeddings, speech, image and moderation. Excluded so the Settings model
+# picker only offers models that actually answer chat completions (#198).
+_OPENAI_NON_CHAT_MARKERS = (
+    "embedding", "whisper", "tts", "audio", "realtime",
+    "moderation", "dall-e", "image", "transcribe", "search", "codex",
+)
+
+
+def _is_openai_chat_model(model_id: str) -> bool:
+    """True for OpenAI chat/reasoning models (``gpt-*``, the ``o<n>`` reasoning
+    series, ``chatgpt-*``), excluding the non-chat families above. ``gpt-`` and
+    ``o\\d`` are prefix/pattern matches so newer releases (gpt-4.1, o4, …) keep
+    showing up without a code change. Applied to the openai provider only —
+    custom OpenAI-compatible endpoints use their own naming, so their lists are
+    left unfiltered."""
+    mid = model_id.lower()
+    if not (
+        mid.startswith("gpt-")
+        or mid.startswith("chatgpt-")
+        or re.match(r"o\d", mid)
+    ):
+        return False
+    return not any(marker in mid for marker in _OPENAI_NON_CHAT_MARKERS)
+
+
 @cli.command()
 def test_cloud_api():
     """Test connection to the cloud API"""
@@ -3956,7 +3982,20 @@ def test_cloud_api():
             base_url = cloud_api_url if cloud_provider == "custom" and cloud_api_url else None
             client = OpenAI(api_key=cloud_api_key, base_url=base_url)
             models = client.models.list()
-            model_ids = [m.id for m in models.data[:10]]
+            # Newest first so current chat models lead the Settings dropdown.
+            # OpenAI returns ~50+ models in arbitrary order, mixing in
+            # embeddings/audio/image/moderation; the old unfiltered [:10] slice
+            # crowded those in and pushed newer chat models off the end (#198).
+            # Keep only chat/reasoning models for the openai provider; custom
+            # OpenAI-compatible endpoints keep every model (unknown naming).
+            entries = sorted(
+                models.data,
+                key=lambda m: getattr(m, "created", 0) or 0,
+                reverse=True,
+            )
+            if cloud_provider == "openai":
+                entries = [m for m in entries if _is_openai_chat_model(m.id)]
+            model_ids = [m.id for m in entries[:25]]
             print(json.dumps({"success": True, "models": model_ids}))
     except Exception as e:
         print(json.dumps({"success": False, "error": str(e)}))
