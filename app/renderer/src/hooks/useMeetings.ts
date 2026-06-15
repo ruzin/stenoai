@@ -172,6 +172,11 @@ export function useDeleteMeeting() {
       // the clobber window without a reconciling backend re-scan.
       await qc.cancelQueries({ queryKey: meetingsKeys.list() });
       const deletedFile = meeting.session_info.summary_file;
+      // Guard against a falsy summary_file: filtering on it would drop *every*
+      // row with a falsy summary_file rather than the one deleted. summary_file
+      // is the list's primary key so this shouldn't happen, but the predicate
+      // must not silently nuke the list if a malformed row slips through.
+      if (!deletedFile) return;
       qc.setQueryData<Meeting[]>(meetingsKeys.list(), (prev) =>
         prev ? prev.filter((m) => m.session_info.summary_file !== deletedFile) : prev,
       );
