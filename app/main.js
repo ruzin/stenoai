@@ -660,8 +660,21 @@ function resolveRecordingsDir() {
 // not this (possibly de-duplicated) filename, so the user still sees "interview".
 async function copyImportIntoRecordings(srcPath) {
   const dir = resolveRecordingsDir();
+  // The durable note lives in output/<stem>_summary.{md,json}, named from the
+  // audio stem — and it OUTLIVES the audio: process-streaming unlinks the
+  // recording after a successful transcribe (keep_recordings off, the default).
+  // So a stem that's free in recordings/ can still collide with a note from an
+  // earlier same-basename import whose audio was already removed. Skip any stem
+  // whose note already exists so re-importing e.g. interview.m4a becomes
+  // interview-1 rather than silently overwriting the first interview's summary.
+  // output/ is the sibling of recordings/ under the same data root (matching
+  // the Python pipeline's get_data_dirs layout).
+  const outputDir = path.join(path.dirname(dir), 'output');
   const ext = path.extname(srcPath);
   const stem = path.basename(srcPath, ext);
+  const noteExists = (name) =>
+    fs.existsSync(path.join(outputDir, `${name}_summary.md`)) ||
+    fs.existsSync(path.join(outputDir, `${name}_summary.json`));
   // COPYFILE_EXCL makes each attempt atomic: the copy fails with EEXIST rather
   // than overwriting an existing file, so two concurrent imports that share a
   // basename can't clobber each other. (An existsSync-then-copyFile check would
@@ -669,7 +682,11 @@ async function copyImportIntoRecordings(srcPath) {
   // it.) On EEXIST we bump the suffix and retry. On APFS the copy is a
   // near-instant copy-on-write clone.
   for (let n = 0; ; n += 1) {
-    const dest = path.join(dir, n === 0 ? `${stem}${ext}` : `${stem}-${n}${ext}`);
+    const name = n === 0 ? stem : `${stem}-${n}`;
+    // A pre-existing note with this stem means an earlier import already owns
+    // it; skip ahead so the pipeline writes <name>-N_summary.* beside it.
+    if (noteExists(name)) continue;
+    const dest = path.join(dir, `${name}${ext}`);
     try {
       await fs.promises.copyFile(srcPath, dest, fs.constants.COPYFILE_EXCL);
       return dest;

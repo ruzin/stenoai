@@ -21,10 +21,11 @@ import path from 'path';
  * transcription succeeds, the unlink fires, and "the original still exists"
  * is a genuine regression assertion that fails on the pre-fix code.
  *
- * Collision de-duplication (two same-basename imports -> distinct summaries)
- * is covered at the unit level; this spec keeps to one import to stay within
- * the pipeline lane's budget. Tagged @pipeline so it runs in the model-bearing
- * job and stays out of the fast model-free T2 lane.
+ * Collision de-duplication (a re-import of a same-basename file must not
+ * overwrite the first import's note) is covered model-free in
+ * audio-import-collision.t2; this spec keeps to one import to stay within the
+ * pipeline lane's budget. Tagged @pipeline so it runs in the model-bearing job
+ * and stays out of the fast model-free T2 lane.
  */
 
 type StenoWindow = Window & {
