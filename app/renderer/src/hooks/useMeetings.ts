@@ -146,7 +146,20 @@ export function useDeleteMeeting() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (meeting: Meeting) => unwrap(await ipc().meetings.delete(meeting)),
-    onSuccess: () => qc.invalidateQueries({ queryKey: meetingsKeys.all }),
+    // The deleted file is known, so drop just that row from the list cache
+    // instead of invalidating — a full `invalidateQueries` re-runs the backend
+    // `list-meetings` scan (a Python subprocess + whole-directory re-read) only
+    // to remove one row we already know is gone. Folder views derive from this
+    // same list (FolderDetail filters useMeetings() by folder id), so they
+    // update from this single write too. Removing on success (not optimistically
+    // in onMutate) means a failed delete simply leaves the row in place — no
+    // snapshot/rollback, so concurrent deletes can't clobber each other.
+    onSuccess: (_data, meeting) => {
+      const deletedFile = meeting.session_info.summary_file;
+      qc.setQueryData<Meeting[]>(meetingsKeys.list(), (prev) =>
+        prev ? prev.filter((m) => m.session_info.summary_file !== deletedFile) : prev,
+      );
+    },
   });
 }
 
