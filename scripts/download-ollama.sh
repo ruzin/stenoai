@@ -11,14 +11,25 @@ BIN_DIR="$(cd "$(dirname "$0")/.." && pwd)/bin"
 echo "=== Downloading ffmpeg ==="
 case "$(uname -s)" in
     Darwin)
-        FFMPEG_URL="https://evermeet.cx/ffmpeg/ffmpeg-7.1.1.zip"
+        # ffmpeg must match the BUILD architecture, not just the OS. evermeet.cx
+        # (the old URL) ships x86_64-only mac builds, so it bundled an Intel ffmpeg
+        # into the arm64 release — which crashes on Apple Silicon without Rosetta
+        # (#209). The mac build is Apple-Silicon only (arm64) since v0.4.0, so use
+        # osxexperts' arm64 static build (same 7.1.1 as before) and refuse any
+        # other arch rather than silently shipping a mismatch.
+        if [ "$(uname -m)" != "arm64" ]; then
+            echo "macOS build is arm64-only; unsupported arch: $(uname -m)" >&2
+            exit 1
+        fi
+        FFMPEG_URL="https://www.osxexperts.net/ffmpeg711arm.zip"
         mkdir -p "$BIN_DIR"
         curl -L "$FFMPEG_URL" -o "$BIN_DIR/ffmpeg.zip"
         cd "$BIN_DIR"
-        unzip -o ffmpeg.zip
+        # Extract only the binary; skip the __MACOSX resource-fork junk in the zip.
+        unzip -o ffmpeg.zip ffmpeg
         rm ffmpeg.zip
         chmod +x ffmpeg
-        echo "ffmpeg downloaded"
+        echo "ffmpeg 7.1.1 (arm64) downloaded"
         cd - > /dev/null
         ;;
     Linux)
