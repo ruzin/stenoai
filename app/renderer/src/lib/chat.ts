@@ -1,5 +1,41 @@
 // Shared helpers for the Chat tab + conversation view.
 
+import type { AiProvider, CloudProvider } from '@/lib/ipc';
+
+/** The AI-provider config fields the active-model label reads. */
+type ActiveModelFields = {
+  ai_provider: AiProvider;
+  cloud_provider: CloudProvider;
+  cloud_model: string;
+  model: string;
+};
+
+/**
+ * Human label for the model that will actually answer, driven by the ACTIVE
+ * `ai_provider`. The stored `cloud_*` prefs persist even when local/adapter is
+ * the active engine, so keying off them (the old behaviour) showed e.g.
+ * "openai · gpt-4o" to a local user — this keys off the active provider so the
+ * label can't lie. Returns 'Auto' until provider config has loaded.
+ */
+export function formatActiveModel(p: ActiveModelFields | undefined): string {
+  if (!p) return 'Auto';
+  // Guard each interpolation: an optimistic provider switch can briefly leave the
+  // cache holding {ai_provider} without the model fields, which would otherwise
+  // render "Ollama · undefined" for a frame.
+  switch (p.ai_provider) {
+    case 'cloud':
+      return [p.cloud_provider, p.cloud_model].filter(Boolean).join(' · ') || 'Cloud';
+    case 'remote':
+      return p.model ? `Remote Ollama · ${p.model}` : 'Remote Ollama';
+    case 'adapter':
+      // The org adapter brokers the model server-side; the desktop has no id.
+      return 'Organisation';
+    case 'local':
+    default:
+      return p.model ? `Ollama · ${p.model}` : 'Ollama';
+  }
+}
+
 // Sentinel summaryFile that marks a chat session as belonging to the global
 // Chat tab rather than any specific meeting. Stored on the session record so
 // the Recents list can filter to chat-tab sessions and skip in-meeting

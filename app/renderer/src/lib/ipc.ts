@@ -409,6 +409,8 @@ export type GetAiProviderResponse = Result<{
   cloud_api_url: string;
   cloud_provider: CloudProvider;
   cloud_model: string;
+  /** The local/remote Ollama summarisation model (config.model). */
+  model: string;
   cloud_api_key_set: boolean;
   /** AWS region used as the Bedrock endpoint host (defaults to us-east-1). */
   bedrock_region: string;

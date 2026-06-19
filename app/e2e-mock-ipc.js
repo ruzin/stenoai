@@ -28,6 +28,9 @@ function install({ ipcMain }) {
     provider: 'local', // 'local' | 'remote' | 'cloud' | 'adapter'
     orgSession: null, // { adapterUrl, email, name, orgId, exp } when signed in
     everSignedIn: false,
+    model: 'gemma4:e2b-it-qat', // local/remote Ollama model (config.model)
+    cloudProvider: 'openai',
+    cloudModel: 'gpt-4o',
   };
 
   // Channels with behaviour a test depends on. Each is (event, ...args) like a
@@ -37,6 +40,9 @@ function install({ ipcMain }) {
     'get-ai-provider': async () => ({
       success: true,
       ai_provider: state.provider,
+      cloud_provider: state.cloudProvider,
+      cloud_model: state.cloudModel,
+      model: state.model,
       cloud_api_key_set: false,
     }),
 

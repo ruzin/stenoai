@@ -3758,6 +3758,10 @@ def get_ai_provider():
         "cloud_api_key_set": bool(config.get_cloud_api_key()),
         "cloud_provider": config.get_cloud_provider(),
         "cloud_model": config.get_cloud_model(),
+        # The local/remote Ollama summarisation model, so the UI can show the
+        # model that's actually answering under ai_provider=local/remote
+        # (cloud/adapter use cloud_model / the org's server-side model).
+        "model": config.get_model(),
         "bedrock_region": config.get_bedrock_region(),
         "bedrock_inference_profile": config.get_bedrock_inference_profile(),
         "bedrock_supported_models": list(config.SUPPORTED_BEDROCK_MODELS),
