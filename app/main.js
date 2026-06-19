@@ -1875,9 +1875,13 @@ ipcMain.on('chat-global-stream', (event, queryId, question, folderId) => {
   let chunkCount = 0;
   proc.stdout.on('data', (data) => {
     buf += data.toString();
-    const lines = buf.split('\n');
-    buf = lines.pop();
-    for (const line of lines) {
+    const rawLines = buf.split('\n');
+    buf = rawLines.pop();
+    // Strip a trailing CR: on Windows the backend's stdout is \r\n, so splitting
+    // on \n leaves "CHAT_STREAM_COMPLETE\r" which the exact-match below would
+    // miss — the stream would then never signal done. (The CHUNK/ERROR prefixes
+    // tolerate it, but the completion sentinel must be matched exactly.)
+    for (const line of rawLines.map((l) => (l.endsWith('\r') ? l.slice(0, -1) : l))) {
       if (line.startsWith('CHAT_CHUNK:')) {
         try {
           const chunk = Buffer.from(line.slice(11), 'base64').toString('utf-8');
