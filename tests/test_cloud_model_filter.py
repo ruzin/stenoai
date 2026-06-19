@@ -27,15 +27,29 @@ class OpenAIChatModelFilterTests(unittest.TestCase):
             "o3-mini",
             "o4-mini",
             # web-search-grounded chat models — served via chat completions, so
-            # the "search" substring must NOT exclude them (#198 follow-up).
+            # the "search" substring must NOT exclude them (#198 follow-up). They
+            # don't contain "deep-research", so the Responses-only filter below
+            # leaves them alone.
             "gpt-4o-search-preview",
             "gpt-4o-mini-search-preview",
-            # deep-research reasoning models pass the o\\d gate; "research"
-            # contains "search", so they must not be excluded either.
-            "o3-deep-research",
-            "o4-mini-deep-research",
         ]:
             self.assertTrue(_is_openai_chat_model(model_id), msg=model_id)
+
+    def test_drops_responses_only_models(self):
+        # gpt-5-pro and the *-deep-research reasoning models are served ONLY via
+        # the Responses API, not chat.completions. Steno calls
+        # client.chat.completions.create, so offering these in the picker yields
+        # a runtime 400 — they must be dropped even though they pass the gpt-/o\\d
+        # gate. Dated snapshots (…-pro-YYYY-MM-DD, …-deep-research-YYYY-MM-DD)
+        # must drop too.
+        for model_id in [
+            "gpt-5-pro",
+            "gpt-5-pro-2025-10-06",
+            "o3-deep-research",
+            "o3-deep-research-2025-06-26",
+            "o4-mini-deep-research",
+        ]:
+            self.assertFalse(_is_openai_chat_model(model_id), msg=model_id)
 
     def test_drops_non_chat_families(self):
         for model_id in [
@@ -56,8 +70,10 @@ class OpenAIChatModelFilterTests(unittest.TestCase):
 
     def test_future_gpt_and_o_series_pass_without_a_code_change(self):
         # `gpt-` is a prefix match and the reasoning series is `o\d`, so models
-        # that don't exist yet still surface — the whole point of #198.
-        for model_id in ["gpt-5", "gpt-6-mini", "o5", "o9-pro"]:
+        # that don't exist yet still surface — the whole point of #198. (A future
+        # `-pro` tier stays Responses-only, so it's covered by the drop test, not
+        # here.)
+        for model_id in ["gpt-5", "gpt-6-mini", "o5", "o9"]:
             self.assertTrue(_is_openai_chat_model(model_id), msg=model_id)
 
     def test_case_insensitive(self):
