@@ -10,6 +10,33 @@ type ActiveModelFields = {
   model: string;
 };
 
+/** Provider-readiness fields the chat composer gates on. */
+type ChatProviderFields = {
+  ai_provider: AiProvider;
+  cloud_api_key_set?: boolean;
+  remote_ollama_url?: string;
+};
+
+/**
+ * Whether the cloud/local/remote provider is configured well enough to answer
+ * chat: local always works, remote needs its Ollama URL, cloud needs its key.
+ * Callers layer their own adapter / org-scope rules on top (those differ
+ * between the Chat tab and a conversation), so this covers only the shared core.
+ */
+export function chatProviderReady(p: ChatProviderFields | undefined): boolean {
+  if (!p) return false;
+  switch (p.ai_provider) {
+    case 'local':
+      return true;
+    case 'remote':
+      return !!p.remote_ollama_url;
+    case 'cloud':
+      return !!p.cloud_api_key_set;
+    default:
+      return false;
+  }
+}
+
 /**
  * Human label for the model that will actually answer, driven by the ACTIVE
  * `ai_provider`. The stored `cloud_*` prefs persist even when local/adapter is

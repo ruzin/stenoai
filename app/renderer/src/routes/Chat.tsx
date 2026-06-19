@@ -21,7 +21,7 @@ import { useAiProvider } from '@/hooks/useAi';
 import { useUserName } from '@/hooks/useSettings';
 import { useOrgSession } from '@/hooks/useOrg';
 import { navigate } from '@/lib/router';
-import { GLOBAL_SCOPE, bucketKey, deriveSessionName, toBucketLabel, formatActiveModel } from '@/lib/chat';
+import { GLOBAL_SCOPE, bucketKey, deriveSessionName, toBucketLabel, formatActiveModel, chatProviderReady } from '@/lib/chat';
 import { PRESETS, PresetGlyph } from '@/lib/chatPresets';
 
 export function Chat() {
@@ -50,24 +50,17 @@ export function Chat() {
   const submittingRef = React.useRef(false);
   const inputRef = React.useRef<HTMLInputElement>(null);
 
-  const isCloud = provider.data?.ai_provider === 'cloud';
   const isAdapter = provider.data?.ai_provider === 'adapter';
   const isLocalEngine =
     provider.data?.ai_provider === 'local' || provider.data?.ai_provider === 'remote';
-  const cloudKeySet = provider.data?.cloud_api_key_set ?? false;
-  const remoteUrlSet = !!provider.data?.remote_ollama_url;
-  // Which providers can answer cross-note chat:
-  //  - cloud needs its API key set; adapter needs an active org session
-  //    (a signed-out adapter user would otherwise get an opaque submit failure);
-  //  - local always works; remote needs its Ollama URL configured.
-  // Local/remote answer over a context-capped, most-recent slice of notes
-  // (the backend sizes the corpus to the model's window) — see the hint below.
+  // Cloud/local/remote readiness is the shared core (chatProviderReady); adapter
+  // adds an active-org-session requirement here (a signed-out adapter user would
+  // otherwise get an opaque submit failure). Local/remote answer over a
+  // context-capped, most-recent slice (the backend sizes the corpus to the
+  // model's window) — see the hint below.
   const orgSignedIn = orgSession.data?.signedIn === true;
   const providerReady =
-    (isCloud && cloudKeySet) ||
-    (isAdapter && orgSignedIn) ||
-    provider.data?.ai_provider === 'local' ||
-    (provider.data?.ai_provider === 'remote' && remoteUrlSet);
+    chatProviderReady(provider.data) || (isAdapter && orgSignedIn);
   const orgScopeActive = scopeFolderId === ORG_SHARED_SCOPE;
   const ready = providerReady || orgScopeActive;
 
@@ -241,14 +234,16 @@ export function Chat() {
               </span>
               {isLocalEngine && (
                 // Local/remote windows are smaller than cloud, so the backend
-                // caps the corpus to the most-recent notes. Disclose it so a
-                // local user knows the answer may not span their whole history.
+                // caps the corpus to the most-recent notes when it's over budget.
+                // "may omit" (not "omits") since a small library fits entirely.
+                // TODO: tie to the actual per-response cap (CHAT_SCOPE_CAPPED,
+                // descoped from WS3) so the hint only shows when truncation ran.
                 <span
                   data-testid="chat-local-scope-hint"
                   className="text-[12px]"
                   style={{ color: 'var(--fg-muted)' }}
                 >
-                  · covers recent notes
+                  · may omit older notes
                 </span>
               )}
             </div>

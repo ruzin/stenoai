@@ -35,6 +35,7 @@ import {
   deriveSessionName,
   toBucketLabel,
   formatActiveModel,
+  chatProviderReady,
 } from '@/lib/chat';
 import { consumePendingNewChat } from '@/routes/Chat';
 import { renderMarkdown } from '@/lib/markdown';
@@ -62,17 +63,11 @@ export function ChatConversation({ sessionId }: ChatConversationProps) {
   const inputRef = React.useRef<HTMLInputElement>(null);
   const scrollRef = React.useRef<HTMLDivElement>(null);
 
-  const isCloud = provider.data?.ai_provider === 'cloud';
-  const cloudKeySet = provider.data?.cloud_api_key_set ?? false;
-  const remoteUrlSet = !!provider.data?.remote_ollama_url;
   const isLocalEngine =
     provider.data?.ai_provider === 'local' || provider.data?.ai_provider === 'remote';
-  // Local always works; remote needs its Ollama URL; cloud needs its key.
-  // Local/remote answer over a context-capped, most-recent slice (see hint).
-  const providerReady =
-    (isCloud && cloudKeySet) ||
-    provider.data?.ai_provider === 'local' ||
-    (provider.data?.ai_provider === 'remote' && remoteUrlSet);
+  // Shared cloud/local/remote readiness; local/remote answer over a
+  // context-capped, most-recent slice (see hint).
+  const providerReady = chatProviderReady(provider.data);
   // Org-scoped follow-ups go through the adapter and don't need the local
   // cloud provider configured — the cloud-key gate becomes irrelevant.
   const isOrgScope = (s: string | null | undefined) => s === ORG_SHARED_SCOPE;
@@ -491,7 +486,7 @@ export function ChatConversation({ sessionId }: ChatConversationProps) {
                   className="text-[12px]"
                   style={{ color: 'var(--fg-muted)' }}
                 >
-                  · covers recent notes
+                  · may omit older notes
                 </span>
               )}
             </div>

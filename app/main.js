@@ -1837,9 +1837,10 @@ ipcMain.on('query-transcript-stream', (event, queryId, summaryFile, question) =>
 
 // Cross-note chat (Chat tab). Same wire protocol as query-transcript-stream
 // (CHAT_CHUNK / CHAT_STREAM_COMPLETE / CHAT_STREAM_ERROR -> query-chunk /
-// query-done) so the renderer can reuse useStreamingQuery. Cloud-only —
-// the Python CLI rejects local providers because we don't have retrieval
-// yet and a full-corpus prompt blows local context windows.
+// query-done) so the renderer can reuse useStreamingQuery. Works with every
+// provider — the Python CLI sizes the assembled corpus to the active model's
+// context window (smaller for local/remote), so a local model answers over
+// fewer recent notes instead of overflowing. No retrieval (RAG) yet.
 ipcMain.on('chat-global-stream', (event, queryId, question, folderId) => {
   sendDebugLog(`💬 Global chat query: ${String(question || '').slice(0, 80)}... (folder: ${folderId || 'all'})`);
   const env = { ...process.env, ...getAiEnv() };

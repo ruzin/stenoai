@@ -31,6 +31,7 @@ function install({ ipcMain }) {
     model: 'gemma4:e2b-it-qat', // local/remote Ollama model (config.model)
     cloudProvider: 'openai',
     cloudModel: 'gpt-4o',
+    remoteUrl: '', // remote Ollama URL (empty = not configured)
   };
 
   // Channels with behaviour a test depends on. Each is (event, ...args) like a
@@ -43,6 +44,7 @@ function install({ ipcMain }) {
       cloud_provider: state.cloudProvider,
       cloud_model: state.cloudModel,
       model: state.model,
+      remote_ollama_url: state.remoteUrl,
       cloud_api_key_set: false,
     }),
 
