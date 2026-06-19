@@ -29,11 +29,21 @@ case "$(uname -s)" in
         unzip -o ffmpeg.zip ffmpeg
         rm ffmpeg.zip
         chmod +x ffmpeg
-        # Validate the binary actually runs and is the expected major version —
-        # catches a truncated/corrupt download or a wrong-format extract before it
-        # gets bundled (complements the `file ... arm64` arch guard in CI). set -e
-        # makes a non-zero exit here fail the build loudly.
-        if ! ./ffmpeg -version | grep -q "ffmpeg version 7.1"; then
+        # Validate the binary before bundling it. Two distinct failure modes:
+        #  1. Wrong architecture. An x86_64 ffmpeg runs fine HERE under Rosetta and
+        #     would sail through the -version check, then crash on a Rosetta-less
+        #     user machine (#209). Assert the Mach-O is arm64 so the script
+        #     self-enforces the arch rather than leaning only on the external CI
+        #     `file ... arm64` guard.
+        #  2. Truncated/corrupt download or wrong-format extract. Run -version and
+        #     pin the major; pipefail (scoped to a subshell) makes a non-zero
+        #     ffmpeg exit fail loudly instead of being masked by grep's exit.
+        # set -e turns either non-zero exit into a loud build failure.
+        if ! file ./ffmpeg | grep -q "arm64"; then
+            echo "Downloaded ffmpeg is not an arm64 binary: $(file ./ffmpeg)" >&2
+            exit 1
+        fi
+        if ! ( set -o pipefail; ./ffmpeg -version | grep -q "ffmpeg version 7.1" ); then
             echo "Downloaded ffmpeg failed -version or is not 7.1.x" >&2
             exit 1
         fi
