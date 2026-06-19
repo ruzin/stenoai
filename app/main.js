@@ -1131,10 +1131,6 @@ if (!gotSingleInstanceLock) {
       console.warn('processing-log init failed (non-fatal):', e?.message);
     }
 
-    // Clear any .import reservation markers orphaned by a crash mid-import; no
-    // import is in flight at startup, so a leftover marker is always stale and
-    // would otherwise force every future import of that stem to bump to -N.
-    sweepStaleImportMarkers();
     // Application menu. macOS uses the global menu bar with mac-only roles
     // (services/hide/unhide). Windows/Linux get a slimmer, platform-correct
     // menu — kept (editing accelerators, Settings, Help) but hidden by default
@@ -1301,6 +1297,14 @@ if (!gotSingleInstanceLock) {
         // Non-fatal - custom path just won't be cached
       }
     }
+
+    // Clear any .import reservation markers orphaned by a crash mid-import. No
+    // import is in flight at startup, so a leftover marker is always stale and
+    // would otherwise force every future import of that stem to bump to -N.
+    // MUST run after the custom storage path is loaded above: resolveRecordingsDir()
+    // keys off _cachedCustomStoragePath, so sweeping earlier would scan the
+    // default dir and miss a custom-storage user's recordings/ entirely.
+    await sweepStaleImportMarkers();
 
     // Register global hotkey for toggle recording (Cmd+Shift+R on macOS, Ctrl+Shift+R on Windows/Linux)
     const hotkeyModifier = process.platform === 'darwin' ? 'Command+Shift+R' : 'Ctrl+Shift+R';
