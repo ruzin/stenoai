@@ -287,20 +287,37 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
   }, [info.name, summaryFile, qc]);
 
   const [copiedTranscript, setCopiedTranscript] = React.useState(false);
+  const [exportError, setExportError] = React.useState<string | null>(null);
   // Built once per meeting — the transcript can be large, and it's read on every
   // render for the buttons' disabled state as well as in both handlers.
   const transcriptBundle = React.useMemo(() => buildTranscriptBundle(meeting), [meeting]);
 
-  const copyTranscriptForAi = async () => {
+  // Clipboard copy mirrors copyNotes above: fire-and-forget is the established
+  // pattern for these lightweight copies in this view.
+  const copyTranscriptForAi = () => {
     if (!transcriptBundle) return;
-    await navigator.clipboard.writeText(transcriptBundle);
+    void navigator.clipboard.writeText(transcriptBundle);
     setCopiedTranscript(true);
     setTimeout(() => setCopiedTranscript(false), 1500);
   };
 
+  // Save writes a file, which can genuinely fail — so unlike the copy paths we
+  // surface a real failure. A user-cancelled dialog is not an error (the handler
+  // returns error: 'canceled') and stays silent.
   const saveTranscript = async () => {
     if (!transcriptBundle) return;
-    await ipc().meetings.exportTranscript(defaultExportFilename(meeting), transcriptBundle);
+    setExportError(null);
+    try {
+      const res = await ipc().meetings.exportTranscript(
+        defaultExportFilename(meeting),
+        transcriptBundle,
+      );
+      if (!res.success && res.error !== 'canceled') {
+        setExportError(`Couldn't save transcript: ${res.error || 'unknown error'}`);
+      }
+    } catch (error) {
+      setExportError(`Couldn't save transcript: ${getErrorMessage(error)}`);
+    }
   };
 
   const copyNotes = () => {
@@ -504,6 +521,12 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
             </Popover>
           </div>
         </div>
+
+        {exportError && (
+          <p role="alert" className="text-[12.5px]" style={{ color: 'var(--danger)' }}>
+            {exportError}
+          </p>
+        )}
 
         <h1
           data-testid="meeting-detail-title"
