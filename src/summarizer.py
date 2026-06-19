@@ -673,7 +673,7 @@ names, jargon, or context that helps interpret the transcript more accurately.
 
 IMPORTANT: Do not infer or assume information that wasn't directly mentioned.
 
-Include a brief overview so someone can quickly understand what happened in the meeting, what areas/topics were discussed, what were the key points, and what are the next steps if any were mentioned.
+Include a brief overview so someone can quickly understand what happened in the meeting, what areas/topics were discussed, what were the key points, and what are the next steps if any were mentioned. Write the overview directly as a summary of the subject matter — do not refer to "the transcript" or open with phrases like "The transcript discusses".
 
 CRITICAL JSON FORMATTING RULES:
 1. ALL strings must be enclosed in double quotes "like this"
@@ -974,7 +974,7 @@ Return ONLY the response in this exact JSON format:
         return f"""{diarisation_note}{notes_context}Summarise this meeting transcript as markdown. Output ONLY the markdown below with no preamble, commentary, or explanation. Start directly with ## Summary.
 
 ## Summary
-A 1-3 sentence overview of what was discussed.
+A 1-3 sentence overview of the main topics and outcomes, written directly. Do not refer to "the transcript", "the meeting", or "the recording", and do not open with phrases like "The transcript discusses" or "In this meeting".
 
 ## Key Topics
 ### [Topic title]
