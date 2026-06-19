@@ -32,7 +32,7 @@ Thank you for your interest in contributing to StenoAI! This guide will help you
    # Install Ollama
    brew install ollama
    ollama serve &
-   ollama pull llama3.2:3b
+   ollama pull gemma4:e2b-it-qat
    
    # Install ffmpeg
    brew install ffmpeg

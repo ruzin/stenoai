@@ -75,6 +75,44 @@ class ConfigWhisperModelTests(unittest.TestCase):
             self.assertEqual(config.get_whisper_model(), "small")
 
 
+class ConfigSummaryModelTests(unittest.TestCase):
+    def test_default_model_is_gemma4_e2b(self):
+        self.assertEqual(Config.DEFAULT_MODEL, "gemma4:e2b-it-qat")
+
+    def test_get_model_returns_default_on_fresh_config(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config = Config(config_path=Path(tmp_dir) / "config.json")
+            self.assertEqual(config.get_model(), "gemma4:e2b-it-qat")
+
+    def test_default_model_is_first_active_entry_in_registry(self):
+        # The Settings UI relies on active models being listed first, default
+        # first. The default must be a registered model and the first key.
+        self.assertIn(Config.DEFAULT_MODEL, Config.SUPPORTED_MODELS)
+        first_key = next(iter(Config.SUPPORTED_MODELS))
+        self.assertEqual(first_key, Config.DEFAULT_MODEL)
+        self.assertNotEqual(
+            Config.SUPPORTED_MODELS[Config.DEFAULT_MODEL].get("deprecated"), True
+        )
+
+    def test_llama32_kept_as_recognised_active_model(self):
+        # Kept (not removed/deprecated) so users already on it keep a recognised
+        # selection after the default swap.
+        self.assertIn("llama3.2:3b", Config.SUPPORTED_MODELS)
+        self.assertNotEqual(
+            Config.SUPPORTED_MODELS["llama3.2:3b"].get("deprecated"), True
+        )
+
+    def test_existing_user_choice_survives_default_swap(self):
+        # Migration safety: a user already on the old default keeps it; only a
+        # fresh config (no stored "model") gets the new gemma4 default.
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "config.json"
+            config = Config(config_path=path)
+            self.assertTrue(config.set_model("llama3.2:3b"))
+            reloaded = Config(config_path=path)
+            self.assertEqual(reloaded.get_model(), "llama3.2:3b")
+
+
 class ConfigWhisperModelMigrationTests(unittest.TestCase):
     """_migrate_whisper_model runs at load time to rescue configs that hold
     values outside the current SUPPORTED_WHISPER_MODELS list. Bare 'large'

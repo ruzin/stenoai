@@ -51,6 +51,19 @@ function assertInstalledShape(models: Record<string, ModelInfo> | undefined) {
   }
 }
 
+test('a fresh install defaults the summary model to gemma4:e2b-it-qat', async ({
+  launchApp,
+}) => {
+  // No config is seeded, so get-current-model returns Config.DEFAULT_MODEL.
+  // This pins the WS1 default swap (was llama3.2:3b).
+  const { page } = await launchApp();
+  const current = await page.evaluate(() =>
+    (window as StenoWindow).stenoai.models.getCurrent(),
+  );
+  expect(current.success).toBe(true);
+  expect(current.model).toBe('gemma4:e2b-it-qat');
+});
+
 test('summary model set persists to config.model and round-trips through get-current-model', async ({
   launchApp,
   userDataDir,
