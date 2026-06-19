@@ -207,6 +207,11 @@ type SaveMeetingNotesResponse = Result<{ path: string }>;
 // `path` is the file the transcript bundle was written to. Cancelling the save
 // dialog resolves as { success: false, error: 'canceled' } (not a rejection),
 // so the renderer treats a cancel like any other non-success and shows nothing.
+// `'canceled'` is a NORMATIVE cross-process sentinel: the renderer matches it by
+// exact string to stay silent. Producers define it once in app/ipc-sentinels.js
+// (EXPORT_CANCELED, required by main.js + the mock IPC); the renderer mirrors it
+// as EXPORT_CANCELED_ERROR. This doc is the source of truth — change all three
+// together.
 type ExportTranscriptResponse = Result<{ path: string }>;
 
 // Main → renderer events emitted during reprocess / recording pipelines.

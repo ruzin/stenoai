@@ -71,6 +71,14 @@ import {
 
 const LAST_OPENED_KEY = 'steno-last-opened-meeting';
 
+// Cross-process sentinel: the export-transcript handler returns this exact error
+// when the user dismisses the save dialog, which we treat as a silent no-op
+// rather than a failure. Must match the producers' value (app/ipc-sentinels.js,
+// mirrored in the mock IPC) and app/docs/ipc-contract.md — the renderer is bundled
+// separately and can't require that CJS module, so the contract doc is the source
+// of truth that keeps them aligned.
+const EXPORT_CANCELED_ERROR = 'canceled';
+
 interface MeetingDetailProps {
   summaryFile: string;
 }
@@ -310,7 +318,7 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
 
   // Save writes a file, which can genuinely fail — so unlike the copy paths we
   // surface a real failure. A user-cancelled dialog is not an error (the handler
-  // returns error: 'canceled') and stays silent.
+  // returns error: EXPORT_CANCELED_ERROR) and stays silent.
   const saveTranscript = async () => {
     if (!transcriptBundle) return;
     setExportError(null);
@@ -319,7 +327,7 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
         defaultExportFilename(meeting),
         transcriptBundle,
       );
-      if (!res.success && res.error !== 'canceled') {
+      if (!res.success && res.error !== EXPORT_CANCELED_ERROR) {
         setExportError(`Couldn't save transcript: ${res.error || 'unknown error'}`);
       }
     } catch (error) {

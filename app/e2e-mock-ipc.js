@@ -21,6 +21,7 @@
  */
 
 const fs = require('fs');
+const { EXPORT_CANCELED } = require('./ipc-sentinels');
 
 // A deterministic meeting the transcript-export T1 spec navigates to. Seeded
 // only when STENOAI_E2E_SEED_MEETING=1 so the other T1 specs keep an empty Home.
@@ -106,7 +107,7 @@ function install({ ipcMain }) {
         return { success: false, error: 'No transcript content to export.' };
       }
       const seamPath = process.env.STENOAI_E2E_EXPORT_PATH;
-      if (!seamPath) return { success: false, error: 'canceled' };
+      if (!seamPath) return { success: false, error: EXPORT_CANCELED };
       fs.writeFileSync(seamPath, content, 'utf-8');
       return { success: true, path: seamPath };
     },

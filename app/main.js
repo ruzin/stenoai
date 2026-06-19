@@ -80,6 +80,7 @@ const http = require('http');
 const os = require('os');
 const { URL, URLSearchParams } = require('url');
 const crypto = require('crypto');
+const { EXPORT_CANCELED } = require('./ipc-sentinels');
 const { PostHog } = require('posthog-node');
 const { initMain } = require('electron-audio-loopback');
 const { autoUpdater } = require('electron-updater');
@@ -2349,7 +2350,7 @@ ipcMain.handle('export-transcript', async (event, defaultFilename, content) => {
         ],
       });
       if (result.canceled || !result.filePath) {
-        return { success: false, error: 'canceled' };
+        return { success: false, error: EXPORT_CANCELED };
       }
       targetPath = result.filePath;
     }
