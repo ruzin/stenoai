@@ -17,7 +17,7 @@
     "dev:renderer": "vite",
     "build:renderer": "vite build",
     "typecheck:renderer": "tsc -p renderer/tsconfig.json --noEmit",
-    "lint:renderer": "eslint renderer/src --ext .ts,.tsx",
+    "lint:renderer": "eslint --config renderer/eslint.config.mjs renderer/src",
     "format:renderer": "prettier --write renderer/src",
     "build": "npm run build:renderer && electron-builder",
     "pack:unsigned": "npm run build:renderer && electron-builder --dir --config electron-builder.ci.yml",

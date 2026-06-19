@@ -199,7 +199,7 @@ function parseTranscript(text: string, isDiarised: boolean): Segment[] {
   const trimmed = text.trim();
   if (!trimmed) return [];
   const sentences = trimmed
-    .split(/(?<=[.!?])\s+(?=[A-Z"'(\[])/)
+    .split(/(?<=[.!?])\s+(?=[A-Z"'([])/)
     .map((s) => s.trim())
     .filter(Boolean);
   return (sentences.length > 1 ? sentences : [trimmed]).map((s) => ({ speaker: null, text: s }));
