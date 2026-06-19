@@ -93,6 +93,11 @@ test('@contract reprocess builds a transcript-bearing prompt and parses the repl
     expect(prompt).toContain('we ship the release on Friday');
     expect(prompt).toContain('budget is fifty thousand');
 
+    // Summary-style contract: the prompt pins direct phrasing so the summary
+    // doesn't open with a "The transcript discusses…" meta-preamble (a
+    // run-to-run LLM variance we lock down in the prompt itself).
+    expect(prompt).toContain('written directly');
+
     // Exactly one summarise call (regenTitle=false → no separate title call) —
     // pins that reprocess didn't double-summarise.
     expect(ollama.chatCalls()).toBe(1);
