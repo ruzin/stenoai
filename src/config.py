@@ -109,7 +109,7 @@ def is_bundled() -> bool:
 class Config:
     """Manages application configuration with file persistence."""
 
-    DEFAULT_MODEL = "llama3.2:3b"
+    DEFAULT_MODEL = "gemma4:e2b-it-qat"
 
     # Supported models with metadata. Active models first (roughly ascending by
     # capability/size, default first), deprecated models last — the Settings UI
@@ -118,20 +118,20 @@ class Config:
     # so a user already on the model keeps a recognised selection; fully retired
     # models are dropped from this dict.
     SUPPORTED_MODELS = {
-        "llama3.2:3b": {
-            "name": "Llama 3.2 3B",
-            "size": "2GB",
-            "params": "3B",
-            "description": "Fast and lightweight for quick meetings (default)",
-            "speed": "very fast",
-            "quality": "good"
-        },
         "gemma4:e2b-it-qat": {
             "name": "Gemma 4 E2B (QAT)",
             "size": "4.3GB",
             "params": "2B",
-            "description": "Lightest Gemma 4, quantization-aware, 128K context",
+            "description": "Lightest Gemma 4, quantization-aware, real 128K context (default)",
             "speed": "fast",
+            "quality": "good"
+        },
+        "llama3.2:3b": {
+            "name": "Llama 3.2 3B",
+            "size": "2GB",
+            "params": "3B",
+            "description": "Fast and lightweight for quick meetings",
+            "speed": "very fast",
             "quality": "good"
         },
         "qwen3.5:9b": {

@@ -42,6 +42,43 @@ def bedrock_converse_url(region: str, target_id: str) -> str:
     return f"https://bedrock-runtime.{region}.amazonaws.com/model/{encoded}/converse"
 
 
+# Ollama applies a small default context window (num_ctx ~4K) regardless of the
+# model's real capability, silently truncating long meeting transcripts before
+# the model ever sees them. We request a larger window per Ollama call, sized per
+# model where the window is known, clamped to a floor and ceiling:
+#   - floor keeps short-context models usable,
+#   - ceiling bounds the KV-cache memory a request can allocate on edge-class
+#     machines (gemma4:e2b advertises a real 128K window, but a meeting fits well
+#     under our ceiling, so we don't ask Ollama to allocate the whole 128K).
+# NB: keep the SAME num_ctx across every call to a given model in one run —
+# Ollama reloads the model when num_ctx changes, so a mismatched title/summary
+# request would force an expensive reload.
+OLLAMA_NUM_CTX_FLOOR = 8192
+OLLAMA_NUM_CTX_DEFAULT = 32768
+OLLAMA_NUM_CTX_CEILING = 131072
+_OLLAMA_MODEL_NUM_CTX = {
+    "gemma4:e2b-it-qat": 32768,
+    "gemma4:12b": 32768,
+    "gemma3:4b": 16384,
+    # llama3.2:3b's quantized build effectively caps ~8K despite the headline 128K
+    "llama3.2:3b": 8192,
+    "qwen3.5:9b": 32768,
+    "gpt-oss:20b": 32768,
+    "deepseek-r1:14b": 32768,
+}
+
+
+def resolve_num_ctx(model_name: str) -> int:
+    """Context window (num_ctx) to request from Ollama for ``model_name``.
+
+    Sized per known model, clamped to ``[FLOOR, CEILING]``; unknown models fall
+    back to the conservative default. Pure function — unit-testable without a
+    running model or Ollama.
+    """
+    base = _OLLAMA_MODEL_NUM_CTX.get(model_name, OLLAMA_NUM_CTX_DEFAULT)
+    return max(OLLAMA_NUM_CTX_FLOOR, min(base, OLLAMA_NUM_CTX_CEILING))
+
+
 class OllamaSummarizer:
     def __init__(self, model_name: Optional[str] = None):
         """
@@ -153,7 +190,7 @@ class OllamaSummarizer:
                     logger.info(f"Using configured model: {model_name}")
                 except Exception as e:
                     logger.warning(f"Failed to load model from config: {e}, using default")
-                    model_name = "llama3.2:3b"
+                    model_name = config.DEFAULT_MODEL
 
             self.model_name = model_name
             self._ensure_ollama_ready()
@@ -175,6 +212,16 @@ class OllamaSummarizer:
         """Start the Ollama service if not running."""
         logger.info("Starting Ollama service...")
         return ollama_manager.start_ollama_server(wait=True, timeout=30)
+
+    def _ollama_options(self) -> Dict[str, Any]:
+        """Per-request options for local/remote Ollama ``chat`` calls.
+
+        Sets an explicit ``num_ctx`` so the model uses a real context window
+        instead of Ollama's small default (which would truncate long meetings).
+        Applied to every local/remote call for the active model so num_ctx stays
+        consistent and Ollama doesn't reload the model between calls.
+        """
+        return {"num_ctx": resolve_num_ctx(self.model_name)}
     
     def _repair_json(self, json_text: str) -> Optional[str]:
         """
@@ -315,8 +362,8 @@ class OllamaSummarizer:
             except Exception as e:
                 logger.error(f"Failed to download model {self.model_name}: {e}")
 
-            # Try fallback models from supported list
-            fallback_models = ["llama3.2:3b", "gemma3:4b", "qwen3.5:9b", "deepseek-r1:14b"]
+            # Try fallback models from supported list (default first)
+            fallback_models = ["gemma4:e2b-it-qat", "llama3.2:3b", "qwen3.5:9b", "gemma4:12b"]
             for fallback in fallback_models:
                 if fallback in model_names:
                     logger.info(f"Using already-installed fallback model: {fallback}")
@@ -811,6 +858,7 @@ Return ONLY the response in this exact JSON format:
                                     'content': prompt
                                 }
                             ],
+                            options=self._ollama_options(),
                         )
                         break  # Success, exit retry loop
 
@@ -1071,6 +1119,7 @@ TRANSCRIPT:
                     model=self.model_name,
                     messages=[{'role': 'user', 'content': prompt}],
                     stream=True,
+                    options=self._ollama_options(),
                 )
                 for chunk in response:
                     content = chunk.get('message', {}).get('content', '')
@@ -1103,7 +1152,8 @@ TRANSCRIPT:
             # Test with a simple prompt
             test_response = self.client.chat(
                 model=self.model_name,
-                messages=[{'role': 'user', 'content': 'Hello'}]
+                messages=[{'role': 'user', 'content': 'Hello'}],
+                options=self._ollama_options(),
             )
             
             logger.info("Ollama connection test successful")
@@ -1220,6 +1270,7 @@ TITLE:"""
                 ollama_response = title_client.chat(
                     model=self.model_name,
                     messages=[{'role': 'user', 'content': prompt}],
+                    options=self._ollama_options(),
                 )
                 response_text = ollama_response['message']['content'].strip()
 
@@ -1322,6 +1373,7 @@ ANSWER:"""
                     model=self.model_name,
                     messages=[{"role": "user", "content": prompt}],
                     stream=True,
+                    options=self._ollama_options(),
                 )
                 for chunk in stream:
                     content = chunk['message']['content']
@@ -1379,6 +1431,7 @@ ANSWER:"""
                                     'content': prompt
                                 }
                             ],
+                            options=self._ollama_options(),
                         )
                         break
 

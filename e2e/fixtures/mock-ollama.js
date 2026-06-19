@@ -40,6 +40,17 @@ function startMockOllama(opts = {}) {
         res.end(
           JSON.stringify({
             models: [
+              // gemma4:e2b-it-qat is the config default (Config.DEFAULT_MODEL);
+              // list it so the summarizer finds the configured model installed
+              // instead of taking the pull path. llama3.2:3b kept for tests that
+              // pin the older model explicitly.
+              {
+                name: 'gemma4:e2b-it-qat',
+                model: 'gemma4:e2b-it-qat',
+                modified_at: '2024-01-01T00:00:00Z',
+                size: 4301000000,
+                digest: 'mock',
+              },
               {
                 name: 'llama3.2:3b',
                 model: 'llama3.2:3b',

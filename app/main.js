@@ -402,6 +402,11 @@ async function showShortcutNotification(body) {
 const BACKEND_STATUS_RETRY_ATTEMPTS = 3;
 const BACKEND_STATUS_RETRY_DELAY_MS = 250;
 
+// Default local AI (summarisation) model the first-run setup pulls. The setup
+// pull here is NOT backend-driven, so this must be kept in sync with
+// src.config.Config.DEFAULT_MODEL (the Python single source of truth).
+const DEFAULT_AI_MODEL = 'gemma4:e2b-it-qat';
+
 function wait(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
@@ -4493,11 +4498,11 @@ ipcMain.handle('setup-ollama-and-model', async () => {
     }
     
     sendDebugLog('Downloading AI model (this may take several minutes)...');
-    sendDebugLog('POST http://127.0.0.1:11434/api/pull {name: "llama3.2:3b"}');
+    sendDebugLog(`POST http://127.0.0.1:11434/api/pull {name: "${DEFAULT_AI_MODEL}"}`);
 
     const http = require('http');
     return new Promise((resolve) => {
-      const postData = JSON.stringify({ name: 'llama3.2:3b' });
+      const postData = JSON.stringify({ name: DEFAULT_AI_MODEL });
       const req = http.request({
         hostname: '127.0.0.1',
         port: 11434,
@@ -4541,7 +4546,7 @@ ipcMain.handle('setup-ollama-and-model', async () => {
           if (res.statusCode === 200) {
             sendDebugLog('AI model download completed successfully');
             try {
-              await runPythonScript('simple_recorder.py', ['set-model', 'llama3.2:3b'], true);
+              await runPythonScript('simple_recorder.py', ['set-model', DEFAULT_AI_MODEL], true);
             } catch (e) {
               // Non-fatal -- config reset is best-effort
             }

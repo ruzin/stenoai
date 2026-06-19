@@ -142,8 +142,8 @@ Have questions or suggestions? [Join our Discord](https://discord.gg/DZ6vcQnxxu)
 - `Whisper Small` (466 MB): Balanced speed and accuracy. Same 99-language coverage. **(legacy — kept available for existing users; Large V3 Turbo recommended)**
 
 **Summarization Models** (Ollama):
-- `llama3.2:3b` (2GB): Fast and lightweight for quick meetings **(default)**
-- `gemma4:e2b-it-qat` (4.3GB): Lightest Gemma 4, quantization-aware — good for memory-constrained machines (128K context)
+- `gemma4:e2b-it-qat` (4.3GB): Lightest Gemma 4, quantization-aware, with a real 128K context **(default)**
+- `llama3.2:3b` (2GB): Fast and lightweight for quick meetings
 - `qwen3.5:9b` (6.6GB): Excellent at structured output and action items
 - `gemma4:12b` (7.6GB): Gemma 4 with a 256K context — best for long meetings
 - `gpt-oss:20b` (14GB): OpenAI open-weight model with reasoning capabilities
