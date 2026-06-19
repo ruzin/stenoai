@@ -204,6 +204,11 @@ type DeleteMeetingResponse = Result<{ message: string }>;
 
 type SaveMeetingNotesResponse = Result<{ path: string }>;
 
+// `path` is the file the transcript bundle was written to. Cancelling the save
+// dialog resolves as { success: false, error: 'canceled' } (not a rejection),
+// so the renderer treats a cancel like any other non-success and shows nothing.
+type ExportTranscriptResponse = Result<{ path: string }>;
+
 // Main → renderer events emitted during reprocess / recording pipelines.
 interface SummaryChunkEvent  { chunk: string; sessionName: string }
 interface SummaryTitleEvent  { title: string; sessionName: string }
