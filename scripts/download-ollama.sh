@@ -29,6 +29,14 @@ case "$(uname -s)" in
         unzip -o ffmpeg.zip ffmpeg
         rm ffmpeg.zip
         chmod +x ffmpeg
+        # Validate the binary actually runs and is the expected major version —
+        # catches a truncated/corrupt download or a wrong-format extract before it
+        # gets bundled (complements the `file ... arm64` arch guard in CI). set -e
+        # makes a non-zero exit here fail the build loudly.
+        if ! ./ffmpeg -version | grep -q "ffmpeg version 7.1"; then
+            echo "Downloaded ffmpeg failed -version or is not 7.1.x" >&2
+            exit 1
+        fi
         echo "ffmpeg 7.1.1 (arm64) downloaded"
         cd - > /dev/null
         ;;
