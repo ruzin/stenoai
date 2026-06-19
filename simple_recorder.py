@@ -2828,6 +2828,10 @@ def set_model(model_name):
     else:
         print(f"ERROR: Failed to save model configuration")
         print(json.dumps({"success": False, "error": "Failed to save config"}))
+        # Exit non-zero so callers (e.g. the setup-ollama-and-model reuse path in
+        # main.js) can't read a config-write failure as success — the model was
+        # NOT persisted as active. sys.exit (not bare exit) for the PyInstaller bundle.
+        sys.exit(1)
 
 
 @cli.command()

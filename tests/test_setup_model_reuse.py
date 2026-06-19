@@ -6,8 +6,13 @@ is the decision (which installed model to reuse, in what preference order);
 these tests pin that behaviour without touching Ollama or the network.
 """
 
+import json
 import unittest
+from unittest import mock
 
+from click.testing import CliRunner
+
+import simple_recorder
 from simple_recorder import pick_installed_supported_model
 
 # A representative slice of config.SUPPORTED_MODELS order (ascending capability,
@@ -119,6 +124,42 @@ class PickInstalledSupportedModelTests(unittest.TestCase):
                 deprecated=DEPRECATED,
             ),
             "llama3.2:3b",
+        )
+
+
+class SetModelExitCodeTests(unittest.TestCase):
+    """`set-model` must signal a config-write failure through its EXIT CODE, not
+    just a JSON body. The reuse flow (setup-ollama-and-model) shells out to it to
+    persist the reused model as active; if the write fails but the process exits
+    0, setup reports success while the active model was never saved (#123)."""
+
+    def _invoke(self, *, save_succeeds):
+        # Installed fallback model differs from the configured + default model;
+        # persisting it as active is what may fail.
+        fake_config = mock.Mock()
+        fake_config.SUPPORTED_MODELS = {"llama3.2:3b": {}, "qwen3.5:9b": {}}
+        fake_config.set_model.return_value = save_succeeds
+        with mock.patch("src.config.get_config", return_value=fake_config):
+            return CliRunner().invoke(simple_recorder.set_model, ["qwen3.5:9b"])
+
+    def _last_json(self, output):
+        line = [ln for ln in output.splitlines() if ln.strip().startswith("{")][-1]
+        return json.loads(line)
+
+    def test_config_write_failure_exits_nonzero(self):
+        result = self._invoke(save_succeeds=False)
+        self.assertNotEqual(result.exit_code, 0)
+        self.assertEqual(
+            self._last_json(result.output),
+            {"success": False, "error": "Failed to save config"},
+        )
+
+    def test_success_exits_zero(self):
+        result = self._invoke(save_succeeds=True)
+        self.assertEqual(result.exit_code, 0)
+        self.assertEqual(
+            self._last_json(result.output),
+            {"success": True, "model": "qwen3.5:9b"},
         )
 
 

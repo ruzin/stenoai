@@ -3997,10 +3997,22 @@ ipcMain.handle('setup-ollama-and-model', async () => {
       const resolved = JSON.parse(resolvedRaw.trim());
       if (resolved && resolved.installed) {
         sendDebugLog(`Found already-installed model "${resolved.installed}" — skipping download`);
+        // Persist it as the active model, and only report success once that
+        // write actually succeeded. set-model now exits non-zero on a
+        // config-write failure (runPythonScript rejects) AND prints
+        // success:false, so we check both: swallowing the failure here would
+        // have setup claim success with no active model saved.
         try {
-          await runPythonScript('simple_recorder.py', ['set-model', resolved.installed], true);
+          const setRaw = await runPythonScript('simple_recorder.py', ['set-model', resolved.installed], true);
+          // set-model prints a human line before the JSON, so grab the last
+          // JSON-looking line rather than parsing the whole stdout.
+          const jsonLine = setRaw.trim().split('\n').reverse().find((l) => l.trim().startsWith('{'));
+          const setRes = jsonLine ? JSON.parse(jsonLine) : null;
+          if (!setRes || setRes.success !== true) {
+            return { success: false, error: (setRes && setRes.error) || 'Failed to save the selected model.' };
+          }
         } catch (e) {
-          // Non-fatal -- config write is best-effort, same as the pull path.
+          return { success: false, error: `Failed to save the selected model: ${e.message}` };
         }
         trackEvent('setup_completed', { step: 'ollama_existing_model' });
         return { success: true, message: `Using already-installed model ${resolved.installed}` };
