@@ -292,13 +292,20 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
   // render for the buttons' disabled state as well as in both handlers.
   const transcriptBundle = React.useMemo(() => buildTranscriptBundle(meeting), [meeting]);
 
-  // Clipboard copy mirrors copyNotes above: fire-and-forget is the established
-  // pattern for these lightweight copies in this view.
-  const copyTranscriptForAi = () => {
+  // Await the write and only flip to "Copied" once it actually succeeds — a
+  // rejected clipboard (permission denied, no focus) must not show a false
+  // success. The transcript bundle is large and the only thing a user pastes
+  // into an LLM, so a silent miscopy is worse here than for the small notes copy.
+  const copyTranscriptForAi = async () => {
     if (!transcriptBundle) return;
-    void navigator.clipboard.writeText(transcriptBundle);
-    setCopiedTranscript(true);
-    setTimeout(() => setCopiedTranscript(false), 1500);
+    setExportError(null);
+    try {
+      await navigator.clipboard.writeText(transcriptBundle);
+      setCopiedTranscript(true);
+      setTimeout(() => setCopiedTranscript(false), 1500);
+    } catch (error) {
+      setExportError(`Couldn't copy transcript: ${getErrorMessage(error)}`);
+    }
   };
 
   // Save writes a file, which can genuinely fail — so unlike the copy paths we
@@ -395,7 +402,7 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
               <TooltipTrigger asChild>
                 <ActionIconButton
                   label={copiedTranscript ? 'Copied' : 'Copy transcript'}
-                  onClick={copyTranscriptForAi}
+                  onClick={() => void copyTranscriptForAi()}
                   disabled={!transcriptBundle}
                 >
                   {copiedTranscript ? <Check className="size-[13px]" /> : <FileText className="size-[13px]" />}

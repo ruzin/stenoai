@@ -17,22 +17,24 @@ export function buildTranscriptBundle(meeting: Meeting | null | undefined): stri
   ).trim();
   if (!body) return '';
 
-  // Metadata line — drop any field that is missing.
+  // Metadata line — drop any field that is missing. Labels are English to match
+  // the rest of the UI (the Copy notes bundle, headings, etc. are all English);
+  // the app isn't localised, so hardcoded German here read as a stray.
   const metaParts: string[] = [];
   const dateStr = isoToDate(info?.processed_at ?? info?.updated_at);
-  if (dateStr) metaParts.push(`Datum: ${dateStr}`);
+  if (dateStr) metaParts.push(`Date: ${dateStr}`);
   const durStr = secondsToMinutes(info?.duration_seconds);
-  if (durStr) metaParts.push(`Dauer: ${durStr}`);
+  if (durStr) metaParts.push(`Duration: ${durStr}`);
   const people = participantNames(meeting.participants);
-  if (people) metaParts.push(`Teilnehmer: ${people}`);
+  if (people) metaParts.push(`Participants: ${people}`);
 
   const lines: string[] = [`# ${title}`];
   if (metaParts.length) lines.push(metaParts.join(' · '));
 
   const notes = (meeting.notes ?? '').trim();
-  if (notes) lines.push('', '## Notizen', notes);
+  if (notes) lines.push('', '## Notes', notes);
 
-  lines.push('', '## Transkript', body);
+  lines.push('', '## Transcript', body);
   return lines.join('\n');
 }
 

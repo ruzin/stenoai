@@ -156,6 +156,7 @@ truth for elapsed time and paused state so remounts recover correctly.
 | `delete-meeting` | R→M invoke | yes | `stenoai.meetings.delete(meeting)` |
 | `reprocess-meeting` | R→M invoke | yes | `stenoai.meetings.reprocess(summaryFile, regenTitle, name)` |
 | `save-meeting-notes` | R→M invoke | yes | `stenoai.meetings.saveNotes(name, notes)` |
+| `export-transcript` | R→M invoke | yes | `stenoai.meetings.exportTranscript(defaultFilename, content)` |
 | `meetings-refreshed` | M→R | **drop** | — (orphan — see note) |
 | `summary-chunk` | M→R | yes | `stenoai.on.summaryChunk(cb)` |
 | `summary-title` | M→R | yes | `stenoai.on.summaryTitle(cb)` |
