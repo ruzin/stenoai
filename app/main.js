@@ -2327,6 +2327,40 @@ ipcMain.handle('save-meeting-notes', async (event, sessionName, notes) => {
   }
 });
 
+// Transcript export bridge. The renderer builds the Markdown bundle and hands us
+// the finished string; we own only the file write. STENOAI_E2E_EXPORT_PATH bypasses
+// the native dialog so the Playwright T2 spec can drive this hermetically (same
+// isolation philosophy as STENOAI_USER_DATA_DIR).
+ipcMain.handle('export-transcript', async (event, defaultFilename, content) => {
+  try {
+    if (typeof content !== 'string' || content.length === 0) {
+      return { success: false, error: 'No transcript content to export.' };
+    }
+
+    const seamPath = process.env.STENOAI_E2E_EXPORT_PATH;
+    let targetPath = seamPath;
+
+    if (!targetPath) {
+      const result = await dialog.showSaveDialog(mainWindow, {
+        defaultPath: defaultFilename || 'transcript.md',
+        filters: [
+          { name: 'Markdown', extensions: ['md'] },
+          { name: 'Text', extensions: ['txt'] },
+        ],
+      });
+      if (result.canceled || !result.filePath) {
+        return { success: false, error: 'canceled' };
+      }
+      targetPath = result.filePath;
+    }
+
+    fs.writeFileSync(targetPath, content, 'utf-8');
+    return { success: true, path: targetPath };
+  } catch (err) {
+    return { success: false, error: String(err && err.message ? err.message : err) };
+  }
+});
+
 ipcMain.handle('update-meeting', async (event, summaryFilePath, updates) => {
   try {
     const projectRoot = path.join(__dirname, '..');

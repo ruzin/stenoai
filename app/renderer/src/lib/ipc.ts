@@ -659,6 +659,7 @@ export interface StenoaiBridge {
       Result<{ message: string }>
     >;
     saveNotes: RequestFn<[name: string, notes: string], SaveMeetingNotesResponse>;
+    exportTranscript: RequestFn<[defaultFilename: string, content: string], Result<{ path: string }>>;
     regenTitle: RequestFn<[summaryFile: string, name: string], Result<Record<string, never>>>;
   };
 
