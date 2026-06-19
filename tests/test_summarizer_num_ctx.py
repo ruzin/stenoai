@@ -8,6 +8,7 @@ running Ollama required.
 
 import unittest
 
+from src.config import Config
 from src.summarizer import (
     resolve_num_ctx,
     OLLAMA_NUM_CTX_FLOOR,
@@ -50,6 +51,22 @@ class ResolveNumCtxTests(unittest.TestCase):
             self.assertEqual(resolve_num_ctx(huge), OLLAMA_NUM_CTX_CEILING)
         finally:
             del _OLLAMA_MODEL_NUM_CTX[huge]
+
+    def test_every_active_registry_model_has_an_explicit_window(self):
+        # Drift guard: a model added to the config registry without a num_ctx
+        # entry would silently get the generic default. Fail loudly instead so
+        # the per-model window is a deliberate choice, not an oversight.
+        active = {
+            mid
+            for mid, info in Config.SUPPORTED_MODELS.items()
+            if not info.get("deprecated")
+        }
+        missing = active - set(_OLLAMA_MODEL_NUM_CTX)
+        self.assertEqual(
+            missing,
+            set(),
+            msg=f"active registry models missing a num_ctx entry: {missing}",
+        )
 
 
 if __name__ == "__main__":

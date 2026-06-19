@@ -250,7 +250,7 @@ def run_ollama_command(args: list, timeout: int = 300) -> Tuple[bool, str, str]:
     Run an Ollama CLI command.
 
     Args:
-        args: Command arguments (e.g., ['pull', 'llama3.2:3b'])
+        args: Command arguments (e.g., ['pull', 'gemma4:e2b-it-qat'])
         timeout: Command timeout in seconds
 
     Returns:
@@ -281,7 +281,7 @@ def pull_model(model_name: str, progress_callback=None) -> bool:
     Pull an Ollama model.
 
     Args:
-        model_name: Name of model to pull (e.g., 'llama3.2:3b')
+        model_name: Name of model to pull (e.g., 'gemma4:e2b-it-qat')
         progress_callback: Optional callback function for progress updates
 
     Returns:
