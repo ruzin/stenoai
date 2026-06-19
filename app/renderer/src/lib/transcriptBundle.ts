@@ -67,7 +67,14 @@ function secondsToMinutes(seconds: number | undefined): string | null {
 function participantNames(participants: unknown[] | undefined): string | null {
   if (!participants || participants.length === 0) return null;
   const names = participants
-    .map((p) => (typeof p === 'string' ? p : (p as { name?: string })?.name ?? ''))
+    .map((p) => {
+      // participants is unknown[]; a non-string entry (or a {name} whose name
+      // isn't a string) must not reach .trim() — that would throw and crash the
+      // whole export. Coerce anything non-string to '' instead.
+      if (typeof p === 'string') return p;
+      const name = (p as { name?: unknown } | null)?.name;
+      return typeof name === 'string' ? name : '';
+    })
     .map((s) => s.trim())
     .filter(Boolean);
   return names.length ? names.join(', ') : null;
