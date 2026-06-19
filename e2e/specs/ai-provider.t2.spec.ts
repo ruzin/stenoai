@@ -20,6 +20,7 @@ type ProviderSnapshot = {
   cloud_provider?: string;
   cloud_api_url?: string;
   cloud_model?: string;
+  model?: string;
   cloud_api_key_set?: boolean;
   bedrock_region?: string;
   bedrock_inference_profile?: string;
@@ -58,6 +59,9 @@ test('provider switch + cloud/bedrock config persist and round-trip through get-
   const initial = await getProvider(page);
   expect(initial.success).toBe(true);
   expect(initial.ai_provider).toBe('local');
+  // The active local Ollama model is exposed so the Chat indicator can show it
+  // (WS2). Fresh config → the registry default.
+  expect(initial.model).toBe('gemma4:e2b-it-qat');
 
   // Provider switches persist to config.ai_provider and reflect in the snapshot.
   for (const provider of ['remote', 'cloud', 'local']) {

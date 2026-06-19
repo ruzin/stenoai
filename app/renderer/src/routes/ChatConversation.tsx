@@ -34,6 +34,7 @@ import {
   bucketKey,
   deriveSessionName,
   toBucketLabel,
+  formatActiveModel,
 } from '@/lib/chat';
 import { consumePendingNewChat } from '@/routes/Chat';
 import { renderMarkdown } from '@/lib/markdown';
@@ -469,10 +470,12 @@ export function ChatConversation({ sessionId }: ChatConversationProps) {
           <div className="flex items-center justify-between gap-2 px-1">
             <div className="flex items-center gap-1">
               <FolderScopePicker value={scopeFolderId} onChange={setScopeFolderId} />
-              <span className="text-[12px]" style={{ color: 'var(--fg-muted)' }}>
-                {provider.data?.cloud_provider
-                  ? `${provider.data.cloud_provider} · ${provider.data.cloud_model}`
-                  : 'Auto'}
+              <span
+                data-testid="chat-model-indicator"
+                className="text-[12px]"
+                style={{ color: 'var(--fg-muted)' }}
+              >
+                {formatActiveModel(provider.data)}
               </span>
             </div>
             <div className="flex items-center gap-1">

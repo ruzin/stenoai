@@ -21,7 +21,7 @@ import { useAiProvider } from '@/hooks/useAi';
 import { useUserName } from '@/hooks/useSettings';
 import { useOrgSession } from '@/hooks/useOrg';
 import { navigate } from '@/lib/router';
-import { GLOBAL_SCOPE, bucketKey, deriveSessionName, toBucketLabel } from '@/lib/chat';
+import { GLOBAL_SCOPE, bucketKey, deriveSessionName, toBucketLabel, formatActiveModel } from '@/lib/chat';
 import { PRESETS, PresetGlyph } from '@/lib/chatPresets';
 
 export function Chat() {
@@ -227,10 +227,12 @@ export function Chat() {
           <div className="flex items-center justify-between gap-2 px-1">
             <div className="flex items-center gap-1">
               <FolderScopePicker value={scopeFolderId} onChange={setScopeFolderId} />
-              <span className="text-[12px]" style={{ color: 'var(--fg-muted)' }}>
-                {provider.data?.cloud_provider
-                  ? `${provider.data.cloud_provider} · ${provider.data.cloud_model}`
-                  : 'Auto'}
+              <span
+                data-testid="chat-model-indicator"
+                className="text-[12px]"
+                style={{ color: 'var(--fg-muted)' }}
+              >
+                {formatActiveModel(provider.data)}
               </span>
             </div>
             <div className="flex items-center gap-1">

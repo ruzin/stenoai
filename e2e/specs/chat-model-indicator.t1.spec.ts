@@ -1,0 +1,50 @@
+import { test, expect } from '../fixtures/electron';
+
+/**
+ * T1 — renderer-only, mock IPC. Pins the Chat composer's model indicator
+ * (WS2): the label must reflect the ACTIVE ai_provider, not stored cloud_*
+ * prefs. The old label keyed off cloud_provider, so a local/adapter user saw a
+ * stale "openai · gpt-4o" — the bug behind #198. Wire shapes are stubbed in
+ * app/e2e-mock-ipc.js; the mapping itself is formatActiveModel in lib/chat.ts.
+ */
+
+const indicator = '[data-testid="chat-model-indicator"]';
+
+test('local provider shows the Ollama model, not a stale cloud model', async ({ launchApp }) => {
+  const { page } = await launchApp({ mockIpc: true });
+
+  // Default mock provider is 'local' with model gemma4:e2b-it-qat.
+  await page.evaluate(() => {
+    window.location.hash = '#/chat';
+  });
+
+  const label = page.locator(indicator).first();
+  await expect(label).toBeVisible();
+  await expect(label).toHaveText('Ollama · gemma4:e2b-it-qat');
+  // Must NOT leak the stored cloud default (the #198 regression).
+  await expect(label).not.toContainText('openai');
+  await expect(label).not.toContainText('gpt-4o');
+});
+
+test('org/adapter provider shows "Organisation", never a cloud model id', async ({ launchApp }) => {
+  const { page } = await launchApp({ mockIpc: true });
+
+  // Sign in to the org → hard-lock flips the provider to adapter.
+  await page.evaluate(() => {
+    window.location.hash = '#/settings?tab=organisation';
+  });
+  await expect(page.getByTestId('org-sign-in-card')).toBeVisible();
+  await page.getByPlaceholder('https://steno-adapter.yourcompany.com').fill('https://e2e.example.com');
+  await page.getByPlaceholder('you@yourcompany.com').fill('e2e@example.com');
+  await page.getByPlaceholder('••••••').fill('hunter2');
+  await page.getByRole('button', { name: /sign in with password/i }).click();
+  await expect(page.getByTestId('org-signed-in-card')).toBeVisible();
+
+  await page.evaluate(() => {
+    window.location.hash = '#/chat';
+  });
+
+  const label = page.locator(indicator).first();
+  await expect(label).toBeVisible();
+  await expect(label).toHaveText('Organisation');
+});
