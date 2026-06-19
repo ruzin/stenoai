@@ -7,6 +7,7 @@ running Ollama required.
 """
 
 import unittest
+from unittest import mock
 
 from src.config import Config
 from src.summarizer import (
@@ -36,21 +37,18 @@ class ResolveNumCtxTests(unittest.TestCase):
             self.assertLessEqual(value, OLLAMA_NUM_CTX_CEILING, msg=model)
 
     def test_clamps_below_floor_up(self):
-        # A model mapped below the floor is raised to the floor.
-        tiny = "tiny-test-model"
-        _OLLAMA_MODEL_NUM_CTX[tiny] = 512
-        try:
-            self.assertEqual(resolve_num_ctx(tiny), OLLAMA_NUM_CTX_FLOOR)
-        finally:
-            del _OLLAMA_MODEL_NUM_CTX[tiny]
+        # A model mapped below the floor is raised to the floor. patch.dict
+        # restores the shared map even on failure (no leaked test state).
+        with mock.patch.dict(_OLLAMA_MODEL_NUM_CTX, {"tiny-test-model": 512}):
+            self.assertEqual(resolve_num_ctx("tiny-test-model"), OLLAMA_NUM_CTX_FLOOR)
 
     def test_clamps_above_ceiling_down(self):
-        huge = "huge-test-model"
-        _OLLAMA_MODEL_NUM_CTX[huge] = OLLAMA_NUM_CTX_CEILING * 4
-        try:
-            self.assertEqual(resolve_num_ctx(huge), OLLAMA_NUM_CTX_CEILING)
-        finally:
-            del _OLLAMA_MODEL_NUM_CTX[huge]
+        with mock.patch.dict(
+            _OLLAMA_MODEL_NUM_CTX, {"huge-test-model": OLLAMA_NUM_CTX_CEILING * 4}
+        ):
+            self.assertEqual(
+                resolve_num_ctx("huge-test-model"), OLLAMA_NUM_CTX_CEILING
+            )
 
     def test_every_active_registry_model_has_an_explicit_window(self):
         # Drift guard: a model added to the config registry without a num_ctx

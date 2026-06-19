@@ -32,8 +32,8 @@ and Bedrock (curated `SUPPORTED_BEDROCK_MODELS`) are already clean. Green + cubi
 - `src/config.py` `SUPPORTED_MODELS` (~:118) — move `gemma4:e2b-it-qat` to first and update its
   description to `(default)`; drop `(default)` from the `llama3.2:3b` entry. **Do not remove**
   `llama3.2:3b` — keep it (un-deprecated is fine) so existing users keep a recognised selection.
-- `src/summarizer.py:156` — the hardcoded `"llama3.2:3b"` config-load fallback → `"gemma4:e2b-it-qat"`.
-- `src/summarizer.py:319` — reorder `fallback_models` to lead with `"gemma4:e2b-it-qat"`.
+- `src/summarizer.py` (config-load fallback, ~:156) — the hardcoded `"llama3.2:3b"` → the registry default.
+- `src/summarizer.py` `fallback_models` (~:368, in `_ensure_model_available`) — lead with the default; derive the rest from active `SUPPORTED_MODELS`.
 
 **Migration / safety:**
 - Only **new installs / first run** get the new default (existing `config.json` keeps the user's

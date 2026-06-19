@@ -364,8 +364,18 @@ class OllamaSummarizer:
             except Exception as e:
                 logger.error(f"Failed to download model {self.model_name}: {e}")
 
-            # Try fallback models from supported list (default first)
-            fallback_models = ["gemma4:e2b-it-qat", "llama3.2:3b", "qwen3.5:9b", "gemma4:12b"]
+            # Try fallback models: a preferred order (default, then small/fast)
+            # followed by every other active supported model, so an
+            # installed-but-omitted model can still rescue summarisation rather
+            # than forcing a (possibly offline) pull. Derived from the registry
+            # so it can't drift out of sync with SUPPORTED_MODELS.
+            from .config import Config
+            preferred = ["gemma4:e2b-it-qat", "llama3.2:3b", "qwen3.5:9b", "gemma4:12b"]
+            active = [
+                mid for mid, info in Config.SUPPORTED_MODELS.items()
+                if not info.get("deprecated")
+            ]
+            fallback_models = preferred + [m for m in active if m not in preferred]
             for fallback in fallback_models:
                 if fallback in model_names:
                     logger.info(f"Using already-installed fallback model: {fallback}")
