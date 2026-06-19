@@ -731,6 +731,28 @@ async function copyImportIntoRecordings(srcPath) {
   }
 }
 
+// Sweep orphaned .<stem>.import reservation markers. copyImportIntoRecordings
+// removes its marker in a finally, but a crash (or hard kill) between the 'wx'
+// open and that finally leaves the marker on disk. Because audioStemTaken skips
+// dotfiles, the orphan never trips the early skip — it silently forces every
+// later import of that stem to bump to <stem>-1 via EEXIST, even with no real
+// collision. No import is ever in flight at app startup, so any marker present
+// then is unambiguously stale and safe to delete. Best-effort: a failure here
+// must never block launch.
+async function sweepStaleImportMarkers() {
+  try {
+    const dir = resolveRecordingsDir();
+    const entries = await fs.promises.readdir(dir);
+    await Promise.all(
+      entries
+        .filter((f) => f.startsWith('.') && f.endsWith('.import'))
+        .map((f) => fs.promises.rm(path.join(dir, f), { force: true })),
+    );
+  } catch (err) {
+    console.warn('Failed to sweep stale import markers:', err?.message ?? err);
+  }
+}
+
 /**
  * Validate that a file path is within allowed directories (security)
  * Prevents path traversal attacks by ensuring files are only accessed
@@ -1109,6 +1131,10 @@ if (!gotSingleInstanceLock) {
       console.warn('processing-log init failed (non-fatal):', e?.message);
     }
 
+    // Clear any .import reservation markers orphaned by a crash mid-import; no
+    // import is in flight at startup, so a leftover marker is always stale and
+    // would otherwise force every future import of that stem to bump to -N.
+    sweepStaleImportMarkers();
     // Application menu. macOS uses the global menu bar with mac-only roles
     // (services/hide/unhide). Windows/Linux get a slimmer, platform-correct
     // menu — kept (editing accelerators, Settings, Help) but hidden by default

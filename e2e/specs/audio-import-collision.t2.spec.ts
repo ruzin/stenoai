@@ -200,3 +200,81 @@ test('two parallel imports of the same stem with different extensions get distin
     }
   }
 });
+
+test('a stale .import marker left by a crash does not permanently force a suffix', async ({
+  launchApp,
+  userDataDir,
+}) => {
+  // The reservation marker (.<stem>.import) is created with 'wx' and removed in
+  // a finally. A crash BETWEEN the open and that finally orphans the marker on
+  // disk. audioStemTaken skips dotfiles, so the orphan never trips the early
+  // skip — instead the next import of that stem hits EEXIST on the open and is
+  // bumped to <stem>-1 forever, even though no real file/note collision exists.
+  // The fix sweeps orphaned markers at startup (no import is ever in flight at
+  // app launch, so a leftover marker is unambiguously stale). This pins that a
+  // marker present at launch does not block a later import from claiming the
+  // bare stem.
+  killOllama();
+  const ollama = await startMockOllama();
+
+  const realDirBefore = fileSig(realUserDataDir());
+
+  // The dir resolveRecordingsDir() uses in an unpackaged (dev) run — repo-root/
+  // recordings, independent of STENOAI_USER_DATA_DIR (the same pre-existing dev
+  // quirk the other tests in this file rely on). Seeded BEFORE launch so the
+  // marker is present when the startup sweep runs.
+  const recordingsDir = path.resolve(__dirname, '..', '..', 'recordings');
+  mkdirSync(recordingsDir, { recursive: true });
+  const stem = 'crashedimport';
+  const staleMarker = path.join(recordingsDir, `.${stem}.import`);
+  const outputDir = path.join(path.dirname(recordingsDir), 'output');
+
+  // Stand in for the orphan a crash mid-import leaves behind.
+  writeFileSync(staleMarker, '');
+
+  try {
+    const { page } = await launchApp();
+
+    // Sanity: the app copies into exactly the dir we seeded the orphan in.
+    const dir = await page.evaluate(() =>
+      (window as StenoWindow).stenoai.recording.getDir(),
+    );
+    expect(dir?.path).toBe(recordingsDir);
+
+    const srcDir = path.join(userDataDir, 'stale-import-src');
+    mkdirSync(srcDir, { recursive: true });
+    const srcPath = path.join(srcDir, `${stem}.wav`);
+    makeWav(srcPath, { seconds: 2 });
+
+    const queued = await page.evaluate(
+      (p) => (window as StenoWindow).stenoai.recording.processFile(p, 'Crashed Import'),
+      srcPath,
+    );
+    expect(queued?.success).toBe(true);
+
+    // With the orphan swept at startup, the import claims the bare stem.
+    await expect
+      .poll(() => existsSync(path.join(recordingsDir, `${stem}.wav`)), {
+        timeout: 10_000,
+        intervals: [200],
+      })
+      .toBe(true);
+    // Not bumped to <stem>-1 by a leftover marker.
+    expect(existsSync(path.join(recordingsDir, `${stem}-1.wav`))).toBe(false);
+    // And the orphan itself is gone.
+    expect(existsSync(staleMarker)).toBe(false);
+
+    expect(fileSig(realUserDataDir())).toBe(realDirBefore);
+  } finally {
+    await ollama.close();
+    killOllama();
+    rmSync(staleMarker, { force: true });
+    rmSync(path.join(recordingsDir, `${stem}.wav`), { force: true });
+    rmSync(path.join(recordingsDir, `${stem}-1.wav`), { force: true });
+    rmSync(path.join(recordingsDir, `.${stem}-1.import`), { force: true });
+    rmSync(path.join(outputDir, `${stem}_summary.md`), { force: true });
+    rmSync(path.join(outputDir, `${stem}_summary.json`), { force: true });
+    rmSync(path.join(outputDir, `${stem}-1_summary.md`), { force: true });
+    rmSync(path.join(outputDir, `${stem}-1_summary.json`), { force: true });
+  }
+});
