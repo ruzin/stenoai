@@ -74,6 +74,28 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
+  lint-renderer:
+    name: Lint (renderer)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install dependencies
+        working-directory: app
+        run: npm ci
+
+      - name: Lint renderer
+        working-directory: app
+        run: npm run lint:renderer
+
   build-backend-macos:
     name: Build backend bundle (macOS)
     runs-on: macos-latest
