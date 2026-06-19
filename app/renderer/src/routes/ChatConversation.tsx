@@ -64,11 +64,19 @@ export function ChatConversation({ sessionId }: ChatConversationProps) {
 
   const isCloud = provider.data?.ai_provider === 'cloud';
   const cloudKeySet = provider.data?.cloud_api_key_set ?? false;
-  const localReady = isCloud && cloudKeySet;
+  const remoteUrlSet = !!provider.data?.remote_ollama_url;
+  const isLocalEngine =
+    provider.data?.ai_provider === 'local' || provider.data?.ai_provider === 'remote';
+  // Local always works; remote needs its Ollama URL; cloud needs its key.
+  // Local/remote answer over a context-capped, most-recent slice (see hint).
+  const providerReady =
+    (isCloud && cloudKeySet) ||
+    provider.data?.ai_provider === 'local' ||
+    (provider.data?.ai_provider === 'remote' && remoteUrlSet);
   // Org-scoped follow-ups go through the adapter and don't need the local
   // cloud provider configured — the cloud-key gate becomes irrelevant.
   const isOrgScope = (s: string | null | undefined) => s === ORG_SHARED_SCOPE;
-  const ready = localReady || isOrgScope(scopeFolderId);
+  const ready = providerReady || isOrgScope(scopeFolderId);
 
   // Make THIS session the active one as soon as the route mounts so
   // chat.activeSession / chat.appendMessage operate on the right record
@@ -477,6 +485,15 @@ export function ChatConversation({ sessionId }: ChatConversationProps) {
               >
                 {formatActiveModel(provider.data)}
               </span>
+              {isLocalEngine && (
+                <span
+                  data-testid="chat-local-scope-hint"
+                  className="text-[12px]"
+                  style={{ color: 'var(--fg-muted)' }}
+                >
+                  · covers recent notes
+                </span>
+              )}
             </div>
             <div className="flex items-center gap-1">
               {isStreaming ? (

@@ -2870,32 +2870,42 @@ def query_streaming(transcript_file, question):
         print(f"CHAT_STREAM_ERROR:{e}", flush=True)
 
 
+def _chat_corpus_char_budget(ai_provider: str, model: str) -> int:
+    """Char budget for the cross-note chat corpus, sized to the active model.
+
+    Cloud/adapter models have large windows (Anthropic 200k, recent OpenAI
+    128k+ tokens), so we use a generous fixed budget. Local/remote Ollama
+    windows are smaller, so we derive the budget from the model's num_ctx (the
+    same window the summariser requests) — a smaller local model then answers
+    over fewer, most-recent notes instead of overflowing. ~3.5 chars/token;
+    reserve ~45% of the window for the question, prompt scaffold and reply.
+    Pure function so it's unit-testable without notes or a model.
+    """
+    if ai_provider in ("local", "remote"):
+        from src.summarizer import resolve_num_ctx
+        return int(resolve_num_ctx(model) * 3.5 * 0.55)
+    return 400_000
+
+
 @cli.command(name='chat-global-streaming')
 @click.option('--question', '-q', required=True, help='Question to ask across notes')
 @click.option('--folder', '-f', default=None, help='Folder ID to scope the corpus to (default: all notes)')
 def chat_global_streaming(question, folder):
     """Cross-note chat: gather meeting title + summary + key points, feed as
-    context to the cloud LLM, stream the answer. Optionally scope to a single
-    folder; default queries every note.
+    context to the configured LLM, stream the answer. Optionally scope to a
+    single folder; default queries every note.
 
-    Requires a remote-hosted model — either a direct cloud API key OR a
-    signed-in organisation adapter that brokers one. Local models can't fit
-    a full corpus of summaries reliably and we don't have retrieval (RAG)
-    yet — caller (main.js) is responsible for gating accordingly."""
+    Works with every provider — cloud / org adapter / local / remote Ollama.
+    The assembled corpus is capped to the active model's context window
+    (model-aware budget below), so a local model with a smaller window simply
+    answers over fewer (most-recent) notes rather than overflowing. We don't
+    have retrieval (RAG) yet, so older notes beyond the budget are omitted."""
     import sys
     import base64
     from pathlib import Path
     from src.config import get_config, get_data_dirs
 
     config = get_config()
-    if config.get_ai_provider() not in ("cloud", "adapter"):
-        print(
-            "CHAT_STREAM_ERROR:Cross-note chat needs a cloud or organisation AI provider. "
-            "Switch in Settings → AI.",
-            flush=True,
-        )
-        return
-
     dirs = get_data_dirs()
     output_dir = dirs["output"]
 
@@ -2945,10 +2955,10 @@ def chat_global_streaming(question, folder):
     summaries.sort(key=sort_key, reverse=True)
 
     # Cap the assembled corpus so a user with hundreds of meetings can't blow
-    # past the cloud model's context window. ~400k chars ≈ 100k tokens, well
-    # under both Anthropic (200k) and recent OpenAI (128k+) limits while
-    # leaving headroom for the prompt scaffold and the model's reply.
-    CORPUS_CHAR_BUDGET = 400_000
+    # past the active model's context window (see _chat_corpus_char_budget).
+    CORPUS_CHAR_BUDGET = _chat_corpus_char_budget(
+        config.get_ai_provider(), config.get_model()
+    )
     blocks = []
     used_chars = 0
     truncated = 0
