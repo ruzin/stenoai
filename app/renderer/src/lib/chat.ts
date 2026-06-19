@@ -19,17 +19,20 @@ type ActiveModelFields = {
  */
 export function formatActiveModel(p: ActiveModelFields | undefined): string {
   if (!p) return 'Auto';
+  // Guard each interpolation: an optimistic provider switch can briefly leave the
+  // cache holding {ai_provider} without the model fields, which would otherwise
+  // render "Ollama · undefined" for a frame.
   switch (p.ai_provider) {
     case 'cloud':
-      return `${p.cloud_provider} · ${p.cloud_model}`;
+      return [p.cloud_provider, p.cloud_model].filter(Boolean).join(' · ') || 'Cloud';
     case 'remote':
-      return `Remote Ollama · ${p.model}`;
+      return p.model ? `Remote Ollama · ${p.model}` : 'Remote Ollama';
     case 'adapter':
       // The org adapter brokers the model server-side; the desktop has no id.
       return 'Organisation';
     case 'local':
     default:
-      return `Ollama · ${p.model}`;
+      return p.model ? `Ollama · ${p.model}` : 'Ollama';
   }
 }
 

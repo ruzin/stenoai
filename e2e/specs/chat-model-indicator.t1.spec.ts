@@ -26,6 +26,38 @@ test('local provider shows the Ollama model, not a stale cloud model', async ({ 
   await expect(label).not.toContainText('gpt-4o');
 });
 
+test('cloud provider shows "<provider> · <model>"', async ({ launchApp }) => {
+  const { page } = await launchApp({ mockIpc: true });
+
+  // Switch to cloud on a non-chat route, then mount Chat fresh so the provider
+  // query refetches the new state.
+  await page.evaluate(() => {
+    window.location.hash = '#/settings';
+  });
+  await page.evaluate(() => (window as unknown as { stenoai: { ai: { setProvider: (p: string) => Promise<unknown> } } }).stenoai.ai.setProvider('cloud'));
+  await page.evaluate(() => {
+    window.location.hash = '#/chat';
+  });
+
+  const label = page.locator(indicator).first();
+  await expect(label).toHaveText('openai · gpt-4o');
+});
+
+test('remote provider shows "Remote Ollama · <model>"', async ({ launchApp }) => {
+  const { page } = await launchApp({ mockIpc: true });
+
+  await page.evaluate(() => {
+    window.location.hash = '#/settings';
+  });
+  await page.evaluate(() => (window as unknown as { stenoai: { ai: { setProvider: (p: string) => Promise<unknown> } } }).stenoai.ai.setProvider('remote'));
+  await page.evaluate(() => {
+    window.location.hash = '#/chat';
+  });
+
+  const label = page.locator(indicator).first();
+  await expect(label).toHaveText('Remote Ollama · gemma4:e2b-it-qat');
+});
+
 test('org/adapter provider shows "Organisation", never a cloud model id', async ({ launchApp }) => {
   const { page } = await launchApp({ mockIpc: true });
 
