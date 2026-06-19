@@ -35,6 +35,7 @@ import {
   deriveSessionName,
   toBucketLabel,
   formatActiveModel,
+  chatProviderReady,
 } from '@/lib/chat';
 import { consumePendingNewChat } from '@/routes/Chat';
 import { renderMarkdown } from '@/lib/markdown';
@@ -62,13 +63,15 @@ export function ChatConversation({ sessionId }: ChatConversationProps) {
   const inputRef = React.useRef<HTMLInputElement>(null);
   const scrollRef = React.useRef<HTMLDivElement>(null);
 
-  const isCloud = provider.data?.ai_provider === 'cloud';
-  const cloudKeySet = provider.data?.cloud_api_key_set ?? false;
-  const localReady = isCloud && cloudKeySet;
+  const isLocalEngine =
+    provider.data?.ai_provider === 'local' || provider.data?.ai_provider === 'remote';
+  // Shared cloud/local/remote readiness; local/remote answer over a
+  // context-capped, most-recent slice (see hint).
+  const providerReady = chatProviderReady(provider.data);
   // Org-scoped follow-ups go through the adapter and don't need the local
   // cloud provider configured — the cloud-key gate becomes irrelevant.
   const isOrgScope = (s: string | null | undefined) => s === ORG_SHARED_SCOPE;
-  const ready = localReady || isOrgScope(scopeFolderId);
+  const ready = providerReady || isOrgScope(scopeFolderId);
 
   // Make THIS session the active one as soon as the route mounts so
   // chat.activeSession / chat.appendMessage operate on the right record
@@ -477,6 +480,15 @@ export function ChatConversation({ sessionId }: ChatConversationProps) {
               >
                 {formatActiveModel(provider.data)}
               </span>
+              {isLocalEngine && (
+                <span
+                  data-testid="chat-local-scope-hint"
+                  className="text-[12px]"
+                  style={{ color: 'var(--fg-muted)' }}
+                >
+                  · may omit older notes
+                </span>
+              )}
             </div>
             <div className="flex items-center gap-1">
               {isStreaming ? (

@@ -21,7 +21,7 @@ import { useAiProvider } from '@/hooks/useAi';
 import { useUserName } from '@/hooks/useSettings';
 import { useOrgSession } from '@/hooks/useOrg';
 import { navigate } from '@/lib/router';
-import { GLOBAL_SCOPE, bucketKey, deriveSessionName, toBucketLabel, formatActiveModel } from '@/lib/chat';
+import { GLOBAL_SCOPE, bucketKey, deriveSessionName, toBucketLabel, formatActiveModel, chatProviderReady } from '@/lib/chat';
 import { PRESETS, PresetGlyph } from '@/lib/chatPresets';
 
 export function Chat() {
@@ -50,21 +50,19 @@ export function Chat() {
   const submittingRef = React.useRef(false);
   const inputRef = React.useRef<HTMLInputElement>(null);
 
-  const isCloud = provider.data?.ai_provider === 'cloud';
   const isAdapter = provider.data?.ai_provider === 'adapter';
-  const cloudKeySet = provider.data?.cloud_api_key_set ?? false;
-  // Org chat goes through the adapter's central key, so it doesn't need
-  // the local cloud provider configured. Adapter mode also works — the
-  // adapter brokers a cloud model server-side, fitting the same
-  // "remote-hosted model" requirement that cross-note chat needs.
-  // Critically: adapter mode is only "ready" when the org session is
-  // actually signed in. Without this, a user on ai_provider=adapter but
-  // signed out (e.g. session expired mid-app, restore not yet run) sees
-  // the chat input enabled and gets an opaque failure on submit.
+  const isLocalEngine =
+    provider.data?.ai_provider === 'local' || provider.data?.ai_provider === 'remote';
+  // Cloud/local/remote readiness is the shared core (chatProviderReady); adapter
+  // adds an active-org-session requirement here (a signed-out adapter user would
+  // otherwise get an opaque submit failure). Local/remote answer over a
+  // context-capped, most-recent slice (the backend sizes the corpus to the
+  // model's window) — see the hint below.
   const orgSignedIn = orgSession.data?.signedIn === true;
-  const localReady = (isCloud && cloudKeySet) || (isAdapter && orgSignedIn);
+  const providerReady =
+    chatProviderReady(provider.data) || (isAdapter && orgSignedIn);
   const orgScopeActive = scopeFolderId === ORG_SHARED_SCOPE;
-  const ready = localReady || orgScopeActive;
+  const ready = providerReady || orgScopeActive;
 
   // Recents = global-scope chats only (sessions started from THIS tab),
   // never the in-meeting AskBar history.
@@ -106,7 +104,7 @@ export function Chat() {
     // the adapter's centrally-managed key). Local chat still does.
     const isOrgScope = scopeFolderId === ORG_SHARED_SCOPE;
     if (!q || submittingRef.current) return;
-    if (!isOrgScope && !localReady) return;
+    if (!isOrgScope && !providerReady) return;
     submittingRef.current = true;
     setSubmitError(null);
     let createdSessionId: string | null = null;
@@ -174,7 +172,7 @@ export function Chat() {
           {greetingName ? `Hi ${greetingName}, ask anything` : 'Ask anything'}
         </h1>
 
-        {!localReady && !orgScopeActive && provider.isFetched && <CloudRequiredBanner />}
+        {!providerReady && !orgScopeActive && provider.isFetched && <ProviderRequiredBanner />}
         {submitError && (
           <div
             role="alert"
@@ -220,7 +218,7 @@ export function Chat() {
                   }
                 }}
                 disabled={!ready}
-                placeholder={ready ? 'Summarise my meetings this week  /' : 'Connect a cloud provider in Settings to ask across notes'}
+                placeholder={ready ? 'Summarise my meetings this week  /' : 'Set up an AI provider in Settings to ask across notes'}
                 className="block w-full bg-transparent px-2 pb-3 pt-1 outline-none disabled:cursor-not-allowed"
                 style={{ fontSize: 15, color: 'var(--fg-1)', fontFamily: 'var(--font-sans)' }}
               />
@@ -234,6 +232,20 @@ export function Chat() {
               >
                 {formatActiveModel(provider.data)}
               </span>
+              {isLocalEngine && (
+                // Local/remote windows are smaller than cloud, so the backend
+                // caps the corpus to the most-recent notes when it's over budget.
+                // "may omit" (not "omits") since a small library fits entirely.
+                // TODO: tie to the actual per-response cap (CHAT_SCOPE_CAPPED,
+                // descoped from WS3) so the hint only shows when truncation ran.
+                <span
+                  data-testid="chat-local-scope-hint"
+                  className="text-[12px]"
+                  style={{ color: 'var(--fg-muted)' }}
+                >
+                  · may omit older notes
+                </span>
+              )}
             </div>
             <div className="flex items-center gap-1">
               <button
@@ -398,7 +410,7 @@ export function consumePendingNewChat(sessionId: string): PendingNewChat | null 
   return out;
 }
 
-function CloudRequiredBanner() {
+function ProviderRequiredBanner() {
   return (
     <div
       className="mb-4 flex items-start gap-3 rounded-md border px-3 py-2.5 text-[13px]"
@@ -410,8 +422,8 @@ function CloudRequiredBanner() {
     >
       <Sparkles className="mt-0.5 size-[14px] flex-shrink-0" style={{ color: 'var(--fg-2)' }} />
       <div className="flex-1">
-        Cross-note chat needs a remote-hosted model — local models can't fit
-        a full-corpus prompt yet. Switch to Cloud API or your Organisation in{' '}
+        Your AI provider isn't ready for chat yet — add a cloud API key, sign in
+        to your Organisation, or set your remote Ollama URL in{' '}
         <button
           type="button"
           className="underline transition-colors hover:text-[color:var(--fg-1)]"
