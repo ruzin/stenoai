@@ -675,24 +675,58 @@ async function copyImportIntoRecordings(srcPath) {
   const noteExists = (name) =>
     fs.existsSync(path.join(outputDir, `${name}_summary.md`)) ||
     fs.existsSync(path.join(outputDir, `${name}_summary.json`));
-  // COPYFILE_EXCL makes each attempt atomic: the copy fails with EEXIST rather
-  // than overwriting an existing file, so two concurrent imports that share a
-  // basename can't clobber each other. (An existsSync-then-copyFile check would
-  // have a TOCTOU window where both pick the same dest before either creates
-  // it.) On EEXIST we bump the suffix and retry. On APFS the copy is a
+  // Is the STEM already taken in recordings/, regardless of extension? The note
+  // is keyed on the stem alone (output/<stem>_summary.md), so meeting.wav and
+  // meeting.m4a collide on it even though their filenames differ. A bare
+  // COPYFILE_EXCL on <stem><ext> wouldn't catch that — the two dest names don't
+  // clash — so we must also reject a stem any sibling file already uses. Dotfiles
+  // (our .stem.import reservation markers below) are skipped.
+  const audioStemTaken = (name) => {
+    let entries;
+    try {
+      entries = fs.readdirSync(dir);
+    } catch {
+      return false;
+    }
+    return entries.some(
+      (f) => !f.startsWith('.') && path.basename(f, path.extname(f)) === name,
+    );
+  };
+  // Reserve the OUTPUT STEM atomically and independently of the extension. The
+  // noteExists / audioStemTaken checks are non-atomic on their own: two
+  // concurrent imports of the same stem but different extensions (meeting.wav +
+  // meeting.m4a) could both pass them, both copy successfully (different dest
+  // filenames → no EEXIST), and both later write meeting_summary.md, one
+  // clobbering the other. A per-stem marker created with 'wx' (O_EXCL) is the
+  // atomic claim that closes that window: only one import wins .<name>.import,
+  // the other gets EEXIST and bumps to <stem>-1. Once a copy lands, the audio
+  // file itself holds the stem (audioStemTaken sees it), so the marker is
+  // transient and removed in finally; the durable post-deletion record stays the
+  // note. COPYFILE_EXCL is kept as belt-and-suspenders. On APFS the copy is a
   // near-instant copy-on-write clone.
   for (let n = 0; ; n += 1) {
     const name = n === 0 ? stem : `${stem}-${n}`;
-    // A pre-existing note with this stem means an earlier import already owns
-    // it; skip ahead so the pipeline writes <name>-N_summary.* beside it.
-    if (noteExists(name)) continue;
-    const dest = path.join(dir, `${name}${ext}`);
+    // A pre-existing note or sibling audio with this stem means it's already
+    // owned; skip ahead so the pipeline writes <stem>-N_summary.* beside it.
+    if (noteExists(name) || audioStemTaken(name)) continue;
+    const reservation = path.join(dir, `.${name}.import`);
+    let handle;
     try {
+      handle = await fs.promises.open(reservation, 'wx');
+    } catch (err) {
+      if (err.code === 'EEXIST') continue;
+      throw err;
+    }
+    try {
+      const dest = path.join(dir, `${name}${ext}`);
       await fs.promises.copyFile(srcPath, dest, fs.constants.COPYFILE_EXCL);
       return dest;
     } catch (err) {
       if (err.code === 'EEXIST') continue;
       throw err;
+    } finally {
+      await handle.close();
+      await fs.promises.rm(reservation, { force: true });
     }
   }
 }

@@ -3,7 +3,7 @@ import { startMockOllama } from '../fixtures/mock-ollama';
 import { makeWav } from '../fixtures/make-wav';
 import { realUserDataDir, fileSig } from '../fixtures/real-user-data';
 import { killOllama } from '../fixtures/kill-ollama';
-import { mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'fs';
+import { mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, rmSync } from 'fs';
 import path from 'path';
 
 /**
@@ -39,6 +39,11 @@ type StenoWindow = Window & {
     };
   };
 };
+
+// The stem (filename without extension) a recordings/ entry will write its
+// note under: output/<stem>_summary.md. Two imports that resolve to the same
+// stem collide on that note.
+const stemOf = (file: string) => path.basename(file, path.extname(file));
 
 test('a re-import of a same-basename file does not overwrite the first import\'s note', async ({
   launchApp,
@@ -108,6 +113,90 @@ test('a re-import of a same-basename file does not overwrite the first import\'s
     if (recordingsDir) {
       rmSync(path.join(recordingsDir, 'imported.wav'), { force: true });
       rmSync(path.join(recordingsDir, 'imported-1.wav'), { force: true });
+    }
+  }
+});
+
+test('two parallel imports of the same stem with different extensions get distinct stems', async ({
+  launchApp,
+  userDataDir,
+}) => {
+  // Regression for the COPYFILE_EXCL-only reservation: it reserved the full
+  // filename (<stem><ext>), so dup.wav and dup.m4a produced different dest names
+  // (dup.wav, dup.m4a), neither raising EEXIST — both kept the stem "dup" and
+  // would later write the SAME output/dup_summary.md, one clobbering the other.
+  // The reservation must be on the stem, independent of extension, so the second
+  // import bumps to dup-1.
+  killOllama();
+  const ollama = await startMockOllama();
+
+  const realDirBefore = fileSig(realUserDataDir());
+
+  let recordingsDir: string | undefined;
+  let outputDir: string | undefined;
+  const stems = ['dup', 'dup-1'];
+  const exts = ['wav', 'm4a'];
+
+  try {
+    const { page } = await launchApp();
+
+    const dir = await page.evaluate(() =>
+      (window as StenoWindow).stenoai.recording.getDir(),
+    );
+    recordingsDir = dir?.path;
+    expect(recordingsDir).toBeTruthy();
+    outputDir = path.join(path.dirname(recordingsDir!), 'output');
+
+    // Same stem, different extensions — the exact pair the old check let through.
+    const srcDir = path.join(userDataDir, 'parallel-import-src');
+    mkdirSync(srcDir, { recursive: true });
+    const wavSrc = path.join(srcDir, 'dup.wav');
+    const m4aSrc = path.join(srcDir, 'dup.m4a');
+    makeWav(wavSrc, { seconds: 2 });
+    makeWav(m4aSrc, { seconds: 2 }); // WAV bytes in a .m4a — only the stem/ext matter here
+
+    // Fire both through the bridge in the same tick so their copies interleave
+    // (each copyImportIntoRecordings yields at its first await before either
+    // finishes), reproducing the concurrent reservation race.
+    const results = await page.evaluate(
+      ([a, b]) => {
+        const api = (window as StenoWindow).stenoai.recording;
+        return Promise.all([
+          api.processFile(a, 'Dup A'),
+          api.processFile(b, 'Dup B'),
+        ]);
+      },
+      [wavSrc, m4aSrc],
+    );
+    expect(results.every((r) => r?.success === true)).toBe(true);
+
+    // processFile resolves only after copyImportIntoRecordings has copied the
+    // file, so both copies exist now. Snapshot synchronously — the async
+    // pipeline unlinks them seconds later, so a poll would race the cleanup.
+    // Both imports must live under DISTINCT stems: collect the dup* copies'
+    // stems and assert exactly {dup, dup-1} — never a second "dup" under a
+    // different extension, which is what would later overwrite dup_summary.md.
+    const dupStems = readdirSync(recordingsDir!)
+      .filter((f) => !f.startsWith('.') && /^dup(-\d+)?\.(wav|m4a)$/.test(f))
+      .map(stemOf);
+    expect([...new Set(dupStems)].sort()).toEqual(['dup', 'dup-1']);
+
+    // The two summaries the pipeline will write therefore differ — no clobber.
+    expect(fileSig(realUserDataDir())).toBe(realDirBefore);
+  } finally {
+    await ollama.close();
+    killOllama();
+    if (recordingsDir) {
+      for (const s of stems) for (const e of exts) {
+        rmSync(path.join(recordingsDir, `${s}.${e}`), { force: true });
+        rmSync(path.join(recordingsDir, `.${s}.import`), { force: true });
+      }
+    }
+    if (outputDir) {
+      for (const s of stems) {
+        rmSync(path.join(outputDir, `${s}_summary.md`), { force: true });
+        rmSync(path.join(outputDir, `${s}_summary.json`), { force: true });
+      }
     }
   }
 });
