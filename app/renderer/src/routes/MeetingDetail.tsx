@@ -6,6 +6,8 @@ import {
   Clock,
   CloudOff,
   Copy,
+  Download,
+  FileText,
   Folder as FolderIcon,
   Globe,
   MoreHorizontal,
@@ -57,6 +59,7 @@ import {
 } from '@/hooks/useFolders';
 import { useActiveMeeting } from '@/lib/askBarContext';
 import { ipc, type Meeting } from '@/lib/ipc';
+import { buildTranscriptBundle, defaultExportFilename } from '@/lib/transcriptBundle';
 import { unwrap } from '@/lib/result';
 import { cn } from '@/lib/utils';
 import { navigate } from '@/lib/router';
@@ -283,6 +286,23 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
     };
   }, [info.name, summaryFile, qc]);
 
+  const [copiedTranscript, setCopiedTranscript] = React.useState(false);
+  // Built once per meeting — the transcript can be large, and it's read on every
+  // render for the buttons' disabled state as well as in both handlers.
+  const transcriptBundle = React.useMemo(() => buildTranscriptBundle(meeting), [meeting]);
+
+  const copyTranscriptForAi = async () => {
+    if (!transcriptBundle) return;
+    await navigator.clipboard.writeText(transcriptBundle);
+    setCopiedTranscript(true);
+    setTimeout(() => setCopiedTranscript(false), 1500);
+  };
+
+  const saveTranscript = async () => {
+    if (!transcriptBundle) return;
+    await ipc().meetings.exportTranscript(defaultExportFilename(meeting), transcriptBundle);
+  };
+
   const copyNotes = () => {
     const lines: string[] = [info.name];
     const meta = [formatDetailDate(info), formatDuration(info.duration_seconds)]
@@ -354,6 +374,20 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
               </TooltipTrigger>
               <TooltipContent side="bottom">{copied ? 'Copied!' : 'Copy notes'}</TooltipContent>
             </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <ActionIconButton
+                  label={copiedTranscript ? 'Copied' : 'Copy transcript'}
+                  onClick={copyTranscriptForAi}
+                  disabled={!transcriptBundle}
+                >
+                  {copiedTranscript ? <Check className="size-[13px]" /> : <FileText className="size-[13px]" />}
+                </ActionIconButton>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                {copiedTranscript ? 'Copied!' : 'Copy transcript'}
+              </TooltipContent>
+            </Tooltip>
             {/* Regenerate re-runs summarisation on the existing transcript.
                 A transcription-failure note has no transcript, so reprocess
                 would exit non-zero and strand the UI on a spinner — hide it
@@ -411,6 +445,16 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
                 >
                   <FolderIcon className="size-[13px] shrink-0" style={{ color: 'var(--fg-2)' }} />
                   View containing folder
+                </button>
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-sm transition-colors hover:bg-[color:var(--surface-hover)] disabled:opacity-50"
+                  style={{ color: 'var(--fg-1)' }}
+                  onClick={() => void saveTranscript()}
+                  disabled={!transcriptBundle}
+                >
+                  <Download className="size-[13px] shrink-0" style={{ color: 'var(--fg-2)' }} />
+                  Save transcript as .md…
                 </button>
                 {orgSession.data?.signedIn && (
                   isShared ? (

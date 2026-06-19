@@ -22,6 +22,7 @@ import {
   TranscriptPanelContent,
 } from '@/components/TranscriptPanel';
 import { useMeeting } from '@/hooks/useMeetings';
+import { buildTranscriptBundle } from '@/lib/transcriptBundle';
 
 // ---------------------------------------------------------------------------
 // Transcript bar — rendered separately above the chat bar
@@ -39,7 +40,7 @@ export function TranscriptBar() {
     if (activeOrgMeeting) {
       text = orgTranscript.trim();
     } else if (meeting.data) {
-      text = (meeting.data.transcript ?? '').trim();
+      text = buildTranscriptBundle(meeting.data);
     }
     if (!text) return;
     await navigator.clipboard.writeText(text);
