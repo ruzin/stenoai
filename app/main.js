@@ -6331,11 +6331,15 @@ ipcMain.handle('append-system-audio-chunk', async (_event, payload) => {
       return { success: false, error: 'No open system audio file' };
     }
     const buf = Buffer.isBuffer(payload) ? payload : Buffer.from(payload);
-    // Ordering is guaranteed by the renderer chaining its appends (each awaits
-    // the prior IPC round-trip); the WriteStream's internal buffer then
-    // preserves that order on disk. We don't await 'drain' — at ~16 KB/s to a
-    // local disk the kernel buffer never backs up in practice.
-    activeSysAudioWriteStream.write(buf);
+    // Await the write callback so a disk-write failure (ENOSPC, EIO) is
+    // reported as a failed append rather than acked as success — the renderer
+    // checks this envelope to know the on-disk file is truncated. Ordering is
+    // preserved because the renderer chains its appends (each awaits the prior
+    // round-trip) and the WriteStream is FIFO.
+    const stream = activeSysAudioWriteStream;
+    await new Promise((resolve, reject) => {
+      stream.write(buf, (err) => (err ? reject(err) : resolve()));
+    });
     activeSysAudioBytesWritten += buf.length;
     return { success: true };
   } catch (error) {

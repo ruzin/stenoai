@@ -73,6 +73,10 @@ export function useSystemAudioCapture() {
   // arrival order regardless of how their arrayBuffer() promises resolve.
   // Disk is the buffer now — there is no in-memory chunk array.
   const appendChainRef = React.useRef<Promise<void>>(Promise.resolve());
+  // Latches on the first failed chunk append so we surface the failure once
+  // (not once per second) and don't claim a clean recording when the on-disk
+  // file is actually truncated.
+  const appendFailedRef = React.useRef(false);
   const sessionNameRef = React.useRef<string | null>(null);
   const activeRef = React.useRef(false);
   // Bumped by stopCapture so any in-flight startCapture awaiting
@@ -355,6 +359,7 @@ export function useSystemAudioCapture() {
           audioBitsPerSecond: 128_000,
         });
         appendChainRef.current = Promise.resolve();
+        appendFailedRef.current = false;
         recorder.ondataavailable = (e) => {
           if (!e.data || e.data.size === 0) return;
           const blob = e.data;
@@ -364,7 +369,18 @@ export function useSystemAudioCapture() {
           appendChainRef.current = appendChainRef.current
             .then(async () => {
               const buf = new Uint8Array(await blob.arrayBuffer());
-              await bridge.recording.appendSystemAudioChunk(buf);
+              const res = await bridge.recording.appendSystemAudioChunk(buf);
+              // A resolved {success:false} (disk error, stream gone) isn't a
+              // throw — check it explicitly so a write failure isn't silently
+              // dropped. Surface it once; the file is now truncated.
+              if (!res.success && !appendFailedRef.current) {
+                appendFailedRef.current = true;
+                // eslint-disable-next-line no-console
+                console.error('[systemAudioCapture] chunk append failed:', res.error);
+                bridge.recording.reportCaptureError(
+                  `Recording may be incomplete: ${res.error || 'failed to write audio'}`,
+                );
+              }
             })
             .catch((err) => {
               // eslint-disable-next-line no-console
@@ -637,8 +653,33 @@ export function useSystemAudioCapture() {
         clearInterval(rmsIntervalRef.current);
         rmsIntervalRef.current = null;
       }
+      // Close the incremental-write file so the partial recording is flushed
+      // and the main-side stream isn't leaked across unmount. Reading
+      // appendChainRef.current must be DEFERRED until after recorder.stop()'s
+      // final ondataavailable has enqueued its append — otherwise we'd chain
+      // the close onto a stale snapshot taken before that last chunk and drop
+      // it. So close from the recorder's onstop (fires after the final
+      // ondataavailable); fall back to an immediate chain when there's no live
+      // recorder. Best-effort either way — unmount cleanup can't await.
+      const closeFile = () => {
+        void appendChainRef.current.finally(() =>
+          bridge.recording.closeSystemAudioFile(),
+        );
+      };
       const recorder = recorderRef.current;
-      if (recorder && recorder.state !== 'inactive') {
+      // activeRef.current is still true only when THIS unmount owns the live
+      // capture; if stopCapture already took over it has flipped it false (and
+      // its own onstop will flush+close), so we must not clobber that handoff.
+      const hadOpenFile = activeRef.current;
+      if (hadOpenFile && recorder && recorder.state !== 'inactive') {
+        recorder.onstop = closeFile;
+        try { recorder.stop(); } catch { closeFile(); }
+      } else if (hadOpenFile) {
+        // Open file but no live recorder (failed mid-start) — close directly.
+        closeFile();
+      } else if (recorder && recorder.state !== 'inactive') {
+        // stopCapture is handling the stop; just ensure the recorder stops
+        // without overwriting its onstop flush+close handoff.
         try { recorder.stop(); } catch { /* already stopping */ }
       }
       micStreamRef.current?.getTracks().forEach((t) => t.stop());
@@ -652,15 +693,8 @@ export function useSystemAudioCapture() {
       mixedStreamRef.current = null;
       audioCtxRef.current = null;
       recorderRef.current = null;
-      if (activeRef.current) {
+      if (hadOpenFile) {
         activeRef.current = false;
-        // Close the incremental-write file so the partial recording is flushed
-        // and the main-side stream isn't leaked across unmount. Chain after any
-        // in-flight appends so the final ~1s timeslice isn't dropped by closing
-        // out from under it (best-effort — unmount cleanup can't await).
-        void appendChainRef.current.finally(() =>
-          bridge.recording.closeSystemAudioFile(),
-        );
         void bridge.recording.disableLoopbackAudio();
         bridge.recording.reportSystemAudioState(false);
       }
