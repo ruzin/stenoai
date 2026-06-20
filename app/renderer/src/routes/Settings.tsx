@@ -550,7 +550,7 @@ export function Settings() {
               className="mt-10 text-center text-[12px]"
               style={{ color: 'var(--fg-muted)', maxWidth: 600 }}
             >
-              StenoAI {version.data?.version ?? ''}
+              Steno {version.data?.version ?? ''}
             </div>
           )}
         </div>
@@ -2026,7 +2026,7 @@ function AdvancedTab() {
 
       <SettingRow
         label="Anonymous usage analytics"
-        description="Help improve StenoAI — no meeting content is ever sent"
+        description="Help improve Steno — no meeting content is ever sent"
       >
         <Switch
           checked={telemetry.data?.telemetry_enabled ?? false}
@@ -2086,7 +2086,7 @@ function DeveloperTab() {
   };
 
   const placeholder =
-    'StenoAI debug console\nSession started — waiting for activity…\n';
+    'Steno debug console\nSession started — waiting for activity…\n';
 
   return (
     <section data-settings-tab="developer">

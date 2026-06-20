@@ -440,14 +440,13 @@ export function Home({ mode }: HomeProps) {
                 color: 'var(--fg-1)',
               }}
             >
-              Welcome to StenoAI.
+              Welcome to Steno.
             </h1>
             <p
               className="text-[17px] leading-[1.55]"
               style={{ color: 'var(--fg-2)' }}
             >
-              Capture your first meeting — transcription and summaries happen
-              locally on your device.
+              AI for your confidential workflows.
             </p>
             <p className="text-sm" style={{ color: 'var(--fg-muted)' }}>
               Always get consent when transcribing others.
