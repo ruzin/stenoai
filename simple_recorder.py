@@ -28,10 +28,15 @@ from typing import Optional
 
 # Force UTF-8 on stdout/stderr so emoji and non-ASCII prints don't crash under
 # Windows' default cp1252 codepage. Must run before any print() in this module.
+# newline="\n" disables Windows' \n -> \r\n translation: the Electron host parses
+# our streaming protocol line-by-line and matches exact sentinels (e.g.
+# STREAM_COMPLETE); a translated trailing \r would make those exact matches fail
+# and strand the UI "in analysis". (main.js also splits CRLF-tolerantly as a
+# belt-and-suspenders, but fixing it at the source covers every sentinel.)
 if sys.platform == "win32":
     try:
-        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace", newline="\n")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace", newline="\n")
     except (AttributeError, OSError):
         pass
 

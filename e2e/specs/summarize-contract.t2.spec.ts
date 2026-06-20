@@ -44,6 +44,9 @@ type StenoWindow = Window & {
     meetings: {
       reprocess: (summaryFile: string, regenTitle: boolean, name: string) => Promise<ReprocessResult>;
     };
+    on: {
+      summaryComplete: (cb: (e: { success: boolean }) => void) => () => void;
+    };
   };
 };
 
@@ -104,6 +107,51 @@ test('@contract reprocess builds a transcript-bearing prompt and parses the repl
 
     // Keystone: the real user-data dir is byte-for-byte untouched.
     expect(fileSig(realUserDataDir())).toBe(realDirBefore);
+  } finally {
+    await ollama.close();
+  }
+});
+
+test('@contract reprocess fires the summary-complete event (Windows CRLF completion guard)', async ({
+  launchApp,
+  userDataDir,
+}) => {
+  // The summary streaming UI finalises on the `summary-complete` event, which
+  // main.js emits when it sees the exact line `STREAM_COMPLETE`. On Windows the
+  // backend's stdout is \r\n, so an exact match must tolerate a trailing \r —
+  // otherwise the event never fires and the UI is stuck "in analysis". This
+  // asserts the event actually arrives (regression guard for that fix).
+  // Content-agnostic: it only checks that completion fires (e.success), so it's
+  // unaffected by tuning the shared FIXED_REPLY/TRANSCRIPT constants above.
+  writeUserConfig(userDataDir, { ai_provider: 'local' });
+  const summaryFile = writeMeetingSummary(userDataDir, 'complete-event', {
+    name: 'Complete Event Meeting',
+    summary: 'stale',
+    transcript: TRANSCRIPT,
+  });
+
+  const ollama = await startMockOllama({ chatReply: FIXED_REPLY });
+  try {
+    const { page } = await launchApp();
+
+    const completed: boolean = await page.evaluate(
+      (f) =>
+        new Promise<boolean>((resolve) => {
+          const timer = setTimeout(() => resolve(false), 25_000);
+          const w = window as unknown as StenoWindow;
+          const off = w.stenoai.on.summaryComplete((e) => {
+            if (e && e.success) {
+              clearTimeout(timer);
+              off();
+              resolve(true);
+            }
+          });
+          w.stenoai.meetings.reprocess(f, false, 'Complete Event Meeting');
+        }),
+      summaryFile,
+    );
+
+    expect(completed).toBe(true);
   } finally {
     await ollama.close();
   }
