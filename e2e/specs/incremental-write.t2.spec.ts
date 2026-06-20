@@ -11,6 +11,12 @@ import { realUserDataDir, fileSig } from '../fixtures/real-user-data';
  * processable file. This drives that IPC trio directly through the preload
  * bridge (no real capture, no model) and asserts the bytes land on disk in
  * append order. Model-free — runs in the fast t2-macos / t2-windows jobs.
+ *
+ * Coverage gap (intentional): the mic-only fallback in useSystemAudioCapture
+ * (loopback denial -> record mic only) is NOT covered here — it needs real
+ * getUserMedia/getDisplayMedia, out of reach for a model-free T2. That branch
+ * becomes the default capture path in the follow-up cutover PR and is
+ * exercised end-to-end by the @pipeline transcription smoke there.
  */
 
 type OpenResult = { success: boolean; filePath?: string; error?: string };

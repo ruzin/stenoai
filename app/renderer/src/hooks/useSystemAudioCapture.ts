@@ -336,7 +336,13 @@ export function useSystemAudioCapture() {
         //    file, so this is a hard failure).
         const name = sessionNameRef.current ?? 'Note';
         const opened = await bridge.recording.openSystemAudioFile(name);
-        if (cancelled()) { stopAcquired(); return; }
+        if (cancelled()) {
+          // Cancelled after the file opened — close it so the main-side write
+          // stream isn't leaked (it'd otherwise linger until the next open).
+          stopAcquired();
+          if (opened.success) void bridge.recording.closeSystemAudioFile();
+          return;
+        }
         if (!opened.success) {
           throw new Error(opened.error || 'Could not open recording file');
         }
@@ -648,9 +654,13 @@ export function useSystemAudioCapture() {
       recorderRef.current = null;
       if (activeRef.current) {
         activeRef.current = false;
-        // Close the incremental-write file so the partial recording is
-        // flushed and the main-side stream isn't leaked across unmount.
-        void bridge.recording.closeSystemAudioFile();
+        // Close the incremental-write file so the partial recording is flushed
+        // and the main-side stream isn't leaked across unmount. Chain after any
+        // in-flight appends so the final ~1s timeslice isn't dropped by closing
+        // out from under it (best-effort — unmount cleanup can't await).
+        void appendChainRef.current.finally(() =>
+          bridge.recording.closeSystemAudioFile(),
+        );
         void bridge.recording.disableLoopbackAudio();
         bridge.recording.reportSystemAudioState(false);
       }

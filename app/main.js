@@ -6275,26 +6275,47 @@ ipcMain.handle('get-recordings-dir', async () => {
 // means `keep_recordings` semantics + cleanup are symmetric, and users have
 // a single canonical place to find saved audio.
 //
-// Only one recording is ever active, so the open file is keyed on a single
-// module-level WriteStream rather than threading a handle through every IPC.
+// Only one recording is active at a time (the renderer serialises starts via
+// activeRef/startTokenRef), so the open file is keyed on a single module-level
+// WriteStream rather than threading a handle through every IPC. open() also
+// reclaims a stream left over from an abnormal prior teardown (renderer reload
+// mid-capture) so a stale fd can't outlive its recording.
 let activeSysAudioWriteStream = null;
 let activeSysAudioFilePath = null;
+let activeSysAudioBytesWritten = 0;
 
 ipcMain.handle('open-system-audio-file', async (_event, sessionName) => {
   try {
-    // Close any stream left open by a prior recording that never cleanly
-    // stopped (e.g. a renderer reload mid-capture) so we never leak an fd
-    // or append a new recording onto a stale file.
+    // Reclaim a stream left open by a prior recording that never cleanly
+    // stopped (e.g. a renderer reload mid-capture). End (flush) it and leave
+    // its partial file on disk under recordings/ — abandoned rather than
+    // processed, since no clean stop handed it to the queue.
     if (activeSysAudioWriteStream) {
+      sendDebugLog(`[sysaudio] abandoning unclosed prior recording ${path.basename(activeSysAudioFilePath || '')}`);
       try { activeSysAudioWriteStream.end(); } catch (_) { /* already ended */ }
       activeSysAudioWriteStream = null;
+      activeSysAudioFilePath = null;
     }
     const dir = resolveRecordingsDir();
     const safeName = String(sessionName || 'Note').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 64);
     const filename = `sysaudio-${Date.now()}-${safeName}.webm`;
     const filePath = path.join(dir, filename);
-    activeSysAudioWriteStream = fs.createWriteStream(filePath);
+    const stream = fs.createWriteStream(filePath);
+    // Attach an 'error' listener at creation time. A WriteStream that emits
+    // 'error' with no listener re-throws as an uncaught exception and would
+    // crash the main process (and the in-progress recording) — e.g. on ENOSPC
+    // mid-write. Instead, log and drop the stream so subsequent append/close
+    // report a clean failure rather than taking the app down.
+    stream.on('error', (err) => {
+      sendDebugLog(`[sysaudio] write stream error: ${err.message}`);
+      if (activeSysAudioWriteStream === stream) {
+        activeSysAudioWriteStream = null;
+        activeSysAudioFilePath = null;
+      }
+    });
+    activeSysAudioWriteStream = stream;
     activeSysAudioFilePath = filePath;
+    activeSysAudioBytesWritten = 0;
     sendDebugLog(`[sysaudio] opened ${filename} for incremental write`);
     return { success: true, filePath };
   } catch (error) {
@@ -6309,10 +6330,12 @@ ipcMain.handle('append-system-audio-chunk', async (_event, payload) => {
       return { success: false, error: 'No open system audio file' };
     }
     const buf = Buffer.isBuffer(payload) ? payload : Buffer.from(payload);
-    // createWriteStream serialises writes in call order, so chunks land in
-    // the order the renderer enqueued them (it chains appends) even without
-    // awaiting back-pressure here.
+    // Ordering is guaranteed by the renderer chaining its appends (each awaits
+    // the prior IPC round-trip); the WriteStream's internal buffer then
+    // preserves that order on disk. We don't await 'drain' — at ~16 KB/s to a
+    // local disk the kernel buffer never backs up in practice.
     activeSysAudioWriteStream.write(buf);
+    activeSysAudioBytesWritten += buf.length;
     return { success: true };
   } catch (error) {
     sendDebugLog(`Error appending system audio chunk: ${error.message}`);
@@ -6323,8 +6346,10 @@ ipcMain.handle('append-system-audio-chunk', async (_event, payload) => {
 ipcMain.handle('close-system-audio-file', async () => {
   const stream = activeSysAudioWriteStream;
   const filePath = activeSysAudioFilePath;
+  const bytesWritten = activeSysAudioBytesWritten;
   activeSysAudioWriteStream = null;
   activeSysAudioFilePath = null;
+  activeSysAudioBytesWritten = 0;
   if (!stream) {
     return { success: false, error: 'No open system audio file' };
   }
@@ -6333,7 +6358,15 @@ ipcMain.handle('close-system-audio-file', async () => {
       stream.on('error', reject);
       stream.end(resolve);
     });
-    sendDebugLog(`[sysaudio] closed ${path.basename(filePath)}`);
+    // A zero-byte file means no audio was captured (immediate stop, or a
+    // failed start that still opened the file). Remove it rather than queue an
+    // empty recording or leave a stray .webm, and report no usable file.
+    if (bytesWritten === 0) {
+      try { fs.unlinkSync(filePath); } catch (_) { /* */ }
+      sendDebugLog(`[sysaudio] closed empty recording, removed ${path.basename(filePath)}`);
+      return { success: false, error: 'Empty recording (no audio captured)' };
+    }
+    sendDebugLog(`[sysaudio] closed ${path.basename(filePath)} (${bytesWritten} bytes)`);
     return { success: true, filePath };
   } catch (error) {
     sendDebugLog(`Error closing system audio file: ${error.message}`);
