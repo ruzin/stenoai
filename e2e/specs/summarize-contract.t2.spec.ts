@@ -121,6 +121,8 @@ test('@contract reprocess fires the summary-complete event (Windows CRLF complet
   // backend's stdout is \r\n, so an exact match must tolerate a trailing \r —
   // otherwise the event never fires and the UI is stuck "in analysis". This
   // asserts the event actually arrives (regression guard for that fix).
+  // Content-agnostic: it only checks that completion fires (e.success), so it's
+  // unaffected by tuning the shared FIXED_REPLY/TRANSCRIPT constants above.
   writeUserConfig(userDataDir, { ai_provider: 'local' });
   const summaryFile = writeMeetingSummary(userDataDir, 'complete-event', {
     name: 'Complete Event Meeting',
