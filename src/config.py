@@ -290,22 +290,25 @@ class Config:
         self._config["whisper_model"] = "large-v3-turbo"
         self._save()
 
-    def _migrate_summary_model(self) -> None:
-        """Reset a removed summary model to the default.
+    # Curated models we retired — a user pinned to one is migrated to the
+    # default on load. Deliberately a specific allow-list, NOT "anything not in
+    # SUPPORTED_MODELS": set_model intentionally allows arbitrary user-pulled
+    # Ollama models (e.g. llama3.2:1b), and those must NOT be clobbered.
+    _RETIRED_SUMMARY_MODELS = {"gemma3:4b", "deepseek-r1:14b"}
 
-        Models retired from SUPPORTED_MODELS (e.g. gemma3:4b, deepseek-r1:14b)
-        would otherwise leave a user pinned to a model the app no longer knows.
-        Migrate any unknown saved model to DEFAULT_MODEL. (Deprecated-but-kept
-        models like llama3.2:3b are still in SUPPORTED_MODELS, so they're left
-        alone.)
+    def _migrate_summary_model(self) -> None:
+        """Reset a retired summary model to the default.
+
+        gemma3:4b / deepseek-r1:14b were removed from SUPPORTED_MODELS; a user
+        pinned to one would otherwise stay on a model the app no longer surfaces.
+        Only those specific ids migrate — custom/self-pulled models and the
+        deprecated-but-kept llama3.2:3b are left alone.
         """
         if self._load_failed:
             return  # never persist defaults over a corrupt-but-recoverable file
-        current = self._config.get("model")
-        if current is None or current in self.SUPPORTED_MODELS:
-            return
-        self._config["model"] = self.DEFAULT_MODEL
-        self._save()
+        if self._config.get("model") in self._RETIRED_SUMMARY_MODELS:
+            self._config["model"] = self.DEFAULT_MODEL
+            self._save()
 
     def _migrate_cloud_model_map(self) -> None:
         """One-shot migration from legacy single 'cloud_model' to per-provider

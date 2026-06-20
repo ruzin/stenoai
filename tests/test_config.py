@@ -123,6 +123,16 @@ class ConfigSummaryModelTests(unittest.TestCase):
             # Persisted so the migration doesn't re-run forever.
             self.assertEqual(json.loads(path.read_text())["model"], "gemma4:e2b-it-qat")
 
+    def test_custom_pulled_model_is_not_migrated(self):
+        # set_model intentionally allows arbitrary user-pulled Ollama models
+        # (not in SUPPORTED_MODELS). The migration must only touch the specific
+        # retired ids — a custom model must survive a reload untouched.
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "config.json"
+            path.write_text(json.dumps({"model": "llama3.2:1b"}))
+            config = Config(config_path=path)
+            self.assertEqual(config.get_model(), "llama3.2:1b")
+
 
 class ConfigWhisperModelMigrationTests(unittest.TestCase):
     """_migrate_whisper_model runs at load time to rescue configs that hold
