@@ -61,12 +61,10 @@ _OLLAMA_MODEL_NUM_CTX = {
     # gemma4:12b advertises 256K; capped well under that — a meeting fits in 32K
     # and the full window would be a large KV-cache allocation.
     "gemma4:12b": 32768,
-    "gemma3:4b": 16384,
     # llama3.2:3b's quantized build effectively caps ~8K despite the headline 128K
     "llama3.2:3b": 8192,
     "qwen3.5:9b": 32768,
     "gpt-oss:20b": 32768,
-    "deepseek-r1:14b": 32768,
 }
 
 

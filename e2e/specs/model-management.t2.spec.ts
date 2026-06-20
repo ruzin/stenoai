@@ -100,8 +100,8 @@ test('whisper models: list reports installed flags; set persists to config.whisp
   expect(listed.provider).toBe('local');
   assertInstalledShape(listed.supported_models);
 
-  // Pick a known supported key (SUPPORTED_WHISPER_MODELS = small | large-v3-turbo;
-  // set-whisper-model validates against those) and set it; it persists + the
+  // Pick the supported key (SUPPORTED_WHISPER_MODELS = large-v3-turbo;
+  // set-whisper-model validates against it) and set it; it persists + the
   // list's current model follows.
   await page.evaluate(() => (window as StenoWindow).stenoai.whisperModels.set('large-v3-turbo'));
   await expect.poll(() => readUserConfig(userDataDir).whisper_model).toBe('large-v3-turbo');
