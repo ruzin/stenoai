@@ -35,6 +35,7 @@ if (process.platform !== 'darwin') {
 
 const path = require('path');
 const { spawn: _spawnRaw, exec } = require('child_process');
+const processingLog = require('./processing-log');
 
 // Wrap spawn so every backend / ollama launch defaults to windowsHide:true.
 // The PyInstaller backend (stenoai.exe) and bundled ollama.exe are console
@@ -1016,6 +1017,16 @@ if (!gotSingleInstanceLock) {
   });
 
   app.whenReady().then(async () => {
+    // Persistent diagnostic log under <userData>/logs (honors
+    // STENOAI_USER_DATA_DIR via getUserDataDir, so e2e/tests stay isolated).
+    // The startup marker is a stable anchor that separates sessions.
+    try {
+      processingLog.init({ dir: path.join(getUserDataDir(), 'logs') });
+      processingLog.logLine('app', `startup v${app.getVersion()} platform=${process.platform}`);
+    } catch (e) {
+      console.warn('processing-log init failed (non-fatal):', e?.message);
+    }
+
     // Application menu. macOS uses the global menu bar with mac-only roles
     // (services/hide/unhide). Windows/Linux get a slimmer, platform-correct
     // menu — kept (editing accelerators, Settings, Help) but hidden by default
