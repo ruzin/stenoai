@@ -1349,7 +1349,7 @@ ipcMain.handle('get-system-audio-support', async () => {
 // Debug functionality handled by side panel now
 
 // Backend communication - always uses bundled stenoai executable
-function runPythonScript(script, args = [], silent = false, extraEnv = {}) {
+function runPythonScript(script, args = [], silent = false, extraEnv = {}, logLabel = null) {
   return new Promise((resolve, reject) => {
     const backendPath = getBackendPath();
 
@@ -1363,6 +1363,11 @@ function runPythonScript(script, args = [], silent = false, extraEnv = {}) {
       cwd: getBackendCwd(),
       env: Object.keys(extraEnv).length > 0 ? { ...require('process').env, ...extraEnv } : undefined
     });
+
+    // Opt-in persistent capture for the legacy process-recording path only.
+    // Default null → generic backend calls (config reads, chat query, …) are
+    // NOT persisted, preserving the no-global-tee privacy boundary.
+    if (logLabel) attachProcessingStderr(process, logLabel);
 
     let stdout = '';
     let stderr = '';
@@ -1442,7 +1447,7 @@ ipcMain.handle('get-status', handleGetStatus);
 ipcMain.handle('process-recording', async (event, audioFile, sessionName) => {
   try {
     const env = getAiEnv();
-    const result = await runPythonScript('simple_recorder.py', ['process', audioFile, '--name', sessionName], false, env);
+    const result = await runPythonScript('simple_recorder.py', ['process', audioFile, '--name', sessionName], false, env, 'process-recording');
     trackEvent('transcription_completed', { success: true });
     trackEvent('summarization_completed', { success: true });
     return { success: true, result: result };
@@ -2331,6 +2336,8 @@ function spawnLiveTranscribe(sessionName) {
     sendDebugLog(`[live-transcribe] ${data.toString().trim()}`);
   });
 
+  attachProcessingStderr(liveTranscribeProcess, 'live-transcribe');
+
   liveTranscribeProcess.on('exit', (code, signal) => {
     sendDebugLog(`Live transcribe sidecar exited code=${code} signal=${signal}`);
     liveTranscribeProcess = null;
@@ -2772,6 +2779,8 @@ async function processNextInQueue() {
           sendDebugLog(`STDERR: ${msg}`);
         }
       });
+
+      attachProcessingStderr(proc, 'process-streaming');
 
       proc.on('close', (code) => {
         watchdog.clear();
@@ -3877,6 +3886,29 @@ function sendDebugLog(message) {
   if (mainWindow) {
     mainWindow.webContents.send('debug-log', message);
   }
+}
+
+// Feed a child process's stderr into the persistent processing log, one record
+// per complete line. Node 'data' events deliver arbitrary chunks (not lines),
+// so we keep a residual buffer and flush the remainder on close. Additive: this
+// does NOT replace the existing per-pipeline sendDebugLog calls (renderer panel)
+// — it persists the same low-PII backend logger output to disk alongside them.
+function attachProcessingStderr(proc, label) {
+  if (!proc || !proc.stderr) return;
+  let buf = '';
+  proc.stderr.on('data', (data) => {
+    buf += data.toString();
+    let nl;
+    while ((nl = buf.indexOf('\n')) !== -1) {
+      const line = buf.slice(0, nl);
+      buf = buf.slice(nl + 1);
+      if (line.trim()) processingLog.logLine(label, line);
+    }
+  });
+  proc.on('close', () => {
+    if (buf.trim()) processingLog.logLine(label, buf);
+    buf = '';
+  });
 }
 
 ipcMain.handle('setup-ollama-and-model', async () => {
