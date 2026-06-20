@@ -1579,7 +1579,9 @@ ipcMain.handle('reprocess-meeting', async (event, summaryFile, regenerateTitle, 
       proc.stdout.on('data', (data) => {
         watchdog.reset();
         const text = data.toString();
-        text.split('\n').forEach(line => {
+        // CRLF-tolerant: Windows stdout is \r\n; exact-match lines (STREAM_COMPLETE)
+        // would otherwise carry a trailing \r and never match.
+        text.split(/\r?\n/).forEach(line => {
           if (line.startsWith('CHUNK:')) {
             try {
               const encoded = line.slice(6);
@@ -1781,7 +1783,9 @@ ipcMain.on('query-transcript-stream', (event, queryId, summaryFile, question) =>
   let chunkCount = 0;
   proc.stdout.on('data', (data) => {
     buf += data.toString();
-    const lines = buf.split('\n');
+    // Split on CRLF or LF: the backend's stdout is \r\n on Windows, and an exact
+    // match below (=== 'STREAM_COMPLETE') would otherwise miss the trailing \r.
+    const lines = buf.split(/\r?\n/);
     buf = lines.pop();
     for (const line of lines) {
       if (line.startsWith('CHAT_CHUNK:') || line.startsWith('CHUNK:')) {
@@ -2907,8 +2911,9 @@ async function processNextInQueue() {
       proc.stdout.on('data', (data) => {
         watchdog.reset();
         const text = data.toString();
-        // Parse protocol lines
-        text.split('\n').forEach(line => {
+        // Parse protocol lines (CRLF-tolerant: Windows stdout is \r\n, and the
+        // STREAM_COMPLETE exact-match below must not carry a trailing \r).
+        text.split(/\r?\n/).forEach(line => {
           if (line.startsWith('CHUNK:')) {
             try {
               const encoded = line.slice(6);
@@ -3188,8 +3193,9 @@ ipcMain.handle('start-recording-ui', async (_, sessionName) => {
       }
       console.log('Recording stdout:', output);
 
-      // Parse streaming protocol + send to debug panel
-      output.split('\n').forEach(line => {
+      // Parse streaming protocol + send to debug panel (CRLF-tolerant: Windows
+      // stdout is \r\n, so the STREAM_COMPLETE exact-match must not see a \r).
+      output.split(/\r?\n/).forEach(line => {
         if (line.startsWith('CHUNK:')) {
           const encoded = line.slice(6);
           try {
