@@ -48,12 +48,7 @@ from src import tls_bootstrap  # noqa: F401
 
 # Import modules with graceful fallback for missing dependencies
 try:
-    from src.audio_recorder import AudioRecorder
-except ImportError:
-    AudioRecorder = None
-
-try:
-    from src.transcriber import WhisperTranscriber  
+    from src.transcriber import WhisperTranscriber
 except ImportError:
     WhisperTranscriber = None
     
@@ -141,9 +136,6 @@ class SimpleRecorder:
     """Simple audio recorder and transcriber."""
     
     def __init__(self):
-        # Only initialize if dependencies are available
-        self.audio_recorder = AudioRecorder() if AudioRecorder else None
-
         # Only initialize transcriber/summarizer when needed to save memory
         self.transcriber = None
         self.summarizer = None
@@ -157,10 +149,7 @@ class SimpleRecorder:
         
         # State file
         self.state_file = Path("recorder_state.json")
-        
-        # Global AudioRecorder instance to maintain state across CLI calls
-        self.persistent_recorder = None
-        
+
     def get_state(self) -> dict:
         """Get current recorder state.
 
@@ -289,81 +278,6 @@ class SimpleRecorder:
             "action_items": action_items,
         }
 
-    def start_recording(self, session_name: str = "Recording") -> str:
-        """Start recording audio."""
-        state = self.get_state()
-        if state.get("recording"):
-            raise Exception(f"Already recording: {state.get('current_file', 'unknown file')}")
-        
-        # Create filename
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        safe_name = "".join(c for c in session_name if c.isalnum() or c in (' ', '-', '_')).strip()
-        filename = f"{timestamp}_{safe_name}.wav"
-        
-        recording_path = self.recordings_dir / filename
-        
-        print(f"🎤 Starting recording: {session_name}")
-        print(f"📁 File: {recording_path}")
-        
-        # Start recording
-        self.audio_recorder.start_recording()
-        
-        # Update state
-        new_state = {
-            "recording": True,
-            "current_file": str(recording_path), 
-            "session_name": session_name,
-            "start_time": datetime.now().isoformat()
-        }
-        self.save_state(new_state)
-        
-        return str(recording_path)
-    
-    def stop_recording(self) -> Optional[str]:
-        """Stop current recording."""
-        state = self.get_state()
-        if not state.get("recording"):
-            print("⚠️ No active recording to stop")
-            return None
-        
-        print("🔴 Stopping recording")
-        
-        # Stop recording
-        self.audio_recorder.stop_recording()
-        
-        # Wait a moment for recording to fully stop
-        import time
-        time.sleep(0.5)
-        
-        # Get the planned file path from state
-        recording_path = state.get("current_file")
-        if not recording_path:
-            print("⚠️ No recording file path found in state")
-            # Try to create a default path
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            recording_path = str(self.recordings_dir / f"{timestamp}_recording.wav")
-        
-        # Save the recording to the planned file
-        from pathlib import Path
-        if self.audio_recorder.save_recording(Path(recording_path)):
-            print(f"✅ Recording saved: {recording_path}")
-        else:
-            print("❌ Failed to save recording")
-            recording_path = None
-        
-        # Update state (always clear recording state)
-        new_state = {
-            "recording": False,
-            "current_file": None,
-            "session_name": None,
-            "stop_time": datetime.now().isoformat()
-        }
-        if recording_path:
-            new_state["last_recording"] = recording_path
-        
-        self.save_state(new_state)
-        return recording_path
-    
     async def transcribe_audio(self, audio_file: str, session_name: str = "Recording") -> dict:
         """Transcribe audio file."""
         audio_path = Path(audio_file)
@@ -871,171 +785,6 @@ def cli():
 
 
 @cli.command()
-@click.argument('session_name', default='Recording')
-def start(session_name):
-    """Start recording audio (stop with Ctrl+C to auto-process)"""
-    import signal
-    import time
-    
-    recorder = SimpleRecorder()
-    recording_path = None
-    recording_started = False
-    processing_started = False
-    
-    def signal_handler(signum, frame):
-        """Handle SIGTERM/SIGINT gracefully by stopping recording and processing"""
-        nonlocal processing_started
-        # Track real failures so we exit non-zero on the way out. Previously
-        # the handler always exited 0 even when transcription/summarization
-        # threw — Electron read that as success and the renderer would
-        # navigate to a non-existent meeting.
-        had_failure = False
-
-        # Different handling for different signals
-        signal_name = "SIGINT" if signum == 2 else f"SIGTERM" if signum == 15 else f"Signal {signum}"
-        print(f"\n🛑 Received {signal_name} - stopping recording and processing...")
-
-        # Prevent double processing if multiple signals received
-        if processing_started:
-            print("⚠️ Processing already started - please wait for completion...")
-            if signum == 15:  # SIGTERM - ignore it during processing
-                print("🔄 Ignoring SIGTERM during transcription/summarization")
-                return
-            sys.exit(0)
-
-        if recording_started and recorder:
-            processing_started = True
-            try:
-                final_path = recorder.stop_recording()
-                if final_path:
-                    print(f"✅ Recording saved: {final_path}")
-
-                    # Check file size
-                    from pathlib import Path
-                    file_size = Path(final_path).stat().st_size
-                    print(f"📏 File size: {file_size / 1024:.1f} KB")
-
-                    if file_size >= 1000:  # At least 1KB of audio data
-                        print("🔄 Starting transcription and summarization pipeline...")
-
-                        # Process recording with proper async handling
-                        try:
-                            import asyncio
-                            loop = asyncio.new_event_loop()
-                            asyncio.set_event_loop(loop)
-
-                            _notes_text = recorder._load_user_notes(session_name, recorder.output_dir)
-
-                            print("📝 Starting transcription...")
-                            result = loop.run_until_complete(recorder.process_recording_streaming(final_path, session_name, notes_text=_notes_text))
-
-                            print("✅ Complete processing finished!", flush=True)
-                            print(f"📄 Transcript: {result['session_info']['transcript_file']}")
-                            print(f"📋 Summary: {result['session_info']['summary_file']}")
-                            print(f"📊 Meeting: {result['session_info']['name']}")
-
-                        except Exception as e:
-                            print(f"❌ Processing pipeline failed: {e}", flush=True)
-                            import traceback
-                            traceback.print_exc()
-                            had_failure = True
-                    else:
-                        # Recording succeeded but was too short to process —
-                        # not a failure, just nothing to do.
-                        print("⚠️ Recording too short - skipping processing")
-                else:
-                    print("❌ No recording data to save")
-                    had_failure = True
-            except Exception as e:
-                print(f"❌ Error during signal handling: {e}")
-                import traceback
-                traceback.print_exc()
-                had_failure = True
-
-        print("🏁 Recording session ended")
-        sys.exit(1 if had_failure else 0)
-
-    # Register signal handlers for graceful shutdown
-    signal.signal(signal.SIGTERM, signal_handler)
-    signal.signal(signal.SIGINT, signal_handler)
-    
-    try:
-        recording_path = recorder.start_recording(session_name)
-        recording_started = True
-        print(f"🎤 Recording '{session_name}' - Press Ctrl+C to stop and process")
-        print(f"📁 File: {recording_path}")
-        print("📢 Speak now...")
-        
-        # Wait indefinitely until interrupted
-        while True:
-            time.sleep(1)
-            
-    except Exception as e:
-        print(f"ERROR: {e}")
-        sys.exit(1)
-
-
-@cli.command()
-def stop():
-    """Stop current recording and trigger processing"""
-    import subprocess
-    import signal
-    import os
-    import time
-    
-    # First check if there's a recording process running
-    try:
-        # Find running start processes
-        result = subprocess.run(
-            ['pgrep', '-f', 'simple_recorder.py start'],
-            capture_output=True,
-            text=True
-        )
-        
-        if result.returncode == 0 and result.stdout.strip():
-            pids = result.stdout.strip().split('\n')
-            print(f"🔍 Found {len(pids)} recording process(es)")
-            
-            for pid in pids:
-                if pid.strip():
-                    try:
-                        pid_int = int(pid.strip())
-                        print(f"🛑 Sending SIGINT to recording process (PID: {pid_int})")
-                        os.kill(pid_int, signal.SIGINT)
-                        
-                        print(f"✅ Stop signal sent to process {pid_int}")
-                        print(f"🔄 Recording will stop and processing will begin automatically")
-                        print(f"💡 Processing may take a few minutes - check output files when complete")
-                            
-                    except (ValueError, ProcessLookupError) as e:
-                        print(f"⚠️ Could not signal process {pid}: {e}")
-            
-            print("✅ Stop signal sent - recording will be processed automatically")
-            
-        else:
-            # Fallback to old method if no start process found
-            print("🔍 No start process found, checking recording state...")
-            recorder = SimpleRecorder()
-            state = recorder.get_state()
-            
-            if state.get("recording"):
-                print("⚠️ Recording state shows active but no process found")
-                print("🔧 Clearing stuck state...")
-                recorder.save_state({
-                    "recording": False,
-                    "current_file": None,
-                    "session_name": None
-                })
-                print("✅ State cleared")
-            else:
-                print("ℹ️ No active recording found")
-                
-    except Exception as e:
-        print(f"ERROR: {e}")
-        sys.exit(1)
-
-
-@cli.command()
 @click.argument('audio_file', default='')
 @click.option('--name', '-n', default='Recording', help='Session name for the recording')
 @click.option('--notes', default=None, help='Path to user notes file')
@@ -1220,8 +969,6 @@ def process_streaming(audio_file, name, notes):
         print(f"SAVED:{summary_path}", flush=True)
 
     asyncio.run(run())
-
-
 
 
 @cli.command(name='get-whisper-model')
@@ -1580,11 +1327,8 @@ class _LiveVadPipeline:
       LIVE_SEG:<segment json>      per partial OR final
       LIVE_ERROR:<error json>      on any unrecoverable failure
 
-    Two callers use this:
-      * ``_live_parakeet_consumer`` — sounddevice queue input (mic-only path)
-      * ``_live_stdin_consumer`` — stdin bytes input (system-audio path)
-
-    Each caller drives ``process(chunk)`` from its own input loop and
+    Driven by ``_live_stdin_consumer`` (stdin bytes input, the renderer-driven
+    capture path), which drives ``process(chunk)`` from its own input loop and
     calls ``finalize()`` on shutdown. The shared class owns all VAD +
     partial/final state so a fix to either path lands in one place.
 
@@ -1915,36 +1659,6 @@ class _LiveVadPipeline:
             )
 
 
-def _live_parakeet_consumer(stream_queue, source_rate, stop_event):
-    """Live consumer fed by the AudioRecorder's queue (mic-only path)."""
-    import queue as _q
-    pipeline = _LiveVadPipeline.create(source_rate=source_rate, source_label=None)
-    if pipeline is None:
-        return
-    try:
-        while not stop_event.is_set():
-            try:
-                raw = stream_queue.get(timeout=0.1)
-            except _q.Empty:
-                pipeline.tick_idle()
-                continue
-            pipeline.process(pipeline.flatten_chunk(raw))
-
-        # Drain remaining queued chunks before final flush.
-        while True:
-            try:
-                raw = stream_queue.get_nowait()
-            except _q.Empty:
-                break
-            pipeline.process(pipeline.flatten_chunk(raw))
-
-        pipeline.finalize()
-    except Exception as e:
-        print("LIVE_ERROR:" + json.dumps({
-            "stage": "consumer_loop", "error": str(e),
-        }), flush=True)
-
-
 def _live_stdin_consumer():
     """Live consumer fed by raw float32 stdin (renderer-driven system-audio
     path). The renderer captures mic + system audio via Web Audio,
@@ -2018,235 +1732,11 @@ def transcribe_stream_cmd():
 
 
 @cli.command()
-@click.argument('duration', type=int, default=10)
-@click.argument('session_name', default='Recording')
-@click.option('--live/--no-live', default=False,
-              help='Emit LIVE_SEG:<json> lines from Parakeet while recording')
-def record(duration, session_name, live):
-    """Record audio for specified duration and process it"""
-    import signal
-    import sys
-
-    print(f"🎤 Recording {duration} seconds of audio for '{session_name}'...")
-    if live:
-        print("🟢 Live transcription enabled (Parakeet TDT v3)")
-
-    recorder = SimpleRecorder()
-    recording_path = None
-    recording_started = False
-    is_paused = False
-    live_thread = None
-    live_stop = None
-
-    def pause_handler(signum, frame):
-        """Handle SIGUSR1 to pause recording"""
-        nonlocal is_paused
-        print(f"📨 Received SIGUSR1 signal (pause request)")
-        print(f"   recording_started={recording_started}, has_recorder={recorder is not None}, has_audio={recorder.audio_recorder is not None if recorder else False}")
-        if recording_started and recorder and recorder.audio_recorder:
-            if not is_paused:
-                recorder.audio_recorder.pause_recording()
-                is_paused = True
-                print("⏸️ Recording paused successfully")
-            else:
-                print("⏸️ Already paused - ignoring")
-        else:
-            print("⚠️ Cannot pause - recording not active")
-
-    def resume_handler(signum, frame):
-        """Handle SIGUSR2 to resume recording"""
-        nonlocal is_paused
-        print(f"📨 Received SIGUSR2 signal (resume request)")
-        print(f"   recording_started={recording_started}, is_paused={is_paused}")
-        if recording_started and recorder and recorder.audio_recorder:
-            if is_paused:
-                recorder.audio_recorder.resume_recording()
-                is_paused = False
-                print("▶️ Recording resumed successfully")
-            else:
-                print("▶️ Not paused - ignoring")
-        else:
-            print("⚠️ Cannot resume - recording not active")
-
-    # Register pause/resume signal handlers (Unix only)
-    if sys.platform != 'win32':
-        try:
-            signal.signal(signal.SIGUSR1, pause_handler)
-            signal.signal(signal.SIGUSR2, resume_handler)
-        except (AttributeError, ValueError) as e:
-            print(f"⚠️ Could not register pause/resume signals: {e}")
-
-    def signal_handler(signum, frame):
-        """Handle SIGTERM gracefully by stopping recording and processing"""
-        print(f"\n🛑 Received termination signal ({signum})")
-        if recording_started and recorder:
-            print("⏹️ Stopping recording and starting processing pipeline...")
-            try:
-                final_path = recorder.stop_recording()
-                # Drain the live Parakeet consumer (if running) before the
-                # summarizer takes over stdout. Setting the event after
-                # stop_recording guarantees the audio queue is no longer
-                # being written to — the consumer will drain what's left
-                # and call finalize() on the way out, then we join.
-                if live_thread is not None and live_stop is not None:
-                    live_stop.set()
-                    live_thread.join(timeout=10.0)
-                if final_path:
-                    print(f"✅ Recording saved: {final_path}")
-                    
-                    # Check file size
-                    from pathlib import Path
-                    file_size = Path(final_path).stat().st_size
-                    print(f"📏 File size: {file_size / 1024:.1f} KB")
-                    
-                    if file_size >= 1000:  # At least 1KB of audio data
-                        print("🔄 Starting transcription and summarization pipeline...")
-                        
-                        # Create new event loop for signal handler
-                        try:
-                            # Process recording synchronously in signal handler
-                            import asyncio
-                            if hasattr(asyncio, '_get_running_loop') and asyncio._get_running_loop():
-                                loop = asyncio._get_running_loop()
-                            else:
-                                loop = asyncio.new_event_loop()
-                                asyncio.set_event_loop(loop)
-                            
-                            # Load user notes if saved by Electron
-                            _notes_text = recorder._load_user_notes(session_name, recorder.output_dir)
-
-                            print("📝 Starting transcription...")
-                            result = loop.run_until_complete(recorder.process_recording_streaming(final_path, session_name, notes_text=_notes_text))
-
-                            print("✅ Complete processing finished!", flush=True)
-                            print(f"📄 Transcript: {result['session_info']['transcript_file']}")
-                            print(f"📋 Summary: {result['session_info']['summary_file']}")
-                            print(f"📊 Meeting: {result['session_info']['name']}")
-
-                        except Exception as e:
-                            print(f"❌ Processing pipeline failed: {e}", flush=True)
-                            import traceback
-                            traceback.print_exc()
-                    else:
-                        print("⚠️ Recording too short - skipping processing")
-                else:
-                    print("❌ No recording data to save")
-            except Exception as e:
-                print(f"❌ Error during signal handling: {e}")
-                import traceback
-                traceback.print_exc()
-        
-        print("🏁 Recording session ended - process complete")
-        sys.exit(0)
-    
-    # Register signal handlers
-    signal.signal(signal.SIGTERM, signal_handler)
-    signal.signal(signal.SIGINT, signal_handler)
-    
-    try:
-        # When --live is set, stand up the Parakeet streaming consumer
-        # BEFORE start_recording fires so the audio callback's first chunk
-        # has a non-None queue to publish into. The model is loaded on the
-        # consumer thread, so start_recording returns instantly even if
-        # MLX takes a couple of seconds to bring weights up — the user
-        # hears recording start immediately and live segments stream in
-        # once the model is ready.
-        if live and recorder.audio_recorder is not None:
-            import threading as _threading
-            live_stop = _threading.Event()
-            stream_q = recorder.audio_recorder.enable_stream()
-            live_thread = _threading.Thread(
-                target=_live_parakeet_consumer,
-                args=(stream_q, recorder.audio_recorder.sample_rate, live_stop),
-                daemon=True,
-                name='parakeet-live',
-            )
-            live_thread.start()
-
-        # Start recording
-        recording_path = recorder.start_recording(session_name)
-        recording_started = True
-        print(f"📁 Recording to: {recording_path}")
-        print("📢 Speak into your microphone now!")
-        
-        # For very long durations (like 999999), just wait indefinitely until signal
-        if duration > 86400:  # More than a day
-            print("🔄 Recording indefinitely (until stopped)...")
-            try:
-                while True:
-                    time.sleep(5)  # Check every 5 seconds
-            except KeyboardInterrupt:
-                signal_handler(signal.SIGINT, None)
-        else:
-            # Count down for normal durations (log every 10 minutes to reduce spam)
-            for i in range(duration, 0, -1):
-                if i % 600 == 0:  # Every 10 minutes
-                    print(f"Recording... {i // 60} minutes remaining")
-                time.sleep(1)
-        
-        # Normal completion (if not interrupted)
-        final_path = recorder.stop_recording()
-        # Mirror the signal_handler teardown: stop audio first, then signal
-        # the live consumer to finalize, then join. Without this the
-        # consumer would keep running into the summarizer's stdout window
-        # and the renderer would see late LIVE_SEG lines arrive after
-        # processing-complete.
-        if live_thread is not None and live_stop is not None:
-            live_stop.set()
-            live_thread.join(timeout=10.0)
-        if not final_path:
-            print("❌ Recording failed - no audio data collected")
-            return
-            
-        print(f"✅ Recording saved: {final_path}")
-        
-        # Check file size
-        from pathlib import Path
-        file_size = Path(final_path).stat().st_size
-        print(f"📏 File size: {file_size / 1024:.1f} KB")
-        
-        if file_size < 1000:  # Less than 1KB indicates empty recording
-            print("⚠️ Recording appears to be empty - check microphone")
-            return
-        
-        # Process recording
-        print("🔄 Processing recording (transcribe + summarize)...")
-        
-        async def process_recording():
-            result = await recorder.process_recording(final_path, session_name)
-            print("✅ Processing complete!")
-            print(f"📄 Transcript: {result['session_info']['transcript_file']}")  
-            print(f"📋 Summary: {result['session_info']['summary_file']}")
-            
-            # Show quick preview
-            if result.get('transcript'):
-                preview = result['transcript'][:200] + "..." if len(result['transcript']) > 200 else result['transcript']
-                print(f"📝 Preview: {preview}")
-        
-        asyncio.run(process_recording())
-        
-    except Exception as e:
-        print(f"❌ Recording failed: {e}")
-        import traceback
-        traceback.print_exc()
-        sys.exit(1)
-
-
-@cli.command()
 def test():
     """Quick system test - check components can initialize"""
     print("🧪 Quick system test...")
     
     try:
-        # Test audio recording capability
-        print("🎤 Testing audio recording...")
-        recorder = SimpleRecorder()
-        if not recorder.audio_recorder:
-            print("❌ Audio recording not available")
-            print("ERROR: Audio dependencies missing")
-            return
-        print("✅ Audio recording ready")
-        
         # Test transcriber availability
         print("🗣️ Testing Whisper transcriber...")
         if not WhisperTranscriber:
@@ -3829,7 +3319,6 @@ def set_cloud_api_url(url):
         print(json.dumps({"success": True, "cloud_api_url": url}))
     else:
         print(json.dumps({"success": False, "error": "Failed to save cloud API URL"}))
-
 
 
 @cli.command()

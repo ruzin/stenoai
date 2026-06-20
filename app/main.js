@@ -1422,48 +1422,6 @@ async function handleGetNotifications() {
   }
 }
 
-// IPC Handlers - Separate start/stop with better error handling
-ipcMain.handle('start-recording', async (event, sessionName) => {
-  try {
-    sendDebugLog(`Starting recording session: ${sessionName || 'Note'}`);
-    sendDebugLog('$ python simple_recorder.py start');
-
-    // Start recording (removed clear-state to prevent race conditions)
-    const result = await runPythonScript('simple_recorder.py', ['start', sessionName || 'Note']);
-
-    if (result.includes('SUCCESS')) {
-      sendDebugLog('Recording started successfully');
-      trackEvent('recording_started');
-      return { success: true, message: result };
-    } else {
-      sendDebugLog(`Recording failed: ${result}`);
-      return { success: false, error: result };
-    }
-  } catch (error) {
-    console.error('Start recording error:', error.message);
-    sendDebugLog(`Recording error: ${error.message}`);
-    trackEvent('error_occurred', { error_type: 'start_recording' });
-    return { success: false, error: error.message };
-  }
-});
-
-ipcMain.handle('stop-recording', async () => {
-  try {
-    const result = await runPythonScript('simple_recorder.py', ['stop']);
-
-    if (result.includes('SUCCESS') || result.includes('Recording saved')) {
-      trackEvent('recording_stopped');
-      return { success: true, message: result };
-    } else {
-      return { success: false, error: result };
-    }
-  } catch (error) {
-    console.error('Stop recording error:', error.message);
-    trackEvent('error_occurred', { error_type: 'stop_recording' });
-    return { success: false, error: error.message };
-  }
-});
-
 ipcMain.handle('get-status', handleGetStatus);
 
 ipcMain.handle('process-recording', async (event, audioFile, sessionName) => {
