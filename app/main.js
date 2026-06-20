@@ -2310,22 +2310,9 @@ ipcMain.handle('get-live-transcript-state', async () => {
   };
 });
 
-// Synchronously read system_audio_enabled from the user config so
-// start-recording-ui can decide whether to spawn the Python `record`
-// subprocess (off) or let the renderer drive the dual-stream capture (on).
-//
-// Always returns false on macOS without CoreAudio Process Tap support
-// (< 14.4 or non-darwin), regardless of the user's config setting — the
-// Python pipeline is the only working capture path there. Without this
-// gate, a user on older macOS with the new default `true` config would
-// produce no audio at all (Python skipped by main.js, renderer skipped
-// by useSystemAudioCapture's own OS check). Falls through to the config
-// default (currently true on a missing/empty config) when the OS does
-// support CoreAudio Tap so new installs get system audio out of the box.
-// Spawn the Python transcribe-stream sidecar for the system-audio path.
-// Wires stdout NDJSON to the same live-transcript-{ready,chunk,error}
-// IPC events the in-process `record --live` consumer uses, so the
-// renderer doesn't care which path produced the events.
+// Spawn the Python transcribe-stream sidecar that produces live partials for
+// the renderer-driven capture (Parakeet engine only). Wires its stdout NDJSON
+// to the live-transcript-{ready,chunk,error} IPC events the renderer consumes.
 function spawnLiveTranscribe(sessionName) {
   if (liveTranscribeProcess) {
     // Race-safe restart: a quick stop→start can land here while the
@@ -2966,7 +2953,7 @@ ipcMain.handle('start-recording-ui', async (_, sessionName) => {
       sendDebugLog(`Live transcription off — engine=${engine}`);
     }
     updateTrayIcon(true);
-    trackEvent('recording_started', { recording_mode: 'system_audio' });
+    trackEvent('recording_started');
     return {
       success: true,
       sessionName: actualSessionName,
