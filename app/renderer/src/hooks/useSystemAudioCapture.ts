@@ -68,7 +68,11 @@ export function useSystemAudioCapture() {
   const sysStreamRef = React.useRef<MediaStream | null>(null);
   const audioCtxRef = React.useRef<AudioContext | null>(null);
   const mixedStreamRef = React.useRef<MediaStream | null>(null);
-  const chunksRef = React.useRef<Blob[]>([]);
+  // Serialises the incremental writes: each MediaRecorder timeslice is
+  // appended to the open on-disk file through this chain so chunks land in
+  // arrival order regardless of how their arrayBuffer() promises resolve.
+  // Disk is the buffer now — there is no in-memory chunk array.
+  const appendChainRef = React.useRef<Promise<void>>(Promise.resolve());
   const sessionNameRef = React.useRef<string | null>(null);
   const activeRef = React.useRef(false);
   // Bumped by stopCapture so any in-flight startCapture awaiting
@@ -142,7 +146,6 @@ export function useSystemAudioCapture() {
       mixedStreamRef.current = null;
       audioCtxRef.current = null;
       recorderRef.current = null;
-      chunksRef.current = [];
     };
 
     const startCapture = async () => {
@@ -177,26 +180,41 @@ export function useSystemAudioCapture() {
         if (cancelled()) { stopAcquired(); return; }
         micStreamRef.current = micStream;
 
-        // 2. System audio loopback. With `forceCoreAudioTap: true` in
-        //    main.js's initMain(), getDisplayMedia is intercepted by
+        // 2. System audio loopback — BEST-EFFORT. With `forceCoreAudioTap: true`
+        //    in main.js's initMain(), getDisplayMedia is intercepted by
         //    electron-audio-loopback's setDisplayMediaRequestHandler and
-        //    served via CoreAudio Process Taps (macOS 14.4+). video:true
-        //    is required by the API; we drop the track immediately.
-        await bridge.recording.enableLoopbackAudio();
-        if (cancelled()) { stopAcquired(); return; }
-        sysStream = await navigator.mediaDevices.getDisplayMedia({
-          video: true,
-          audio: true,
-        });
-        if (cancelled()) { stopAcquired(); return; }
-        sysStream.getVideoTracks().forEach((t) => {
-          t.stop();
-          sysStream!.removeTrack(t);
-        });
-        if (sysStream.getAudioTracks().length === 0) {
-          throw new Error('No audio track in loopback stream');
+        //    served via CoreAudio Process Taps (macOS 14.4+). video:true is
+        //    required by the API; we drop the track immediately.
+        //
+        //    If loopback is unavailable (permission denied, no tap on this OS,
+        //    or no audio track) we DEGRADE TO MIC-ONLY rather than failing the
+        //    whole recording: sysStream stays null and the stereo graph below
+        //    wires mic → L with a silent R channel (the backend tolerates an
+        //    empty Others side). A genuine mic failure above still aborts.
+        try {
+          await bridge.recording.enableLoopbackAudio();
+          if (cancelled()) { stopAcquired(); return; }
+          sysStream = await navigator.mediaDevices.getDisplayMedia({
+            video: true,
+            audio: true,
+          });
+          if (cancelled()) { stopAcquired(); return; }
+          sysStream.getVideoTracks().forEach((t) => {
+            t.stop();
+            sysStream!.removeTrack(t);
+          });
+          if (sysStream.getAudioTracks().length === 0) {
+            throw new Error('No audio track in loopback stream');
+          }
+          sysStreamRef.current = sysStream;
+        } catch (loopbackErr) {
+          // eslint-disable-next-line no-console
+          console.warn('[systemAudioCapture] loopback unavailable, continuing mic-only', loopbackErr);
+          sysStream?.getTracks().forEach((t) => t.stop());
+          sysStream = null;
+          sysStreamRef.current = null;
+          try { await bridge.recording.disableLoopbackAudio(); } catch { /* */ }
         }
-        sysStreamRef.current = sysStream;
 
         // 3. Build the stereo graph. AudioContext at 48 kHz matches the
         //    native loopback rate so no resampling. We route mic to
@@ -211,28 +229,33 @@ export function useSystemAudioCapture() {
         audioCtxRef.current = ctx;
 
         const micSource = ctx.createMediaStreamSource(micStream);
-        const sysSource = ctx.createMediaStreamSource(sysStream);
-
         const micGain = ctx.createGain();
         micGain.channelCount = 1;
         micGain.channelCountMode = 'explicit';
         micGain.gain.value = 0.7;
         micSource.connect(micGain);
 
-        const sysGain = ctx.createGain();
-        // channelCount=1 with channelInterpretation='speakers' triggers
-        // Web Audio's automatic stereo→mono downmix (L/2 + R/2) for any
-        // multi-channel system loopback (ScreenCaptureKit can return
-        // stereo on some macOS versions; CoreAudio Process Tap is mono).
-        sysGain.channelCount = 1;
-        sysGain.channelCountMode = 'explicit';
-        sysGain.channelInterpretation = 'speakers';
-        sysGain.gain.value = 0.7;
-        sysSource.connect(sysGain);
+        // System source/gain only exist when loopback was acquired. A
+        // mic-only recording leaves the R channel of the merger silent.
+        let sysSource: MediaStreamAudioSourceNode | null = null;
+        let sysGain: GainNode | null = null;
+        if (sysStream) {
+          sysSource = ctx.createMediaStreamSource(sysStream);
+          sysGain = ctx.createGain();
+          // channelCount=1 with channelInterpretation='speakers' triggers
+          // Web Audio's automatic stereo→mono downmix (L/2 + R/2) for any
+          // multi-channel system loopback (ScreenCaptureKit can return
+          // stereo on some macOS versions; CoreAudio Process Tap is mono).
+          sysGain.channelCount = 1;
+          sysGain.channelCountMode = 'explicit';
+          sysGain.channelInterpretation = 'speakers';
+          sysGain.gain.value = 0.7;
+          sysSource.connect(sysGain);
+        }
 
         const merger = ctx.createChannelMerger(2);
         micGain.connect(merger, 0, 0);  // mic → L
-        sysGain.connect(merger, 0, 1);  // sys → R
+        if (sysGain) sysGain.connect(merger, 0, 1);  // sys → R (silent when mic-only)
 
         const dest = ctx.createMediaStreamDestination();
         merger.connect(dest);
@@ -265,7 +288,7 @@ export function useSystemAudioCapture() {
           liveMono.channelCountMode = 'explicit';
           liveMono.channelInterpretation = 'speakers';
           micGain.connect(liveMono);
-          sysGain.connect(liveMono);
+          if (sysGain) sysGain.connect(liveMono);
 
           const TAP_BUFFER = 4096;       // 48 kHz frames per callback (~85 ms)
           const DECIMATION = 3;           // 48 kHz / 16 kHz
@@ -305,7 +328,19 @@ export function useSystemAudioCapture() {
           tapSilencer.connect(ctx.destination);
         }
 
-        // 4. Record the mix.
+        // 4. Record the mix. The WebM blob is streamed to disk a timeslice at
+        //    a time (see ondataavailable → appendSystemAudioChunk) rather than
+        //    buffered in memory until stop, so a crash leaves a processable
+        //    file. Open the on-disk file first; if that fails there's nowhere
+        //    to write, so abort (caught below → mic-only would also have no
+        //    file, so this is a hard failure).
+        const name = sessionNameRef.current ?? 'Note';
+        const opened = await bridge.recording.openSystemAudioFile(name);
+        if (cancelled()) { stopAcquired(); return; }
+        if (!opened.success) {
+          throw new Error(opened.error || 'Could not open recording file');
+        }
+
         const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
           ? 'audio/webm;codecs=opus'
           : 'audio/webm';
@@ -313,10 +348,23 @@ export function useSystemAudioCapture() {
           mimeType,
           audioBitsPerSecond: 128_000,
         });
+        appendChainRef.current = Promise.resolve();
         recorder.ondataavailable = (e) => {
-          if (e.data && e.data.size > 0) chunksRef.current.push(e.data);
+          if (!e.data || e.data.size === 0) return;
+          const blob = e.data;
+          // Chain appends so they serialise in arrival order — the handler
+          // fires in order, and chaining synchronously here preserves that
+          // even though each blob.arrayBuffer() resolves asynchronously.
+          appendChainRef.current = appendChainRef.current
+            .then(async () => {
+              const buf = new Uint8Array(await blob.arrayBuffer());
+              await bridge.recording.appendSystemAudioChunk(buf);
+            })
+            .catch((err) => {
+              // eslint-disable-next-line no-console
+              console.error('[systemAudioCapture] chunk append failed', err);
+            });
         };
-        chunksRef.current = [];
         // 1s timeslice so a crash mid-recording loses at most ~1s of audio.
         recorder.start(1_000);
         recorderRef.current = recorder;
@@ -332,10 +380,15 @@ export function useSystemAudioCapture() {
         micAnalyser.fftSize = 512;
         micAnalyser.smoothingTimeConstant = 0;
         micSource.connect(micAnalyser);
-        const sysAnalyser = ctx.createAnalyser();
-        sysAnalyser.fftSize = 512;
-        sysAnalyser.smoothingTimeConstant = 0;
-        sysSource.connect(sysAnalyser);
+        // No system analyser on a mic-only recording — sysRms is treated as 0
+        // below, so auto-stop falls back to mic-only silence.
+        let sysAnalyser: AnalyserNode | null = null;
+        if (sysSource) {
+          sysAnalyser = ctx.createAnalyser();
+          sysAnalyser.fftSize = 512;
+          sysAnalyser.smoothingTimeConstant = 0;
+          sysSource.connect(sysAnalyser);
+        }
 
         const computeRms = (analyser: AnalyserNode, buf: Uint8Array<ArrayBuffer>): number => {
           analyser.getByteTimeDomainData(buf);
@@ -348,7 +401,9 @@ export function useSystemAudioCapture() {
         };
 
         const micBuf = new Uint8Array(new ArrayBuffer(micAnalyser.fftSize));
-        const sysBuf = new Uint8Array(new ArrayBuffer(sysAnalyser.fftSize));
+        const sysBuf = sysAnalyser
+          ? new Uint8Array(new ArrayBuffer(sysAnalyser.fftSize))
+          : null;
         let lastActiveAtMs = Date.now();
         // Latch the in-flight stop attempt instead of tearing the
         // interval down: a stop failure (Python crash, queue lock, race
@@ -371,7 +426,7 @@ export function useSystemAudioCapture() {
           }
           if (stopAttemptInFlight) return;
           const micRms = computeRms(micAnalyser, micBuf);
-          const sysRms = computeRms(sysAnalyser, sysBuf);
+          const sysRms = sysAnalyser && sysBuf ? computeRms(sysAnalyser, sysBuf) : 0;
           if (micRms > SILENCE_RMS_THRESHOLD || sysRms > SILENCE_RMS_THRESHOLD) {
             lastActiveAtMs = Date.now();
             return;
@@ -440,7 +495,7 @@ export function useSystemAudioCapture() {
           rmsIntervalRef.current = setInterval(() => {
             if (!activeRef.current || isPausedRef.current) return;
             const micRms = computeRms(micAnalyser, micBuf);
-            const sysRms = computeRms(sysAnalyser, sysBuf);
+            const sysRms = sysAnalyser && sysBuf ? computeRms(sysAnalyser, sysBuf) : 0;
             pushRmsSample({
               tSec: (Date.now() - recordingStartMs) / 1000,
               micRms,
@@ -458,9 +513,17 @@ export function useSystemAudioCapture() {
         console.error('[systemAudioCapture] start failed', err);
         teardownStreams();
         activeRef.current = false;
+        // Close any file opened before the failure so we don't leak the
+        // main-side write stream (no-op if open never ran).
+        try { await bridge.recording.closeSystemAudioFile(); } catch { /* */ }
         // Tell main to drop the stuck "recording" pill — its optimistic
         // systemAudioRecordingActive flag was set on start-recording-ui.
         bridge.recording.reportSystemAudioState(false);
+        // Surface the failure to the user (native notification) — otherwise a
+        // denied mic permission looks like a silent no-op.
+        bridge.recording.reportCaptureError(
+          err instanceof Error ? err.message : 'Recording could not start',
+        );
         try { await bridge.recording.disableLoopbackAudio(); } catch { /* */ }
       }
     };
@@ -491,14 +554,15 @@ export function useSystemAudioCapture() {
       await new Promise<void>((resolve) => {
         recorder.onstop = async () => {
           try {
-            const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
-            const bytes = new Uint8Array(await blob.arrayBuffer());
-            const written = await bridge.recording.writeSystemAudioBlob(bytes, name);
-            if (written.success) {
-              await bridge.recording.processSystemAudio(written.filePath, name);
-            } else {
+            // Flush any in-flight appends, then close the on-disk file and
+            // hand the finished WebM to the processing queue.
+            await appendChainRef.current;
+            const closed = await bridge.recording.closeSystemAudioFile();
+            if (!closed.success) {
               // eslint-disable-next-line no-console
-              console.error('[systemAudioCapture] write failed', written.error);
+              console.error('[systemAudioCapture] close failed', closed.error);
+            } else if (closed.filePath) {
+              await bridge.recording.processSystemAudio(closed.filePath, name);
             }
           } catch (err) {
             // eslint-disable-next-line no-console
@@ -582,9 +646,11 @@ export function useSystemAudioCapture() {
       mixedStreamRef.current = null;
       audioCtxRef.current = null;
       recorderRef.current = null;
-      chunksRef.current = [];
       if (activeRef.current) {
         activeRef.current = false;
+        // Close the incremental-write file so the partial recording is
+        // flushed and the main-side stream isn't leaked across unmount.
+        void bridge.recording.closeSystemAudioFile();
         void bridge.recording.disableLoopbackAudio();
         bridge.recording.reportSystemAudioState(false);
       }
