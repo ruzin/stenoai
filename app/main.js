@@ -6340,6 +6340,14 @@ ipcMain.handle('append-system-audio-chunk', async (_event, payload) => {
     await new Promise((resolve, reject) => {
       stream.write(buf, (err) => (err ? reject(err) : resolve()));
     });
+    // Only credit the byte count if this is still the active stream — a
+    // concurrent open() could have rotated it during the await, and crediting
+    // a rotated-in recording with this chunk's size would corrupt its
+    // empty-file accounting. If rotated, the write landed on an abandoned
+    // stream, so report failure rather than a false success.
+    if (activeSysAudioWriteStream !== stream) {
+      return { success: false, error: 'Recording rotated during write' };
+    }
     activeSysAudioBytesWritten += buf.length;
     return { success: true };
   } catch (error) {
