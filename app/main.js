@@ -2728,6 +2728,7 @@ async function processNextInQueue() {
         // Parse protocol lines (CRLF-tolerant: Windows stdout is \r\n, and the
         // STREAM_COMPLETE exact-match below must not carry a trailing \r).
         text.split(/\r?\n/).forEach(line => {
+          logPipelineStdoutLine(line);
           if (line.startsWith('CHUNK:')) {
             try {
               const encoded = line.slice(6);
@@ -3909,6 +3910,30 @@ function attachProcessingStderr(proc, label) {
     if (buf.trim()) processingLog.logLine(label, buf);
     buf = '';
   });
+}
+
+// Persist only an allowlist of pipeline stdout protocol events. Excludes
+// CHUNK/CHAT_CHUNK/TITLE/LIVE_SEG and any free-text/query answer (privacy).
+// HEARTBEAT is throttled to once per 10s so a long transcription doesn't flood.
+let lastHeartbeatLoggedAt = 0;
+function logPipelineStdoutLine(line) {
+  const l = line.trim();
+  if (!l) return;
+  if (l.startsWith('HEARTBEAT')) {
+    const now = Date.now();
+    if (now - lastHeartbeatLoggedAt < 10_000) return;
+    lastHeartbeatLoggedAt = now;
+    processingLog.logLine('pipeline', l);
+    return;
+  }
+  if (
+    l.startsWith('TRANSCRIPTION_COMPLETE') ||
+    l.startsWith('TRANSCRIPTION_FAILED') ||
+    l.startsWith('SAVED:') ||
+    l === 'STREAM_COMPLETE'
+  ) {
+    processingLog.logLine('pipeline', l);
+  }
 }
 
 ipcMain.handle('setup-ollama-and-model', async () => {
