@@ -100,6 +100,11 @@ jobs:
       run: |
         chmod +x scripts/download-ollama.sh
         ./scripts/download-ollama.sh
+        # Fail loudly if the bundled ffmpeg isn't arm64 — an x86_64 ffmpeg in the
+        # arm64 build crashes on Apple Silicon without Rosetta (#209). Mirrors the
+        # mic-monitor arch guard below.
+        file bin/ffmpeg
+        file bin/ffmpeg | grep -q "arm64"
 
     - name: Build mic-monitor helper (Swift)
       run: |
