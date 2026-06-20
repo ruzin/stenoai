@@ -115,7 +115,7 @@ export function useRecording() {
   // duplicate cache invalidations and N navigations per recording.
 
   const startRecording = React.useCallback(
-    async (name?: string) => {
+    async (name?: string, eventId?: string) => {
       // Optimistic cache write so the UI flips to status='recording'
       // instantly. The backend's start-recording-ui has a 2s warm-up and
       // the next queue poll (1s) will reconcile sessionName + elapsed.
@@ -157,7 +157,7 @@ export function useRecording() {
       });
       navigate('/recording');
       try {
-        const data = unwrap(await ipc().recording.start(name));
+        const data = unwrap(await ipc().recording.start(name, eventId));
         qc.invalidateQueries({ queryKey: queueKey });
         return data;
       } catch (err) {
@@ -271,7 +271,7 @@ export function useRecordingEvents() {
       bridge.on.shortcutStopRecording(() => {
         void stopRecording();
       }),
-      bridge.on.autoRecordRequested(({ sessionName }) => {
+      bridge.on.autoRecordRequested(({ sessionName, eventId }) => {
         // Suggested by the mic-monitor auto-detect notification ("Take Notes").
         // Allow start when idle OR when a previous note is still processing
         // — the user explicitly opted in by clicking "Take Notes", and the
@@ -279,7 +279,9 @@ export function useRecordingEvents() {
         // an active recording (recording/paused) is already in progress —
         // user already manually started or is mid-meeting.
         if (status === 'recording' || status === 'paused') return;
-        void startRecording(sessionName ?? undefined);
+        // Thread the matched calendar event id through so main tags the
+        // recording with it (suppresses the pre-meeting notif for this meeting).
+        void startRecording(sessionName ?? undefined, eventId ?? undefined);
       }),
       bridge.on.autoPauseRequested(() => {
         // Mic stopped on the meeting app — pause so we don't keep recording

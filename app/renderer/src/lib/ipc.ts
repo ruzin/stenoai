@@ -587,7 +587,7 @@ export interface StenoaiBridge {
   };
 
   recording: {
-    start: RequestFn<[name?: string], StartRecordingResponse>;
+    start: RequestFn<[name?: string, eventId?: string], StartRecordingResponse>;
     stop: RequestFn<[], StopRecordingResponse>;
     pause: RequestFn<[], PauseRecordingResponse>;
     resume: RequestFn<[], ResumeRecordingResponse>;
@@ -723,6 +723,12 @@ export interface StenoaiBridge {
       [payload: { title: string; failed?: boolean }],
       Result<Record<string, never>>
     >;
+    /** Design-for-test seam for the pre-meeting notification (production fire
+     *  path is the main-side scheduler). Returns `shown` for the gate/suppression. */
+    showPremeetingNotification: RequestFn<
+      [payload: { event: { id: string; title?: string } }],
+      Result<{ shown?: boolean }>
+    >;
     getLanguage: RequestFn<[], GetLanguageResponse>;
     setLanguage: RequestFn<[code: string], Result<Record<string, never>>>;
     getUserName: RequestFn<[], GetUserNameResponse>;
@@ -801,7 +807,7 @@ export interface StenoaiBridge {
     shortcutStopRecording: Subscribe<void>;
     trayStartRecording: Subscribe<void>;
     trayStopRecording: Subscribe<void>;
-    autoRecordRequested: Subscribe<{ sessionName?: string; appName?: string }>;
+    autoRecordRequested: Subscribe<{ sessionName?: string; appName?: string; eventId?: string | null }>;
     autoPauseRequested: Subscribe<void>;
     autoResumeRequested: Subscribe<void>;
     autoSummariseRequested: Subscribe<void>;

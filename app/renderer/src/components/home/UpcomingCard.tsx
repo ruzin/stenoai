@@ -39,7 +39,9 @@ export function UpcomingCard({ event }: UpcomingCardProps) {
   // same way back-to-back.
   const onStart = () => {
     if (recording.status === 'recording' || recording.status === 'paused') return;
-    void recording.startRecording(event.title);
+    // Pass the calendar event id so main tags the recording with it — this
+    // suppresses the pre-meeting notification for the meeting we're recording.
+    void recording.startRecording(event.title, event.id);
   };
 
   // Open the meeting URL externally. Used by the inner Join button only.
