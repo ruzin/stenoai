@@ -5,7 +5,7 @@ must be distinguished from genuine silence: the crash path tags the result
 with ``transcription_failed`` and preserves the source audio, whereas silence
 still returns the "No speech detected in audio" sentinel with no flag. These
 tests pin that contract end to end across ``transcribe_audio``,
-``transcribe_diarised`` and ``SimpleRecorder._handle_transcription_failure``.
+``transcribe_diarised`` and ``MeetingPipeline._handle_transcription_failure``.
 """
 
 import tempfile
@@ -13,7 +13,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from simple_recorder import SimpleRecorder, _parse_meeting_markdown
+from simple_recorder import MeetingPipeline, _parse_meeting_markdown
 from src.transcriber import WhisperTranscriber
 
 
@@ -308,8 +308,8 @@ class TranscribeDiarisedFailureTests(unittest.TestCase):
 
 
 class HandleTranscriptionFailureTests(unittest.TestCase):
-    def _build_recorder(self, output_dir: Path) -> SimpleRecorder:
-        recorder = SimpleRecorder.__new__(SimpleRecorder)
+    def _build_recorder(self, output_dir: Path) -> MeetingPipeline:
+        recorder = MeetingPipeline.__new__(MeetingPipeline)
         recorder.output_dir = output_dir
         return recorder
 
@@ -368,7 +368,7 @@ class HandleTranscriptionFailureTests(unittest.TestCase):
             out_dir = Path(tmp_dir) / "output"
             out_dir.mkdir()
             audio = _make_audio_file(tmp_dir, "session.webm")
-            recorder = SimpleRecorder.__new__(SimpleRecorder)
+            recorder = MeetingPipeline.__new__(MeetingPipeline)
             recorder.output_dir = out_dir
             transcript_data = {
                 "duration_seconds": 60.0,

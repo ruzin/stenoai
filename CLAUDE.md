@@ -80,9 +80,9 @@ overrides luffy's test-level defaults); the QA review lens checks for it.
     ASR, no real model), and the calendar/notifications pair `calendar-auth.t2`
     (auth-status from a local token file + auto-detect-meetings toggle) /
     `notifications.t2` (the notifications_enabled toggle gating the note-ready /
-    silence notifications via the `shown` signal), and the onboarding/updates pair
-    `setup-check.t2` (the setup-wizard allGood + checks contract) / `announcements.t2`
-    (the local announcements feed + version stamp) (all model-free, run in `t2-macos` /
+    silence notifications via the `shown` signal), and the onboarding spec
+    `setup-check.t2` (the setup-wizard allGood + checks contract) (all model-free,
+    run in `t2-macos` /
     `t2-windows`); `transcription-pipeline.t2` and `honest-failure.t2` (tagged
     `@pipeline`, run in `t2-pipeline-macos` / `t2-pipeline-windows`). Engine selection
     for `@pipeline` specs is shared via `e2e/fixtures/engine.ts`; model-free T2 setup
@@ -166,6 +166,18 @@ Tokens live in `app/renderer/src/globals.css` under `:root` (light) and
   - Review frontend code for layout bugs, CSS consistency, accessibility, and polish
   - Use the frontend-design skill for UI-related changes
   - Categorize findings by severity (critical/medium/low) and fix critical issues before merging
+
+### When to use `luffy` / `nami` (guideline, not a mandate)
+Match the rigor to the change — don't run the heavyweight loop on a one-line edit.
+- **`luffy`** (autonomous build → multi-agent QA/Design/Eng review loop → `/verify` → PR):
+  use for **new features, risky changes, or wide-blast-radius refactors**. It's
+  token-heavy; reserve it for work that earns the review panel.
+- **Lighter self-review** (implement → test/typecheck → `/verify` if there's a runtime
+  surface → PR): use for **mechanical refactors, dead-code cleanup, copy/docs**.
+- **`nami`** (push → open/update PR → drive CI + review comments to green): effectively
+  **always**, regardless of change size — every PR should be taken to green-and-reviewed,
+  and bot/human comments evaluated critically (fix real issues, push back with reasons on
+  wrong ones). Stop at green; a human merges.
 
 ## Git Commit Guidelines
 - Do NOT include "Generated with Claude Code" attribution in commit messages
