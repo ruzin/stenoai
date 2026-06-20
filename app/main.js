@@ -7382,8 +7382,10 @@ async function fetchCalendarEventsForScheduler(timeoutMs = 4000) {
   }
 }
 
-// Same upcoming rules Home.tsx's `upcomingToday` uses (source of truth):
-// timed (not all-day), not declined, start still in the future.
+// Mirrors the per-event predicates of Home.tsx's `upcomingToday` (timed/
+// not-all-day, not declined, start in the future) — but deliberately WITHOUT
+// Home's start-of-tomorrow upper bound: a 2-min-before reminder should arm for
+// any upcoming meeting in the fetch window, not just today's.
 function isPremeetingEligible(e, nowMs) {
   if (!e || typeof e.start !== 'string') return false;
   if (!e.start.includes('T')) return false;      // all-day events are date-only
@@ -7395,6 +7397,8 @@ function isPremeetingEligible(e, nowMs) {
 
 // The single fire path, shared by the armed timer and the
 // show-premeeting-notification test seam. Returns whether the banner was shown.
+// No internal firedIds dedupe (the scheduler owns that, skipping already-fired
+// ids on re-poll) so the seam can drive it repeatedly in tests.
 async function firePreMeetingNotification(event) {
   premeetingTimers.delete(event.id);
   // Gate: the master notifications toggle (no dedicated pre-meeting toggle —
@@ -7405,7 +7409,6 @@ async function firePreMeetingNotification(event) {
     sendDebugLog(`[premeeting] suppressed — already recording event ${event.id}`);
     return false;
   }
-  premeetingFiredIds.add(event.id);
   if (!Notification.isSupported()) return false;
   const notif = new Notification({
     title: 'Meeting starting',
@@ -7418,6 +7421,9 @@ async function firePreMeetingNotification(event) {
     }
   });
   notif.show();
+  // Mark fired only after we've actually shown it, so an unshowable notif
+  // (no OS support) isn't permanently skipped by the scheduler's dedupe.
+  premeetingFiredIds.add(event.id);
   return true;
 }
 
@@ -7439,6 +7445,18 @@ async function schedulePreMeetingNotifications() {
   const events = await fetchCalendarEventsForScheduler();
   if (!events) return; // no calendar connected / fetch failed — keep existing timers
   const nowMs = Date.now();
+  // Forget fired ids that are no longer a just-fired occurrence: pruned if the
+  // event dropped out of the fetch (cancelled / rolled past the window) OR its
+  // start is now in the future again (a recurring meeting reusing the same id —
+  // re-firing in the pre-start gap is already prevented by the delay<=0 guard
+  // below). Keeps the Set bounded across a long-running session.
+  const startById = new Map(events.map((e) => [e.id, new Date(e.start).getTime()]));
+  for (const id of premeetingFiredIds) {
+    const startMs = startById.get(id);
+    if (startMs === undefined || (isFinite(startMs) && startMs > nowMs)) {
+      premeetingFiredIds.delete(id);
+    }
+  }
   clearPreMeetingTimers();
   for (const e of events) {
     if (!isPremeetingEligible(e, nowMs)) continue;
