@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { ipc } from '@/lib/ipc';
+import { isMac } from '@/lib/utils';
 import {
   LIVE_RMS_HZ,
   pushRmsSample,
@@ -22,24 +23,20 @@ const SILENCE_RMS_THRESHOLD = 0.01;
 const SILENCE_SAMPLE_INTERVAL_MS = 1_000;
 
 /**
- * Mounts ONCE at App level. When system audio is enabled and the user starts
- * recording, captures BOTH mic (getUserMedia) and system loopback
- * (getDisplayMedia routed through CoreAudio Process Taps via
- * `electron-audio-loopback` with forceCoreAudioTap) and emits a single
- * STEREO WebM/Opus blob with **mic in channel 0 (L), system in channel 1
- * (R)**. The backend's `transcribe_diarised` (src/transcriber.py) detects
- * the stereo layout, splits the channels, transcribes each separately with
- * per-segment timestamps, and emits a chronologically interleaved
- * `[You]` / `[Others]` transcript that TranscriptPanel renders as
- * alternating speaker bubbles.
+ * Mounts ONCE at App level. This is the ONLY recording path — whenever the
+ * user starts recording it captures the mic (getUserMedia) and, when loopback
+ * is enabled (macOS toggle on; Windows always; OS must support it), also the
+ * system loopback (getDisplayMedia routed through CoreAudio Process Taps via
+ * `electron-audio-loopback` with forceCoreAudioTap). It emits a single STEREO
+ * WebM/Opus blob with **mic in channel 0 (L), system in channel 1 (R)**,
+ * streamed incrementally to disk. The backend's `transcribe_diarised`
+ * (src/transcriber.py) detects the stereo layout, splits the channels,
+ * transcribes each separately with per-segment timestamps, and emits a
+ * chronologically interleaved `[You]` / `[Others]` transcript.
  *
- * macOS 14.4+ only — older versions are gated out at the Settings toggle.
- * This hook also short-circuits if support reports false, so an older
- * machine never reaches getDisplayMedia.
- *
- * The Python `record` subprocess is bypassed in this mode (main.js skips
- * spawning it on start-recording-ui) so we don't end up with two parallel
- * recordings → two notes.
+ * When loopback is off/unsupported the recording is MIC-ONLY: the R channel is
+ * silent and the transcript is You-only. There is no longer a Python `record`
+ * subprocess fallback — capture always happens here, on every platform.
  */
 export function useSystemAudioCapture() {
   const { status, sessionName } = useRecording();
@@ -57,11 +54,26 @@ export function useSystemAudioCapture() {
   React.useEffect(() => {
     liveTapEnabledRef.current = liveTapEnabled;
   }, [liveTapEnabled]);
-  // While the support query is still loading (data === undefined), assume
-  // supported so a fast user who hits record before the IPC resolves still
-  // gets system audio. The result-aware false case only fires after the
-  // query has confirmed the OS is unsupported.
-  const enabled = (systemAudio.data ?? false) && (systemAudioSupport.data?.supported ?? true);
+  // Renderer-driven capture is the ONLY recording path now, so capture ALWAYS
+  // runs while status === 'recording' (the mic is captured regardless). The
+  // "Record system audio" setting no longer gates whether we record — it only
+  // decides whether system LOOPBACK is mixed in:
+  //  - Windows: always on when the OS supports it (the toggle is hidden; the
+  //    product decision is always mic+system).
+  //  - macOS: follows the user's setting (default on; off = mic-only).
+  // When the support query is still loading we assume supported so a fast user
+  // who records before the IPC resolves still gets loopback.
+  const loopbackSupported = systemAudioSupport.data?.supported ?? true;
+  const loopbackEnabled = isMac
+    ? (systemAudio.data ?? true) && loopbackSupported
+    : loopbackSupported;
+  // Read into a ref so startCapture (closed over once) sees the current value
+  // without the capture effect depending on it — toggling mid-recording must
+  // not tear down or restart the active capture.
+  const loopbackEnabledRef = React.useRef(loopbackEnabled);
+  React.useEffect(() => {
+    loopbackEnabledRef.current = loopbackEnabled;
+  }, [loopbackEnabled]);
 
   const recorderRef = React.useRef<MediaRecorder | null>(null);
   const micStreamRef = React.useRef<MediaStream | null>(null);
@@ -184,18 +196,22 @@ export function useSystemAudioCapture() {
         if (cancelled()) { stopAcquired(); return; }
         micStreamRef.current = micStream;
 
-        // 2. System audio loopback — BEST-EFFORT. With `forceCoreAudioTap: true`
-        //    in main.js's initMain(), getDisplayMedia is intercepted by
-        //    electron-audio-loopback's setDisplayMediaRequestHandler and
-        //    served via CoreAudio Process Taps (macOS 14.4+). video:true is
-        //    required by the API; we drop the track immediately.
+        // 2. System audio loopback — OPTIONAL + BEST-EFFORT. Skipped entirely
+        //    when loopback is disabled (macOS toggle off) or the OS doesn't
+        //    support it; otherwise attempted via getDisplayMedia (intercepted by
+        //    electron-audio-loopback's setDisplayMediaRequestHandler and served
+        //    via CoreAudio Process Taps when `forceCoreAudioTap` is set). video:
+        //    true is required by the API; we drop the track immediately.
         //
-        //    If loopback is unavailable (permission denied, no tap on this OS,
-        //    or no audio track) we DEGRADE TO MIC-ONLY rather than failing the
-        //    whole recording: sysStream stays null and the stereo graph below
-        //    wires mic → L with a silent R channel (the backend tolerates an
-        //    empty Others side). A genuine mic failure above still aborts.
+        //    If loopback is disabled OR unavailable (permission denied, no tap,
+        //    no audio track) we record MIC-ONLY rather than failing: sysStream
+        //    stays null and the stereo graph below wires mic → L with a silent R
+        //    channel (the backend tolerates an empty Others side). A genuine mic
+        //    failure above still aborts.
         try {
+          if (!loopbackEnabledRef.current) {
+            throw new Error('loopback disabled');
+          }
           await bridge.recording.enableLoopbackAudio();
           if (cancelled()) { stopAcquired(); return; }
           sysStream = await navigator.mediaDevices.getDisplayMedia({
@@ -212,8 +228,13 @@ export function useSystemAudioCapture() {
           }
           sysStreamRef.current = sysStream;
         } catch (loopbackErr) {
-          // eslint-disable-next-line no-console
-          console.warn('[systemAudioCapture] loopback unavailable, continuing mic-only', loopbackErr);
+          // Intentionally-disabled loopback (toggle off) is the expected
+          // mic-only case — don't log it as a failure; only a genuine
+          // unavailability warrants a warning.
+          if (loopbackEnabledRef.current) {
+            // eslint-disable-next-line no-console
+            console.warn('[systemAudioCapture] loopback unavailable, continuing mic-only', loopbackErr);
+          }
           sysStream?.getTracks().forEach((t) => t.stop());
           sysStream = null;
           sysStreamRef.current = null;
@@ -600,16 +621,11 @@ export function useSystemAudioCapture() {
       });
     };
 
-    // If support resolved false or the user toggled system audio off
-    // during an active recording, gracefully stop the capture rather
-    // than leaving streams unmanaged. The stop path tears down the
-    // mic/system streams, hands off the recorded blob for processing,
-    // and resets the tray state.
-    if (!enabled) {
-      if (activeRef.current) void stopCapture();
-      return;
-    }
-
+    // Capture is driven purely by the recording status now — it is the only
+    // recording path, so it always runs while recording (mic-only when loopback
+    // is off/unsupported). The system-audio toggle no longer starts or stops
+    // capture; it only affects whether loopback is mixed in on the NEXT start
+    // (read via loopbackEnabledRef inside startCapture).
     if (status === 'recording' && !activeRef.current) {
       void startCapture();
     } else if (
@@ -628,7 +644,7 @@ export function useSystemAudioCapture() {
     ) {
       void stopCapture();
     }
-  }, [enabled, status]);
+  }, [status]);
 
   // Unmount-only safety net (empty deps = no cleanup on dep changes). Runs
   // when the App tree unmounts (e.g. window close, page reload, StrictMode

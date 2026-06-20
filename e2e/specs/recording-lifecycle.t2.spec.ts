@@ -52,12 +52,11 @@ test('recording state machine: start -> pause -> resume -> stop is reflected in 
 
   const { page } = await launchApp();
 
-  // The renderer-driven (no-subprocess) path needs OS system-audio support
-  // (macOS >= 14.4 / Windows >= 10). Without it, start would fall back to the
-  // mic subprocess and need a real device — skip LOUDLY rather than emit a
-  // misleading failure or silently spawn a recorder. Windows CI (>= 10) always
-  // runs this; macOS only skips on a pre-14.4 runner (hosted images are well
-  // past that), so the loud annotation surfaces any regression to a no-op skip.
+  // The deterministic capture path drives real getUserMedia/getDisplayMedia, so
+  // it needs OS loopback support (macOS >= 14.4 / Windows >= 10) to exercise the
+  // mic+system graph headlessly — skip LOUDLY otherwise rather than emit a
+  // misleading failure. Windows CI (>= 10) always runs this; macOS only skips on
+  // a pre-14.4 runner (hosted images are well past that).
   const support = await page.evaluate(() =>
     (window as StenoWindow).stenoai.recording.getSystemAudioSupport(),
   );

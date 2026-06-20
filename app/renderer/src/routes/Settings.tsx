@@ -747,24 +747,24 @@ function GeneralTab() {
         />
       </SettingRow>
 
-      <SettingRow
-        label="Record system audio"
-        description={
-          systemAudioSupport.data && !systemAudioSupport.data.supported
-            ? isMac
-              ? `Capture audio from virtual meetings (requires macOS 14.4+, you're on ${systemAudioSupport.data.osVersion || 'an older version'})`
-              : 'Capture audio from virtual meetings (not supported on this OS).'
-            : systemAudioSupport.data?.experimental
-              ? 'Capture audio from virtual meetings (experimental on Windows — verify your first recording captures system audio).'
-              : 'Capture audio from virtual meetings (requires macOS 14.4+).'
-        }
-      >
-        <Switch
-          checked={(systemAudio.data ?? false) && (systemAudioSupport.data?.supported ?? true)}
-          onCheckedChange={(v) => setSystemAudio.mutate(v)}
-          disabled={systemAudio.data === undefined || systemAudioSupport.data?.supported === false}
-        />
-      </SettingRow>
+      {/* macOS only: chooses mic-only vs mic+system. Windows always records
+          mic+system (toggle hidden), so this control isn't shown there. */}
+      {isMac && (
+        <SettingRow
+          label="Record system audio"
+          description={
+            systemAudioSupport.data && !systemAudioSupport.data.supported
+              ? `Capture both sides of a call (requires macOS 14.4+, you're on ${systemAudioSupport.data.osVersion || 'an older version'}). Mic-only recording still works.`
+              : 'Capture both sides of a call. Turn off to record your mic only.'
+          }
+        >
+          <Switch
+            checked={(systemAudio.data ?? true) && (systemAudioSupport.data?.supported ?? true)}
+            onCheckedChange={(v) => setSystemAudio.mutate(v)}
+            disabled={systemAudio.data === undefined || systemAudioSupport.data?.supported === false}
+          />
+        </SettingRow>
+      )}
 
       <SettingRow
         label="Auto-detect meetings"

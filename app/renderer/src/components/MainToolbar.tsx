@@ -162,12 +162,13 @@ function RecordingOptionsPopover() {
   const systemAudio = useSystemAudioSetting();
   const setSystemAudio = useSetSystemAudio();
   const systemAudioSupport = useSystemAudioSupport();
-  const enabled = systemAudio.data ?? false;
-  // Show the toggle wherever loopback capture is available (macOS 14.4+ or
-  // Windows 10+), not just on mac. Hidden while support is still loading or
-  // on unsupported OSes.
-  const showSystemAudio = systemAudioSupport.data?.supported === true;
-  const experimental = systemAudioSupport.data?.experimental === true;
+  // macOS default is on (system_audio_enabled defaults true on darwin).
+  const enabled = systemAudio.data ?? true;
+  // macOS only: the toggle chooses mic-only vs mic+system. On Windows the
+  // product decision is always mic+system, so the toggle is hidden (the
+  // renderer forces loopback on there). Also hidden while support is loading
+  // or on a Mac without loopback support (pre-14.4).
+  const showSystemAudio = isMac && systemAudioSupport.data?.supported === true;
 
   return (
     <Popover>
@@ -204,11 +205,6 @@ function RecordingOptionsPopover() {
                     className="text-sm font-medium"
                   >
                     Record system audio
-                    {experimental && (
-                      <span className="ml-1.5 text-[10px] uppercase tracking-wide text-muted-foreground">
-                        Experimental
-                      </span>
-                    )}
                   </label>
                   <Switch
                     id="maintoolbar-system-audio"
@@ -218,9 +214,7 @@ function RecordingOptionsPopover() {
                   />
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  {experimental
-                    ? 'Capture both sides of calls (experimental on Windows). Verify your first recording captures system audio.'
-                    : 'Capture both sides of calls on macOS. Grants microphone permission on first use.'}
+                  Capture both sides of calls. Turn off to record your mic only.
                 </p>
               </div>
             </div>

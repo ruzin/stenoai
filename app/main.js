@@ -963,22 +963,15 @@ if (!gotSingleInstanceLock) {
   app.on('before-quit', async (event) => {
     if (isQuitting) return;
 
-    // Use synchronous flag -- systemAudioRecordingActive is updated via IPC on each state change
-    if (currentRecordingProcess || systemAudioRecordingActive) {
+    // Synchronous flag — systemAudioRecordingActive is updated via IPC on each
+    // state change. Capture is renderer-driven on every platform now.
+    if (systemAudioRecordingActive) {
       event.preventDefault();
       const confirmed = await showCustomQuitDialog('recording');
       if (confirmed) {
-        if (currentRecordingProcess) {
-          currentRecordingProcess.kill('SIGTERM');
-          currentRecordingProcess = null;
-          currentRecordingSessionName = null;
-          // Intentionally do NOT clear the sidecar here. SIGTERM is async;
-          // if the subprocess doesn't honour it before Electron exits, we
-          // need the sidecar to survive so the next launch can detect and
-          // reap the orphan. The 'close' event handler clears the sidecar
-          // when the process actually exits — that's the right moment.
-        }
-        if (systemAudioRecordingActive && mainWindow && !mainWindow.isDestroyed()) {
+        // Ask the renderer to finalise its WebM (incremental file is already on
+        // disk) and queue processing before we exit — best-effort.
+        if (mainWindow && !mainWindow.isDestroyed()) {
           try {
             await mainWindow.webContents.executeJavaScript('stopSystemAudioRecording("quit")');
           } catch (e) {
@@ -1092,15 +1085,6 @@ if (!gotSingleInstanceLock) {
       }
     }
 
-    // Reap any orphan recording subprocess left over from a prior crash
-    // before creating the window. We don't want to surface "Recording in
-    // progress" UI while the prior orphan still holds the mic / writes to
-    // disk. Failures here are non-fatal — the helper logs and returns.
-    try {
-      await cleanupOrphanRecording();
-    } catch (e) {
-      sendDebugLog(`[orphan-cleanup] unexpected error during startup cleanup: ${e.message}`);
-    }
 
     // Dev runs otherwise show the default Electron dock icon. Packaged builds
     // already get this icon via electron-builder's `mac.icon` setting.
@@ -2499,27 +2483,8 @@ function stopLiveTranscribe() {
   }, 5000);
 }
 
-function loadSystemAudioEnabled() {
-  if (!isSystemAudioSupported()) return false;
-  // Default differs by platform: macOS ships system audio ON (CoreAudio tap is
-  // verified); Windows ships it OFF (opt-in/experimental — see src/config.py).
-  const defaultOn = process.platform === 'darwin';
-  try {
-    const cfgPath = path.join(getUserDataDir(), 'config.json');
-    if (!fs.existsSync(cfgPath)) return defaultOn; // new install
-    const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf-8'));
-    // Honour an explicit boolean; an absent key means "haven't been asked
-    // yet" → fall back to the platform default.
-    return typeof cfg.system_audio_enabled === 'boolean'
-      ? cfg.system_audio_enabled
-      : defaultOn;
-  } catch (_) {
-    return defaultOn;
-  }
-}
-
-// Sync read of the active ASR engine. Mirrors loadSystemAudioEnabled —
-// reading the JSON directly so we don't spawn a Python subprocess on
+// Sync read of the active ASR engine. Reads the JSON directly so we don't
+// spawn a Python subprocess on
 // every recording start just to ask. Default 'parakeet' matches the
 // Python migration (fresh installs default to Parakeet); existing users
 // will have had transcription_engine written on their first launch by
@@ -2536,9 +2501,8 @@ function loadTranscriptionEngine() {
   }
 }
 
-// Sync read of the auto-detect-meetings setting; default ON. Mirrors
-// loadSystemAudioEnabled — we avoid spawning Python during startup just
-// to read a boolean. Wire any new defaults through the Python config so
+// Sync read of the auto-detect-meetings setting; default ON. Reads the JSON
+// directly to avoid spawning Python during startup just to read a boolean. Wire any new defaults through the Python config so
 // the truth lives in one place.
 function loadAutoDetectMeetingsEnabled() {
   try {
@@ -2557,123 +2521,6 @@ let currentRecordingProcess = null;
 let currentRecordingSessionName = null;  // Surfaced in get-queue-status so renderer knows which meeting is live
 let processingQueue = [];
 
-// ── Orphan-recording cleanup ────────────────────────────────────────────
-//
-// When the user starts a recording, we spawn the Python `record` subprocess
-// as a child of Electron. If Electron crashes between start and stop (renderer
-// OOM, native module segfault, force-quit), the OS *usually* tears the child
-// down via broken stdio pipes — but not always, and not immediately. To
-// guarantee the next launch ends any orphan rather than leaving it writing
-// audio in the background, we persist the spawned PID + backend path to a
-// sidecar file. On startup we read the sidecar and, if the recorded PID is
-// still alive AND still looks like our backend, signal it to exit and remove
-// the sidecar.
-//
-// Lives in its own sidecar file rather than `recorder_state.json` so it stays
-// purely a renderer/main-side concern — the Python state file format doesn't
-// change.
-const RECORD_PID_SIDECAR_FILENAME = 'last-record.json';
-function recordPidSidecarPath() {
-  return path.join(app.getPath('userData'), RECORD_PID_SIDECAR_FILENAME);
-}
-
-function writeRecordPidSidecarSync(info) {
-  const filePath = recordPidSidecarPath();
-  const tmpPath = `${filePath}.tmp`;
-  try {
-    fs.mkdirSync(path.dirname(filePath), { recursive: true });
-    fs.writeFileSync(tmpPath, JSON.stringify(info), 'utf-8');
-    fs.renameSync(tmpPath, filePath);
-  } catch (e) {
-    sendDebugLog(`[orphan-cleanup] Failed to write PID sidecar: ${e.message}`);
-    try { if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath); } catch (_) {}
-  }
-}
-
-function clearRecordPidSidecarSync() {
-  try {
-    const filePath = recordPidSidecarPath();
-    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
-  } catch (e) {
-    sendDebugLog(`[orphan-cleanup] Failed to clear PID sidecar: ${e.message}`);
-  }
-}
-
-// Returns true only when (a) the PID is alive and (b) it looks like our
-// backend binary. The `ps` check guards against PID reuse — a long-since-dead
-// orphan whose PID was recycled to an unrelated process must not be killed.
-function isOrphanedRecordProcess(pid, expectedBackendPath) {
-  try {
-    process.kill(pid, 0); // throws ESRCH if no such process
-  } catch (_) {
-    return false;
-  }
-  try {
-    const { execSync } = require('child_process');
-    const cmd = execSync(`ps -p ${pid} -o command=`, { timeout: 1500 }).toString().trim();
-    // The first whitespace-separated token in `ps -o command=` is argv[0]
-    // — the executable path. Match its basename against ours so dev
-    // (`dist/stenoai/stenoai`) and packaged (`<resourcesPath>/stenoai/stenoai`)
-    // both resolve, but a stranger that merely *mentions* "stenoai" in its
-    // arguments doesn't get killed.
-    const binaryName = path.basename(expectedBackendPath);
-    if (!binaryName) return false;
-    const argv0 = cmd.split(/\s+/)[0] || '';
-    return path.basename(argv0) === binaryName;
-  } catch (_) {
-    // ps unavailable or pid disappeared between the kill(0) and the ps;
-    // err on the side of "not orphan" rather than signalling a stranger.
-    return false;
-  }
-}
-
-async function cleanupOrphanRecording() {
-  const filePath = recordPidSidecarPath();
-  if (!fs.existsSync(filePath)) return;
-
-  let info;
-  try {
-    info = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-  } catch (e) {
-    sendDebugLog(`[orphan-cleanup] PID sidecar unreadable, removing: ${e.message}`);
-    try { fs.unlinkSync(filePath); } catch (_) {}
-    return;
-  }
-
-  const pid = info && info.pid;
-  const backendPath = info && info.backendPath;
-  const sessionName = (info && info.sessionName) || '';
-  if (!Number.isInteger(pid) || !backendPath) {
-    try { fs.unlinkSync(filePath); } catch (_) {}
-    return;
-  }
-
-  if (!isOrphanedRecordProcess(pid, backendPath)) {
-    sendDebugLog(`[orphan-cleanup] pid=${pid} is not our backend; clearing sidecar`);
-    try { fs.unlinkSync(filePath); } catch (_) {}
-    return;
-  }
-
-  sendDebugLog(`[orphan-cleanup] Orphan record subprocess detected pid=${pid} session="${sessionName}"; sending SIGTERM`);
-  try { process.kill(pid, 'SIGTERM'); } catch (_) {}
-
-  // Wait up to 5s for clean exit, then escalate to SIGKILL.
-  const deadline = Date.now() + 5000;
-  while (Date.now() < deadline) {
-    try {
-      process.kill(pid, 0);
-    } catch (_) {
-      sendDebugLog(`[orphan-cleanup] pid=${pid} exited cleanly`);
-      try { fs.unlinkSync(filePath); } catch (_) {}
-      return;
-    }
-    await new Promise((r) => setTimeout(r, 250));
-  }
-
-  sendDebugLog(`[orphan-cleanup] pid=${pid} still alive after SIGTERM; sending SIGKILL`);
-  try { process.kill(pid, 'SIGKILL'); } catch (_) {}
-  try { fs.unlinkSync(filePath); } catch (_) {}
-}
 // ── End orphan-recording cleanup ────────────────────────────────────────
 // Live-transcript ring buffer for the in-flight recording. Populated by the
 // Python `record --live` subprocess's LIVE_SEG: stdout lines. The renderer
@@ -3085,313 +2932,49 @@ ipcMain.handle('start-recording-ui', async (_, sessionName) => {
     const engine = loadTranscriptionEngine();
     const liveEnabled = engine === 'parakeet';
 
-    // Renderer-driven dual-stream path: when system audio is enabled the
-    // renderer (useSystemAudioCapture) captures mic + system loopback and
-    // mixes them in Web Audio. We MUST NOT spawn the Python `record`
-    // subprocess here or we'd produce two parallel recordings → two notes.
-    // The renderer will write its mixed WebM and queue it through the
-    // existing process-system-audio-recording IPC.
-    if (loadSystemAudioEnabled()) {
-      sendDebugLog(`Starting renderer-driven recording (system audio mode): ${actualSessionName}`);
-      currentRecordingSessionName = actualSessionName;
-      startRecordingRuntimeState();
-      // Flip the active flag immediately so the queue handler reports
-      // hasRecording=true on the very next poll. Without this the renderer
-      // hook would see status='idle' (queue says no recording) at the
-      // moment we want it to fire startCapture, and the dual-stream
-      // capture would never start. The renderer's reportSystemAudioState
-      // IPC is then idempotent on success and clears the flag on failure.
-      systemAudioRecordingActive = true;
-      // Reset live transcript buffer for this session before the live
-      // sidecar spawns and starts emitting events.
-      liveTranscriptState = {
-        sessionName: actualSessionName,
-        segments: [],
-        ready: false,
-        error: null,
-      };
-      // Spawn the Parakeet+Silero transcribe-stream subprocess. Whisper
-      // recordings skip this entirely — the renderer's useSystemAudioCapture
-      // gates its IPC writes on the same engine, so no chunks are produced
-      // when the sidecar isn't running.
-      if (liveEnabled) {
-        try {
-          spawnLiveTranscribe(actualSessionName);
-        } catch (e) {
-          sendDebugLog(`Failed to spawn live transcribe sidecar: ${e.message}`);
-        }
-      } else {
-        sendDebugLog(`Live transcription off — engine=${engine}`);
-      }
-      updateTrayIcon(true);
-      trackEvent('recording_started', { recording_mode: 'system_audio' });
-      return {
-        success: true,
-        sessionName: actualSessionName,
-        message: 'Renderer-driven recording started'
-      };
-    }
-
-    // Legacy mic-only path: spawn Python `record` subprocess.
-    console.log('Starting long recording process...');
-    sendDebugLog(`Starting recording process: ${actualSessionName} (engine=${engine})`);
-    sendDebugLog('$ stenoai record 7200' + (liveEnabled ? ' --live' : ''));
-
-    // Start background recording with 2-hour limit
-    // Pass AI env (cloud key and/or org-adapter url+token) so the
-    // recorder subprocess can summarise via whichever provider is active.
-    const recordEnv = getAiEnv();
-
-    // --live engages the Parakeet streaming consumer thread inside the
-    // record subprocess. Whisper recordings record without --live so the
-    // subprocess captures audio only — the post-stop pipeline transcribes
-    // the WAV via WhisperTranscriber.
-    const recordArgs = ['record', '7200', actualSessionName];
-    if (liveEnabled) recordArgs.push('--live');
-    // Only the --live (Parakeet) path emits LIVE_READY; stamp the load clock
-    // so we can log model-load latency against it below.
-    if (liveEnabled) parakeetLoadStartedAt = Date.now();
-    currentRecordingProcess = spawn(getBackendPath(), recordArgs, {
-      cwd: getBackendCwd(),
-      env: Object.keys(recordEnv).length > 0 ? { ...require('process').env, ...recordEnv } : undefined
-    });
+    // Renderer-driven capture (useSystemAudioCapture) is the ONLY recording
+    // path: it captures the mic (+ system loopback when the Settings toggle is
+    // on) and streams its WebM to disk, queued through the
+    // process-system-audio-recording IPC. The legacy Python `record`
+    // subprocess — signal-controlled and thus unworkable on Windows — is
+    // retired, so there is no longer a mic-XOR-system fork here.
+    sendDebugLog(`Starting renderer-driven recording: ${actualSessionName}`);
     currentRecordingSessionName = actualSessionName;
-    // Persist {pid, sessionName, backendPath} so the next launch can detect
-    // an orphan if Electron crashes between here and the close handler.
-    writeRecordPidSidecarSync({
-      pid: currentRecordingProcess.pid,
-      sessionName: actualSessionName,
-      startedAt: Date.now(),
-      backendPath: getBackendPath(),
-    });
-    // Reset the live transcript buffer for this session. We do it here
-    // (before spawn parses anything) so a late-mounting LiveTranscriptPanel
-    // can never see a stale segments array from a previous recording.
+    startRecordingRuntimeState();
+    // Flip the active flag immediately so the queue handler reports
+    // hasRecording=true on the very next poll, which is what cues the renderer
+    // hook to fire startCapture. reportSystemAudioState then re-affirms it on
+    // success / clears it on failure.
+    systemAudioRecordingActive = true;
+    // Reset the live transcript buffer before the sidecar starts emitting.
     liveTranscriptState = {
       sessionName: actualSessionName,
       segments: [],
       ready: false,
       error: null,
     };
-    startRecordingRuntimeState();
-
-    let hasStarted = false;
-    let processingSucceeded = false;
-    let recordedAudioFile = null;
-    // Authoritative pointer to the final summary file once Python finishes
-    // auto-renaming + writing it (emitted as `SAVED:<path>`). Use this in
-    // preference to the name/audio fallbacks since it can't drift.
-    let savedSummaryFile = null;
-
-    currentRecordingProcess.stdout.on('data', (data) => {
-      const output = data.toString();
-
-      // Capture the audio file path when the recording is saved
-      const audioMatch = output.match(/Recording saved:\s*(.+\.wav)/);
-      if (audioMatch) {
-        recordedAudioFile = audioMatch[1].trim();
+    // Spawn the Parakeet+Silero transcribe-stream sidecar for live partials.
+    // Whisper recordings skip it — the renderer gates its live-tap IPC on the
+    // same engine, so no chunks are produced when the sidecar isn't running.
+    if (liveEnabled) {
+      try {
+        spawnLiveTranscribe(actualSessionName);
+      } catch (e) {
+        sendDebugLog(`Failed to spawn live transcribe sidecar: ${e.message}`);
       }
-      console.log('Recording stdout:', output);
-
-      // Parse streaming protocol + send to debug panel (CRLF-tolerant: Windows
-      // stdout is \r\n, so the STREAM_COMPLETE exact-match must not see a \r).
-      output.split(/\r?\n/).forEach(line => {
-        if (line.startsWith('CHUNK:')) {
-          const encoded = line.slice(6);
-          try {
-            const chunk = Buffer.from(encoded, 'base64').toString('utf-8');
-            if (mainWindow && !mainWindow.isDestroyed()) {
-              mainWindow.webContents.send('summary-chunk', { chunk, sessionName: actualSessionName });
-            }
-          } catch (e) { /* ignore decode errors */ }
-        } else if (line.startsWith('TITLE:')) {
-          const title = line.slice(6);
-          if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send('summary-title', { title, sessionName: actualSessionName });
-          }
-        } else if (line === 'STREAM_COMPLETE') {
-          if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send('summary-complete', { success: true, sessionName: actualSessionName });
-          }
-        } else if (line.startsWith('LIVE_READY:')) {
-          // Model finished loading — UI uses this to swap "Loading…" for
-          // the empty consent-only state.
-          if (parakeetLoadStartedAt) {
-            sendDebugLog(`[parakeet-load] model ready in ${Date.now() - parakeetLoadStartedAt}ms (record --live)`);
-            parakeetLoadStartedAt = 0;
-          }
-          liveTranscriptState.ready = true;
-          if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send('live-transcript-ready', {
-              sessionName: actualSessionName,
-            });
-          }
-        } else if (line.startsWith('LIVE_SEG:')) {
-          try {
-            const seg = JSON.parse(line.slice('LIVE_SEG:'.length));
-            // Map snake_case wire shape to camelCase for the renderer.
-            const segment = {
-              text: seg.text,
-              start: seg.start,
-              end: seg.end,
-              isFinal: !!seg.is_final,
-            };
-            // Final segments append. Partials overwrite the trailing entry
-            // when it was also a partial; otherwise they're appended as
-            // the new tail.
-            if (segment.isFinal) {
-              liveTranscriptState.segments.push(segment);
-            } else {
-              const tail = liveTranscriptState.segments[liveTranscriptState.segments.length - 1];
-              if (tail && !tail.isFinal) {
-                liveTranscriptState.segments[liveTranscriptState.segments.length - 1] = segment;
-              } else {
-                liveTranscriptState.segments.push(segment);
-              }
-            }
-            if (mainWindow && !mainWindow.isDestroyed()) {
-              mainWindow.webContents.send('live-transcript-chunk', {
-                sessionName: actualSessionName,
-                segment,
-              });
-            }
-          } catch (e) {
-            sendDebugLog(`LIVE_SEG parse error: ${e.message}`);
-          }
-        } else if (line.startsWith('LIVE_ERROR:')) {
-          try {
-            const payload = JSON.parse(line.slice('LIVE_ERROR:'.length));
-            liveTranscriptState.error = payload;
-            if (mainWindow && !mainWindow.isDestroyed()) {
-              mainWindow.webContents.send('live-transcript-error', {
-                sessionName: actualSessionName,
-                ...payload,
-              });
-            }
-          } catch (e) {
-            sendDebugLog(`LIVE_ERROR parse error: ${e.message}`);
-          }
-        } else if (line.startsWith('SAVED:')) {
-          savedSummaryFile = line.slice(6).trim();
-        } else if (line.trim()) {
-          sendDebugLog(line.trim());
-        }
-      });
-
-      // Background recording process handles complete pipeline - just notify when done
-      if (output.includes('✅ Complete processing finished!')) {
-        processingSucceeded = true;
-        console.log(`🎉 Recording and processing completed for: ${actualSessionName}`);
-        // Notify frontend that everything is done
-        if (mainWindow) {
-          // Get the processed meeting data to send to frontend
-          runPythonScript('simple_recorder.py', ['list-meetings'], true)
-            .then(meetingsResult => {
-              const allMeetings = JSON.parse(meetingsResult);
-              // Prefer the SAVED:<path> pointer Python emits — that's the
-              // exact summary file written this session and survives the
-              // auto-rename. Fall back to name match (only if user kept the
-              // placeholder), then to audio-file basename.
-              let processedMeeting = null;
-              if (savedSummaryFile) {
-                processedMeeting = allMeetings.find(
-                  m => m.session_info?.summary_file === savedSummaryFile,
-                );
-              }
-              if (!processedMeeting) {
-                processedMeeting = allMeetings.find(m => m.session_info?.name === actualSessionName);
-              }
-              if (!processedMeeting && recordedAudioFile) {
-                const audioBasename = path.basename(recordedAudioFile);
-                processedMeeting = allMeetings.find(m =>
-                  m.session_info?.audio_file && path.basename(m.session_info.audio_file) === audioBasename
-                );
-              }
-
-              mainWindow.webContents.send('processing-complete', {
-                success: true,
-                sessionName: actualSessionName,
-                message: 'Recording and processing completed successfully',
-                meetingData: processedMeeting
-              });
-            })
-            .catch(error => {
-              console.error('Error getting processed meeting data:', error);
-              // Fallback - send without meetingData, frontend will refresh
-              mainWindow.webContents.send('processing-complete', {
-                success: true,
-                sessionName: actualSessionName,
-                message: 'Recording and processing completed successfully'
-              });
-            });
-        }
-      }
-
-      // Detect explicit processing failure from backend
-      if (output.includes('❌ Processing pipeline failed')) {
-        processingSucceeded = true; // Prevent duplicate notification from close handler
-        console.error(`Processing failed for: ${actualSessionName}`);
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.webContents.send('processing-complete', {
-            success: false,
-            sessionName: actualSessionName,
-            message: 'Processing failed: summarization error (check that Ollama and a model are available)'
-          });
-        }
-      }
-
-      // Don't queue background recordings for additional processing - they handle it themselves!
-
-      if (output.includes('Recording to:') && !hasStarted) {
-        hasStarted = true;
-      }
-    });
-
-    currentRecordingProcess.stderr.on('data', (data) => {
-      const output = data.toString();
-      console.log('Recording stderr:', output);
-
-      // Send real-time stderr to debug panel (same as runPythonScript)
-      output.split('\n').forEach(line => {
-        if (line.trim()) sendDebugLog('STDERR: ' + line.trim());
-      });
-    });
-
-    currentRecordingProcess.on('close', (code) => {
-      console.log(`Recording process closed with code ${code}`);
-      sendDebugLog(`Recording process completed with exit code: ${code}`);
-      // Normal exit — drop the orphan-detection sidecar so the next launch
-      // doesn't try to kill a long-dead PID (or worse, a recycled one).
-      clearRecordPidSidecarSync();
-      currentRecordingProcess = null;
-      currentRecordingSessionName = null;
-      resetRecordingRuntimeState();
-      updateTrayIcon(false);
-
-      // If process exited without a success or failure message, notify the user
-      if (!processingSucceeded && hasStarted && mainWindow && !mainWindow.isDestroyed()) {
-        console.error(`Recording process exited (code ${code}) without completing processing`);
-        mainWindow.webContents.send('processing-complete', {
-          success: false,
-          sessionName: actualSessionName,
-          message: `Processing failed unexpectedly (exit code ${code})`
-        });
-      }
-    });
-
-    // Give it time to start
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    
-    if (currentRecordingProcess) {
-      trackEvent('recording_started');
-      updateTrayIcon(true);
-      return { success: true, message: 'Recording started successfully' };
     } else {
-      return { success: false, error: 'Failed to start recording process' };
+      sendDebugLog(`Live transcription off — engine=${engine}`);
     }
+    updateTrayIcon(true);
+    trackEvent('recording_started', { recording_mode: 'system_audio' });
+    return {
+      success: true,
+      sessionName: actualSessionName,
+      message: 'Renderer-driven recording started',
+    };
   } catch (error) {
     console.error('Start recording UI error:', error.message);
-    currentRecordingProcess = null;
+    systemAudioRecordingActive = false;
     currentRecordingSessionName = null;
     resetRecordingRuntimeState();
     updateTrayIcon(false);
@@ -3407,15 +2990,10 @@ ipcMain.handle('start-recording-ui', async (_, sessionName) => {
 // is still going. Instead a notification offers Resume, reusing the same
 // auto-resume-requested renderer affordance as meeting-end auto-pause.
 //
-// Mode × platform matrix:
-// - backend (mic-only) mode, macOS/Linux: SIGUSR1 to the record subprocess
-//   (same as pause-recording-ui) + markRecordingPaused.
-// - backend mode, Windows: SIGUSR1 is unsupported (mirrors the
-//   pause-recording-ui gate) — log and skip; acceptable for alpha.
-// - system-audio mode, both OSes: markRecordingPaused + auto-pause-requested
-//   to the renderer, which pauses its MediaRecorder (possibly only after
-//   wake — the renderer is suspended too — but nothing records during sleep
-//   either way).
+// Capture is renderer-driven (MediaRecorder) on every platform now, so this is
+// uniform: markRecordingPaused + auto-pause-requested to the renderer, which
+// pauses its MediaRecorder (possibly only after wake — the renderer is
+// suspended too — but nothing records during sleep either way).
 let pausedBySleep = false;
 // Live "Recording paused / Resume" notification, so a manual resume/stop can
 // dismiss it — a stale banner clicked later would fire auto-resume-requested
@@ -3432,23 +3010,14 @@ function closeSleepPausedNotification() {
 function autoPauseForSleep() {
   try {
     if (recordingRuntimeState.isPaused) return;
-    const hasBackendRecording = currentRecordingProcess !== null;
-    if (!hasBackendRecording && !systemAudioRecordingActive) return;
-
-    if (hasBackendRecording) {
-      if (process.platform === 'win32') {
-        sendDebugLog('[power] suspend during recording — pause unsupported on Windows backend mode, skipping');
-        return;
-      }
-      sendDebugLog('[power] system suspend — pausing recording (SIGUSR1)');
-      currentRecordingProcess.kill('SIGUSR1');
-      markRecordingPaused();
-    } else {
-      sendDebugLog('[power] system suspend — pausing system-audio recording');
-      markRecordingPaused();
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('auto-pause-requested');
-      }
+    if (!systemAudioRecordingActive) return;
+    // Capture is renderer-driven (MediaRecorder). Mark paused and ask the
+    // renderer to pause — possibly only honoured after wake, since the renderer
+    // is suspended too, but nothing records during sleep either way.
+    sendDebugLog('[power] system suspend — pausing recording');
+    markRecordingPaused();
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('auto-pause-requested');
     }
     pausedBySleep = true;
   } catch (e) {
@@ -3491,22 +3060,11 @@ function showSleepPausedNotification() {
 
 ipcMain.handle('pause-recording-ui', async () => {
   try {
-    // Mic-only mode: signal the Python `record` subprocess directly.
-    if (currentRecordingProcess) {
-      if (process.platform === 'win32') {
-        return { success: false, error: 'Pause not supported on Windows' };
-      }
-      sendDebugLog('Sending SIGUSR1 to pause recording...');
-      currentRecordingProcess.kill('SIGUSR1');
-      markRecordingPaused();
-      return { success: true, message: 'Recording paused' };
-    }
-    // System-audio mode: capture is renderer-driven (MediaRecorder via
-    // useSystemAudioCapture). Just flip the runtime-state flag — the queue
-    // endpoint reports isPaused=true, status becomes 'paused', and the
-    // renderer effect pauses the MediaRecorder.
+    // Capture is renderer-driven (MediaRecorder via useSystemAudioCapture).
+    // Flip the runtime-state flag — the queue endpoint reports isPaused=true,
+    // status becomes 'paused', and the renderer effect pauses the MediaRecorder.
     if (systemAudioRecordingActive) {
-      sendDebugLog('Pause (system-audio mode): marking paused, renderer will pause MediaRecorder');
+      sendDebugLog('Pause: marking paused, renderer will pause MediaRecorder');
       markRecordingPaused();
       return { success: true, message: 'Recording paused' };
     }
@@ -3524,17 +3082,8 @@ ipcMain.handle('resume-recording-ui', async () => {
     // Any resume (manual or notification-driven) ends the sleep-pause state.
     pausedBySleep = false;
     closeSleepPausedNotification();
-    if (currentRecordingProcess) {
-      if (process.platform === 'win32') {
-        return { success: false, error: 'Resume not supported on Windows' };
-      }
-      sendDebugLog('Sending SIGUSR2 to resume recording...');
-      currentRecordingProcess.kill('SIGUSR2');
-      markRecordingResumed();
-      return { success: true, message: 'Recording resumed' };
-    }
     if (systemAudioRecordingActive) {
-      sendDebugLog('Resume (system-audio mode): marking resumed, renderer will resume MediaRecorder');
+      sendDebugLog('Resume: marking resumed, renderer will resume MediaRecorder');
       markRecordingResumed();
       return { success: true, message: 'Recording resumed' };
     }
@@ -3553,46 +3102,21 @@ ipcMain.handle('stop-recording-ui', async () => {
     // recording that no longer exists.
     pausedBySleep = false;
     closeSleepPausedNotification();
-    // Always clear system-audio active state. The renderer's stopCapture flow
-    // also reports false, but races (renderer already torn down, recorder
-    // errored before reportSystemAudioState) can leave this stuck true and
-    // the UI thinks a recording is still in progress.
+    // Capture is renderer-driven; the renderer's stopCapture flow finalises the
+    // WebM and reports systemAudioRecordingActive=false. Clear it here too in
+    // case a race (renderer torn down / recorder errored before reporting) left
+    // it stuck true. Closing the live sidecar lets Python drain its final
+    // utterance; a watchdog SIGTERM in stopLiveTranscribe covers stuck cases.
     systemAudioRecordingActive = false;
-    // Shut down the live transcribe sidecar if it's running (system-audio
-    // path). Closing stdin lets Python drain any final utterance before
-    // exiting; a watchdog SIGTERM in stopLiveTranscribe covers stuck cases.
     stopLiveTranscribe();
-
-    if (!currentRecordingProcess) {
-      // Idempotent: clicking stop with no active recording is not an error
-      // (it's a stale-state race). Reset everything and report success so
-      // the renderer can finish its own cleanup.
-      currentRecordingSessionName = null;
-      resetRecordingRuntimeState();
-      updateTrayIcon(false);
-      return { success: true, message: 'No active recording to stop' };
-    }
-
-    console.log('Stopping recording process...');
-
-    // Send SIGTERM to trigger graceful stop and processing
-    currentRecordingProcess.kill('SIGTERM');
-
-    // Don't wait - let the process complete independently
-    // The process will handle: stop recording → transcribe → summarize → exit
-    currentRecordingProcess = null;
     currentRecordingSessionName = null;
     resetRecordingRuntimeState();
     updateTrayIcon(false);
-
     trackEvent('recording_stopped');
-    return {
-      success: true,
-      message: 'Recording stopped - processing will complete in background'
-    };
+    return { success: true, message: 'Recording stopped' };
   } catch (error) {
     console.error('Stop recording UI error:', error.message);
-    currentRecordingProcess = null;
+    systemAudioRecordingActive = false;
     currentRecordingSessionName = null;
     resetRecordingRuntimeState();
     updateTrayIcon(false);

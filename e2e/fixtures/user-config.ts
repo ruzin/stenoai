@@ -36,10 +36,10 @@ export function writeUserConfig(
 }
 
 /**
- * Configure the app so `start-recording-ui` takes the renderer-driven path
+ * Configure the app for the renderer-driven capture path
  * (system audio ON) with the Whisper engine (so no Parakeet live-transcribe
  * sidecar spawns). That path sets the recording state machine WITHOUT spawning
- * the Python `record` subprocess, touching a real microphone, or loading any
+ * a model (the renderer-driven path is now the only recording path), without loading any
  * model — see app/main.js `start-recording-ui` + `loadSystemAudioEnabled` /
  * `loadTranscriptionEngine`. This is what makes the lifecycle deterministic on a
  * headless CI runner. It still requires `isSystemAudioSupported()` to be true on
