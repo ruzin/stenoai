@@ -2728,7 +2728,7 @@ async function processNextInQueue() {
         // Parse protocol lines (CRLF-tolerant: Windows stdout is \r\n, and the
         // STREAM_COMPLETE exact-match below must not carry a trailing \r).
         text.split(/\r?\n/).forEach(line => {
-          logPipelineStdoutLine(line);
+          logPipelineStdoutLine(line, 'process-streaming');
           if (line.startsWith('CHUNK:')) {
             try {
               const encoded = line.slice(6);
@@ -3894,6 +3894,7 @@ function sendDebugLog(message) {
 // so we keep a residual buffer and flush the remainder on close. Additive: this
 // does NOT replace the existing per-pipeline sendDebugLog calls (renderer panel)
 // — it persists the same low-PII backend logger output to disk alongside them.
+const STDERR_BUF_CAP = 64 * 1024; // flush a newline-less stream so buf can't grow unbounded
 function attachProcessingStderr(proc, label) {
   if (!proc || !proc.stderr) return;
   let buf = '';
@@ -3905,6 +3906,13 @@ function attachProcessingStderr(proc, label) {
       buf = buf.slice(nl + 1);
       if (line.trim()) processingLog.logLine(label, line);
     }
+    // Flood guard: a backend that emits stderr without newlines (e.g. \r-based
+    // progress) would grow buf unboundedly. Flush the residual as one record
+    // (processing-log truncates it to its own per-line cap) and reset.
+    if (buf.length > STDERR_BUF_CAP) {
+      if (buf.trim()) processingLog.logLine(label, buf);
+      buf = '';
+    }
   });
   proc.on('close', () => {
     if (buf.trim()) processingLog.logLine(label, buf);
@@ -3914,16 +3922,18 @@ function attachProcessingStderr(proc, label) {
 
 // Persist only an allowlist of pipeline stdout protocol events. Excludes
 // CHUNK/CHAT_CHUNK/TITLE/LIVE_SEG and any free-text/query answer (privacy).
-// HEARTBEAT is throttled to once per 10s so a long transcription doesn't flood.
-let lastHeartbeatLoggedAt = 0;
-function logPipelineStdoutLine(line) {
+// HEARTBEAT is throttled to once per 10s, keyed per source so concurrent
+// pipelines (e.g. a queued process-streaming run during a live record) don't
+// mask each other's heartbeats. Records are logged under the source label.
+const lastHeartbeatLoggedAt = new Map();
+function logPipelineStdoutLine(line, source) {
   const l = line.trim();
   if (!l) return;
   if (l.startsWith('HEARTBEAT')) {
     const now = Date.now();
-    if (now - lastHeartbeatLoggedAt < 10_000) return;
-    lastHeartbeatLoggedAt = now;
-    processingLog.logLine('pipeline', l);
+    if (now - (lastHeartbeatLoggedAt.get(source) || 0) < 10_000) return;
+    lastHeartbeatLoggedAt.set(source, now);
+    processingLog.logLine(source, l);
     return;
   }
   if (
@@ -3932,7 +3942,7 @@ function logPipelineStdoutLine(line) {
     l.startsWith('SAVED:') ||
     l === 'STREAM_COMPLETE'
   ) {
-    processingLog.logLine('pipeline', l);
+    processingLog.logLine(source, l);
   }
 }
 
