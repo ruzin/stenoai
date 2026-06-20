@@ -357,7 +357,7 @@ export function Setup() {
             data-setup-summary-chooser
           >
             <div className="mb-3 text-sm font-medium text-foreground">
-              How should StenoAI summarize meetings?
+              How should Steno summarize meetings?
             </div>
             <div className="grid grid-cols-2 gap-2">
               <button
@@ -463,7 +463,7 @@ export function Setup() {
               Anonymous usage analytics
             </div>
             <Muted className="mt-0.5">
-              Help improve StenoAI — meeting content is never sent. You can
+              Help improve Steno — meeting content is never sent. You can
               change this any time in Settings → Advanced.
             </Muted>
           </div>
@@ -512,7 +512,7 @@ export function Setup() {
           </button>
           {debugOpen && (
             <pre className="mt-3 h-64 overflow-auto rounded border border-border bg-muted/40 p-3 font-mono text-[11px] leading-relaxed text-foreground">
-              {logs.length === 0 ? 'StenoAI Setup\nCommands and output will appear here...\n' : logs.join('\n')}
+              {logs.length === 0 ? 'Steno Setup\nCommands and output will appear here...\n' : logs.join('\n')}
             </pre>
           )}
         </div>
