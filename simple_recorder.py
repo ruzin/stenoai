@@ -3,14 +3,14 @@
 Simple Audio Recorder & Transcriber for Electron App
 
 Backend script that handles:
-1. Recording system/microphone audio
-2. Transcribing with Whisper  
-3. Summarizing with Ollama
-4. Saving everything locally
+1. Transcribing captured audio with Whisper/Parakeet
+2. Summarizing with Ollama
+3. Saving everything locally
 
-Usage (called by Electron):
-    python simple_recorder.py start "Meeting Name"
-    python simple_recorder.py stop  
+Audio capture is done in the Electron renderer (Web Audio); this backend
+transcribes/summarizes the resulting file. Usage (called by Electron):
+    python simple_recorder.py process-streaming recording.webm --name "Session"
+    python simple_recorder.py transcribe-stream   # live partials over stdin
     python simple_recorder.py process recording.wav --name "Session"
     python simple_recorder.py status
 """
@@ -522,8 +522,8 @@ Transcript:
             "session_info": {
                 "name": session_name,
                 "audio_file": str(audio_path),
-                # No transcript was produced, but callers (the `record`/process
-                # CLI handlers) read this key unconditionally — keep it present
+                # No transcript was produced, but the process CLI handlers read
+                # this key unconditionally — keep it present
                 # and empty so a failure doesn't KeyError and turn a graceful
                 # exit into a non-zero crash.
                 "transcript_file": "",
@@ -1310,7 +1310,7 @@ def status():
 
 
 class _LiveVadPipeline:
-    """VAD-gated batch transcription pipeline shared by both live consumers.
+    """VAD-gated batch transcription pipeline for the live-transcript consumer.
 
     Replaces the earlier parakeet-mlx streaming approach with the
     Granola / OpenOats / Meetily pattern: Silero VAD detects utterance
@@ -1329,8 +1329,8 @@ class _LiveVadPipeline:
 
     Driven by ``_live_stdin_consumer`` (stdin bytes input, the renderer-driven
     capture path), which drives ``process(chunk)`` from its own input loop and
-    calls ``finalize()`` on shutdown. The shared class owns all VAD +
-    partial/final state so a fix to either path lands in one place.
+    calls ``finalize()`` on shutdown. The class owns all VAD + partial/final
+    state so the live path is in one place.
 
     Architecture notes:
       * Audio is consumed at 16 kHz mono float32 (Parakeet + Silero
@@ -1372,10 +1372,10 @@ class _LiveVadPipeline:
 
         # Live transcription is Parakeet-only. Whisper users get the
         # post-stop pipeline (src.transcriber.WhisperTranscriber) and no
-        # live drawer; main.js gates this by not passing --live to
-        # `record` and not spawning the `transcribe-stream` sidecar. The
-        # defensive check below catches anyone driving the CLI directly
-        # with a whisper config.
+        # live drawer; main.js gates this by not spawning the
+        # `transcribe-stream` sidecar for whisper recordings. The defensive
+        # check below catches anyone driving the CLI directly with a whisper
+        # config.
         try:
             from src.config import get_config
             _cfg = get_config()
@@ -1507,15 +1507,6 @@ class _LiveVadPipeline:
         self.preroll: list = []
         self.cursor = 0
 
-    def flatten_chunk(self, chunk):
-        """Coerce queue payloads (sounddevice gives (frames, channels) for
-        multichannel; mono is (frames, 1)) to a 1-D float32 array. Stdin
-        path already passes 1-D, so this is a no-op there."""
-        arr = self.np.asarray(chunk, dtype=self.np.float32)
-        if arr.ndim > 1:
-            arr = arr[:, 0]
-        return arr
-
     def parse_float32_bytes(self, raw_bytes):
         """Parse raw little-endian float32 bytes into a 1-D float32 array.
 
@@ -1567,13 +1558,6 @@ class _LiveVadPipeline:
                 "VAD transition: in_speech=%s buffer=%d samples",
                 self.vad.in_speech, len(self.speech_samples),
             )
-
-    def tick_idle(self):
-        """Called by callers between input reads (e.g. queue.get timeout).
-        Forces a mid-monologue final if MAX_UTTERANCE_S is reached without
-        new audio."""
-        if self.vad.in_speech and len(self.speech_samples) >= self.max_utterance_samples:
-            self._finalise()
 
     def finalize(self):
         """Drain VAD on shutdown so a trailing utterance still emits.
