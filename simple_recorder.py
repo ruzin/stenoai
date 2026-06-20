@@ -132,7 +132,7 @@ def _render_frontmatter(meta: dict) -> list[str]:
     return lines
 
 
-class SimpleRecorder:
+class MeetingPipeline:
     """Simple audio recorder and transcriber."""
     
     def __init__(self):
@@ -739,7 +739,7 @@ def process(audio_file, name, notes):
     """Process audio file: transcribe + summarize"""
 
     async def run_process():
-        recorder = SimpleRecorder()
+        recorder = MeetingPipeline()
 
         # Read user notes if provided
         notes_text = None
@@ -778,7 +778,7 @@ def process_streaming(audio_file, name, notes):
     import sys
 
     async def run():
-        recorder = SimpleRecorder()
+        recorder = MeetingPipeline()
 
         # Read user notes
         notes_text = None
@@ -879,7 +879,7 @@ def process_streaming(audio_file, name, notes):
         summary_path = recorder.output_dir / f"{audio_path.stem}_summary.md"
 
         # Parse the streamed markdown for title generation
-        parsed = SimpleRecorder._parse_streamed_markdown(streamed_md)
+        parsed = MeetingPipeline._parse_streamed_markdown(streamed_md)
 
         # Save as .md only (primary format for new meetings)
         summary_path = summary_path.with_suffix('.md')
@@ -1238,7 +1238,7 @@ def status():
     readiness ("READY") plus recent recordings. Used by main.js as a backend
     health check (get-status).
     """
-    recorder = SimpleRecorder()
+    recorder = MeetingPipeline()
 
     print("🎙️ Steno Recorder Status")
     print("=" * 25)
@@ -1920,7 +1920,7 @@ def reprocess(summary_file, regenerate_title):
 
     import base64
 
-    recorder = SimpleRecorder()
+    recorder = MeetingPipeline()
     summary_path = Path(summary_file)
 
     if not summary_path.exists():
@@ -2072,7 +2072,7 @@ def regen_title(summary_file):
     import json
     from pathlib import Path
 
-    recorder = SimpleRecorder()
+    recorder = MeetingPipeline()
     summary_path = Path(summary_file)
 
     if not summary_path.exists():
@@ -2505,7 +2505,7 @@ def list_failed():
 @cli.command()
 def clear_state():
     """Clear recording state (useful for resetting stuck recordings)"""
-    recorder = SimpleRecorder()
+    recorder = MeetingPipeline()
     
     if recorder.state_file.exists():
         recorder.state_file.unlink()

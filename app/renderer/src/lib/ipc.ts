@@ -85,17 +85,6 @@ export interface CalendarEvent {
     | 'unknown';
 }
 
-export interface Announcement {
-  id: string;
-  title: string;
-  body: string;
-  action_url?: string;
-  action_label?: string;
-  min_version?: string;
-  max_version?: string;
-  dismissible?: boolean;
-}
-
 export interface UpdateMeetingPatch {
   name?: string;
   summary?: string;
@@ -433,10 +422,6 @@ export type CheckForUpdatesResponse = Result<{
   releaseUrl: string;
   releaseName: string;
   downloadUrl: string | null;
-}>;
-export type CheckAnnouncementsResponse = Result<{
-  announcements: Announcement[];
-  currentVersion: string;
 }>;
 
 // ---------- event payloads ----------
@@ -780,7 +765,6 @@ export interface StenoaiBridge {
 
   updates: {
     check: RequestFn<[], CheckForUpdatesResponse>;
-    announcements: RequestFn<[], CheckAnnouncementsResponse>;
     openReleasePage: RequestFn<[url: string], Result<Record<string, never>>>;
     install: SendFn<[]>;
   };
