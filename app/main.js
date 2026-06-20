@@ -6266,24 +6266,150 @@ ipcMain.handle('get-recordings-dir', async () => {
   }
 });
 
-// Renderer-driven system audio capture writes its WebM/Opus blob into the
-// same recordings/ folder the mic path uses. Keeping both capture paths in
-// one folder means `keep_recordings` semantics + cleanup are symmetric, and
-// users have a single canonical place to find saved audio.
-ipcMain.handle('write-system-audio-blob', async (_event, payload, sessionName) => {
+// Renderer-driven system audio capture streams its WebM/Opus blob into the
+// same recordings/ folder the mic path uses, written INCREMENTALLY as each
+// MediaRecorder timeslice arrives rather than buffered in renderer memory
+// until stop. A crash / force-quit then leaves a valid WebM prefix on disk
+// (the container is streamable, so ffmpeg decodes a truncated file) instead
+// of losing the whole recording. Keeping both capture paths in one folder
+// means `keep_recordings` semantics + cleanup are symmetric, and users have
+// a single canonical place to find saved audio.
+//
+// Only one recording is active at a time (the renderer serialises starts via
+// activeRef/startTokenRef), so the open file is keyed on a single module-level
+// WriteStream rather than threading a handle through every IPC. open() also
+// reclaims a stream left over from an abnormal prior teardown (renderer reload
+// mid-capture) so a stale fd can't outlive its recording.
+let activeSysAudioWriteStream = null;
+let activeSysAudioFilePath = null;
+let activeSysAudioBytesWritten = 0;
+
+ipcMain.handle('open-system-audio-file', async (_event, sessionName) => {
   try {
+    // Reclaim a stream left open by a prior recording that never cleanly
+    // stopped (e.g. a renderer reload mid-capture). End (flush) it and leave
+    // its partial file on disk under recordings/ — abandoned rather than
+    // processed, since no clean stop handed it to the queue.
+    if (activeSysAudioWriteStream) {
+      sendDebugLog(`[sysaudio] abandoning unclosed prior recording ${path.basename(activeSysAudioFilePath || '')}`);
+      try { activeSysAudioWriteStream.end(); } catch (_) { /* already ended */ }
+      activeSysAudioWriteStream = null;
+      activeSysAudioFilePath = null;
+    }
     const dir = resolveRecordingsDir();
     const safeName = String(sessionName || 'Note').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 64);
     const filename = `sysaudio-${Date.now()}-${safeName}.webm`;
     const filePath = path.join(dir, filename);
-    const buf = Buffer.isBuffer(payload) ? payload : Buffer.from(payload);
-    fs.writeFileSync(filePath, buf);
-    sendDebugLog(`[sysaudio] wrote blob ${filename} (${buf.length} bytes)`);
+    const stream = fs.createWriteStream(filePath);
+    // Attach an 'error' listener at creation time. A WriteStream that emits
+    // 'error' with no listener re-throws as an uncaught exception and would
+    // crash the main process (and the in-progress recording) — e.g. on ENOSPC
+    // mid-write. Instead, log and drop the stream so subsequent append/close
+    // report a clean failure rather than taking the app down.
+    stream.on('error', (err) => {
+      sendDebugLog(`[sysaudio] write stream error: ${err.message}`);
+      if (activeSysAudioWriteStream === stream) {
+        activeSysAudioWriteStream = null;
+        activeSysAudioFilePath = null;
+        activeSysAudioBytesWritten = 0;
+      }
+    });
+    activeSysAudioWriteStream = stream;
+    activeSysAudioFilePath = filePath;
+    activeSysAudioBytesWritten = 0;
+    sendDebugLog(`[sysaudio] opened ${filename} for incremental write`);
     return { success: true, filePath };
   } catch (error) {
-    sendDebugLog(`Error writing system audio blob: ${error.message}`);
+    sendDebugLog(`Error opening system audio file: ${error.message}`);
     return { success: false, error: error.message };
   }
+});
+
+ipcMain.handle('append-system-audio-chunk', async (_event, payload) => {
+  try {
+    if (!activeSysAudioWriteStream) {
+      return { success: false, error: 'No open system audio file' };
+    }
+    const buf = Buffer.isBuffer(payload) ? payload : Buffer.from(payload);
+    // Await the write callback so a disk-write failure (ENOSPC, EIO) is
+    // reported as a failed append rather than acked as success — the renderer
+    // checks this envelope to know the on-disk file is truncated. Ordering is
+    // preserved because the renderer chains its appends (each awaits the prior
+    // round-trip) and the WriteStream is FIFO.
+    const stream = activeSysAudioWriteStream;
+    await new Promise((resolve, reject) => {
+      stream.write(buf, (err) => (err ? reject(err) : resolve()));
+    });
+    // Only credit the byte count if this is still the active stream — a
+    // concurrent open() could have rotated it during the await, and crediting
+    // a rotated-in recording with this chunk's size would corrupt its
+    // empty-file accounting. If rotated, the write landed on an abandoned
+    // stream, so report failure rather than a false success.
+    if (activeSysAudioWriteStream !== stream) {
+      return { success: false, error: 'Recording rotated during write' };
+    }
+    activeSysAudioBytesWritten += buf.length;
+    return { success: true };
+  } catch (error) {
+    sendDebugLog(`Error appending system audio chunk: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('close-system-audio-file', async () => {
+  const stream = activeSysAudioWriteStream;
+  const filePath = activeSysAudioFilePath;
+  const bytesWritten = activeSysAudioBytesWritten;
+  activeSysAudioWriteStream = null;
+  activeSysAudioFilePath = null;
+  activeSysAudioBytesWritten = 0;
+  if (!stream) {
+    return { success: false, error: 'No open system audio file' };
+  }
+  try {
+    await new Promise((resolve, reject) => {
+      stream.on('error', reject);
+      stream.end(resolve);
+    });
+    // A zero-byte file means no audio was captured (immediate stop, or a
+    // failed start that still opened the file). Remove it rather than queue an
+    // empty recording or leave a stray .webm, and report no usable file.
+    if (bytesWritten === 0) {
+      try { fs.unlinkSync(filePath); } catch (_) { /* */ }
+      sendDebugLog(`[sysaudio] closed empty recording, removed ${path.basename(filePath)}`);
+      return { success: false, error: 'Empty recording (no audio captured)' };
+    }
+    sendDebugLog(`[sysaudio] closed ${path.basename(filePath)} (${bytesWritten} bytes)`);
+    return { success: true, filePath };
+  } catch (error) {
+    sendDebugLog(`Error closing system audio file: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+});
+
+// A failed renderer-side capture (mic permission denied, no audio device)
+// would otherwise be silent — the optimistic "recording" pill is dropped via
+// system-audio-recording-state, but the user gets no reason. Surface a native
+// notification so a failed start is visible. Not gated on the notifications
+// toggle: that governs routine note-ready/silence notices, whereas this is an
+// error the user needs to see to know their recording didn't start.
+function showRecordingFailedNotification(body) {
+  try {
+    if (!Notification.isSupported()) return;
+    new Notification({
+      title: 'StenoAI',
+      body: body || "Recording couldn't start.",
+    }).show();
+  } catch (error) {
+    console.error('Failed to show recording-failed notification:', error.message);
+  }
+}
+
+ipcMain.on('recording-capture-error', (_event, message) => {
+  sendDebugLog(`[sysaudio] capture error: ${message}`);
+  showRecordingFailedNotification(
+    message ? `Recording couldn't start: ${message}` : "Recording couldn't start.",
+  );
 });
 
 ipcMain.handle('process-system-audio-recording', async (event, audioFilePath, sessionName) => {

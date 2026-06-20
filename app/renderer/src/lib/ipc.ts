@@ -622,10 +622,15 @@ export interface StenoaiBridge {
         platform?: string;
       }>
     >;
-    writeSystemAudioBlob: RequestFn<
-      [bytes: Uint8Array, name: string],
-      Result<{ filePath: string }>
-    >;
+    /** Open an on-disk WebM file for the renderer-driven recording. Chunks are
+     *  appended as they arrive (see appendSystemAudioChunk) so a crash leaves a
+     *  processable file instead of losing the whole recording. */
+    openSystemAudioFile: RequestFn<[name: string], Result<{ filePath: string }>>;
+    appendSystemAudioChunk: RequestFn<[bytes: Uint8Array], Result<Record<string, never>>>;
+    closeSystemAudioFile: RequestFn<[], Result<{ filePath: string }>>;
+    /** Report a renderer-side capture failure so main can surface a native
+     *  notification (a failed start would otherwise be silent). Fire-and-forget. */
+    reportCaptureError: SendFn<[message: string]>;
     processSystemAudio: RequestFn<[filePath: string, name: string], Result<{ message: string }>>;
     processFile: RequestFn<[filePath: string, name: string], Result<{ message: string }>>;
     pickAudioFile: RequestFn<[], PickAudioFileResponse>;
