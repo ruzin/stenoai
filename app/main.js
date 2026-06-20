@@ -6311,6 +6311,7 @@ ipcMain.handle('open-system-audio-file', async (_event, sessionName) => {
       if (activeSysAudioWriteStream === stream) {
         activeSysAudioWriteStream = null;
         activeSysAudioFilePath = null;
+        activeSysAudioBytesWritten = 0;
       }
     });
     activeSysAudioWriteStream = stream;
