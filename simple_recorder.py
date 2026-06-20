@@ -150,52 +150,6 @@ class SimpleRecorder:
         # State file
         self.state_file = Path("recorder_state.json")
 
-    def get_state(self) -> dict:
-        """Get current recorder state.
-
-        Distinguishes "file missing" (normal — return default) from "file
-        unreadable / corrupt" (real failure — log and quarantine so the
-        user can recover the file and we don't pretend we were idle while
-        an orphan subprocess may still be writing audio).
-        """
-        if not self.state_file.exists():
-            return {"recording": False, "current_file": None, "session_name": None}
-        try:
-            with open(self.state_file, 'r') as f:
-                return json.load(f)
-        except (json.JSONDecodeError, UnicodeDecodeError) as e:
-            # Corrupt state — most likely a non-atomic write was killed
-            # mid-flight before save_state's tempfile + rename pattern was
-            # in place. UnicodeDecodeError covers the case where binary
-            # garbage from a partial write fails UTF-8 decoding before
-            # json.load even sees it. Both are "content unparseable" —
-            # quarantine and return default.
-            logger.error(f"State file corrupt at {self.state_file}: {e}")
-            try:
-                quarantine = self.state_file.with_suffix(self.state_file.suffix + '.corrupt')
-                self.state_file.replace(quarantine)
-                logger.error(f"Moved corrupt state aside to {quarantine}")
-            except OSError as move_err:
-                logger.error(f"Failed to quarantine corrupt state file: {move_err}")
-        except OSError as e:
-            # Permission / IO error reading the file. Don't pretend we're
-            # idle — surface this loudly so the user can fix file perms or
-            # disk issues instead of silently losing recording state.
-            logger.error(f"Failed to read state file {self.state_file}: {e}")
-        return {"recording": False, "current_file": None, "session_name": None}
-
-    def save_state(self, state: dict):
-        """Save recorder state atomically.
-
-        Writes to a tempfile in the same directory (so os.replace is an
-        atomic rename within one filesystem) and then renames over the
-        real path. A crash mid-write either leaves the prior valid state
-        intact or leaves an orphan tempfile alongside it — never a
-        partially-written recorder_state.json that get_state would
-        misread as "idle" while audio is still being captured.
-        """
-        _atomic_write_json(self.state_file, state)
-
     def _resolve_output_language(self, configured_language: str, detected_language: Optional[str] = None) -> str:
         """Resolve which language should be used for summary/title/query output."""
         from src.config import get_config
@@ -537,12 +491,8 @@ Transcript:
         """Complete processing: transcribe + summarize."""
         print(f"🔄 Processing recording: {audio_file}")
         
-        # If no audio file provided, use the last recording
         if not audio_file:
-            state = self.get_state()
-            audio_file = state.get("last_recording")
-            if not audio_file:
-                raise Exception("No audio file specified and no recent recording found")
+            raise Exception("No audio file specified")
         
         # Ensure we have a proper path
         audio_file = str(audio_file)  # Convert to string if it's a Path object
@@ -657,10 +607,7 @@ Transcript:
         print(f"🔄 Processing recording: {audio_file}")
 
         if not audio_file:
-            state = self.get_state()
-            audio_file = state.get("last_recording")
-            if not audio_file:
-                raise Exception("No audio file specified and no recent recording found")
+            raise Exception("No audio file specified")
 
         audio_path = Path(audio_file)
         if not audio_path.exists():
@@ -1284,21 +1231,19 @@ def set_silence_auto_stop_minutes_cmd(minutes: int):
 
 @cli.command()
 def status():
-    """Show recorder status"""
+    """Show recorder status.
+
+    Recording state is tracked in the Electron main process now (capture is
+    renderer-driven), not in recorder_state.json — so this reports backend
+    readiness ("READY") plus recent recordings. Used by main.js as a backend
+    health check (get-status).
+    """
     recorder = SimpleRecorder()
-    state = recorder.get_state()
-    
+
     print("🎙️ Steno Recorder Status")
     print("=" * 25)
-    
-    if state.get("recording"):
-        print("STATUS: RECORDING")
-        print(f"Session: {state.get('session_name')}")
-        print(f"File: {state.get('current_file')}")
-        print(f"Started: {state.get('start_time')}")
-    else:
-        print("STATUS: READY")
-    
+    print("STATUS: READY")
+
     # Show recent recordings
     recordings = list(recorder.recordings_dir.glob("*.wav"))
     if recordings:
