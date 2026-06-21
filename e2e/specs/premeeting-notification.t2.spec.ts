@@ -11,7 +11,6 @@ import { enableDeterministicRecording } from '../fixtures/user-config';
  */
 
 type ShowResult = { success: boolean; shown?: boolean; error?: string };
-type Queue = { success: boolean; hasRecording: boolean };
 
 type StenoWindow = Window & {
   stenoai: {
@@ -24,8 +23,6 @@ type StenoWindow = Window & {
     recording: {
       start: (name?: string, eventId?: string) => Promise<{ success: boolean }>;
       stop: () => Promise<{ success: boolean }>;
-      getQueue: () => Promise<Queue>;
-      getSystemAudioSupport: () => Promise<{ success: boolean; supported?: boolean }>;
     };
   };
 };
@@ -70,28 +67,17 @@ test('pre-meeting notification is suppressed for the meeting being recorded (eve
   enableDeterministicRecording(userDataDir);
   const { page } = await launchApp();
 
-  // The recording state machine needs the renderer-driven path's OS support
-  // (macOS >= 14.4 / Windows >= 10) — same guard as recording-lifecycle.t2.
-  const support = await page.evaluate(() =>
-    (window as StenoWindow).stenoai.recording.getSystemAudioSupport(),
-  );
-  if (!support?.supported) {
-    // eslint-disable-next-line no-console
-    console.warn('[t2] SKIPPED premeeting suppression: system-audio path unsupported on this host.');
-  }
-  test.skip(!support?.supported, 'system-audio path unsupported on this runner');
-
-  // Start a recording tagged with EVT.id (the calendar-event association).
+  // start-recording-ui sets currentRecordingEventId SYNCHRONOUSLY and returns
+  // success on every platform (renderer-driven path) — so we check suppression
+  // immediately after start, NOT after polling hasRecording. The renderer
+  // capture (which may not sustain on a headless runner and would then clear
+  // the association) is irrelevant to the suppression logic, and waiting for it
+  // is what made this flaky on headless Windows.
   const started = await page.evaluate(
     (id) => (window as StenoWindow).stenoai.recording.start('Daily standup', id),
     EVT.id,
   );
   expect(started.success).toBe(true);
-  await expect
-    .poll(async () =>
-      (await page.evaluate(() => (window as StenoWindow).stenoai.recording.getQueue())).hasRecording,
-    )
-    .toBe(true);
 
   // Suppressed for the meeting we're recording (matched by event id)...
   expect((await showPremeeting(page, EVT)).shown).toBe(false);
@@ -102,11 +88,6 @@ test('pre-meeting notification is suppressed for the meeting being recorded (eve
 
   // Stop clears the association; the notif fires for that meeting again.
   await page.evaluate(() => (window as StenoWindow).stenoai.recording.stop());
-  await expect
-    .poll(async () =>
-      (await page.evaluate(() => (window as StenoWindow).stenoai.recording.getQueue())).hasRecording,
-    )
-    .toBe(false);
   expect((await showPremeeting(page, EVT)).shown).not.toBe(false);
 
   expect(fileSig(realUserDataDir())).toBe(realDirBefore);

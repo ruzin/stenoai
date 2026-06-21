@@ -239,14 +239,14 @@ jobs:
       - name: Ensure no stray Ollama
         run: pkill -f ollama || true
 
-      # Cache the whisper ggml weights (~466 MB for 'small') so only the first
+      # Cache the whisper ggml weights (~1.6 GB for 'large-v3-turbo') so only the first
       # run pays the download; later runs restore in ~30 s. The model is NOT
       # bundled — it downloads on use into pywhispercpp's models dir.
       - name: Cache whisper model
         uses: actions/cache@v4
         with:
           path: ~/Library/Application Support/pywhispercpp/models
-          key: whisper-small-ggml
+          key: whisper-large-v3-turbo-ggml
 
       - name: Install Electron dependencies
         working-directory: app
@@ -263,9 +263,9 @@ jobs:
       # coverage.
       - name: Ensure whisper model present
         run: |
-          ./dist/stenoai/stenoai pull-whisper-model small
+          ./dist/stenoai/stenoai pull-whisper-model large-v3-turbo
           ./dist/stenoai/stenoai list-whisper-models \
-            | python3 -c "import sys,json; sys.exit(0 if json.load(sys.stdin)['supported_models']['small']['installed'] else 1)"
+            | python3 -c "import sys,json; sys.exit(0 if json.load(sys.stdin)['supported_models']['large-v3-turbo']['installed'] else 1)"
 
       # Playwright exits 0 when --grep matches no tests. Assert the tagged spec
       # is actually selected so a future rename / dropped @pipeline tag can't
