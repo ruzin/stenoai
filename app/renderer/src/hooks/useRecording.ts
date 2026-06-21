@@ -369,6 +369,24 @@ export function useRecordingProcessingEffects() {
             });
         }
       }
+      // Hard processing crash (process-streaming non-zero exit): no note was
+      // written, so the synthetic processing row is about to vanish on the
+      // queue invalidation below with nothing to show for it. Surface a
+      // failure notification keyed on the session so an import/recording that
+      // dies in the background doesn't just silently disappear. The graceful
+      // transcription-failure path takes the success:true branch above (it
+      // writes a marked note), so this only fires for true crashes.
+      if (!data.success) {
+        void ipc()
+          .settings.showNoteReadyNotification({
+            title: data.sessionName?.trim() || 'your note',
+            failed: true,
+            hardFailure: true,
+          })
+          .catch(() => {
+            // Notification failure isn't fatal — nothing else to fall back to.
+          });
+      }
       qc.invalidateQueries({ queryKey: meetingsKeys.all });
       qc.invalidateQueries({ queryKey: queueKey });
       // Clear any streamCache entry for the finished session. MeetingDetail

@@ -19,6 +19,7 @@ import { LiveTranscriptBar } from '@/components/LiveTranscriptBar';
 import { useLiveTranscriptOpen } from '@/hooks/liveTranscriptOpenStore';
 import { useTranscriptionEngine } from '@/hooks/useModels';
 import { QuitDialog } from '@/components/QuitDialog';
+import { ImportDropZone } from '@/components/ImportDropZone';
 import { AskBarProvider } from '@/lib/askBarContext';
 import {
   useRecording,
@@ -189,6 +190,7 @@ export function App() {
       <AskBarProvider>
         <RouteView route={route} />
         <QuitDialog />
+        <ImportDropZone />
 
         {/* Bottom dock — shared anchor across recording → processing → meeting.
             During recording the slot swaps between the compact LiveDock pill

@@ -16,6 +16,7 @@ will implement exactly what is listed here, exposed through
   - `R→M (invoke)` — `ipcRenderer.invoke(...)` → `ipcMain.handle(...)` request/response
   - `R→M (send)` — `ipcRenderer.send(...)` → `ipcMain.on(...)` fire-and-forget
   - `M→R` — `webContents.send(...)` → `ipcRenderer.on(...)` main-driven event
+  - `R-direct` — synchronous renderer-side call with no IPC hop (an Electron renderer API such as `webUtils` exposed through the bridge). Not every bridge method is an IPC channel.
 - **Needed** — whether the new (React) renderer needs the channel.
   - `yes` — keep and port
   - `drop` — remove (dead listener, unused in renderer, or main-only concern)
@@ -84,8 +85,9 @@ progress events back.
 | `resume-recording-ui` | R→M invoke | yes | `stenoai.recording.resume()` |
 | `system-audio-recording-state` | R→M send | yes | `stenoai.recording.reportSystemAudioState(active)` |
 | `process-system-audio-recording` | R→M invoke | yes | `stenoai.recording.processSystemAudio(filePath, name)` |
-| `process-recording` | R→M invoke | yes | `stenoai.recording.processFile(path, name)` |
+| `process-recording` | R→M invoke | yes | `stenoai.recording.processFile(path, name)` — imports a local file: copies it into `recordings/` then **queues** it (fire-and-forget, resolves before transcription; progress shows as a processing row) |
 | `select-audio-file` | R→M invoke | yes | `stenoai.recording.pickAudioFile()` |
+| — | R-direct (webUtils) | yes | `stenoai.recording.getPathForFile(file)` — sync; resolves a dropped File's absolute path (Electron 32+ removed `File.path`) |
 | `get-queue-status` | R→M invoke | yes | `stenoai.recording.getQueue()` |
 | `get-recordings-dir` | R→M invoke | yes | `stenoai.recording.getDir()` |
 | `get-live-transcript-state` | R→M invoke | yes | `stenoai.liveTranscript.getState()` |
@@ -387,7 +389,7 @@ are string-cased (`"True"`/`"False"`) — that translation lives in main.js.
 | `set-silence-auto-stop-enabled` | R→M invoke | yes | `stenoai.settings.setSilenceAutoStopEnabled(b)` |
 | `set-silence-auto-stop-minutes` | R→M invoke | yes | `stenoai.settings.setSilenceAutoStopMinutes(n)` |
 | `show-silence-auto-stop-notification` | R→M invoke | yes | `stenoai.settings.showSilenceAutoStopNotification({ minutes, sessionName })` |
-| `show-note-ready-notification` | R→M invoke | yes | `stenoai.settings.showNoteReadyNotification({ title })` |
+| `show-note-ready-notification` | R→M invoke | yes | `stenoai.settings.showNoteReadyNotification({ title, failed?, hardFailure? })` — `failed`: graceful transcription failure (marked note written); `hardFailure`: processing crash / import that never enqueued (no note) |
 | `get-telemetry` / `set-telemetry` | R→M invoke | yes | `stenoai.settings.getTelemetry()` / `setTelemetry(b)` |
 | `get-dock-icon` / `set-dock-icon` | R→M invoke | yes | `stenoai.settings.getDockIcon()` / `setDockIcon(b)` |
 | `get-system-audio` / `set-system-audio` | R→M invoke | yes | `stenoai.settings.getSystemAudio()` / `setSystemAudio(b)` |
