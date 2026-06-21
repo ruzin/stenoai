@@ -113,6 +113,22 @@ function install({ ipcMain }) {
   // render if the shape is wrong (consumers that .map / .filter / for-of over
   // the result). Everything not listed here and not in MOCKS falls through to a
   // permissive { success: true } — enough to keep invoke() from rejecting.
+  // Optional seeded notes for specs that exercise note lists / search
+  // (e.g. the command-palette T1). Gated so other specs keep the empty list.
+  const seedMeeting = (name, summaryFile, summary) => ({
+    session_info: { name, summary_file: summaryFile },
+    summary,
+    transcript: '',
+  });
+  const SEEDED_MEETINGS =
+    process.env.STENOAI_E2E_SEED_MEETINGS === '1'
+      ? [
+          seedMeeting('Q3 Budget review', 'q3-budget.json', 'We revised the budget numbers for Q3.'),
+          seedMeeting('Marketing sync', 'marketing.json', 'Budget owner is now Sarah.'),
+          seedMeeting('Standup notes', 'standup.json', 'No blockers today.'),
+        ]
+      : [];
+
   const DEFAULTS = {
     'get-app-version': '0.0.0-e2e',
     // Fires on first paint once signed in (Sidebar + RouteView gate the
@@ -126,7 +142,7 @@ function install({ ipcMain }) {
         shared_notes_enabled: process.env.STENOAI_E2E_SHARED_NOTES !== '0',
       },
     },
-    'list-meetings': { success: true, meetings: [] },
+    'list-meetings': { success: true, meetings: SEEDED_MEETINGS },
     'list-folders': { success: true, folders: [] },
     'get-calendar-events': { success: true, events: [] },
     'parakeet-status': { success: true, model: '', installed: false },

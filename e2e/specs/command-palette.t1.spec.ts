@@ -1,0 +1,61 @@
+import { test, expect } from '../fixtures/electron';
+
+/**
+ * T1 — renderer-only, mock IPC. Drives the global ⌘K command palette (#213):
+ * opens from the shortcut + the sidebar trigger, searches note title/summary,
+ * keyboard-navigates, and opens a note. Meetings are seeded via the mock
+ * (STENOAI_E2E_SEED_MEETINGS=1 in app/e2e-mock-ipc.js).
+ */
+
+const palette = '[data-testid="command-palette"]';
+const input = '[data-testid="command-palette-input"]';
+const result = '[data-testid="command-palette-result"]';
+
+const launchOpts = { mockIpc: true, env: { STENOAI_E2E_SEED_MEETINGS: '1' } } as const;
+
+test('⌘K opens the palette and searches note content', async ({ launchApp }) => {
+  const { page } = await launchApp(launchOpts);
+
+  await page.keyboard.press('ControlOrMeta+k');
+  await expect(page.locator(palette)).toBeVisible();
+
+  // Empty query shows recent notes (all 3 seeds).
+  await expect(page.locator(result)).toHaveCount(3);
+
+  // "budget" matches a title (Q3 Budget review) + a summary (Marketing sync).
+  await page.locator(input).fill('budget');
+  await expect(page.locator(result)).toHaveCount(2);
+  await expect(page.locator(palette)).toContainText('Q3 Budget review');
+  await expect(page.locator(palette)).toContainText('Marketing sync');
+});
+
+test('arrow + enter opens the selected note; esc closes', async ({ launchApp }) => {
+  const { page } = await launchApp(launchOpts);
+
+  await page.keyboard.press('ControlOrMeta+k');
+  await page.locator(input).fill('marketing');
+  await expect(page.locator(result)).toHaveCount(1);
+
+  await page.keyboard.press('Enter');
+  await expect(page.locator(palette)).toBeHidden();
+  await expect
+    .poll(() => page.evaluate(() => window.location.hash))
+    .toContain('/meetings/marketing.json');
+});
+
+test('sidebar search box opens the palette', async ({ launchApp }) => {
+  const { page } = await launchApp(launchOpts);
+
+  // Under mock IPC the app lands on the setup wizard (no model installed),
+  // which has no sidebar. Go to Home, which renders it. The one-shot setup
+  // gate already fired on launch, so it won't redirect us back.
+  await page.evaluate(() => {
+    window.location.hash = '#/';
+  });
+
+  await page.locator('[data-testid="sidebar-search-trigger"]').click();
+  await expect(page.locator(palette)).toBeVisible();
+
+  await page.keyboard.press('Escape');
+  await expect(page.locator(palette)).toBeHidden();
+});
