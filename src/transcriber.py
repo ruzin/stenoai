@@ -435,6 +435,11 @@ class WhisperTranscriber:
         else:
             self.backend = "whisper.cpp"
             self._load_whisper_cpp()
+        fallback = (self.backend == "whisper.cpp") != (requested == "whisper")
+        logger.info(
+            "ASR engine selected: requested=%s using=%s fallback=%s",
+            requested, self.backend, fallback,
+        )
         self._ensure_ffmpeg_in_path()
 
     def _load_whisper_cpp(self) -> None:

@@ -35,6 +35,7 @@ if (process.platform !== 'darwin') {
 
 const path = require('path');
 const { spawn: _spawnRaw, exec } = require('child_process');
+const processingLog = require('./processing-log');
 
 // Wrap spawn so every backend / ollama launch defaults to windowsHide:true.
 // The PyInstaller backend (stenoai.exe) and bundled ollama.exe are console
@@ -1016,6 +1017,16 @@ if (!gotSingleInstanceLock) {
   });
 
   app.whenReady().then(async () => {
+    // Persistent diagnostic log under <userData>/logs (honors
+    // STENOAI_USER_DATA_DIR via getUserDataDir, so e2e/tests stay isolated).
+    // The startup marker is a stable anchor that separates sessions.
+    try {
+      processingLog.init({ dir: path.join(getUserDataDir(), 'logs') });
+      processingLog.logLine('app', `startup v${app.getVersion()} platform=${process.platform}`);
+    } catch (e) {
+      console.warn('processing-log init failed (non-fatal):', e?.message);
+    }
+
     // Application menu. macOS uses the global menu bar with mac-only roles
     // (services/hide/unhide). Windows/Linux get a slimmer, platform-correct
     // menu — kept (editing accelerators, Settings, Help) but hidden by default
@@ -1338,7 +1349,7 @@ ipcMain.handle('get-system-audio-support', async () => {
 // Debug functionality handled by side panel now
 
 // Backend communication - always uses bundled stenoai executable
-function runPythonScript(script, args = [], silent = false, extraEnv = {}) {
+function runPythonScript(script, args = [], silent = false, extraEnv = {}, logLabel = null) {
   return new Promise((resolve, reject) => {
     const backendPath = getBackendPath();
 
@@ -1352,6 +1363,11 @@ function runPythonScript(script, args = [], silent = false, extraEnv = {}) {
       cwd: getBackendCwd(),
       env: Object.keys(extraEnv).length > 0 ? { ...require('process').env, ...extraEnv } : undefined
     });
+
+    // Opt-in persistent capture for the legacy process-recording path only.
+    // Default null → generic backend calls (config reads, chat query, …) are
+    // NOT persisted, preserving the no-global-tee privacy boundary.
+    if (logLabel) attachProcessingStderr(process, logLabel);
 
     let stdout = '';
     let stderr = '';
@@ -1431,7 +1447,7 @@ ipcMain.handle('get-status', handleGetStatus);
 ipcMain.handle('process-recording', async (event, audioFile, sessionName) => {
   try {
     const env = getAiEnv();
-    const result = await runPythonScript('simple_recorder.py', ['process', audioFile, '--name', sessionName], false, env);
+    const result = await runPythonScript('simple_recorder.py', ['process', audioFile, '--name', sessionName], false, env, 'process-recording');
     trackEvent('transcription_completed', { success: true });
     trackEvent('summarization_completed', { success: true });
     return { success: true, result: result };
@@ -2320,6 +2336,8 @@ function spawnLiveTranscribe(sessionName) {
     sendDebugLog(`[live-transcribe] ${data.toString().trim()}`);
   });
 
+  attachProcessingStderr(liveTranscribeProcess, 'live-transcribe');
+
   liveTranscribeProcess.on('exit', (code, signal) => {
     sendDebugLog(`Live transcribe sidecar exited code=${code} signal=${signal}`);
     liveTranscribeProcess = null;
@@ -2710,6 +2728,7 @@ async function processNextInQueue() {
         // Parse protocol lines (CRLF-tolerant: Windows stdout is \r\n, and the
         // STREAM_COMPLETE exact-match below must not carry a trailing \r).
         text.split(/\r?\n/).forEach(line => {
+          logPipelineStdoutLine(line, 'process-streaming');
           if (line.startsWith('CHUNK:')) {
             try {
               const encoded = line.slice(6);
@@ -2761,6 +2780,8 @@ async function processNextInQueue() {
           sendDebugLog(`STDERR: ${msg}`);
         }
       });
+
+      attachProcessingStderr(proc, 'process-streaming');
 
       proc.on('close', (code) => {
         watchdog.clear();
@@ -3865,6 +3886,63 @@ function sendDebugLog(message) {
   // Send to main window (both setup console and debug panel)
   if (mainWindow) {
     mainWindow.webContents.send('debug-log', message);
+  }
+}
+
+// Feed a child process's stderr into the persistent processing log, one record
+// per complete line. Node 'data' events deliver arbitrary chunks (not lines),
+// so we keep a residual buffer and flush the remainder on close. Additive: this
+// does NOT replace the existing per-pipeline sendDebugLog calls (renderer panel)
+// — it persists the same low-PII backend logger output to disk alongside them.
+const STDERR_BUF_CAP = 64 * 1024; // flush a newline-less stream so buf can't grow unbounded
+function attachProcessingStderr(proc, label) {
+  if (!proc || !proc.stderr) return;
+  let buf = '';
+  proc.stderr.on('data', (data) => {
+    buf += data.toString();
+    let nl;
+    while ((nl = buf.indexOf('\n')) !== -1) {
+      const line = buf.slice(0, nl);
+      buf = buf.slice(nl + 1);
+      if (line.trim()) processingLog.logLine(label, line);
+    }
+    // Flood guard: a backend that emits stderr without newlines (e.g. \r-based
+    // progress) would grow buf unboundedly. Flush the residual as one record
+    // (processing-log truncates it to its own per-line cap) and reset.
+    if (buf.length > STDERR_BUF_CAP) {
+      if (buf.trim()) processingLog.logLine(label, buf);
+      buf = '';
+    }
+  });
+  proc.on('close', () => {
+    if (buf.trim()) processingLog.logLine(label, buf);
+    buf = '';
+  });
+}
+
+// Persist only an allowlist of pipeline stdout protocol events. Excludes
+// CHUNK/CHAT_CHUNK/TITLE/LIVE_SEG and any free-text/query answer (privacy).
+// HEARTBEAT is throttled to once per 10s, keyed per source so concurrent
+// pipelines (e.g. a queued process-streaming run during a live record) don't
+// mask each other's heartbeats. Records are logged under the source label.
+const lastHeartbeatLoggedAt = new Map();
+function logPipelineStdoutLine(line, source) {
+  const l = line.trim();
+  if (!l) return;
+  if (l.startsWith('HEARTBEAT')) {
+    const now = Date.now();
+    if (now - (lastHeartbeatLoggedAt.get(source) || 0) < 10_000) return;
+    lastHeartbeatLoggedAt.set(source, now);
+    processingLog.logLine(source, l);
+    return;
+  }
+  if (
+    l.startsWith('TRANSCRIPTION_COMPLETE') ||
+    l.startsWith('TRANSCRIPTION_FAILED') ||
+    l.startsWith('SAVED:') ||
+    l === 'STREAM_COMPLETE'
+  ) {
+    processingLog.logLine(source, l);
   }
 }
 
