@@ -19,7 +19,7 @@
     "typecheck:renderer": "tsc -p renderer/tsconfig.json --noEmit",
     "lint:renderer": "eslint --config renderer/eslint.config.mjs renderer/src",
     "format:renderer": "prettier --write renderer/src",
-    "test:unit": "node --test processing-log.test.js",
+    "test:unit": "node --test processing-log.test.js && vitest run",
     "build": "npm run build:renderer && electron-builder",
     "pack:unsigned": "npm run build:renderer && electron-builder --dir --config electron-builder.ci.yml",
     "build-mac": "npm run build:renderer && electron-builder --mac",
@@ -34,7 +34,6 @@
     "release:patch": "npm run version:patch && npm run build",
     "release:minor": "npm run version:minor && npm run build",
     "release:major": "npm run version:major && npm run build",
-    "test:unit": "vitest run",
     "test:unit:watch": "vitest",
     "test:e2e": "cross-env NODE_PATH=node_modules playwright test --config ../e2e/playwright.config.ts",
     "test:e2e:update": "cross-env NODE_PATH=node_modules playwright test --config ../e2e/playwright.config.ts --update-snapshots"
