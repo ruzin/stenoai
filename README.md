@@ -138,12 +138,10 @@ Have questions or suggestions? [Join our Discord](https://discord.gg/DZ6vcQnxxu)
 
 **Transcription Models:**
 - `Parakeet TDT v3` (572 MB): Highest quality, supports live transcription, 25 European languages (English, Spanish, French, German, Italian, Portuguese, Dutch, Russian, Polish, Czech, and 15 others). Apple Silicon only via MLX. **(default on fresh installs)**
-- `Whisper Large V3 Turbo` (1.6 GB): Best accuracy Whisper model. 99 languages including Chinese, Japanese, Arabic, Korean, and Hindi. Post-stop only.
-- `Whisper Small` (466 MB): Balanced speed and accuracy. Same 99-language coverage. **(legacy — kept available for existing users; Large V3 Turbo recommended)**
+- `Whisper Large V3 Turbo` (1.6 GB): Best-accuracy Whisper engine for the languages Parakeet can't speak (Chinese, Japanese, Korean, Arabic, Hindi, and 94 others). Post-stop only.
 
 **Summarization Models** (Ollama):
 - `gemma4:e2b-it-qat` (4.3GB): Lightest Gemma 4, quantization-aware, with a real 128K context **(default)**
-- `llama3.2:3b` (2GB): Fast and lightweight for quick meetings
 - `qwen3.5:9b` (6.6GB): Excellent at structured output and action items
 - `gemma4:12b` (7.6GB): Gemma 4 with a 256K context — best for long meetings
 - `gpt-oss:20b` (14GB): OpenAI open-weight model with reasoning capabilities
@@ -183,7 +181,7 @@ You can run it locally as well (see below) if you don't want to install a DMG.
 
 Windows 10/11 (x64) is supported in **alpha**, with the full pipeline verified working: record → live Parakeet transcription → batch transcript → Ollama summary, **including system-audio loopback capture with `[You]`/`[Others]` diarisation**.
 
-**Install:** download **`stenoAI-windows-x64.exe`** from the [latest release](https://github.com/ruzin/stenoai/releases/latest) and run it — it installs per-user (no admin needed) and creates Start-menu/desktop shortcuts. On first launch, Windows SmartScreen warns because the alpha is unsigned — click **More info → Run anyway**. The first-run setup wizard then downloads the transcription model (~670 MB) and the summarisation model (~2 GB).
+**Install:** download **`stenoAI-windows-x64.exe`** from the [latest release](https://github.com/ruzin/stenoai/releases/latest) and run it — it installs per-user (no admin needed) and creates Start-menu/desktop shortcuts. On first launch, Windows SmartScreen warns because the alpha is unsigned — click **More info → Run anyway**. The first-run setup wizard then downloads the transcription model (~670 MB) and the default summarisation model, Gemma 4 E2B (~4.3 GB).
 
 > Before the first tagged Windows release lands, grab the installer from the [Windows build workflow](https://github.com/ruzin/stenoai/actions/workflows/build-windows.yml): sign in to GitHub, open the latest green run, download the `stenoai-windows` artifact, and run the `.exe` inside.
 
@@ -273,7 +271,7 @@ log stream --predicate 'eventMessage CONTAINS "ollama" OR process CONTAINS "Sten
 - **Recording stops early**: Check microphone permissions, Screen Recording permission (if using system audio), and available disk space.
 - **"Processing failed"**: Usually an Ollama service or model issue — check the terminal logs.
 - **Empty transcripts**: Whisper couldn't detect speech — verify audio input levels.
-- **Slow processing**: Normal for longer recordings; Ollama is CPU-intensive. If summaries are unusually slow, switch to a smaller model in Settings → AI (Llama 3.2 3B is the fastest).
+- **Slow processing**: Normal for longer recordings; Ollama is CPU-intensive. If summaries are unusually slow, switch to a lighter model in Settings → AI (Gemma 4 E2B is the lightest/fastest).
 
 ### Logs Location
 - **User Data**: `~/Library/Application Support/stenoai/`
