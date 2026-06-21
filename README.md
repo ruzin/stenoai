@@ -41,10 +41,10 @@
 If you're looking for a hosted desktop recording API, consider checking out [Recall.ai](https://www.recall.ai/product/desktop-recording-sdk?utm_source=github&utm_medium=sponsorship&utm_campaign=ruzin-stenoai), an API that records Zoom, Google Meet, Microsoft Teams, in-person meetings, and more.
 
 ## 📢 What's New
-- **2026-06-15** 🛠️ Reliability + cross-platform fixes — saving meeting notes now writes to the right place (it was failing silently in the packaged app), and Windows now stores recordings, cloud keys, and calendar tokens in the correct location, with existing credentials migrating forward seamlessly on upgrade. Under the hood: a comprehensive end-to-end test suite + a pre-release gate now guard every release.
-- **2026-06-14** 🧠 Gemma 4 summary models — Google's Gemma 4 is now selectable as a local summarization model: **Gemma 4 12B** (256K context, great for long meetings) or the lightweight **Gemma 4 E2B (QAT)** for memory-constrained machines. Both run fully on-device via the bundled Ollama (updated to run them).
-- **2026-06-12** 🛡️ Stability round — recordings auto-pause when you close the lid (with a Resume prompt on wake), long meetings on slow machines are never killed mid-transcription, a Parakeet crash now recovers via whisper.cpp, and audio is cleaned (high-pass + loudness normalization) before transcription for better accuracy.
-- **2026-06-12** 🧠 Long meetings transcribe reliably — chunked transcription fixes the out-of-memory crash on 30+ minute recordings, and if transcription ever fails your audio is preserved and the meeting is marked for reprocessing instead of saving as empty.
+- **2026-06-22** 🛡️ Works behind corporate proxies — org backup, AI, and note sync now route through your system proxy (incl. PAC) and trust the OS certificate store, so Steno works on managed enterprise networks that force egress through a proxy or inspect TLS.
+- **2026-06-22** 💾 Backup status you can see — when an org note fails to back up it now shows a quiet "Not backed up" indicator you can click to retry, and the failure is written to the diagnostic log, instead of failing silently.
+- **2026-06-21** 🔎 Instant search (⌘K) — a global command palette to jump to any note from anywhere.
+- **2026-06-21** 🎙️ Import audio files — drag & drop or pick an existing recording to transcribe and summarize it.
 
 
 ## Features
