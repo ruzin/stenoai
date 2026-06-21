@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { Search } from 'lucide-react';
-import { useMeetings } from '@/hooks/useMeetings';
+import { useMeetings, LIVE_SUMMARY_PREFIX } from '@/hooks/useMeetings';
 import { searchNotes, snippet } from '@/lib/noteSearch';
 import { navigate } from '@/lib/router';
 import type { Meeting } from '@/lib/ipc';
@@ -18,6 +18,10 @@ export function useCommandPalette(): PaletteContextValue {
 }
 
 const RECENT_COUNT = 8;
+// Bound how many matches we render/snippet per keystroke; a broad term against a
+// large library would otherwise build hundreds of rows. Refine the query to reach
+// the rest — standard command-palette behavior.
+const MAX_RESULTS = 50;
 
 /** Most-recent first. The backend list (useMeetings) is unsorted; Home re-sorts
  *  in groupPrevious by the same key, so we mirror it here. */
@@ -46,7 +50,16 @@ function CommandPalette({ onClose }: { onClose: () => void }) {
   // One recency sort feeds both paths: empty-query recents and search results
   // (searchNotes preserves input order, so results stay newest-first).
   const sorted = React.useMemo(
-    () => (meetings.data ?? []).filter((m) => !m.is_recording).slice().sort((a, b) => recencyMs(b) - recencyMs(a)),
+    () =>
+      (meetings.data ?? [])
+        // Drop the synthetic in-progress placeholders (live recording + the
+        // processing row). They share the __live__/ sentinel summary_file, so
+        // opening one would navigate to a detail route that doesn't exist on
+        // disk. Real notes being reprocessed keep their real summary_file and
+        // stay searchable.
+        .filter((m) => !m.is_recording && !m.session_info.summary_file.startsWith(LIVE_SUMMARY_PREFIX))
+        .slice()
+        .sort((a, b) => recencyMs(b) - recencyMs(a)),
     [meetings.data],
   );
   const [query, setQuery] = React.useState('');
@@ -64,7 +77,7 @@ function CommandPalette({ onClose }: { onClose: () => void }) {
 
   const results = React.useMemo<Meeting[]>(() => {
     if (!query.trim()) return sorted.slice(0, RECENT_COUNT);
-    return searchNotes(sorted, query);
+    return searchNotes(sorted, query).slice(0, MAX_RESULTS);
   }, [sorted, query]);
 
   // Keep selection within [0, len-1]; never let it stick at -1 once results
@@ -89,6 +102,9 @@ function CommandPalette({ onClose }: { onClose: () => void }) {
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Escape') {
       e.preventDefault();
+      // Stop the Escape from also reaching document-level handlers (e.g. the
+      // QuitDialog's), which would otherwise close both at once.
+      e.stopPropagation();
       onClose();
     } else if (e.key === 'ArrowDown') {
       e.preventDefault();

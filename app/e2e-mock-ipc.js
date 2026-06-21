@@ -115,17 +115,20 @@ function install({ ipcMain }) {
   // permissive { success: true } — enough to keep invoke() from rejecting.
   // Optional seeded notes for specs that exercise note lists / search
   // (e.g. the command-palette T1). Gated so other specs keep the empty list.
-  const seedMeeting = (name, summaryFile, summary) => ({
-    session_info: { name, summary_file: summaryFile },
+  const seedMeeting = (name, summaryFile, summary, processedAt) => ({
+    session_info: { name, summary_file: summaryFile, processed_at: processedAt },
     summary,
     transcript: '',
   });
+  // Inserted oldest-first on purpose: distinct processed_at timestamps let the
+  // command-palette spec prove the recency sort actually reorders them (without
+  // timestamps every row tied at epoch 0 and insertion order masked a missing sort).
   const SEEDED_MEETINGS =
     process.env.STENOAI_E2E_SEED_MEETINGS === '1'
       ? [
-          seedMeeting('Q3 Budget review', 'q3-budget.json', 'We revised the budget numbers for Q3.'),
-          seedMeeting('Marketing sync', 'marketing.json', 'Budget owner is now Sarah.'),
-          seedMeeting('Standup notes', 'standup.json', 'No blockers today.'),
+          seedMeeting('Standup notes', 'standup.json', 'No blockers today.', '2026-06-18T10:00:00Z'),
+          seedMeeting('Marketing sync', 'marketing.json', 'Budget owner is now Sarah.', '2026-06-19T10:00:00Z'),
+          seedMeeting('Q3 Budget review', 'q3-budget.json', 'We revised the budget numbers for Q3.', '2026-06-20T10:00:00Z'),
         ]
       : [];
 

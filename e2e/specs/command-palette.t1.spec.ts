@@ -19,8 +19,12 @@ test('⌘K opens the palette and searches note content', async ({ launchApp }) =
   await page.keyboard.press('ControlOrMeta+k');
   await expect(page.locator(palette)).toBeVisible();
 
-  // Empty query shows recent notes (all 3 seeds).
+  // Empty query shows recent notes (all 3 seeds), newest-first. The seeds are
+  // inserted oldest-first, so this order proves the recency sort runs (not just
+  // insertion order).
   await expect(page.locator(result)).toHaveCount(3);
+  await expect(page.locator(result).nth(0)).toContainText('Q3 Budget review');
+  await expect(page.locator(result).nth(2)).toContainText('Standup notes');
 
   // "budget" matches a title (Q3 Budget review) + a summary (Marketing sync).
   await page.locator(input).fill('budget');
