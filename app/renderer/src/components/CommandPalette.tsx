@@ -19,6 +19,12 @@ export function useCommandPalette(): PaletteContextValue {
 
 const RECENT_COUNT = 8;
 
+/** Most-recent first. The backend list (useMeetings) is unsorted; Home re-sorts
+ *  in groupPrevious by the same key, so we mirror it here. */
+function recencyMs(m: Meeting): number {
+  return new Date(m.session_info.processed_at ?? m.session_info.updated_at ?? 0).getTime();
+}
+
 /**
  * Global ⌘K search. Provides `open()` to descendants (the sidebar trigger) and
  * renders the overlay itself. Searches notes (title + summary) from any screen
@@ -37,27 +43,42 @@ export function CommandPaletteProvider({ children }: { children: React.ReactNode
 
 function CommandPalette({ onClose }: { onClose: () => void }) {
   const meetings = useMeetings();
-  const all = React.useMemo(
-    () => (meetings.data ?? []).filter((m) => !m.is_recording),
+  // One recency sort feeds both paths: empty-query recents and search results
+  // (searchNotes preserves input order, so results stay newest-first).
+  const sorted = React.useMemo(
+    () => (meetings.data ?? []).filter((m) => !m.is_recording).slice().sort((a, b) => recencyMs(b) - recencyMs(a)),
     [meetings.data],
   );
   const [query, setQuery] = React.useState('');
   const [selected, setSelected] = React.useState(0);
   const inputRef = React.useRef<HTMLInputElement>(null);
+  const listRef = React.useRef<HTMLUListElement>(null);
 
+  // Autofocus the input on open; restore focus to the previously-focused
+  // element (e.g. the sidebar trigger) when the palette closes.
   React.useEffect(() => {
+    const prev = document.activeElement as HTMLElement | null;
     inputRef.current?.focus();
+    return () => prev?.focus?.();
   }, []);
 
   const results = React.useMemo<Meeting[]>(() => {
-    if (!query.trim()) return all.slice(0, RECENT_COUNT);
-    return searchNotes(all, query);
-  }, [all, query]);
+    if (!query.trim()) return sorted.slice(0, RECENT_COUNT);
+    return searchNotes(sorted, query);
+  }, [sorted, query]);
 
-  // Keep selection in range as results change.
+  // Keep selection within [0, len-1]; never let it stick at -1 once results
+  // appear (ArrowDown on an empty list would otherwise leave it negative).
   React.useEffect(() => {
-    setSelected((s) => Math.min(s, Math.max(0, results.length - 1)));
+    setSelected((s) => Math.max(0, Math.min(s, results.length - 1)));
   }, [results.length]);
+
+  // Scroll the active option into view as the keyboard selection moves.
+  React.useEffect(() => {
+    listRef.current
+      ?.querySelector(`[data-index="${selected}"]`)
+      ?.scrollIntoView({ block: 'nearest' });
+  }, [selected]);
 
   const openMeeting = (m: Meeting | undefined) => {
     if (!m) return;
@@ -78,8 +99,14 @@ function CommandPalette({ onClose }: { onClose: () => void }) {
     } else if (e.key === 'Enter') {
       e.preventDefault();
       openMeeting(results[selected]);
+    } else if (e.key === 'Tab') {
+      // The input is the only tab stop in the dialog; trap Tab so focus can't
+      // escape behind the aria-modal overlay.
+      e.preventDefault();
     }
   };
+
+  const activeId = results[selected] ? `cmdk-opt-${selected}` : undefined;
 
   return (
     <div
@@ -109,6 +136,10 @@ function CommandPalette({ onClose }: { onClose: () => void }) {
             style={{ color: 'var(--fg-1)', fontFamily: 'var(--font-sans)' }}
             placeholder="Search notes…"
             aria-label="Search notes"
+            role="combobox"
+            aria-expanded="true"
+            aria-controls="cmdk-listbox"
+            aria-activedescendant={activeId}
             value={query}
             onChange={(e) => {
               setQuery(e.target.value);
@@ -117,7 +148,13 @@ function CommandPalette({ onClose }: { onClose: () => void }) {
           />
         </div>
 
-        <ul role="listbox" className="scrollbar-clean max-h-[50vh] overflow-auto py-1">
+        <ul
+          ref={listRef}
+          id="cmdk-listbox"
+          role="listbox"
+          aria-label="Search results"
+          className="scrollbar-clean max-h-[50vh] overflow-auto py-1"
+        >
           {results.length === 0 ? (
             <li
               className="px-3.5 py-6 text-center text-[13px]"
@@ -132,8 +169,10 @@ function CommandPalette({ onClose }: { onClose: () => void }) {
               return (
                 <li
                   key={m.session_info.summary_file}
+                  id={`cmdk-opt-${i}`}
                   role="option"
                   aria-selected={i === selected}
+                  data-index={i}
                   data-testid="command-palette-result"
                   className="mx-1 cursor-pointer rounded-md px-2.5 py-2"
                   style={i === selected ? { background: 'var(--surface-active)' } : undefined}

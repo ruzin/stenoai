@@ -332,7 +332,7 @@ export function Sidebar({
               type="button"
               data-testid="sidebar-search-trigger"
               onClick={() => palette.open()}
-              className="flex h-[30px] w-full items-center rounded-md border-0 px-[10px] pl-[30px] text-left text-[13px] outline-none transition-colors hover:shadow-[inset_0_0_0_1px_hsl(var(--border))]"
+              className="flex h-[30px] w-full items-center rounded-md border-0 px-[10px] pl-[30px] text-left text-[13px] outline-none transition-colors hover:shadow-[inset_0_0_0_1px_hsl(var(--border))] focus-visible:shadow-[inset_0_0_0_1px_hsl(var(--border))]"
               style={{ background: 'rgba(27,27,25,0.04)', color: 'var(--fg-muted)', fontFamily: 'var(--font-sans)' }}
               aria-label="Search notes"
             >

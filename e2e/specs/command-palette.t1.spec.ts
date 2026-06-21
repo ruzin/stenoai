@@ -33,14 +33,29 @@ test('arrow + enter opens the selected note; esc closes', async ({ launchApp }) 
   const { page } = await launchApp(launchOpts);
 
   await page.keyboard.press('ControlOrMeta+k');
-  await page.locator(input).fill('marketing');
-  await expect(page.locator(result)).toHaveCount(1);
+  // "budget" matches two notes (Q3 Budget review title, Marketing sync summary),
+  // newest-first. ArrowDown moves selection from the first to the second.
+  await page.locator(input).fill('budget');
+  await expect(page.locator(result)).toHaveCount(2);
+  await expect(page.locator('[data-index="0"]')).toHaveAttribute('aria-selected', 'true');
+
+  await page.keyboard.press('ArrowDown');
+  await expect(page.locator('[data-index="1"]')).toHaveAttribute('aria-selected', 'true');
 
   await page.keyboard.press('Enter');
   await expect(page.locator(palette)).toBeHidden();
   await expect
     .poll(() => page.evaluate(() => window.location.hash))
     .toContain('/meetings/marketing.json');
+});
+
+test('esc closes the palette', async ({ launchApp }) => {
+  const { page } = await launchApp(launchOpts);
+
+  await page.keyboard.press('ControlOrMeta+k');
+  await expect(page.locator(palette)).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.locator(palette)).toBeHidden();
 });
 
 test('sidebar search box opens the palette', async ({ launchApp }) => {
