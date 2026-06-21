@@ -130,7 +130,7 @@ function CommandPalette({ onClose }: { onClose: () => void }) {
       className="fixed inset-0 z-[200] flex items-start justify-center"
       onMouseDown={onClose}
     >
-      <div className="absolute inset-0" style={{ background: 'rgba(0,0,0,0.32)' }} />
+      <div className="absolute inset-0 bg-ink-900/40 backdrop-blur-sm" />
       <div
         role="dialog"
         aria-modal="true"
