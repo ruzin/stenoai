@@ -22,7 +22,7 @@ def _build_transcriber() -> WhisperTranscriber:
     # import-availability gate — mirrors tests/test_transcriber_failure.py.
     transcriber = WhisperTranscriber.__new__(WhisperTranscriber)
     transcriber.model = None
-    transcriber.model_size = "small"
+    transcriber.model_size = "large-v3-turbo"
     transcriber.backend = "parakeet-tdt-v3"
     return transcriber
 

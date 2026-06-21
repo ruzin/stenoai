@@ -209,6 +209,9 @@ const stenoai = {
     setSilenceAutoStopMinutes: (v) => invoke('set-silence-auto-stop-minutes', v),
     showSilenceAutoStopNotification: (payload) => invoke('show-silence-auto-stop-notification', payload),
     showNoteReadyNotification: (payload) => invoke('show-note-ready-notification', payload),
+    // Design-for-test seam: the production fire path is the main-side scheduler
+    // timer; this lets e2e drive the gate + suppression deterministically.
+    showPremeetingNotification: (payload) => invoke('show-premeeting-notification', payload),
     getLanguage: () => invoke('get-language'),
     setLanguage: (code) => invoke('set-language', code),
     getUserName: () => invoke('get-user-name'),

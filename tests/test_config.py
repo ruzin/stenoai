@@ -46,10 +46,10 @@ class ConfigLanguageTests(unittest.TestCase):
 
 
 class ConfigWhisperModelTests(unittest.TestCase):
-    def test_default_whisper_model_is_small(self):
+    def test_default_whisper_model_is_large_v3_turbo(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             config = Config(config_path=Path(tmp_dir) / "config.json")
-            self.assertEqual(config.get_whisper_model(), "small")
+            self.assertEqual(config.get_whisper_model(), "large-v3-turbo")
 
     def test_set_whisper_model_persists_supported_size(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -65,14 +65,14 @@ class ConfigWhisperModelTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             config = Config(config_path=Path(tmp_dir) / "config.json")
             self.assertFalse(config.set_whisper_model("ultra-mega"))
-            self.assertEqual(config.get_whisper_model(), "small")
+            self.assertEqual(config.get_whisper_model(), "large-v3-turbo")
 
     def test_get_whisper_model_falls_back_when_stored_value_invalid(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             config = Config(config_path=Path(tmp_dir) / "config.json")
             # Simulate a hand-edited config with a stale model name
             config._config["whisper_model"] = "obsolete-model"
-            self.assertEqual(config.get_whisper_model(), "small")
+            self.assertEqual(config.get_whisper_model(), "large-v3-turbo")
 
 
 class ConfigSummaryModelTests(unittest.TestCase):
@@ -94,23 +94,44 @@ class ConfigSummaryModelTests(unittest.TestCase):
             Config.SUPPORTED_MODELS[Config.DEFAULT_MODEL].get("deprecated"), True
         )
 
-    def test_llama32_kept_as_recognised_active_model(self):
-        # Kept (not removed/deprecated) so users already on it keep a recognised
-        # selection after the default swap.
+    def test_llama32_deprecated_but_kept(self):
+        # Deprecated (tucked into the dimmed Settings section) but NOT removed,
+        # so a user already on it keeps a recognised selection.
         self.assertIn("llama3.2:3b", Config.SUPPORTED_MODELS)
-        self.assertNotEqual(
+        self.assertEqual(
             Config.SUPPORTED_MODELS["llama3.2:3b"].get("deprecated"), True
         )
 
     def test_existing_user_choice_survives_default_swap(self):
-        # Migration safety: a user already on the old default keeps it; only a
-        # fresh config (no stored "model") gets the new gemma4 default.
+        # Migration safety: a user on a still-supported (even deprecated) model
+        # keeps it; only a fresh config (no stored "model") gets the default.
         with tempfile.TemporaryDirectory() as tmp_dir:
             path = Path(tmp_dir) / "config.json"
             config = Config(config_path=path)
             self.assertTrue(config.set_model("llama3.2:3b"))
             reloaded = Config(config_path=path)
             self.assertEqual(reloaded.get_model(), "llama3.2:3b")
+
+    def test_removed_model_migrates_to_default(self):
+        # A user pinned to a model retired from SUPPORTED_MODELS (e.g. the
+        # removed gemma3:4b) is migrated to the default on load, not left stuck.
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "config.json"
+            path.write_text(json.dumps({"model": "gemma3:4b"}))
+            config = Config(config_path=path)
+            self.assertEqual(config.get_model(), "gemma4:e2b-it-qat")
+            # Persisted so the migration doesn't re-run forever.
+            self.assertEqual(json.loads(path.read_text())["model"], "gemma4:e2b-it-qat")
+
+    def test_custom_pulled_model_is_not_migrated(self):
+        # set_model intentionally allows arbitrary user-pulled Ollama models
+        # (not in SUPPORTED_MODELS). The migration must only touch the specific
+        # retired ids — a custom model must survive a reload untouched.
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "config.json"
+            path.write_text(json.dumps({"model": "llama3.2:1b"}))
+            config = Config(config_path=path)
+            self.assertEqual(config.get_model(), "llama3.2:1b")
 
 
 class ConfigWhisperModelMigrationTests(unittest.TestCase):
@@ -133,14 +154,14 @@ class ConfigWhisperModelMigrationTests(unittest.TestCase):
                 json.loads(path.read_text())["whisper_model"], "large-v3-turbo"
             )
 
-    def test_migrates_retired_tier_to_small(self):
+    def test_migrates_retired_tier_to_turbo(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             path = Path(tmp_dir) / "config.json"
             self._write_config(path, {"whisper_model": "medium"})
             config = Config(config_path=path)
-            self.assertEqual(config.get_whisper_model(), "small")
+            self.assertEqual(config.get_whisper_model(), "large-v3-turbo")
             self.assertEqual(
-                json.loads(path.read_text())["whisper_model"], "small"
+                json.loads(path.read_text())["whisper_model"], "large-v3-turbo"
             )
 
     def test_leaves_supported_value_untouched(self):

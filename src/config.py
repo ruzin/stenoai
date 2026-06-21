@@ -130,9 +130,10 @@ class Config:
             "name": "Llama 3.2 3B",
             "size": "2GB",
             "params": "3B",
-            "description": "Fast and lightweight for quick meetings",
+            "description": "Replaced by Gemma 4 E2B",
             "speed": "very fast",
-            "quality": "good"
+            "quality": "good",
+            "deprecated": True
         },
         "qwen3.5:9b": {
             "name": "Qwen 3.5 9B",
@@ -158,24 +159,6 @@ class Config:
             "speed": "medium",
             "quality": "excellent"
         },
-        "gemma3:4b": {
-            "name": "Gemma 3 4B",
-            "size": "2.5GB",
-            "params": "4B",
-            "description": "Replaced by Gemma 4 E2B",
-            "speed": "fast",
-            "quality": "good",
-            "deprecated": True
-        },
-        "deepseek-r1:14b": {
-            "name": "DeepSeek R1 14B",
-            "size": "9.0GB",
-            "params": "14B",
-            "description": "Replaced by Gemma 4 12B",
-            "speed": "fast",
-            "quality": "excellent",
-            "deprecated": True
-        }
     }
 
 
@@ -271,6 +254,7 @@ class Config:
         self._config: Dict[str, Any] = self._load()
         self._migrate_cloud_model_map()
         self._migrate_whisper_model()
+        self._migrate_summary_model()
         self._migrate_transcription_engine()
 
     def _migrate_transcription_engine(self) -> None:
@@ -292,23 +276,39 @@ class Config:
         self._save()
 
     def _migrate_whisper_model(self) -> None:
-        """Map any out-of-current-list whisper model to a supported one.
+        """Map any out-of-current-list whisper model to the supported one.
 
-        - 'large' (invalid pywhispercpp name — crashes the native loader) →
-          'large-v3-turbo' (closest current-list match).
-        - Any other previously-supported but now-retired tier
-          (tiny/base/medium/large-v3) → 'small' (the safe default).
+        The curated lineup is now a single tier (large-v3-turbo), so any
+        previously-supported but now-retired tier (tiny/base/small/medium/
+        large/large-v3) migrates to it.
         """
         if self._load_failed:
             return  # never persist defaults over a corrupt-but-recoverable file
         current = self._config.get("whisper_model")
         if current is None or current in self.SUPPORTED_WHISPER_MODELS:
             return
-        if current == "large":
-            self._config["whisper_model"] = "large-v3-turbo"
-        else:
-            self._config["whisper_model"] = "small"
+        self._config["whisper_model"] = "large-v3-turbo"
         self._save()
+
+    # Curated models we retired — a user pinned to one is migrated to the
+    # default on load. Deliberately a specific allow-list, NOT "anything not in
+    # SUPPORTED_MODELS": set_model intentionally allows arbitrary user-pulled
+    # Ollama models (e.g. llama3.2:1b), and those must NOT be clobbered.
+    _RETIRED_SUMMARY_MODELS = {"gemma3:4b", "deepseek-r1:14b"}
+
+    def _migrate_summary_model(self) -> None:
+        """Reset a retired summary model to the default.
+
+        gemma3:4b / deepseek-r1:14b were removed from SUPPORTED_MODELS; a user
+        pinned to one would otherwise stay on a model the app no longer surfaces.
+        Only those specific ids migrate — custom/self-pulled models and the
+        deprecated-but-kept llama3.2:3b are left alone.
+        """
+        if self._load_failed:
+            return  # never persist defaults over a corrupt-but-recoverable file
+        if self._config.get("model") in self._RETIRED_SUMMARY_MODELS:
+            self._config["model"] = self.DEFAULT_MODEL
+            self._save()
 
     def _migrate_cloud_model_map(self) -> None:
         """One-shot migration from legacy single 'cloud_model' to per-provider
@@ -416,7 +416,7 @@ class Config:
             "anonymous_id": str(uuid.uuid4()),
             "storage_path": "",
             "keep_recordings": False,
-            "whisper_model": "small",
+            "whisper_model": "large-v3-turbo",
             "transcription_engine": "parakeet",
             "version": "1.0"
         }
@@ -632,10 +632,10 @@ class Config:
 
     def get_whisper_model(self) -> str:
         """Get the configured Whisper model size."""
-        model = self._config.get("whisper_model", "small")
+        model = self._config.get("whisper_model", "large-v3-turbo")
         if model not in self.SUPPORTED_WHISPER_MODELS:
-            logger.warning(f"Invalid Whisper model in config: {model}; falling back to small")
-            return "small"
+            logger.warning(f"Invalid Whisper model in config: {model}; falling back to large-v3-turbo")
+            return "large-v3-turbo"
         return model
 
     def set_whisper_model(self, model_size: str) -> bool:

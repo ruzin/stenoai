@@ -400,7 +400,7 @@ class WhisperTranscriber:
     model (no size variants).
     """
 
-    def __init__(self, model_size: str = "small"):
+    def __init__(self, model_size: str = "large-v3-turbo"):
         if not (PARAKEET_AVAILABLE or WHISPER_CPP_AVAILABLE):
             raise ImportError(
                 "No ASR backend available. Need parakeet-mlx (Apple Silicon) "
@@ -442,7 +442,7 @@ class WhisperTranscriber:
 
         pywhispercpp auto-downloads the ggml weight on first construction;
         ``self.model_size`` should be one of the entries in
-        ``src/whisper_models.py`` (``small`` is the historical default).
+        ``src/whisper_models.py`` (large-v3-turbo is the default).
         """
         import multiprocessing
         n_threads = max(1, multiprocessing.cpu_count() - 2)

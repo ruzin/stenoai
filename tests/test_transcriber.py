@@ -26,7 +26,7 @@ class WhisperTranscriberShimTests(unittest.TestCase):
         # would add filesystem dependencies to these unit tests.
         transcriber = WhisperTranscriber.__new__(WhisperTranscriber)
         transcriber.model = None
-        transcriber.model_size = "small"
+        transcriber.model_size = "large-v3-turbo"
         transcriber.backend = "parakeet-tdt-v3"
         return transcriber
 

@@ -10,13 +10,13 @@ class IsInstalledTests(unittest.TestCase):
     def test_false_when_ggml_file_missing(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             with patch.object(whisper_models, "get_models_dir", return_value=Path(tmp_dir)):
-                self.assertFalse(whisper_models.is_installed("small"))
+                self.assertFalse(whisper_models.is_installed("large-v3-turbo"))
 
     def test_true_when_ggml_file_present(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
-            (Path(tmp_dir) / "ggml-small.bin").write_bytes(b"x")
+            (Path(tmp_dir) / "ggml-large-v3-turbo.bin").write_bytes(b"x")
             with patch.object(whisper_models, "get_models_dir", return_value=Path(tmp_dir)):
-                self.assertTrue(whisper_models.is_installed("small"))
+                self.assertTrue(whisper_models.is_installed("large-v3-turbo"))
 
 
 class DownloadWithProgressTests(unittest.TestCase):
@@ -30,11 +30,11 @@ class DownloadWithProgressTests(unittest.TestCase):
 
     def test_short_circuits_when_file_exists(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
-            existing = Path(tmp_dir) / "ggml-small.bin"
+            existing = Path(tmp_dir) / "ggml-large-v3-turbo.bin"
             existing.write_bytes(b"abc")
             callback = MagicMock()
             with patch.object(whisper_models, "get_models_dir", return_value=Path(tmp_dir)):
-                ok = whisper_models.download_with_progress("small", callback)
+                ok = whisper_models.download_with_progress("large-v3-turbo", callback)
             self.assertTrue(ok)
             # Emits a single 100% so the renderer's progress map flushes to
             # complete, even though no network call happened.
@@ -55,10 +55,10 @@ class DownloadWithProgressTests(unittest.TestCase):
             callback = MagicMock()
             with patch.object(whisper_models, "get_models_dir", return_value=Path(tmp_dir)), \
                  patch("requests.get", return_value=fake_response):
-                ok = whisper_models.download_with_progress("small", callback)
+                ok = whisper_models.download_with_progress("large-v3-turbo", callback)
 
             self.assertTrue(ok)
-            dest = Path(tmp_dir) / "ggml-small.bin"
+            dest = Path(tmp_dir) / "ggml-large-v3-turbo.bin"
             self.assertTrue(dest.exists())
             self.assertEqual(dest.read_bytes(), b"abcdefghijkl")
             # The .part file is renamed away on success
@@ -92,7 +92,7 @@ class DownloadWithProgressTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             with patch.object(whisper_models, "get_models_dir", return_value=Path(tmp_dir)), \
                  patch("requests.get", return_value=fake_response):
-                ok = whisper_models.download_with_progress("small", lambda *a: None)
+                ok = whisper_models.download_with_progress("large-v3-turbo", lambda *a: None)
 
             self.assertFalse(ok)
             # No partial file lingers — would otherwise grow the models dir

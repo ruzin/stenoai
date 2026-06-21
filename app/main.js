@@ -1114,6 +1114,10 @@ if (!gotSingleInstanceLock) {
     if (!IS_E2E) createTray();
     setupAutoUpdater();
     setupAutoMeetingDetector();
+    // Pre-meeting heads-up scheduler (calendar-time based). Skipped under E2E —
+    // tests drive the show-premeeting-notification IPC seam directly; this would
+    // otherwise start a background calendar poll.
+    if (!IS_E2E) startPreMeetingScheduler();
 
     // Hard lock: reconcile ai_provider with the org session once at startup
     // (belt-and-braces for tray-only starts; the sidebar's org-status call
@@ -3849,6 +3853,11 @@ function setupAutoMeetingDetector() {
 
 app.on('before-quit', () => {
   stopMicMonitor();
+  if (premeetingRescheduleTimer) {
+    clearInterval(premeetingRescheduleTimer);
+    premeetingRescheduleTimer = null;
+  }
+  clearPreMeetingTimers();
 });
 
 // Add IPC handler for sending debug logs to frontend
@@ -5922,8 +5931,13 @@ ipcMain.on('system-audio-recording-state', (event, isRecording) => {
   sendDebugLog(`[sysaudio] state -> ${isRecording ? 'true' : 'false'} (was ${systemAudioRecordingActive})`);
   systemAudioRecordingActive = isRecording;
   if (!isRecording && !currentRecordingProcess) {
+    // Reset the elapsed counter (avoids leaking startedAtMs when startCapture
+    // fails), but DON'T blank currentRecordingSessionName here: this is a
+    // transient capture-state report, and a brief renderer-capture flap
+    // (fail→recover) would otherwise drop the "which meeting is live" label
+    // mid-recording. The name is authoritatively cleared on real stop
+    // (stop-recording-ui); a stale name while hasRecording is false is inert.
     resetRecordingRuntimeState();
-    currentRecordingSessionName = null;
   }
   updateTrayIcon(isRecording);
   updateTrayMenu();
@@ -7314,6 +7328,179 @@ async function getCalendarEventForNow(timeoutMs = 1500) {
     clearTimeout(timeoutId);
   }
 }
+
+// ── Pre-meeting notification ────────────────────────────────────────────
+// ~2 min before a scheduled calendar meeting, fire a heads-up notification;
+// clicking it focuses Steno. INDEPENDENT of auto-detect (which is mic-based and
+// prompts to record): this is calendar-time based and only focuses — never
+// records — so there's no recording conflict. Suppressed for a meeting we're
+// already recording (matched by calendar event id).
+const PREMEETING_LEAD_MS = 2 * 60 * 1000;          // fire this long before start
+const PREMEETING_RESCHEDULE_MS = 10 * 60 * 1000;   // re-poll the calendar this often
+const premeetingTimers = new Map();                // eventId -> setTimeout handle
+const premeetingFiredIds = new Set();              // ids already fired this app session
+let premeetingRescheduleTimer = null;
+
+// Fetch upcoming events from whichever provider is connected (mirrors
+// getCalendarEventForNow's fetch). Returns the normalized event array, or null
+// when no calendar is connected / the fetch fails.
+// Sentinel: a calendar IS connected but this fetch failed transiently (network
+// blip / timeout). Distinct from "no calendar connected" so the scheduler can
+// KEEP existing timers on a blip (don't drop a reminder for a meeting starting
+// in the re-poll gap) but CLEAR them on a real disconnect (no stale reminders).
+const SCHEDULER_FETCH_FAILED = Symbol('scheduler-fetch-failed');
+
+async function fetchCalendarEventsForScheduler(timeoutMs = 4000) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const googleToken = await getValidAccessToken();
+    if (googleToken) {
+      const raw = await fetchCalendarEvents(googleToken, 7, controller.signal);
+      return raw.map(normalizeCalendarEvent).filter(Boolean);
+    }
+    const outlookToken = await getValidOutlookAccessToken();
+    if (outlookToken) {
+      const raw = await fetchOutlookCalendarEvents(outlookToken, 7, controller.signal);
+      return raw.map(normalizeCalendarEvent).filter(Boolean);
+    }
+    return null; // no calendar connected
+  } catch (err) {
+    sendDebugLog(`[premeeting] calendar fetch failed: ${err.message}`);
+    return SCHEDULER_FETCH_FAILED; // transient — caller keeps existing timers
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+// Mirrors the per-event predicates of Home.tsx's `upcomingToday` (timed/
+// not-all-day, not declined, start in the future) — but deliberately WITHOUT
+// Home's start-of-tomorrow upper bound: a 2-min-before reminder should arm for
+// any upcoming meeting in the fetch window, not just today's.
+function isPremeetingEligible(e, nowMs) {
+  if (!e || typeof e.start !== 'string') return false;
+  if (!e.start.includes('T')) return false;      // all-day events are date-only
+  if (e.is_all_day === true) return false;
+  if (e.response_status === 'declined') return false;
+  const startMs = new Date(e.start).getTime();
+  return isFinite(startMs) && startMs > nowMs;
+}
+
+// The single fire path, shared by the armed timer and the
+// show-premeeting-notification test seam. Returns whether the banner was shown.
+// No internal firedIds dedupe (the scheduler owns that, skipping already-fired
+// ids on re-poll) so the seam can drive it repeatedly in tests.
+async function firePreMeetingNotification(event) {
+  premeetingTimers.delete(event.id);
+  // Gate: the master notifications toggle (no dedicated pre-meeting toggle —
+  // this folds under "Desktop notifications").
+  if (!(await notificationsEnabled())) return false;
+  // Suppress only while we're recording THIS meeting — matched by name. A
+  // recording started from a calendar event is named after its title (auto-detect
+  // accept + Home upcoming-card both pass event.title), so the live session name
+  // equals the reminder's event title. Key off currentRecordingSessionName — the
+  // AUTHORITATIVE "which meeting is live" signal: set on start, cleared only on a
+  // real stop (NOT on a transient capture flap, see system-audio-recording-state),
+  // and null whenever there's no active session. Deliberately NOT gated on the
+  // volatile systemAudioRecordingActive, which flips false on every capture blip
+  // and would let a reminder through mid-recording during a flap. A name can't be
+  // stale here (stop clears it), so there's no risk of suppressing a later
+  // meeting. Title collisions (two same-named meetings) are an accepted edge for a
+  // heads-up notification.
+  if (currentRecordingSessionName && currentRecordingSessionName === event.title) {
+    sendDebugLog(`[premeeting] suppressed — already recording "${event.title}"`);
+    return false;
+  }
+  if (!Notification.isSupported()) return false;
+  const notif = new Notification({
+    title: 'Meeting starting',
+    body: `${event.title || 'Your meeting'} starts in 2 minutes`,
+  });
+  notif.on('click', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      if (!mainWindow.isVisible()) mainWindow.show();
+      mainWindow.focus();
+    }
+  });
+  notif.show();
+  // Mark fired only after we've actually shown it, so an unshowable notif
+  // (no OS support) isn't permanently skipped by the scheduler's dedupe.
+  premeetingFiredIds.add(event.id);
+  return true;
+}
+
+function clearPreMeetingTimers() {
+  for (const t of premeetingTimers.values()) clearTimeout(t);
+  premeetingTimers.clear();
+}
+
+// (Re)arm timers from the latest calendar fetch. Idempotent: clears prior timers
+// and re-arms, so moved/cancelled events drop out and new ones get picked up.
+// Skips ids already fired this session and events already inside the lead window
+// (don't backfire). Gated on the master notifications toggle + a connected
+// calendar: a disconnect clears armed timers; a transient fetch blip keeps them.
+async function schedulePreMeetingNotifications() {
+  if (!(await notificationsEnabled())) {
+    clearPreMeetingTimers();
+    return;
+  }
+  const events = await fetchCalendarEventsForScheduler();
+  if (events === SCHEDULER_FETCH_FAILED) return; // transient blip — keep existing timers
+  if (!events) {
+    // No calendar connected — drop any reminders armed while it was. (A transient
+    // fetch error returns the sentinel above and is handled differently.)
+    clearPreMeetingTimers();
+    return;
+  }
+  const nowMs = Date.now();
+  // Forget fired ids that are no longer a just-fired occurrence: pruned if the
+  // event dropped out of the fetch (cancelled / rolled past the window) OR its
+  // start is now in the future again (a recurring meeting reusing the same id —
+  // re-firing in the pre-start gap is already prevented by the delay<=0 guard
+  // below). Keeps the Set bounded across a long-running session.
+  const startById = new Map(events.map((e) => [e.id, new Date(e.start).getTime()]));
+  for (const id of premeetingFiredIds) {
+    const startMs = startById.get(id);
+    if (startMs === undefined || (isFinite(startMs) && startMs > nowMs)) {
+      premeetingFiredIds.delete(id);
+    }
+  }
+  clearPreMeetingTimers();
+  for (const e of events) {
+    if (!isPremeetingEligible(e, nowMs)) continue;
+    if (premeetingFiredIds.has(e.id)) continue;
+    const delay = new Date(e.start).getTime() - PREMEETING_LEAD_MS - nowMs;
+    if (delay <= 0) continue; // already within the lead window — don't backfire
+    premeetingTimers.set(e.id, setTimeout(() => { void firePreMeetingNotification(e); }, delay));
+  }
+  sendDebugLog(`[premeeting] armed ${premeetingTimers.size} notification(s)`);
+}
+
+// Run once at app ready + on a periodic re-poll so newly-added/moved events get
+// armed and cancelled ones drop. Safe to call repeatedly.
+function startPreMeetingScheduler() {
+  void schedulePreMeetingNotifications();
+  if (premeetingRescheduleTimer) clearInterval(premeetingRescheduleTimer);
+  premeetingRescheduleTimer = setInterval(() => {
+    void schedulePreMeetingNotifications();
+  }, PREMEETING_RESCHEDULE_MS);
+}
+
+// Test seam + the production render path's IPC mirror. The armed timer calls
+// firePreMeetingNotification directly; this lets e2e drive the gate + suppression
+// deterministically (returns `shown` like the other notification handlers). The
+// renderer never calls this in production.
+ipcMain.handle('show-premeeting-notification', async (_event, payload) => {
+  try {
+    const event = payload && payload.event;
+    if (!event || !event.id) return { success: false, error: 'event with id required' };
+    const shown = await firePreMeetingNotification(event);
+    return { success: true, shown };
+  } catch (e) {
+    sendDebugLog(`Failed to show pre-meeting notification: ${e.message}`);
+    return { success: false, error: e.message };
+  }
+});
 
 // ── Outlook Calendar: IPC Handlers ──────────────────────────────────────
 
