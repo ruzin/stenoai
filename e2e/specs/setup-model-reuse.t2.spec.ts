@@ -8,10 +8,14 @@ import path from 'path';
 
 /**
  * T2 — #123: first-run setup must REUSE an already-installed supported model
- * instead of re-pulling the hardcoded default. The mock Ollama lists `llama3.2:3b`
- * under /api/tags, so the `setup-ollama-and-model` flow should detect it, set it
- * as the active model, and issue NO /api/pull (the regression assertion is
- * `pullCalls() === 0`). Model-free: only /api/tags + config I/O, no model loads.
+ * instead of re-pulling the hardcoded default. The mock Ollama lists the default
+ * `gemma4:e2b-it-qat` (plus `llama3.2:3b`) under /api/tags. We seed config with a
+ * supported-but-NOT-installed model (`qwen3.5:9b`), so the `setup-ollama-and-model`
+ * flow must fall through to the installed default, set it as the active model, and
+ * issue NO /api/pull. The regression assertion is `pullCalls() === 0`; the active
+ * model flipping from the seeded `qwen3.5:9b` to the reused `gemma4:e2b-it-qat`
+ * proves the reuse path actually resolved + persisted an installed model rather
+ * than leaving the default untouched. Model-free: only /api/tags + config I/O.
  *
  * The dev-mode handler still locates the bundled Ollama binary (`bin/ollama`)
  * before reusing a running instance, so this skips LOUDLY when that binary is
@@ -52,7 +56,10 @@ test('setup reuses an installed supported model and skips the pull (#123)', asyn
   killOllama();
   const mock = await startMockOllama();
   try {
-    writeUserConfig(userDataDir, { ai_provider: 'local' });
+    // Seed a supported model that the mock does NOT list as installed, so the
+    // picker must fall through to the installed default (gemma4:e2b-it-qat) — and
+    // the post-setup model change proves the reuse path ran.
+    writeUserConfig(userDataDir, { ai_provider: 'local', model: 'qwen3.5:9b' });
     const { page } = await launchApp();
 
     const res = await page.evaluate(() =>
@@ -63,8 +70,9 @@ test('setup reuses an installed supported model and skips the pull (#123)', asyn
 
     // The #123 regression assertion: the installed model was reused, not pulled.
     expect(mock.pullCalls()).toBe(0);
-    // ...and it was persisted as the active model.
-    await expect.poll(() => readUserConfig(userDataDir).model).toBe('llama3.2:3b');
+    // ...and the installed default was resolved + persisted as the active model
+    // (flipped away from the seeded, not-installed qwen3.5:9b).
+    await expect.poll(() => readUserConfig(userDataDir).model).toBe('gemma4:e2b-it-qat');
   } finally {
     await mock.close();
   }
