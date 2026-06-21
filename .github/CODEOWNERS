@@ -1,0 +1,3 @@
+# Require @ruzin review on all changes. With require_code_owner_reviews
+# enabled on main, every PR needs the owner's approval before merge.
+* @ruzin
