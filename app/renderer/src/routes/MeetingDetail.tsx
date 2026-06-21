@@ -4,6 +4,7 @@ import {
   Check,
   ChevronLeft,
   Clock,
+  CloudOff,
   Copy,
   Folder as FolderIcon,
   Globe,
@@ -127,6 +128,11 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
   const isShared = backupState.data?.shared ?? false;
   const isSharing = shareToOrg.isPending;
   const isUnsharing = unshareFromOrg.isPending;
+  // A persisted upload failure on a note that never landed — surfaced as a
+  // "Backup failed · Retry" affordance so an auto-backup that silently failed
+  // (e.g. behind a corporate proxy) is visible and one-click retryable.
+  const backupFailed = !isShared && Boolean(backupState.data?.failed_at);
+  const backupError = backupState.data?.error ?? null;
 
   const onShareToOrg = async () => {
     setShareError(null);
@@ -513,6 +519,22 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
               {participants.length} {participants.length === 1 ? 'person' : 'people'}
             </ChipV2>
           )}
+          {/* Quiet, non-alarming backup status for org users — a calm
+              metadata chip (not a red alert) that a user can click to retry.
+              The failure is also written to the diagnostic log for support. */}
+          {orgSession.data?.signedIn && backupFailed && (
+            <ChipV2
+              icon={<CloudOff className="size-[11px]" />}
+              onClick={() => void onShareToOrg()}
+              title={
+                backupError
+                  ? `Last backup failed: ${backupError}. Click to retry.`
+                  : 'This note has not been backed up. Click to retry.'
+              }
+            >
+              {isSharing ? 'Backing up…' : 'Not backed up'}
+            </ChipV2>
+          )}
         </div>
 
         {titleError && (
@@ -711,14 +733,16 @@ interface ChipV2Props {
   icon?: React.ReactNode;
   children: React.ReactNode;
   onClick?: () => void;
+  title?: string;
 }
 
-function ChipV2({ icon, children, onClick }: ChipV2Props) {
+function ChipV2({ icon, children, onClick, title }: ChipV2Props) {
   return (
     <button
       type="button"
       className="mv-chip"
       onClick={onClick}
+      title={title}
       style={onClick ? undefined : { cursor: 'default' }}
     >
       {icon}

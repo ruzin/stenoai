@@ -233,6 +233,12 @@ export type OrgGetBackupStateResponse = Result<{
   shared: boolean;
   meeting_id: string | null;
   attempted_at: string | null;
+  /** ISO timestamp of the last upload failure for this note, or null. Set
+   *  independently of `shared` so a never-shared note can still report a
+   *  failed backup attempt; cleared once a share/backup actually lands. */
+  failed_at: string | null;
+  /** Truncated error message from the last failed backup, or null. */
+  error: string | null;
 }>;
 
 /** Outcome from `org.unshareBySummary`. `adapter_status` tells you which

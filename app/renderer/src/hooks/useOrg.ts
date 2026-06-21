@@ -180,8 +180,13 @@ export function useShareToOrg() {
   return useMutation({
     mutationFn: async (payload: OrgShareMeetingPayload) =>
       unwrap(await ipc().org.shareMeeting(payload)).meeting,
-    onSuccess: (_data, payload) => {
+    onSuccess: () => {
       qc.invalidateQueries({ queryKey: orgKeys.meetings() });
+    },
+    // Refresh the per-note backup state whether the share succeeded (flips to
+    // "Shared", clears the failure) or failed (main persisted failed_at, so
+    // the "Backup failed · Retry" affordance stays accurate).
+    onSettled: (_data, _err, payload) => {
       if (payload.summaryFile) {
         qc.invalidateQueries({ queryKey: orgKeys.backupState(payload.summaryFile) });
       }
@@ -214,7 +219,14 @@ export function useOrgBackupState(summaryFile: string | null) {
       : [...orgKeys.all, 'backup-state', 'none'],
     queryFn: async () => {
       const res = unwrap(await ipc().org.getBackupState(summaryFile!));
-      return { shared: res.shared, meeting_id: res.meeting_id };
+      return {
+        shared: res.shared,
+        meeting_id: res.meeting_id,
+        // failed_at/error drive the note-detail "Not backed up" status chip
+        // for a note whose backup never landed.
+        failed_at: res.failed_at ?? null,
+        error: res.error ?? null,
+      };
     },
     enabled: !!summaryFile,
     staleTime: 0,

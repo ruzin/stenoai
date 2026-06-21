@@ -88,6 +88,13 @@ AUDIO_LOUDNORM = "I=-16:TP=-1.5:LRA=11"
 # 10 minutes is generous headroom before we give up and use the original.
 AUDIO_PREPROCESS_TIMEOUT_S = 600
 
+# Floor for the per-channel diarised split decode (see
+# _diarised_split_timeout). The split fully decodes the whole recording once
+# per channel; a fixed 120 s used to silently time out on multi-hour stereo
+# files and drop us back to a mono (no [You]/[Others]) transcript. Matches the
+# pre-process floor; the helper scales it up with duration for long meetings.
+DIARISED_SPLIT_TIMEOUT_S = 600
+
 # RMS energy gate for "channel has speech". Intentionally low (-70 dB) so
 # headphones-mode mic recordings — captured at much lower amplitude than
 # speakers-mode — still pass. The model handles low-amplitude speech fine;
@@ -173,6 +180,22 @@ def _parse_duration_from_ffmpeg_stderr(stderr: str) -> Optional[float]:
     if not m:
         return None
     return int(m.group(1)) * 3600 + int(m.group(2)) * 60 + float(m.group(3))
+
+
+def _diarised_split_timeout(duration_seconds: Optional[float]) -> int:
+    """Wall-clock cap for one per-channel ffmpeg decode of the full recording.
+
+    A single channel split decodes the entire file; ffmpeg decode runs well
+    under 2x realtime even on a slow CPU-only box, so scaling the cap to
+    ``duration * 2`` leaves generous headroom while still bounding a runaway.
+    The previous fixed 120 s silently timed out on multi-hour stereo meetings
+    and dropped the whole recording back to a mono (no [You]/[Others])
+    transcript. When duration is unknown (some WebM headers) we fall back to
+    the floor, which still comfortably beats the old 120 s.
+    """
+    if duration_seconds and duration_seconds > 0:
+        return max(DIARISED_SPLIT_TIMEOUT_S, int(duration_seconds * 2))
+    return DIARISED_SPLIT_TIMEOUT_S
 
 
 try:
@@ -932,6 +955,10 @@ class WhisperTranscriber:
         mic_path = Path(temp_dir) / f"stenoai_ch0_{audio_filepath.stem}.wav"
         system_path = Path(temp_dir) / f"stenoai_ch1_{audio_filepath.stem}.wav"
 
+        # Scale the decode timeout to the recording length — a fixed 120 s
+        # silently timed out on multi-hour files and lost speaker separation.
+        split_timeout = _diarised_split_timeout(duration)
+
         try:
             for ch_idx, out_path in [(0, mic_path), (1, system_path)]:
                 # High-pass only on the diarised path — deliberately NO
@@ -944,7 +971,7 @@ class WhisperTranscriber:
                      '-af', f'pan=mono|c0=c{ch_idx},highpass=f={AUDIO_HIGHPASS_HZ}',
                      '-ar', '16000', '-ac', '1', '-c:a', 'pcm_s16le',
                      str(out_path)],
-                    capture_output=True, timeout=120
+                    capture_output=True, timeout=split_timeout
                 )
                 if result.returncode != 0:
                     logger.error(f"Channel {ch_idx} extraction failed: {result.stderr.decode()}")

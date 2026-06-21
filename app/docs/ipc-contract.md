@@ -601,7 +601,11 @@ doesn't need a parallel subscription.
 `org-share-meeting` is the canonical share path: main does presign → PUT
 to S3 → register metadata in one step, so the renderer never sees the
 presigned URL or the bytes-in-flight. `org-create-meeting` is kept for
-inline-body fallbacks (legacy or test).
+inline-body fallbacks (legacy or test). A failed backup is recorded in
+`.org-backup-state.json` (surfaced per-note via `org-get-backup-state`'s
+`failed_at`/`error`, the note-detail "Not backed up" chip) and written to the
+persistent diagnostic log, so support can see failures even though the
+user-facing signal is intentionally quiet.
 
 ```ts
 interface OrgStatusResponse {
