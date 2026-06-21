@@ -5931,8 +5931,13 @@ ipcMain.on('system-audio-recording-state', (event, isRecording) => {
   sendDebugLog(`[sysaudio] state -> ${isRecording ? 'true' : 'false'} (was ${systemAudioRecordingActive})`);
   systemAudioRecordingActive = isRecording;
   if (!isRecording && !currentRecordingProcess) {
+    // Reset the elapsed counter (avoids leaking startedAtMs when startCapture
+    // fails), but DON'T blank currentRecordingSessionName here: this is a
+    // transient capture-state report, and a brief renderer-capture flap
+    // (fail→recover) would otherwise drop the "which meeting is live" label
+    // mid-recording. The name is authoritatively cleared on real stop
+    // (stop-recording-ui); a stale name while hasRecording is false is inert.
     resetRecordingRuntimeState();
-    currentRecordingSessionName = null;
   }
   updateTrayIcon(isRecording);
   updateTrayMenu();
