@@ -5952,7 +5952,12 @@ ipcMain.on('system-audio-recording-state', (event, isRecording) => {
   if (!isRecording && !currentRecordingProcess) {
     resetRecordingRuntimeState();
     currentRecordingSessionName = null;
-    currentRecordingEventId = null;
+    // NOTE: deliberately NOT clearing currentRecordingEventId here. This is a
+    // transient capture-state report — a brief renderer-capture flap
+    // (fail→recover) would otherwise drop the meeting association mid-recording.
+    // The id is cleared on real stop / start-failure, and the pre-meeting
+    // suppression additionally requires systemAudioRecordingActive, so a stale
+    // id after a genuine capture failure can't wrongly suppress.
   }
   updateTrayIcon(isRecording);
   updateTrayMenu();
@@ -7404,8 +7409,10 @@ async function firePreMeetingNotification(event) {
   // Gate: the master notifications toggle (no dedicated pre-meeting toggle —
   // this folds under "Desktop notifications").
   if (!(await notificationsEnabled())) return false;
-  // Suppress if we're already recording THIS meeting (matched by event id).
-  if (currentRecordingEventId && currentRecordingEventId === event.id) {
+  // Suppress only if we're ACTIVELY recording THIS meeting (matched by event
+  // id). The systemAudioRecordingActive guard means a stale id left over from a
+  // failed/ended capture can't suppress a later meeting's reminder.
+  if (systemAudioRecordingActive && currentRecordingEventId === event.id) {
     sendDebugLog(`[premeeting] suppressed — already recording event ${event.id}`);
     return false;
   }

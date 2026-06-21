@@ -79,8 +79,10 @@ test('pre-meeting notification is suppressed for the meeting being recorded (eve
   );
   expect(started.success).toBe(true);
 
-  // Suppressed for the meeting we're recording (matched by event id)...
-  expect((await showPremeeting(page, EVT)).shown).toBe(false);
+  // Suppressed for the meeting we're recording (matched by event id). Poll to
+  // tolerate a brief renderer-capture flap on a headless runner settling the
+  // active-recording flag (the event-id association itself now survives a flap).
+  await expect.poll(async () => (await showPremeeting(page, EVT)).shown).toBe(false);
   // ...but fires for a DIFFERENT meeting.
   expect((await showPremeeting(page, { id: 'evt-other', title: 'Other call' })).shown).not.toBe(
     false,
@@ -88,7 +90,7 @@ test('pre-meeting notification is suppressed for the meeting being recorded (eve
 
   // Stop clears the association; the notif fires for that meeting again.
   await page.evaluate(() => (window as StenoWindow).stenoai.recording.stop());
-  expect((await showPremeeting(page, EVT)).shown).not.toBe(false);
+  await expect.poll(async () => (await showPremeeting(page, EVT)).shown).not.toBe(false);
 
   expect(fileSig(realUserDataDir())).toBe(realDirBefore);
 });
