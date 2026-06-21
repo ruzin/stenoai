@@ -3985,7 +3985,42 @@ ipcMain.handle('setup-ollama-and-model', async () => {
       }
       sendDebugLog('Warning: Ollama may not be fully ready, attempting pull anyway...');
     }
-    
+
+    // #123: don't re-download the default if the connected Ollama already has a
+    // supported model. The backend matches installed models against the supported
+    // registry (single source of truth in config.py); on a hit we set it active
+    // and skip the pull entirely, so the default Local path needs no network for
+    // anyone with a usable Ollama already set up. Best-effort: any failure here
+    // falls through to the normal download below.
+    try {
+      const resolvedRaw = await runPythonScript('simple_recorder.py', ['resolve-setup-model'], true);
+      const resolved = JSON.parse(resolvedRaw.trim());
+      if (resolved && resolved.installed) {
+        sendDebugLog(`Found already-installed model "${resolved.installed}" — skipping download`);
+        // Persist it as the active model, and only report success once that
+        // write actually succeeded. set-model now exits non-zero on a
+        // config-write failure (runPythonScript rejects) AND prints
+        // success:false, so we check both: swallowing the failure here would
+        // have setup claim success with no active model saved.
+        try {
+          const setRaw = await runPythonScript('simple_recorder.py', ['set-model', resolved.installed], true);
+          // set-model prints a human line before the JSON, so grab the last
+          // JSON-looking line rather than parsing the whole stdout.
+          const jsonLine = setRaw.trim().split('\n').reverse().find((l) => l.trim().startsWith('{'));
+          const setRes = jsonLine ? JSON.parse(jsonLine) : null;
+          if (!setRes || setRes.success !== true) {
+            return { success: false, error: (setRes && setRes.error) || 'Failed to save the selected model.' };
+          }
+        } catch (e) {
+          return { success: false, error: `Failed to save the selected model: ${e.message}` };
+        }
+        trackEvent('setup_completed', { step: 'ollama_existing_model' });
+        return { success: true, message: `Using already-installed model ${resolved.installed}` };
+      }
+    } catch (e) {
+      sendDebugLog(`Could not check for installed models, proceeding to download: ${e.message}`);
+    }
+
     sendDebugLog('Downloading AI model (this may take several minutes)...');
     sendDebugLog(`POST http://127.0.0.1:11434/api/pull {name: "${DEFAULT_AI_MODEL}"}`);
 

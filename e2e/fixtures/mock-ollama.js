@@ -22,12 +22,13 @@ const OLLAMA_PORT = 11434;
  * Start the mock Ollama on 11434.
  * @param {object} [opts]
  * @param {string} [opts.chatReply='ok'] assistant content returned by /api/chat.
- * @returns {Promise<{ close: () => Promise<void>, lastChatPrompt: () => string|null, chatCalls: () => number }>}
+ * @returns {Promise<{ close: () => Promise<void>, lastChatPrompt: () => string|null, chatCalls: () => number, pullCalls: () => number }>}
  */
 function startMockOllama(opts = {}) {
   const chatReply = opts.chatReply ?? 'ok';
   let lastChatPrompt = null;
   let chatCalls = 0;
+  let pullCalls = 0;
 
   return new Promise((resolve, reject) => {
     const server = http.createServer((req, res) => {
@@ -66,6 +67,7 @@ function startMockOllama(opts = {}) {
       // /api/pull — defensive: if the model is ever considered missing, answer
       // a success stream rather than 404 so summarisation doesn't crash.
       if (req.method === 'POST' && req.url === '/api/pull') {
+        pullCalls++;
         res.writeHead(200, { 'content-type': 'application/x-ndjson' });
         res.end(JSON.stringify({ status: 'success' }) + '\n');
         return;
@@ -105,6 +107,7 @@ function startMockOllama(opts = {}) {
         close: () => new Promise((r) => server.close(() => r())),
         lastChatPrompt: () => lastChatPrompt,
         chatCalls: () => chatCalls,
+        pullCalls: () => pullCalls,
       });
     });
   });

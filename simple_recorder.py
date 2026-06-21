@@ -2828,6 +2828,10 @@ def set_model(model_name):
     else:
         print(f"ERROR: Failed to save model configuration")
         print(json.dumps({"success": False, "error": "Failed to save config"}))
+        # Exit non-zero so callers (e.g. the setup-ollama-and-model reuse path in
+        # main.js) can't read a config-write failure as success — the model was
+        # NOT persisted as active. sys.exit (not bare exit) for the PyInstaller bundle.
+        sys.exit(1)
 
 
 @cli.command()
@@ -3536,6 +3540,75 @@ def pull_model(model_name):
         print(json.dumps({"success": True, "model": model_name}))
     except Exception as e:
         print(json.dumps({"success": False, "error": str(e)}))
+
+
+def pick_installed_supported_model(installed_names, preferred, supported_order, deprecated=()):
+    """Pick the best already-installed supported Ollama model id, or None (#123).
+
+    Args:
+        installed_names: model ids the connected Ollama reports via /api/tags.
+        preferred: ids to try first, in order — the configured model, then the
+            packaged default. Honours "prefer the configured default if present".
+        supported_order: the supported registry keys, ascending by capability
+            (config.SUPPORTED_MODELS order); the fall-through when no preferred
+            id is installed.
+        deprecated: supported ids flagged deprecated — chosen only as a last
+            resort so a live model always wins over a retired one.
+
+    Returns the id to reuse, or None when nothing supported is installed (the
+    caller then pulls the default).
+    """
+    installed = set(installed_names)
+    supported = set(supported_order)
+    dep = set(deprecated)
+    for cand in preferred:
+        if cand and cand in supported and cand in installed:
+            return cand
+    for cand in supported_order:
+        if cand in installed and cand not in dep:
+            return cand
+    for cand in supported_order:
+        if cand in installed and cand in dep:
+            return cand
+    return None
+
+
+@cli.command(name='resolve-setup-model')
+def resolve_setup_model():
+    """Report an already-installed supported model so first-run setup can skip a
+    redundant download (#123).
+
+    Prints {"installed": "<model-id>"} when the connected Ollama already has a
+    supported model, else {"installed": null}. Never pulls — the caller decides
+    whether to download. Uses the HTTP API (ollama package), not the binary.
+    """
+    from src.config import get_config, Config
+    from src.ollama_manager import start_ollama_server
+
+    result = {"installed": None}
+    try:
+        start_ollama_server()
+        import ollama
+        resp = ollama.list()
+        installed = {
+            getattr(m, 'model', '') or ''
+            for m in (getattr(resp, 'models', None) or [])
+        }
+        installed.discard('')
+        config = get_config()
+        deprecated = [
+            mid for mid, meta in Config.SUPPORTED_MODELS.items()
+            if meta.get('deprecated')
+        ]
+        result["installed"] = pick_installed_supported_model(
+            installed_names=installed,
+            preferred=[config.get_model(), Config.DEFAULT_MODEL],
+            supported_order=list(Config.SUPPORTED_MODELS.keys()),
+            deprecated=deprecated,
+        )
+    except Exception as e:
+        result["error"] = str(e)
+    print(json.dumps(result))
 
 
 @cli.command(name='check-adapter')
