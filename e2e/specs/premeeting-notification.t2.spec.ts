@@ -23,6 +23,7 @@ type StenoWindow = Window & {
     recording: {
       start: (name?: string) => Promise<{ success: boolean }>;
       stop: () => Promise<{ success: boolean }>;
+      getQueue: () => Promise<{ hasRecording: boolean; sessionName: string | null }>;
     };
   };
 };
@@ -76,9 +77,26 @@ test('pre-meeting notification is suppressed for the meeting being recorded (nam
   );
   expect(started.success).toBe(true);
 
-  // Suppressed for the meeting we're recording (session name === event title).
-  // Poll to tolerate the active-recording flag settling on a headless runner.
-  await expect.poll(async () => (await showPremeeting(page, EVT)).shown).toBe(false);
+  // Atomic + self-diagnosing: in ONE evaluate, read the live recording state and
+  // (only while it's active) fire the notification, returning a coded result.
+  // Polled so a headless-runner capture flap that briefly drops hasRecording is
+  // retried rather than failing; the coded value also surfaces the real state
+  // (queue/sessionName) in any timeout message.
+  await expect
+    .poll(
+      async () =>
+        page.evaluate(async (evt) => {
+          const q = await (window as StenoWindow).stenoai.recording.getQueue();
+          if (!q.hasRecording) return `no-recording(name=${q.sessionName})`;
+          const r = await (window as StenoWindow).stenoai.settings.showPremeetingNotification({
+            event: evt,
+          });
+          return r.shown ? `fired(name=${q.sessionName})` : 'suppressed';
+        }, EVT),
+      { timeout: 15_000 },
+    )
+    .toBe('suppressed');
+
   // ...but fires for a DIFFERENT meeting (different title).
   expect((await showPremeeting(page, { id: 'evt-other', title: 'Other call' })).shown).not.toBe(
     false,
