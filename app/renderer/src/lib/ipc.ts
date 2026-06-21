@@ -241,11 +241,6 @@ export type OrgGetBackupStateResponse = Result<{
   error: string | null;
 }>;
 
-/** Bulk list of summaryFiles whose last backup failed and which haven't since
- *  been shared — drives the meetings-list "Not backed up" chip with a single
- *  read instead of a per-row getBackupState call. */
-export type OrgListBackupFailuresResponse = Result<{ failures: string[] }>;
-
 /** Outcome from `org.unshareBySummary`. `adapter_status` tells you which
  *  branch ran so the renderer can word the toast — `deleted` is the happy
  *  path, `already-gone` means the org-side meeting was 404 (someone else
@@ -842,7 +837,6 @@ export interface StenoaiBridge {
     deleteMeeting: RequestFn<[id: string], Result<{ id: string }>>;
     shareMeeting: RequestFn<[payload: OrgShareMeetingPayload], OrgShareMeetingResponse>;
     getBackupState: RequestFn<[summaryFile: string], OrgGetBackupStateResponse>;
-    listBackupFailures: RequestFn<[], OrgListBackupFailuresResponse>;
     unshareBySummary: RequestFn<[summaryFile: string], OrgUnshareBySummaryResponse>;
     getAutoBackup: RequestFn<[], GetOrgAutoBackupResponse>;
     setAutoBackup: RequestFn<[enabled: boolean], SetOrgAutoBackupResponse>;

@@ -7997,9 +7997,10 @@ function recordOrgBackupAttempt(summaryFile, meetingId) {
 // Record an upload failure WITHOUT marking the note as attempted — kept in a
 // separate map so isOrgBackupAttempted() (and thus the auto-backup
 // dedup/retry gate) stays driven by successes only, leaving the door open
-// for a retry. Surfaced per-note via getOrgBackupEntry so the renderer can
-// show a persistent "Backup failed · Retry" affordance instead of swallowing
-// the error.
+// for a retry. Surfaced per-note via getOrgBackupEntry (the note-detail "Not
+// backed up" status chip) AND written to the persistent diagnostic log so a
+// failure is discoverable by support/IT even though the user-facing signal is
+// deliberately quiet (an end user can't fix e.g. a corporate-proxy failure).
 function recordOrgBackupFailure(summaryFile, errorMessage) {
   const state = loadOrgBackupState();
   if (!state.failures) state.failures = {};
@@ -8007,6 +8008,13 @@ function recordOrgBackupFailure(summaryFile, errorMessage) {
     failed_at: new Date().toISOString(),
     error: errorMessage ? String(errorMessage).slice(0, 500) : null,
   };
+  // Best-effort diagnostic logging (never throws): the persistent processing
+  // log on disk for support, plus the in-app debug panel.
+  try {
+    const msg = `org backup failed for ${path.basename(summaryFile)}: ${errorMessage || 'unknown error'}`;
+    processingLog.logLine('org-backup', msg);
+    sendDebugLog(`[org-backup] ${msg}`);
+  } catch (_) { /* logging is best-effort */ }
   return saveOrgBackupState(state);
 }
 
@@ -8018,15 +8026,6 @@ function clearOrgBackupAttempt(summaryFile) {
   delete state.attempts[summaryFile];
   if (state.failures) delete state.failures[summaryFile];
   return saveOrgBackupState(state);
-}
-
-// The summaryFiles of notes whose last backup failed and which have NOT since
-// been shared. Reads the one state file once so the meetings list can show a
-// "Not backed up" chip without an IPC per row.
-function listOrgBackupFailures() {
-  const state = loadOrgBackupState();
-  if (!state.failures) return [];
-  return Object.keys(state.failures).filter((sf) => !state.attempts[sf]);
 }
 
 function getOrgBackupEntry(summaryFile) {
@@ -8460,16 +8459,6 @@ ipcMain.handle('org-get-backup-state', async (_event, summaryFile) => {
   try {
     if (!summaryFile) return { success: false, error: 'summaryFile is required' };
     return { success: true, ...getOrgBackupEntry(summaryFile) };
-  } catch (e) {
-    return { success: false, error: e.message };
-  }
-});
-
-// Bulk lookup for the meetings list: the summaryFiles with an un-recovered
-// backup failure. One file read for the whole list (vs one IPC per row).
-ipcMain.handle('org-list-backup-failures', async () => {
-  try {
-    return { success: true, failures: listOrgBackupFailures() };
   } catch (e) {
     return { success: false, error: e.message };
   }

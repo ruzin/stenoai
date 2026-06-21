@@ -277,7 +277,6 @@ const stenoai = {
     deleteMeeting: (id) => invoke('org-delete-meeting', id),
     shareMeeting: (payload) => invoke('org-share-meeting', payload),
     getBackupState: (summaryFile) => invoke('org-get-backup-state', summaryFile),
-    listBackupFailures: () => invoke('org-list-backup-failures'),
     unshareBySummary: (summaryFile) => invoke('org-unshare-by-summary', summaryFile),
     getAutoBackup: () => invoke('org-get-auto-backup'),
     setAutoBackup: (enabled) => invoke('org-set-auto-backup', enabled),

@@ -1,10 +1,10 @@
 import * as React from 'react';
 import {
-  AlertTriangle,
   Calendar as CalendarIcon,
   Check,
   ChevronLeft,
   Clock,
+  CloudOff,
   Copy,
   Folder as FolderIcon,
   Globe,
@@ -386,38 +386,21 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
                     <button
                       type="button"
                       className="flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-sm transition-colors hover:bg-[color:var(--surface-hover)] disabled:opacity-50"
-                      // Danger treatment only when failed-and-idle — a retry
-                      // in flight reads as in-progress, not as an error.
-                      style={{
-                        color: !isSharing && (backupFailed || shareError) ? 'var(--danger)' : 'var(--fg-1)',
-                      }}
+                      style={{ color: 'var(--fg-1)' }}
                       onClick={() => void onShareToOrg()}
                       // Disable while the persistent share state is still
                       // loading — otherwise a fast click during initial
                       // mount would treat the note as "not shared" and
                       // upload a duplicate against an already-shared note.
                       disabled={isSharing || backupState.isLoading}
-                      title={
-                        backupFailed && backupError
-                          ? `Last backup failed: ${backupError}`
-                          : `Share with ${orgSession.data.orgId}`
-                      }
+                      title={`Share with ${orgSession.data.orgId}`}
                     >
-                      {!isSharing && (backupFailed || shareError) ? (
-                        <AlertTriangle
-                          className="size-[13px] shrink-0"
-                          style={{ color: 'var(--danger)' }}
-                        />
-                      ) : (
-                        <Globe className="size-[13px] shrink-0" style={{ color: 'var(--fg-2)' }} />
-                      )}
+                      <Globe className="size-[13px] shrink-0" style={{ color: 'var(--fg-2)' }} />
                       {isSharing
                         ? 'Sharing…'
                         : shareError
                           ? `Share failed: ${shareError}`
-                          : backupFailed
-                            ? 'Backup failed · Retry'
-                            : `Share with ${orgSession.data.orgId}`}
+                          : `Share with ${orgSession.data.orgId}`}
                     </button>
                   )
                 )}
@@ -534,6 +517,22 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
           {participants.length > 0 && (
             <ChipV2 icon={<Users className="size-[11px]" />}>
               {participants.length} {participants.length === 1 ? 'person' : 'people'}
+            </ChipV2>
+          )}
+          {/* Quiet, non-alarming backup status for org users — a calm
+              metadata chip (not a red alert) that a user can click to retry.
+              The failure is also written to the diagnostic log for support. */}
+          {orgSession.data?.signedIn && backupFailed && (
+            <ChipV2
+              icon={<CloudOff className="size-[11px]" />}
+              onClick={() => void onShareToOrg()}
+              title={
+                backupError
+                  ? `Last backup failed: ${backupError}. Click to retry.`
+                  : 'This note has not been backed up. Click to retry.'
+              }
+            >
+              {isSharing ? 'Backing up…' : 'Not backed up'}
             </ChipV2>
           )}
         </div>
@@ -734,14 +733,16 @@ interface ChipV2Props {
   icon?: React.ReactNode;
   children: React.ReactNode;
   onClick?: () => void;
+  title?: string;
 }
 
-function ChipV2({ icon, children, onClick }: ChipV2Props) {
+function ChipV2({ icon, children, onClick, title }: ChipV2Props) {
   return (
     <button
       type="button"
       className="mv-chip"
       onClick={onClick}
+      title={title}
       style={onClick ? undefined : { cursor: 'default' }}
     >
       {icon}

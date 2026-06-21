@@ -14,8 +14,6 @@ import path from 'path';
  * adapter forced to fail the S3 PUT, then asserts:
  *   - the failure is recorded (getBackupState.failed_at/error set, shared:false)
  *     WITHOUT marking the note "attempted" (so retry stays possible),
- *   - the bulk listBackupFailures includes it (drives the list "Not backed up"
- *     chip),
  *   - a subsequent successful share CLEARS the failure and flips shared:true.
  *
  * Model-free; deterministic (the mock PUTs back to itself). Mirrors
@@ -45,12 +43,11 @@ type StenoWindow = Window & {
       tryAutoBackup: (payload: unknown) => Promise<AutoBackupResult>;
       shareMeeting: (payload: unknown) => Promise<Result & { meeting?: Meeting }>;
       getBackupState: (summaryFile: string) => Promise<BackupState>;
-      listBackupFailures: () => Promise<Result & { failures: string[] }>;
     };
   };
 };
 
-test('org auto-backup failure is persisted, listed, and cleared on retry; real dir untouched', async ({
+test('org auto-backup failure is persisted, surfaced, and cleared on retry; real dir untouched', async ({
   launchApp,
   userDataDir,
 }) => {
@@ -113,14 +110,7 @@ test('org auto-backup failure is persisted, listed, and cleared on retry; real d
     expect(stateAfterFail.failed_at).toBeTruthy();
     expect(stateAfterFail.error).toBeTruthy();
 
-    // 3) Bulk list (drives the list "Not backed up" chip) includes it.
-    const failuresAfter = await page.evaluate(() =>
-      (window as StenoWindow).stenoai.org.listBackupFailures(),
-    );
-    expect(failuresAfter.success).toBe(true);
-    expect(failuresAfter.failures).toContain(summaryFile);
-
-    // 4) Heal the adapter and retry via the manual share path.
+    // 3) Heal the adapter and retry via the manual share path.
     adapter.setFailS3Put(false);
     const retry = await page.evaluate(
       (sf) =>
@@ -134,7 +124,7 @@ test('org auto-backup failure is persisted, listed, and cleared on retry; real d
     expect(retry.success).toBe(true);
     expect(adapter.s3Puts()).toBeGreaterThan(0);
 
-    // 5) Success clears the failure and flips shared:true.
+    // 4) Success clears the failure and flips shared:true.
     const stateAfterRetry = await page.evaluate(
       (sf) => (window as StenoWindow).stenoai.org.getBackupState(sf),
       summaryFile,
@@ -142,12 +132,6 @@ test('org auto-backup failure is persisted, listed, and cleared on retry; real d
     expect(stateAfterRetry.shared).toBe(true);
     expect(stateAfterRetry.failed_at).toBeNull();
     expect(stateAfterRetry.meeting_id).toBe(retry.meeting!.id);
-
-    // 6) And it's gone from the bulk failures list.
-    const failuresCleared = await page.evaluate(() =>
-      (window as StenoWindow).stenoai.org.listBackupFailures(),
-    );
-    expect(failuresCleared.failures).not.toContain(summaryFile);
 
     // Keystone: everything landed in the temp dir; real user-data untouched.
     expect(fileSig(realUserDataDir())).toBe(realDirBefore);
