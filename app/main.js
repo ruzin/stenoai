@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell, systemPreferences, globalShortcut, safeStorage, Tray, Menu, nativeImage, Notification, powerMonitor, net } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, systemPreferences, globalShortcut, safeStorage, Tray, Menu, nativeImage, Notification, powerMonitor, net, session } = require('electron');
 
 // Prevent EPIPE crashes when stdout/stderr pipe is broken (e.g. launching terminal closed)
 process.stdout?.on('error', () => {});
@@ -1121,6 +1121,22 @@ if (!gotSingleInstanceLock) {
   });
 
   app.whenReady().then(async () => {
+    // Follow the OS system proxy for all main-process HTTP (net.fetch uses the
+    // default session). net.fetch alone honours the *session* proxy, but the
+    // default session does NOT auto-adopt the Windows system proxy — without
+    // this, the org adapter + S3 calls still went direct and failed behind a
+    // corporate proxy (verified on a Windows VM: net::ERR_NETWORK_ACCESS_DENIED
+    // until the session was pointed at the system proxy). mode:'system' is a
+    // no-op on a machine with no proxy configured, so the no-proxy happy path
+    // (and the signed macOS build) is unchanged. Best-effort.
+    try {
+      session.defaultSession.setProxy({ mode: 'system' }).catch((e) => {
+        console.warn('setProxy(system) failed (non-fatal):', e?.message);
+      });
+    } catch (e) {
+      console.warn('setProxy(system) threw (non-fatal):', e?.message);
+    }
+
     // Persistent diagnostic log under <userData>/logs (honors
     // STENOAI_USER_DATA_DIR via getUserDataDir, so e2e/tests stay isolated).
     // The startup marker is a stable anchor that separates sessions.
