@@ -43,9 +43,16 @@ export function TranscriptBar() {
       text = buildTranscriptBundle(meeting.data);
     }
     if (!text) return;
-    await navigator.clipboard.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // Clipboard can reject on lost focus / denied permission. Don't surface a
+      // false "Copied" state, and swallow the rejection so it isn't unhandled.
+      // (The richer MeetingDetail surface shows an inline error; this compact
+      // transcript-bar button has nowhere to put one.)
+    }
   };
 
   if (!transcriptOpen) return null;

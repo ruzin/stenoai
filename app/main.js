@@ -2338,12 +2338,21 @@ ipcMain.handle('export-transcript', async (event, defaultFilename, content) => {
       return { success: false, error: 'No transcript content to export.' };
     }
 
-    const seamPath = process.env.STENOAI_E2E_EXPORT_PATH;
+    // Test-only seam: only honor it under e2e, so a stray env var in a real
+    // launch can't silently redirect a user's export to an arbitrary path.
+    const seamPath = IS_E2E ? process.env.STENOAI_E2E_EXPORT_PATH : undefined;
     let targetPath = seamPath;
 
     if (!targetPath) {
+      // The renderer supplies a suggested name only; reduce it to a bare
+      // filename so a malformed value can't steer defaultPath with an absolute
+      // path or traversal components. The user still confirms via the dialog.
+      const suggested =
+        typeof defaultFilename === 'string' && defaultFilename.trim()
+          ? path.basename(defaultFilename).slice(0, 200)
+          : 'transcript.md';
       const result = await dialog.showSaveDialog(mainWindow, {
-        defaultPath: defaultFilename || 'transcript.md',
+        defaultPath: suggested,
         filters: [
           { name: 'Markdown', extensions: ['md'] },
           { name: 'Text', extensions: ['txt'] },
@@ -2355,7 +2364,8 @@ ipcMain.handle('export-transcript', async (event, defaultFilename, content) => {
       targetPath = result.filePath;
     }
 
-    fs.writeFileSync(targetPath, content, 'utf-8');
+    // Async write so a large transcript can't block the main process/UI thread.
+    await fs.promises.writeFile(targetPath, content, 'utf-8');
     return { success: true, path: targetPath };
   } catch (err) {
     return { success: false, error: String(err && err.message ? err.message : err) };

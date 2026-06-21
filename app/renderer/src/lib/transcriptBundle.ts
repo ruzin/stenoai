@@ -46,7 +46,11 @@ export function defaultExportFilename(meeting: Meeting | null | undefined): stri
     (info?.name ?? '')
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '') || 'transcript';
+      .replace(/^-+|-+$/g, '')
+      // Cap the slug so a very long title can't push the filename past the
+      // ~255-byte filesystem limit (date prefix + ".md" leave headroom).
+      .slice(0, 80)
+      .replace(/-+$/g, '') || 'transcript';
   return `${date}-${slug}.md`;
 }
 
@@ -66,8 +70,11 @@ function secondsToMinutes(seconds: number | undefined): string | null {
   return mins < 1 ? '<1 min' : `${mins} min`;
 }
 
-function participantNames(participants: unknown[] | undefined): string | null {
-  if (!participants || participants.length === 0) return null;
+function participantNames(participants: unknown): string | null {
+  // participants is typed as a list, but malformed/legacy data could hand us a
+  // string or object; calling .map() on a non-array would throw and crash the
+  // whole export render. Guard the collection itself, not just its entries.
+  if (!Array.isArray(participants) || participants.length === 0) return null;
   const names = participants
     .map((p) => {
       // participants is unknown[]; a non-string entry (or a {name} whose name
