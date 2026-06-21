@@ -101,7 +101,11 @@ test('org/S3 traffic routes through the system proxy (net.fetch, not undici); re
     const proxied = proxy.requests();
     const adapterHost = adapter.url.replace(/^https?:\/\//, '');
     expect(proxied.some((u) => u.includes(adapterHost))).toBe(true);
-    expect(proxied.some((u) => u.includes('/auth/login') || u.includes('/meetings') || u.includes('/uploads/presign'))).toBe(true);
+    // The adapter auth/CRUD call traversed the proxy...
+    expect(proxied.some((u) => u.includes('/auth/login'))).toBe(true);
+    // ...and so did the S3 PUT specifically (the originally-broken leg — the
+    // mock's presigned upload_url points back at itself as /s3/<key>).
+    expect(proxied.some((u) => u.includes('/s3/'))).toBe(true);
 
     // Keystone: nothing leaked into the real user-data dir.
     expect(fileSig(realUserDataDir())).toBe(realDirBefore);

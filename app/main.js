@@ -8087,7 +8087,9 @@ async function adapterFetch(pathname, opts = {}) {
   // corporate-proxied machine every adapter call — and the S3 PUT below — would
   // fail. net.fetch honours the system proxy (incl. PAC) and the OS trust store
   // on both Windows and macOS. Same for every other org/S3 call in this file.
-  const res = await net.fetch(session.adapterUrl + pathname, { ...opts, headers });
+  // credentials:'omit' — the adapter authenticates via the Bearer header above,
+  // not session cookies; net.fetch defaults to 'include', so be explicit.
+  const res = await net.fetch(session.adapterUrl + pathname, { ...opts, headers, credentials: 'omit' });
   const text = await res.text();
   let body;
   try {
@@ -8177,6 +8179,7 @@ ipcMain.handle('org-login', async (_event, payload) => {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ email, password }),
+      credentials: 'omit',
     });
     const text = await res.text();
     let body;
@@ -8353,6 +8356,7 @@ ipcMain.handle('org-sso-google-start', async (_event, payload) => {
         code_challenge: codeChallenge,
         state,
       }),
+      credentials: 'omit',
     });
     const startBody = await startRes.json().catch(() => ({}));
     if (!startRes.ok) {
@@ -8376,6 +8380,7 @@ ipcMain.handle('org-sso-google-start', async (_event, payload) => {
         code_verifier: codeVerifier,
         redirect_uri: redirectUri,
       }),
+      credentials: 'omit',
     });
     const cbBody = await cbRes.json().catch(() => ({}));
     if (!cbRes.ok) {
@@ -8803,6 +8808,7 @@ ipcMain.on('org-chat-stream', async (event, streamId, payload) => {
       },
       body: JSON.stringify(payload || {}),
       signal: controller.signal,
+      credentials: 'omit',
     });
     if (!res.ok) {
       let detail = '';
