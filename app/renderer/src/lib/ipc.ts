@@ -587,7 +587,7 @@ export interface StenoaiBridge {
   };
 
   recording: {
-    start: RequestFn<[name?: string, eventId?: string], StartRecordingResponse>;
+    start: RequestFn<[name?: string], StartRecordingResponse>;
     stop: RequestFn<[], StopRecordingResponse>;
     pause: RequestFn<[], PauseRecordingResponse>;
     resume: RequestFn<[], ResumeRecordingResponse>;
@@ -807,7 +807,7 @@ export interface StenoaiBridge {
     shortcutStopRecording: Subscribe<void>;
     trayStartRecording: Subscribe<void>;
     trayStopRecording: Subscribe<void>;
-    autoRecordRequested: Subscribe<{ sessionName?: string; appName?: string; eventId?: string | null }>;
+    autoRecordRequested: Subscribe<{ sessionName?: string; appName?: string }>;
     autoPauseRequested: Subscribe<void>;
     autoResumeRequested: Subscribe<void>;
     autoSummariseRequested: Subscribe<void>;

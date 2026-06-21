@@ -21,7 +21,7 @@ type StenoWindow = Window & {
       }) => Promise<ShowResult>;
     };
     recording: {
-      start: (name?: string, eventId?: string) => Promise<{ success: boolean }>;
+      start: (name?: string) => Promise<{ success: boolean }>;
       stop: () => Promise<{ success: boolean }>;
     };
   };
@@ -59,7 +59,7 @@ test('pre-meeting notification is gated by the master notifications toggle; real
   expect(fileSig(realUserDataDir())).toBe(realDirBefore);
 });
 
-test('pre-meeting notification is suppressed for the meeting being recorded (event-id match)', async ({
+test('pre-meeting notification is suppressed for the meeting being recorded (name match)', async ({
   launchApp,
   userDataDir,
 }) => {
@@ -67,28 +67,24 @@ test('pre-meeting notification is suppressed for the meeting being recorded (eve
   enableDeterministicRecording(userDataDir);
   const { page } = await launchApp();
 
-  // start-recording-ui sets currentRecordingEventId SYNCHRONOUSLY and returns
-  // success on every platform (renderer-driven path) — so we check suppression
-  // immediately after start, NOT after polling hasRecording. The renderer
-  // capture (which may not sustain on a headless runner and would then clear
-  // the association) is irrelevant to the suppression logic, and waiting for it
-  // is what made this flaky on headless Windows.
+  // Start a recording NAMED after the meeting (a calendar-started recording is
+  // named after its event title). The live recording's session name then equals
+  // the reminder's event.title, which is the suppression match.
   const started = await page.evaluate(
-    (id) => (window as StenoWindow).stenoai.recording.start('Daily standup', id),
-    EVT.id,
+    (name) => (window as StenoWindow).stenoai.recording.start(name),
+    EVT.title,
   );
   expect(started.success).toBe(true);
 
-  // Suppressed for the meeting we're recording (matched by event id). Poll to
-  // tolerate a brief renderer-capture flap on a headless runner settling the
-  // active-recording flag (the event-id association itself now survives a flap).
+  // Suppressed for the meeting we're recording (session name === event title).
+  // Poll to tolerate the active-recording flag settling on a headless runner.
   await expect.poll(async () => (await showPremeeting(page, EVT)).shown).toBe(false);
-  // ...but fires for a DIFFERENT meeting.
+  // ...but fires for a DIFFERENT meeting (different title).
   expect((await showPremeeting(page, { id: 'evt-other', title: 'Other call' })).shown).not.toBe(
     false,
   );
 
-  // Stop clears the association; the notif fires for that meeting again.
+  // Stop clears the session name; the notif fires for that meeting again.
   await page.evaluate(() => (window as StenoWindow).stenoai.recording.stop());
   await expect.poll(async () => (await showPremeeting(page, EVT)).shown).not.toBe(false);
 

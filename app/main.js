@@ -2468,11 +2468,6 @@ function loadAutoDetectMeetingsEnabled() {
 let systemAudioRecordingActive = false;  // Track system audio recording for tray/quit
 let currentRecordingProcess = null;
 let currentRecordingSessionName = null;  // Surfaced in get-queue-status so renderer knows which meeting is live
-// Calendar event id this recording was started for (null for manual/non-calendar
-// recordings). Set ONLY in start-recording-ui (the single setter) and cleared
-// alongside currentRecordingSessionName. Used to suppress the pre-meeting
-// notification for a meeting we're already recording.
-let currentRecordingEventId = null;
 let processingQueue = [];
 
 // ── End orphan-recording cleanup ────────────────────────────────────────
@@ -2869,7 +2864,7 @@ function addToProcessingQueue(audioFile, sessionName, notesFile) {
   processNextInQueue();
 }
 
-ipcMain.handle('start-recording-ui', async (_, sessionName, eventId) => {
+ipcMain.handle('start-recording-ui', async (_, sessionName) => {
   try {
     if (currentRecordingProcess) {
       return { success: false, error: 'Recording already in progress' };
@@ -2894,10 +2889,6 @@ ipcMain.handle('start-recording-ui', async (_, sessionName, eventId) => {
     // retired, so there is no longer a mic-XOR-system fork here.
     sendDebugLog(`Starting renderer-driven recording: ${actualSessionName}`);
     currentRecordingSessionName = actualSessionName;
-    // Single setter for the calendar-event association (used to suppress the
-    // pre-meeting notif for a meeting we're already recording). null for
-    // manual recordings.
-    currentRecordingEventId = eventId || null;
     startRecordingRuntimeState();
     // Flip the active flag immediately so the queue handler reports
     // hasRecording=true on the very next poll, which is what cues the renderer
@@ -2934,7 +2925,6 @@ ipcMain.handle('start-recording-ui', async (_, sessionName, eventId) => {
     console.error('Start recording UI error:', error.message);
     systemAudioRecordingActive = false;
     currentRecordingSessionName = null;
-    currentRecordingEventId = null;
     resetRecordingRuntimeState();
     updateTrayIcon(false);
     trackEvent('error_occurred', { error_type: 'start_recording_ui' });
@@ -3069,7 +3059,6 @@ ipcMain.handle('stop-recording-ui', async () => {
     systemAudioRecordingActive = false;
     stopLiveTranscribe();
     currentRecordingSessionName = null;
-    currentRecordingEventId = null;
     resetRecordingRuntimeState();
     updateTrayIcon(false);
     trackEvent('recording_stopped');
@@ -3078,7 +3067,6 @@ ipcMain.handle('stop-recording-ui', async () => {
     console.error('Stop recording UI error:', error.message);
     systemAudioRecordingActive = false;
     currentRecordingSessionName = null;
-    currentRecordingEventId = null;
     resetRecordingRuntimeState();
     updateTrayIcon(false);
     trackEvent('error_occurred', { error_type: 'stop_recording_ui' });
@@ -3824,14 +3812,7 @@ function requestAutoRecord(appName, originatingEvt, calEvent) {
   if (mainWindow && !mainWindow.isDestroyed()) {
     if (!mainWindow.isVisible()) mainWindow.show();
     mainWindow.focus();
-    // Carry the matched calendar event id so the renderer threads it back
-    // through start-recording-ui (the single setter of currentRecordingEventId).
-    // Setting it here directly would be clobbered by that round-trip.
-    mainWindow.webContents.send('auto-record-requested', {
-      sessionName,
-      appName,
-      eventId: calEvent?.id ?? null,
-    });
+    mainWindow.webContents.send('auto-record-requested', { sessionName, appName });
   }
 }
 
@@ -5952,12 +5933,6 @@ ipcMain.on('system-audio-recording-state', (event, isRecording) => {
   if (!isRecording && !currentRecordingProcess) {
     resetRecordingRuntimeState();
     currentRecordingSessionName = null;
-    // NOTE: deliberately NOT clearing currentRecordingEventId here. This is a
-    // transient capture-state report — a brief renderer-capture flap
-    // (fail→recover) would otherwise drop the meeting association mid-recording.
-    // The id is cleared on real stop / start-failure, and the pre-meeting
-    // suppression additionally requires systemAudioRecordingActive, so a stale
-    // id after a genuine capture failure can't wrongly suppress.
   }
   updateTrayIcon(isRecording);
   updateTrayMenu();
@@ -7409,11 +7384,19 @@ async function firePreMeetingNotification(event) {
   // Gate: the master notifications toggle (no dedicated pre-meeting toggle —
   // this folds under "Desktop notifications").
   if (!(await notificationsEnabled())) return false;
-  // Suppress only if we're ACTIVELY recording THIS meeting (matched by event
-  // id). The systemAudioRecordingActive guard means a stale id left over from a
-  // failed/ended capture can't suppress a later meeting's reminder.
-  if (systemAudioRecordingActive && currentRecordingEventId === event.id) {
-    sendDebugLog(`[premeeting] suppressed — already recording event ${event.id}`);
+  // Suppress only if we're ACTIVELY recording THIS meeting — matched by name:
+  // a recording started from a calendar event is named after its title (the
+  // auto-detect accept + Home upcoming-card both pass event.title), so the live
+  // recording's session name equals the reminder's event title. The
+  // systemAudioRecordingActive guard means a stale name after a stopped/failed
+  // capture can't suppress a later meeting's reminder. Title collisions (two
+  // same-named meetings) are an accepted edge for a heads-up notification.
+  if (
+    systemAudioRecordingActive &&
+    currentRecordingSessionName &&
+    currentRecordingSessionName === event.title
+  ) {
+    sendDebugLog(`[premeeting] suppressed — already recording "${event.title}"`);
     return false;
   }
   if (!Notification.isSupported()) return false;
