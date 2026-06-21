@@ -1,7 +1,8 @@
-import { Folder as FolderIcon, Loader2 } from 'lucide-react';
+import { AlertTriangle, Folder as FolderIcon, Loader2 } from 'lucide-react';
 import type { Meeting } from '@/lib/ipc';
 import { navigate } from '@/lib/router';
 import { useMeetingsList } from '@/lib/meetingsListContext';
+import { useOrgSignedIn, useOrgBackupFailures } from '@/hooks/useOrg';
 
 interface PreviousRowProps {
   meeting: Meeting;
@@ -20,6 +21,16 @@ export function PreviousRow({ meeting, folderName }: PreviousRowProps) {
   const isLive = meeting.is_recording;
   const isProcessing = meeting.is_processing;
   const isSynthetic = isLive || isProcessing;
+
+  // "Not backed up" chip for org users whose auto-backup failed. One shared,
+  // deduped query for the whole list (not one per row); invisible to non-org
+  // users (the failures set is empty / the query is disabled).
+  const orgSignedIn = useOrgSignedIn();
+  const backupFailures = useOrgBackupFailures(orgSignedIn);
+  const backupFailed =
+    !isSynthetic &&
+    orgSignedIn &&
+    Boolean(backupFailures.data?.has(info.summary_file));
 
   // Synthetic rows route to the live or processing screen instead of trying
   // to open the sentinel summary_file (which doesn't exist on disk yet).
@@ -77,7 +88,7 @@ export function PreviousRow({ meeting, folderName }: PreviousRowProps) {
             {preview}
           </div>
         )}
-        {(folderName || participants > 0) && (
+        {(folderName || participants > 0 || backupFailed) && (
           <div
             className="mt-0.5 flex items-center gap-2.5 text-xs"
             style={{ color: 'var(--fg-muted)' }}
@@ -96,6 +107,21 @@ export function PreviousRow({ meeting, folderName }: PreviousRowProps) {
                 {folderName && <span className="opacity-50">·</span>}
                 <span>
                   {participants} {participants === 1 ? 'person' : 'people'}
+                </span>
+              </>
+            )}
+            {backupFailed && (
+              <>
+                {(folderName || participants > 0) && (
+                  <span className="opacity-50">·</span>
+                )}
+                <span
+                  className="inline-flex items-center gap-1 text-[11.5px]"
+                  style={{ color: 'var(--danger)' }}
+                  title="This note failed to back up to your organisation. Open it to retry."
+                >
+                  <AlertTriangle className="size-[11px]" />
+                  Not backed up
                 </span>
               </>
             )}

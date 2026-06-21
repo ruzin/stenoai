@@ -17,6 +17,7 @@ export const orgKeys = {
   meeting: (id: string) => [...orgKeys.all, 'meeting', id] as const,
   autoBackup: () => [...orgKeys.all, 'auto-backup'] as const,
   backupState: (summaryFile: string) => [...orgKeys.all, 'backup-state', summaryFile] as const,
+  backupFailures: () => [...orgKeys.all, 'backup-failures'] as const,
 };
 
 export function useOrgSession() {
@@ -58,6 +59,19 @@ export function useOrgSession() {
   }, [exp, qc]);
 
   return query;
+}
+
+/** Lightweight signed-in check. Shares the org-status query cache (same key /
+ *  queryFn as useOrgSession, so it's deduped — no extra IPC) but WITHOUT the
+ *  JWT-expiry scheduling effect, so it's safe to mount in many list rows
+ *  without spawning a timer per row. */
+export function useOrgSignedIn(): boolean {
+  const query = useQuery({
+    queryKey: orgKeys.status(),
+    queryFn: () => ipc().org.status(),
+    staleTime: 60_000,
+  });
+  return Boolean(query.data?.signedIn);
 }
 
 /** Enterprise policy from the adapter (GET /policy). Fetched once the user is
@@ -180,8 +194,14 @@ export function useShareToOrg() {
   return useMutation({
     mutationFn: async (payload: OrgShareMeetingPayload) =>
       unwrap(await ipc().org.shareMeeting(payload)).meeting,
-    onSuccess: (_data, payload) => {
+    onSuccess: () => {
       qc.invalidateQueries({ queryKey: orgKeys.meetings() });
+    },
+    // Refresh the per-note backup state whether the share succeeded (flips to
+    // "Shared", clears the failure) or failed (main persisted failed_at, so
+    // the "Backup failed · Retry" affordance stays accurate).
+    onSettled: (_data, _err, payload) => {
+      qc.invalidateQueries({ queryKey: orgKeys.backupFailures() });
       if (payload.summaryFile) {
         qc.invalidateQueries({ queryKey: orgKeys.backupState(payload.summaryFile) });
       }
@@ -214,10 +234,34 @@ export function useOrgBackupState(summaryFile: string | null) {
       : [...orgKeys.all, 'backup-state', 'none'],
     queryFn: async () => {
       const res = unwrap(await ipc().org.getBackupState(summaryFile!));
-      return { shared: res.shared, meeting_id: res.meeting_id };
+      return {
+        shared: res.shared,
+        meeting_id: res.meeting_id,
+        // failed_at/error let the detail + list views show a persistent
+        // "Backup failed · Retry" affordance for a note that never landed.
+        failed_at: res.failed_at ?? null,
+        error: res.error ?? null,
+      };
     },
     enabled: !!summaryFile,
     staleTime: 0,
+  });
+}
+
+/** Bulk set of summaryFiles whose last org backup failed (and haven't since
+ *  been shared). One query shared across every meetings-list row — React
+ *  Query dedupes by key, so the list makes a single IPC call regardless of
+ *  row count. Gated on `enabled` (the caller passes the signed-in flag) so a
+ *  non-org user issues no calls. Returns a Set for O(1) per-row membership. */
+export function useOrgBackupFailures(enabled = true) {
+  return useQuery({
+    queryKey: orgKeys.backupFailures(),
+    queryFn: async () => {
+      const res = unwrap(await ipc().org.listBackupFailures());
+      return new Set(res.failures);
+    },
+    enabled,
+    staleTime: 30_000,
   });
 }
 
@@ -234,6 +278,7 @@ export function useUnshareFromOrgBySummary() {
     },
     onSuccess: (_data, summaryFile) => {
       qc.invalidateQueries({ queryKey: orgKeys.backupState(summaryFile) });
+      qc.invalidateQueries({ queryKey: orgKeys.backupFailures() });
       qc.invalidateQueries({ queryKey: orgKeys.meetings() });
     },
   });

@@ -7986,24 +7986,70 @@ function recordOrgBackupAttempt(summaryFile, meetingId) {
     attempted_at: new Date().toISOString(),
     meeting_id: meetingId || null,
   };
+  // A successful share clears any prior recorded failure for this note, so
+  // the "Backup failed · Retry" affordance disappears once it actually lands.
+  if (state.failures && state.failures[summaryFile]) {
+    delete state.failures[summaryFile];
+  }
+  return saveOrgBackupState(state);
+}
+
+// Record an upload failure WITHOUT marking the note as attempted — kept in a
+// separate map so isOrgBackupAttempted() (and thus the auto-backup
+// dedup/retry gate) stays driven by successes only, leaving the door open
+// for a retry. Surfaced per-note via getOrgBackupEntry so the renderer can
+// show a persistent "Backup failed · Retry" affordance instead of swallowing
+// the error.
+function recordOrgBackupFailure(summaryFile, errorMessage) {
+  const state = loadOrgBackupState();
+  if (!state.failures) state.failures = {};
+  state.failures[summaryFile] = {
+    failed_at: new Date().toISOString(),
+    error: errorMessage ? String(errorMessage).slice(0, 500) : null,
+  };
   return saveOrgBackupState(state);
 }
 
 function clearOrgBackupAttempt(summaryFile) {
   const state = loadOrgBackupState();
-  if (!state.attempts[summaryFile]) return true;
+  const hadAttempt = Boolean(state.attempts[summaryFile]);
+  const hadFailure = Boolean(state.failures && state.failures[summaryFile]);
+  if (!hadAttempt && !hadFailure) return true;
   delete state.attempts[summaryFile];
+  if (state.failures) delete state.failures[summaryFile];
   return saveOrgBackupState(state);
+}
+
+// The summaryFiles of notes whose last backup failed and which have NOT since
+// been shared. Reads the one state file once so the meetings list can show a
+// "Not backed up" chip without an IPC per row.
+function listOrgBackupFailures() {
+  const state = loadOrgBackupState();
+  if (!state.failures) return [];
+  return Object.keys(state.failures).filter((sf) => !state.attempts[sf]);
 }
 
 function getOrgBackupEntry(summaryFile) {
   const state = loadOrgBackupState();
   const entry = state.attempts[summaryFile];
-  if (!entry) return { shared: false, meeting_id: null, attempted_at: null };
+  const failure = state.failures ? state.failures[summaryFile] : null;
+  if (!entry) {
+    return {
+      shared: false,
+      meeting_id: null,
+      attempted_at: null,
+      failed_at: failure?.failed_at || null,
+      error: failure?.error || null,
+    };
+  }
   return {
     shared: true,
     meeting_id: entry.meeting_id || null,
     attempted_at: entry.attempted_at || null,
+    // A successful attempt always clears its failure (see
+    // recordOrgBackupAttempt), so a shared note reports no failure.
+    failed_at: null,
+    error: null,
   };
 }
 
@@ -8419,6 +8465,16 @@ ipcMain.handle('org-get-backup-state', async (_event, summaryFile) => {
   }
 });
 
+// Bulk lookup for the meetings list: the summaryFiles with an un-recovered
+// backup failure. One file read for the whole list (vs one IPC per row).
+ipcMain.handle('org-list-backup-failures', async () => {
+  try {
+    return { success: true, failures: listOrgBackupFailures() };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
 // Unshare by summary file. Reads the local backup-state for `summaryFile`,
 // deletes the org-side meeting via the adapter (best-effort — 404 means
 // it's already gone), then clears the local attempt flag so a subsequent
@@ -8560,6 +8616,10 @@ ipcMain.handle('org-share-meeting', async (_event, payload) => {
     if (summaryFile) recordOrgBackupAttempt(summaryFile, meeting?.id);
     return { success: true, meeting, s3_key };
   } catch (e) {
+    // Record the failure so a manual Share that fails also leaves a
+    // persistent, retryable indicator on the note (mirrors auto-backup).
+    const sf = payload?.summaryFile;
+    if (sf) recordOrgBackupFailure(sf, e.message);
     return { success: false, error: e.message };
   }
 });
@@ -8680,9 +8740,15 @@ ipcMain.handle('org-try-auto-backup', async (_event, payload) => {
       recordOrgBackupAttempt(summaryFile, meeting?.id);
       return { attempted: true, meeting, s3_key };
     } catch (e) {
+      // Persist the failure (without marking the note attempted) so the
+      // renderer can surface a "Backup failed · Retry" affordance instead
+      // of the failure being silently console.warn'd.
+      recordOrgBackupFailure(summaryFile, e.message);
       return { attempted: false, reason: 'upload-failed', error: e.message };
     }
   } catch (e) {
+    const sf = payload?.summaryFile;
+    if (sf) recordOrgBackupFailure(sf, e.message);
     return { attempted: false, reason: 'error', error: e.message };
   }
 });

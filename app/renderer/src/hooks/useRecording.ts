@@ -362,6 +362,12 @@ export function useRecordingProcessingEffects() {
                 qc.invalidateQueries({ queryKey: orgKeys.backupState(newSummaryFile) });
               } else if (res.reason === 'upload-failed' || res.reason === 'error') {
                 console.warn('[org-auto-backup] skipped:', res.reason, res.error);
+                // main persisted the failure in .org-backup-state.json;
+                // refresh the per-note backup state + the bulk failures set so
+                // the "Backup failed · Retry" affordance and the list "Not
+                // backed up" chip appear without waiting for staleTime.
+                qc.invalidateQueries({ queryKey: orgKeys.backupState(newSummaryFile) });
+                qc.invalidateQueries({ queryKey: orgKeys.backupFailures() });
               }
             })
             .catch((e) => {

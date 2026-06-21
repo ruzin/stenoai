@@ -47,7 +47,9 @@ const json = (res, status, body) => {
  * Start the mock adapter on an ephemeral loopback port.
  * @param {object} [opts]
  * @param {object} [opts.policy] override the /policy response.
- * @returns {Promise<{ url: string, close: () => Promise<void>, s3Puts: () => number }>}
+ * @param {boolean} [opts.failS3Put] start with the S3 PUT returning 500 (used
+ *   to exercise the upload-failure path). Toggle at runtime via setFailS3Put.
+ * @returns {Promise<{ url: string, close: () => Promise<void>, s3Puts: () => number, setFailS3Put: (v: boolean) => void }>}
  */
 function startMockAdapter(opts = {}) {
   const policy = opts.policy || { auto_share_default: true, shared_notes_enabled: true };
@@ -55,6 +57,7 @@ function startMockAdapter(opts = {}) {
   let idSeq = 0;
   let keySeq = 0;
   let s3PutCount = 0;
+  let failS3Put = Boolean(opts.failS3Put);
   let baseUrl = '';
 
   return new Promise((resolve, reject) => {
@@ -121,6 +124,11 @@ function startMockAdapter(opts = {}) {
           });
         }
         if (method === 'PUT' && url.startsWith('/s3/')) {
+          // Simulate an S3/proxy upload failure: the desktop throws on a
+          // non-2xx PUT, which is the real "backup failed" path.
+          if (failS3Put) {
+            return json(res, 500, { detail: 'mock: forced s3 failure' });
+          }
           s3PutCount++;
           res.writeHead(200);
           return res.end();
@@ -144,6 +152,9 @@ function startMockAdapter(opts = {}) {
         url: baseUrl,
         close: () => new Promise((r) => server.close(() => r())),
         s3Puts: () => s3PutCount,
+        setFailS3Put: (v) => {
+          failS3Put = Boolean(v);
+        },
       });
     });
   });

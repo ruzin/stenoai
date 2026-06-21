@@ -233,7 +233,18 @@ export type OrgGetBackupStateResponse = Result<{
   shared: boolean;
   meeting_id: string | null;
   attempted_at: string | null;
+  /** ISO timestamp of the last upload failure for this note, or null. Set
+   *  independently of `shared` so a never-shared note can still report a
+   *  failed backup attempt; cleared once a share/backup actually lands. */
+  failed_at: string | null;
+  /** Truncated error message from the last failed backup, or null. */
+  error: string | null;
 }>;
+
+/** Bulk list of summaryFiles whose last backup failed and which haven't since
+ *  been shared — drives the meetings-list "Not backed up" chip with a single
+ *  read instead of a per-row getBackupState call. */
+export type OrgListBackupFailuresResponse = Result<{ failures: string[] }>;
 
 /** Outcome from `org.unshareBySummary`. `adapter_status` tells you which
  *  branch ran so the renderer can word the toast — `deleted` is the happy
@@ -831,6 +842,7 @@ export interface StenoaiBridge {
     deleteMeeting: RequestFn<[id: string], Result<{ id: string }>>;
     shareMeeting: RequestFn<[payload: OrgShareMeetingPayload], OrgShareMeetingResponse>;
     getBackupState: RequestFn<[summaryFile: string], OrgGetBackupStateResponse>;
+    listBackupFailures: RequestFn<[], OrgListBackupFailuresResponse>;
     unshareBySummary: RequestFn<[summaryFile: string], OrgUnshareBySummaryResponse>;
     getAutoBackup: RequestFn<[], GetOrgAutoBackupResponse>;
     setAutoBackup: RequestFn<[enabled: boolean], SetOrgAutoBackupResponse>;

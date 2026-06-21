@@ -1,5 +1,6 @@
 import * as React from 'react';
 import {
+  AlertTriangle,
   Calendar as CalendarIcon,
   Check,
   ChevronLeft,
@@ -127,6 +128,11 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
   const isShared = backupState.data?.shared ?? false;
   const isSharing = shareToOrg.isPending;
   const isUnsharing = unshareFromOrg.isPending;
+  // A persisted upload failure on a note that never landed — surfaced as a
+  // "Backup failed · Retry" affordance so an auto-backup that silently failed
+  // (e.g. behind a corporate proxy) is visible and one-click retryable.
+  const backupFailed = !isShared && Boolean(backupState.data?.failed_at);
+  const backupError = backupState.data?.error ?? null;
 
   const onShareToOrg = async () => {
     setShareError(null);
@@ -380,21 +386,34 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
                     <button
                       type="button"
                       className="flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-sm transition-colors hover:bg-[color:var(--surface-hover)] disabled:opacity-50"
-                      style={{ color: 'var(--fg-1)' }}
+                      style={{ color: backupFailed || shareError ? 'var(--danger)' : 'var(--fg-1)' }}
                       onClick={() => void onShareToOrg()}
                       // Disable while the persistent share state is still
                       // loading — otherwise a fast click during initial
                       // mount would treat the note as "not shared" and
                       // upload a duplicate against an already-shared note.
                       disabled={isSharing || backupState.isLoading}
-                      title={`Share with ${orgSession.data.orgId}`}
+                      title={
+                        backupFailed && backupError
+                          ? `Last backup failed: ${backupError}`
+                          : `Share with ${orgSession.data.orgId}`
+                      }
                     >
-                      <Globe className="size-[13px] shrink-0" style={{ color: 'var(--fg-2)' }} />
+                      {backupFailed || shareError ? (
+                        <AlertTriangle
+                          className="size-[13px] shrink-0"
+                          style={{ color: 'var(--danger)' }}
+                        />
+                      ) : (
+                        <Globe className="size-[13px] shrink-0" style={{ color: 'var(--fg-2)' }} />
+                      )}
                       {isSharing
                         ? 'Sharing…'
                         : shareError
                           ? `Share failed: ${shareError}`
-                          : `Share with ${orgSession.data.orgId}`}
+                          : backupFailed
+                            ? 'Backup failed · Retry'
+                            : `Share with ${orgSession.data.orgId}`}
                     </button>
                   )
                 )}

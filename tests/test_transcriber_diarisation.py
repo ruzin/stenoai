@@ -18,8 +18,10 @@ from pathlib import Path
 
 from src.transcriber import (
     BLEED_JACCARD_THRESHOLD,
+    DIARISED_SPLIT_TIMEOUT_S,
     MIN_RMS_THRESHOLD,
     WhisperTranscriber,
+    _diarised_split_timeout,
     _parse_channels_from_ffmpeg_stderr,
     _parse_duration_from_ffmpeg_stderr,
     _token_jaccard,
@@ -233,6 +235,28 @@ class ResolveFfmpegTests(unittest.TestCase):
         from src.transcriber import _resolve_ffmpeg
         result = _resolve_ffmpeg()
         self.assertTrue(result is None or isinstance(result, str))
+
+
+class DiarisedSplitTimeoutTests(unittest.TestCase):
+    """The per-channel split timeout must scale with recording length so a
+    multi-hour stereo meeting isn't cut off mid-decode and silently dropped
+    to a mono transcript (the old fixed 120 s did exactly that)."""
+
+    def test_long_meeting_scales_well_above_old_fixed_cap(self):
+        # A 4-hour file would never decode in the old 120 s on CPU.
+        four_hours = 4 * 3600
+        timeout = _diarised_split_timeout(four_hours)
+        self.assertGreater(timeout, 120)
+        self.assertEqual(timeout, four_hours * 2)
+
+    def test_unknown_and_short_durations_fall_back_to_floor(self):
+        self.assertEqual(_diarised_split_timeout(None), DIARISED_SPLIT_TIMEOUT_S)
+        self.assertEqual(_diarised_split_timeout(0), DIARISED_SPLIT_TIMEOUT_S)
+        # A short clip whose 2x is under the floor still gets the full floor.
+        self.assertEqual(_diarised_split_timeout(30), DIARISED_SPLIT_TIMEOUT_S)
+
+    def test_returns_int(self):
+        self.assertIsInstance(_diarised_split_timeout(1234.5), int)
 
 
 if __name__ == '__main__':
