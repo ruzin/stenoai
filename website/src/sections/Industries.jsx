@@ -30,7 +30,7 @@ export function Industries() {
               margin: "0 0 20px",
             }}
           >
-            Sovereign AI for confidential conversations.
+            AI for confidential workflows.
           </h2>
           <p className="text-fg-2 text-lg leading-[1.55]">
             If your meetings contain confidential data, you can't send audio to a third party.
