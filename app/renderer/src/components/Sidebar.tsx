@@ -330,7 +330,6 @@ export function Sidebar({
             />
             <button
               type="button"
-              data-sidebar-search
               data-testid="sidebar-search-trigger"
               onClick={() => palette.open()}
               className="flex h-[30px] w-full items-center rounded-md border-0 px-[10px] pl-[30px] text-left text-[13px] outline-none transition-colors hover:shadow-[inset_0_0_0_1px_hsl(var(--border))]"
