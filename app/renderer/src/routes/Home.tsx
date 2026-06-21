@@ -16,6 +16,7 @@ import {
 } from '@/hooks/useCalendarEvents';
 import { useFolders } from '@/hooks/useFolders';
 import { ipc, type CalendarEvent, type Meeting } from '@/lib/ipc';
+import { searchNotes } from '@/lib/noteSearch';
 import { navigate } from '@/lib/router';
 
 interface HomeProps {
@@ -201,13 +202,8 @@ export function Home({ mode }: HomeProps) {
   const searchInputRef = React.useRef<HTMLInputElement>(null);
   const filtered = React.useMemo(() => {
     if (mode !== 'meetings') return previous;
-    const needle = search.trim().toLowerCase();
-    if (!needle) return previous;
-    return previous.filter((m) => {
-      const name = m.session_info.name?.toLowerCase() ?? '';
-      const summary = m.summary?.toLowerCase() ?? '';
-      return name.includes(needle) || summary.includes(needle);
-    });
+    if (!search.trim()) return previous;
+    return searchNotes(previous, search);
   }, [mode, previous, search]);
   const groups = React.useMemo(() => groupPrevious(filtered), [filtered]);
 

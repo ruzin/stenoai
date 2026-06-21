@@ -76,7 +76,6 @@ export function MeetingsShell({
   const { sidebarCollapsed, toggleSidebar } = useSidebarCollapsed();
   const { width: sidebarWidth, setWidth: setSidebarWidth } = useSidebarWidth();
 
-  const [search, setSearch] = React.useState('');
   const [newFolderOpen, setNewFolderOpen] = React.useState(false);
   const [newFolderName, setNewFolderName] = React.useState('');
   const [renameTarget, setRenameTarget] = React.useState<
@@ -217,8 +216,6 @@ export function MeetingsShell({
             onToggleCollapsed={toggleSidebar}
             width={sidebarWidth}
             onWidthChange={setSidebarWidth}
-            search={search}
-            onSearchChange={setSearch}
             folders={sidebarFolders}
             totalMeetings={totalMeetings}
             onNewFolder={() => setNewFolderOpen(true)}
