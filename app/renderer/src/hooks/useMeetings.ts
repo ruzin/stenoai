@@ -146,7 +146,41 @@ export function useDeleteMeeting() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (meeting: Meeting) => unwrap(await ipc().meetings.delete(meeting)),
-    onSuccess: () => qc.invalidateQueries({ queryKey: meetingsKeys.all }),
+    // Cancel any in-flight meetings-list refetch before touching the cache. A
+    // refetch already running when the delete fires was scanned by the backend
+    // *before* the file was removed, so its (stale) response would re-introduce
+    // the deleted row if it landed after the setQueryData below. The many
+    // meetingsKeys.all invalidations elsewhere (processing-complete, update,
+    // reprocess, folder edits) make such an overlap reachable. Cancelling drops
+    // that stale response without kicking off a new fetch, so we still avoid the
+    // backend re-scan this hook exists to remove.
+    onMutate: () => qc.cancelQueries({ queryKey: meetingsKeys.list() }),
+    // The deleted file is known, so drop just that row from the list cache
+    // instead of invalidating — a full `invalidateQueries` re-runs the backend
+    // `list-meetings` scan (a Python subprocess + whole-directory re-read) only
+    // to remove one row we already know is gone. Folder views derive from this
+    // same list (FolderDetail filters useMeetings() by folder id), so they
+    // update from this single write too. Removing on success (not optimistically
+    // in onMutate) means a failed delete simply leaves the row in place — no
+    // snapshot/rollback, so concurrent deletes can't clobber each other.
+    onSuccess: async (_data, meeting) => {
+      // Cancel again here: the onMutate cancel only covers refetches already
+      // running at mutation start, but a fresh list refetch can be triggered
+      // *during* the (fast) delete IPC and would land after the write below.
+      // The setQueryData filter handles a stale response that lands before this
+      // point; cancelling handles one that would land after. Together they close
+      // the clobber window without a reconciling backend re-scan.
+      await qc.cancelQueries({ queryKey: meetingsKeys.list() });
+      const deletedFile = meeting.session_info.summary_file;
+      // Guard against a falsy summary_file: filtering on it would drop *every*
+      // row with a falsy summary_file rather than the one deleted. summary_file
+      // is the list's primary key so this shouldn't happen, but the predicate
+      // must not silently nuke the list if a malformed row slips through.
+      if (!deletedFile) return;
+      qc.setQueryData<Meeting[]>(meetingsKeys.list(), (prev) =>
+        prev?.filter((m) => m.session_info.summary_file !== deletedFile),
+      );
+    },
   });
 }
 
