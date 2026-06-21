@@ -25,10 +25,11 @@ import path from 'path';
  * unlink" case stays in audio-import.t2 (@pipeline).
  *
  * The seeded note goes in the output dir that copyImportIntoRecordings actually
- * checks — the sibling of the app's recordings dir (from getDir()). In an
- * unpackaged run that's the repo-root output/ (resolveRecordingsDir doesn't
- * honor STENOAI_USER_DATA_DIR in dev — a pre-existing quirk; the dirs coincide
- * with the user-data root once packaged), so the finally cleans up that scratch.
+ * checks — the sibling of the app's recordings dir (from getDir()). Both
+ * resolvers now honor STENOAI_USER_DATA_DIR, so under e2e that's the per-test
+ * temp dir (the keystone): fully isolated, never the real ~/Library or repo
+ * scratch. (#233 fixed the old dev quirk where getDir() returned repo-root
+ * recordings/ while the frozen backend wrote under ~/Library.)
  */
 
 type StenoWindow = Window & {
@@ -219,11 +220,10 @@ test('a stale .import marker left by a crash does not permanently force a suffix
 
   const realDirBefore = fileSig(realUserDataDir());
 
-  // The dir resolveRecordingsDir() uses in an unpackaged (dev) run — repo-root/
-  // recordings, independent of STENOAI_USER_DATA_DIR (the same pre-existing dev
-  // quirk the other tests in this file rely on). Seeded BEFORE launch so the
-  // marker is present when the startup sweep runs.
-  const recordingsDir = path.resolve(__dirname, '..', '..', 'recordings');
+  // The dir the app copies into. Both resolvers now honor STENOAI_USER_DATA_DIR,
+  // so under e2e this is the per-test temp dir (isolated). Seeded BEFORE launch
+  // so the marker is present when the startup sweep runs.
+  const recordingsDir = path.join(userDataDir, 'recordings');
   mkdirSync(recordingsDir, { recursive: true });
   const stem = 'crashedimport';
   const staleMarker = path.join(recordingsDir, `.${stem}.import`);

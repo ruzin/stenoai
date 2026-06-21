@@ -636,14 +636,19 @@ function getAllowedBaseDirs() {
 // handler that can't `await runPythonScript`.
 function resolveRecordingsDir() {
   let dir;
-  if (_cachedCustomStoragePath) {
+  if (_cachedCustomStoragePath && !process.env.STENOAI_USER_DATA_DIR) {
     dir = path.join(_cachedCustomStoragePath, 'recordings');
-  } else if (app.isPackaged) {
-    // getUserDataDir() (not a macOS literal) so the packaged path is correct on
-    // Windows (%APPDATA%/stenoai) too; identical on macOS.
-    dir = path.join(getUserDataDir(), 'recordings');
   } else {
-    dir = path.join(__dirname, '..', 'recordings');
+    // getUserDataDir() resolves the per-OS data dir when packaged (Windows
+    // %APPDATA%/stenoai; identical on macOS) AND honors STENOAI_USER_DATA_DIR
+    // (the e2e temp dir) — so JS agrees with the backend's get_data_dirs() in
+    // every mode. The old hardcoded REPO/recordings dev branch ignored both,
+    // so the dev app (and e2e) disagreed with the frozen backend, which writes
+    // notes under ~/Library even in dev — that mismatch broke import-collision
+    // dedup in `npm start` (#233). The STENOAI_USER_DATA_DIR guard above mirrors
+    // get_data_dirs()'s precedence (config.py): the e2e isolation override beats
+    // a configured custom storage path, so a test can never escape the temp dir.
+    dir = path.join(getUserDataDir(), 'recordings');
   }
   fs.mkdirSync(dir, { recursive: true });
   return dir;
@@ -5990,13 +5995,17 @@ ipcMain.handle('get-recordings-dir', async () => {
     const jsonData = JSON.parse(result.trim());
 
     let recordingsDir;
-    if (jsonData.storage_path) {
+    if (jsonData.storage_path && !process.env.STENOAI_USER_DATA_DIR) {
       recordingsDir = path.join(jsonData.storage_path, 'recordings');
-    } else if (app.isPackaged) {
-      // getUserDataDir() for the correct Windows path (%APPDATA%); identical on macOS.
-      recordingsDir = path.join(getUserDataDir(), 'recordings');
     } else {
-      recordingsDir = path.join(__dirname, '..', 'recordings');
+      // getUserDataDir() resolves the per-OS data dir when packaged (Windows
+      // %APPDATA%; identical on macOS) AND honors STENOAI_USER_DATA_DIR (the
+      // e2e temp dir). The old hardcoded REPO/recordings dev branch disagreed
+      // with the frozen backend (which writes under ~/Library even in dev),
+      // breaking import-collision dedup in `npm start` (#233). The override
+      // guard mirrors get_data_dirs() precedence (config.py): e2e isolation
+      // beats custom storage. Mirrors resolveRecordingsDir().
+      recordingsDir = path.join(getUserDataDir(), 'recordings');
     }
 
     // Ensure directory exists
