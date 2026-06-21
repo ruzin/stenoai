@@ -7344,6 +7344,12 @@ let premeetingRescheduleTimer = null;
 // Fetch upcoming events from whichever provider is connected (mirrors
 // getCalendarEventForNow's fetch). Returns the normalized event array, or null
 // when no calendar is connected / the fetch fails.
+// Sentinel: a calendar IS connected but this fetch failed transiently (network
+// blip / timeout). Distinct from "no calendar connected" so the scheduler can
+// KEEP existing timers on a blip (don't drop a reminder for a meeting starting
+// in the re-poll gap) but CLEAR them on a real disconnect (no stale reminders).
+const SCHEDULER_FETCH_FAILED = Symbol('scheduler-fetch-failed');
+
 async function fetchCalendarEventsForScheduler(timeoutMs = 4000) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
@@ -7361,7 +7367,7 @@ async function fetchCalendarEventsForScheduler(timeoutMs = 4000) {
     return null; // no calendar connected
   } catch (err) {
     sendDebugLog(`[premeeting] calendar fetch failed: ${err.message}`);
-    return null;
+    return SCHEDULER_FETCH_FAILED; // transient — caller keeps existing timers
   } finally {
     clearTimeout(timeoutId);
   }
@@ -7431,14 +7437,20 @@ function clearPreMeetingTimers() {
 // and re-arms, so moved/cancelled events drop out and new ones get picked up.
 // Skips ids already fired this session and events already inside the lead window
 // (don't backfire). Gated on the master notifications toggle + a connected
-// calendar (null fetch → no-op).
+// calendar: a disconnect clears armed timers; a transient fetch blip keeps them.
 async function schedulePreMeetingNotifications() {
   if (!(await notificationsEnabled())) {
     clearPreMeetingTimers();
     return;
   }
   const events = await fetchCalendarEventsForScheduler();
-  if (!events) return; // no calendar connected / fetch failed — keep existing timers
+  if (events === SCHEDULER_FETCH_FAILED) return; // transient blip — keep existing timers
+  if (!events) {
+    // No calendar connected — drop any reminders armed while it was. (A transient
+    // fetch error returns the sentinel above and is handled differently.)
+    clearPreMeetingTimers();
+    return;
+  }
   const nowMs = Date.now();
   // Forget fired ids that are no longer a just-fired occurrence: pruned if the
   // event dropped out of the fetch (cancelled / rolled past the window) OR its
