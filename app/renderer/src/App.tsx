@@ -20,6 +20,7 @@ import { useLiveTranscriptOpen } from '@/hooks/liveTranscriptOpenStore';
 import { useTranscriptionEngine } from '@/hooks/useModels';
 import { QuitDialog } from '@/components/QuitDialog';
 import { ImportDropZone } from '@/components/ImportDropZone';
+import { CommandPaletteProvider, useCommandPalette } from '@/components/CommandPalette';
 import { AskBarProvider } from '@/lib/askBarContext';
 import {
   useRecording,
@@ -158,25 +159,6 @@ export function App() {
     })();
   }, [recording.isLoading, recording.status, route]);
 
-  // ⌘K — focus sidebar search. Capture-phase listener so it wins over nested
-  // handlers; fires even when focus is in a form control (the search input
-  // itself is exempt by the data-sidebar-search check).
-  React.useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== 'k') return;
-      const search = document.querySelector<HTMLInputElement>(
-        '[data-sidebar-search]',
-      );
-      if (search) {
-        e.preventDefault();
-        search.focus();
-        search.select();
-      }
-    };
-    document.addEventListener('keydown', onKey, true);
-    return () => document.removeEventListener('keydown', onKey, true);
-  }, []);
-
   const isRecordingRoute = route === '/recording';
   const isProcessingRoute = route === '/meetings/processing';
   // The /chat page has its own large composer, so the floating AskBar dock
@@ -186,7 +168,9 @@ export function App() {
   const showAskBar = !isRecordingRoute && !isProcessingRoute && !isChatRoute;
 
   return (
-    <StreamingProvider>
+    <CommandPaletteProvider>
+      <CommandPaletteHotkey />
+      <StreamingProvider>
       <AskBarProvider>
         <RouteView route={route} />
         <QuitDialog />
@@ -210,8 +194,25 @@ export function App() {
           </BottomDockSlot>
         )}
       </AskBarProvider>
-    </StreamingProvider>
+      </StreamingProvider>
+    </CommandPaletteProvider>
   );
+}
+
+/** Global ⌘K → open the command palette. Capture-phase so it fires even when
+ *  focus is in a form control. */
+function CommandPaletteHotkey() {
+  const { open } = useCommandPalette();
+  React.useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== 'k') return;
+      e.preventDefault();
+      open();
+    };
+    document.addEventListener('keydown', onKey, true);
+    return () => document.removeEventListener('keydown', onKey, true);
+  }, [open]);
+  return null;
 }
 
 /**

@@ -16,6 +16,7 @@ import { cn, shortcut } from '@/lib/utils';
 import { LucideIcon, IconPicker } from '@/components/IconPicker';
 import { useUpdateFolderIcon } from '@/hooks/useFolders';
 import { useOrgLogout, useOrgSession, useSharedNotesGate } from '@/hooks/useOrg';
+import { useCommandPalette } from '@/components/CommandPalette';
 
 export interface SidebarMeeting {
   summaryFile: string;
@@ -137,8 +138,6 @@ interface SidebarProps {
   onToggleCollapsed: () => void;
   width: number;
   onWidthChange: (w: number) => void;
-  search: string;
-  onSearchChange: (value: string) => void;
   folders: SidebarFolder[];
   totalMeetings: number;
   onNewFolder: () => void;
@@ -152,8 +151,6 @@ export function Sidebar({
   onToggleCollapsed: _onToggleCollapsed,
   width,
   onWidthChange,
-  search,
-  onSearchChange,
   folders,
   totalMeetings,
   onNewFolder,
@@ -161,6 +158,7 @@ export function Sidebar({
   onContextAction,
   currentRoute,
 }: SidebarProps) {
+  const palette = useCommandPalette();
   const [foldersOpen, setFoldersOpen] = React.useState(true);
   const [dragOverFolder, setDragOverFolder] = React.useState<string | null>(null);
   const [dragOverAllMeetings, setDragOverAllMeetings] = React.useState(false);
@@ -234,11 +232,6 @@ export function Sidebar({
     [width, onWidthChange],
   );
 
-  const filteredFolders = React.useMemo(() => {
-    const needle = search.trim().toLowerCase();
-    if (!needle) return folders;
-    return folders.filter((f) => f.name.toLowerCase().includes(needle));
-  }, [folders, search]);
 
   return (
     <aside
@@ -335,15 +328,17 @@ export function Sidebar({
               className="pointer-events-none absolute left-[9px] top-1/2 -translate-y-1/2 size-[13px]"
               style={{ color: 'var(--fg-2)' }}
             />
-            <input
+            <button
+              type="button"
               data-sidebar-search
-              className="h-[30px] w-full rounded-md border-0 px-[10px] pl-[30px] text-[13px] outline-none transition-colors focus:shadow-[inset_0_0_0_1px_hsl(var(--border))]"
-              style={{ background: 'rgba(27,27,25,0.04)', color: 'var(--fg-1)', fontFamily: 'var(--font-sans)' }}
-              placeholder="Search"
-              value={search}
-              onChange={(e) => onSearchChange(e.target.value)}
-              aria-label="Search folders"
-            />
+              data-testid="sidebar-search-trigger"
+              onClick={() => palette.open()}
+              className="flex h-[30px] w-full items-center rounded-md border-0 px-[10px] pl-[30px] text-left text-[13px] outline-none transition-colors hover:shadow-[inset_0_0_0_1px_hsl(var(--border))]"
+              style={{ background: 'rgba(27,27,25,0.04)', color: 'var(--fg-muted)', fontFamily: 'var(--font-sans)' }}
+              aria-label="Search notes"
+            >
+              Search
+            </button>
             <span
               className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 rounded px-1.5 py-px text-[11px] tabular-nums tracking-[0.02em]"
               style={{ color: 'var(--fg-muted)', background: 'rgba(27,27,25,0.04)', fontFamily: 'var(--font-sans)' }}
@@ -440,7 +435,7 @@ export function Sidebar({
             </div>
 
             {foldersOpen &&
-              filteredFolders.map((folder) => {
+              folders.map((folder) => {
                 const isOver = dragOverFolder === folder.id;
                 const isActive = activeFolderId === folder.id;
                 return (
