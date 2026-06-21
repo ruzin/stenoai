@@ -8742,13 +8742,15 @@ ipcMain.handle('org-try-auto-backup', async (_event, payload) => {
     } catch (e) {
       // Persist the failure (without marking the note attempted) so the
       // renderer can surface a "Backup failed · Retry" affordance instead
-      // of the failure being silently console.warn'd.
+      // of the failure being silently console.warn'd. Scoped to the actual
+      // upload attempt — pre-upload faults (session read, policy seed) fall
+      // through to the outer catch and are NOT recorded as a backup failure,
+      // so a transient setup hiccup doesn't surface a misleading
+      // "Not backed up" chip.
       recordOrgBackupFailure(summaryFile, e.message);
       return { attempted: false, reason: 'upload-failed', error: e.message };
     }
   } catch (e) {
-    const sf = payload?.summaryFile;
-    if (sf) recordOrgBackupFailure(sf, e.message);
     return { attempted: false, reason: 'error', error: e.message };
   }
 });

@@ -386,7 +386,11 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
                     <button
                       type="button"
                       className="flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-sm transition-colors hover:bg-[color:var(--surface-hover)] disabled:opacity-50"
-                      style={{ color: backupFailed || shareError ? 'var(--danger)' : 'var(--fg-1)' }}
+                      // Danger treatment only when failed-and-idle — a retry
+                      // in flight reads as in-progress, not as an error.
+                      style={{
+                        color: !isSharing && (backupFailed || shareError) ? 'var(--danger)' : 'var(--fg-1)',
+                      }}
                       onClick={() => void onShareToOrg()}
                       // Disable while the persistent share state is still
                       // loading — otherwise a fast click during initial
@@ -399,7 +403,7 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
                           : `Share with ${orgSession.data.orgId}`
                       }
                     >
-                      {backupFailed || shareError ? (
+                      {!isSharing && (backupFailed || shareError) ? (
                         <AlertTriangle
                           className="size-[13px] shrink-0"
                           style={{ color: 'var(--danger)' }}
