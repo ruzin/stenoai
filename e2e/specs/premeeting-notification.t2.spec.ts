@@ -5,7 +5,7 @@ import { enableDeterministicRecording } from '../fixtures/user-config';
 /**
  * T2 — pre-meeting notification: it's gated by the master "Desktop
  * notifications" toggle (no dedicated setting), and SUPPRESSED for a meeting
- * we're already recording (matched by calendar event id). Uses the
+ * we're already recording (matched by session name === event title). Uses the
  * `show-premeeting-notification` design-for-test seam, which returns `shown`
  * (the production fire path is the main-side scheduler timer). Model-free.
  */
@@ -23,7 +23,6 @@ type StenoWindow = Window & {
     recording: {
       start: (name?: string) => Promise<{ success: boolean }>;
       stop: () => Promise<{ success: boolean }>;
-      getQueue: () => Promise<{ hasRecording: boolean; sessionName: string | null }>;
     };
   };
 };
@@ -70,33 +69,21 @@ test('pre-meeting notification is suppressed for the meeting being recorded (nam
 
   // Start a recording NAMED after the meeting (a calendar-started recording is
   // named after its event title). The live recording's session name then equals
-  // the reminder's event.title, which is the suppression match.
+  // the reminder's event.title, which is the suppression match. Suppression keys
+  // off currentRecordingSessionName — set synchronously by start-recording-ui and
+  // cleared only on a real stop — so it's deterministic on every platform (no
+  // dependence on real audio capture sustaining active, which a headless Windows
+  // runner with no audio device can't do).
   const started = await page.evaluate(
     (name) => (window as StenoWindow).stenoai.recording.start(name),
     EVT.title,
   );
   expect(started.success).toBe(true);
 
-  // Check suppression IMMEDIATELY (one atomic evaluate), while the recording is
-  // confirmed active — the renderer-driven capture doesn't sustain for long on a
-  // headless runner, so a slow poll would race its teardown (same reason
-  // recording-lifecycle.t2 asserts right after start). The single evaluate reads
-  // the live queue and, only while hasRecording, fires the notification. The
-  // coded result surfaces the real state on failure.
-  const whileRecording = await page.evaluate(async (evt) => {
-    const q = await (window as StenoWindow).stenoai.recording.getQueue();
-    if (!q.hasRecording) return `no-recording(name=${q.sessionName})`;
-    const a = await (window as StenoWindow).stenoai.settings.showPremeetingNotification({
-      event: evt,
-    });
-    // Same instant: a DIFFERENT meeting still fires (name mismatch).
-    const b = await (window as StenoWindow).stenoai.settings.showPremeetingNotification({
-      event: { id: 'evt-other', title: 'Other call' },
-    });
-    return `recording:self=${a.shown},other=${b.shown}`;
-  }, EVT);
-  // self suppressed (shown=false), other fires (shown=true).
-  expect(whileRecording).toBe('recording:self=false,other=true');
+  // The reminder for the meeting we're recording is suppressed (shown:false)...
+  await expect.poll(async () => (await showPremeeting(page, EVT)).shown).toBe(false);
+  // ...while a DIFFERENT meeting still fires (name mismatch).
+  expect((await showPremeeting(page, { id: 'evt-other', title: 'Other call' })).shown).toBe(true);
 
   // Stop clears the session name; the notif fires for that meeting again.
   await page.evaluate(() => (window as StenoWindow).stenoai.recording.stop());

@@ -7395,18 +7395,19 @@ async function firePreMeetingNotification(event) {
   // Gate: the master notifications toggle (no dedicated pre-meeting toggle —
   // this folds under "Desktop notifications").
   if (!(await notificationsEnabled())) return false;
-  // Suppress only if we're ACTIVELY recording THIS meeting — matched by name:
-  // a recording started from a calendar event is named after its title (the
-  // auto-detect accept + Home upcoming-card both pass event.title), so the live
-  // recording's session name equals the reminder's event title. The
-  // systemAudioRecordingActive guard means a stale name after a stopped/failed
-  // capture can't suppress a later meeting's reminder. Title collisions (two
-  // same-named meetings) are an accepted edge for a heads-up notification.
-  if (
-    systemAudioRecordingActive &&
-    currentRecordingSessionName &&
-    currentRecordingSessionName === event.title
-  ) {
+  // Suppress only while we're recording THIS meeting — matched by name. A
+  // recording started from a calendar event is named after its title (auto-detect
+  // accept + Home upcoming-card both pass event.title), so the live session name
+  // equals the reminder's event title. Key off currentRecordingSessionName — the
+  // AUTHORITATIVE "which meeting is live" signal: set on start, cleared only on a
+  // real stop (NOT on a transient capture flap, see system-audio-recording-state),
+  // and null whenever there's no active session. Deliberately NOT gated on the
+  // volatile systemAudioRecordingActive, which flips false on every capture blip
+  // and would let a reminder through mid-recording during a flap. A name can't be
+  // stale here (stop clears it), so there's no risk of suppressing a later
+  // meeting. Title collisions (two same-named meetings) are an accepted edge for a
+  // heads-up notification.
+  if (currentRecordingSessionName && currentRecordingSessionName === event.title) {
     sendDebugLog(`[premeeting] suppressed — already recording "${event.title}"`);
     return false;
   }
