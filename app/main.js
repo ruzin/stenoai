@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell, systemPreferences, globalShortcut, safeStorage, Tray, Menu, nativeImage, Notification, powerMonitor } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, systemPreferences, globalShortcut, safeStorage, Tray, Menu, nativeImage, Notification, powerMonitor, net } = require('electron');
 
 // Prevent EPIPE crashes when stdout/stderr pipe is broken (e.g. launching terminal closed)
 process.stdout?.on('error', () => {});
@@ -8082,7 +8082,14 @@ async function adapterFetch(pathname, opts = {}) {
     authorization: 'Bearer ' + session.token,
     ...(opts.headers || {}),
   };
-  const res = await fetch(session.adapterUrl + pathname, { ...opts, headers });
+  // net.fetch (Chromium's network stack) rather than Node's global fetch
+  // (undici): undici ignores the OS system proxy + certificate store, so on a
+  // corporate-proxied machine every adapter call — and the S3 PUT below — would
+  // fail. net.fetch honours the system proxy (incl. PAC) and the OS trust store
+  // on both Windows and macOS. Same for every other org/S3 call in this file.
+  // credentials:'omit' — the adapter authenticates via the Bearer header above,
+  // not session cookies; net.fetch defaults to 'include', so be explicit.
+  const res = await net.fetch(session.adapterUrl + pathname, { ...opts, headers, credentials: 'omit' });
   const text = await res.text();
   let body;
   try {
@@ -8168,10 +8175,11 @@ ipcMain.handle('org-login', async (_event, payload) => {
     const url = normaliseAdapterUrl(adapterUrl);
     if (!url) return { success: false, error: 'adapter URL is required' };
     if (!email || !password) return { success: false, error: 'email and password are required' };
-    const res = await fetch(url + '/auth/login', {
+    const res = await net.fetch(url + '/auth/login', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ email, password }),
+      credentials: 'omit',
     });
     const text = await res.text();
     let body;
@@ -8340,7 +8348,7 @@ ipcMain.handle('org-sso-google-start', async (_event, payload) => {
     const redirectUri = `http://127.0.0.1:${port}/callback`;
 
     // 3. Ask the adapter to mint the authorize URL.
-    const startRes = await fetch(adapterUrl + '/auth/sso/google/start', {
+    const startRes = await net.fetch(adapterUrl + '/auth/sso/google/start', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -8348,6 +8356,7 @@ ipcMain.handle('org-sso-google-start', async (_event, payload) => {
         code_challenge: codeChallenge,
         state,
       }),
+      credentials: 'omit',
     });
     const startBody = await startRes.json().catch(() => ({}));
     if (!startRes.ok) {
@@ -8363,7 +8372,7 @@ ipcMain.handle('org-sso-google-start', async (_event, payload) => {
     const code = await waitForCallback(state, 5 * 60 * 1000);
 
     // 6. Exchange via the adapter.
-    const cbRes = await fetch(adapterUrl + '/auth/sso/google/callback', {
+    const cbRes = await net.fetch(adapterUrl + '/auth/sso/google/callback', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -8371,6 +8380,7 @@ ipcMain.handle('org-sso-google-start', async (_event, payload) => {
         code_verifier: codeVerifier,
         redirect_uri: redirectUri,
       }),
+      credentials: 'omit',
     });
     const cbBody = await cbRes.json().catch(() => ({}));
     if (!cbRes.ok) {
@@ -8527,10 +8537,13 @@ async function uploadMeetingToOrg({ title, body, transcript = '', visibility = '
 
   // Step 2: PUT the markdown bytes straight to S3. Bucket has SSE-AES256
   // by default; the upload inherits that.
-  const putRes = await fetch(presign.upload_url, {
+  const putRes = await net.fetch(presign.upload_url, {
     method: 'PUT',
     headers: { 'content-type': 'text/markdown' },
     body,
+    // Presigned URL carries its own auth in the query string — don't let the
+    // session attach cookies/credentials to the S3 request.
+    credentials: 'omit',
   });
   if (!putRes.ok) {
     const detail = await putRes.text().catch(() => '');
@@ -8555,10 +8568,11 @@ async function uploadMeetingToOrg({ title, body, transcript = '', visibility = '
           content_type: 'text/plain',
         }),
       });
-      const tPut = await fetch(tPresign.upload_url, {
+      const tPut = await net.fetch(tPresign.upload_url, {
         method: 'PUT',
         headers: { 'content-type': 'text/plain' },
         body: transcriptText,
+        credentials: 'omit',
       });
       if (tPut.ok) {
         transcriptKey = tPresign.s3_key;
@@ -8786,7 +8800,7 @@ ipcMain.on('org-chat-stream', async (event, streamId, payload) => {
   sender.once('destroyed', onDestroyed);
 
   try {
-    const res = await fetch(session.adapterUrl + '/ai/chat/stream', {
+    const res = await net.fetch(session.adapterUrl + '/ai/chat/stream', {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
@@ -8794,6 +8808,7 @@ ipcMain.on('org-chat-stream', async (event, streamId, payload) => {
       },
       body: JSON.stringify(payload || {}),
       signal: controller.signal,
+      credentials: 'omit',
     });
     if (!res.ok) {
       let detail = '';
