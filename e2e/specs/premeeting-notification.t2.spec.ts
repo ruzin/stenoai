@@ -77,30 +77,26 @@ test('pre-meeting notification is suppressed for the meeting being recorded (nam
   );
   expect(started.success).toBe(true);
 
-  // Atomic + self-diagnosing: in ONE evaluate, read the live recording state and
-  // (only while it's active) fire the notification, returning a coded result.
-  // Polled so a headless-runner capture flap that briefly drops hasRecording is
-  // retried rather than failing; the coded value also surfaces the real state
-  // (queue/sessionName) in any timeout message.
-  await expect
-    .poll(
-      async () =>
-        page.evaluate(async (evt) => {
-          const q = await (window as StenoWindow).stenoai.recording.getQueue();
-          if (!q.hasRecording) return `no-recording(name=${q.sessionName})`;
-          const r = await (window as StenoWindow).stenoai.settings.showPremeetingNotification({
-            event: evt,
-          });
-          return r.shown ? `fired(name=${q.sessionName})` : 'suppressed';
-        }, EVT),
-      { timeout: 15_000 },
-    )
-    .toBe('suppressed');
-
-  // ...but fires for a DIFFERENT meeting (different title).
-  expect((await showPremeeting(page, { id: 'evt-other', title: 'Other call' })).shown).not.toBe(
-    false,
-  );
+  // Check suppression IMMEDIATELY (one atomic evaluate), while the recording is
+  // confirmed active — the renderer-driven capture doesn't sustain for long on a
+  // headless runner, so a slow poll would race its teardown (same reason
+  // recording-lifecycle.t2 asserts right after start). The single evaluate reads
+  // the live queue and, only while hasRecording, fires the notification. The
+  // coded result surfaces the real state on failure.
+  const whileRecording = await page.evaluate(async (evt) => {
+    const q = await (window as StenoWindow).stenoai.recording.getQueue();
+    if (!q.hasRecording) return `no-recording(name=${q.sessionName})`;
+    const a = await (window as StenoWindow).stenoai.settings.showPremeetingNotification({
+      event: evt,
+    });
+    // Same instant: a DIFFERENT meeting still fires (name mismatch).
+    const b = await (window as StenoWindow).stenoai.settings.showPremeetingNotification({
+      event: { id: 'evt-other', title: 'Other call' },
+    });
+    return `recording:self=${a.shown},other=${b.shown}`;
+  }, EVT);
+  // self suppressed (shown=false), other fires (shown=true).
+  expect(whileRecording).toBe('recording:self=false,other=true');
 
   // Stop clears the session name; the notif fires for that meeting again.
   await page.evaluate(() => (window as StenoWindow).stenoai.recording.stop());
