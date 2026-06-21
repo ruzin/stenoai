@@ -588,6 +588,7 @@ handlers, which add the bearer header in main.
 | `org-create-meeting` | R→M invoke | yes | `stenoai.org.createMeeting(payload)` |
 | `org-delete-meeting` | R→M invoke | yes | `stenoai.org.deleteMeeting(id)` |
 | `org-share-meeting` | R→M invoke | yes | `stenoai.org.shareMeeting(payload)` |
+| `org-list-backup-failures` | R→M invoke | yes | `stenoai.org.listBackupFailures()` |
 | `org-ai-chat` | R→M invoke | yes | `stenoai.org.aiChat(payload)` |
 | `org-chat-stream` | R→M send | yes | `stenoai.org.chatStream(streamId, payload)` |
 
@@ -601,7 +602,10 @@ doesn't need a parallel subscription.
 `org-share-meeting` is the canonical share path: main does presign → PUT
 to S3 → register metadata in one step, so the renderer never sees the
 presigned URL or the bytes-in-flight. `org-create-meeting` is kept for
-inline-body fallbacks (legacy or test).
+inline-body fallbacks (legacy or test). `org-list-backup-failures` returns
+the summaryFiles whose last backup failed and haven't since been shared, in
+one read — backing the meetings-list "Not backed up" chip without a
+per-row `org-get-backup-state` call.
 
 ```ts
 interface OrgStatusResponse {
