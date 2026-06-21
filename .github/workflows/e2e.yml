@@ -31,6 +31,31 @@ permissions:
   contents: read
 
 jobs:
+  # Hermetic renderer/main unit tests — node:test for the main-process
+  # processing-log module + vitest (jsdom) for renderer hooks. No Electron,
+  # Python, xvfb, or network, so it's fast and runs on every PR.
+  unit-tests:
+    name: Unit (node:test + vitest)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install dependencies
+        working-directory: app
+        run: npm ci
+
+      - name: Run unit tests (node:test + vitest)
+        working-directory: app
+        run: npm run test:unit
+
   t1-renderer:
     name: T1 (renderer + mock IPC)
     runs-on: ubuntu-latest

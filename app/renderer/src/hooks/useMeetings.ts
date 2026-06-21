@@ -178,7 +178,7 @@ export function useDeleteMeeting() {
       // must not silently nuke the list if a malformed row slips through.
       if (!deletedFile) return;
       qc.setQueryData<Meeting[]>(meetingsKeys.list(), (prev) =>
-        prev ? prev.filter((m) => m.session_info.summary_file !== deletedFile) : prev,
+        prev?.filter((m) => m.session_info.summary_file !== deletedFile),
       );
     },
   });
