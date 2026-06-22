@@ -830,7 +830,19 @@ Return ONLY the response in this exact JSON format:
                     decisions=[],
                     duration_minutes=duration_minutes
                 )
-            
+
+            if self.ai_provider in ("local", "remote"):
+                num_ctx = resolve_num_ctx(self.model_name)
+                estimated_tokens = (len(transcript) + len(notes or "")) / 4
+                if estimated_tokens > num_ctx * 0.8:
+                    raise ValueError(
+                        "Transcript is too long for this model's context window "
+                        f"(~{int(estimated_tokens):,} estimated tokens vs a "
+                        f"{num_ctx:,}-token window for {self.model_name}). The "
+                        "summary would be silently truncated. Use a model with a "
+                        "larger context window or a shorter recording."
+                    )
+
             prompt = self._create_permissive_prompt(transcript, language, notes=notes)
             logger.info(f"Sending transcript to {self.ai_provider} model: {self.model_name}")
             logger.info(f"Transcript length: {len(transcript)} characters")
@@ -1077,7 +1089,7 @@ TRANSCRIPT:
         # real window we request.
         if self.ai_provider in ("local", "remote"):
             num_ctx = resolve_num_ctx(self.model_name)
-            estimated_tokens = len(transcript) / 4
+            estimated_tokens = (len(transcript) + len(notes or "")) / 4
             if estimated_tokens > num_ctx * 0.8:
                 raise ValueError(
                     "Transcript is too long for this model's context window "
