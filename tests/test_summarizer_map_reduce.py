@@ -1,6 +1,7 @@
 """Unit tests for map-reduce summarization helpers in OllamaSummarizer."""
 
 import unittest
+from unittest import mock
 
 from src.config import Config
 from src.summarizer import OllamaSummarizer, MAP_PROMPT_OVERHEAD_TOKENS, MAP_OUTPUT_MAX_TOKENS, CHARS_PER_TOKEN
@@ -83,6 +84,62 @@ class SplitIntoChunksTests(unittest.TestCase):
         combined = " ".join(chunks)
         for i, ln in enumerate(lines):
             self.assertIn(ln.strip(), combined, msg=f"line {i} not found in any chunk")
+
+
+class MapCallTests(unittest.TestCase):
+    def test_map_prompt_contains_chunk_position(self):
+        s = _make_summarizer()
+        prompt = s._create_map_prompt("hello world", 2, 5)
+        self.assertIn("part 2 of 5", prompt)
+        self.assertIn("hello world", prompt)
+
+    def test_map_prompt_contains_extraction_structure(self):
+        s = _make_summarizer()
+        prompt = s._create_map_prompt("some text", 1, 3)
+        self.assertIn("KEY POINTS", prompt)
+        self.assertIn("ACTION ITEMS", prompt)
+        self.assertIn("TRANSCRIPT SEGMENT:", prompt)
+
+    def test_summarize_chunk_raises_on_empty_llm_response(self):
+        s = _make_summarizer()
+        with mock.patch.object(s, '_ensure_ollama_ready'):
+            with mock.patch.object(s.client, 'chat', return_value={"message": {"content": ""}}):
+                with self.assertRaises(ValueError) as ctx:
+                    s._summarize_chunk("some content", 1, 3)
+        self.assertIn("empty", str(ctx.exception).lower())
+
+    def test_summarize_chunk_returns_stripped_content(self):
+        s = _make_summarizer()
+        fake_response = {"message": {"content": "  KEY POINTS\n- item\n"}}
+        with mock.patch.object(s, '_ensure_ollama_ready'):
+            with mock.patch.object(s.client, 'chat', return_value=fake_response):
+                result = s._summarize_chunk("some content", 1, 3)
+        self.assertEqual(result, "KEY POINTS\n- item")
+
+    def test_summarize_chunk_passes_num_predict_option(self):
+        s = _make_summarizer()
+        fake_response = {"message": {"content": "some result"}}
+        with mock.patch.object(s, '_ensure_ollama_ready'):
+            with mock.patch.object(s.client, 'chat', return_value=fake_response) as mock_chat:
+                s._summarize_chunk("content", 1, 1)
+        call_kwargs = mock_chat.call_args
+        options = call_kwargs[1].get('options') or (call_kwargs[0][2] if len(call_kwargs[0]) > 2 else {})
+        # Extract options from however it was called
+        all_kwargs = mock_chat.call_args.kwargs if mock_chat.call_args.kwargs else {}
+        if not all_kwargs:
+            all_kwargs = dict(zip(['model', 'messages', 'stream', 'options'], mock_chat.call_args.args))
+        self.assertEqual(all_kwargs.get('options', {}).get('num_predict'), 600)
+
+    def test_summarize_chunk_uses_non_streaming(self):
+        s = _make_summarizer()
+        fake_response = {"message": {"content": "result"}}
+        with mock.patch.object(s, '_ensure_ollama_ready'):
+            with mock.patch.object(s.client, 'chat', return_value=fake_response) as mock_chat:
+                s._summarize_chunk("content", 1, 1)
+        call_kwargs = mock_chat.call_args.kwargs if mock_chat.call_args.kwargs else {}
+        if not call_kwargs:
+            call_kwargs = dict(zip(['model', 'messages', 'stream', 'options'], mock_chat.call_args.args))
+        self.assertIs(call_kwargs.get('stream'), False)
 
 
 if __name__ == "__main__":

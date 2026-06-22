@@ -268,6 +268,38 @@ class OllamaSummarizer:
                 result.append(overlap + raw)
         return result
 
+    def _create_map_prompt(self, chunk: str, chunk_num: int, total_chunks: int) -> str:
+        """Compact extraction prompt for one transcript chunk (map step)."""
+        return (
+            f"This is part {chunk_num} of {total_chunks} of a meeting transcript.\n"
+            "Extract only what is explicitly stated. Be concise.\n\n"
+            "KEY POINTS\n- ...\n\n"
+            "DECISIONS\n- ...\n\n"
+            "ACTION ITEMS\n- [owner] action (deadline if mentioned)\n\n"
+            "OPEN QUESTIONS\n- ...\n\n"
+            f"TRANSCRIPT SEGMENT:\n{chunk}"
+        )
+
+    def _summarize_chunk(self, chunk: str, chunk_num: int, total_chunks: int) -> str:
+        """Non-streaming Ollama call for one map chunk. Returns stripped text or raises."""
+        prompt = self._create_map_prompt(chunk, chunk_num, total_chunks)
+        if self.ai_provider != "remote":
+            self._ensure_ollama_ready()
+        options = {**self._ollama_options(), "num_predict": MAP_OUTPUT_MAX_TOKENS}
+        response = self.client.chat(
+            model=self.model_name,
+            messages=[{"role": "user", "content": prompt}],
+            stream=False,
+            options=options,
+        )
+        result = (response.get("message", {}).get("content") or "").strip()
+        if not result:
+            raise ValueError(
+                f"Chunk {chunk_num}/{total_chunks} returned an empty result — "
+                "aborting map-reduce summarization."
+            )
+        return result
+
     def _repair_json(self, json_text: str) -> Optional[str]:
         """
         Attempt to repair common JSON formatting issues.
