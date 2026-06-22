@@ -142,5 +142,44 @@ class MapCallTests(unittest.TestCase):
         self.assertIs(call_kwargs.get('stream'), False)
 
 
+class ReducePromptTests(unittest.TestCase):
+    def test_reduce_prompt_contains_chunk_headers(self):
+        s = _make_summarizer()
+        results = ["KEY POINTS\n- item A", "KEY POINTS\n- item B"]
+        prompt = s._create_reduce_prompt(results)
+        self.assertIn("CHUNK 1 OF 2", prompt)
+        self.assertIn("CHUNK 2 OF 2", prompt)
+        self.assertIn("item A", prompt)
+        self.assertIn("item B", prompt)
+
+    def test_reduce_prompt_instructs_markdown_output(self):
+        s = _make_summarizer()
+        prompt = s._create_reduce_prompt(["result"])
+        self.assertIn("## Summary", prompt)
+        self.assertIn("## Key Topics", prompt)
+        self.assertIn("## Key Points", prompt)
+        self.assertIn("## Action Items", prompt)
+
+    def test_reduce_prompt_includes_notes_when_provided(self):
+        s = _make_summarizer()
+        prompt = s._create_reduce_prompt(["result"], notes="bring coffee")
+        self.assertIn("bring coffee", prompt)
+        self.assertIn("USER NOTES", prompt)
+
+    def test_reduce_prompt_no_notes_section_when_empty(self):
+        s = _make_summarizer()
+        prompt = s._create_reduce_prompt(["result"], notes=None)
+        self.assertNotIn("USER NOTES", prompt)
+
+    def test_reduce_prompt_does_not_say_summarise_this_transcript(self):
+        # Regression guard: the reduce step must NOT reuse _create_markdown_prompt's
+        # opening "Summarise this meeting transcript" because the input is already
+        # extracted bullet lists, not raw speech.
+        s = _make_summarizer()
+        prompt = s._create_reduce_prompt(["result"])
+        self.assertNotIn("Summarise this meeting transcript", prompt)
+        self.assertNotIn("TRANSCRIPT:\n", prompt)
+
+
 if __name__ == "__main__":
     unittest.main()

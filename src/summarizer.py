@@ -300,6 +300,59 @@ class OllamaSummarizer:
             )
         return result
 
+    def _create_reduce_prompt(self, map_results: list[str], language: str = "en", notes: str = None) -> str:
+        """Reduce prompt: merge N map-extracted summaries into a single coherent note."""
+        n = len(map_results)
+
+        if language and language not in ("en", "auto"):
+            from .config import get_config
+            language_name = get_config().get_language_name(language)
+            if language_name != "Unknown":
+                language_instruction = (
+                    f"\n\nCRITICAL: Write all content (summary text, topic titles, "
+                    f"topic analysis, key points, action items) in {language_name}. "
+                    f"However, keep the markdown section headers exactly as shown in "
+                    f"English: '## Summary', '## Key Topics', '## Key Points', "
+                    f"'## Action Items'. Do not translate these four headers."
+                )
+            else:
+                language_instruction = ""
+        else:
+            language_instruction = ""
+
+        notes_context = ""
+        if notes and notes.strip():
+            notes_context = f"USER NOTES (written during the meeting):\n{notes.strip()}\n\n"
+
+        combined = "\n\n".join(
+            f"CHUNK {i + 1} OF {n}\n{result}"
+            for i, result in enumerate(map_results)
+        )
+
+        return (
+            f"{notes_context}"
+            f"The following are structured extracts from {n} segments of a long meeting.\n"
+            "Merge and deduplicate into a single coherent summary. "
+            "Do not refer to \"the extracts\" or \"the segments\" — "
+            "write as if summarising the original meeting directly.\n"
+            "Output ONLY the markdown below with no preamble. Start directly with ## Summary.\n\n"
+            "## Summary\n"
+            "A 1-3 sentence overview of the main topics and outcomes, written directly. "
+            "Do not open with phrases like \"The meeting discussed\" or \"This meeting\".\n\n"
+            "## Key Topics\n"
+            "### [Topic title]\n"
+            "Brief analysis of what was discussed about this topic.\n\n"
+            "(Repeat for each major topic)\n\n"
+            "## Key Points\n"
+            "- [Key point 1]\n"
+            "- [Key point 2]\n\n"
+            "## Action Items\n"
+            "- [Action item 1]\n"
+            "- [Action item 2]\n\n"
+            f"Only include information explicitly discussed. Do not infer or assume.{language_instruction}\n\n"
+            f"EXTRACTS:\n{combined}"
+        )
+
     def _repair_json(self, json_text: str) -> Optional[str]:
         """
         Attempt to repair common JSON formatting issues.
