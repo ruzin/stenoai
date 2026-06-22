@@ -86,7 +86,7 @@ def resolve_num_ctx(model_name: str) -> int:
 
 
 class OllamaSummarizer:
-    def __init__(self, model_name: Optional[str] = None, ai_provider: Optional[str] = None, config = None):
+    def __init__(self, model_name: Optional[str] = None, ai_provider: Optional[str] = None, config: Optional['Config'] = None):
         """
         Initialize the summarizer with automatic service management.
         Supports local Ollama, remote Ollama, and cloud API providers.
@@ -252,7 +252,7 @@ class OllamaSummarizer:
                 raw_chunks.append(transcript[pos:])
                 break
             # Scan backward from budget boundary to nearest \n (never exceed budget)
-            split_pos = transcript.rfind('\n', pos, end)
+            split_pos = transcript.rfind('\n', pos, end + 1)
             if split_pos <= pos:
                 split_pos = end  # no newline in range; hard cut
             raw_chunks.append(transcript[pos:split_pos])

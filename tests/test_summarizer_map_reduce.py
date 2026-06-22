@@ -1,7 +1,6 @@
 """Unit tests for map-reduce summarization helpers in OllamaSummarizer."""
 
 import unittest
-from unittest import mock
 
 from src.config import Config
 from src.summarizer import OllamaSummarizer, MAP_PROMPT_OVERHEAD_TOKENS, MAP_OUTPUT_MAX_TOKENS, CHARS_PER_TOKEN
