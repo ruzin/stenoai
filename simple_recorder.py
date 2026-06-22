@@ -205,7 +205,7 @@ Summary output language: {config.get_language_name(output_language)}
 
 {transcript_body}
 """
-        with open(transcript_path, 'w') as f:
+        with open(transcript_path, 'w', encoding='utf-8') as f:
             f.write(transcript_content)
         return transcript_path
 
@@ -804,12 +804,6 @@ def process(audio_file, name, notes):
     asyncio.run(run_process())
 
 
-# Minimum length for the LIVE transcript to be worth swapping in as a fallback
-# (#207). This is a quality floor on the *fallback source* only — it does NOT
-# decide whether the batch result is bad (that's batch_failed / the silence
-# sentinel). A correct-but-short batch transcript is never replaced.
-_LIVE_TRANSCRIPT_MIN_CHARS = 100
-
 # Detect a silence-only batch result exactly, kept in sync with the
 # transcriber that produces the sentinel. Mirrors the graceful-import pattern
 # above so a missing transcriber dependency doesn't break the CLI.
@@ -888,17 +882,17 @@ def process_streaming(audio_file, name, notes, live_transcript):
         # unusable:
         #   - the batch transcription crashed (transcription_failed), or
         #   - it came back as exactly the silence sentinel.
-        # A correct-but-short meeting (e.g. a 5-minute stand-up under 100 chars)
-        # is a real batch transcript and must NOT be replaced — the old length
-        # threshold did exactly that (Fix 4). The 100-char floor is kept only as
-        # a MINIMUM-QUALITY gate on the live fallback itself: we won't swap in a
-        # live transcript that's too short to be worth it.
+        # A correct-but-short batch transcript (e.g. a 5-minute stand-up) must
+        # NOT be replaced — the old length threshold did exactly that (Fix 4).
+        # We only swap in the live text when the batch result is genuinely
+        # unusable (failed or silence sentinel). Any non-whitespace live content
+        # is better than a silent failure — even a brief session deserves rescue.
         batch_text = transcript_data.get("transcript_text", "") or ""
         batch_failed = bool(transcript_data.get("transcription_failed"))
         batch_is_silence = batch_text.strip() == _SILENCE_SENTINEL
         is_live_transcript = False
         if (batch_failed or batch_is_silence) and live_transcript_text \
-                and len(live_transcript_text) >= _LIVE_TRANSCRIPT_MIN_CHARS:
+                and live_transcript_text.strip():
             logger.warning(
                 "Batch transcription %s; falling back to the live transcript "
                 "captured during recording (%d chars)",
