@@ -431,6 +431,9 @@ export type CheckForUpdatesResponse = Result<{
 }>;
 
 // ---------- event payloads ----------
+export interface ProcessingProgressEvent {
+  line: string;
+}
 export interface SummaryChunkEvent {
   chunk: string;
   sessionName: string;
@@ -798,6 +801,7 @@ export interface StenoaiBridge {
     summaryTitle: Subscribe<SummaryTitleEvent>;
     summaryComplete: Subscribe<SummaryCompleteEvent>;
     processingComplete: Subscribe<ProcessingCompleteEvent>;
+    processingProgress: Subscribe<ProcessingProgressEvent>;
     queryChunk: Subscribe<QueryChunkEvent>;
     queryDone: Subscribe<QueryDoneEvent>;
     modelPullProgress: Subscribe<ModelPullProgressEvent>;

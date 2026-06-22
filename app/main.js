@@ -2911,6 +2911,8 @@ async function processNextInQueue() {
             transcriptionFailedMsg = line.slice('TRANSCRIPTION_FAILED:'.length).trim();
             sendDebugLog(`Transcription failed (audio preserved): ${transcriptionFailedMsg}`);
             trackEvent('transcription_completed', { success: false });
+          } else if (line.startsWith('PROGRESS:')) {
+            mainWindow.webContents.send('processing-progress', { line });
           } else if (line.startsWith('HEARTBEAT:')) {
             // Liveness signal — its real job (resetting the watchdog) already
             // happened at the top of this handler. Throttle debug-log output
