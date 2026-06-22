@@ -353,6 +353,76 @@ class OllamaSummarizer:
             f"EXTRACTS:\n{combined}"
         )
 
+    def _needs_chunking(self, transcript: str, notes: str = None) -> bool:
+        """True iff transcript is too long for a single Ollama call on the configured model."""
+        if self.ai_provider not in ("local", "remote"):
+            return False
+        num_ctx = resolve_num_ctx(self.model_name)
+        estimated_tokens = (len(transcript) + len(notes or "")) / CHARS_PER_TOKEN
+        return estimated_tokens > num_ctx * 0.8
+
+    def _hierarchical_reduce(self, map_results: list[str], depth: int) -> list[str]:
+        """Re-chunk map results that are too large for a single reduce call (max depth 2)."""
+        if depth > 2:
+            raise ValueError(
+                "Meeting is too long to summarize even after chunking — "
+                "try a model with a larger context window."
+            )
+        combined_text = "\n\n".join(map_results)
+        chunks = self._split_into_chunks(combined_text)
+        n = len(chunks)
+        new_results = [self._summarize_chunk(chunk, i + 1, n) for i, chunk in enumerate(chunks)]
+        num_ctx = resolve_num_ctx(self.model_name)
+        combined_tokens = len("\n\n".join(new_results)) / CHARS_PER_TOKEN
+        if combined_tokens > num_ctx * 0.7:
+            return self._hierarchical_reduce(new_results, depth + 1)
+        return new_results
+
+    def _map_reduce_streaming(
+        self,
+        transcript: str,
+        language: str = "en",
+        notes: str = None,
+        progress_callback=None,
+    ):
+        """Map-reduce generator: chunks → parallel map → streaming reduce."""
+        chunks = self._split_into_chunks(transcript)
+        n = len(chunks)
+        map_results = []
+
+        for i, chunk in enumerate(chunks):
+            if progress_callback:
+                progress_callback(i + 1, n)
+            map_results.append(self._summarize_chunk(chunk, i + 1, n))
+
+        # Signal: now entering the reduce step (step > total is unambiguous)
+        if progress_callback:
+            progress_callback(n + 1, n)
+
+        # Check if combined map output fits in a single reduce call
+        num_ctx = resolve_num_ctx(self.model_name)
+        combined_tokens = len("\n\n".join(map_results)) / CHARS_PER_TOKEN
+        if combined_tokens > num_ctx * 0.7:
+            map_results = self._hierarchical_reduce(map_results, depth=1)
+
+        reduce_prompt = self._create_reduce_prompt(map_results, language, notes)
+        if self.ai_provider != "remote":
+            self._ensure_ollama_ready()
+        try:
+            response = self.client.chat(
+                model=self.model_name,
+                messages=[{"role": "user", "content": reduce_prompt}],
+                stream=True,
+                options=self._ollama_options(),
+            )
+            for chunk in response:
+                content = chunk.get("message", {}).get("content", "")
+                if content:
+                    yield content
+        except Exception as e:
+            logger.error(f"Ollama map-reduce reduce step failed: {e}")
+            return
+
     def _repair_json(self, json_text: str) -> Optional[str]:
         """
         Attempt to repair common JSON formatting issues.
@@ -1183,7 +1253,7 @@ Only include information explicitly discussed. Do not infer or assume.{language_
 TRANSCRIPT:
 {transcript}"""
 
-    def summarize_transcript_streaming(self, transcript: str, duration_minutes: int = 0, language: str = "en", notes: str = None):
+    def summarize_transcript_streaming(self, transcript: str, duration_minutes: int = 0, language: str = "en", notes: str = None, progress_callback=None):
         """Generator that yields markdown chunks from the LLM.
 
         Args:
@@ -1191,10 +1261,15 @@ TRANSCRIPT:
             duration_minutes: Duration of the meeting
             language: Language code for output
             notes: Optional user notes for context
+            progress_callback: Optional callable(step, total) for progress reporting
 
         Yields:
             str: Text chunks as they arrive from the LLM
         """
+        if self._needs_chunking(transcript, notes):
+            yield from self._map_reduce_streaming(transcript, language, notes, progress_callback)
+            return
+
         prompt = self._create_markdown_prompt(transcript, language, notes)
         logger.info(f"Starting streaming summary with {self.ai_provider} model: {self.model_name}")
 

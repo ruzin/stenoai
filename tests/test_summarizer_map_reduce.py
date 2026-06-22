@@ -181,5 +181,127 @@ class ReducePromptTests(unittest.TestCase):
         self.assertNotIn("TRANSCRIPT:\n", prompt)
 
 
+class NeedsChunkingTests(unittest.TestCase):
+    def test_returns_false_for_cloud_provider(self):
+        cfg = Config()
+        with mock.patch.object(cfg, 'get_cloud_api_key', return_value="sk-fake"):
+            with mock.patch.object(cfg, 'get_cloud_provider', return_value="bedrock"):
+                with mock.patch.object(cfg, 'get_bedrock_region', return_value="us-east-1"):
+                    with mock.patch.object(cfg, 'get_bedrock_inference_profile', return_value=""):
+                        s = OllamaSummarizer(model_name="gpt-4o", ai_provider="cloud", config=cfg)
+        # Cloud provider: even with a giant transcript, chunking is not needed
+        self.assertFalse(s._needs_chunking("x" * 1_000_000))
+
+    def test_returns_false_for_adapter_provider(self):
+        cfg = Config()
+        with mock.patch.object(cfg, 'get_adapter_url', return_value="https://adapter.example.com"):
+            with mock.patch.object(cfg, 'get_adapter_token', return_value="fake-token"):
+                s = OllamaSummarizer(model_name="adapter-model", ai_provider="adapter", config=cfg)
+        self.assertFalse(s._needs_chunking("x" * 1_000_000))
+
+    def test_returns_false_for_short_transcript(self):
+        s = _make_summarizer("llama3.2:3b")  # num_ctx = 8192
+        # 8192 * 0.8 * 4 = 26214 chars threshold; 1000 chars is well below
+        self.assertFalse(s._needs_chunking("x" * 1000))
+
+    def test_returns_true_for_long_transcript(self):
+        s = _make_summarizer("llama3.2:3b")  # threshold ~26214 chars
+        long_transcript = "x" * 30000
+        self.assertTrue(s._needs_chunking(long_transcript))
+
+
+class MapReduceStreamingTests(unittest.TestCase):
+    def test_progress_callback_called_for_each_chunk_then_reducing(self):
+        s = _make_summarizer()
+        budget = s._chunk_budget_chars()
+        overlap = int(budget * 0.05)
+        content_budget = budget - overlap
+        # Force 2 raw chunks
+        line = "a" * 80 + "\n"
+        n = (content_budget // len(line)) + 5
+        transcript = line * n
+
+        progress_calls = []
+        with mock.patch.object(s, '_summarize_chunk', return_value="KEY POINTS\n- x"):
+            with mock.patch.object(s, '_ensure_ollama_ready'):
+                # Patch the Ollama streaming (reduce step)
+                def fake_chat(**kwargs):
+                    return iter([
+                        {"message": {"content": "## Summary\nok\n"}},
+                        {"message": {"content": ""}},
+                    ])
+                with mock.patch.object(s.client, 'chat', side_effect=fake_chat):
+                    chunks = list(s._map_reduce_streaming(
+                        transcript,
+                        progress_callback=lambda step, total: progress_calls.append((step, total)),
+                    ))
+
+        # Should have called progress once per map chunk, then once for reducing
+        n_chunks = len(s._split_into_chunks(transcript))
+        map_calls = [(i + 1, n_chunks) for i in range(n_chunks)]
+        reduce_signal = (n_chunks + 1, n_chunks)  # step > total = "reducing"
+        self.assertEqual(progress_calls[:-1], map_calls)
+        self.assertEqual(progress_calls[-1], reduce_signal)
+
+    def test_map_reduce_streaming_yields_reduce_content(self):
+        s = _make_summarizer()
+        budget = s._chunk_budget_chars()
+        overlap = int(budget * 0.05)
+        content_budget = budget - overlap
+        line = "b" * 80 + "\n"
+        n = (content_budget // len(line)) + 5
+        transcript = line * n
+
+        with mock.patch.object(s, '_summarize_chunk', return_value="extracted"):
+            with mock.patch.object(s, '_ensure_ollama_ready'):
+                def fake_chat(**kwargs):
+                    return iter([
+                        {"message": {"content": "## Summary\ntest result\n"}},
+                        {"message": {"content": ""}},
+                    ])
+                with mock.patch.object(s.client, 'chat', side_effect=fake_chat):
+                    result = "".join(s._map_reduce_streaming(transcript))
+        self.assertIn("## Summary", result)
+        self.assertIn("test result", result)
+
+
+class SummarizeTranscriptStreamingForkTests(unittest.TestCase):
+    def test_short_transcript_uses_direct_path(self):
+        """Short transcripts must NOT trigger map-reduce (1 chat call, not N+1)."""
+        s = _make_summarizer()
+        short = "Speaker: hello.\n" * 5
+
+        def fake_chat(**kwargs):
+            return iter([{"message": {"content": "## Summary\nok\n"}}])
+
+        with mock.patch.object(s, '_ensure_ollama_ready'):
+            with mock.patch.object(s.client, 'chat', side_effect=fake_chat) as mock_chat:
+                list(s.summarize_transcript_streaming(short))
+        # Direct path: exactly 1 chat call
+        self.assertEqual(mock_chat.call_count, 1)
+
+    def test_long_transcript_routes_to_map_reduce(self):
+        """A transcript over threshold must call _map_reduce_streaming, not direct."""
+        s = _make_summarizer("llama3.2:3b")
+        long_transcript = "Speaker: words.\n" * 3000  # definitely over 26k chars
+
+        with mock.patch.object(s, '_map_reduce_streaming', return_value=iter(["ok"])) as mock_mr:
+            with mock.patch.object(s, '_ensure_ollama_ready'):
+                list(s.summarize_transcript_streaming(long_transcript))
+        mock_mr.assert_called_once()
+
+    def test_no_valueerror_for_long_transcript(self):
+        """The PR #246 ValueError must be gone — long transcripts must not raise."""
+        s = _make_summarizer("llama3.2:3b")
+        long_transcript = "x" * 40000  # over threshold
+
+        with mock.patch.object(s, '_map_reduce_streaming', return_value=iter(["## Summary\nok"])):
+            with mock.patch.object(s, '_ensure_ollama_ready'):
+                try:
+                    list(s.summarize_transcript_streaming(long_transcript))
+                except ValueError as e:
+                    self.fail(f"summarize_transcript_streaming raised ValueError for long transcript: {e}")
+
+
 if __name__ == "__main__":
     unittest.main()
