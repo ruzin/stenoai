@@ -1709,6 +1709,10 @@ ipcMain.handle('reprocess-meeting', async (event, summaryFile, regenerateTitle, 
             if (mainWindow && !mainWindow.isDestroyed()) {
               mainWindow.webContents.send('summary-complete', { success: true, sessionName });
             }
+          } else if (line.startsWith('PROGRESS:')) {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('processing-progress', { line });
+            }
           } else if (line.trim()) {
             sendDebugLog(line.trim());
           }
@@ -2912,7 +2916,9 @@ async function processNextInQueue() {
             sendDebugLog(`Transcription failed (audio preserved): ${transcriptionFailedMsg}`);
             trackEvent('transcription_completed', { success: false });
           } else if (line.startsWith('PROGRESS:')) {
-            mainWindow.webContents.send('processing-progress', { line });
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('processing-progress', { line });
+            }
           } else if (line.startsWith('HEARTBEAT:')) {
             // Liveness signal — its real job (resetting the watchdog) already
             // happened at the top of this handler. Throttle debug-log output
