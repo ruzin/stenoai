@@ -31,7 +31,12 @@ export function buildTranscriptBundle(meeting: Meeting | null | undefined): stri
   const lines: string[] = [`# ${title}`];
   if (metaParts.length) lines.push(metaParts.join(' · '));
 
-  const notes = (meeting.notes ?? '').trim();
+  // The backend persists user notes under `user_notes` (see
+  // _parse_meeting_markdown); `notes` is only ever set by the renderer for the
+  // live/draft recording. Prefer the backend field so saved meetings actually
+  // carry the user's notes into the export, and fall back to `notes` for the
+  // in-memory draft case.
+  const notes = (meeting.user_notes ?? meeting.notes ?? '').trim();
   if (notes) lines.push('', '## Notes', notes);
 
   lines.push('', '## Transcript', body);
@@ -43,7 +48,7 @@ export function defaultExportFilename(meeting: Meeting | null | undefined): stri
   const info = meeting?.session_info;
   const date = isoToDate(info?.processed_at ?? info?.updated_at) ?? isoToDate(new Date().toISOString())!;
   const slug =
-    (info?.name ?? '')
+    transliterate(info?.name ?? '')
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-+|-+$/g, '')
@@ -52,6 +57,28 @@ export function defaultExportFilename(meeting: Meeting | null | undefined): stri
       .slice(0, 80)
       .replace(/-+$/g, '') || 'transcript';
   return `${date}-${slug}.md`;
+}
+
+// Map the common non-ASCII characters (esp. German umlauts/ß) to ASCII before
+// slugging, so a title like "Ärztegespräch über Änderungen" yields a readable
+// "aerztegespraech-ueber-aenderungen" filename instead of being stripped to
+// dashes. Deliberately a small hand-rolled table (no Unicode dependency): the
+// explicit umlaut map handles the ae/oe/ue/ss expansions, then NFD + combining-
+// mark removal strips the remaining accents (é→e, ñ→n, …) for free.
+function transliterate(input: string): string {
+  const umlauts: Record<string, string> = {
+    ä: 'ae',
+    ö: 'oe',
+    ü: 'ue',
+    Ä: 'Ae',
+    Ö: 'Oe',
+    Ü: 'Ue',
+    ß: 'ss',
+  };
+  return input
+    .replace(/[äöüÄÖÜß]/g, (ch) => umlauts[ch] ?? ch)
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '');
 }
 
 function isoToDate(iso: string | undefined): string | null {

@@ -2364,8 +2364,25 @@ ipcMain.handle('export-transcript', async (event, defaultFilename, content) => {
       targetPath = result.filePath;
     }
 
-    // Async write so a large transcript can't block the main process/UI thread.
-    await fs.promises.writeFile(targetPath, content, 'utf-8');
+    // Atomic write: write to a temp file in the SAME directory, then rename it
+    // into place. A direct writeFile() that fails mid-way (disk full, I/O error)
+    // truncates and corrupts a pre-existing file at targetPath; tmp+rename leaves
+    // the original untouched on failure. Mirrors the chat-sessions persistence
+    // pattern (~line 2056). Async so a large transcript can't block the UI thread.
+    const dir = path.dirname(targetPath);
+    const base = path.basename(targetPath);
+    const tmpPath = path.join(dir, `.${base}.${require('crypto').randomBytes(6).toString('hex')}.tmp`);
+    try {
+      await fs.promises.writeFile(tmpPath, content, 'utf-8');
+      // Node's fs.rename maps to MoveFileExW(MOVEFILE_REPLACE_EXISTING) on
+      // Windows and rename(2) on Unix — both atomically replace an existing
+      // destination on the same volume, so no separate unlink is needed.
+      await fs.promises.rename(tmpPath, targetPath);
+    } catch (writeErr) {
+      // Best-effort cleanup so a failed export doesn't leave a stray temp file.
+      try { await fs.promises.unlink(tmpPath); } catch (_) {}
+      throw writeErr;
+    }
     return { success: true, path: targetPath };
   } catch (err) {
     return { success: false, error: String(err && err.message ? err.message : err) };

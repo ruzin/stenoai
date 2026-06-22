@@ -1939,7 +1939,9 @@ def list_meetings():
                         "action_items": data.get("action_items", []),
                         "has_transcript": bool(data.get("transcript")),
                         "is_diarised": data.get("is_diarised", False),
-                        "folders": data.get("folders", [])
+                        "diarised_text": data.get("diarised_text"),
+                        "folders": data.get("folders", []),
+                        "user_notes": data.get("user_notes"),
                     }
             meetings.append((sort_key, essential_meeting))
         except Exception as e:

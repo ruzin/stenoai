@@ -38,7 +38,10 @@ const SEED_MEETING = {
   },
   transcript: 'Alice: we ship Friday.\nBob: I will prep the release notes.',
   is_diarised: false,
-  notes: 'Remember to send the deck.',
+  // The real backend (list-meetings -> _parse_meeting_markdown) returns the
+  // user's notes under `user_notes`, not `notes`; mirror that here so the spec
+  // exercises the same key buildTranscriptBundle reads for saved meetings.
+  user_notes: 'Remember to send the deck.',
   participants: ['Alice', 'Bob'],
   summary: '',
   key_points: [],
