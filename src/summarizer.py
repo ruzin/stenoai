@@ -67,6 +67,12 @@ _OLLAMA_MODEL_NUM_CTX = {
     "gpt-oss:20b": 32768,
 }
 
+# Map-reduce summarization constants
+MAP_PROMPT_OVERHEAD_TOKENS = 300  # reserve for map prompt scaffolding
+MAP_OUTPUT_MAX_TOKENS = 600       # hard cap on each map call's output
+CHARS_PER_TOKEN = 4               # conservative estimate, safe for multilingual
+_OVERLAP_RATIO = 0.05             # last 5% of previous chunk prepended to next
+
 
 def resolve_num_ctx(model_name: str) -> int:
     """Context window (num_ctx) to request from Ollama for ``model_name``.
@@ -80,18 +86,21 @@ def resolve_num_ctx(model_name: str) -> int:
 
 
 class OllamaSummarizer:
-    def __init__(self, model_name: Optional[str] = None):
+    def __init__(self, model_name: Optional[str] = None, ai_provider: Optional[str] = None, config = None):
         """
         Initialize the summarizer with automatic service management.
         Supports local Ollama, remote Ollama, and cloud API providers.
 
         Args:
             model_name: Name of the model to use. If None, loads from config.
+            ai_provider: AI provider type (local, remote, cloud, adapter). If None, loads from config.
+            config: Config object. If None, loads from get_config().
         """
         from .config import get_config
-        config = get_config()
+        if config is None:
+            config = get_config()
 
-        self.ai_provider = config.get_ai_provider()
+        self.ai_provider = ai_provider or config.get_ai_provider()
         self.client = None
         self.cloud_client = None
         self.anthropic_client = None
@@ -222,7 +231,43 @@ class OllamaSummarizer:
         consistent and Ollama doesn't reload the model between calls.
         """
         return {"num_ctx": resolve_num_ctx(self.model_name)}
-    
+
+    def _chunk_budget_chars(self) -> int:
+        """Total chars per chunk: content + overlap prefix, sized for the model."""
+        num_ctx = resolve_num_ctx(self.model_name)
+        content_tokens = num_ctx - MAP_PROMPT_OVERHEAD_TOKENS - MAP_OUTPUT_MAX_TOKENS
+        return int(content_tokens * CHARS_PER_TOKEN)
+
+    def _split_into_chunks(self, transcript: str) -> list[str]:
+        """Split transcript into overlapping chunks that each fit within the model context."""
+        budget = self._chunk_budget_chars()
+        overlap_chars = int(budget * _OVERLAP_RATIO)
+        content_budget = budget - overlap_chars
+
+        raw_chunks: list[str] = []
+        pos = 0
+        while pos < len(transcript):
+            end = pos + content_budget
+            if end >= len(transcript):
+                raw_chunks.append(transcript[pos:])
+                break
+            # Scan backward from budget boundary to nearest \n (never exceed budget)
+            split_pos = transcript.rfind('\n', pos, end)
+            if split_pos <= pos:
+                split_pos = end  # no newline in range; hard cut
+            raw_chunks.append(transcript[pos:split_pos])
+            pos = split_pos + 1  # skip the \n itself
+
+        result: list[str] = []
+        for i, raw in enumerate(raw_chunks):
+            if i == 0:
+                result.append(raw)
+            else:
+                prev = raw_chunks[i - 1]
+                overlap = prev[-overlap_chars:] if len(prev) >= overlap_chars else prev
+                result.append(overlap + raw)
+        return result
+
     def _repair_json(self, json_text: str) -> Optional[str]:
         """
         Attempt to repair common JSON formatting issues.
