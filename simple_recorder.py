@@ -861,6 +861,40 @@ def process_streaming(audio_file, name, notes):
 
         print("STREAM_COMPLETE", flush=True)
 
+        # Validate the streamed summary before we treat it as a success. A
+        # context overflow (e.g. a transcript longer than the model's num_ctx)
+        # makes the model emit truncated output with no `## Summary` header.
+        # _parse_meeting_markdown then yields an empty summary and the UI shows
+        # "No summary available" — but the file was saved as a success and a
+        # title was hallucinated from the garbage. Detect the missing header
+        # (same convention _parse_streamed_markdown / _parse_meeting_markdown
+        # use) and fail loudly instead. We still write the raw output to a
+        # debug sidecar (NOT the *_summary.md the renderer reads) so the broken
+        # output can be inspected without the app navigating to a fake meeting.
+        has_summary_header = any(
+            line.strip().startswith('## Summary')
+            for line in streamed_md.split('\n')
+        )
+        if not has_summary_header:
+            audio_path = Path(audio_file)
+            debug_path = recorder.output_dir / f"{audio_path.stem}_summary.invalid.md"
+            try:
+                debug_path.write_text(streamed_md, encoding='utf-8')
+            except Exception as e:
+                logger.warning(f"Failed to write invalid-summary debug file: {e}")
+            # ERROR: + non-zero exit mirrors the existing failure contract the
+            # Electron main relies on (close code != 0 -> processing-complete
+            # success:false). No SAVED: is emitted, so no hallucinated meeting
+            # is navigated to.
+            print(
+                "ERROR: Summary generation failed: the model returned no "
+                "'## Summary' section, which usually means the transcript "
+                "exceeded the model's context window. Try a model with a "
+                "larger context window or a shorter recording.",
+                flush=True,
+            )
+            sys.exit(1)
+
         # Step 3: Generate title
         session_name = name
         if _AUTO_NAMED_PATTERN.match(name):
@@ -915,7 +949,18 @@ def process_streaming(audio_file, name, notes):
 
         print(f"SAVED:{summary_path}", flush=True)
 
-    asyncio.run(run())
+    try:
+        asyncio.run(run())
+    except SystemExit:
+        # An explicit sys.exit() (e.g. the invalid-summary guard above) has
+        # already printed its ERROR: line — let it propagate unchanged.
+        raise
+    except Exception as e:
+        # Surface failures (e.g. the pre-flight context-window check raising
+        # before any token streams) as a clean ERROR: line + non-zero exit,
+        # matching the run_process() contract instead of dumping a traceback.
+        print(f"ERROR: {e}", flush=True)
+        sys.exit(1)
 
 
 @cli.command(name='get-whisper-model')

@@ -1065,6 +1065,28 @@ TRANSCRIPT:
         Yields:
             str: Text chunks as they arrive from the LLM
         """
+        # Pre-flight context check (Ollama only). Ollama silently truncates a
+        # transcript that exceeds num_ctx before the model sees it, which makes
+        # the model emit output with no `## Summary` header — surfacing
+        # downstream as an empty/"No summary available" meeting. Catch it here
+        # with a rough token estimate (~4 chars/token) and a 20% buffer for the
+        # prompt scaffolding around the transcript, and fail with a clear,
+        # actionable message instead of producing a silently-truncated summary.
+        # Cloud/adapter providers manage their own (much larger) context, so
+        # this only applies to local/remote Ollama where resolve_num_ctx is the
+        # real window we request.
+        if self.ai_provider in ("local", "remote"):
+            num_ctx = resolve_num_ctx(self.model_name)
+            estimated_tokens = len(transcript) / 4
+            if estimated_tokens > num_ctx * 0.8:
+                raise ValueError(
+                    "Transcript is too long for this model's context window "
+                    f"(~{int(estimated_tokens):,} estimated tokens vs a "
+                    f"{num_ctx:,}-token window for {self.model_name}). The "
+                    "summary would be silently truncated. Use a model with a "
+                    "larger context window or a shorter recording."
+                )
+
         prompt = self._create_markdown_prompt(transcript, language, notes)
         logger.info(f"Starting streaming summary with {self.ai_provider} model: {self.model_name}")
 

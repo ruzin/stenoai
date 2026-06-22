@@ -186,3 +186,5 @@ ollama.pid
 
 # Local design reference library (cloned, not vendored)
 .reference/
+.worktrees
+worktrees
