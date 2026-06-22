@@ -1,0 +1,157 @@
+import { test, expect } from '../fixtures/electron';
+import { writeUserConfig, writeMeetingSummary } from '../fixtures/user-config';
+import { startMockOllama } from '../fixtures/mock-ollama';
+import { readFileSync } from 'fs';
+
+/**
+ * T2 @map-reduce — end-to-end exercise of the map-reduce summarisation path.
+ *
+ * Drives `reprocess` through the real bundled backend + mock Ollama and asserts:
+ *   1. A transcript > 26 214 chars (llama3.2:3b threshold) triggers N map calls
+ *      + 1 reduce call (N+1 total), emitting PROGRESS:summarize: lines in order.
+ *   2. A short transcript still takes the direct 1-call path (regression guard).
+ *
+ * Model-free: transcripts are pre-seeded and the LLM is the mock. No ASR, no
+ * real model. Tagged @map-reduce; runs in the model-free t2 jobs.
+ */
+
+// llama3.2:3b context=8192, budget factor ~0.8 → ~6554 tokens → ~26 214 chars.
+// 500 lines × ~80 chars = ~40 000 chars — comfortably over the threshold,
+// guaranteeing exactly 2 map chunks + 1 reduce = 3 chat calls.
+const LONG_TRANSCRIPT = Array.from({ length: 500 }, (_, i) =>
+  `Speaker A: This is utterance ${i} of a long planning meeting about the quarterly roadmap.\n`,
+).join('');
+
+type ReprocessResult = { success: boolean; error?: string };
+type StenoWindow = Window & {
+  stenoai: {
+    meetings: {
+      reprocess: (summaryFile: string, regenTitle: boolean, name: string) => Promise<ReprocessResult>;
+    };
+    on: {
+      summaryComplete: (cb: (e: { success: boolean }) => void) => () => void;
+      processingProgress: (cb: (e: { line: string }) => void) => () => void;
+    };
+  };
+};
+
+test.describe('Map-reduce summarization @map-reduce', () => {
+  test('long transcript triggers N+1 chat calls (2 map + 1 reduce)', async ({
+    launchApp,
+    userDataDir,
+  }) => {
+    // Pin llama3.2:3b so the chunking threshold is predictable.
+    writeUserConfig(userDataDir, { ai_provider: 'local', ai_model: 'llama3.2:3b' });
+    const summaryFile = writeMeetingSummary(userDataDir, 'long-meeting', {
+      name: 'Long Planning Meeting',
+      summary: 'stale',
+      transcript: LONG_TRANSCRIPT,
+    });
+
+    // Map calls get compact extraction replies; reduce call gets the full summary.
+    const ollama = await startMockOllama({
+      chatReplyQueue: [
+        'KEY POINTS\n- Planning session discussed roadmap.\n\nACTION ITEMS\n- Team to review Q3 budget.',
+        'KEY POINTS\n- Team confirmed delivery timeline.\n\nACTION ITEMS\n- Alice to update tracker.',
+      ],
+      chatReply:
+        '## Summary\nThis was a long planning meeting about the quarterly roadmap.\n\n## Key Points\n- Roadmap agreed\n\n## Action Items\n- Update tracker',
+    });
+    try {
+      const { page } = await launchApp();
+
+      // Capture PROGRESS: events via the IPC bridge.
+      const progressLines: string[] = [];
+      await page.exposeFunction('captureProgress', (line: string) => {
+        progressLines.push(line);
+      });
+      await page.evaluate(() => {
+        const w = window as unknown as StenoWindow;
+        w.stenoai.on.processingProgress((e: { line: string }) => {
+          (window as any).captureProgress(e.line);
+        });
+      });
+
+      // Trigger reprocess and wait for completion.
+      const completed: boolean = await page.evaluate(
+        (f) =>
+          new Promise<boolean>((resolve) => {
+            const timer = setTimeout(() => resolve(false), 60_000);
+            const w = window as unknown as StenoWindow;
+            const off = w.stenoai.on.summaryComplete((e) => {
+              if (e && e.success) {
+                clearTimeout(timer);
+                off();
+                resolve(true);
+              }
+            });
+            w.stenoai.meetings.reprocess(f, false, 'Long Planning Meeting');
+          }),
+        summaryFile,
+      );
+
+      expect(completed).toBe(true);
+
+      // 2 map calls + 1 reduce call = 3 total.
+      expect(ollama.chatCalls()).toBe(3);
+
+      // PROGRESS: lines must arrive in order.
+      const summarizeLines = progressLines.filter((l) => l.startsWith('PROGRESS:summarize:'));
+      expect(summarizeLines).toEqual([
+        'PROGRESS:summarize:1/2',
+        'PROGRESS:summarize:2/2',
+        'PROGRESS:summarize:reducing',
+      ]);
+
+      // Final summary must be saved to disk with the expected shape.
+      const saved = JSON.parse(readFileSync(summaryFile, 'utf8'));
+      expect(saved.summary).toContain('## Summary');
+    } finally {
+      await ollama.close();
+    }
+  });
+
+  test('short transcript uses direct path (1 chat call)', async ({
+    launchApp,
+    userDataDir,
+  }) => {
+    writeUserConfig(userDataDir, { ai_provider: 'local', ai_model: 'llama3.2:3b' });
+    const summaryFile = writeMeetingSummary(userDataDir, 'short-meeting', {
+      name: 'Short Meeting',
+      summary: 'stale',
+      transcript: 'Speaker A: Hello, let us begin.\nSpeaker B: Agreed, let us proceed.\n',
+    });
+
+    const ollama = await startMockOllama({
+      chatReply:
+        '## Summary\nBrief meeting.\n\n## Key Points\n- Started well\n\n## Action Items\n- None',
+    });
+    try {
+      const { page } = await launchApp();
+
+      const completed: boolean = await page.evaluate(
+        (f) =>
+          new Promise<boolean>((resolve) => {
+            const timer = setTimeout(() => resolve(false), 60_000);
+            const w = window as unknown as StenoWindow;
+            const off = w.stenoai.on.summaryComplete((e) => {
+              if (e && e.success) {
+                clearTimeout(timer);
+                off();
+                resolve(true);
+              }
+            });
+            w.stenoai.meetings.reprocess(f, false, 'Short Meeting');
+          }),
+        summaryFile,
+      );
+
+      expect(completed).toBe(true);
+
+      // Short transcript takes the direct path: exactly 1 chat call.
+      expect(ollama.chatCalls()).toBe(1);
+    } finally {
+      await ollama.close();
+    }
+  });
+});
