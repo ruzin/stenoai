@@ -251,10 +251,13 @@ class OllamaSummarizer:
             if end >= len(transcript):
                 raw_chunks.append(transcript[pos:])
                 break
-            # Scan backward from budget boundary to nearest \n (never exceed budget)
-            split_pos = transcript.rfind('\n', pos, end + 1)
-            if split_pos <= pos:
-                split_pos = end  # no newline in range; hard cut
+            # Scan backward in the last 20% of the chunk for a clean \n break.
+            # Searching from pos would pick up an early header newline when the
+            # transcript body is one long line, producing a tiny first chunk.
+            scan_start = max(pos, end - content_budget // 5)
+            split_pos = transcript.rfind('\n', scan_start, end + 1)
+            if split_pos < scan_start:
+                split_pos = end  # no newline in scan window; hard cut
             raw_chunks.append(transcript[pos:split_pos])
             pos = split_pos + 1  # skip the \n itself
 
