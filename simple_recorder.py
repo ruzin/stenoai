@@ -108,6 +108,16 @@ def _start_summary_heartbeat(label: str = "summarize", interval_s: int = 60, max
     return stop
 
 
+def _emit_progress(step: int, total: int) -> None:
+    """Emit a PROGRESS: line to stdout for the map-reduce summarization step."""
+    if step > total:
+        label = "reducing"
+    else:
+        label = f"{step}/{total}"
+    sys.stdout.write(f"PROGRESS:summarize:{label}\n")
+    sys.stdout.flush()
+
+
 def _render_frontmatter(meta: dict) -> list[str]:
     """Render a meeting .md YAML frontmatter block (including the enclosing
     ``---`` fences) from a flat dict, with the type-specific scalar
@@ -647,7 +657,8 @@ Transcript:
         print("🧠 Generating summary...", flush=True)
         streamed_chunks = []
         for chunk in self.summarizer.summarize_transcript_streaming(
-            text_for_summary, duration_minutes, output_language, notes_text
+            text_for_summary, duration_minutes, output_language, notes_text,
+            progress_callback=_emit_progress,
         ):
             encoded = base64.b64encode(chunk.encode('utf-8')).decode('ascii')
             sys.stdout.write(f"CHUNK:{encoded}\n")
@@ -848,7 +859,8 @@ def process_streaming(audio_file, name, notes):
         summary_heartbeat = _start_summary_heartbeat()
         try:
             for chunk in recorder.summarizer.summarize_transcript_streaming(
-                text_for_summary, duration_minutes, output_language, notes_text
+                text_for_summary, duration_minutes, output_language, notes_text,
+                progress_callback=_emit_progress,
             ):
                 summary_heartbeat.set()
                 encoded = base64.b64encode(chunk.encode('utf-8')).decode('ascii')
@@ -1980,7 +1992,8 @@ def reprocess(summary_file, regenerate_title):
         summary_heartbeat = _start_summary_heartbeat()
         try:
             for chunk in recorder.summarizer.summarize_transcript_streaming(
-                transcript, duration_minutes, output_language, notes_text
+                transcript, duration_minutes, output_language, notes_text,
+                progress_callback=_emit_progress,
             ):
                 summary_heartbeat.set()
                 encoded = base64.b64encode(chunk.encode('utf-8')).decode('ascii')
