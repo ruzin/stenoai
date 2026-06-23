@@ -8,16 +8,27 @@ from click.testing import CliRunner
 from unittest import mock
 
 import simple_recorder
+from src import report_store
 from src.config import Config
+
+_MD_TEMPLATE = """\
+---
+language: en
+duration_seconds: 600
+---
+## Summary
+
+Existing summary
+
+## Transcript
+
+{transcript}
+"""
 
 
 def _write_summary(tmp, transcript="Alice: hi. Bob: bye."):
-    p = Path(tmp) / "meeting_summary.json"
-    p.write_text(json.dumps({
-        "summary": "Existing summary",
-        "transcript": transcript,
-        "session_info": {"name": "Test", "duration_minutes": 10},
-    }))
+    p = Path(tmp) / "meeting_summary.md"
+    p.write_text(_MD_TEMPLATE.format(transcript=transcript))
     return p
 
 
@@ -33,9 +44,9 @@ class GenerateReportCliTests(unittest.TestCase):
                 )
             self.assertNotEqual(res.exit_code, 0)
             self.assertIn("STREAM_ERROR", res.output)
-            # No report persisted.
-            data = json.loads(summary.read_text())
-            self.assertFalse(data.get("reports"))
+            # No sidecar written.
+            sidecar_p = report_store.sidecar_path(summary)
+            self.assertFalse(sidecar_p.exists())
 
     def test_empty_stream_emits_stream_error_and_nonzero_exit(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -56,8 +67,9 @@ class GenerateReportCliTests(unittest.TestCase):
             self.assertNotEqual(res.exit_code, 0)
             self.assertIn("STREAM_ERROR", res.output)
             self.assertIn("empty report", res.output)
-            data = json.loads(summary.read_text())
-            self.assertFalse(data.get("reports"))
+            # No sidecar written.
+            sidecar_p = report_store.sidecar_path(summary)
+            self.assertFalse(sidecar_p.exists())
 
     def test_valid_stream_writes_before_stream_complete(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -77,13 +89,17 @@ class GenerateReportCliTests(unittest.TestCase):
                     [str(summary), "standard"],
                 )
             self.assertEqual(res.exit_code, 0, res.output)
-            # Ordering: the file is written before STREAM_COMPLETE is emitted.
-            saved_idx = res.output.find("STREAM_COMPLETE")
-            self.assertNotEqual(saved_idx, -1)
-            data = json.loads(summary.read_text())
-            self.assertEqual(len(data["reports"]), 1)
-            self.assertIn("body", data["reports"][0]["content"])
-            self.assertEqual(data["active_report"], data["reports"][0]["id"])
+            # Ordering: the sidecar is written before STREAM_COMPLETE is emitted.
+            self.assertIn("STREAM_COMPLETE", res.output)
+            # Report landed in the sidecar, NOT the meeting file.
+            sidecar_p = report_store.sidecar_path(summary)
+            self.assertTrue(sidecar_p.exists(), "sidecar file should exist")
+            sidecar = json.loads(sidecar_p.read_text())
+            self.assertEqual(len(sidecar["reports"]), 1)
+            self.assertIn("body", sidecar["reports"][0]["content"])
+            self.assertEqual(sidecar["active_report"], sidecar["reports"][0]["id"])
+            # Meeting file itself must NOT be modified (it's still a .md).
+            self.assertTrue(summary.read_text().startswith("---"))
 
 
 if __name__ == "__main__":

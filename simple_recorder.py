@@ -2177,12 +2177,11 @@ def delete_report(summary_file, report_id):
 @click.argument('summary_file', required=True)
 @click.argument('template_id', required=True)
 def generate_report(summary_file, template_id):
-    """Generate a template-based report and append it to the meeting JSON."""
-    import json
+    """Generate a template-based report and write it to the meeting sidecar."""
     import base64
-    import src.reports
-
+    from src import report_store, reports as _rpts
     from src.config import get_config
+
     recorder = MeetingPipeline()
     summary_path = Path(summary_file)
 
@@ -2191,8 +2190,7 @@ def generate_report(summary_file, template_id):
         sys.exit(1)
 
     try:
-        with open(summary_path, 'r') as f:
-            existing_data = json.load(f)
+        meeting = report_store.read_meeting(summary_path)
     except Exception as e:
         print(f"ERROR: Failed to load summary file: {e}")
         sys.exit(1)
@@ -2205,31 +2203,22 @@ def generate_report(summary_file, template_id):
         print("STREAM_ERROR:Unknown template", flush=True)
         sys.exit(1)
 
-    transcript = existing_data.get('transcript', '')
+    transcript = meeting["transcript"]
     if not transcript:
         print("ERROR: No transcript found in summary file")
         sys.exit(1)
 
-    duration_minutes = existing_data.get('session_info', {}).get('duration_minutes', 10)
-    if duration_minutes is None:
-        ds = existing_data.get('session_info', {}).get('duration_seconds')
-        duration_minutes = int(ds / 60) if ds else 10
-
-    notes_text = existing_data.get('user_notes')
+    duration_minutes = meeting["duration_minutes"] or 10
+    notes_text = meeting["notes"]
 
     # Resolve output language: template language takes precedence over "auto"
     if tmpl.get("language") and tmpl["language"] != "auto":
         output_language = tmpl["language"]
     else:
-        existing_session_info = existing_data.get("session_info", {})
-        output_language = existing_session_info.get("output_language")
+        output_language = meeting["language"]
         if not output_language:
-            configured_language = existing_session_info.get("configured_language")
-            if not configured_language:
-                configured_language = config.get_language()
             output_language = recorder._resolve_output_language(
-                configured_language,
-                existing_session_info.get("detected_language")
+                config.get_language(), None
             )
 
     if recorder.summarizer is None:
@@ -2269,15 +2258,16 @@ def generate_report(summary_file, template_id):
         print("STREAM_ERROR:Model returned an empty report", flush=True)
         sys.exit(1)
 
-    # Write the meeting JSON BEFORE emitting STREAM_COMPLETE so the renderer's
+    # Write the sidecar BEFORE emitting STREAM_COMPLETE so the renderer's
     # refetch (triggered by the completion event) never reads stale data.
-    report = src.reports.make_report(
+    sidecar = report_store.load_sidecar(summary_path)
+    report = _rpts.make_report(
         template_id, tmpl["name"], recorder.summarizer.model_name, streamed_md
     )
-    src.reports.append_report(existing_data, report)
-    _atomic_write_json(summary_path, existing_data)
+    _rpts.append_report(sidecar, report)
+    report_store.save_sidecar(summary_path, sidecar)
     print("STREAM_COMPLETE", flush=True)
-    print(f"SAVED:{summary_path}")
+    print(f"SAVED:{report_store.sidecar_path(summary_path)}")
 
 
 @cli.command('regen-title')
