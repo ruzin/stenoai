@@ -2123,6 +2123,106 @@ def reprocess(summary_file, regenerate_title):
         sys.exit(1)
 
 
+@cli.command(name='generate-report')
+@click.argument('summary_file', required=True)
+@click.argument('template_id', required=True)
+def generate_report(summary_file, template_id):
+    """Generate a template-based report and append it to the meeting JSON."""
+    import json
+    import base64
+    import src.reports
+
+    from src.config import get_config
+    recorder = MeetingPipeline()
+    summary_path = Path(summary_file)
+
+    if not summary_path.exists():
+        print(f"ERROR: Summary file not found: {summary_file}")
+        sys.exit(1)
+
+    try:
+        with open(summary_path, 'r') as f:
+            existing_data = json.load(f)
+    except Exception as e:
+        print(f"ERROR: Failed to load summary file: {e}")
+        sys.exit(1)
+
+    # Unknown template → IPC contract: exit 0 with JSON error
+    config = get_config()
+    tmpl = config.get_template(template_id)
+    if tmpl is None:
+        print(json.dumps({"success": False, "error": "Unknown template"}))
+        return
+
+    transcript = existing_data.get('transcript', '')
+    if not transcript:
+        print("ERROR: No transcript found in summary file")
+        sys.exit(1)
+
+    duration_minutes = existing_data.get('session_info', {}).get('duration_minutes', 10)
+    if duration_minutes is None:
+        ds = existing_data.get('session_info', {}).get('duration_seconds')
+        duration_minutes = int(ds / 60) if ds else 10
+
+    notes_text = existing_data.get('user_notes')
+
+    # Resolve output language: template language takes precedence over "auto"
+    if tmpl.get("language") and tmpl["language"] != "auto":
+        output_language = tmpl["language"]
+    else:
+        existing_session_info = existing_data.get("session_info", {})
+        output_language = existing_session_info.get("output_language")
+        if not output_language:
+            configured_language = existing_session_info.get("configured_language")
+            if not configured_language:
+                configured_language = config.get_language()
+            output_language = recorder._resolve_output_language(
+                configured_language,
+                existing_session_info.get("detected_language")
+            )
+
+    if recorder.summarizer is None:
+        from src.summarizer import OllamaSummarizer
+        recorder.summarizer = OllamaSummarizer()
+
+    print("Generating report...", flush=True)
+    streamed_chunks = []
+    summary_heartbeat = _start_summary_heartbeat()
+    _stream_error = None
+    try:
+        for chunk in recorder.summarizer.summarize_transcript_streaming(
+            transcript, duration_minutes, output_language, notes_text,
+            progress_callback=_emit_progress,
+            template_prompt=tmpl["prompt"],
+        ):
+            summary_heartbeat.set()
+            encoded = base64.b64encode(chunk.encode('utf-8')).decode('ascii')
+            sys.stdout.write(f"CHUNK:{encoded}\n")
+            sys.stdout.flush()
+            streamed_chunks.append(chunk)
+    except Exception as e:
+        _stream_error = e
+    finally:
+        summary_heartbeat.set()
+
+    if _stream_error is not None:
+        logger.error(f"Report generation failed: {_stream_error}")
+        err_msg = str(_stream_error).replace('\n', ' ').replace('\r', ' ')
+        print(f"STREAM_ERROR:{err_msg}", flush=True)
+        sys.exit(1)
+
+    streamed_md = ''.join(streamed_chunks)
+
+    print("STREAM_COMPLETE", flush=True)
+
+    report = src.reports.make_report(
+        template_id, tmpl["name"], recorder.summarizer.model_name, streamed_md
+    )
+    src.reports.append_report(existing_data, report)
+    _atomic_write_json(summary_path, existing_data)
+    print(f"SAVED:{summary_path}")
+
+
 @cli.command('regen-title')
 @click.argument('summary_file', required=True)
 def regen_title(summary_file):

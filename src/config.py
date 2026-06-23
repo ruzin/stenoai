@@ -510,6 +510,10 @@ class Config:
             custom=self._config.get("custom_templates", []) or [],
         )
 
+    def get_template(self, template_id: str) -> Optional[dict]:
+        """Return the template with the given id, or None if not found."""
+        return next((t for t in self.get_templates() if t["id"] == template_id), None)
+
     def get_default_template_id(self) -> str:
         return self._config.get("default_template_id", _templates.STANDARD_TEMPLATE_ID)
 
