@@ -24,6 +24,29 @@ class StructuredToMarkdownTests(unittest.TestCase):
         self.assertNotIn("## Key Points", md)
         self.assertNotIn("## Action Items", md)
 
+    def test_empty_summary_with_sections_still_nonempty(self):
+        # Fix B2 (HIGH): a prior note with empty `summary` but populated
+        # discussion_areas/key_points/action_items must still reconstruct to a
+        # non-empty backup markdown, so the reprocess #249 snapshot fires and the
+        # old version isn't lost. The gate is `_backup_md.strip()`, so prove it
+        # is truthy here.
+        md = R.structured_to_markdown(
+            "",
+            [{"title": "Topic A", "analysis": "did A"}],
+            ["a key point"],
+            ["an action item"],
+        )
+        self.assertTrue(md.strip(), "expected non-empty backup md for empty-summary note")
+        self.assertNotIn("## Summary", md)
+        self.assertIn("### Topic A", md)
+        self.assertIn("- a key point", md)
+        self.assertIn("- an action item", md)
+
+    def test_all_fields_empty_yields_empty(self):
+        # The gate must NOT fire when there's genuinely nothing to back up.
+        md = R.structured_to_markdown("", [], [], [])
+        self.assertFalse(md.strip(), "expected empty md when every field is empty")
+
     def test_tolerates_string_or_dict_items(self):
         md = R.structured_to_markdown(
             "o", [], [{"decision": "kp dict"}, "kp str"], [{"description": "ai dict"}, "ai str"]

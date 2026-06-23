@@ -253,6 +253,12 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
   const activeReport = activeReportId
     ? reports.find((r) => r.id === activeReportId) ?? null
     : null;
+  // meeting.active_report is the source of truth (the switch persists it). Re-sync
+  // local state whenever it changes so a reprocess (backend clears it to null)
+  // can't leave the UI showing a stale report. Idempotent for user clicks.
+  React.useEffect(() => {
+    setActiveReportId(meeting.active_report ?? null);
+  }, [meeting.active_report]);
   // When a report generation finishes, summaryComplete fires for THIS meeting
   // and we want to land on the freshly-created report. The IPC stream doesn't
   // carry the new report id, so we flag "the active stream is a report" and,

@@ -2109,23 +2109,21 @@ def reprocess(summary_file, regenerate_title):
             # #249: snapshot the prior Standard note as a switchable backup before
             # we overwrite it, so a regenerate never loses the previous summary.
             from src import reports as _reports
-            _prev_summary = existing_data.get("summary", "")
-            if (_prev_summary or "").strip():
-                _backup_md = _reports.structured_to_markdown(
-                    _prev_summary,
-                    existing_data.get("discussion_areas", []),
-                    existing_data.get("key_points", []),
-                    existing_data.get("action_items", []),
-                )
-                if _backup_md.strip():
-                    _stamp = datetime.now().strftime("%Y-%m-%d %H:%M")
-                    _reports.append_report(existing_data, _reports.make_report(
-                        "standard-backup", f"Standard · {_stamp}",
-                        existing_data.get("session_info", {}).get("model")
-                        or recorder.summarizer.model_name, _backup_md))
-                    # append_report sets active_report to the backup; the live note
-                    # should stay the default view after regenerate, so clear it:
-                    existing_data["active_report"] = None
+            _backup_md = _reports.structured_to_markdown(
+                existing_data.get("summary", ""),
+                existing_data.get("discussion_areas", []),
+                existing_data.get("key_points", []),
+                existing_data.get("action_items", []),
+            )
+            if _backup_md.strip():
+                _stamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+                _reports.append_report(existing_data, _reports.make_report(
+                    "standard-backup", f"Standard · {_stamp}",
+                    existing_data.get("session_info", {}).get("model")
+                    or recorder.summarizer.model_name, _backup_md))
+                # append_report sets active_report to the backup; the live note
+                # should stay the default view after regenerate, so clear it:
+                existing_data["active_report"] = None
             existing_data.update({
                 "summary": parsed.get("summary", "") or "",
                 "participants": parsed.get("participants", []) or [],
