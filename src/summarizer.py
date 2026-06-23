@@ -58,6 +58,9 @@ OLLAMA_NUM_CTX_DEFAULT = 32768
 OLLAMA_NUM_CTX_CEILING = 131072
 _OLLAMA_MODEL_NUM_CTX = {
     "gemma4:e2b-it-qat": 32768,
+    # gemma4:4b (E4B) advertises a large window like its siblings; capped to 32K
+    # — a meeting fits and the full window would be a large KV-cache allocation.
+    "gemma4:4b": 32768,
     # gemma4:12b advertises 256K; capped well under that — a meeting fits in 32K
     # and the full window would be a large KV-cache allocation.
     "gemma4:12b": 32768,
@@ -297,10 +300,18 @@ class OllamaSummarizer:
         if self.ai_provider != "remote":
             self._ensure_ollama_ready()
         options = {**self._ollama_options(), "num_predict": MAP_OUTPUT_MAX_TOKENS}
+        # think=False: thinking-capable models (gemma4:e2b-it-qat, gemma4:12b,
+        # gpt-oss) emit chain-of-thought into a separate `message.thinking`
+        # channel that still counts against num_predict. With output capped at
+        # MAP_OUTPUT_MAX_TOKENS, reasoning can consume the entire budget and
+        # leave `message.content` empty -> empty-result retry -> ValueError ->
+        # STREAM_ERROR. Extraction needs no reasoning, so disable it and give
+        # the whole budget to the answer. No-op on non-thinking models.
         response = self.client.chat(
             model=self.model_name,
             messages=[{"role": "user", "content": prompt}],
             stream=False,
+            think=False,
             options=options,
         )
         result = (response.get("message", {}).get("content") or "").strip()
@@ -429,10 +440,15 @@ class OllamaSummarizer:
         # handler in simple_recorder.reprocess (`except Exception as e:
         # _stream_error = e`) so it emits STREAM_ERROR + sys.exit(1). Swallowing
         # it would yield nothing → caller joins [] into "" → empty summary saved.
+        # think=False for the same reason as the map step: the reduce prompt
+        # demands direct markdown output, not reasoning, and thinking tokens
+        # would only delay (and on a thinking model can risk) the first content
+        # token. See _summarize_chunk for the full rationale.
         response = self.client.chat(
             model=self.model_name,
             messages=[{"role": "user", "content": reduce_prompt}],
             stream=True,
+            think=False,
             options=self._ollama_options(),
         )
         streamed_chunks = []
@@ -1092,6 +1108,9 @@ Return ONLY the response in this exact JSON format:
                                     'content': prompt
                                 }
                             ],
+                            # think=False: this JSON-summary path wants direct
+                            # structured output, not reasoning. See _summarize_chunk.
+                            think=False,
                             options=self._ollama_options(),
                         )
                         break  # Success, exit retry loop
@@ -1354,10 +1373,15 @@ TRANSCRIPT:
             try:
                 if self.ai_provider != "remote":
                     self._ensure_ollama_ready()
+                # think=False: the markdown summary prompt wants direct output;
+                # a thinking model would otherwise spend tokens reasoning into a
+                # separate channel before the first content token. See
+                # _summarize_chunk for the full rationale.
                 response = self.client.chat(
                     model=self.model_name,
                     messages=[{'role': 'user', 'content': prompt}],
                     stream=True,
+                    think=False,
                     options=self._ollama_options(),
                 )
                 for chunk in response:
@@ -1509,6 +1533,9 @@ TITLE:"""
                 ollama_response = title_client.chat(
                     model=self.model_name,
                     messages=[{'role': 'user', 'content': prompt}],
+                    # think=False: a 6-word title needs no reasoning; thinking would
+                    # only burn tokens/latency before the title. See _summarize_chunk.
+                    think=False,
                     options=self._ollama_options(),
                 )
                 response_text = ollama_response['message']['content'].strip()

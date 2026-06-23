@@ -142,6 +142,79 @@ class MapCallTests(unittest.TestCase):
         self.assertIs(call_kwargs.get('stream'), False)
 
 
+class ThinkingDisabledTests(unittest.TestCase):
+    """Regression for STREAM_ERROR "empty result after retry" on thinking-capable
+    models. gemma4:e2b-it-qat / gemma4:12b emit chain-of-thought into
+    message.thinking; the map step caps output at MAP_OUTPUT_MAX_TOKENS, so
+    reasoning tokens exhaust the budget and message.content comes back empty.
+    Summarization calls must pass think=False so the whole budget is answer text.
+    """
+
+    @staticmethod
+    def _chat_kwargs(mock_chat):
+        kw = dict(mock_chat.call_args.kwargs)
+        if not kw:
+            kw = dict(zip(['model', 'messages', 'stream', 'options'], mock_chat.call_args.args))
+        return kw
+
+    def _long_transcript(self, s):
+        budget = s._chunk_budget_chars()
+        overlap = int(budget * 0.05)
+        content_budget = budget - overlap
+        line = "b" * 80 + "\n"
+        n = (content_budget // len(line)) + 5
+        return line * n
+
+    def test_map_chunk_call_disables_thinking(self):
+        s = _make_summarizer()
+        fake_response = {"message": {"content": "result"}}
+        with mock.patch.object(s, '_ensure_ollama_ready'):
+            with mock.patch.object(s.client, 'chat', return_value=fake_response) as mock_chat:
+                s._summarize_chunk("content", 1, 1)
+        self.assertIs(self._chat_kwargs(mock_chat).get('think'), False)
+
+    def test_reduce_call_disables_thinking(self):
+        s = _make_summarizer()
+        transcript = self._long_transcript(s)
+        with mock.patch.object(s, '_summarize_chunk', return_value="extracted"):
+            with mock.patch.object(s, '_ensure_ollama_ready'):
+                def fake_chat(**kwargs):
+                    return iter([{"message": {"content": "## Summary\nok\n"}}])
+                with mock.patch.object(s.client, 'chat', side_effect=fake_chat) as mock_chat:
+                    list(s._map_reduce_streaming(transcript))
+        self.assertIs(mock_chat.call_args.kwargs.get('think'), False)
+
+    def test_direct_streaming_summary_disables_thinking(self):
+        s = _make_summarizer()
+        short = "Speaker: hello.\n" * 5
+
+        def fake_chat(**kwargs):
+            return iter([{"message": {"content": "## Summary\nok\n"}}])
+
+        with mock.patch.object(s, '_ensure_ollama_ready'):
+            with mock.patch.object(s.client, 'chat', side_effect=fake_chat) as mock_chat:
+                list(s.summarize_transcript_streaming(short))
+        self.assertIs(mock_chat.call_args.kwargs.get('think'), False)
+
+    def test_json_summary_path_disables_thinking(self):
+        s = _make_summarizer()
+        valid = ('{"overview":"o","key_points":[],"next_steps":[],'
+                 '"discussion_areas":[],"participants":[]}')
+        with mock.patch.object(s, '_ensure_ollama_ready'):
+            with mock.patch.object(s.client, 'chat',
+                                   return_value={"message": {"content": valid}}) as mock_chat:
+                s.summarize_transcript("some transcript text", 10)
+        self.assertIs(self._chat_kwargs(mock_chat).get('think'), False)
+
+    def test_generate_title_disables_thinking(self):
+        s = _make_summarizer()
+        fake_client = mock.MagicMock()
+        fake_client.chat.return_value = {"message": {"content": "Project Kickoff"}}
+        with mock.patch('ollama.Client', return_value=fake_client):
+            s.generate_title("a summary", "a transcript")
+        self.assertIs(fake_client.chat.call_args.kwargs.get('think'), False)
+
+
 class ReducePromptTests(unittest.TestCase):
     def test_reduce_prompt_contains_chunk_headers(self):
         s = _make_summarizer()

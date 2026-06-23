@@ -24,7 +24,10 @@ onnxruntime>=1.17
 # Parakeet can't speak (Chinese, Japanese, Korean, Arabic, Hindi, …).
 # Cross-platform — Windows wheels are published.
 pywhispercpp>=1.2.0
-ollama>=0.1.7
+# >=0.5.0: the chat() `think` param (used to disable reasoning channels for
+# summarization) was introduced in ollama-python 0.5.0; older versions raise
+# TypeError on it, which the streaming path would swallow into an empty summary.
+ollama>=0.5.0
 click>=8.1.0
 pydantic>=2.5.0
 python-dateutil>=2.8.0
