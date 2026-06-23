@@ -2,14 +2,15 @@ import { test, expect } from '../fixtures/electron';
 import { realUserDataDir, fileSig } from '../fixtures/real-user-data';
 import { writeUserConfig, writeMeetingSummary } from '../fixtures/user-config';
 import { startMockOllama } from '../fixtures/mock-ollama';
-import { readFileSync } from 'fs';
+import { readFileSync, existsSync } from 'fs';
+import path from 'path';
 
 /**
  * T2 — generate-report persists into reports[] and sets active_report. Drives
  * the real `generate-report` path (NO ASR, NO real model) with a capturing mock
  * Ollama and asserts the two sides of the generate-report contract:
  *   1. The markdown returned by the mock LLM is stored verbatim in
- *      `reports[0].content` in the meeting `_summary.json`.
+ *      `reports[0].content` in the sidecar `<stem>_reports.json`.
  *   2. `active_report` is set to `reports[0].id` and `reports[0].template_id`
  *      matches the template used.
  *
@@ -43,7 +44,22 @@ type StenoWindow = Window & {
 
 const readSummary = (file: string) => JSON.parse(readFileSync(file, 'utf8'));
 
-test('generate-report appends to reports[] and sets active_report in the meeting JSON', async ({
+type Report = { id: string; template_id: string; content: string };
+
+const readSidecar = (sidecarPath: string): { reports: Report[]; active_report: string | null } => {
+  if (!existsSync(sidecarPath)) return { reports: [], active_report: null };
+  return JSON.parse(readFileSync(sidecarPath, 'utf8'));
+};
+
+/** Derive the sidecar path from a `*_summary.json` path. */
+const sidecarFor = (summaryFile: string): string => {
+  const dir = path.dirname(summaryFile);
+  const base = path.basename(summaryFile, '.json'); // e.g. 'report-gen_summary'
+  const stem = base.endsWith('_summary') ? base.slice(0, -'_summary'.length) : base;
+  return path.join(dir, `${stem}_reports.json`);
+};
+
+test('generate-report appends to reports[] and sets active_report in the sidecar', async ({
   launchApp,
   userDataDir,
 }) => {
@@ -56,6 +72,7 @@ test('generate-report appends to reports[] and sets active_report in the meeting
     summary: 'Existing summary',
     transcript: TRANSCRIPT,
   });
+  const sidecarPath = sidecarFor(summaryFile);
 
   const ollama = await startMockOllama({ chatReply: REPORT_REPLY });
   try {
@@ -94,18 +111,18 @@ test('generate-report appends to reports[] and sets active_report in the meeting
 
     expect(completed).toBe(true);
 
-    // Wait for the file to be written (STREAM_COMPLETE fires before _atomic_write_json).
+    // Wait for the sidecar to be written (STREAM_COMPLETE fires before atomic write).
     await expect
-      .poll(() => readSummary(summaryFile).reports?.length, { timeout: 15_000 })
+      .poll(() => readSidecar(sidecarPath).reports.length, { timeout: 15_000 })
       .toBe(1);
 
-    // Assert the on-disk JSON: reports[] appended, content verbatim, active_report set.
-    const updated = readSummary(summaryFile);
-    expect(updated.reports).toHaveLength(1);
-    expect(updated.reports[0].content).toContain('did the thing');
-    expect(updated.reports[0].content).toContain('Q2 up 15%');
-    expect(updated.reports[0].template_id).toBe(templateId);
-    expect(updated.active_report).toBe(updated.reports[0].id);
+    // Assert the sidecar on disk: reports[] appended, content verbatim, active_report set.
+    const sidecar = readSidecar(sidecarPath);
+    expect(sidecar.reports).toHaveLength(1);
+    expect(sidecar.reports[0].content).toContain('did the thing');
+    expect(sidecar.reports[0].content).toContain('Q2 up 15%');
+    expect(sidecar.reports[0].template_id).toBe(templateId);
+    expect(sidecar.active_report).toBe(sidecar.reports[0].id);
 
     // Keystone: the real user-data dir is byte-for-byte untouched.
     expect(fileSig(realUserDataDir())).toBe(realDirBefore);
@@ -126,6 +143,7 @@ test('generate-report with an unknown template surfaces failure and persists no 
     summary: 'Existing summary',
     transcript: TRANSCRIPT,
   });
+  const sidecarPath = sidecarFor(summaryFile);
 
   // Mock Ollama is started but should never be reached — the unknown-template
   // guard fails before any model call.
@@ -155,10 +173,10 @@ test('generate-report with an unknown template surfaces failure and persists no 
     expect(result.completed).toBe(true);
     expect(result.success).toBe(false);
 
-    // No report was persisted to the meeting JSON.
-    const updated = readSummary(summaryFile);
-    expect(updated.reports ?? []).toHaveLength(0);
-    expect(updated.active_report ?? null).toBeNull();
+    // No report was persisted to the sidecar (sidecar absent or empty).
+    const sidecar = readSidecar(sidecarPath);
+    expect(sidecar.reports).toHaveLength(0);
+    expect(sidecar.active_report).toBeNull();
 
     // Keystone: the real user-data dir is byte-for-byte untouched.
     expect(fileSig(realUserDataDir())).toBe(realDirBefore);

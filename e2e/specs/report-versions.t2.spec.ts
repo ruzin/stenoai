@@ -2,17 +2,18 @@ import { test, expect } from '../fixtures/electron';
 import { realUserDataDir, fileSig } from '../fixtures/real-user-data';
 import { writeUserConfig, writeMeetingSummary } from '../fixtures/user-config';
 import { startMockOllama } from '../fixtures/mock-ollama';
-import { readFileSync } from 'fs';
+import { readFileSync, existsSync } from 'fs';
+import path from 'path';
 
 /**
  * T2 — report-versions round-trip. Drives `reprocess` (NO ASR, NO real model)
  * with a capturing mock Ollama and asserts the full versions contract:
- *   1. reprocess snapshots the prior Standard note into `reports[]` as a backup
- *      (template_id 'standard-backup', non-empty content) and writes the new
- *      mock LLM output as the live summary.
- *   2. setActiveReport(backupId) → active_report === backupId on disk.
- *   3. setActiveReport('standard') → active_report === null on disk.
- *   4. deleteReport(backupId) → reports[] is empty on disk.
+ *   1. reprocess snapshots the prior Standard note into the sidecar (`<stem>_reports.json`)
+ *      as a backup (template_id 'standard-backup', non-empty content) and writes the new
+ *      mock LLM output as the live summary in the meeting JSON.
+ *   2. setActiveReport(backupId) → active_report === backupId in the sidecar.
+ *   3. setActiveReport('standard') → active_report === null in the sidecar.
+ *   4. deleteReport(backupId) → reports[] is empty in the sidecar.
  *
  * Model-free: the transcript is pre-seeded and the LLM is the mock.
  * The isolation keystone (STENOAI_USER_DATA_DIR) prevents writes to the real
@@ -53,6 +54,21 @@ type StenoWindow = Window & {
 
 const readSummary = (file: string) => JSON.parse(readFileSync(file, 'utf8'));
 
+type Report = { id: string; template_id: string; content: string };
+
+const readSidecar = (sidecarPath: string): { reports: Report[]; active_report: string | null } => {
+  if (!existsSync(sidecarPath)) return { reports: [], active_report: null };
+  return JSON.parse(readFileSync(sidecarPath, 'utf8'));
+};
+
+/** Derive the sidecar path from a `*_summary.json` path. */
+const sidecarFor = (summaryFile: string): string => {
+  const dir = path.dirname(summaryFile);
+  const base = path.basename(summaryFile, '.json'); // e.g. 'report-versions_summary'
+  const stem = base.endsWith('_summary') ? base.slice(0, -'_summary'.length) : base;
+  return path.join(dir, `${stem}_reports.json`);
+};
+
 test('reprocess backup + set-active + delete round-trip', async ({
   launchApp,
   userDataDir,
@@ -66,6 +82,7 @@ test('reprocess backup + set-active + delete round-trip', async ({
     summary: SEEDED_SUMMARY,
     transcript: TRANSCRIPT,
   });
+  const sidecarPath = sidecarFor(summaryFile);
 
   const ollama = await startMockOllama({ chatReply: REPROCESS_REPLY });
   try {
@@ -91,23 +108,27 @@ test('reprocess backup + set-active + delete round-trip', async ({
 
     expect(completed).toBe(true);
 
-    // Poll until the file reflects the new live summary (written after STREAM_COMPLETE).
+    // Poll until the meeting JSON reflects the new live summary (written after STREAM_COMPLETE).
     await expect
       .poll(() => readSummary(summaryFile).summary, { timeout: 15_000 })
       .toBe('new summary');
 
-    // Assert backup: exactly one entry with template_id 'standard-backup' and
-    // non-empty content (the pre-existing summary was captured as markdown).
-    const afterReprocess = readSummary(summaryFile);
-    expect(afterReprocess.reports).toHaveLength(1);
-    const backup = afterReprocess.reports[0];
+    // Assert backup in the sidecar: exactly one entry with template_id 'standard-backup'
+    // and non-empty content (the pre-existing summary was captured as markdown).
+    await expect
+      .poll(() => readSidecar(sidecarPath).reports.length, { timeout: 10_000 })
+      .toBe(1);
+
+    const sidecarAfterReprocess = readSidecar(sidecarPath);
+    expect(sidecarAfterReprocess.reports).toHaveLength(1);
+    const backup = sidecarAfterReprocess.reports[0];
     expect(backup.template_id).toBe('standard-backup');
     expect(backup.content.trim()).not.toBe('');
     // The backup content is derived from the seeded summary.
     expect(backup.content).toContain('Old Q2 summary');
 
     // active_report is null after reprocess (live Standard note is the default view).
-    expect(afterReprocess.active_report ?? null).toBeNull();
+    expect(sidecarAfterReprocess.active_report ?? null).toBeNull();
 
     const backupId = backup.id as string;
     expect(backupId).toBeTruthy();
@@ -119,9 +140,9 @@ test('reprocess backup + set-active + delete round-trip', async ({
     );
     expect(setRes.success).toBe(true);
 
-    // Poll until active_report is the backup id on disk.
+    // Poll until active_report is the backup id in the sidecar.
     await expect
-      .poll(() => readSummary(summaryFile).active_report, { timeout: 10_000 })
+      .poll(() => readSidecar(sidecarPath).active_report, { timeout: 10_000 })
       .toBe(backupId);
 
     // --- Step 3: setActiveReport back to 'standard' ---
@@ -131,9 +152,9 @@ test('reprocess backup + set-active + delete round-trip', async ({
     );
     expect(clearRes.success).toBe(true);
 
-    // Poll until active_report is null on disk.
+    // Poll until active_report is null in the sidecar.
     await expect
-      .poll(() => readSummary(summaryFile).active_report ?? null, { timeout: 10_000 })
+      .poll(() => readSidecar(sidecarPath).active_report ?? null, { timeout: 10_000 })
       .toBeNull();
 
     // --- Step 4: deleteReport ---
@@ -143,9 +164,9 @@ test('reprocess backup + set-active + delete round-trip', async ({
     );
     expect(delRes.success).toBe(true);
 
-    // Poll until reports[] is empty on disk.
+    // Poll until reports[] is empty in the sidecar.
     await expect
-      .poll(() => readSummary(summaryFile).reports?.length ?? 0, { timeout: 10_000 })
+      .poll(() => readSidecar(sidecarPath).reports.length, { timeout: 10_000 })
       .toBe(0);
 
     // Keystone: the real user-data dir is byte-for-byte untouched.
