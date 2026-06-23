@@ -2914,10 +2914,11 @@ def save_template(template_json):
         print(json.dumps({"success": False, "error": f"Invalid JSON: {e}"}))
         sys.exit(1)
     ok, err, saved = get_config().save_template(payload)
+    # Exit 0 regardless: the JSON on stdout IS the result. The IPC handler parses
+    # it directly; non-zero exit would cause runPythonScript to reject and throw
+    # away the structured error message (returning raw stderr instead).
     print(json.dumps({"success": ok, "template": saved} if ok
                      else {"success": False, "error": err}))
-    if not ok:
-        sys.exit(1)
 
 
 @cli.command(name='delete-template')
