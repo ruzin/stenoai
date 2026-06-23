@@ -262,12 +262,12 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
   React.useEffect(() => {
     const sessionName = info.name;
     const offChunk = ipc().on.summaryChunk((e) => {
-      if (e.sessionName !== sessionName) return;
+      if (e.summaryFile !== summaryFile) return;
       setStreamPhase((prev) => (prev === 'analyzing' ? 'generating' : prev));
       setStreamText((prev) => prev + e.chunk);
     });
     const offComplete = ipc().on.summaryComplete((e) => {
-      if (e.sessionName !== sessionName) return;
+      if (e.summaryFile !== summaryFile) return;
       if (!e.success) {
         setStreamPhase('idle');
         setChunkProgress(null);

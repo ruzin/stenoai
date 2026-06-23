@@ -469,6 +469,7 @@ export interface ProcessingProgressEvent {
 export interface SummaryChunkEvent {
   chunk: string;
   sessionName: string;
+  summaryFile?: string;
 }
 export interface SummaryTitleEvent {
   title: string;
@@ -477,6 +478,7 @@ export interface SummaryTitleEvent {
 export interface SummaryCompleteEvent {
   success: boolean;
   sessionName: string;
+  summaryFile?: string;
 }
 export interface ProcessingCompleteEvent {
   success: boolean;

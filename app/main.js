@@ -1876,7 +1876,7 @@ ipcMain.handle('reprocess-meeting', async (event, summaryFile, regenerateTitle, 
               const encoded = line.slice(6);
               const chunk = Buffer.from(encoded, 'base64').toString('utf-8');
               if (mainWindow && !mainWindow.isDestroyed()) {
-                mainWindow.webContents.send('summary-chunk', { chunk, sessionName });
+                mainWindow.webContents.send('summary-chunk', { chunk, sessionName, summaryFile });
               }
             } catch (e) { console.log('CHUNK decode error:', e.message); }
           } else if (line.startsWith('TITLE:')) {
@@ -1886,7 +1886,7 @@ ipcMain.handle('reprocess-meeting', async (event, summaryFile, regenerateTitle, 
             }
           } else if (line === 'STREAM_COMPLETE') {
             if (mainWindow && !mainWindow.isDestroyed()) {
-              mainWindow.webContents.send('summary-complete', { success: true, sessionName });
+              mainWindow.webContents.send('summary-complete', { success: true, sessionName, summaryFile });
             }
           } else if (line.startsWith('PROGRESS:')) {
             if (mainWindow && !mainWindow.isDestroyed()) {
@@ -1896,7 +1896,7 @@ ipcMain.handle('reprocess-meeting', async (event, summaryFile, regenerateTitle, 
             const errMsg = line.slice('STREAM_ERROR:'.length);
             sendDebugLog(`❌ Reprocess stream error: ${errMsg}`);
             if (mainWindow && !mainWindow.isDestroyed()) {
-              mainWindow.webContents.send('summary-complete', { success: false, sessionName });
+              mainWindow.webContents.send('summary-complete', { success: false, sessionName, summaryFile });
             }
           } else if (line.trim()) {
             sendDebugLog(line.trim());
@@ -1997,7 +1997,7 @@ ipcMain.handle('generate-report-meeting', async (event, summaryFile, templateId)
               const encoded = line.slice(6);
               const chunk = Buffer.from(encoded, 'base64').toString('utf-8');
               if (mainWindow && !mainWindow.isDestroyed()) {
-                mainWindow.webContents.send('summary-chunk', { chunk, sessionName });
+                mainWindow.webContents.send('summary-chunk', { chunk, sessionName, summaryFile });
               }
             } catch (e) { console.log('CHUNK decode error:', e.message); }
           } else if (line.startsWith('TITLE:')) {
@@ -2007,7 +2007,7 @@ ipcMain.handle('generate-report-meeting', async (event, summaryFile, templateId)
             }
           } else if (line === 'STREAM_COMPLETE') {
             if (mainWindow && !mainWindow.isDestroyed()) {
-              mainWindow.webContents.send('summary-complete', { success: true, sessionName });
+              mainWindow.webContents.send('summary-complete', { success: true, sessionName, summaryFile });
             }
           } else if (line.startsWith('PROGRESS:')) {
             if (mainWindow && !mainWindow.isDestroyed()) {
@@ -2017,7 +2017,7 @@ ipcMain.handle('generate-report-meeting', async (event, summaryFile, templateId)
             const errMsg = line.slice('STREAM_ERROR:'.length);
             sendDebugLog(`❌ Report generation stream error: ${errMsg}`);
             if (mainWindow && !mainWindow.isDestroyed()) {
-              mainWindow.webContents.send('summary-complete', { success: false, sessionName });
+              mainWindow.webContents.send('summary-complete', { success: false, sessionName, summaryFile });
             }
           } else if (line.startsWith('SAVED:')) {
             sendDebugLog(`Report saved: ${line.slice(6).trim()}`);
