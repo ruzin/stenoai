@@ -2108,22 +2108,19 @@ def reprocess(summary_file, regenerate_title):
             parsed = recorder._parse_streamed_markdown(streamed_md)
             # #249: snapshot the prior Standard note as a switchable backup before
             # we overwrite it, so a regenerate never loses the previous summary.
-            from src import reports as _reports
-            _backup_md = _reports.structured_to_markdown(
-                existing_data.get("summary", ""),
-                existing_data.get("discussion_areas", []),
-                existing_data.get("key_points", []),
-                existing_data.get("action_items", []),
-            )
+            from src import report_store, reports as _reports
+            _backup_md = report_store.read_meeting(summary_path)["summary_markdown"]
             if _backup_md.strip():
                 _stamp = datetime.now().strftime("%Y-%m-%d %H:%M")
-                _reports.append_report(existing_data, _reports.make_report(
+                _sidecar = report_store.load_sidecar(summary_path)
+                _reports.append_report(_sidecar, _reports.make_report(
                     "standard-backup", f"Standard · {_stamp}",
                     existing_data.get("session_info", {}).get("model")
                     or recorder.summarizer.model_name, _backup_md))
                 # append_report sets active_report to the backup; the live note
                 # should stay the default view after regenerate, so clear it:
-                existing_data["active_report"] = None
+                _sidecar["active_report"] = None
+                report_store.save_sidecar(summary_path, _sidecar)
             existing_data.update({
                 "summary": parsed.get("summary", "") or "",
                 "participants": parsed.get("participants", []) or [],
@@ -2146,12 +2143,11 @@ def reprocess(summary_file, regenerate_title):
 @click.argument('report_id')
 def set_active_report(summary_file, report_id):
     """Persist which report version is shown (report_id 'standard' clears it)."""
-    from src import reports as _reports
-    path = Path(summary_file)
-    data = json.loads(path.read_text(encoding='utf-8'))
-    ok = _reports.set_active(data, report_id)
+    from src import report_store, reports as _reports
+    sidecar = report_store.load_sidecar(summary_file)
+    ok = _reports.set_active(sidecar, report_id)
     if ok:
-        _atomic_write_json(path, data)
+        report_store.save_sidecar(summary_file, sidecar)
     print(json.dumps({"success": ok} if ok else {"success": False, "error": "Unknown report"}))
     if not ok:
         sys.exit(1)
@@ -2162,12 +2158,11 @@ def set_active_report(summary_file, report_id):
 @click.argument('report_id')
 def delete_report(summary_file, report_id):
     """Delete a saved report version from a meeting."""
-    from src import reports as _reports
-    path = Path(summary_file)
-    data = json.loads(path.read_text(encoding='utf-8'))
-    ok = _reports.remove_report(data, report_id)
+    from src import report_store, reports as _reports
+    sidecar = report_store.load_sidecar(summary_file)
+    ok = _reports.remove_report(sidecar, report_id)
     if ok:
-        _atomic_write_json(path, data)
+        report_store.save_sidecar(summary_file, sidecar)
     print(json.dumps({"success": ok} if ok else {"success": False, "error": "Unknown report"}))
     if not ok:
         sys.exit(1)
