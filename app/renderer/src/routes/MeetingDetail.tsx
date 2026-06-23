@@ -1013,7 +1013,6 @@ function ReportSwitch({
                   onGenerate(t.id);
                 }}
               >
-                {t.icon && <span aria-hidden>{t.icon}</span>}
                 <span className="truncate">{t.name}</span>
               </button>
             ))}

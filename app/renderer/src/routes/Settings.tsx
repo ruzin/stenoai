@@ -1003,19 +1003,6 @@ function AiTab() {
 // transcript / global setting.
 const TEMPLATE_LANGUAGES: LangOption[] = LANGUAGES_WHISPER;
 
-// Fixed icon palette for custom templates. Keys are stored verbatim on the
-// template; the renderer that shows summaries maps them to glyphs. We keep
-// the picker small and curated rather than a free-text field so authored
-// templates stay visually consistent with the built-ins.
-const TEMPLATE_ICONS: { value: string; label: string }[] = [
-  { value: 'doc', label: 'Document' },
-  { value: 'people', label: 'People' },
-  { value: 'calendar', label: 'Calendar' },
-  { value: 'lightbulb', label: 'Idea' },
-  { value: 'phone', label: 'Call' },
-  { value: 'megaphone', label: 'Announcement' },
-];
-
 function TemplatesTab() {
   const { templates, defaultId, isLoading } = useTemplates();
   const setDefault = useSetDefaultTemplate();
@@ -1179,13 +1166,12 @@ function TemplateEditor({
   const [name, setName] = React.useState(editing?.name ?? '');
   const [prompt, setPrompt] = React.useState(editing?.prompt ?? '');
   const [language, setLanguage] = React.useState(editing?.language ?? 'auto');
-  const [icon, setIcon] = React.useState(editing?.icon ?? 'doc');
   const [error, setError] = React.useState<string | null>(null);
 
   const onSave = () => {
     setError(null);
     save.mutate(
-      { id: editing?.id, name, icon, prompt, language },
+      { id: editing?.id, name, prompt, language },
       {
         onSuccess: () => onClose(),
         onError: (e) => setError(e instanceof Error ? e.message : 'Save failed'),
@@ -1226,21 +1212,6 @@ function TemplateEditor({
             {TEMPLATE_LANGUAGES.map((l) => (
               <SelectItem key={l.value} value={l.value}>
                 {l.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </SettingRow>
-
-      <SettingRow label="Icon">
-        <Select value={icon} onValueChange={setIcon}>
-          <SelectTrigger className={cn(COMPACT_TRIGGER, 'min-w-[180px]')}>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {TEMPLATE_ICONS.map((i) => (
-              <SelectItem key={i.value} value={i.value}>
-                {i.label}
               </SelectItem>
             ))}
           </SelectContent>
