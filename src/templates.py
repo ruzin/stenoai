@@ -15,6 +15,11 @@ import re
 
 STANDARD_TEMPLATE_ID = "standard"
 
+MAX_NAME_LEN = 200
+MAX_PROMPT_LEN = 8000
+MAX_ICON_LEN = 64
+VALID_FORMATS = {"structured", "markdown"}
+
 # Only STANDARD is a built-in. Locked + structured: its "prompt" is empty
 # because it routes through the existing JSON-schema summary path, not a
 # free-form prompt. PR B reads `format` to pick the render/generation path.
@@ -34,7 +39,7 @@ BUILTIN_TEMPLATES = {
 SAMPLE_TEMPLATE = {
     "id": "shareable-summary",
     "name": "Shareable summary",
-    "icon": "send",
+    "icon": "megaphone",
     "prompt": (
         "Write a clear, plain-language summary I can forward to a colleague or "
         "manager: the key points, decisions, and any next steps. Write in the "
@@ -58,14 +63,47 @@ def new_template_id(name: str, existing_ids: set) -> str:
 
 
 def validate_template(t: dict, valid_languages: set) -> tuple:
-    """Return (ok, error_message) for a template dict (name/prompt/language)."""
-    if not (t.get("name") or "").strip():
+    """Return (ok, error_message) for a template dict.
+
+    Defensive at the Python trust boundary: `t` arrives from the renderer as
+    decoded JSON and may be malformed. This never raises — it always returns
+    (False, "<message>") on bad input.
+    """
+    if not isinstance(t, dict):
+        return False, "Invalid template payload"
+
+    name = t.get("name")
+    if not isinstance(name, str):
         return False, "Template name is required"
-    if not (t.get("prompt") or "").strip():
+    name = name.strip()
+    if not name:
+        return False, "Template name is required"
+    if len(name) > MAX_NAME_LEN:
+        return False, f"Template name is too long (max {MAX_NAME_LEN} characters)"
+
+    prompt = t.get("prompt")
+    if not isinstance(prompt, str):
         return False, "Template prompt is required"
+    if not prompt.strip():
+        return False, "Template prompt is required"
+    if len(prompt) > MAX_PROMPT_LEN:
+        return False, f"Template prompt is too long (max {MAX_PROMPT_LEN} characters)"
+
     lang = t.get("language", "auto")
-    if lang not in valid_languages:
+    if not isinstance(lang, str) or lang not in valid_languages:
         return False, f"Unsupported language: {lang}"
+
+    fmt = t.get("format")
+    if fmt is not None and fmt not in VALID_FORMATS:
+        return False, f"Unsupported format: {fmt}"
+
+    icon = t.get("icon")
+    if icon is not None:
+        if not isinstance(icon, str):
+            return False, "Invalid template icon"
+        if len(icon) > MAX_ICON_LEN:
+            return False, "Template icon is too long"
+
     return True, ""
 
 

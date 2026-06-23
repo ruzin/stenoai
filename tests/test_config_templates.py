@@ -85,6 +85,30 @@ class TemplateCrudTests(unittest.TestCase):
             ok, err, _ = c.save_template({"name": " ", "prompt": "x", "language": "auto"})
             self.assertFalse(ok)
 
+    def test_save_does_not_crash_on_non_dict_payload(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            c = _cfg(tmp)
+            ok, err, saved = c.save_template([])
+            self.assertFalse(ok)
+            self.assertTrue(err)
+            self.assertEqual(saved, {})
+
+    def test_save_rejects_over_long_prompt(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            c = _cfg(tmp)
+            ok, _, _ = c.save_template(
+                {"name": "X", "prompt": "x" * 8001, "language": "auto"}
+            )
+            self.assertFalse(ok)
+
+    def test_reset_template_noop_and_unknown_id(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            c = _cfg(tmp)
+            # standard is locked → no override exists → reset is a no-op success
+            self.assertTrue(c.reset_template(STANDARD_TEMPLATE_ID))
+            # an id with no override returns True too
+            self.assertTrue(c.reset_template("does-not-exist"))
+
 
 if __name__ == "__main__":
     unittest.main()

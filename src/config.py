@@ -522,6 +522,8 @@ class Config:
 
     def save_template(self, t: dict) -> tuple:
         """Upsert a template. Returns (ok, error, saved_template)."""
+        if not isinstance(t, dict):
+            return False, "Invalid template payload", {}
         valid_langs = set(self.SUPPORTED_LANGUAGES.keys()) | {"auto"}
         ok, err = _templates.validate_template(t, valid_langs)
         if not ok:

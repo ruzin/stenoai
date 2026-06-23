@@ -39,6 +39,54 @@ class BuiltinRegistryTests(unittest.TestCase):
         )
         self.assertTrue(ok)
 
+    def test_validate_is_defensive_at_the_trust_boundary(self):
+        langs = {"auto", "de"}
+        # Non-dict payloads must return (False, msg), never raise.
+        for bad in ([], None, 42):
+            ok, msg = T.validate_template(bad, langs)
+            self.assertFalse(ok)
+            self.assertTrue(msg)
+        # name: numeric / blank / over-long
+        for bad_name in (123, "", "   ", "x" * (T.MAX_NAME_LEN + 1)):
+            ok, _ = T.validate_template(
+                {"name": bad_name, "prompt": "p", "language": "auto"}, langs
+            )
+            self.assertFalse(ok)
+        # prompt: missing / blank / over-long / numeric
+        for bad_prompt in (None, "", "   ", 123, "x" * (T.MAX_PROMPT_LEN + 1)):
+            ok, _ = T.validate_template(
+                {"name": "X", "prompt": bad_prompt, "language": "auto"}, langs
+            )
+            self.assertFalse(ok)
+        # language: array / unknown
+        for bad_lang in (["de"], "xx"):
+            ok, _ = T.validate_template(
+                {"name": "X", "prompt": "p", "language": bad_lang}, langs
+            )
+            self.assertFalse(ok)
+        # format: present but invalid
+        ok, _ = T.validate_template(
+            {"name": "X", "prompt": "p", "language": "auto", "format": "weird"}, langs
+        )
+        self.assertFalse(ok)
+        # icon: present but not a str
+        ok, _ = T.validate_template(
+            {"name": "X", "prompt": "p", "language": "auto", "icon": 5}, langs
+        )
+        self.assertFalse(ok)
+        # A fully valid dict still passes.
+        ok, msg = T.validate_template(
+            {"name": "X", "prompt": "p", "language": "de",
+             "format": "markdown", "icon": "doc"},
+            langs,
+        )
+        self.assertTrue(ok, msg)
+
+    def test_sample_icon_is_a_valid_editor_key(self):
+        editor_keys = {"doc", "people", "calendar", "lightbulb", "phone", "megaphone"}
+        self.assertEqual(T.SAMPLE_TEMPLATE["icon"], "megaphone")
+        self.assertIn(T.SAMPLE_TEMPLATE["icon"], editor_keys)
+
     def test_merge_applies_overrides_and_tags_builtin(self):
         merged = T.merge_templates(
             overrides={"standard": {"name": "Default note"}},
