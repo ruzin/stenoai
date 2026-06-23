@@ -56,6 +56,7 @@ import {
   DialogClose,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import {
   Tooltip,
   TooltipTrigger,
@@ -953,6 +954,8 @@ function ReportSwitch({
   generating,
 }: ReportSwitchProps) {
   const [open, setOpen] = React.useState(false);
+  // Report pending deletion → drives the confirmation dialog.
+  const [deleteTarget, setDeleteTarget] = React.useState<Report | null>(null);
   return (
     <div className="flex flex-wrap items-center gap-1.5" data-testid="report-switch">
       <ReportPill active={activeReportId === null} onClick={() => onSelect(null)}>
@@ -966,7 +969,7 @@ function ReportSwitch({
             key={r.id}
             active={activeReportId === r.id}
             onClick={() => onSelect(r.id)}
-            onDelete={() => onDelete(r.id)}
+            onDelete={() => setDeleteTarget(r)}
             title={meta || undefined}
           >
             <span className="flex flex-col items-start leading-tight">
@@ -1019,6 +1022,22 @@ function ReportSwitch({
           </PopoverContent>
         </Popover>
       )}
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        onOpenChange={(o) => !o && setDeleteTarget(null)}
+        title={
+          deleteTarget ? `Delete report "${deleteTarget.template_name}"?` : ''
+        }
+        description="This permanently deletes this generated report. The transcript and other reports are not affected."
+        confirmLabel="Delete"
+        destructive
+        onConfirm={() => {
+          if (!deleteTarget) return;
+          onDelete(deleteTarget.id);
+          setDeleteTarget(null);
+        }}
+      />
     </div>
   );
 }
@@ -1065,8 +1084,7 @@ function ReportPill({
             e.stopPropagation();
             onDelete();
           }}
-          className="mr-1.5 inline-flex items-center rounded-full p-0.5 transition-colors hover:bg-[color:var(--surface-hover)]"
-          style={{ color: 'var(--fg-2)' }}
+          className="mr-1.5 inline-flex items-center rounded-full p-0.5 text-[color:var(--fg-2)] transition-colors hover:bg-[color:var(--danger-bg)] hover:text-[color:var(--danger)]"
         >
           <Trash2 className="size-[11px]" />
         </button>

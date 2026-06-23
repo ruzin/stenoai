@@ -13,6 +13,7 @@ import {
   X,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Input, Textarea } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import {
@@ -1011,6 +1012,8 @@ function TemplatesTab() {
 
   // null = editor closed; a Template = edit existing; {} = new template.
   const [editing, setEditing] = React.useState<Partial<Template> | null>(null);
+  // Template pending deletion → drives the confirmation dialog.
+  const [deleteTarget, setDeleteTarget] = React.useState<Template | null>(null);
 
   return (
     <section data-settings-tab="templates">
@@ -1119,9 +1122,11 @@ function TemplatesTab() {
                 <Button
                   variant="ghost"
                   size="sm"
-                  className={COMPACT_BTN}
-                  disabled={del.isPending}
-                  onClick={() => del.mutate(t.id)}
+                  className={cn(
+                    COMPACT_BTN,
+                    'text-[color:var(--fg-2)] hover:bg-[color:var(--danger-bg)] hover:text-[color:var(--danger)]',
+                  )}
+                  onClick={() => setDeleteTarget(t)}
                   aria-label={`Delete ${t.name}`}
                 >
                   <Trash2 size={14} />
@@ -1148,6 +1153,21 @@ function TemplatesTab() {
           New Template
         </Button>
       )}
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        onOpenChange={(o) => !o && setDeleteTarget(null)}
+        title={deleteTarget ? `Delete template "${deleteTarget.name}"?` : ''}
+        description="This permanently deletes the template. Reports already generated from it are not affected."
+        confirmLabel="Delete"
+        destructive
+        isPending={del.isPending}
+        onConfirm={async () => {
+          if (!deleteTarget) return;
+          await del.mutateAsync(deleteTarget.id);
+          setDeleteTarget(null);
+        }}
+      />
     </section>
   );
 }
