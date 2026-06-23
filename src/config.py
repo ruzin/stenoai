@@ -126,13 +126,13 @@ class Config:
             "speed": "fast",
             "quality": "good"
         },
-        "gemma4:4b": {
-            "name": "Gemma 4 E4B",
-            "size": "3.3GB",
+        "gemma4:e4b-it-qat": {
+            "name": "Gemma 4 E4B (QAT)",
+            "size": "6.1GB",
             "params": "4B",
-            "description": "Efficient 4B Gemma 4 — good balance of speed and quality",
-            "speed": "fast",
-            "quality": "good"
+            "description": "Quantization-aware E4B — higher quality than E2B at a modest footprint",
+            "speed": "medium",
+            "quality": "excellent"
         },
         "llama3.2:3b": {
             "name": "Llama 3.2 3B",
@@ -151,11 +151,11 @@ class Config:
             "speed": "medium",
             "quality": "excellent"
         },
-        "gemma4:12b": {
-            "name": "Gemma 4 12B",
-            "size": "7.6GB",
+        "gemma4:12b-it-qat": {
+            "name": "Gemma 4 12B (QAT)",
+            "size": "7.2GB",
             "params": "12B",
-            "description": "Large 256K context - best for long meetings",
+            "description": "Large 256K context, quantization-aware - best for long meetings",
             "speed": "medium",
             "quality": "excellent"
         },
@@ -298,6 +298,15 @@ class Config:
         self._config["whisper_model"] = "large-v3-turbo"
         self._save()
 
+    # Summary-model ids we renamed in place — a user pinned to the old tag is
+    # moved to the equivalent, better-quantized build so they keep the model
+    # they chose (rather than being dropped to the default). The new tag is a
+    # different Ollama model, so the next summarisation pulls it on demand.
+    _RENAMED_SUMMARY_MODELS = {
+        "gemma4:4b": "gemma4:e4b-it-qat",
+        "gemma4:12b": "gemma4:12b-it-qat",
+    }
+
     # Curated models we retired — a user pinned to one is migrated to the
     # default on load. Deliberately a specific allow-list, NOT "anything not in
     # SUPPORTED_MODELS": set_model intentionally allows arbitrary user-pulled
@@ -305,16 +314,22 @@ class Config:
     _RETIRED_SUMMARY_MODELS = {"gemma3:4b", "deepseek-r1:14b"}
 
     def _migrate_summary_model(self) -> None:
-        """Reset a retired summary model to the default.
+        """Migrate a renamed or retired summary model on load.
 
-        gemma3:4b / deepseek-r1:14b were removed from SUPPORTED_MODELS; a user
-        pinned to one would otherwise stay on a model the app no longer surfaces.
-        Only those specific ids migrate — custom/self-pulled models and the
+        Renamed ids (gemma4:4b -> gemma4:e4b-it-qat, gemma4:12b ->
+        gemma4:12b-it-qat) move to the equivalent quantization-aware build, so
+        the user keeps their chosen model; the new tag is pulled on demand.
+        Retired ids (gemma3:4b, deepseek-r1:14b) reset to the default. Only
+        these specific ids migrate — custom/self-pulled models and the
         deprecated-but-kept llama3.2:3b are left alone.
         """
         if self._load_failed:
             return  # never persist defaults over a corrupt-but-recoverable file
-        if self._config.get("model") in self._RETIRED_SUMMARY_MODELS:
+        current = self._config.get("model")
+        if current in self._RENAMED_SUMMARY_MODELS:
+            self._config["model"] = self._RENAMED_SUMMARY_MODELS[current]
+            self._save()
+        elif current in self._RETIRED_SUMMARY_MODELS:
             self._config["model"] = self.DEFAULT_MODEL
             self._save()
 

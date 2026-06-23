@@ -144,7 +144,7 @@ class MapCallTests(unittest.TestCase):
 
 class ThinkingDisabledTests(unittest.TestCase):
     """Regression for STREAM_ERROR "empty result after retry" on thinking-capable
-    models. gemma4:e2b-it-qat / gemma4:12b emit chain-of-thought into
+    models. gemma4:e2b-it-qat / gemma4:12b-it-qat emit chain-of-thought into
     message.thinking; the map step caps output at MAP_OUTPUT_MAX_TOKENS, so
     reasoning tokens exhaust the budget and message.content comes back empty.
     Summarization calls must pass think=False so the whole budget is answer text.

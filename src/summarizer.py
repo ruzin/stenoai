@@ -58,12 +58,12 @@ OLLAMA_NUM_CTX_DEFAULT = 32768
 OLLAMA_NUM_CTX_CEILING = 131072
 _OLLAMA_MODEL_NUM_CTX = {
     "gemma4:e2b-it-qat": 32768,
-    # gemma4:4b (E4B) advertises a large window like its siblings; capped to 32K
-    # — a meeting fits and the full window would be a large KV-cache allocation.
-    "gemma4:4b": 32768,
-    # gemma4:12b advertises 256K; capped well under that — a meeting fits in 32K
-    # and the full window would be a large KV-cache allocation.
-    "gemma4:12b": 32768,
+    # gemma4:e4b-it-qat (E4B) advertises a large window like its siblings; capped
+    # to 32K — a meeting fits and the full window would be a large KV-cache alloc.
+    "gemma4:e4b-it-qat": 32768,
+    # gemma4:12b-it-qat advertises 256K; capped well under that — a meeting fits
+    # in 32K and the full window would be a large KV-cache allocation.
+    "gemma4:12b-it-qat": 32768,
     # llama3.2:3b's quantized build effectively caps ~8K despite the headline 128K
     "llama3.2:3b": 8192,
     "qwen3.5:9b": 32768,
@@ -351,7 +351,7 @@ class OllamaSummarizer:
         if self.ai_provider != "remote":
             self._ensure_ollama_ready()
         options = {**self._ollama_options(), "num_predict": MAP_OUTPUT_MAX_TOKENS}
-        # think=False: thinking-capable models (gemma4:e2b-it-qat, gemma4:12b,
+        # think=False: thinking-capable models (gemma4:e2b-it-qat, gemma4:12b-it-qat,
         # gpt-oss) emit chain-of-thought into a separate `message.thinking`
         # channel that still counts against num_predict. With output capped at
         # MAP_OUTPUT_MAX_TOKENS, reasoning can consume the entire budget and
@@ -675,7 +675,7 @@ class OllamaSummarizer:
             # than forcing a (possibly offline) pull. Derived from the registry
             # so it can't drift out of sync with SUPPORTED_MODELS.
             from .config import Config
-            preferred = ["gemma4:e2b-it-qat", "llama3.2:3b", "gemma4:4b", "qwen3.5:9b", "gemma4:12b"]
+            preferred = ["gemma4:e2b-it-qat", "llama3.2:3b", "qwen3.5:9b", "gemma4:e4b-it-qat", "gemma4:12b-it-qat"]
             active = [
                 mid for mid, info in Config.SUPPORTED_MODELS.items()
                 if not info.get("deprecated")

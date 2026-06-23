@@ -4,9 +4,10 @@ import { motion as Motion } from "framer-motion";
 
 const models = [
   { id: "gemma4:e2b-it-qat",  label: "Gemma 4 E2B", detail: "2B · Light" },
+  { id: "gemma4:e4b-it-qat",  label: "Gemma 4 E4B", detail: "4B · Balanced" },
   { id: "llama3.2:3b",        label: "Llama 3.2",   detail: "3B · Fast" },
   { id: "qwen3.5:9b",         label: "Qwen 3.5",    detail: "9B · Smart" },
-  { id: "gemma4:12b",         label: "Gemma 4",     detail: "12B · Long meetings" },
+  { id: "gemma4:12b-it-qat",  label: "Gemma 4",     detail: "12B · Long meetings" },
   { id: "gpt-oss:20b",        label: "GPT-OSS",     detail: "20B · Capable" },
 ];
 
