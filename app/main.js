@@ -1950,6 +1950,129 @@ ipcMain.handle('reprocess-meeting', async (event, summaryFile, regenerateTitle, 
   }
 });
 
+ipcMain.handle('generate-report-meeting', async (event, summaryFile, templateId) => {
+  // Resolve the sessionName from the meeting JSON so streaming events carry the
+  // same key as the reprocess flow (keyed by sessionName, disambiguated by summaryFile).
+  let sessionName = null;
+  try {
+    const fs = require('fs');
+    const data = JSON.parse(fs.readFileSync(summaryFile, 'utf-8'));
+    sessionName = data?.session_info?.name || null;
+  } catch (_) { /* non-fatal — sessionName stays null */ }
+
+  try {
+    const args = ['generate-report', summaryFile, templateId];
+
+    sendDebugLog(`📄 Generating report for: ${summaryFile} (template: ${templateId})`);
+    sendDebugLog(`$ stenoai ${args.join(' ')}`);
+
+    activeReprocessJobs.set(summaryFile, { summaryFile, sessionName });
+
+    const aiEnv = getAiEnv();
+    const reportEnv = Object.keys(aiEnv).length > 0 ? { ...require('process').env, ...aiEnv } : undefined;
+
+    await new Promise((resolve, reject) => {
+      const proc = spawn(getBackendPath(), args, {
+        cwd: getBackendCwd(),
+        env: reportEnv
+      });
+
+      let stderrBuf = '';
+
+      const watchdog = makeInactivityWatchdog(proc, TRANSCRIBE_INACTIVITY_MS, 'generate-report');
+
+      proc.on('error', (err) => {
+        watchdog.clear();
+        reject(new Error(`generate-report spawn error: ${err.message}`));
+      });
+
+      proc.stdout.on('data', (data) => {
+        watchdog.reset();
+        const text = data.toString();
+        // CRLF-tolerant: Windows stdout is \r\n; exact-match lines (STREAM_COMPLETE)
+        // would otherwise carry a trailing \r and never match.
+        text.split(/\r?\n/).forEach(line => {
+          if (line.startsWith('CHUNK:')) {
+            try {
+              const encoded = line.slice(6);
+              const chunk = Buffer.from(encoded, 'base64').toString('utf-8');
+              if (mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.webContents.send('summary-chunk', { chunk, sessionName });
+              }
+            } catch (e) { console.log('CHUNK decode error:', e.message); }
+          } else if (line.startsWith('TITLE:')) {
+            const title = line.slice(6);
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('summary-title', { title, sessionName });
+            }
+          } else if (line === 'STREAM_COMPLETE') {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('summary-complete', { success: true, sessionName });
+            }
+          } else if (line.startsWith('PROGRESS:')) {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('processing-progress', { line, summaryFile });
+            }
+          } else if (line.startsWith('STREAM_ERROR:')) {
+            const errMsg = line.slice('STREAM_ERROR:'.length);
+            sendDebugLog(`❌ Report generation stream error: ${errMsg}`);
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('summary-complete', { success: false, sessionName });
+            }
+          } else if (line.startsWith('SAVED:')) {
+            sendDebugLog(`Report saved: ${line.slice(6).trim()}`);
+          } else if (line.trim()) {
+            sendDebugLog(line.trim());
+          }
+        });
+      });
+
+      proc.stderr.on('data', (data) => {
+        watchdog.reset();
+        const msg = data.toString().trim();
+        if (msg) {
+          stderrBuf += msg + '\n';
+          sendDebugLog(`STDERR: ${msg}`);
+        }
+      });
+
+      proc.on('close', (code) => {
+        watchdog.clear();
+        if (code === 0) {
+          console.log(`✅ Completed report generation: ${sessionName}`);
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('processing-complete', {
+              success: true,
+              sessionName,
+              summaryFile,
+              message: 'Report generation completed successfully'
+            });
+          }
+          resolve();
+        } else {
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('processing-complete', {
+              success: false,
+              sessionName,
+              summaryFile,
+              message: `Report generation failed (exit ${code})`,
+            });
+          }
+          reject(new Error(`generate-report exited with code ${code}: ${stderrBuf.slice(-500)}`));
+        }
+      });
+    });
+
+    sendDebugLog('✅ Report generated successfully');
+    return { success: true };
+  } catch (error) {
+    sendDebugLog(`❌ Report generation failed: ${error.message}`);
+    return { success: false, error: error.message };
+  } finally {
+    activeReprocessJobs.delete(summaryFile);
+  }
+});
+
 ipcMain.handle('regen-meeting-title', async (event, summaryFile, sessionName) => {
   try {
     const aiEnv = getAiEnv();

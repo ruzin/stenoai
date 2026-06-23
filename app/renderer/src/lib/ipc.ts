@@ -40,6 +40,8 @@ export interface Meeting {
   diarised_text?: string | null;
   folders?: string[];
   notes?: string;
+  reports?: Report[];
+  active_report?: string;
   /** Synthetic flag set by the renderer for the in-progress recording. Never sent by backend. */
   is_recording?: boolean;
   /** Synthetic flag set by the renderer when a recording is in the processing pipeline (post-stop, pre-summary). */
@@ -343,6 +345,15 @@ export type ListTemplatesResponse = Result<{
   default_template_id: string;
 }>;
 export type SaveTemplateResponse = Result<{ template: Template }>;
+
+export interface Report {
+  id: string;
+  template_id: string;
+  template_name: string;
+  model: string;
+  content: string;
+  created_at: string;
+}
 
 export interface RawSupportedModel {
   name?: string;
@@ -676,6 +687,7 @@ export interface StenoaiBridge {
     >;
     saveNotes: RequestFn<[name: string, notes: string], SaveMeetingNotesResponse>;
     regenTitle: RequestFn<[summaryFile: string, name: string], Result<Record<string, never>>>;
+    generateReport: RequestFn<[summaryFile: string, templateId: string], Result<{ message: string }>>;
   };
 
   query: {
