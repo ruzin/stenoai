@@ -168,6 +168,14 @@ const stenoai = {
     removeMeeting: (summaryFile, folderId) => invoke('remove-meeting-from-folder', summaryFile, folderId),
   },
 
+  templates: {
+    list: () => invoke('list-templates'),
+    save: (template) => invoke('save-template', template),
+    remove: (id) => invoke('delete-template', id),
+    setDefault: (id) => invoke('set-default-template', id),
+    reset: (id) => invoke('reset-template', id),
+  },
+
   models: {
     checkOllama: () => invoke('check-ollama-installed'),
     list: () => invoke('list-models'),

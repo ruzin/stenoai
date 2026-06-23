@@ -328,6 +328,22 @@ export type CreateFolderResponse = Result<{ folder: Folder }>;
 
 export type CheckOllamaResponse = Result<{ installed: boolean; path?: string }>;
 export type CheckModelInstalledResponse = Result<{ installed: boolean }>;
+export interface Template {
+  id: string;
+  name: string;
+  icon: string;
+  prompt: string;
+  language: string;
+  format: 'structured' | 'markdown';
+  builtin: boolean;
+  locked: boolean;
+}
+export type ListTemplatesResponse = Result<{
+  templates: Template[];
+  default_template_id: string;
+}>;
+export type SaveTemplateResponse = Result<{ template: Template }>;
+
 export interface RawSupportedModel {
   name?: string;
   size?: string;
@@ -689,6 +705,14 @@ export interface StenoaiBridge {
       [summaryFile: string, folderId: string],
       Result<Record<string, never>>
     >;
+  };
+
+  templates: {
+    list: RequestFn<[], ListTemplatesResponse>;
+    save: RequestFn<[t: Partial<Template>], SaveTemplateResponse>;
+    remove: RequestFn<[id: string], Result<Record<string, never>>>;
+    setDefault: RequestFn<[id: string], Result<Record<string, never>>>;
+    reset: RequestFn<[id: string], Result<Record<string, never>>>;
   };
 
   models: {

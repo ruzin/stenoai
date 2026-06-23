@@ -5061,7 +5061,50 @@ ipcMain.handle('set-model', async (event, modelName) => {
   }
 });
 
+ipcMain.handle('list-templates', async () => {
+  try {
+    const out = await runPythonScript('simple_recorder.py', ['list-templates']);
+    return { success: true, ...JSON.parse(out) };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
 
+ipcMain.handle('save-template', async (_e, template) => {
+  try {
+    const out = await runPythonScript('simple_recorder.py', ['save-template', JSON.stringify(template)]);
+    return JSON.parse(out);
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('delete-template', async (_e, id) => {
+  try {
+    const out = await runPythonScript('simple_recorder.py', ['delete-template', id]);
+    return JSON.parse(out);
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('set-default-template', async (_e, id) => {
+  try {
+    const out = await runPythonScript('simple_recorder.py', ['set-default-template', id]);
+    return JSON.parse(out);
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('reset-template', async (_e, id) => {
+  try {
+    const out = await runPythonScript('simple_recorder.py', ['reset-template', id]);
+    return JSON.parse(out);
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
 
 ipcMain.handle('get-transcription-engine', async () => {
   try {
