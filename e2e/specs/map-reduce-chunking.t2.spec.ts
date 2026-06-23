@@ -7,7 +7,7 @@ import { readFileSync } from 'fs';
  * T2 @map-reduce — end-to-end exercise of the map-reduce summarisation path.
  *
  * Drives `reprocess` through the real bundled backend + mock Ollama and asserts:
- *   1. A transcript > 26 214 chars (llama3.2:3b threshold) triggers N map calls
+ *   1. A transcript > 13 107 chars (llama3.2:3b threshold) triggers N map calls
  *      + 1 reduce call (N+1 total), emitting PROGRESS:summarize: lines in order.
  *   2. A short transcript still takes the direct 1-call path (regression guard).
  *
@@ -44,7 +44,7 @@ test.describe('Map-reduce summarization @map-reduce', () => {
     userDataDir,
   }) => {
     // Pin llama3.2:3b so the chunking threshold is predictable.
-    writeUserConfig(userDataDir, { ai_provider: 'local', ai_model: 'llama3.2:3b' });
+    writeUserConfig(userDataDir, { ai_provider: 'local', model: 'llama3.2:3b' });
     const summaryFile = writeMeetingSummary(userDataDir, 'long-meeting', {
       name: 'Long Planning Meeting',
       summary: 'stale',
@@ -112,9 +112,12 @@ test.describe('Map-reduce summarization @map-reduce', () => {
         'PROGRESS:summarize:reducing',
       ]);
 
-      // Final summary must be saved to disk with the expected shape.
+      // Final summary must be saved to disk with the expected shape. `summary`
+      // holds the parsed ## Summary body (the header is stripped by the backend's
+      // _parse_streamed_markdown; the other sections land in their own fields),
+      // so assert on the reduce reply's overview text rather than the header.
       const saved = JSON.parse(readFileSync(summaryFile, 'utf8'));
-      expect(saved.summary).toContain('## Summary');
+      expect(saved.summary).toContain('long planning meeting about the quarterly roadmap');
     } finally {
       await ollama.close();
     }
@@ -124,7 +127,7 @@ test.describe('Map-reduce summarization @map-reduce', () => {
     launchApp,
     userDataDir,
   }) => {
-    writeUserConfig(userDataDir, { ai_provider: 'local', ai_model: 'llama3.2:3b' });
+    writeUserConfig(userDataDir, { ai_provider: 'local', model: 'llama3.2:3b' });
     const summaryFile = writeMeetingSummary(userDataDir, 'short-meeting', {
       name: 'Short Meeting',
       summary: 'stale',

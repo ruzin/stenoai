@@ -73,7 +73,9 @@ _OLLAMA_MODEL_NUM_CTX = {
 # Map-reduce summarization constants
 MAP_PROMPT_OVERHEAD_TOKENS = 300  # reserve for map prompt scaffolding
 MAP_OUTPUT_MAX_TOKENS = 600       # hard cap on each map call's output
-CHARS_PER_TOKEN = 4               # used for needs_chunking threshold (English baseline)
+CHARS_PER_TOKEN = 4               # English baseline; used for the reduce-fits size check
+                                  # (_map_reduce_streaming / _hierarchical_reduce). The
+                                  # needs_chunking gate uses the conservative floor below.
 _CHUNK_SAFETY_CHARS_PER_TOKEN = 2 # used for chunk budget: worst-case German/BPE (2.0 c/t floor)
 _OVERLAP_RATIO = 0.05             # last 5% of previous chunk prepended to next
 
@@ -382,11 +384,18 @@ class OllamaSummarizer:
         )
 
     def _needs_chunking(self, transcript: str, notes: str = None) -> bool:
-        """True iff transcript is too long for a single Ollama call on the configured model."""
+        """True iff transcript is too long for a single Ollama call on the configured model.
+
+        Uses the same conservative chars/token floor as the chunk budget
+        (_CHUNK_SAFETY_CHARS_PER_TOKEN, worst-case German/BPE density) rather than
+        the optimistic English baseline: an optimistic gate would let a token-dense
+        transcript take the single-call path and silently overflow num_ctx (the
+        truncated-formatting / empty-summary failure this whole path exists to avoid).
+        """
         if self.ai_provider not in ("local", "remote"):
             return False
         num_ctx = resolve_num_ctx(self.model_name)
-        estimated_tokens = (len(transcript) + len(notes or "")) / CHARS_PER_TOKEN
+        estimated_tokens = (len(transcript) + len(notes or "")) / _CHUNK_SAFETY_CHARS_PER_TOKEN
         return estimated_tokens > num_ctx * 0.8
 
     def _hierarchical_reduce(self, map_results: list[str], depth: int) -> list[str]:

@@ -264,6 +264,10 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
       }, 400);
     });
     const offProgress = ipc().on.processingProgress((e) => {
+      // Ignore progress from a different meeting's concurrent reprocess — without
+      // this scope check this view would render another meeting's map/reduce step.
+      // Scoped on summaryFile (unique) rather than the display name (shareable).
+      if (e.summaryFile !== summaryFile) return;
       const mapMatch = e.line.match(/^PROGRESS:summarize:(\d+)\/(\d+)$/);
       if (mapMatch) {
         setChunkProgress({ step: parseInt(mapMatch[1]), total: parseInt(mapMatch[2]) });

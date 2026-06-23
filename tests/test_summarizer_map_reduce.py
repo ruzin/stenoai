@@ -274,11 +274,11 @@ class NeedsChunkingTests(unittest.TestCase):
 
     def test_returns_false_for_short_transcript(self):
         s = _make_summarizer("llama3.2:3b")  # num_ctx = 8192
-        # 8192 * 0.8 * 4 = 26214 chars threshold; 1000 chars is well below
+        # 8192 * 0.8 * 2 = 13107 chars threshold; 1000 chars is well below
         self.assertFalse(s._needs_chunking("x" * 1000))
 
     def test_returns_true_for_long_transcript(self):
-        s = _make_summarizer("llama3.2:3b")  # threshold ~26214 chars
+        s = _make_summarizer("llama3.2:3b")  # threshold ~13107 chars
         long_transcript = "x" * 30000
         self.assertTrue(s._needs_chunking(long_transcript))
 

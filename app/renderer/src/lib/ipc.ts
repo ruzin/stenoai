@@ -434,6 +434,10 @@ export type CheckForUpdatesResponse = Result<{
 // ---------- event payloads ----------
 export interface ProcessingProgressEvent {
   line: string;
+  // The meeting's summary file — its unique key — so a detail view can ignore
+  // progress from a different meeting's concurrent reprocess. Uses the file path
+  // (not the display name, which two meetings can share) for an exact match.
+  summaryFile?: string;
 }
 export interface SummaryChunkEvent {
   chunk: string;

@@ -1771,24 +1771,40 @@ ipcMain.handle('get-meeting', async (_event, summaryFile) => {
     if (!summaryFile || (!summaryFile.endsWith('.json') && !summaryFile.endsWith('.md'))) {
       return { success: false, error: 'Invalid file path' };
     }
-    // Path containment: the resolved path must live under one of the known
-    // output directories (default data dir, custom storage, or dev project
-    // root). Use separator-safe prefix check to prevent /output-evil bypass.
-    const resolved = path.resolve(summaryFile);
-    const allowedOutputDirs = getAllowedBaseDirs().map(
-      d => path.resolve(d, 'output') + path.sep,
+    // Path containment: the file's REAL path (symlinks resolved) must live under
+    // one of the known output directories (default data dir, custom storage, or
+    // dev project root). We canonicalize BOTH the target and the allowed dirs
+    // with realpath so (a) a symlink planted in the output dir can't escape the
+    // allowlist into an arbitrary-file read — path.resolve only collapses '..',
+    // it does not follow symlinks — and (b) a legitimately symlinked base dir
+    // (e.g. macOS /tmp -> /private/tmp, which the e2e temp data dir uses) still
+    // matches. realpath needs the path to exist; a missing target -> denied.
+    let realResolved;
+    try {
+      realResolved = await fs.promises.realpath(path.resolve(summaryFile));
+    } catch {
+      return { success: false, error: 'Access denied' };
+    }
+    const allowedOutputDirs = await Promise.all(
+      getAllowedBaseDirs().map(async d => {
+        try {
+          return (await fs.promises.realpath(path.resolve(d, 'output'))) + path.sep;
+        } catch {
+          return null; // output dir may not exist yet
+        }
+      }),
     );
-    const allowed = allowedOutputDirs.some(base => resolved.startsWith(base));
+    const allowed = allowedOutputDirs.some(base => base && realResolved.startsWith(base));
     if (!allowed) {
       return { success: false, error: 'Access denied' };
     }
-    const content = await fs.promises.readFile(resolved, 'utf-8');
-    if (resolved.endsWith('.md')) {
+    const content = await fs.promises.readFile(realResolved, 'utf-8');
+    if (summaryFile.endsWith('.md')) {
       // Legacy .md meetings are still listed by list-meetings, so their detail
       // pages route through here. Unlike the list payload, the detail page
       // needs the full data INCLUDING the transcript (for the AskBar /
       // TranscriptPanel), so we return everything parseMeetingMarkdown yields.
-      return { success: true, meeting: parseMeetingMarkdown(content, resolved) };
+      return { success: true, meeting: parseMeetingMarkdown(content, realResolved) };
     }
     return { success: true, meeting: JSON.parse(content) };
   } catch (error) {
@@ -1869,7 +1885,7 @@ ipcMain.handle('reprocess-meeting', async (event, summaryFile, regenerateTitle, 
             }
           } else if (line.startsWith('PROGRESS:')) {
             if (mainWindow && !mainWindow.isDestroyed()) {
-              mainWindow.webContents.send('processing-progress', { line });
+              mainWindow.webContents.send('processing-progress', { line, summaryFile });
             }
           } else if (line.startsWith('STREAM_ERROR:')) {
             const errMsg = line.slice('STREAM_ERROR:'.length);
@@ -3089,6 +3105,9 @@ async function processNextInQueue() {
             trackEvent('transcription_completed', { success: false });
           } else if (line.startsWith('PROGRESS:')) {
             if (mainWindow && !mainWindow.isDestroyed()) {
+              // No summaryFile yet in the record->summarise flow (it's assigned
+              // via SAVED: later); this progress is consumed by the single-job
+              // Processing view, which doesn't need per-meeting scoping.
               mainWindow.webContents.send('processing-progress', { line });
             }
           } else if (line.startsWith('HEARTBEAT:')) {
