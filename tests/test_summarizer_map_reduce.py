@@ -15,7 +15,7 @@ def _make_summarizer(model_name="llama3.2:3b"):
 class ChunkBudgetTests(unittest.TestCase):
     def test_budget_uses_fixed_caps_not_ratio(self):
         s = _make_summarizer("llama3.2:3b")  # num_ctx = 8192
-        # content_tokens = 8192 - 300 - 600 = 7292; budget = 7292 * 3 = 21876
+        # content_tokens = 8192 - 300 - 600 = 7292; budget = 7292 * 2 = 14584
         self.assertEqual(s._chunk_budget_chars(), 7292 * _CHUNK_SAFETY_CHARS_PER_TOKEN)
 
     def test_budget_scales_with_model_context(self):

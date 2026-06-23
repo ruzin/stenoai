@@ -71,7 +71,7 @@ _OLLAMA_MODEL_NUM_CTX = {
 MAP_PROMPT_OVERHEAD_TOKENS = 300  # reserve for map prompt scaffolding
 MAP_OUTPUT_MAX_TOKENS = 600       # hard cap on each map call's output
 CHARS_PER_TOKEN = 4               # used for needs_chunking threshold (English baseline)
-_CHUNK_SAFETY_CHARS_PER_TOKEN = 3 # used for chunk budget: tighter for German/BPE variance
+_CHUNK_SAFETY_CHARS_PER_TOKEN = 2 # used for chunk budget: worst-case German/BPE (2.0 c/t floor)
 _OVERLAP_RATIO = 0.05             # last 5% of previous chunk prepended to next
 
 
