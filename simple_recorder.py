@@ -745,6 +745,41 @@ Transcript:
         }
 
 
+def generate_default_template_report(summary_path, transcript, notes, language,
+                                     duration_minutes, config, summarizer):
+    """Best-effort: if the configured default template is not 'standard', generate
+    its report into the meeting's sidecar and make it active. Additive — the
+    Standard note is untouched. Never raises (a new recording must not fail because
+    of the extra report)."""
+    from src import reports as _reports
+    from src import report_store as _store
+    try:
+        tid = config.get_default_template_id()
+        if not tid or tid == "standard":
+            return None
+        tmpl = config.get_template(tid)
+        if not tmpl or not (tmpl.get("prompt") or "").strip():
+            return None
+        report_language = tmpl["language"] if tmpl.get("language") and tmpl["language"] != "auto" else language
+        chunks = []
+        for chunk in summarizer.summarize_transcript_streaming(
+            transcript, duration_minutes, report_language, notes,
+            template_prompt=tmpl["prompt"],
+        ):
+            chunks.append(chunk)
+        content = "".join(chunks).strip()
+        if not content:
+            return None
+        sidecar = _store.load_sidecar(summary_path)
+        report = _reports.make_report(tid, tmpl["name"], summarizer.model_name, content)
+        _reports.append_report(sidecar, report)
+        _store.save_sidecar(summary_path, sidecar)
+        return report
+    except Exception as e:
+        logger.warning(f"Default-template report generation skipped: {e}")
+        return None
+
+
 # CLI Commands for Electron
 @click.group()
 def cli():
@@ -950,6 +985,14 @@ def process_streaming(audio_file, name, notes):
                 pass
 
         print(f"SAVED:{summary_path}", flush=True)
+
+        # B3: if a non-Standard default template is configured, additionally
+        # generate its report into the sidecar (best-effort; the Standard note
+        # is already saved above).
+        generate_default_template_report(
+            summary_path, text_for_summary, notes_text, output_language,
+            duration_minutes, config, recorder.summarizer,
+        )
 
     asyncio.run(run())
 
