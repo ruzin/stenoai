@@ -1989,6 +1989,7 @@ def reprocess(summary_file, regenerate_title):
         # Same watchdog-liveness cover as process_streaming: model load +
         # prompt eval is silent until the first streamed token.
         summary_heartbeat = _start_summary_heartbeat()
+        _stream_error = None
         try:
             for chunk in recorder.summarizer.summarize_transcript_streaming(
                 transcript, duration_minutes, output_language, notes_text,
@@ -1999,8 +2000,16 @@ def reprocess(summary_file, regenerate_title):
                 sys.stdout.write(f"CHUNK:{encoded}\n")
                 sys.stdout.flush()
                 streamed_chunks.append(chunk)
+        except Exception as e:
+            _stream_error = e
         finally:
             summary_heartbeat.set()
+
+        if _stream_error is not None:
+            logger.error(f"Summarization failed: {_stream_error}")
+            print(f"STREAM_ERROR:{_stream_error}", flush=True)
+            sys.exit(1)
+
         streamed_md = ''.join(streamed_chunks)
 
         print("STREAM_COMPLETE", flush=True)

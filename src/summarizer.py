@@ -284,8 +284,9 @@ class OllamaSummarizer:
             f"TRANSCRIPT SEGMENT:\n{chunk}"
         )
 
-    def _summarize_chunk(self, chunk: str, chunk_num: int, total_chunks: int) -> str:
+    def _summarize_chunk(self, chunk: str, chunk_num: int, total_chunks: int, _retry: bool = True) -> str:
         """Non-streaming Ollama call for one map chunk. Returns stripped text or raises."""
+        import time
         prompt = self._create_map_prompt(chunk, chunk_num, total_chunks)
         if self.ai_provider != "remote":
             self._ensure_ollama_ready()
@@ -298,9 +299,15 @@ class OllamaSummarizer:
         )
         result = (response.get("message", {}).get("content") or "").strip()
         if not result:
+            if _retry:
+                logger.warning(
+                    f"Chunk {chunk_num}/{total_chunks} returned empty result, retrying once…"
+                )
+                time.sleep(2)
+                return self._summarize_chunk(chunk, chunk_num, total_chunks, _retry=False)
             raise ValueError(
-                f"Chunk {chunk_num}/{total_chunks} returned an empty result — "
-                "aborting map-reduce summarization."
+                f"Chunk {chunk_num}/{total_chunks} returned an empty result after retry — "
+                "Ollama may have run out of context or memory."
             )
         return result
 

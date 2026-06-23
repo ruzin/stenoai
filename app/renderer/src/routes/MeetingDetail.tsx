@@ -88,6 +88,20 @@ export function MeetingDetail({ summaryFile }: MeetingDetailProps) {
         <div className="flex min-h-[40vh] items-center justify-center text-[color:var(--fg-2)]">
           Loading meeting…
         </div>
+      ) : meeting.isError ? (
+        <div className="space-y-4 text-center">
+          <h1 className="mv-title">Couldn't load note.</h1>
+          <p className="text-[17px] leading-[1.55]" style={{ color: 'var(--fg-2)' }}>
+            {(meeting.error as Error)?.message ?? 'An error occurred loading this note.'}
+          </p>
+          <button
+            type="button"
+            className="mv-chip"
+            onClick={() => navigate('/meetings')}
+          >
+            Back to meetings
+          </button>
+        </div>
       ) : !meeting.data ? (
         <div className="space-y-4 text-center">
           <h1 className="mv-title">Note not found.</h1>

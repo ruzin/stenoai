@@ -1725,6 +1725,12 @@ ipcMain.handle('reprocess-meeting', async (event, summaryFile, regenerateTitle, 
             if (mainWindow && !mainWindow.isDestroyed()) {
               mainWindow.webContents.send('processing-progress', { line });
             }
+          } else if (line.startsWith('STREAM_ERROR:')) {
+            const errMsg = line.slice('STREAM_ERROR:'.length);
+            sendDebugLog(`❌ Reprocess stream error: ${errMsg}`);
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('summary-complete', { success: false, sessionName });
+            }
           } else if (line.trim()) {
             sendDebugLog(line.trim());
           }
@@ -1754,6 +1760,14 @@ ipcMain.handle('reprocess-meeting', async (event, summaryFile, regenerateTitle, 
           }
           resolve();
         } else {
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('processing-complete', {
+              success: false,
+              sessionName,
+              summaryFile,
+              message: `Reprocessing failed (exit ${code})`,
+            });
+          }
           reject(new Error(`reprocess exited with code ${code}: ${stderrBuf.slice(-500)}`));
         }
       });
