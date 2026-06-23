@@ -113,3 +113,56 @@ test('generate-report appends to reports[] and sets active_report in the meeting
     await ollama.close();
   }
 });
+
+test('generate-report with an unknown template surfaces failure and persists no report', async ({
+  launchApp,
+  userDataDir,
+}) => {
+  const realDirBefore = fileSig(realUserDataDir());
+
+  writeUserConfig(userDataDir, { ai_provider: 'local' });
+  const summaryFile = writeMeetingSummary(userDataDir, 'report-gen-fail', {
+    name: 'Report Gen Fail Meeting',
+    summary: 'Existing summary',
+    transcript: TRANSCRIPT,
+  });
+
+  // Mock Ollama is started but should never be reached — the unknown-template
+  // guard fails before any model call.
+  const ollama = await startMockOllama({ chatReply: REPORT_REPLY });
+  try {
+    const { page } = await launchApp();
+
+    // Drive generate-report with a template id that does not exist and wait for
+    // the completion event. It must arrive with success:false (mirroring the
+    // first spec's summaryComplete listener), not silently succeed.
+    const result: { completed: boolean; success: boolean } = await page.evaluate(
+      ([f]) =>
+        new Promise<{ completed: boolean; success: boolean }>((resolve) => {
+          const timer = setTimeout(() => resolve({ completed: false, success: false }), 30_000);
+          const w = window as unknown as StenoWindow;
+          const off = w.stenoai.on.summaryComplete((e) => {
+            clearTimeout(timer);
+            off();
+            resolve({ completed: true, success: !!(e && e.success) });
+          });
+          w.stenoai.meetings.generateReport(f, 'does-not-exist');
+        }),
+      [summaryFile] as [string],
+    );
+
+    // The completion event arrived and reported failure (not silent success).
+    expect(result.completed).toBe(true);
+    expect(result.success).toBe(false);
+
+    // No report was persisted to the meeting JSON.
+    const updated = readSummary(summaryFile);
+    expect(updated.reports ?? []).toHaveLength(0);
+    expect(updated.active_report ?? null).toBeNull();
+
+    // Keystone: the real user-data dir is byte-for-byte untouched.
+    expect(fileSig(realUserDataDir())).toBe(realDirBefore);
+  } finally {
+    await ollama.close();
+  }
+});

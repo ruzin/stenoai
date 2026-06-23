@@ -2147,12 +2147,13 @@ def generate_report(summary_file, template_id):
         print(f"ERROR: Failed to load summary file: {e}")
         sys.exit(1)
 
-    # Unknown template → IPC contract: exit 0 with JSON error
+    # Unknown template → surface as a stream error so the IPC handler (which only
+    # watches the streaming protocol) reports failure instead of silent success.
     config = get_config()
     tmpl = config.get_template(template_id)
     if tmpl is None:
-        print(json.dumps({"success": False, "error": "Unknown template"}))
-        return
+        print("STREAM_ERROR:Unknown template", flush=True)
+        sys.exit(1)
 
     transcript = existing_data.get('transcript', '')
     if not transcript:
@@ -2213,13 +2214,19 @@ def generate_report(summary_file, template_id):
 
     streamed_md = ''.join(streamed_chunks)
 
-    print("STREAM_COMPLETE", flush=True)
+    # Do NOT persist an empty report — surface a stream error instead.
+    if not streamed_md.strip():
+        print("STREAM_ERROR:Model returned an empty report", flush=True)
+        sys.exit(1)
 
+    # Write the meeting JSON BEFORE emitting STREAM_COMPLETE so the renderer's
+    # refetch (triggered by the completion event) never reads stale data.
     report = src.reports.make_report(
         template_id, tmpl["name"], recorder.summarizer.model_name, streamed_md
     )
     src.reports.append_report(existing_data, report)
     _atomic_write_json(summary_path, existing_data)
+    print("STREAM_COMPLETE", flush=True)
     print(f"SAVED:{summary_path}")
 
 
