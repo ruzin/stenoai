@@ -1648,6 +1648,26 @@ ipcMain.handle('list-meetings', async () => {
 // meetings without a Python round-trip. Returns the FULL data (transcript
 // included) — the size-stripping that list-meetings does is intentionally
 // not applied here because the detail page needs the transcript.
+async function readReportsSidecar(meetingPath) {
+  // Derive sidecar path: <stem>_summary.(md|json) → <stem>_reports.json
+  const ext = path.extname(meetingPath); // '.md' or '.json'
+  const base = path.basename(meetingPath, ext); // e.g. '20240101_120000_summary'
+  const dir = path.dirname(meetingPath);
+  // Strip trailing '_summary' if present (handles both naming conventions)
+  const stem = base.endsWith('_summary') ? base.slice(0, -'_summary'.length) : base;
+  const sidecarPath = path.join(dir, `${stem}_reports.json`);
+  try {
+    const raw = await fs.promises.readFile(sidecarPath, 'utf-8');
+    const data = JSON.parse(raw);
+    return {
+      reports: Array.isArray(data.reports) ? data.reports : [],
+      active_report: data.active_report ?? null,
+    };
+  } catch {
+    return { reports: [], active_report: null };
+  }
+}
+
 function parseMeetingMarkdown(content, mdPath) {
   // Split frontmatter
   const meta = {};
@@ -1809,9 +1829,13 @@ ipcMain.handle('get-meeting', async (_event, summaryFile) => {
       // pages route through here. Unlike the list payload, the detail page
       // needs the full data INCLUDING the transcript (for the AskBar /
       // TranscriptPanel), so we return everything parseMeetingMarkdown yields.
-      return { success: true, meeting: parseMeetingMarkdown(content, realResolved) };
+      const mdMeeting = parseMeetingMarkdown(content, realResolved);
+      const mdSidecar = await readReportsSidecar(realResolved);
+      return { success: true, meeting: { ...mdMeeting, reports: mdSidecar.reports, active_report: mdSidecar.active_report } };
     }
-    return { success: true, meeting: JSON.parse(content) };
+    const jsonMeeting = JSON.parse(content);
+    const jsonSidecar = await readReportsSidecar(realResolved);
+    return { success: true, meeting: { ...jsonMeeting, reports: jsonSidecar.reports, active_report: jsonSidecar.active_report } };
   } catch (error) {
     return { success: false, error: error.message };
   }
