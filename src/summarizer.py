@@ -258,9 +258,15 @@ class OllamaSummarizer:
             scan_start = max(pos, end - content_budget // 5)
             split_pos = transcript.rfind('\n', scan_start, end + 1)
             if split_pos < scan_start:
-                split_pos = end  # no newline in scan window; hard cut
-            raw_chunks.append(transcript[pos:split_pos])
-            pos = split_pos + 1  # skip the \n itself
+                # No newline in scan window; hard cut at `end`. Advance to `end`
+                # exactly — the +1 below is only correct when we split ON a
+                # newline (to skip the \n itself); a hard cut has no separator
+                # char to skip, so +1 would drop a real character.
+                raw_chunks.append(transcript[pos:end])
+                pos = end
+            else:
+                raw_chunks.append(transcript[pos:split_pos])
+                pos = split_pos + 1  # skip the \n itself
 
         result: list[str] = []
         for i, raw in enumerate(raw_chunks):
@@ -419,20 +425,27 @@ class OllamaSummarizer:
         reduce_prompt = self._create_reduce_prompt(map_results, language, notes)
         if self.ai_provider != "remote":
             self._ensure_ollama_ready()
-        try:
-            response = self.client.chat(
-                model=self.model_name,
-                messages=[{"role": "user", "content": reduce_prompt}],
-                stream=True,
-                options=self._ollama_options(),
-            )
-            for chunk in response:
-                content = chunk.get("message", {}).get("content", "")
-                if content:
-                    yield content
-        except Exception as e:
-            logger.error(f"Ollama map-reduce reduce step failed: {e}")
-            return
+        # No try/except here: a reduce failure must propagate to the outer
+        # handler in simple_recorder.reprocess (`except Exception as e:
+        # _stream_error = e`) so it emits STREAM_ERROR + sys.exit(1). Swallowing
+        # it would yield nothing → caller joins [] into "" → empty summary saved.
+        response = self.client.chat(
+            model=self.model_name,
+            messages=[{"role": "user", "content": reduce_prompt}],
+            stream=True,
+            options=self._ollama_options(),
+        )
+        streamed_chunks = []
+        for chunk in response:
+            content = chunk.get("message", {}).get("content", "")
+            if content:
+                streamed_chunks.append(content)
+                yield content
+        # The model can complete without raising yet return nothing. Guard
+        # against silently saving an empty summary by routing through
+        # STREAM_ERROR instead.
+        if not streamed_chunks:
+            raise ValueError("Reduce step returned empty result")
 
     def _repair_json(self, json_text: str) -> Optional[str]:
         """

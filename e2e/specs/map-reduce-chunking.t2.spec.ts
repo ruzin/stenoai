@@ -15,9 +15,12 @@ import { readFileSync } from 'fs';
  * real model. Tagged @map-reduce; runs in the model-free t2 jobs.
  */
 
-// llama3.2:3b context=8192, budget factor ~0.8 → ~6554 tokens → ~26 214 chars.
-// 500 lines × ~80 chars = ~40 000 chars — comfortably over the threshold,
-// guaranteeing exactly 2 map chunks + 1 reduce = 3 chat calls.
+// Chunk math (llama3.2:3b, num_ctx=8192):
+//   needs_chunking threshold: estimated_tokens > num_ctx * 0.8
+//   chunk budget chars = (num_ctx - 300 - 600) * 2 = 14584 (content + overlap)
+//   overlap = floor(14584 * 0.05) = 729; content_budget = 13855
+// The 500-line transcript below is 44 390 chars → ceil(44390 / 13855) = 4 map
+// chunks, so 4 map calls + 1 reduce = 5 chat calls.
 const LONG_TRANSCRIPT = Array.from({ length: 500 }, (_, i) =>
   `Speaker A: This is utterance ${i} of a long planning meeting about the quarterly roadmap.\n`,
 ).join('');
@@ -49,10 +52,14 @@ test.describe('Map-reduce summarization @map-reduce', () => {
     });
 
     // Map calls get compact extraction replies; reduce call gets the full summary.
+    // One queued reply per map chunk (4), then the reduce call falls through to
+    // chatReply once the queue is exhausted.
     const ollama = await startMockOllama({
       chatReplyQueue: [
         'KEY POINTS\n- Planning session discussed roadmap.\n\nACTION ITEMS\n- Team to review Q3 budget.',
         'KEY POINTS\n- Team confirmed delivery timeline.\n\nACTION ITEMS\n- Alice to update tracker.',
+        'KEY POINTS\n- Risks reviewed for the rollout.\n\nACTION ITEMS\n- Bob to file mitigation plan.',
+        'KEY POINTS\n- Next steps and owners assigned.\n\nACTION ITEMS\n- Carol to schedule follow-up.',
       ],
       chatReply:
         '## Summary\nThis was a long planning meeting about the quarterly roadmap.\n\n## Key Points\n- Roadmap agreed\n\n## Action Items\n- Update tracker',
@@ -92,14 +99,16 @@ test.describe('Map-reduce summarization @map-reduce', () => {
 
       expect(completed).toBe(true);
 
-      // 2 map calls + 1 reduce call = 3 total.
-      expect(ollama.chatCalls()).toBe(3);
+      // 4 map calls + 1 reduce call = 5 total.
+      expect(ollama.chatCalls()).toBe(5);
 
       // PROGRESS: lines must arrive in order.
       const summarizeLines = progressLines.filter((l) => l.startsWith('PROGRESS:summarize:'));
       expect(summarizeLines).toEqual([
-        'PROGRESS:summarize:1/2',
-        'PROGRESS:summarize:2/2',
+        'PROGRESS:summarize:1/4',
+        'PROGRESS:summarize:2/4',
+        'PROGRESS:summarize:3/4',
+        'PROGRESS:summarize:4/4',
         'PROGRESS:summarize:reducing',
       ]);
 

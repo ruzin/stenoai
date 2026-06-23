@@ -1892,8 +1892,16 @@ def list_meetings():
     for summary_file in summaries:
         try:
             if summary_file.suffix == '.md':
-                essential_meeting = _parse_meeting_markdown(summary_file)
-                sort_key = essential_meeting.get('session_info', {}).get('processed_at', '')
+                parsed = _parse_meeting_markdown(summary_file)
+                sort_key = parsed.get('session_info', {}).get('processed_at', '')
+                # Strip the transcript (and diarised copy) from the LIST payload
+                # to match the JSON path — the full text is fetched lazily by
+                # get-meeting for the detail page. Keep has_transcript so the UI
+                # still knows a transcript exists.
+                essential_meeting = parsed
+                essential_meeting['has_transcript'] = bool(parsed.get('transcript'))
+                essential_meeting.pop('transcript', None)
+                essential_meeting.pop('diarised_text', None)
             else:
                 with open(summary_file, 'r', encoding='utf-8') as f:
                     data = json.load(f)
@@ -2007,7 +2015,12 @@ def reprocess(summary_file, regenerate_title):
 
         if _stream_error is not None:
             logger.error(f"Summarization failed: {_stream_error}")
-            print(f"STREAM_ERROR:{_stream_error}", flush=True)
+            # The renderer's parser reads STREAM_ERROR line-by-line, so a
+            # message containing newlines (tracebacks can) would be truncated
+            # to its first line. Flatten newlines into spaces so the whole
+            # message survives on one line.
+            err_msg = str(_stream_error).replace('\n', ' ').replace('\r', ' ')
+            print(f"STREAM_ERROR:{err_msg}", flush=True)
             sys.exit(1)
 
         streamed_md = ''.join(streamed_chunks)
