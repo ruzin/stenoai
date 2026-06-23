@@ -1638,6 +1638,18 @@ ipcMain.handle('list-meetings', async () => {
   }
 });
 
+ipcMain.handle('get-meeting', async (_event, summaryFile) => {
+  try {
+    if (!summaryFile || !summaryFile.endsWith('.json')) {
+      return { success: false, error: 'Invalid file path' };
+    }
+    const content = await fs.promises.readFile(summaryFile, 'utf-8');
+    return { success: true, meeting: JSON.parse(content) };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
 ipcMain.handle('clear-state', async () => {
   try {
     const result = await runPythonScript('simple_recorder.py', ['clear-state']);

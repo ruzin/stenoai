@@ -1905,9 +1905,8 @@ def list_meetings():
                         "discussion_areas": data.get("discussion_areas", []),
                         "key_points": data.get("key_points", []),
                         "action_items": data.get("action_items", []),
-                        "transcript": data.get("transcript", ""),
+                        "has_transcript": bool(data.get("transcript")),
                         "is_diarised": data.get("is_diarised", False),
-                        "diarised_text": data.get("diarised_text"),
                         "folders": data.get("folders", [])
                     }
             meetings.append((sort_key, essential_meeting))

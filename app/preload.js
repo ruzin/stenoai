@@ -136,6 +136,7 @@ const stenoai = {
 
   meetings: {
     list: () => invoke('list-meetings'),
+    get: (summaryFile) => invoke('get-meeting', summaryFile),
     update: (summaryFile, patch) => invoke('update-meeting', summaryFile, patch),
     revealFolder: (filePath) => invoke('reveal-meeting-folder', filePath),
     delete: (meeting) => invoke('delete-meeting', meeting),

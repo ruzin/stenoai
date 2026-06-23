@@ -117,15 +117,15 @@ function buildLiveMeeting(
 }
 
 export function useMeeting(summaryFile: string | null | undefined) {
-  const meetings = useMeetings();
-  const meeting = React.useMemo(
-    () =>
-      summaryFile
-        ? (meetings.data?.find((m) => m.session_info.summary_file === summaryFile) ?? null)
-        : null,
-    [meetings.data, summaryFile],
-  );
-  return { ...meetings, data: meeting };
+  return useQuery({
+    queryKey: meetingsKeys.detail(summaryFile),
+    queryFn: async () => {
+      if (!summaryFile) return null;
+      const res = await ipc().meetings.get(summaryFile);
+      return unwrap(res).meeting;
+    },
+    enabled: !!summaryFile,
+  });
 }
 
 export function useTranscript(summaryFile: string | null | undefined) {
