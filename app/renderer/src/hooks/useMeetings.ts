@@ -198,6 +198,16 @@ export function useReprocessMeeting() {
   });
 }
 
+export function useGenerateReport() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: { summaryFile: string; templateId: string }) =>
+      unwrap(await ipc().meetings.generateReport(args.summaryFile, args.templateId)),
+    onSuccess: (_data, args) =>
+      qc.invalidateQueries({ queryKey: meetingsKeys.detail(args.summaryFile) }),
+  });
+}
+
 export function useSaveMeetingNotes() {
   return useMutation({
     mutationFn: async (args: { name: string; notes: string }) =>
