@@ -11,21 +11,48 @@
 // PR1 org-lock spec doesn't exercise Ollama and so doesn't start it.
 //
 // Contract testing (Phase 4): pass { chatReply } to return a fixed assistant
-// message instead of the default 'ok', and read lastChatPrompt() to assert what
-// prompt the summarizer built (e.g. that it embedded the transcript). Default
-// behaviour is unchanged, so the existing @pipeline specs are unaffected.
+// message instead of the default summary, and read lastChatPrompt() to assert
+// what prompt the summarizer built (e.g. that it embedded the transcript).
+//
+// The default reply is a minimal but *valid* meeting summary markdown — it must
+// contain a `## Summary` header. process_streaming (simple_recorder.py) now
+// rejects a streamed summary with no `## Summary` section (a context-overflow
+// truncation signal) by exiting non-zero without writing the *_summary.md the
+// @pipeline specs poll for, so a bare 'ok' reply would make those specs hang
+// until their file-poll timeout. Specs that assert on the reply text override
+// chatReply explicitly and are unaffected.
 const http = require('http');
 
 const OLLAMA_PORT = 11434;
 
+// Minimal valid summary the @pipeline specs accept: a real `## Summary` header
+// plus the other sections the markdown prompt asks for, so _parse_streamed_markdown
+// yields a non-empty meeting and process_streaming writes the summary file.
+const DEFAULT_CHAT_REPLY = [
+  '## Summary',
+  'A short end-to-end test summary of the pipeline run.',
+  '',
+  '## Key Topics',
+  '### Pipeline',
+  'The synthetic recording exercised the transcribe-and-summarise pipeline.',
+  '',
+  '## Key Points',
+  '- The pipeline ran end to end.',
+  '',
+  '## Action Items',
+  '- None.',
+  '',
+].join('\n');
+
 /**
  * Start the mock Ollama on 11434.
  * @param {object} [opts]
- * @param {string} [opts.chatReply='ok'] assistant content returned by /api/chat.
+ * @param {string} [opts.chatReply] assistant content returned by /api/chat.
+ *   Defaults to a minimal valid summary markdown (with a `## Summary` header).
  * @returns {Promise<{ close: () => Promise<void>, lastChatPrompt: () => string|null, chatCalls: () => number, pullCalls: () => number }>}
  */
 function startMockOllama(opts = {}) {
-  const chatReply = opts.chatReply ?? 'ok';
+  const chatReply = opts.chatReply ?? DEFAULT_CHAT_REPLY;
   let lastChatPrompt = null;
   let chatCalls = 0;
   let pullCalls = 0;
