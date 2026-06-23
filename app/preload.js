@@ -144,6 +144,8 @@ const stenoai = {
     regenTitle: (summaryFile, name) => invoke('regen-meeting-title', summaryFile, name),
     saveNotes: (name, notes) => invoke('save-meeting-notes', name, notes),
     generateReport: (summaryFile, templateId) => invoke('generate-report-meeting', summaryFile, templateId),
+    setActiveReport: (summaryFile, reportId) => invoke('set-active-report', summaryFile, reportId),
+    deleteReport: (summaryFile, reportId) => invoke('delete-report', summaryFile, reportId),
   },
 
   query: {

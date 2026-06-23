@@ -2073,6 +2073,20 @@ ipcMain.handle('generate-report-meeting', async (event, summaryFile, templateId)
   }
 });
 
+ipcMain.handle('set-active-report', async (_e, summaryFile, reportId) => {
+  try {
+    const out = await runPythonScript('simple_recorder.py', ['set-active-report', summaryFile, reportId]);
+    return JSON.parse(out);
+  } catch (error) { return { success: false, error: error.message }; }
+});
+
+ipcMain.handle('delete-report', async (_e, summaryFile, reportId) => {
+  try {
+    const out = await runPythonScript('simple_recorder.py', ['delete-report', summaryFile, reportId]);
+    return JSON.parse(out);
+  } catch (error) { return { success: false, error: error.message }; }
+});
+
 ipcMain.handle('regen-meeting-title', async (event, summaryFile, sessionName) => {
   try {
     const aiEnv = getAiEnv();

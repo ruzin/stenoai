@@ -690,6 +690,8 @@ export interface StenoaiBridge {
     saveNotes: RequestFn<[name: string, notes: string], SaveMeetingNotesResponse>;
     regenTitle: RequestFn<[summaryFile: string, name: string], Result<Record<string, never>>>;
     generateReport: RequestFn<[summaryFile: string, templateId: string], Result<{ message: string }>>;
+    setActiveReport: RequestFn<[summaryFile: string, reportId: string], Result<Record<string, never>>>;
+    deleteReport: RequestFn<[summaryFile: string, reportId: string], Result<Record<string, never>>>;
   };
 
   query: {

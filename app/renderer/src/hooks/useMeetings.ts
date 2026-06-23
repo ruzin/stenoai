@@ -214,3 +214,21 @@ export function useSaveMeetingNotes() {
       unwrap(await ipc().meetings.saveNotes(args.name, args.notes)),
   });
 }
+
+export const useSetActiveReport = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (a: { summaryFile: string; reportId: string }) =>
+      unwrap(await ipc().meetings.setActiveReport(a.summaryFile, a.reportId)),
+    onSuccess: (_d, a) => qc.invalidateQueries({ queryKey: meetingsKeys.detail(a.summaryFile) }),
+  });
+};
+
+export const useDeleteReport = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (a: { summaryFile: string; reportId: string }) =>
+      unwrap(await ipc().meetings.deleteReport(a.summaryFile, a.reportId)),
+    onSuccess: (_d, a) => qc.invalidateQueries({ queryKey: meetingsKeys.detail(a.summaryFile) }),
+  });
+};
