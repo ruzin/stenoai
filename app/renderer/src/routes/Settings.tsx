@@ -1094,17 +1094,21 @@ function TemplatesTab() {
           </div>
           <div className="flex shrink-0 items-center gap-2">
             {t.builtin ? (
-              <>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className={COMPACT_BTN}
-                  disabled={reset.isPending}
-                  onClick={() => reset.mutate(t.id)}
-                >
-                  Reset
-                </Button>
-                {!t.locked && (
+              // A locked built-in (Standard) can't be edited, so there is no
+              // override to reset and nothing to edit — show no actions (the
+              // "Locked" badge above already conveys its state). Only an
+              // editable built-in offers Reset + Edit.
+              !t.locked && (
+                <>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className={COMPACT_BTN}
+                    disabled={reset.isPending}
+                    onClick={() => reset.mutate(t.id)}
+                  >
+                    Reset
+                  </Button>
                   <Button
                     variant="outline"
                     size="sm"
@@ -1113,8 +1117,8 @@ function TemplatesTab() {
                   >
                     Edit
                   </Button>
-                )}
-              </>
+                </>
+              )
             ) : (
               <>
                 <Button
@@ -1243,15 +1247,21 @@ function TemplateEditor({
         </Select>
       </SettingRow>
 
-      <SettingRow label="Prompt" align="start" noBorder>
+      <div className="pt-3">
+        <div
+          className="mb-2 text-[13px] font-medium"
+          style={{ color: 'var(--fg-1)' }}
+        >
+          Prompt
+        </div>
         <Textarea
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
           placeholder="Summarise the meeting as…"
-          rows={6}
-          className="w-[320px] text-[13px]"
+          rows={10}
+          className="w-full min-h-[200px] text-[13px] leading-relaxed"
         />
-      </SettingRow>
+      </div>
 
       {error && (
         <div
