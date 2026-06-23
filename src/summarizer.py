@@ -70,7 +70,8 @@ _OLLAMA_MODEL_NUM_CTX = {
 # Map-reduce summarization constants
 MAP_PROMPT_OVERHEAD_TOKENS = 300  # reserve for map prompt scaffolding
 MAP_OUTPUT_MAX_TOKENS = 600       # hard cap on each map call's output
-CHARS_PER_TOKEN = 4               # conservative estimate, safe for multilingual
+CHARS_PER_TOKEN = 4               # used for needs_chunking threshold (English baseline)
+_CHUNK_SAFETY_CHARS_PER_TOKEN = 3 # used for chunk budget: tighter for German/BPE variance
 _OVERLAP_RATIO = 0.05             # last 5% of previous chunk prepended to next
 
 
@@ -236,7 +237,7 @@ class OllamaSummarizer:
         """Total chars per chunk: content + overlap prefix, sized for the model."""
         num_ctx = resolve_num_ctx(self.model_name)
         content_tokens = num_ctx - MAP_PROMPT_OVERHEAD_TOKENS - MAP_OUTPUT_MAX_TOKENS
-        return int(content_tokens * CHARS_PER_TOKEN)
+        return int(content_tokens * _CHUNK_SAFETY_CHARS_PER_TOKEN)
 
     def _split_into_chunks(self, transcript: str) -> list[str]:
         """Split transcript into overlapping chunks that each fit within the model context."""

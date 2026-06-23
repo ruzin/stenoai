@@ -4,7 +4,7 @@ import unittest
 from unittest import mock
 
 from src.config import Config
-from src.summarizer import OllamaSummarizer, MAP_PROMPT_OVERHEAD_TOKENS, MAP_OUTPUT_MAX_TOKENS, CHARS_PER_TOKEN
+from src.summarizer import OllamaSummarizer, MAP_PROMPT_OVERHEAD_TOKENS, MAP_OUTPUT_MAX_TOKENS, CHARS_PER_TOKEN, _CHUNK_SAFETY_CHARS_PER_TOKEN
 
 
 def _make_summarizer(model_name="llama3.2:3b"):
@@ -15,8 +15,8 @@ def _make_summarizer(model_name="llama3.2:3b"):
 class ChunkBudgetTests(unittest.TestCase):
     def test_budget_uses_fixed_caps_not_ratio(self):
         s = _make_summarizer("llama3.2:3b")  # num_ctx = 8192
-        # content_tokens = 8192 - 300 - 600 = 7292; budget = 7292 * 4 = 29168
-        self.assertEqual(s._chunk_budget_chars(), 7292 * 4)
+        # content_tokens = 8192 - 300 - 600 = 7292; budget = 7292 * 3 = 21876
+        self.assertEqual(s._chunk_budget_chars(), 7292 * _CHUNK_SAFETY_CHARS_PER_TOKEN)
 
     def test_budget_scales_with_model_context(self):
         s_small = _make_summarizer("llama3.2:3b")   # 8192
