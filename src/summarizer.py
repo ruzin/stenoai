@@ -444,7 +444,7 @@ class OllamaSummarizer:
         # The model can complete without raising yet return nothing. Guard
         # against silently saving an empty summary by routing through
         # STREAM_ERROR instead.
-        if not streamed_chunks:
+        if not ''.join(streamed_chunks).strip():
             raise ValueError("Reduce step returned empty result")
 
     def _repair_json(self, json_text: str) -> Optional[str]:

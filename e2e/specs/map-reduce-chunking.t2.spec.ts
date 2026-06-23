@@ -39,7 +39,7 @@ type StenoWindow = Window & {
 };
 
 test.describe('Map-reduce summarization @map-reduce', () => {
-  test('long transcript triggers N+1 chat calls (2 map + 1 reduce)', async ({
+  test('long transcript triggers N+1 chat calls (4 map + 1 reduce)', async ({
     launchApp,
     userDataDir,
   }) => {

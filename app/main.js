@@ -1771,12 +1771,15 @@ ipcMain.handle('get-meeting', async (_event, summaryFile) => {
     if (!summaryFile || (!summaryFile.endsWith('.json') && !summaryFile.endsWith('.md'))) {
       return { success: false, error: 'Invalid file path' };
     }
-    // Path containment: the resolved path must live under the user-data
-    // output dir. Without this a caller could pass an arbitrary path ending
-    // in .json/.md and read any file on disk.
-    const allowedBase = path.resolve(getUserDataDir(), 'output');
+    // Path containment: the resolved path must live under one of the known
+    // output directories (default data dir, custom storage, or dev project
+    // root). Use separator-safe prefix check to prevent /output-evil bypass.
     const resolved = path.resolve(summaryFile);
-    if (!resolved.startsWith(allowedBase)) {
+    const allowedOutputDirs = getAllowedBaseDirs().map(
+      d => path.resolve(d, 'output') + path.sep,
+    );
+    const allowed = allowedOutputDirs.some(base => resolved.startsWith(base));
+    if (!allowed) {
       return { success: false, error: 'Access denied' };
     }
     const content = await fs.promises.readFile(resolved, 'utf-8');
