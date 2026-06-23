@@ -35,6 +35,8 @@ import {
   useReprocessMeeting,
   useDeleteMeeting,
   useGenerateReport,
+  useSetActiveReport,
+  useDeleteReport,
   meetingsKeys,
 } from '@/hooks/useMeetings';
 import { useTemplates } from '@/hooks/useTemplates';
@@ -143,6 +145,8 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
   const deleteMeeting = useDeleteMeeting();
   const reprocess = useReprocessMeeting();
   const generateReport = useGenerateReport();
+  const setActiveReport = useSetActiveReport();
+  const deleteReport = useDeleteReport();
   const { templates } = useTemplates();
   const orgSession = useOrgSession();
   const shareToOrg = useShareToOrg();
@@ -342,6 +346,18 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
     generatingReportRef.current = true;
     streamCache.set(summaryFile, { text: '', phase: 'analyzing' });
     generateReport.mutate({ summaryFile, templateId });
+  };
+
+  // Persist the choice so it survives navigation (B1 review: active_report not
+  // persisted). `null` selects the structured Standard summary → 'standard'.
+  const onSelectReport = (id: string | null) => {
+    setActiveReportId(id);
+    setActiveReport.mutate({ summaryFile, reportId: id ?? 'standard' });
+  };
+
+  const onDeleteReport = (reportId: string) => {
+    if (activeReportId === reportId) setActiveReportId(null);
+    deleteReport.mutate({ summaryFile, reportId });
   };
 
   const copyNotes = () => {
@@ -652,7 +668,8 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
         <ReportSwitch
           reports={reports}
           activeReportId={activeReportId}
-          onSelect={setActiveReportId}
+          onSelect={onSelectReport}
+          onDelete={onDeleteReport}
           templates={reportTemplates}
           onGenerate={onGenerateReport}
           generating={generateReport.isPending}
@@ -914,6 +931,7 @@ interface ReportSwitchProps {
   reports: Report[];
   activeReportId: string | null;
   onSelect: (id: string | null) => void;
+  onDelete: (reportId: string) => void;
   templates: Template[];
   onGenerate: (templateId: string) => void;
   generating: boolean;
@@ -923,6 +941,7 @@ function ReportSwitch({
   reports,
   activeReportId,
   onSelect,
+  onDelete,
   templates,
   onGenerate,
   generating,
@@ -933,15 +952,31 @@ function ReportSwitch({
       <ReportPill active={activeReportId === null} onClick={() => onSelect(null)}>
         Standard
       </ReportPill>
-      {reports.map((r) => (
-        <ReportPill
-          key={r.id}
-          active={activeReportId === r.id}
-          onClick={() => onSelect(r.id)}
-        >
-          {r.template_name}
-        </ReportPill>
-      ))}
+      {reports.map((r) => {
+        const when = formatReportDate(r.created_at);
+        const meta = [r.model, when].filter(Boolean).join(' · ');
+        return (
+          <ReportPill
+            key={r.id}
+            active={activeReportId === r.id}
+            onClick={() => onSelect(r.id)}
+            onDelete={() => onDelete(r.id)}
+            title={meta || undefined}
+          >
+            <span className="flex flex-col items-start leading-tight">
+              <span>{r.template_name}</span>
+              {meta && (
+                <span
+                  className="text-[10.5px]"
+                  style={{ color: 'var(--fg-2)', fontWeight: 400 }}
+                >
+                  {meta}
+                </span>
+              )}
+            </span>
+          </ReportPill>
+        );
+      })}
       {templates.length > 0 && (
         <Popover open={open} onOpenChange={setOpen}>
           <PopoverTrigger asChild>
@@ -986,18 +1021,19 @@ function ReportSwitch({
 function ReportPill({
   active,
   onClick,
+  onDelete,
+  title,
   children,
 }: {
   active: boolean;
   onClick: () => void;
+  onDelete?: () => void;
+  title?: string;
   children: React.ReactNode;
 }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={active}
-      className="inline-flex items-center rounded-full px-3 py-1 text-[12.5px] transition-colors"
+    <span
+      className="inline-flex items-center rounded-full transition-colors"
       style={{
         color: active ? 'var(--fg-1)' : 'var(--fg-2)',
         background: active ? 'var(--surface-raised)' : 'transparent',
@@ -1005,8 +1041,32 @@ function ReportPill({
         fontWeight: active ? 600 : 400,
       }}
     >
-      {children}
-    </button>
+      <button
+        type="button"
+        onClick={onClick}
+        title={title}
+        aria-pressed={active}
+        className="inline-flex items-center rounded-full py-1 pl-3 text-[12.5px]"
+        style={{ paddingRight: onDelete ? '0.375rem' : '0.75rem' }}
+      >
+        {children}
+      </button>
+      {onDelete && (
+        <button
+          type="button"
+          aria-label="Delete report"
+          title="Delete report"
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete();
+          }}
+          className="mr-1.5 inline-flex items-center rounded-full p-0.5 transition-colors hover:bg-[color:var(--surface-hover)]"
+          style={{ color: 'var(--fg-2)' }}
+        >
+          <Trash2 className="size-[11px]" />
+        </button>
+      )}
+    </span>
   );
 }
 
@@ -1367,6 +1427,15 @@ function formatDetailDate(info: { processed_at?: string; updated_at?: string }):
     hour: 'numeric',
     minute: '2-digit',
   });
+}
+
+// Compact date for the report-pill secondary line (e.g. "Jun 23"). Kept
+// terser than formatDetailDate so the pill stays small.
+function formatReportDate(raw?: string): string | undefined {
+  if (!raw) return undefined;
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) return undefined;
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
 function formatDuration(seconds?: number): string | undefined {
