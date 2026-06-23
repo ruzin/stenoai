@@ -1364,7 +1364,62 @@ Only include information explicitly discussed. Do not infer or assume.{language_
 TRANSCRIPT:
 {transcript}"""
 
-    def summarize_transcript_streaming(self, transcript: str, duration_minutes: int = 0, language: str = "en", notes: str = None, progress_callback=None):
+    def _create_template_report_prompt(self, transcript: str, template_prompt: str,
+                                       language: str = "en", notes: str = None) -> str:
+        """Free-form report prompt: the user's template instructions over the
+        transcript. Unlike _create_markdown_prompt there is NO fixed section
+        schema — the template decides the shape. Output is raw markdown."""
+        if language and language not in ("en", "auto"):
+            from .config import get_config
+            language_name = get_config().get_language_name(language)
+            language_instruction = (
+                f"\n\nCRITICAL: Write the report in {language_name}."
+                if language_name != "Unknown" else ""
+            )
+        else:
+            language_instruction = ""
+        notes_context = ""
+        if notes and notes.strip():
+            notes_context = f"USER NOTES (written during the meeting):\n{notes.strip()}\n\n"
+        diarisation_note = ""
+        if "[You]" in transcript and "[Others]" in transcript:
+            diarisation_note = "NOTE: [You] is the recorder, [Others] are remote participants.\n\n"
+        return (
+            f"{diarisation_note}{notes_context}{template_prompt.strip()}\n\n"
+            "Base the report only on what was explicitly discussed; do not infer. "
+            "Output the report as markdown with no preamble."
+            f"{language_instruction}\n\nTRANSCRIPT:\n{transcript}"
+        )
+
+    def _stream_direct(self, prompt: str):
+        """Stream a single non-chunked completion for ``prompt`` via local/remote
+        Ollama, yielding content chunks. ``think=False`` so a thinking-capable
+        model emits answer text directly instead of spending tokens reasoning
+        into a separate channel before the first content token (see
+        _summarize_chunk for the full rationale).
+
+        Cloud/adapter providers keep their own inline streaming in
+        ``summarize_transcript_streaming`` and never reach here — this is the
+        minimal extraction of just the local/remote Ollama path, shared by the
+        markdown and free-form template routes.
+        """
+        if self.ai_provider != "remote":
+            self._ensure_ollama_ready()
+        # Via _chat_stream_no_think so a remote server that rejects `think`
+        # falls back gracefully (the ollama>=0.5.0 pin governs only the bundled
+        # client). Shared by the markdown and free-form template routes.
+        response = self._chat_stream_no_think(
+            self.client,
+            model=self.model_name,
+            messages=[{'role': 'user', 'content': prompt}],
+            options=self._ollama_options(),
+        )
+        for chunk in response:
+            content = chunk.get('message', {}).get('content', '')
+            if content:
+                yield content
+
+    def summarize_transcript_streaming(self, transcript: str, duration_minutes: int = 0, language: str = "en", notes: str = None, progress_callback=None, template_prompt: Optional[str] = None):
         """Generator that yields markdown chunks from the LLM.
 
         Args:
@@ -1373,10 +1428,21 @@ TRANSCRIPT:
             language: Language code for output
             notes: Optional user notes for context
             progress_callback: Optional callable(step, total) for progress reporting
+            template_prompt: Optional free-form report instructions. When set,
+                the report is generated via the DIRECT path (no chunking, no
+                map-reduce — the map/reduce prompts are summary-schema specific
+                and don't apply to a free-form template).
 
         Yields:
             str: Text chunks as they arrive from the LLM
         """
+        if template_prompt:
+            # Free-form template report: always the direct path (the map/reduce
+            # prompts are summary-schema specific and don't apply here).
+            prompt = self._create_template_report_prompt(transcript, template_prompt, language, notes)
+            yield from self._stream_direct(prompt)
+            return
+
         if self._needs_chunking(transcript, notes):
             yield from self._map_reduce_streaming(transcript, language, notes, progress_callback)
             return
@@ -1437,25 +1503,9 @@ TRANSCRIPT:
                     logger.error(f"OpenAI streaming failed: {e}")
                     return
         else:
-            # Ollama (local or remote)
+            # Ollama (local or remote) — shared with the free-form template path.
             try:
-                if self.ai_provider != "remote":
-                    self._ensure_ollama_ready()
-                # think=False: the markdown summary prompt wants direct output;
-                # a thinking model would otherwise spend tokens reasoning into a
-                # separate channel before the first content token. See
-                # _summarize_chunk for the full rationale. Via _chat_stream_no_think
-                # for the remote-server `think` fallback.
-                response = self._chat_stream_no_think(
-                    self.client,
-                    model=self.model_name,
-                    messages=[{'role': 'user', 'content': prompt}],
-                    options=self._ollama_options(),
-                )
-                for chunk in response:
-                    content = chunk.get('message', {}).get('content', '')
-                    if content:
-                        yield content
+                yield from self._stream_direct(prompt)
             except Exception as e:
                 logger.error(f"Ollama streaming failed: {e}")
                 return
