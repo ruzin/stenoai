@@ -2100,8 +2100,6 @@ def reprocess(summary_file, regenerate_title):
 
         streamed_md = ''.join(streamed_chunks)
 
-        print("STREAM_COMPLETE", flush=True)
-
         # Regenerate title if requested
         if regenerate_title:
             try:
@@ -2187,6 +2185,15 @@ def reprocess(summary_file, regenerate_title):
             })
             with open(summary_path, 'w') as f:
                 json.dump(existing_data, f, indent=2)
+
+        # Signal completion only AFTER the note file is fully written. The
+        # renderer reads the note the instant it sees STREAM_COMPLETE, so
+        # emitting it before the write above is a write-after-complete race
+        # (the #249 backup widened the window). It surfaced as a stale read on
+        # Windows CI — map-reduce-chunking.t2 saw the pre-reprocess summary —
+        # while macOS happened to win the race. Mirrors process_streaming's
+        # write-before-complete intent.
+        print("STREAM_COMPLETE", flush=True)
 
         print(f"Summary reprocessed successfully: {summary_path}")
 
