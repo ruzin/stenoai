@@ -2068,6 +2068,27 @@ def reprocess(summary_file, regenerate_title):
         # Add reprocess timestamp
         existing_data["session_info"]["reprocessed_at"] = datetime.now().isoformat()
 
+        # #249: snapshot the prior Standard note as a switchable backup BEFORE we
+        # overwrite the note file, so a regenerate never loses the previous
+        # summary. read_meeting + the sidecar are format-agnostic, so this runs
+        # once for BOTH .md and .json meetings (above the format branch below).
+        # Only snapshot an existing file — a brand-new meeting has nothing to
+        # back up.
+        if summary_path.exists():
+            from src import report_store, reports as _reports
+            _backup_md = report_store.read_meeting(summary_path)["summary_markdown"]
+            if _backup_md.strip():
+                _stamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+                _sidecar = report_store.load_sidecar(summary_path)
+                _reports.append_report(_sidecar, _reports.make_report(
+                    "standard-backup", f"Standard · {_stamp}",
+                    existing_data.get("session_info", {}).get("model")
+                    or recorder.summarizer.model_name, _backup_md))
+                # append_report sets active_report to the backup; the live note
+                # should stay the default view after regenerate, so clear it:
+                _sidecar["active_report"] = None
+                report_store.save_sidecar(summary_path, _sidecar)
+
         # Save updated summary
         if summary_path.suffix == '.md':
             session_name = existing_data.get('session_info', {}).get('name', 'Reprocessed')
@@ -2106,21 +2127,6 @@ def reprocess(summary_file, regenerate_title):
         else:
             # JSON format: parse streamed markdown into structured fields
             parsed = recorder._parse_streamed_markdown(streamed_md)
-            # #249: snapshot the prior Standard note as a switchable backup before
-            # we overwrite it, so a regenerate never loses the previous summary.
-            from src import report_store, reports as _reports
-            _backup_md = report_store.read_meeting(summary_path)["summary_markdown"]
-            if _backup_md.strip():
-                _stamp = datetime.now().strftime("%Y-%m-%d %H:%M")
-                _sidecar = report_store.load_sidecar(summary_path)
-                _reports.append_report(_sidecar, _reports.make_report(
-                    "standard-backup", f"Standard · {_stamp}",
-                    existing_data.get("session_info", {}).get("model")
-                    or recorder.summarizer.model_name, _backup_md))
-                # append_report sets active_report to the backup; the live note
-                # should stay the default view after regenerate, so clear it:
-                _sidecar["active_report"] = None
-                report_store.save_sidecar(summary_path, _sidecar)
             existing_data.update({
                 "summary": parsed.get("summary", "") or "",
                 "participants": parsed.get("participants", []) or [],

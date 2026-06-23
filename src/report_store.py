@@ -55,18 +55,32 @@ def _split_frontmatter(text: str):
     return fm, body
 
 
+def _split_on_heading(body: str, heading: str):
+    """Split `body` at the first line that IS `heading` (after stripping).
+
+    Mirrors how the meeting writer emits section headers on their own line, so
+    the literal heading text appearing inside transcript/summary prose does NOT
+    trigger a split. Returns (before, after) where `after` is None if the
+    heading line is absent.
+    """
+    lines = body.splitlines(keepends=True)
+    for i, line in enumerate(lines):
+        if line.strip() == heading:
+            before = "".join(lines[:i])
+            after = "".join(lines[i + 1:])
+            return before, after
+    return body, None
+
+
 def _split_md_sections(body: str):
     """Return (summary_markdown, transcript, notes) from a meeting .md body."""
     notes = None
-    if "## User Notes" in body:
-        body, _, notes_part = body.partition("## User Notes")
+    before_notes, notes_part = _split_on_heading(body, "## User Notes")
+    if notes_part is not None:
+        body = before_notes
         notes = notes_part.strip() or None
-    transcript = ""
-    if "## Transcript" in body:
-        summary_part, _, transcript_part = body.partition("## Transcript")
-        transcript = transcript_part.strip()
-    else:
-        summary_part = body
+    summary_part, transcript_part = _split_on_heading(body, "## Transcript")
+    transcript = transcript_part.strip() if transcript_part is not None else ""
     return summary_part.strip(), transcript, notes
 
 

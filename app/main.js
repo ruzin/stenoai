@@ -1648,7 +1648,7 @@ ipcMain.handle('list-meetings', async () => {
 // meetings without a Python round-trip. Returns the FULL data (transcript
 // included) — the size-stripping that list-meetings does is intentionally
 // not applied here because the detail page needs the transcript.
-async function readReportsSidecar(meetingPath) {
+async function readReportsSidecar(meetingPath, allowedOutputDirs) {
   // Derive sidecar path: <stem>_summary.(md|json) → <stem>_reports.json
   const ext = path.extname(meetingPath); // '.md' or '.json'
   const base = path.basename(meetingPath, ext); // e.g. '20240101_120000_summary'
@@ -1657,7 +1657,18 @@ async function readReportsSidecar(meetingPath) {
   const stem = base.endsWith('_summary') ? base.slice(0, -'_summary'.length) : base;
   const sidecarPath = path.join(dir, `${stem}_reports.json`);
   try {
-    const raw = await fs.promises.readFile(sidecarPath, 'utf-8');
+    // Path containment (mirrors get-meeting): the derived '_reports.json' is
+    // read directly, so a symlinked sidecar could otherwise escape the allowed
+    // output tree. Resolve its REAL path and require it to live under one of the
+    // same allowed output dirs the meeting passed. realpath needs the file to
+    // exist; a missing sidecar -> caught below -> empty result.
+    const realSidecar = await fs.promises.realpath(path.resolve(sidecarPath));
+    const allowed = Array.isArray(allowedOutputDirs)
+      && allowedOutputDirs.some(b => b && realSidecar.startsWith(b));
+    if (!allowed) {
+      return { reports: [], active_report: null };
+    }
+    const raw = await fs.promises.readFile(realSidecar, 'utf-8');
     const data = JSON.parse(raw);
     return {
       reports: Array.isArray(data.reports) ? data.reports : [],
@@ -1830,11 +1841,11 @@ ipcMain.handle('get-meeting', async (_event, summaryFile) => {
       // needs the full data INCLUDING the transcript (for the AskBar /
       // TranscriptPanel), so we return everything parseMeetingMarkdown yields.
       const mdMeeting = parseMeetingMarkdown(content, realResolved);
-      const mdSidecar = await readReportsSidecar(realResolved);
+      const mdSidecar = await readReportsSidecar(realResolved, allowedOutputDirs);
       return { success: true, meeting: { ...mdMeeting, reports: mdSidecar.reports, active_report: mdSidecar.active_report } };
     }
     const jsonMeeting = JSON.parse(content);
-    const jsonSidecar = await readReportsSidecar(realResolved);
+    const jsonSidecar = await readReportsSidecar(realResolved, allowedOutputDirs);
     return { success: true, meeting: { ...jsonMeeting, reports: jsonSidecar.reports, active_report: jsonSidecar.active_report } };
   } catch (error) {
     return { success: false, error: error.message };

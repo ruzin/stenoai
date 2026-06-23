@@ -43,6 +43,7 @@ type StenoWindow = Window & {
       get: (summaryFile: string) => Promise<{ success: boolean; meeting?: Meeting }>;
       setActiveReport: (summaryFile: string, reportId: string) => Promise<{ success: boolean }>;
       deleteReport: (summaryFile: string, reportId: string) => Promise<{ success: boolean }>;
+      reprocess: (summaryFile: string, regenTitle: boolean, name: string) => Promise<{ success: boolean; error?: string }>;
     };
     templates: {
       save: (template: Record<string, unknown>) => Promise<{ success: boolean; template?: { id: string } }>;
@@ -185,6 +186,86 @@ test('generate-report on a .md meeting writes the sidecar and get-meeting merges
     expect(getAfterDelete.success).toBe(true);
     expect(getAfterDelete.meeting?.reports ?? []).toHaveLength(0);
     expect(getAfterDelete.meeting?.active_report ?? null).toBeNull();
+
+    // Keystone: the real user-data dir is byte-for-byte untouched.
+    expect(fileSig(realUserDataDir())).toBe(realDirBefore);
+  } finally {
+    await ollama.close();
+  }
+});
+
+/**
+ * Fix 1 (#249) — reprocessing a REAL `.md` meeting must snapshot the prior
+ * Standard note into the sidecar as a `standard-backup`. Before the fix the
+ * snapshot lived only in the `.json` branch, so a `.md` reprocess silently lost
+ * the previous summary. Model-free: mock-ollama returns a new summary markdown.
+ */
+
+// Mock LLM reply that becomes the new live `.md` summary on reprocess.
+const MD_REPROCESS_REPLY = [
+  '## Summary',
+  'Regenerated Q2 summary.',
+  '',
+  '## Key Points',
+  '- Reprocessed',
+].join('\n');
+
+test('reprocessing a .md meeting backs up the prior Standard note into the sidecar', async ({
+  launchApp,
+  userDataDir,
+}) => {
+  const realDirBefore = fileSig(realUserDataDir());
+
+  writeUserConfig(userDataDir, { ai_provider: 'local' });
+  const summaryFile = writeMeetingMarkdown(userDataDir, 'md-reprocess-backup', {
+    name: 'MD Reprocess Backup Meeting',
+    summaryMarkdown: SUMMARY_MARKDOWN,
+    transcript: TRANSCRIPT,
+  });
+  const sidecarPath = sidecarFor(summaryFile);
+
+  const ollama = await startMockOllama({ chatReply: MD_REPROCESS_REPLY });
+  try {
+    const { page } = await launchApp();
+
+    const completed: boolean = await page.evaluate(
+      ([f, name]) =>
+        new Promise<boolean>((resolve) => {
+          const timer = setTimeout(() => resolve(false), 30_000);
+          const w = window as unknown as StenoWindow;
+          const off = w.stenoai.on.summaryComplete((e) => {
+            if (e && e.success) {
+              clearTimeout(timer);
+              off();
+              resolve(true);
+            }
+          });
+          w.stenoai.meetings.reprocess(f, false, name);
+        }),
+      [summaryFile, 'MD Reprocess Backup Meeting'] as [string, string],
+    );
+    expect(completed).toBe(true);
+
+    // The `.md` file is rewritten with the new summary.
+    await expect
+      .poll(() => readFileSync(summaryFile, 'utf8').includes('Regenerated Q2 summary.'), {
+        timeout: 15_000,
+      })
+      .toBe(true);
+
+    // A standard-backup of the PRIOR note now lands in the sidecar.
+    await expect
+      .poll(() => readSidecar(sidecarPath).reports.length, { timeout: 15_000 })
+      .toBe(1);
+
+    const sidecar = readSidecar(sidecarPath);
+    const backup = sidecar.reports[0];
+    expect(backup.template_id).toBe('standard-backup');
+    // The backup captured the prior summary markdown, not the new one.
+    expect(backup.content).toContain('Pipeline strong');
+    expect(backup.content).not.toContain('Regenerated Q2 summary.');
+    // active_report stays null so the live (regenerated) note is the default view.
+    expect(sidecar.active_report ?? null).toBeNull();
 
     // Keystone: the real user-data dir is byte-for-byte untouched.
     expect(fileSig(realUserDataDir())).toBe(realDirBefore);
