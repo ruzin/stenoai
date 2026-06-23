@@ -2892,6 +2892,68 @@ def set_model(model_name):
         sys.exit(1)
 
 
+@cli.command(name='list-templates')
+def list_templates():
+    """List all report templates (built-in + custom) and the default id."""
+    from src.config import get_config
+    config = get_config()
+    print(json.dumps({
+        "templates": config.get_templates(),
+        "default_template_id": config.get_default_template_id(),
+    }))
+
+
+@cli.command(name='save-template')
+@click.argument('template_json')
+def save_template(template_json):
+    """Create or update a template from a JSON object."""
+    from src.config import get_config
+    try:
+        payload = json.loads(template_json)
+    except json.JSONDecodeError as e:
+        print(json.dumps({"success": False, "error": f"Invalid JSON: {e}"}))
+        sys.exit(1)
+    ok, err, saved = get_config().save_template(payload)
+    print(json.dumps({"success": ok, "template": saved} if ok
+                     else {"success": False, "error": err}))
+    if not ok:
+        sys.exit(1)
+
+
+@cli.command(name='delete-template')
+@click.argument('template_id')
+def delete_template(template_id):
+    """Delete a custom template by id."""
+    from src.config import get_config
+    ok = get_config().delete_template(template_id)
+    print(json.dumps({"success": ok}))
+    if not ok:
+        sys.exit(1)
+
+
+@cli.command(name='set-default-template')
+@click.argument('template_id')
+def set_default_template(template_id):
+    """Set the default template used for auto-generation."""
+    from src.config import get_config
+    ok = get_config().set_default_template(template_id)
+    print(json.dumps({"success": ok} if ok
+                     else {"success": False, "error": "Failed to save config"}))
+    if not ok:
+        sys.exit(1)
+
+
+@cli.command(name='reset-template')
+@click.argument('template_id')
+def reset_template(template_id):
+    """Reset a built-in template to its shipped default (drops the override)."""
+    from src.config import get_config
+    ok = get_config().reset_template(template_id)
+    print(json.dumps({"success": ok}))
+    if not ok:
+        sys.exit(1)
+
+
 @cli.command()
 def get_notifications():
     """Get the current notification preference"""
