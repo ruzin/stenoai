@@ -751,9 +751,9 @@ def generate_default_template_report(summary_path, transcript, notes, language,
     its report into the meeting's sidecar and make it active. Additive — the
     Standard note is untouched. Never raises (a new recording must not fail because
     of the extra report)."""
-    from src import reports as _reports
-    from src import report_store as _store
     try:
+        from src import reports as _reports
+        from src import report_store as _store
         tid = config.get_default_template_id()
         if not tid or tid == "standard":
             return None
@@ -761,12 +761,20 @@ def generate_default_template_report(summary_path, transcript, notes, language,
         if not tmpl or not (tmpl.get("prompt") or "").strip():
             return None
         report_language = tmpl["language"] if tmpl.get("language") and tmpl["language"] != "auto" else language
-        chunks = []
-        for chunk in summarizer.summarize_transcript_streaming(
-            transcript, duration_minutes, report_language, notes,
-            template_prompt=tmpl["prompt"],
-        ):
-            chunks.append(chunk)
+        # This generation produces NO CHUNK:/PROGRESS: output, so the main-process
+        # inactivity watchdog would otherwise fire on a slow model and FAIL the
+        # recording AFTER the Standard note was already saved. Heartbeat keeps it
+        # alive; a distinct label avoids polluting the parsed summary stream.
+        heartbeat = _start_summary_heartbeat(label="default-report")
+        try:
+            chunks = []
+            for chunk in summarizer.summarize_transcript_streaming(
+                transcript, duration_minutes, report_language, notes,
+                template_prompt=tmpl["prompt"],
+            ):
+                chunks.append(chunk)
+        finally:
+            heartbeat.set()
         content = "".join(chunks).strip()
         if not content:
             return None

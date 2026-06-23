@@ -76,6 +76,26 @@ class DefaultTemplateReportTests(unittest.TestCase):
                 mp, "T: hi", None, "en", 1, c, _FakeSummarizer(["x"]))
             self.assertIsNone(out)
 
+    def test_swallows_exceptions_writes_nothing(self):
+        class _BoomSummarizer:
+            model_name = "llama3.2:3b"
+            def summarize_transcript_streaming(self, transcript, duration_minutes=0,
+                                               language="en", notes=None,
+                                               progress_callback=None, template_prompt=None):
+                yield "## partial"
+                raise RuntimeError("model exploded mid-stream")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            c, _ = _cfg(tmp, "custom")
+            mp = Path(tmp) / "m_summary.md"
+            mp.write_text("---\n---\n\n## Summary\nx\n", encoding="utf-8")
+            # Must not propagate: a new recording must never fail because of
+            # the extra report.
+            out = simple_recorder.generate_default_template_report(
+                mp, "T: hi", None, "en", 1, c, _BoomSummarizer())
+            self.assertIsNone(out)
+            self.assertFalse((Path(tmp) / "m_reports.json").exists())
+
 
 if __name__ == "__main__":
     unittest.main()
