@@ -265,6 +265,7 @@ class Config:
         self._migrate_whisper_model()
         self._migrate_summary_model()
         self._migrate_transcription_engine()
+        self._normalize_templates()
         self._seed_sample_template()
 
     def _migrate_transcription_engine(self) -> None:
@@ -488,20 +489,43 @@ class Config:
         return self._save()
 
     # --- Report templates ---------------------------------------------------
+    def _normalize_templates(self) -> None:
+        """Coerce persisted template state into the shapes the CRUD/merge code
+        assumes — on EVERY load, not gated behind `templates_seeded`.
+
+        A malformed-but-parseable config (`custom_templates` as a non-list or a
+        list with non-dict entries, or `template_overrides` as a non-dict) would
+        otherwise survive past first-run seeding and crash later template reads
+        (`merge_templates`) and writes (`save_template`/`delete_template`). The
+        repair is in-memory; it persists on the next `_save()`.
+        """
+        if self._load_failed:
+            return
+        custom_raw = self._config.get("custom_templates", [])
+        self._config["custom_templates"] = (
+            [t for t in custom_raw if isinstance(t, dict)]
+            if isinstance(custom_raw, list)
+            else []
+        )
+        overrides_raw = self._config.get("template_overrides")
+        self._config["template_overrides"] = (
+            {k: v for k, v in overrides_raw.items() if isinstance(v, dict)}
+            if isinstance(overrides_raw, dict)
+            else {}
+        )
+
     def _seed_sample_template(self) -> None:
         """Seed the editable 'Shareable summary' sample once, on fresh configs.
 
         Guarded by `templates_seeded` so deleting the sample doesn't re-add it.
+        Assumes `_normalize_templates` has already coerced `custom_templates`
+        into a list of dicts.
         """
         if self._load_failed:
             return
         if self._config.get("templates_seeded"):
             return
-        # Normalize defensively: a malformed-but-parseable config (e.g. a non-list
-        # or a list with non-dict entries) must not crash startup seeding.
-        custom_raw = self._config.setdefault("custom_templates", [])
-        custom = [t for t in custom_raw if isinstance(t, dict)] if isinstance(custom_raw, list) else []
-        self._config["custom_templates"] = custom
+        custom = self._config.setdefault("custom_templates", [])
         if not any(t.get("id") == _templates.SAMPLE_TEMPLATE["id"] for t in custom):
             custom.append(dict(_templates.SAMPLE_TEMPLATE))
         self._config["templates_seeded"] = True

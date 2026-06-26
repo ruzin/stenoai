@@ -110,5 +110,77 @@ class TemplateCrudTests(unittest.TestCase):
             self.assertTrue(c.reset_template("does-not-exist"))
 
 
+class AlreadySeededMalformedConfigTests(unittest.TestCase):
+    """A malformed-but-parseable config that is ALREADY seeded must still be
+    repaired on load — the normalization can't be gated behind the one-time
+    `templates_seeded` flag, or template reads/writes crash on the junk."""
+
+    def _write(self, tmp, config: dict) -> Path:
+        path = Path(tmp) / "config.json"
+        path.write_text(json.dumps(config))
+        return path
+
+    def test_non_list_custom_templates_does_not_crash_reads_or_writes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            # Already seeded, but custom_templates got clobbered to a non-list.
+            path = self._write(
+                tmp, {"templates_seeded": True, "custom_templates": "oops"}
+            )
+            c = Config(config_path=path)
+            # Reads merge cleanly (built-ins only; the junk is dropped).
+            ids = [t["id"] for t in c.get_templates()]
+            self.assertIn(STANDARD_TEMPLATE_ID, ids)
+            # Writes still succeed against the repaired list.
+            ok, _, saved = c.save_template(
+                {"name": "Brief", "prompt": "p", "language": "auto"}
+            )
+            self.assertTrue(ok)
+            self.assertTrue(c.delete_template(saved["id"]))
+
+    def test_list_with_non_dict_entries_is_filtered_on_load(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write(
+                tmp,
+                {
+                    "templates_seeded": True,
+                    "custom_templates": [
+                        "junk",
+                        None,
+                        {"id": "keep", "name": "Keep", "prompt": "p", "language": "auto"},
+                    ],
+                },
+            )
+            c = Config(config_path=path)
+            ids = [t["id"] for t in c.get_templates()]
+            self.assertIn(STANDARD_TEMPLATE_ID, ids)
+            self.assertIn("keep", ids)
+            # The non-dict entries are gone, so CRUD that iterates the list is safe.
+            self.assertTrue(c.delete_template("keep"))
+
+    def test_non_dict_template_overrides_does_not_crash(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write(
+                tmp, {"templates_seeded": True, "template_overrides": "nope"}
+            )
+            c = Config(config_path=path)
+            ids = [t["id"] for t in c.get_templates()]
+            self.assertIn(STANDARD_TEMPLATE_ID, ids)
+
+    def test_malformed_per_template_override_value_is_dropped(self):
+        # template_overrides is a dict, but a per-template value is junk —
+        # merge_templates would still crash on `{**base, **value}` without this.
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write(
+                tmp,
+                {
+                    "templates_seeded": True,
+                    "template_overrides": {STANDARD_TEMPLATE_ID: "oops"},
+                },
+            )
+            c = Config(config_path=path)
+            ids = [t["id"] for t in c.get_templates()]
+            self.assertIn(STANDARD_TEMPLATE_ID, ids)
+
+
 if __name__ == "__main__":
     unittest.main()
