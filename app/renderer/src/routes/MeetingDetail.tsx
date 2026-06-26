@@ -75,6 +75,7 @@ import { buildTranscriptBundle, defaultExportFilename } from '@/lib/transcriptBu
 import { unwrap } from '@/lib/result';
 import { cn } from '@/lib/utils';
 import { navigate } from '@/lib/router';
+import { stripReasoning } from '@/lib/markdown';
 import {
   pendingTitleRegens,
   streamCache,
@@ -853,7 +854,7 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
             <section className="flex flex-col gap-3">
               <SectionTitle>Summary</SectionTitle>
               <div data-testid="tab-summary-content">
-                {summary.split(/\n{2,}/).map((para, i) => (
+                {stripReasoning(summary).split(/\n{2,}/).map((para, i) => (
                   <p
                     key={i}
                     className="text-[15.5px] leading-[1.65]"
@@ -1248,7 +1249,7 @@ const CHAR_TRANSITION = 'top 0.12s ease-out';
 const ROW_TRANSITION = 'top 0.35s cubic-bezier(0.45, 0, 0.55, 1)';
 
 function StreamingView({ text, phase, chunkProgress }: { text: string; phase: StreamPhase; chunkProgress?: { step: number; total: number } | null }) {
-  const blocks = parseMarkdownBlocks(text);
+  const blocks = parseMarkdownBlocks(stripReasoning(text));
   const isStreaming = phase === 'analyzing' || phase === 'generating';
 
   const prevBlockCountRef = React.useRef(blocks.length);

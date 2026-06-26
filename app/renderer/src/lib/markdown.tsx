@@ -8,8 +8,14 @@ import { cn } from '@/lib/utils';
 // zero deps, predictable output, and safe-by-default React text rendering
 // (no innerHTML).
 
+export function stripReasoning(text: string): string {
+  if (!text) return text;
+  return text.replace(/<(think|thought)>[\s\S]*?(?:<\/\1>|$)/gi, '').trimStart();
+}
+
 export function renderMarkdown(text: string): React.ReactNode {
   if (!text) return null;
+  text = stripReasoning(text);
 
   // Strip trailing \r so CRLF input doesn't leave ghost characters at the end
   // of every line — that breaks regex anchors and table cell parsing.
