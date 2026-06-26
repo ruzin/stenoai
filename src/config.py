@@ -497,7 +497,11 @@ class Config:
             return
         if self._config.get("templates_seeded"):
             return
-        custom = self._config.setdefault("custom_templates", [])
+        # Normalize defensively: a malformed-but-parseable config (e.g. a non-list
+        # or a list with non-dict entries) must not crash startup seeding.
+        custom_raw = self._config.setdefault("custom_templates", [])
+        custom = [t for t in custom_raw if isinstance(t, dict)] if isinstance(custom_raw, list) else []
+        self._config["custom_templates"] = custom
         if not any(t.get("id") == _templates.SAMPLE_TEMPLATE["id"] for t in custom):
             custom.append(dict(_templates.SAMPLE_TEMPLATE))
         self._config["templates_seeded"] = True

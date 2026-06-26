@@ -2208,6 +2208,9 @@ def reprocess(summary_file, regenerate_title):
 def set_active_report(summary_file, report_id):
     """Persist which report version is shown (report_id 'standard' clears it)."""
     from src import report_store, reports as _reports
+    if not Path(summary_file).exists():
+        print(json.dumps({"success": False, "error": "Summary file not found"}))
+        sys.exit(1)
     sidecar = report_store.load_sidecar(summary_file)
     ok = _reports.set_active(sidecar, report_id)
     if ok:
@@ -2223,6 +2226,9 @@ def set_active_report(summary_file, report_id):
 def delete_report(summary_file, report_id):
     """Delete a saved report version from a meeting."""
     from src import report_store, reports as _reports
+    if not Path(summary_file).exists():
+        print(json.dumps({"success": False, "error": "Summary file not found"}))
+        sys.exit(1)
     sidecar = report_store.load_sidecar(summary_file)
     ok = _reports.remove_report(sidecar, report_id)
     if ok:

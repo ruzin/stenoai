@@ -64,11 +64,14 @@ class BuiltinRegistryTests(unittest.TestCase):
                 {"name": "X", "prompt": "p", "language": bad_lang}, langs
             )
             self.assertFalse(ok)
-        # format: present but invalid
-        ok, _ = T.validate_template(
-            {"name": "X", "prompt": "p", "language": "auto", "format": "weird"}, langs
-        )
-        self.assertFalse(ok)
+        # format: present but invalid — including non-string/unhashable payloads
+        # that would raise on a naive `fmt in VALID_FORMATS` membership check.
+        for bad_fmt in ("weird", ["markdown"], {"k": "v"}, 5):
+            ok, msg = T.validate_template(
+                {"name": "X", "prompt": "p", "language": "auto", "format": bad_fmt}, langs
+            )
+            self.assertFalse(ok)
+            self.assertTrue(msg)
         # icon: present but not a str
         ok, _ = T.validate_template(
             {"name": "X", "prompt": "p", "language": "auto", "icon": 5}, langs

@@ -85,7 +85,7 @@ class ReadMeetingTests(unittest.TestCase):
             mp.write_text(MD.split("## User Notes")[0], encoding="utf-8")
             m = S.read_meeting(mp)
             self.assertIn("Speaker A: hello.", m["transcript"])
-            self.assertIn(m["notes"] or "", ("", None))
+            self.assertIsNone(m["notes"])
 
     def test_transcript_text_containing_heading_literal_not_truncated(self):
         # A transcript whose TEXT contains the literal '## Transcript' (e.g. a
@@ -106,7 +106,7 @@ class ReadMeetingTests(unittest.TestCase):
             self.assertIn("written ## Transcript on its own line.", m["transcript"])
             self.assertIn("## User Notes inline like this.", m["transcript"])
             # Notes were NOT split out from the inline mention.
-            self.assertIn(m["notes"] or "", ("", None))
+            self.assertIsNone(m["notes"])
             # Summary stays clean.
             self.assertIn("Discussed the markdown spec.", m["summary_markdown"])
             self.assertNotIn("Speaker A", m["summary_markdown"])

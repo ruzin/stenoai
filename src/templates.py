@@ -94,7 +94,7 @@ def validate_template(t: dict, valid_languages: set) -> tuple:
         return False, f"Unsupported language: {lang}"
 
     fmt = t.get("format")
-    if fmt is not None and fmt not in VALID_FORMATS:
+    if fmt is not None and (not isinstance(fmt, str) or fmt not in VALID_FORMATS):
         return False, f"Unsupported format: {fmt}"
 
     icon = t.get("icon")

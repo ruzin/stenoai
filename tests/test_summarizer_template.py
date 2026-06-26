@@ -5,7 +5,11 @@ from src.summarizer import OllamaSummarizer
 
 
 def _s(model="llama3.2:3b"):
-    return OllamaSummarizer(model_name=model, ai_provider="local", config=Config())
+    # Construct under a mocked readiness check: __init__ calls _ensure_ollama_ready()
+    # for the local provider, so without this the tests would try to start Ollama at
+    # construction time (non-hermetic — fails on any machine without Ollama).
+    with mock.patch.object(OllamaSummarizer, "_ensure_ollama_ready", return_value=True):
+        return OllamaSummarizer(model_name=model, ai_provider="local", config=Config())
 
 
 class TemplatePromptTests(unittest.TestCase):
