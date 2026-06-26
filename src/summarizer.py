@@ -15,6 +15,67 @@ from . import ollama_manager
 
 logger = logging.getLogger(__name__)
 
+import re
+from typing import Generator
+
+def _strip_reasoning_blocks(text: str) -> str:
+    """Remove <think>...</think> and <thought>...</thought> blocks from text."""
+    text = re.sub(r'<(think|thought)>.*?</\1>', '', text, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r'</?(think|thought)>', '', text, flags=re.IGNORECASE)
+    return text.strip()
+
+def _strip_reasoning_stream(chunk_generator: Generator[str, None, None]) -> Generator[str, None, None]:
+    """Wrap a chunk generator to strip <think>...</think> and <thought>...</thought> blocks on the fly."""
+    buffer = ""
+    in_reasoning = False
+    reasoning_tag = ""
+    
+    for chunk in chunk_generator:
+        if not chunk: continue
+        buffer += chunk
+        
+        while True:
+            lower_buf = buffer.lower()
+            if not in_reasoning:
+                think_idx = lower_buf.find('<think>')
+                thought_idx = lower_buf.find('<thought>')
+                
+                idxs = [(idx, tag) for idx, tag in [(think_idx, '<think>'), (thought_idx, '<thought>')] if idx != -1]
+                if not idxs:
+                    last_lt = buffer.rfind('<')
+                    if last_lt != -1 and len(buffer) - last_lt < 10:
+                        if last_lt > 0:
+                            yield buffer[:last_lt]
+                            buffer = buffer[last_lt:]
+                    else:
+                        yield buffer
+                        buffer = ""
+                    break
+                    
+                earliest_idx, earliest_tag = min(idxs, key=lambda x: x[0])
+                if earliest_idx > 0:
+                    yield buffer[:earliest_idx]
+                    
+                in_reasoning = True
+                reasoning_tag = '</' + earliest_tag[1:]
+                buffer = buffer[earliest_idx + len(earliest_tag):]
+            else:
+                close_idx = lower_buf.find(reasoning_tag)
+                if close_idx != -1:
+                    in_reasoning = False
+                    buffer = buffer[close_idx + len(reasoning_tag):]
+                else:
+                    last_lt = buffer.rfind('<')
+                    if last_lt != -1 and len(buffer) - last_lt < 12:
+                        buffer = buffer[last_lt:]
+                    else:
+                        buffer = ""
+                    break
+                    
+    if not in_reasoning and buffer:
+        yield buffer
+
+
 
 def bedrock_converse_url(region: str, target_id: str) -> str:
     """Build the Bedrock Converse REST URL for a region + model/profile id.
@@ -883,6 +944,7 @@ Return ONLY the response in this exact JSON format:
                 response_text = ollama_response['message']['content'].strip()
 
             logger.info(f"Received response from {self.ai_provider}")
+            response_text = _strip_reasoning_blocks(response_text)
             logger.info(f"Response length: {len(response_text)} characters")
             logger.info(f"Response preview: {response_text[:200]}...")
             
@@ -1068,76 +1130,79 @@ TRANSCRIPT:
         prompt = self._create_markdown_prompt(transcript, language, notes)
         logger.info(f"Starting streaming summary with {self.ai_provider} model: {self.model_name}")
 
-        if self.ai_provider == "adapter":
-            # Summarisation can legitimately take a long time for a long
-            # meeting; match the dynamic-timeout ceiling summarize_transcript
-            # already uses (2h).
-            yield from self._adapter_stream(prompt, timeout_seconds=7200)
-            return
+        def _generate():
+            if self.ai_provider == "adapter":
+                # Summarisation can legitimately take a long time for a long
+                # meeting; match the dynamic-timeout ceiling summarize_transcript
+                # already uses (2h).
+                yield from self._adapter_stream(prompt, timeout_seconds=7200)
+                return
 
-        if self.ai_provider == "cloud":
-            if self.cloud_provider == "anthropic":
-                try:
-                    with self.anthropic_client.messages.stream(
-                        model=self.model_name,
-                        max_tokens=8192,
-                        messages=[{"role": "user", "content": prompt}],
-                    ) as stream:
-                        for text in stream.text_stream:
+            if self.ai_provider == "cloud":
+                if self.cloud_provider == "anthropic":
+                    try:
+                        with self.anthropic_client.messages.stream(
+                            model=self.model_name,
+                            max_tokens=8192,
+                            messages=[{"role": "user", "content": prompt}],
+                        ) as stream:
+                            for text in stream.text_stream:
+                                yield text
+                    except Exception as e:
+                        logger.error(f"Anthropic streaming failed: {e}")
+                        return
+                elif self.cloud_provider == "bedrock":
+                    # Bedrock's /converse-stream uses amazon eventstream framing
+                    # (binary, length-prefixed), which would need a dedicated
+                    # parser to unwrap without boto3. For the initial Bedrock
+                    # release we fall back to non-streaming Converse and yield
+                    # the full response as a single chunk — the user sees the
+                    # whole answer arrive at once instead of token-by-token.
+                    # Acceptable for summarisation (already a long batch op);
+                    # follow-up PR can add proper streaming.
+                    try:
+                        text = self._bedrock_chat(prompt, timeout_seconds=7200)
+                        if text:
                             yield text
-                except Exception as e:
-                    logger.error(f"Anthropic streaming failed: {e}")
-                    return
-            elif self.cloud_provider == "bedrock":
-                # Bedrock's /converse-stream uses amazon eventstream framing
-                # (binary, length-prefixed), which would need a dedicated
-                # parser to unwrap without boto3. For the initial Bedrock
-                # release we fall back to non-streaming Converse and yield
-                # the full response as a single chunk — the user sees the
-                # whole answer arrive at once instead of token-by-token.
-                # Acceptable for summarisation (already a long batch op);
-                # follow-up PR can add proper streaming.
-                try:
-                    text = self._bedrock_chat(prompt, timeout_seconds=7200)
-                    if text:
-                        yield text
-                except Exception as e:
-                    logger.error(f"Bedrock summarisation failed: {e}")
-                    return
+                    except Exception as e:
+                        logger.error(f"Bedrock summarisation failed: {e}")
+                        return
+                else:
+                    try:
+                        response = self.cloud_client.chat.completions.create(
+                            model=self.model_name,
+                            messages=[{"role": "user", "content": prompt}],
+                            stream=True,
+                        )
+                        for chunk in response:
+                            if not chunk.choices:
+                                continue
+                            content = chunk.choices[0].delta.content or ""
+                            if content:
+                                yield content
+                    except Exception as e:
+                        logger.error(f"OpenAI streaming failed: {e}")
+                        return
             else:
+                # Ollama (local or remote)
                 try:
-                    response = self.cloud_client.chat.completions.create(
+                    if self.ai_provider != "remote":
+                        self._ensure_ollama_ready()
+                    response = self.client.chat(
                         model=self.model_name,
-                        messages=[{"role": "user", "content": prompt}],
+                        messages=[{'role': 'user', 'content': prompt}],
                         stream=True,
+                        options=self._ollama_options(),
                     )
                     for chunk in response:
-                        if not chunk.choices:
-                            continue
-                        content = chunk.choices[0].delta.content or ""
+                        content = chunk.get('message', {}).get('content', '')
                         if content:
                             yield content
                 except Exception as e:
-                    logger.error(f"OpenAI streaming failed: {e}")
+                    logger.error(f"Ollama streaming failed: {e}")
                     return
-        else:
-            # Ollama (local or remote)
-            try:
-                if self.ai_provider != "remote":
-                    self._ensure_ollama_ready()
-                response = self.client.chat(
-                    model=self.model_name,
-                    messages=[{'role': 'user', 'content': prompt}],
-                    stream=True,
-                    options=self._ollama_options(),
-                )
-                for chunk in response:
-                    content = chunk.get('message', {}).get('content', '')
-                    if content:
-                        yield content
-            except Exception as e:
-                logger.error(f"Ollama streaming failed: {e}")
-                return
+
+        yield from _strip_reasoning_stream(_generate())
 
     def test_connection(self) -> bool:
         """
@@ -1335,63 +1400,66 @@ ANSWER:"""
 
         prompt = self._build_query_prompt(transcript, question, language)
 
-        try:
-            if self.ai_provider == "adapter":
-                # Interactive query — user is waiting at the AskBar. Fail
-                # fast on a stalled connection rather than letting it hang
-                # for the summarisation-grade ceiling.
-                yield from self._adapter_stream(prompt, timeout_seconds=300)
-                return
-            if self.ai_provider == "cloud":
-                if self.cloud_provider == "anthropic":
-                    with self.anthropic_client.messages.stream(
-                        model=self.model_name,
-                        max_tokens=2048,
-                        messages=[{"role": "user", "content": prompt}],
-                    ) as stream:
-                        for text in stream.text_stream:
+        def _generate():
+            try:
+                if self.ai_provider == "adapter":
+                    # Interactive query — user is waiting at the AskBar. Fail
+                    # fast on a stalled connection rather than letting it hang
+                    # for the summarisation-grade ceiling.
+                    yield from self._adapter_stream(prompt, timeout_seconds=300)
+                    return
+                if self.ai_provider == "cloud":
+                    if self.cloud_provider == "anthropic":
+                        with self.anthropic_client.messages.stream(
+                            model=self.model_name,
+                            max_tokens=2048,
+                            messages=[{"role": "user", "content": prompt}],
+                        ) as stream:
+                            for text in stream.text_stream:
+                                yield text
+                    elif self.cloud_provider == "bedrock":
+                        # Same eventstream parsing tradeoff as summarize_streaming
+                        # — fall back to non-streaming Converse and emit the full
+                        # answer in one yield. Interactive query so we keep the
+                        # 300 s ceiling that the OpenAI/Anthropic paths use.
+                        text = self._bedrock_chat(prompt, timeout_seconds=300)
+                        if text:
                             yield text
-                elif self.cloud_provider == "bedrock":
-                    # Same eventstream parsing tradeoff as summarize_streaming
-                    # — fall back to non-streaming Converse and emit the full
-                    # answer in one yield. Interactive query so we keep the
-                    # 300 s ceiling that the OpenAI/Anthropic paths use.
-                    text = self._bedrock_chat(prompt, timeout_seconds=300)
-                    if text:
-                        yield text
+                    else:
+                        response = self.cloud_client.chat.completions.create(
+                            model=self.model_name,
+                            messages=[{"role": "user", "content": prompt}],
+                            stream=True,
+                        )
+                        for chunk in response:
+                            # Some providers emit chunk variants with empty choices
+                            # (e.g. usage-only chunks); skip those instead of crashing.
+                            if not chunk.choices:
+                                continue
+                            content = chunk.choices[0].delta.content
+                            if content:
+                                yield content
                 else:
-                    response = self.cloud_client.chat.completions.create(
+                    if self.ai_provider == "remote":
+                        self.client = ollama.Client(host=self.remote_url)
+                    else:
+                        self._ensure_ollama_ready()
+                        self.client = ollama.Client()
+                    stream = self.client.chat(
                         model=self.model_name,
                         messages=[{"role": "user", "content": prompt}],
                         stream=True,
+                        options=self._ollama_options(),
                     )
-                    for chunk in response:
-                        # Some providers emit chunk variants with empty choices
-                        # (e.g. usage-only chunks); skip those instead of crashing.
-                        if not chunk.choices:
-                            continue
-                        content = chunk.choices[0].delta.content
+                    for chunk in stream:
+                        content = chunk['message']['content']
                         if content:
                             yield content
-            else:
-                if self.ai_provider == "remote":
-                    self.client = ollama.Client(host=self.remote_url)
-                else:
-                    self._ensure_ollama_ready()
-                    self.client = ollama.Client()
-                stream = self.client.chat(
-                    model=self.model_name,
-                    messages=[{"role": "user", "content": prompt}],
-                    stream=True,
-                    options=self._ollama_options(),
-                )
-                for chunk in stream:
-                    content = chunk['message']['content']
-                    if content:
-                        yield content
-        except Exception as e:
-            logger.error(f"Streaming query failed: {e}")
-            yield f"\n[Error: {e}]"
+            except Exception as e:
+                logger.error(f"Streaming query failed: {e}")
+                yield f"\n[Error: {e}]"
+                
+        yield from _strip_reasoning_stream(_generate())
 
     def query_transcript(self, transcript: str, question: str, language: str = "en") -> Optional[str]:
         """
@@ -1454,6 +1522,7 @@ ANSWER:"""
                             time.sleep(2)
 
                 response_text = ollama_response['message']['content'].strip()
+            response_text = _strip_reasoning_blocks(response_text)
             logger.info(f"Query response received: {len(response_text)} characters")
 
             return response_text
