@@ -46,6 +46,48 @@ class TemplatePromptTests(unittest.TestCase):
         self.assertIs(seen["think"], False)
         self.assertIn("## Status", out)
 
+    def test_streaming_with_template_uses_active_cloud_provider_not_ollama(self):
+        # Regression: the free-form template path must honour the active provider.
+        # In cloud mode self.client (Ollama) is None, so routing a template report
+        # through _stream_direct would crash. It must go through the cloud client.
+        s = _s()
+        s.ai_provider = "cloud"
+        s.cloud_provider = "openai"
+        s.client = None  # cloud mode has no Ollama client
+
+        captured = {}
+
+        class _Delta:
+            def __init__(self, c):
+                self.content = c
+
+        class _Choice:
+            def __init__(self, c):
+                self.delta = _Delta(c)
+
+        class _Chunk:
+            def __init__(self, c):
+                self.choices = [_Choice(c)]
+
+        def fake_create(**kwargs):
+            captured["content"] = kwargs["messages"][0]["content"]
+            captured["stream"] = kwargs.get("stream")
+            return iter([_Chunk("## Status\n"), _Chunk("ok\n")])
+
+        s.cloud_client = mock.Mock()
+        s.cloud_client.chat.completions.create.side_effect = fake_create
+
+        # Patch _ensure_ollama_ready so the buggy (pre-fix) path fails fast on the
+        # None client instead of trying to spin up Ollama in cloud mode.
+        with mock.patch.object(s, "_ensure_ollama_ready"):
+            out = "".join(s.summarize_transcript_streaming(
+                "Speaker: hi.", 0, "en", None, template_prompt="Write a status update."))
+
+        self.assertEqual(s.cloud_client.chat.completions.create.call_count, 1)
+        self.assertIn("Write a status update.", captured["content"])
+        self.assertTrue(captured["stream"])
+        self.assertIn("## Status", out)
+
 
 if __name__ == "__main__":
     unittest.main()

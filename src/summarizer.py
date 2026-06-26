@@ -1419,35 +1419,13 @@ TRANSCRIPT:
             if content:
                 yield content
 
-    def summarize_transcript_streaming(self, transcript: str, duration_minutes: int = 0, language: str = "en", notes: str = None, progress_callback=None, template_prompt: Optional[str] = None):
-        """Generator that yields markdown chunks from the LLM.
-
-        Args:
-            transcript: Meeting transcript text
-            duration_minutes: Duration of the meeting
-            language: Language code for output
-            notes: Optional user notes for context
-            progress_callback: Optional callable(step, total) for progress reporting
-            template_prompt: Optional free-form report instructions. When set,
-                the report is generated via the DIRECT path (no chunking, no
-                map-reduce — the map/reduce prompts are summary-schema specific
-                and don't apply to a free-form template).
-
-        Yields:
-            str: Text chunks as they arrive from the LLM
+    def _stream_completion(self, prompt: str):
+        """Stream a single completion for ``prompt`` through whichever provider is
+        active: adapter, cloud (anthropic / bedrock / openai-compatible), or local/
+        remote Ollama. Shared by the free-form template path and the markdown
+        summary path so a provider only has to be wired up in one place. Bedrock has
+        no eventstream parser yet, so it yields the whole answer as a single chunk.
         """
-        if template_prompt:
-            # Free-form template report: always the direct path (the map/reduce
-            # prompts are summary-schema specific and don't apply here).
-            prompt = self._create_template_report_prompt(transcript, template_prompt, language, notes)
-            yield from self._stream_direct(prompt)
-            return
-
-        if self._needs_chunking(transcript, notes):
-            yield from self._map_reduce_streaming(transcript, language, notes, progress_callback)
-            return
-
-        prompt = self._create_markdown_prompt(transcript, language, notes)
         logger.info(f"Starting streaming summary with {self.ai_provider} model: {self.model_name}")
 
         if self.ai_provider == "adapter":
@@ -1502,13 +1480,47 @@ TRANSCRIPT:
                 except Exception as e:
                     logger.error(f"OpenAI streaming failed: {e}")
                     return
-        else:
-            # Ollama (local or remote) — shared with the free-form template path.
-            try:
-                yield from self._stream_direct(prompt)
-            except Exception as e:
-                logger.error(f"Ollama streaming failed: {e}")
-                return
+            return
+
+        # Ollama (local or remote) — shared with the free-form template path.
+        try:
+            yield from self._stream_direct(prompt)
+        except Exception as e:
+            logger.error(f"Ollama streaming failed: {e}")
+            return
+
+    def summarize_transcript_streaming(self, transcript: str, duration_minutes: int = 0, language: str = "en", notes: str = None, progress_callback=None, template_prompt: Optional[str] = None):
+        """Generator that yields markdown chunks from the LLM.
+
+        Args:
+            transcript: Meeting transcript text
+            duration_minutes: Duration of the meeting
+            language: Language code for output
+            notes: Optional user notes for context
+            progress_callback: Optional callable(step, total) for progress reporting
+            template_prompt: Optional free-form report instructions. When set,
+                the report streams through the active provider without chunking or
+                map-reduce (those prompts are summary-schema specific and don't
+                apply to a free-form template).
+
+        Yields:
+            str: Text chunks as they arrive from the LLM
+        """
+        if template_prompt:
+            # Free-form template report: no chunking/map-reduce (those prompts are
+            # summary-schema specific and don't apply here). Stream through the
+            # ACTIVE provider — not straight to Ollama, which has no client and
+            # would crash in cloud/adapter mode.
+            prompt = self._create_template_report_prompt(transcript, template_prompt, language, notes)
+            yield from self._stream_completion(prompt)
+            return
+
+        if self._needs_chunking(transcript, notes):
+            yield from self._map_reduce_streaming(transcript, language, notes, progress_callback)
+            return
+
+        prompt = self._create_markdown_prompt(transcript, language, notes)
+        yield from self._stream_completion(prompt)
 
     def test_connection(self) -> bool:
         """
