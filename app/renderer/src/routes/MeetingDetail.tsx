@@ -282,8 +282,16 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
       if (!e.success) {
         setStreamPhase('idle');
         setChunkProgress(null);
-        setReprocessFailed(true);
-        generatingReportRef.current = false;
+        if (e.report) {
+          // A failed report generation is not a reprocess/model-memory failure.
+          // Keyed on the event's `report` flag (not the local ref) so it's
+          // correct regardless of summary-complete vs processing-complete order.
+          generatingReportRef.current = false;
+          setStreamText('');
+          streamCache.delete(summaryFile);
+        } else {
+          setReprocessFailed(true);
+        }
         return;
       }
       setStreamPhase('done');
@@ -311,7 +319,15 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
       setChunkProgress(null);
       if (!e.success) {
         setStreamPhase('idle');
-        setReprocessFailed(true);
+        if (e.report) {
+          // Terminal event of a failed report generation (e.g. non-zero exit
+          // with no STREAM_ERROR). Roll back without the reprocess banner.
+          generatingReportRef.current = false;
+          setStreamText('');
+          streamCache.delete(summaryFile);
+        } else {
+          setReprocessFailed(true);
+        }
         return;
       }
       void qc.invalidateQueries({ queryKey: meetingsKeys.all });
@@ -352,7 +368,21 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
     setReprocessFailed(false);
     generatingReportRef.current = true;
     streamCache.set(summaryFile, { text: '', phase: 'analyzing' });
-    generateReport.mutate({ summaryFile, templateId });
+    generateReport.mutate(
+      { summaryFile, templateId },
+      {
+        // Failures before the first stream event (e.g. the backend never starts
+        // streaming) won't emit summary-complete, so roll the UI back here instead
+        // of stranding it in the analyzing state.
+        onError: () => {
+          generatingReportRef.current = false;
+          setStreamPhase('idle');
+          setStreamText('');
+          setChunkProgress(null);
+          streamCache.delete(summaryFile);
+        },
+      },
+    );
   };
 
   // Persist the choice so it survives navigation (B1 review: active_report not

@@ -1139,6 +1139,7 @@ function TemplatesTab() {
 
       {editing ? (
         <TemplateEditor
+          key={editing.id ?? 'new'}
           editing={editing.id ? editing : null}
           onClose={() => setEditing(null)}
         />

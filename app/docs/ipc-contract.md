@@ -219,7 +219,7 @@ interface ProcessingCompleteEvent {
 
 Emitted during map-reduce summarization of long meetings to update the processing-row badge.
 
-**Payload:** `{ line: string }` — e.g. `"PROGRESS:summarize:2/5"` or `"PROGRESS:summarize:reducing"`
+**Payload:** `{ line: string; summaryFile?: string }` — e.g. `{ line: "PROGRESS:summarize:2/5", summaryFile: "/path/to/meeting.md" }` or `{ line: "PROGRESS:summarize:reducing", summaryFile }`. `summaryFile` scopes the progress to a meeting so a concurrent reprocess can't leak its stage into another meeting's view (see `MeetingDetail.tsx`).
 
 **Renderer:** `ipc().on.processingProgress(cb)` → updates Processing.tsx label to *"Summarizing part 2 of 5…"* or *"Merging summaries…"*.
 

@@ -2042,7 +2042,7 @@ ipcMain.handle('generate-report-meeting', async (event, summaryFile, templateId)
             }
           } else if (line === 'STREAM_COMPLETE') {
             if (mainWindow && !mainWindow.isDestroyed()) {
-              mainWindow.webContents.send('summary-complete', { success: true, sessionName, summaryFile });
+              mainWindow.webContents.send('summary-complete', { success: true, sessionName, summaryFile, report: true });
             }
           } else if (line.startsWith('PROGRESS:')) {
             if (mainWindow && !mainWindow.isDestroyed()) {
@@ -2052,7 +2052,7 @@ ipcMain.handle('generate-report-meeting', async (event, summaryFile, templateId)
             const errMsg = line.slice('STREAM_ERROR:'.length);
             sendDebugLog(`❌ Report generation stream error: ${errMsg}`);
             if (mainWindow && !mainWindow.isDestroyed()) {
-              mainWindow.webContents.send('summary-complete', { success: false, sessionName, summaryFile });
+              mainWindow.webContents.send('summary-complete', { success: false, sessionName, summaryFile, report: true });
             }
           } else if (line.startsWith('SAVED:')) {
             sendDebugLog(`Report saved: ${line.slice(6).trim()}`);
@@ -2080,6 +2080,7 @@ ipcMain.handle('generate-report-meeting', async (event, summaryFile, templateId)
               success: true,
               sessionName,
               summaryFile,
+              report: true,
               message: 'Report generation completed successfully'
             });
           }
@@ -2090,6 +2091,7 @@ ipcMain.handle('generate-report-meeting', async (event, summaryFile, templateId)
               success: false,
               sessionName,
               summaryFile,
+              report: true,
               message: `Report generation failed (exit ${code})`,
             });
           }

@@ -479,6 +479,10 @@ export interface SummaryCompleteEvent {
   success: boolean;
   sessionName: string;
   summaryFile?: string;
+  /** True when this completion belongs to a template report generation rather
+   *  than a reprocess. Lets the renderer suppress the reprocess/model-memory
+   *  failure banner for report failures, independent of event ordering. */
+  report?: boolean;
 }
 export interface ProcessingCompleteEvent {
   success: boolean;
@@ -496,6 +500,11 @@ export interface ProcessingCompleteEvent {
    *  the failure honestly rather than treat it as a normal note. */
   transcriptionFailed?: boolean;
   transcriptionError?: string;
+  /** True when this is the terminal event of a template report generation
+   *  (not a reprocess). The renderer rolls the stream back without the
+   *  reprocess banner regardless of whether STREAM_ERROR or a non-zero exit
+   *  ended it. */
+  report?: boolean;
 }
 export interface QueryChunkEvent {
   queryId: string;
