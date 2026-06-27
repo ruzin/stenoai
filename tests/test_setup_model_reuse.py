@@ -20,8 +20,9 @@ from simple_recorder import pick_installed_supported_model
 SUPPORTED = [
     "llama3.2:3b",
     "gemma4:e2b-it-qat",
+    "gemma4:e4b-it-qat",
     "qwen3.5:9b",
-    "gemma4:12b",
+    "gemma4:12b-it-qat",
     "gpt-oss:20b",
     "gemma3:4b",        # deprecated
     "deepseek-r1:14b",  # deprecated
@@ -70,7 +71,7 @@ class PickInstalledSupportedModelTests(unittest.TestCase):
         # headline: existing llama3.2:3b means no pull).
         self.assertEqual(
             pick_installed_supported_model(
-                installed_names={"llama3.2:3b", "gemma4:12b"},
+                installed_names={"llama3.2:3b", "gemma4:12b-it-qat"},
                 preferred=["gpt-oss:20b", DEFAULT],
                 supported_order=SUPPORTED,
                 deprecated=DEPRECATED,
@@ -83,7 +84,7 @@ class PickInstalledSupportedModelTests(unittest.TestCase):
         # non-deprecated id in registry order.
         self.assertEqual(
             pick_installed_supported_model(
-                installed_names={"gemma4:12b", "qwen3.5:9b"},
+                installed_names={"gemma4:12b-it-qat", "qwen3.5:9b"},
                 preferred=["gpt-oss:20b", DEFAULT],
                 supported_order=SUPPORTED,
                 deprecated=DEPRECATED,
@@ -96,12 +97,12 @@ class PickInstalledSupportedModelTests(unittest.TestCase):
         # installed -- a live model always beats a retired one.
         self.assertEqual(
             pick_installed_supported_model(
-                installed_names={"gemma3:4b", "gemma4:12b"},
+                installed_names={"gemma3:4b", "gemma4:12b-it-qat"},
                 preferred=["gpt-oss:20b", DEFAULT],
                 supported_order=SUPPORTED,
                 deprecated=DEPRECATED,
             ),
-            "gemma4:12b",
+            "gemma4:12b-it-qat",
         )
         # ...but a deprecated model is still better than pulling fresh.
         self.assertEqual(
