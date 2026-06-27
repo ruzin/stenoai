@@ -89,16 +89,28 @@ function install({ ipcMain }) {
 
     // Seed meetings for the specs that need them, gated per env so the
     // org/shared-notes specs keep an empty Home. STENOAI_E2E_SEED_MEETING (one
-    // known meeting) drives the transcript-export T1 — useMeeting filters this
-    // list by session_info.summary_file, so the detail route resolves to
-    // SEED_MEETING. STENOAI_E2E_SEED_MEETINGS (the recency-sorted trio) drives
-    // the command-palette T1. This handler lives in MOCKS, which shadows
-    // DEFAULTS, so it is the single source for the channel.
+    // known meeting) drives the transcript-export T1; STENOAI_E2E_SEED_MEETINGS
+    // (the recency-sorted trio) drives the command-palette T1. This handler
+    // lives in MOCKS, which shadows DEFAULTS, so it is the single source for the
+    // channel.
     'list-meetings': async () => {
       if (process.env.STENOAI_E2E_SEED_MEETING === '1') {
         return { success: true, meetings: [SEED_MEETING] };
       }
       return { success: true, meetings: SEEDED_MEETINGS };
+    },
+
+    // The detail route loads via get-meeting (the lazy per-meeting fetch), not
+    // by filtering list-meetings — answer it with the same seeded meeting so the
+    // transcript-export detail route resolves and renders the transcript actions.
+    'get-meeting': async (_event, summaryFile) => {
+      if (process.env.STENOAI_E2E_SEED_MEETING === '1') {
+        return { success: true, meeting: SEED_MEETING };
+      }
+      const m = SEEDED_MEETINGS.find(
+        (x) => x.session_info && x.session_info.summary_file === summaryFile,
+      );
+      return m ? { success: true, meeting: m } : { success: false, error: 'meeting not found' };
     },
 
     // Mirror the real export-transcript handler's seam: with STENOAI_E2E_EXPORT_PATH
