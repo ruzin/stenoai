@@ -161,6 +161,7 @@ truth for elapsed time and paused state so remounts recover correctly.
 | `summary-title` | M→R | yes | `stenoai.on.summaryTitle(cb)` |
 | `summary-complete` | M→R | yes | `stenoai.on.summaryComplete(cb)` |
 | `processing-complete` | M→R | yes | `stenoai.on.processingComplete(cb)` |
+| `processing-progress` | M→R | yes | `stenoai.on.processingProgress(cb)` |
 
 ```ts
 interface SessionInfo {
@@ -213,6 +214,14 @@ interface ProcessingCompleteEvent {
   meetingData?: Meeting;
 }
 ```
+
+### `processing-progress` (M→R)
+
+Emitted during map-reduce summarization of long meetings to update the processing-row badge.
+
+**Payload:** `{ line: string }` — e.g. `"PROGRESS:summarize:2/5"` or `"PROGRESS:summarize:reducing"`
+
+**Renderer:** `ipc().on.processingProgress(cb)` → updates Processing.tsx label to *"Summarizing part 2 of 5…"* or *"Merging summaries…"*.
 
 **Orphan listener.** `meetings-refreshed` is listened for in
 `app/index.html:9008` but `main.js` never sends it. Only the e2e mock

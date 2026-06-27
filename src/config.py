@@ -126,6 +126,14 @@ class Config:
             "speed": "fast",
             "quality": "good"
         },
+        "gemma4:4b": {
+            "name": "Gemma 4 E4B",
+            "size": "3.3GB",
+            "params": "4B",
+            "description": "Efficient 4B Gemma 4 — good balance of speed and quality",
+            "speed": "fast",
+            "quality": "good"
+        },
         "llama3.2:3b": {
             "name": "Llama 3.2 3B",
             "size": "2GB",

@@ -52,6 +52,7 @@ export function Processing() {
     : recording.elapsed;
 
   const [stage, setStage] = React.useState<ProcessingStage>('transcribing');
+  const [chunkProgress, setChunkProgress] = React.useState<string | null>(null);
   const [streamText, setStreamText] = React.useState('');
   const [streamedTitle, setStreamedTitle] = React.useState<string | null>(null);
 
@@ -109,6 +110,18 @@ export function Processing() {
           });
         }
       }),
+      ipc().on.processingProgress((e) => {
+        const raw = e.line.replace(/^PROGRESS:summarize:/, '');
+        if (raw === 'reducing') {
+          setChunkProgress('Merging summaries…');
+        } else {
+          const [step, total] = raw.split('/').map(Number);
+          if (!Number.isNaN(step) && !Number.isNaN(total)) {
+            setChunkProgress(`Summarizing part ${step} of ${total}…`);
+          }
+        }
+        setStage((s) => (s === 'transcribing' ? 'summarizing' : s));
+      }),
     ];
     return () => offs.forEach((fn) => fn());
   }, [activeSession, updateMeeting]);
@@ -160,7 +173,7 @@ export function Processing() {
         {stage === 'error' ? (
           <ErrorPanel onRetry={() => setStage('transcribing')} />
         ) : (
-          <StageCard stage={stage} streamText={streamText} />
+          <StageCard stage={stage} streamText={streamText} chunkProgress={chunkProgress} />
         )}
 
         {draft?.notes && (
@@ -199,9 +212,11 @@ const StreamMarkdown = React.memo(function StreamMarkdown({ text }: { text: stri
 function StageCard({
   stage,
   streamText,
+  chunkProgress,
 }: {
   stage: ProcessingStage;
   streamText: string;
+  chunkProgress: string | null;
 }) {
   // FLIP animation for the scanner bar. The bar is in normal flow under the
   // streaming markdown, so each token batch shifts it down by a discrete
@@ -285,7 +300,7 @@ function StageCard({
           className="text-[13px] transition-colors"
           style={{ color: 'var(--fg-1)', fontFamily: 'var(--font-sans)' }}
         >
-          {STAGE_LABEL[stage]}
+          {chunkProgress && stage === 'summarizing' ? chunkProgress : STAGE_LABEL[stage]}
         </span>
       </div>
     </div>

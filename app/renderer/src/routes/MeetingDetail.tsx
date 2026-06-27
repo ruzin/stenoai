@@ -88,6 +88,20 @@ export function MeetingDetail({ summaryFile }: MeetingDetailProps) {
         <div className="flex min-h-[40vh] items-center justify-center text-[color:var(--fg-2)]">
           Loading meeting…
         </div>
+      ) : meeting.isError ? (
+        <div className="space-y-4 text-center">
+          <h1 className="mv-title">Couldn't load note.</h1>
+          <p className="text-[17px] leading-[1.55]" style={{ color: 'var(--fg-2)' }}>
+            {(meeting.error as Error)?.message ?? 'An error occurred loading this note.'}
+          </p>
+          <button
+            type="button"
+            className="mv-chip"
+            onClick={() => navigate('/meetings')}
+          >
+            Back to meetings
+          </button>
+        </div>
       ) : !meeting.data ? (
         <div className="space-y-4 text-center">
           <h1 className="mv-title">Note not found.</h1>
@@ -209,6 +223,8 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
   const cached = streamCache.get(summaryFile);
   const [streamText, setStreamText] = React.useState(cached?.text ?? '');
   const [streamPhase, setStreamPhase] = React.useState<StreamPhase>(cached?.phase ?? 'idle');
+  const [chunkProgress, setChunkProgress] = React.useState<{ step: number; total: number } | null>(null);
+  const [reprocessFailed, setReprocessFailed] = React.useState(false);
   const qc = useQueryClient();
 
   React.useEffect(() => {
@@ -224,10 +240,22 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
     });
     const offComplete = ipc().on.summaryComplete((e) => {
       if (e.sessionName !== sessionName) return;
+      if (!e.success) {
+        setStreamPhase('idle');
+        setChunkProgress(null);
+        setReprocessFailed(true);
+        return;
+      }
       setStreamPhase('done');
     });
     const offProcessing = ipc().on.processingComplete((e) => {
       if (e.sessionName !== sessionName) return;
+      setChunkProgress(null);
+      if (!e.success) {
+        setStreamPhase('idle');
+        setReprocessFailed(true);
+        return;
+      }
       void qc.invalidateQueries({ queryKey: meetingsKeys.all });
       setTimeout(() => {
         setStreamText('');
@@ -235,10 +263,23 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
         streamCache.delete(summaryFile);
       }, 400);
     });
+    const offProgress = ipc().on.processingProgress((e) => {
+      // Ignore progress from a different meeting's concurrent reprocess — without
+      // this scope check this view would render another meeting's map/reduce step.
+      // Scoped on summaryFile (unique) rather than the display name (shareable).
+      if (e.summaryFile !== summaryFile) return;
+      const mapMatch = e.line.match(/^PROGRESS:summarize:(\d+)\/(\d+)$/);
+      if (mapMatch) {
+        setChunkProgress({ step: parseInt(mapMatch[1]), total: parseInt(mapMatch[2]) });
+      } else if (e.line === 'PROGRESS:summarize:reducing') {
+        setChunkProgress(null);
+      }
+    });
     return () => {
       offChunk();
       offComplete();
       offProcessing();
+      offProgress();
     };
   }, [info.name, summaryFile, qc]);
 
@@ -325,6 +366,8 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
                     onClick={() => {
                       setStreamText('');
                       setStreamPhase('analyzing');
+                      setChunkProgress(null);
+                      setReprocessFailed(false);
                       streamCache.set(summaryFile, { text: '', phase: 'analyzing' });
                       reprocess.mutate({ summaryFile, regenTitle: false, name: info.name });
                     }}
@@ -544,8 +587,21 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
         )}
       </header>
 
+      {reprocessFailed && (
+        <div
+          className="rounded-lg p-3 text-sm"
+          style={{
+            background: 'var(--surface-raised)',
+            border: '1px solid var(--border-subtle)',
+            color: 'var(--fg-2)',
+          }}
+        >
+          Summary generation failed — the model may have run out of memory or context.
+          Try switching to a smaller model like <strong style={{ color: 'var(--fg-1)' }}>Gemma 4 E2B</strong> in Settings.
+        </div>
+      )}
       {streamPhase !== 'idle' ? (
-        <StreamingView text={streamText} phase={streamPhase} />
+        <StreamingView text={streamText} phase={streamPhase} chunkProgress={chunkProgress} />
       ) : (
         <div className="flex flex-col gap-9">
           {transcriptionFailed ? (
@@ -812,7 +868,7 @@ function parseMarkdownBlocks(text: string): MarkdownBlock[] {
 const CHAR_TRANSITION = 'top 0.12s ease-out';
 const ROW_TRANSITION = 'top 0.35s cubic-bezier(0.45, 0, 0.55, 1)';
 
-function StreamingView({ text, phase }: { text: string; phase: StreamPhase }) {
+function StreamingView({ text, phase, chunkProgress }: { text: string; phase: StreamPhase; chunkProgress?: { step: number; total: number } | null }) {
   const blocks = parseMarkdownBlocks(text);
   const isStreaming = phase === 'analyzing' || phase === 'generating';
 
@@ -911,7 +967,11 @@ function StreamingView({ text, phase }: { text: string; phase: StreamPhase }) {
     if (rowTransitionTimerRef.current) clearTimeout(rowTransitionTimerRef.current);
   }, []);
 
-  const indicatorLabel = phase === 'analyzing' ? 'Analysing transcript' : 'Generating notes';
+  const indicatorLabel = chunkProgress
+    ? `Summarising part ${chunkProgress.step}/${chunkProgress.total}`
+    : phase === 'analyzing'
+      ? 'Analysing transcript'
+      : 'Generating notes';
 
   return (
     <div className="relative">

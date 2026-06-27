@@ -108,6 +108,16 @@ def _start_summary_heartbeat(label: str = "summarize", interval_s: int = 60, max
     return stop
 
 
+def _emit_progress(step: int, total: int) -> None:
+    """Emit a PROGRESS: line to stdout for the map-reduce summarization step."""
+    if step > total:
+        label = "reducing"
+    else:
+        label = f"{step}/{total}"
+    sys.stdout.write(f"PROGRESS:summarize:{label}\n")
+    sys.stdout.flush()
+
+
 def _render_frontmatter(meta: dict) -> list[str]:
     """Render a meeting .md YAML frontmatter block (including the enclosing
     ``---`` fences) from a flat dict, with the type-specific scalar
@@ -646,13 +656,24 @@ Transcript:
 
         print("🧠 Generating summary...", flush=True)
         streamed_chunks = []
-        for chunk in self.summarizer.summarize_transcript_streaming(
-            text_for_summary, duration_minutes, output_language, notes_text
-        ):
-            encoded = base64.b64encode(chunk.encode('utf-8')).decode('ascii')
-            sys.stdout.write(f"CHUNK:{encoded}\n")
-            sys.stdout.flush()
-            streamed_chunks.append(chunk)
+        try:
+            for chunk in self.summarizer.summarize_transcript_streaming(
+                text_for_summary, duration_minutes, output_language, notes_text,
+                progress_callback=_emit_progress,
+            ):
+                encoded = base64.b64encode(chunk.encode('utf-8')).decode('ascii')
+                sys.stdout.write(f"CHUNK:{encoded}\n")
+                sys.stdout.flush()
+                streamed_chunks.append(chunk)
+        except Exception as e:
+            # Surface as STREAM_ERROR so the renderer shows the "try a smaller
+            # model" recommendation (same as reprocess) rather than a generic
+            # failure, then re-raise to preserve this method's existing error
+            # contract for its caller.
+            logger.error(f"Summarization failed: {e}")
+            err_msg = str(e).replace('\n', ' ').replace('\r', ' ')
+            print(f"STREAM_ERROR:{err_msg}", flush=True)
+            raise
         streamed_md = ''.join(streamed_chunks)
 
         print("STREAM_COMPLETE", flush=True)
@@ -846,17 +867,32 @@ def process_streaming(audio_file, name, notes):
         # silent stretch before the first streamed token. Stopped on the
         # first chunk; from then on the chunks themselves are the signal.
         summary_heartbeat = _start_summary_heartbeat()
+        _stream_error = None
         try:
             for chunk in recorder.summarizer.summarize_transcript_streaming(
-                text_for_summary, duration_minutes, output_language, notes_text
+                text_for_summary, duration_minutes, output_language, notes_text,
+                progress_callback=_emit_progress,
             ):
                 summary_heartbeat.set()
                 encoded = base64.b64encode(chunk.encode('utf-8')).decode('ascii')
                 sys.stdout.write(f"CHUNK:{encoded}\n")
                 sys.stdout.flush()
                 streamed_chunks.append(chunk)
+        except Exception as e:
+            _stream_error = e
         finally:
             summary_heartbeat.set()
+
+        # Surface a summarization failure (e.g. a long-meeting map-reduce that
+        # overflows context) as STREAM_ERROR so the renderer shows the same
+        # "try a smaller model" recommendation it shows for reprocess — instead
+        # of a generic processing failure with no guidance.
+        if _stream_error is not None:
+            logger.error(f"Summarization failed: {_stream_error}")
+            err_msg = str(_stream_error).replace('\n', ' ').replace('\r', ' ')
+            print(f"STREAM_ERROR:{err_msg}", flush=True)
+            sys.exit(1)
+
         streamed_md = ''.join(streamed_chunks)
 
         print("STREAM_COMPLETE", flush=True)
@@ -1880,8 +1916,16 @@ def list_meetings():
     for summary_file in summaries:
         try:
             if summary_file.suffix == '.md':
-                essential_meeting = _parse_meeting_markdown(summary_file)
-                sort_key = essential_meeting.get('session_info', {}).get('processed_at', '')
+                parsed = _parse_meeting_markdown(summary_file)
+                sort_key = parsed.get('session_info', {}).get('processed_at', '')
+                # Strip the transcript (and diarised copy) from the LIST payload
+                # to match the JSON path — the full text is fetched lazily by
+                # get-meeting for the detail page. Keep has_transcript so the UI
+                # still knows a transcript exists.
+                essential_meeting = parsed
+                essential_meeting['has_transcript'] = bool(parsed.get('transcript'))
+                essential_meeting.pop('transcript', None)
+                essential_meeting.pop('diarised_text', None)
             else:
                 with open(summary_file, 'r', encoding='utf-8') as f:
                     data = json.load(f)
@@ -1893,9 +1937,8 @@ def list_meetings():
                         "discussion_areas": data.get("discussion_areas", []),
                         "key_points": data.get("key_points", []),
                         "action_items": data.get("action_items", []),
-                        "transcript": data.get("transcript", ""),
+                        "has_transcript": bool(data.get("transcript")),
                         "is_diarised": data.get("is_diarised", False),
-                        "diarised_text": data.get("diarised_text"),
                         "folders": data.get("folders", [])
                     }
             meetings.append((sort_key, essential_meeting))
@@ -1978,17 +2021,32 @@ def reprocess(summary_file, regenerate_title):
         # Same watchdog-liveness cover as process_streaming: model load +
         # prompt eval is silent until the first streamed token.
         summary_heartbeat = _start_summary_heartbeat()
+        _stream_error = None
         try:
             for chunk in recorder.summarizer.summarize_transcript_streaming(
-                transcript, duration_minutes, output_language, notes_text
+                transcript, duration_minutes, output_language, notes_text,
+                progress_callback=_emit_progress,
             ):
                 summary_heartbeat.set()
                 encoded = base64.b64encode(chunk.encode('utf-8')).decode('ascii')
                 sys.stdout.write(f"CHUNK:{encoded}\n")
                 sys.stdout.flush()
                 streamed_chunks.append(chunk)
+        except Exception as e:
+            _stream_error = e
         finally:
             summary_heartbeat.set()
+
+        if _stream_error is not None:
+            logger.error(f"Summarization failed: {_stream_error}")
+            # The renderer's parser reads STREAM_ERROR line-by-line, so a
+            # message containing newlines (tracebacks can) would be truncated
+            # to its first line. Flatten newlines into spaces so the whole
+            # message survives on one line.
+            err_msg = str(_stream_error).replace('\n', ' ').replace('\r', ' ')
+            print(f"STREAM_ERROR:{err_msg}", flush=True)
+            sys.exit(1)
+
         streamed_md = ''.join(streamed_chunks)
 
         print("STREAM_COMPLETE", flush=True)

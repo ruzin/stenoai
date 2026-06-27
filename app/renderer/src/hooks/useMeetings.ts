@@ -117,15 +117,15 @@ function buildLiveMeeting(
 }
 
 export function useMeeting(summaryFile: string | null | undefined) {
-  const meetings = useMeetings();
-  const meeting = React.useMemo(
-    () =>
-      summaryFile
-        ? (meetings.data?.find((m) => m.session_info.summary_file === summaryFile) ?? null)
-        : null,
-    [meetings.data, summaryFile],
-  );
-  return { ...meetings, data: meeting };
+  return useQuery({
+    queryKey: meetingsKeys.detail(summaryFile),
+    queryFn: async () => {
+      if (!summaryFile) return null;
+      const res = await ipc().meetings.get(summaryFile);
+      return unwrap(res).meeting;
+    },
+    enabled: !!summaryFile,
+  });
 }
 
 export function useTranscript(summaryFile: string | null | undefined) {
@@ -180,6 +180,11 @@ export function useDeleteMeeting() {
       qc.setQueryData<Meeting[]>(meetingsKeys.list(), (prev) =>
         prev?.filter((m) => m.session_info.summary_file !== deletedFile),
       );
+      // Drop the lazy-loaded detail cache for this meeting too. The list filter
+      // above only touches the list query; without this, the deleted meeting's
+      // detail payload (transcript etc.) stays served from cache if the detail
+      // route is revisited.
+      qc.removeQueries({ queryKey: meetingsKeys.detail(deletedFile) });
     },
   });
 }

@@ -35,7 +35,7 @@ export interface Meeting {
   discussion_areas?: unknown[];
   key_points?: string[];
   action_items?: unknown[];
-  transcript: string;
+  transcript?: string;
   is_diarised?: boolean;
   diarised_text?: string | null;
   folders?: string[];
@@ -315,6 +315,7 @@ export type PickAudioFileResponse = Result<{ filePath: string }>;
 export type RecordingsDirResponse = Result<{ path: string }>;
 
 export type ListMeetingsResponse = Result<{ meetings: Meeting[] }>;
+export type GetMeetingResponse = Result<{ meeting: Meeting }>;
 export type UpdateMeetingResponse = Result<{ message: string; updatedData: Meeting }>;
 export type DeleteMeetingResponse = Result<{ message: string }>;
 export type SaveMeetingNotesResponse = Result<{ path: string }>;
@@ -431,6 +432,13 @@ export type CheckForUpdatesResponse = Result<{
 }>;
 
 // ---------- event payloads ----------
+export interface ProcessingProgressEvent {
+  line: string;
+  // The meeting's summary file — its unique key — so a detail view can ignore
+  // progress from a different meeting's concurrent reprocess. Uses the file path
+  // (not the display name, which two meetings can share) for an exact match.
+  summaryFile?: string;
+}
 export interface SummaryChunkEvent {
   chunk: string;
   sessionName: string;
@@ -642,6 +650,7 @@ export interface StenoaiBridge {
 
   meetings: {
     list: RequestFn<[], ListMeetingsResponse>;
+    get: RequestFn<[summaryFile: string], GetMeetingResponse>;
     update: RequestFn<[summaryFile: string, patch: UpdateMeetingPatch], UpdateMeetingResponse>;
     revealFolder: RequestFn<[filePath: string], Result<Record<string, never>>>;
     delete: RequestFn<[meeting: Meeting], DeleteMeetingResponse>;
@@ -798,6 +807,7 @@ export interface StenoaiBridge {
     summaryTitle: Subscribe<SummaryTitleEvent>;
     summaryComplete: Subscribe<SummaryCompleteEvent>;
     processingComplete: Subscribe<ProcessingCompleteEvent>;
+    processingProgress: Subscribe<ProcessingProgressEvent>;
     queryChunk: Subscribe<QueryChunkEvent>;
     queryDone: Subscribe<QueryDoneEvent>;
     modelPullProgress: Subscribe<ModelPullProgressEvent>;

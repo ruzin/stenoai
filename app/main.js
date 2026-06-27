@@ -1643,6 +1643,180 @@ ipcMain.handle('list-meetings', async () => {
   }
 });
 
+// Parse a legacy .md meeting file into the standard meeting dict. Mirrors
+// simple_recorder._parse_meeting_markdown so the detail page can render .md
+// meetings without a Python round-trip. Returns the FULL data (transcript
+// included) — the size-stripping that list-meetings does is intentionally
+// not applied here because the detail page needs the transcript.
+function parseMeetingMarkdown(content, mdPath) {
+  // Split frontmatter
+  const meta = {};
+  let body = content;
+  if (content.startsWith('---')) {
+    const parts = content.split('---');
+    // content.split('---', 2) in Python keeps the remainder; replicate by
+    // re-joining everything after the second delimiter.
+    if (parts.length >= 3) {
+      const fmText = parts[1].trim();
+      body = parts.slice(2).join('---').trim();
+      for (const line of fmText.split('\n')) {
+        const colon = line.indexOf(':');
+        if (colon === -1) continue;
+        const key = line.slice(0, colon).trim();
+        let value = line.slice(colon + 1).trim();
+        if (value.startsWith('"') && value.endsWith('"')) {
+          value = value.slice(1, -1).replace(/\\(.)/g, '$1');
+        } else if (value.startsWith('[')) {
+          try {
+            value = JSON.parse(value);
+          } catch (_) {
+            value = [];
+          }
+        } else if (value === 'null') {
+          value = null;
+        } else if (value === 'true') {
+          value = true;
+        } else if (value === 'false') {
+          value = false;
+        } else if (/^-?\d+$/.test(value)) {
+          value = parseInt(value, 10);
+        }
+        meta[key] = value;
+      }
+    }
+  }
+
+  // Parse markdown body into sections keyed by lowercased `## ` heading.
+  const sections = {};
+  let currentSection = null;
+  let currentLines = [];
+  for (const line of body.split('\n')) {
+    if (line.startsWith('## ')) {
+      if (currentSection) sections[currentSection] = currentLines.join('\n').trim();
+      currentSection = line.slice(3).trim().toLowerCase();
+      currentLines = [];
+    } else {
+      currentLines.push(line);
+    }
+  }
+  if (currentSection) sections[currentSection] = currentLines.join('\n').trim();
+
+  const participants = sections.participants
+    ? sections.participants.split(',').map((p) => p.trim()).filter(Boolean)
+    : [];
+
+  const keyPoints = [];
+  if (sections['key points']) {
+    for (let line of sections['key points'].split('\n')) {
+      line = line.trim();
+      if (line.startsWith('- ')) keyPoints.push(line.slice(2));
+    }
+  }
+
+  const actionItems = [];
+  if (sections['action items']) {
+    for (let line of sections['action items'].split('\n')) {
+      line = line.trim();
+      if (line.startsWith('- ')) actionItems.push(line.slice(2).replace('[ ] ', '').replace('[x] ', ''));
+    }
+  }
+
+  const discussionAreas = [];
+  if (sections['key topics']) {
+    let currentTopic = null;
+    let topicLines = [];
+    for (const line of sections['key topics'].split('\n')) {
+      if (line.startsWith('### ')) {
+        if (currentTopic) {
+          discussionAreas.push({ title: currentTopic, analysis: topicLines.join('\n').trim() });
+        }
+        currentTopic = line.slice(4).trim();
+        topicLines = [];
+      } else {
+        topicLines.push(line);
+      }
+    }
+    if (currentTopic) {
+      discussionAreas.push({ title: currentTopic, analysis: topicLines.join('\n').trim() });
+    }
+  }
+
+  const stem = path.basename(mdPath).replace(/\.md$/, '');
+  const sessionInfo = {
+    name: meta.title || stem,
+    processed_at: meta.date || '',
+    duration_seconds: meta.duration_seconds ?? null,
+    summary_file: mdPath,
+    output_language: meta.language ?? null,
+  };
+  if (meta.transcription_failed) {
+    sessionInfo.transcription_failed = true;
+    sessionInfo.reprocessable = Boolean(meta.reprocessable);
+    if (meta.audio_file) sessionInfo.audio_file = meta.audio_file;
+    if (meta.error) sessionInfo.error = meta.error;
+  }
+
+  return {
+    session_info: sessionInfo,
+    summary: sections.summary || '',
+    participants,
+    discussion_areas: discussionAreas,
+    key_points: keyPoints,
+    action_items: actionItems,
+    transcript: sections.transcript || '',
+    is_diarised: meta.is_diarised || false,
+    diarised_text: meta.is_diarised ? sections.transcript || '' : null,
+    user_notes: sections['user notes'] ?? null,
+    folders: meta.folders || [],
+  };
+}
+
+ipcMain.handle('get-meeting', async (_event, summaryFile) => {
+  try {
+    if (!summaryFile || (!summaryFile.endsWith('.json') && !summaryFile.endsWith('.md'))) {
+      return { success: false, error: 'Invalid file path' };
+    }
+    // Path containment: the file's REAL path (symlinks resolved) must live under
+    // one of the known output directories (default data dir, custom storage, or
+    // dev project root). We canonicalize BOTH the target and the allowed dirs
+    // with realpath so (a) a symlink planted in the output dir can't escape the
+    // allowlist into an arbitrary-file read — path.resolve only collapses '..',
+    // it does not follow symlinks — and (b) a legitimately symlinked base dir
+    // (e.g. macOS /tmp -> /private/tmp, which the e2e temp data dir uses) still
+    // matches. realpath needs the path to exist; a missing target -> denied.
+    let realResolved;
+    try {
+      realResolved = await fs.promises.realpath(path.resolve(summaryFile));
+    } catch {
+      return { success: false, error: 'Access denied' };
+    }
+    const allowedOutputDirs = await Promise.all(
+      getAllowedBaseDirs().map(async d => {
+        try {
+          return (await fs.promises.realpath(path.resolve(d, 'output'))) + path.sep;
+        } catch {
+          return null; // output dir may not exist yet
+        }
+      }),
+    );
+    const allowed = allowedOutputDirs.some(base => base && realResolved.startsWith(base));
+    if (!allowed) {
+      return { success: false, error: 'Access denied' };
+    }
+    const content = await fs.promises.readFile(realResolved, 'utf-8');
+    if (summaryFile.endsWith('.md')) {
+      // Legacy .md meetings are still listed by list-meetings, so their detail
+      // pages route through here. Unlike the list payload, the detail page
+      // needs the full data INCLUDING the transcript (for the AskBar /
+      // TranscriptPanel), so we return everything parseMeetingMarkdown yields.
+      return { success: true, meeting: parseMeetingMarkdown(content, realResolved) };
+    }
+    return { success: true, meeting: JSON.parse(content) };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
 ipcMain.handle('clear-state', async () => {
   try {
     const result = await runPythonScript('simple_recorder.py', ['clear-state']);
@@ -1714,6 +1888,16 @@ ipcMain.handle('reprocess-meeting', async (event, summaryFile, regenerateTitle, 
             if (mainWindow && !mainWindow.isDestroyed()) {
               mainWindow.webContents.send('summary-complete', { success: true, sessionName });
             }
+          } else if (line.startsWith('PROGRESS:')) {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('processing-progress', { line, summaryFile });
+            }
+          } else if (line.startsWith('STREAM_ERROR:')) {
+            const errMsg = line.slice('STREAM_ERROR:'.length);
+            sendDebugLog(`❌ Reprocess stream error: ${errMsg}`);
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('summary-complete', { success: false, sessionName });
+            }
           } else if (line.trim()) {
             sendDebugLog(line.trim());
           }
@@ -1743,6 +1927,14 @@ ipcMain.handle('reprocess-meeting', async (event, summaryFile, regenerateTitle, 
           }
           resolve();
         } else {
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('processing-complete', {
+              success: false,
+              sessionName,
+              summaryFile,
+              message: `Reprocessing failed (exit ${code})`,
+            });
+          }
           reject(new Error(`reprocess exited with code ${code}: ${stderrBuf.slice(-500)}`));
         }
       });
@@ -2916,6 +3108,13 @@ async function processNextInQueue() {
             transcriptionFailedMsg = line.slice('TRANSCRIPTION_FAILED:'.length).trim();
             sendDebugLog(`Transcription failed (audio preserved): ${transcriptionFailedMsg}`);
             trackEvent('transcription_completed', { success: false });
+          } else if (line.startsWith('PROGRESS:')) {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              // No summaryFile yet in the record->summarise flow (it's assigned
+              // via SAVED: later); this progress is consumed by the single-job
+              // Processing view, which doesn't need per-meeting scoping.
+              mainWindow.webContents.send('processing-progress', { line });
+            }
           } else if (line.startsWith('HEARTBEAT:')) {
             // Liveness signal — its real job (resetting the watchdog) already
             // happened at the top of this handler. Throttle debug-log output

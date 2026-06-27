@@ -58,6 +58,9 @@ OLLAMA_NUM_CTX_DEFAULT = 32768
 OLLAMA_NUM_CTX_CEILING = 131072
 _OLLAMA_MODEL_NUM_CTX = {
     "gemma4:e2b-it-qat": 32768,
+    # gemma4:4b (E4B) advertises a large window like its siblings; capped to 32K
+    # — a meeting fits and the full window would be a large KV-cache allocation.
+    "gemma4:4b": 32768,
     # gemma4:12b advertises 256K; capped well under that — a meeting fits in 32K
     # and the full window would be a large KV-cache allocation.
     "gemma4:12b": 32768,
@@ -66,6 +69,15 @@ _OLLAMA_MODEL_NUM_CTX = {
     "qwen3.5:9b": 32768,
     "gpt-oss:20b": 32768,
 }
+
+# Map-reduce summarization constants
+MAP_PROMPT_OVERHEAD_TOKENS = 300  # reserve for map prompt scaffolding
+MAP_OUTPUT_MAX_TOKENS = 600       # hard cap on each map call's output
+CHARS_PER_TOKEN = 4               # English baseline; used for the reduce-fits size check
+                                  # (_map_reduce_streaming / _hierarchical_reduce). The
+                                  # needs_chunking gate uses the conservative floor below.
+_CHUNK_SAFETY_CHARS_PER_TOKEN = 2 # used for chunk budget: worst-case German/BPE (2.0 c/t floor)
+_OVERLAP_RATIO = 0.05             # last 5% of previous chunk prepended to next
 
 
 def resolve_num_ctx(model_name: str) -> int:
@@ -80,18 +92,21 @@ def resolve_num_ctx(model_name: str) -> int:
 
 
 class OllamaSummarizer:
-    def __init__(self, model_name: Optional[str] = None):
+    def __init__(self, model_name: Optional[str] = None, ai_provider: Optional[str] = None, config: Optional['Config'] = None):
         """
         Initialize the summarizer with automatic service management.
         Supports local Ollama, remote Ollama, and cloud API providers.
 
         Args:
             model_name: Name of the model to use. If None, loads from config.
+            ai_provider: AI provider type (local, remote, cloud, adapter). If None, loads from config.
+            config: Config object. If None, loads from get_config().
         """
         from .config import get_config
-        config = get_config()
+        if config is None:
+            config = get_config()
 
-        self.ai_provider = config.get_ai_provider()
+        self.ai_provider = ai_provider or config.get_ai_provider()
         self.client = None
         self.cloud_client = None
         self.anthropic_client = None
@@ -222,7 +237,299 @@ class OllamaSummarizer:
         consistent and Ollama doesn't reload the model between calls.
         """
         return {"num_ctx": resolve_num_ctx(self.model_name)}
-    
+
+    def _chunk_budget_chars(self) -> int:
+        """Total chars per chunk: content + overlap prefix, sized for the model."""
+        num_ctx = resolve_num_ctx(self.model_name)
+        content_tokens = num_ctx - MAP_PROMPT_OVERHEAD_TOKENS - MAP_OUTPUT_MAX_TOKENS
+        return int(content_tokens * _CHUNK_SAFETY_CHARS_PER_TOKEN)
+
+    def _split_into_chunks(self, transcript: str) -> list[str]:
+        """Split transcript into overlapping chunks that each fit within the model context."""
+        budget = self._chunk_budget_chars()
+        overlap_chars = int(budget * _OVERLAP_RATIO)
+        content_budget = budget - overlap_chars
+
+        raw_chunks: list[str] = []
+        pos = 0
+        while pos < len(transcript):
+            end = pos + content_budget
+            if end >= len(transcript):
+                raw_chunks.append(transcript[pos:])
+                break
+            # Scan backward in the last 20% of the chunk for a clean \n break.
+            # Searching from pos would pick up an early header newline when the
+            # transcript body is one long line, producing a tiny first chunk.
+            scan_start = max(pos, end - content_budget // 5)
+            split_pos = transcript.rfind('\n', scan_start, end + 1)
+            if split_pos < scan_start:
+                # No newline in scan window; hard cut at `end`. Advance to `end`
+                # exactly — the +1 below is only correct when we split ON a
+                # newline (to skip the \n itself); a hard cut has no separator
+                # char to skip, so +1 would drop a real character.
+                raw_chunks.append(transcript[pos:end])
+                pos = end
+            else:
+                raw_chunks.append(transcript[pos:split_pos])
+                pos = split_pos + 1  # skip the \n itself
+
+        result: list[str] = []
+        for i, raw in enumerate(raw_chunks):
+            if i == 0:
+                result.append(raw)
+            else:
+                prev = raw_chunks[i - 1]
+                overlap = prev[-overlap_chars:] if len(prev) >= overlap_chars else prev
+                result.append(overlap + raw)
+        return result
+
+    def _create_map_prompt(self, chunk: str, chunk_num: int, total_chunks: int) -> str:
+        """Compact extraction prompt for one transcript chunk (map step)."""
+        return (
+            f"This is part {chunk_num} of {total_chunks} of a meeting transcript.\n"
+            "Extract only what is explicitly stated. Be concise.\n\n"
+            "KEY POINTS\n- ...\n\n"
+            "DECISIONS\n- ...\n\n"
+            "ACTION ITEMS\n- [owner] action (deadline if mentioned)\n\n"
+            "OPEN QUESTIONS\n- ...\n\n"
+            f"TRANSCRIPT SEGMENT:\n{chunk}"
+        )
+
+    def _chat_no_think(self, client, **kwargs):
+        """Non-streaming ``client.chat`` with ``think=False``, retrying once
+        WITHOUT ``think`` if the call fails.
+
+        The ``ollama>=0.5.0`` pin only governs the bundled client; in remote mode
+        the request hits the user's own Ollama server, which may be older and
+        reject the ``think`` parameter. On any first-attempt failure we retry
+        without it, then re-raise the ORIGINAL error if the retry also fails so a
+        genuine failure (OOM, model missing) isn't masked as a ``think`` problem.
+        """
+        try:
+            return client.chat(stream=False, think=False, **kwargs)
+        except Exception as original:
+            try:
+                return client.chat(stream=False, **kwargs)
+            except Exception:
+                raise original
+
+    def _chat_stream_no_think(self, client, **kwargs):
+        """Streaming counterpart of :meth:`_chat_no_think`.
+
+        A streaming ``chat`` issues its request lazily on first iteration, so a
+        ``think``-reject surfaces on the first token rather than on the call. We
+        guard the first token and, if it fails, restart the stream without
+        ``think`` — done before yielding anything, so no token is duplicated.
+        """
+        try:
+            stream = iter(client.chat(stream=True, think=False, **kwargs))
+            first = next(stream)
+        except StopIteration:
+            return
+        except Exception as original:
+            # Retry without `think`. Guard the retry's first token too — it is
+            # also issued lazily, so a failure there must re-raise the ORIGINAL
+            # error (not the retry's) to honour the fallback contract. Once the
+            # retry has yielded a token, later errors propagate as-is.
+            try:
+                stream = iter(client.chat(stream=True, **kwargs))
+                first = next(stream)
+            except StopIteration:
+                return
+            except Exception:
+                raise original
+            yield first
+            yield from stream
+            return
+        yield first
+        yield from stream
+
+    def _summarize_chunk(self, chunk: str, chunk_num: int, total_chunks: int, _retry: bool = True) -> str:
+        """Non-streaming Ollama call for one map chunk. Returns stripped text or raises."""
+        import time
+        prompt = self._create_map_prompt(chunk, chunk_num, total_chunks)
+        if self.ai_provider != "remote":
+            self._ensure_ollama_ready()
+        options = {**self._ollama_options(), "num_predict": MAP_OUTPUT_MAX_TOKENS}
+        # think=False: thinking-capable models (gemma4:e2b-it-qat, gemma4:12b,
+        # gpt-oss) emit chain-of-thought into a separate `message.thinking`
+        # channel that still counts against num_predict. With output capped at
+        # MAP_OUTPUT_MAX_TOKENS, reasoning can consume the entire budget and
+        # leave `message.content` empty -> empty-result retry -> ValueError ->
+        # STREAM_ERROR. Extraction needs no reasoning, so disable it and give
+        # the whole budget to the answer. No-op on non-thinking models.
+        # Routed through _chat_no_think so a remote server that rejects `think`
+        # falls back gracefully.
+        response = self._chat_no_think(
+            self.client,
+            model=self.model_name,
+            messages=[{"role": "user", "content": prompt}],
+            options=options,
+        )
+        result = (response.get("message", {}).get("content") or "").strip()
+        if not result:
+            if _retry:
+                logger.warning(
+                    f"Chunk {chunk_num}/{total_chunks} returned empty result, retrying once…"
+                )
+                time.sleep(2)
+                return self._summarize_chunk(chunk, chunk_num, total_chunks, _retry=False)
+            raise ValueError(
+                f"Chunk {chunk_num}/{total_chunks} returned an empty result after retry — "
+                "Ollama may have run out of context or memory."
+            )
+        return result
+
+    def _create_reduce_prompt(self, map_results: list[str], language: str = "en", notes: str = None) -> str:
+        """Reduce prompt: merge N map-extracted summaries into a single coherent note."""
+        n = len(map_results)
+
+        if language and language not in ("en", "auto"):
+            from .config import get_config
+            language_name = get_config().get_language_name(language)
+            if language_name != "Unknown":
+                language_instruction = (
+                    f"\n\nCRITICAL: Write all content (summary text, topic titles, "
+                    f"topic analysis, key points, action items) in {language_name}. "
+                    f"However, keep the markdown section headers exactly as shown in "
+                    f"English: '## Summary', '## Key Topics', '## Key Points', "
+                    f"'## Action Items'. Do not translate these four headers."
+                )
+            else:
+                language_instruction = ""
+        else:
+            language_instruction = ""
+
+        notes_context = ""
+        if notes and notes.strip():
+            notes_context = f"USER NOTES (written during the meeting):\n{notes.strip()}\n\n"
+
+        combined = "\n\n".join(
+            f"CHUNK {i + 1} OF {n}\n{result}"
+            for i, result in enumerate(map_results)
+        )
+
+        return (
+            f"{notes_context}"
+            f"The following are structured extracts from {n} segments of a long meeting.\n"
+            "Merge and deduplicate into a single coherent summary. "
+            "Do not refer to \"the extracts\" or \"the segments\" — "
+            "write as if summarising the original meeting directly.\n"
+            "Output ONLY the markdown below with no preamble. Start directly with ## Summary.\n\n"
+            "## Summary\n"
+            "A 1-3 sentence overview of the main topics and outcomes, written directly. "
+            "Do not open with phrases like \"The meeting discussed\" or \"This meeting\".\n\n"
+            "## Key Topics\n"
+            "### [Topic title]\n"
+            "Brief analysis of what was discussed about this topic.\n\n"
+            "(Repeat for each major topic)\n\n"
+            "## Key Points\n"
+            "- [Key point 1]\n"
+            "- [Key point 2]\n\n"
+            "## Action Items\n"
+            "- [Action item 1]\n"
+            "- [Action item 2]\n\n"
+            f"Only include information explicitly discussed. Do not infer or assume.{language_instruction}\n\n"
+            f"EXTRACTS:\n{combined}"
+        )
+
+    def _needs_chunking(self, transcript: str, notes: str = None) -> bool:
+        """True iff transcript is too long for a single Ollama call on the configured model.
+
+        Uses the same conservative chars/token floor as the chunk budget
+        (_CHUNK_SAFETY_CHARS_PER_TOKEN, worst-case German/BPE density) rather than
+        the optimistic English baseline: an optimistic gate would let a token-dense
+        transcript take the single-call path and silently overflow num_ctx (the
+        truncated-formatting / empty-summary failure this whole path exists to avoid).
+        """
+        if self.ai_provider not in ("local", "remote"):
+            return False
+        num_ctx = resolve_num_ctx(self.model_name)
+        estimated_tokens = (len(transcript) + len(notes or "")) / _CHUNK_SAFETY_CHARS_PER_TOKEN
+        return estimated_tokens > num_ctx * 0.8
+
+    def _hierarchical_reduce(self, map_results: list[str], depth: int, progress_callback=None) -> list[str]:
+        """Re-chunk map results that are too large for a single reduce call (max depth 2)."""
+        if depth > 2:
+            raise ValueError(
+                "Meeting is too long to summarize even after chunking — "
+                "try a model with a larger context window."
+            )
+        combined_text = "\n\n".join(map_results)
+        chunks = self._split_into_chunks(combined_text)
+        n = len(chunks)
+        # Emit progress for each intermediate-reduce chunk: this round is another
+        # batch of map-style calls, so without ticks the UI sits on "reducing"
+        # for the whole pass and can look hung on a slow CPU-only host (the calls
+        # can be minutes each). A moving counter shows the work is progressing.
+        new_results = []
+        for i, chunk in enumerate(chunks):
+            if progress_callback:
+                progress_callback(i + 1, n)
+            new_results.append(self._summarize_chunk(chunk, i + 1, n))
+        num_ctx = resolve_num_ctx(self.model_name)
+        combined_tokens = len("\n\n".join(new_results)) / CHARS_PER_TOKEN
+        if combined_tokens > num_ctx * 0.7:
+            return self._hierarchical_reduce(new_results, depth + 1, progress_callback)
+        return new_results
+
+    def _map_reduce_streaming(
+        self,
+        transcript: str,
+        language: str = "en",
+        notes: str = None,
+        progress_callback=None,
+    ):
+        """Map-reduce generator: chunks → parallel map → streaming reduce."""
+        chunks = self._split_into_chunks(transcript)
+        n = len(chunks)
+        map_results = []
+
+        for i, chunk in enumerate(chunks):
+            if progress_callback:
+                progress_callback(i + 1, n)
+            map_results.append(self._summarize_chunk(chunk, i + 1, n))
+
+        # Signal: now entering the reduce step (step > total is unambiguous)
+        if progress_callback:
+            progress_callback(n + 1, n)
+
+        # Check if combined map output fits in a single reduce call
+        num_ctx = resolve_num_ctx(self.model_name)
+        combined_tokens = len("\n\n".join(map_results)) / CHARS_PER_TOKEN
+        if combined_tokens > num_ctx * 0.7:
+            map_results = self._hierarchical_reduce(map_results, depth=1, progress_callback=progress_callback)
+
+        reduce_prompt = self._create_reduce_prompt(map_results, language, notes)
+        if self.ai_provider != "remote":
+            self._ensure_ollama_ready()
+        # No try/except here: a reduce failure must propagate to the outer
+        # handler in simple_recorder.reprocess (`except Exception as e:
+        # _stream_error = e`) so it emits STREAM_ERROR + sys.exit(1). Swallowing
+        # it would yield nothing → caller joins [] into "" → empty summary saved.
+        # think=False for the same reason as the map step: the reduce prompt
+        # demands direct markdown output, not reasoning, and thinking tokens
+        # would only delay (and on a thinking model can risk) the first content
+        # token. See _summarize_chunk for the full rationale. Routed through
+        # _chat_stream_no_think for the remote-server `think` fallback.
+        response = self._chat_stream_no_think(
+            self.client,
+            model=self.model_name,
+            messages=[{"role": "user", "content": reduce_prompt}],
+            options=self._ollama_options(),
+        )
+        streamed_chunks = []
+        for chunk in response:
+            content = chunk.get("message", {}).get("content", "")
+            if content:
+                streamed_chunks.append(content)
+                yield content
+        # The model can complete without raising yet return nothing. Guard
+        # against silently saving an empty summary by routing through
+        # STREAM_ERROR instead.
+        if not ''.join(streamed_chunks).strip():
+            raise ValueError("Reduce step returned empty result")
+
     def _repair_json(self, json_text: str) -> Optional[str]:
         """
         Attempt to repair common JSON formatting issues.
@@ -368,7 +675,7 @@ class OllamaSummarizer:
             # than forcing a (possibly offline) pull. Derived from the registry
             # so it can't drift out of sync with SUPPORTED_MODELS.
             from .config import Config
-            preferred = ["gemma4:e2b-it-qat", "llama3.2:3b", "qwen3.5:9b", "gemma4:12b"]
+            preferred = ["gemma4:e2b-it-qat", "llama3.2:3b", "gemma4:4b", "qwen3.5:9b", "gemma4:12b"]
             active = [
                 mid for mid, info in Config.SUPPORTED_MODELS.items()
                 if not info.get("deprecated")
@@ -860,7 +1167,11 @@ Return ONLY the response in this exact JSON format:
                                 self._ensure_ollama_ready()
                                 self.client = ollama.Client()
 
-                        ollama_response = self.client.chat(
+                        # think=False: this JSON-summary path wants direct
+                        # structured output, not reasoning. See _summarize_chunk.
+                        # Via _chat_no_think for the remote-server `think` fallback.
+                        ollama_response = self._chat_no_think(
+                            self.client,
                             model=self.model_name,
                             messages=[
                                 {
@@ -1053,7 +1364,7 @@ Only include information explicitly discussed. Do not infer or assume.{language_
 TRANSCRIPT:
 {transcript}"""
 
-    def summarize_transcript_streaming(self, transcript: str, duration_minutes: int = 0, language: str = "en", notes: str = None):
+    def summarize_transcript_streaming(self, transcript: str, duration_minutes: int = 0, language: str = "en", notes: str = None, progress_callback=None):
         """Generator that yields markdown chunks from the LLM.
 
         Args:
@@ -1061,10 +1372,15 @@ TRANSCRIPT:
             duration_minutes: Duration of the meeting
             language: Language code for output
             notes: Optional user notes for context
+            progress_callback: Optional callable(step, total) for progress reporting
 
         Yields:
             str: Text chunks as they arrive from the LLM
         """
+        if self._needs_chunking(transcript, notes):
+            yield from self._map_reduce_streaming(transcript, language, notes, progress_callback)
+            return
+
         prompt = self._create_markdown_prompt(transcript, language, notes)
         logger.info(f"Starting streaming summary with {self.ai_provider} model: {self.model_name}")
 
@@ -1125,10 +1441,15 @@ TRANSCRIPT:
             try:
                 if self.ai_provider != "remote":
                     self._ensure_ollama_ready()
-                response = self.client.chat(
+                # think=False: the markdown summary prompt wants direct output;
+                # a thinking model would otherwise spend tokens reasoning into a
+                # separate channel before the first content token. See
+                # _summarize_chunk for the full rationale. Via _chat_stream_no_think
+                # for the remote-server `think` fallback.
+                response = self._chat_stream_no_think(
+                    self.client,
                     model=self.model_name,
                     messages=[{'role': 'user', 'content': prompt}],
-                    stream=True,
                     options=self._ollama_options(),
                 )
                 for chunk in response:
@@ -1277,7 +1598,11 @@ TITLE:"""
                     host=self.remote_url if self.ai_provider == "remote" else None,
                     timeout=90
                 )
-                ollama_response = title_client.chat(
+                # think=False: a 6-word title needs no reasoning; thinking would
+                # only burn tokens/latency before the title. See _summarize_chunk.
+                # Via _chat_no_think for the remote-server `think` fallback.
+                ollama_response = self._chat_no_think(
+                    title_client,
                     model=self.model_name,
                     messages=[{'role': 'user', 'content': prompt}],
                     options=self._ollama_options(),

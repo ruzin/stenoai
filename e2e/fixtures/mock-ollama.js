@@ -22,10 +22,12 @@ const OLLAMA_PORT = 11434;
  * Start the mock Ollama on 11434.
  * @param {object} [opts]
  * @param {string} [opts.chatReply='ok'] assistant content returned by /api/chat.
- * @returns {Promise<{ close: () => Promise<void>, lastChatPrompt: () => string|null, chatCalls: () => number, pullCalls: () => number }>}
+ * @param {string[]} [opts.chatReplyQueue=[]] queue of replies to dequeue per call; falls back to chatReply when exhausted.
+ * @returns {Promise<{ close: () => Promise<void>, lastChatPrompt: () => string|null, chatCalls: () => number, pullCalls: () => number, remainingQueueLength: () => number }>}
  */
 function startMockOllama(opts = {}) {
   const chatReply = opts.chatReply ?? 'ok';
+  const chatReplyQueue = Array.isArray(opts.chatReplyQueue) ? [...opts.chatReplyQueue] : [];
   let lastChatPrompt = null;
   let chatCalls = 0;
   let pullCalls = 0;
@@ -79,21 +81,31 @@ function startMockOllama(opts = {}) {
         req.on('data', (c) => chunks.push(c));
         req.on('end', () => {
           chatCalls++;
+          let body = {};
           try {
-            const body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
-            const msgs = Array.isArray(body.messages) ? body.messages : [];
-            lastChatPrompt = msgs.length ? String(msgs[msgs.length - 1].content || '') : '';
-          } catch {
-            lastChatPrompt = '';
+            body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
+          } catch { /* ignore */ }
+          const msgs = Array.isArray(body.messages) ? body.messages : [];
+          lastChatPrompt = msgs.length ? String(msgs[msgs.length - 1].content || '') : '';
+
+          // Dequeue reply or fall back to default
+          const reply = chatReplyQueue.length > 0 ? chatReplyQueue.shift() : chatReply;
+
+          if (body.stream === false) {
+            // Non-streaming (map call): return a single JSON object
+            res.writeHead(200, { 'content-type': 'application/json' });
+            res.end(JSON.stringify({ message: { role: 'assistant', content: reply }, done: true }));
+          } else {
+            // Streaming (reduce call / legacy): return NDJSON
+            res.writeHead(200, { 'content-type': 'application/x-ndjson' });
+            res.write(
+              JSON.stringify({ message: { role: 'assistant', content: reply }, done: false }) +
+                '\n',
+            );
+            res.end(
+              JSON.stringify({ message: { role: 'assistant', content: '' }, done: true }) + '\n',
+            );
           }
-          res.writeHead(200, { 'content-type': 'application/x-ndjson' });
-          res.write(
-            JSON.stringify({ message: { role: 'assistant', content: chatReply }, done: false }) +
-              '\n',
-          );
-          res.end(
-            JSON.stringify({ message: { role: 'assistant', content: '' }, done: true }) + '\n',
-          );
         });
         return;
       }
@@ -108,6 +120,7 @@ function startMockOllama(opts = {}) {
         lastChatPrompt: () => lastChatPrompt,
         chatCalls: () => chatCalls,
         pullCalls: () => pullCalls,
+        remainingQueueLength: () => chatReplyQueue.length,
       });
     });
   });
