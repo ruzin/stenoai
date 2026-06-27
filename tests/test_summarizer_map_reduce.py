@@ -215,6 +215,86 @@ class ThinkingDisabledTests(unittest.TestCase):
         self.assertIs(fake_client.chat.call_args.kwargs.get('think'), False)
 
 
+class ThinkFallbackTests(unittest.TestCase):
+    """The ollama>=0.5.0 pin governs only the bundled client; in remote mode the
+    request hits the user's own server, which may reject `think`. _chat_no_think
+    / _chat_stream_no_think must retry once without `think`, and re-raise the
+    ORIGINAL error if the retry also fails (so a genuine fault isn't masked)."""
+
+    def test_chat_no_think_retries_without_think_on_error(self):
+        s = _make_summarizer()
+        seen = []
+
+        def chat(**kwargs):
+            seen.append(kwargs)
+            if 'think' in kwargs:
+                raise Exception("unknown parameter: think")
+            return {"message": {"content": "ok"}}
+
+        client = mock.MagicMock()
+        client.chat.side_effect = chat
+        result = s._chat_no_think(client, model="m", messages=[])
+        self.assertEqual(result["message"]["content"], "ok")
+        self.assertEqual(len(seen), 2)
+        self.assertIs(seen[0].get('think'), False)   # first attempt requested think=False
+        self.assertNotIn('think', seen[1])           # retry dropped it
+
+    def test_chat_no_think_reraises_original_when_retry_also_fails(self):
+        s = _make_summarizer()
+
+        def chat(**kwargs):
+            raise RuntimeError("original" if 'think' in kwargs else "retry")
+
+        client = mock.MagicMock()
+        client.chat.side_effect = chat
+        with self.assertRaises(RuntimeError) as ctx:
+            s._chat_no_think(client, model="m", messages=[])
+        self.assertEqual(str(ctx.exception), "original")
+
+    def test_chat_no_think_passes_through_on_success(self):
+        s = _make_summarizer()
+        client = mock.MagicMock()
+        client.chat.return_value = {"message": {"content": "ok"}}
+        result = s._chat_no_think(client, model="m", messages=[])
+        self.assertEqual(result["message"]["content"], "ok")
+        self.assertEqual(client.chat.call_count, 1)
+        self.assertIs(client.chat.call_args.kwargs.get('think'), False)
+
+    def test_chat_stream_no_think_restarts_stream_without_think(self):
+        s = _make_summarizer()
+
+        def chat(**kwargs):
+            if 'think' in kwargs:
+                def boom():
+                    raise Exception("think rejected")
+                    yield  # pragma: no cover - makes this a generator
+                return boom()
+            return iter([{"message": {"content": "a"}}, {"message": {"content": "b"}}])
+
+        client = mock.MagicMock()
+        client.chat.side_effect = chat
+        out = list(s._chat_stream_no_think(client, model="m", messages=[]))
+        self.assertEqual([c["message"]["content"] for c in out], ["a", "b"])
+
+    def test_chat_stream_no_think_reraises_original_when_retry_stream_also_fails(self):
+        s = _make_summarizer()
+
+        def chat(**kwargs):
+            msg = "original" if 'think' in kwargs else "retry"
+
+            def boom():
+                raise RuntimeError(msg)
+                yield  # pragma: no cover - makes this a generator
+
+            return boom()
+
+        client = mock.MagicMock()
+        client.chat.side_effect = chat
+        with self.assertRaises(RuntimeError) as ctx:
+            list(s._chat_stream_no_think(client, model="m", messages=[]))
+        self.assertEqual(str(ctx.exception), "original")
+
+
 class ReducePromptTests(unittest.TestCase):
     def test_reduce_prompt_contains_chunk_headers(self):
         s = _make_summarizer()

@@ -656,14 +656,24 @@ Transcript:
 
         print("🧠 Generating summary...", flush=True)
         streamed_chunks = []
-        for chunk in self.summarizer.summarize_transcript_streaming(
-            text_for_summary, duration_minutes, output_language, notes_text,
-            progress_callback=_emit_progress,
-        ):
-            encoded = base64.b64encode(chunk.encode('utf-8')).decode('ascii')
-            sys.stdout.write(f"CHUNK:{encoded}\n")
-            sys.stdout.flush()
-            streamed_chunks.append(chunk)
+        try:
+            for chunk in self.summarizer.summarize_transcript_streaming(
+                text_for_summary, duration_minutes, output_language, notes_text,
+                progress_callback=_emit_progress,
+            ):
+                encoded = base64.b64encode(chunk.encode('utf-8')).decode('ascii')
+                sys.stdout.write(f"CHUNK:{encoded}\n")
+                sys.stdout.flush()
+                streamed_chunks.append(chunk)
+        except Exception as e:
+            # Surface as STREAM_ERROR so the renderer shows the "try a smaller
+            # model" recommendation (same as reprocess) rather than a generic
+            # failure, then re-raise to preserve this method's existing error
+            # contract for its caller.
+            logger.error(f"Summarization failed: {e}")
+            err_msg = str(e).replace('\n', ' ').replace('\r', ' ')
+            print(f"STREAM_ERROR:{err_msg}", flush=True)
+            raise
         streamed_md = ''.join(streamed_chunks)
 
         print("STREAM_COMPLETE", flush=True)
@@ -857,6 +867,7 @@ def process_streaming(audio_file, name, notes):
         # silent stretch before the first streamed token. Stopped on the
         # first chunk; from then on the chunks themselves are the signal.
         summary_heartbeat = _start_summary_heartbeat()
+        _stream_error = None
         try:
             for chunk in recorder.summarizer.summarize_transcript_streaming(
                 text_for_summary, duration_minutes, output_language, notes_text,
@@ -867,8 +878,21 @@ def process_streaming(audio_file, name, notes):
                 sys.stdout.write(f"CHUNK:{encoded}\n")
                 sys.stdout.flush()
                 streamed_chunks.append(chunk)
+        except Exception as e:
+            _stream_error = e
         finally:
             summary_heartbeat.set()
+
+        # Surface a summarization failure (e.g. a long-meeting map-reduce that
+        # overflows context) as STREAM_ERROR so the renderer shows the same
+        # "try a smaller model" recommendation it shows for reprocess — instead
+        # of a generic processing failure with no guidance.
+        if _stream_error is not None:
+            logger.error(f"Summarization failed: {_stream_error}")
+            err_msg = str(_stream_error).replace('\n', ' ').replace('\r', ' ')
+            print(f"STREAM_ERROR:{err_msg}", flush=True)
+            sys.exit(1)
+
         streamed_md = ''.join(streamed_chunks)
 
         print("STREAM_COMPLETE", flush=True)

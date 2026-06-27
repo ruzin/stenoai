@@ -295,6 +295,55 @@ class OllamaSummarizer:
             f"TRANSCRIPT SEGMENT:\n{chunk}"
         )
 
+    def _chat_no_think(self, client, **kwargs):
+        """Non-streaming ``client.chat`` with ``think=False``, retrying once
+        WITHOUT ``think`` if the call fails.
+
+        The ``ollama>=0.5.0`` pin only governs the bundled client; in remote mode
+        the request hits the user's own Ollama server, which may be older and
+        reject the ``think`` parameter. On any first-attempt failure we retry
+        without it, then re-raise the ORIGINAL error if the retry also fails so a
+        genuine failure (OOM, model missing) isn't masked as a ``think`` problem.
+        """
+        try:
+            return client.chat(stream=False, think=False, **kwargs)
+        except Exception as original:
+            try:
+                return client.chat(stream=False, **kwargs)
+            except Exception:
+                raise original
+
+    def _chat_stream_no_think(self, client, **kwargs):
+        """Streaming counterpart of :meth:`_chat_no_think`.
+
+        A streaming ``chat`` issues its request lazily on first iteration, so a
+        ``think``-reject surfaces on the first token rather than on the call. We
+        guard the first token and, if it fails, restart the stream without
+        ``think`` — done before yielding anything, so no token is duplicated.
+        """
+        try:
+            stream = iter(client.chat(stream=True, think=False, **kwargs))
+            first = next(stream)
+        except StopIteration:
+            return
+        except Exception as original:
+            # Retry without `think`. Guard the retry's first token too — it is
+            # also issued lazily, so a failure there must re-raise the ORIGINAL
+            # error (not the retry's) to honour the fallback contract. Once the
+            # retry has yielded a token, later errors propagate as-is.
+            try:
+                stream = iter(client.chat(stream=True, **kwargs))
+                first = next(stream)
+            except StopIteration:
+                return
+            except Exception:
+                raise original
+            yield first
+            yield from stream
+            return
+        yield first
+        yield from stream
+
     def _summarize_chunk(self, chunk: str, chunk_num: int, total_chunks: int, _retry: bool = True) -> str:
         """Non-streaming Ollama call for one map chunk. Returns stripped text or raises."""
         import time
@@ -309,11 +358,12 @@ class OllamaSummarizer:
         # leave `message.content` empty -> empty-result retry -> ValueError ->
         # STREAM_ERROR. Extraction needs no reasoning, so disable it and give
         # the whole budget to the answer. No-op on non-thinking models.
-        response = self.client.chat(
+        # Routed through _chat_no_think so a remote server that rejects `think`
+        # falls back gracefully.
+        response = self._chat_no_think(
+            self.client,
             model=self.model_name,
             messages=[{"role": "user", "content": prompt}],
-            stream=False,
-            think=False,
             options=options,
         )
         result = (response.get("message", {}).get("content") or "").strip()
@@ -398,7 +448,7 @@ class OllamaSummarizer:
         estimated_tokens = (len(transcript) + len(notes or "")) / _CHUNK_SAFETY_CHARS_PER_TOKEN
         return estimated_tokens > num_ctx * 0.8
 
-    def _hierarchical_reduce(self, map_results: list[str], depth: int) -> list[str]:
+    def _hierarchical_reduce(self, map_results: list[str], depth: int, progress_callback=None) -> list[str]:
         """Re-chunk map results that are too large for a single reduce call (max depth 2)."""
         if depth > 2:
             raise ValueError(
@@ -408,11 +458,19 @@ class OllamaSummarizer:
         combined_text = "\n\n".join(map_results)
         chunks = self._split_into_chunks(combined_text)
         n = len(chunks)
-        new_results = [self._summarize_chunk(chunk, i + 1, n) for i, chunk in enumerate(chunks)]
+        # Emit progress for each intermediate-reduce chunk: this round is another
+        # batch of map-style calls, so without ticks the UI sits on "reducing"
+        # for the whole pass and can look hung on a slow CPU-only host (the calls
+        # can be minutes each). A moving counter shows the work is progressing.
+        new_results = []
+        for i, chunk in enumerate(chunks):
+            if progress_callback:
+                progress_callback(i + 1, n)
+            new_results.append(self._summarize_chunk(chunk, i + 1, n))
         num_ctx = resolve_num_ctx(self.model_name)
         combined_tokens = len("\n\n".join(new_results)) / CHARS_PER_TOKEN
         if combined_tokens > num_ctx * 0.7:
-            return self._hierarchical_reduce(new_results, depth + 1)
+            return self._hierarchical_reduce(new_results, depth + 1, progress_callback)
         return new_results
 
     def _map_reduce_streaming(
@@ -440,7 +498,7 @@ class OllamaSummarizer:
         num_ctx = resolve_num_ctx(self.model_name)
         combined_tokens = len("\n\n".join(map_results)) / CHARS_PER_TOKEN
         if combined_tokens > num_ctx * 0.7:
-            map_results = self._hierarchical_reduce(map_results, depth=1)
+            map_results = self._hierarchical_reduce(map_results, depth=1, progress_callback=progress_callback)
 
         reduce_prompt = self._create_reduce_prompt(map_results, language, notes)
         if self.ai_provider != "remote":
@@ -452,12 +510,12 @@ class OllamaSummarizer:
         # think=False for the same reason as the map step: the reduce prompt
         # demands direct markdown output, not reasoning, and thinking tokens
         # would only delay (and on a thinking model can risk) the first content
-        # token. See _summarize_chunk for the full rationale.
-        response = self.client.chat(
+        # token. See _summarize_chunk for the full rationale. Routed through
+        # _chat_stream_no_think for the remote-server `think` fallback.
+        response = self._chat_stream_no_think(
+            self.client,
             model=self.model_name,
             messages=[{"role": "user", "content": reduce_prompt}],
-            stream=True,
-            think=False,
             options=self._ollama_options(),
         )
         streamed_chunks = []
@@ -617,7 +675,7 @@ class OllamaSummarizer:
             # than forcing a (possibly offline) pull. Derived from the registry
             # so it can't drift out of sync with SUPPORTED_MODELS.
             from .config import Config
-            preferred = ["gemma4:e2b-it-qat", "llama3.2:3b", "qwen3.5:9b", "gemma4:12b"]
+            preferred = ["gemma4:e2b-it-qat", "llama3.2:3b", "gemma4:4b", "qwen3.5:9b", "gemma4:12b"]
             active = [
                 mid for mid, info in Config.SUPPORTED_MODELS.items()
                 if not info.get("deprecated")
@@ -1109,7 +1167,11 @@ Return ONLY the response in this exact JSON format:
                                 self._ensure_ollama_ready()
                                 self.client = ollama.Client()
 
-                        ollama_response = self.client.chat(
+                        # think=False: this JSON-summary path wants direct
+                        # structured output, not reasoning. See _summarize_chunk.
+                        # Via _chat_no_think for the remote-server `think` fallback.
+                        ollama_response = self._chat_no_think(
+                            self.client,
                             model=self.model_name,
                             messages=[
                                 {
@@ -1117,9 +1179,6 @@ Return ONLY the response in this exact JSON format:
                                     'content': prompt
                                 }
                             ],
-                            # think=False: this JSON-summary path wants direct
-                            # structured output, not reasoning. See _summarize_chunk.
-                            think=False,
                             options=self._ollama_options(),
                         )
                         break  # Success, exit retry loop
@@ -1385,12 +1444,12 @@ TRANSCRIPT:
                 # think=False: the markdown summary prompt wants direct output;
                 # a thinking model would otherwise spend tokens reasoning into a
                 # separate channel before the first content token. See
-                # _summarize_chunk for the full rationale.
-                response = self.client.chat(
+                # _summarize_chunk for the full rationale. Via _chat_stream_no_think
+                # for the remote-server `think` fallback.
+                response = self._chat_stream_no_think(
+                    self.client,
                     model=self.model_name,
                     messages=[{'role': 'user', 'content': prompt}],
-                    stream=True,
-                    think=False,
                     options=self._ollama_options(),
                 )
                 for chunk in response:
@@ -1539,12 +1598,13 @@ TITLE:"""
                     host=self.remote_url if self.ai_provider == "remote" else None,
                     timeout=90
                 )
-                ollama_response = title_client.chat(
+                # think=False: a 6-word title needs no reasoning; thinking would
+                # only burn tokens/latency before the title. See _summarize_chunk.
+                # Via _chat_no_think for the remote-server `think` fallback.
+                ollama_response = self._chat_no_think(
+                    title_client,
                     model=self.model_name,
                     messages=[{'role': 'user', 'content': prompt}],
-                    # think=False: a 6-word title needs no reasoning; thinking would
-                    # only burn tokens/latency before the title. See _summarize_chunk.
-                    think=False,
                     options=self._ollama_options(),
                 )
                 response_text = ollama_response['message']['content'].strip()
