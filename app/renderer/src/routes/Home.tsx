@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { Calendar, ChevronLeft, ChevronRight, PencilLine, RefreshCw, Search, Square, X } from 'lucide-react';
-import { isMac, shortcut } from '@/lib/utils';
+import { isMac } from '@/lib/utils';
 import { MeetingsShell } from '@/components/MeetingsShell';
 import { UpcomingCard } from '@/components/home/UpcomingCard';
 import { PreviousRow } from '@/components/home/PreviousRow';
@@ -16,6 +16,8 @@ import {
 } from '@/hooks/useCalendarEvents';
 import { useFolders } from '@/hooks/useFolders';
 import { ipc, type CalendarEvent, type Meeting } from '@/lib/ipc';
+import { pickInProgressEvent } from '@/lib/calendar';
+import { heroHeadline, heroSubtitle } from '@/lib/hero';
 import { searchNotes } from '@/lib/noteSearch';
 import { navigate } from '@/lib/router';
 
@@ -57,6 +59,10 @@ export function Home({ mode }: HomeProps) {
   const [upcomingTickMs, setUpcomingTickMs] = React.useState<number>(() => Date.now());
   React.useEffect(() => {
     if (mode !== 'home') return;
+    // Refresh immediately on (re)entering Home, otherwise the hero copy
+    // is whatever `upcomingTickMs` was when the user last navigated away
+    // — potentially many minutes stale until the 60s interval fires.
+    setUpcomingTickMs(Date.now());
     const id = setInterval(() => setUpcomingTickMs(Date.now()), 60_000);
     return () => clearInterval(id);
   }, [mode]);
@@ -407,7 +413,52 @@ export function Home({ mode }: HomeProps) {
   const emptyStateCalendarNudge = renderCalendarNudge(false);
   const homeCalendarNudge = renderCalendarNudge(true);
 
-  const greeting = `Ready to capture beautiful notes`;
+  // Hero state inputs. All recompute on the existing 60s tick — no new
+  // intervals. `inProgressEvent` uses the same matching window as the
+  // backend's auto-detect (5 min early grace, 10 min late floor) so the
+  // hero copy and the "Meeting detected" notification agree.
+  const inProgressEvent = React.useMemo<CalendarEvent | null>(() => {
+    if (!calendar.data || calendar.data.needsAuth) return null;
+    return pickInProgressEvent(calendar.data.events, new Date(upcomingTickMs));
+  }, [calendar.data, upcomingTickMs]);
+
+  // `upcomingToday` is already all-day/declined/NaN-filtered and sorted by
+  // start ascending, so the soonest still-future event is just the first one
+  // that starts after now — no need to re-apply the guards here.
+  const nextSoonEvent = React.useMemo<CalendarEvent | null>(
+    () =>
+      upcomingToday.find((e) => new Date(e.start).getTime() > upcomingTickMs) ??
+      null,
+    [upcomingToday, upcomingTickMs],
+  );
+
+  // Whether we have live calendar data to reason about. Distinguishes a
+  // genuinely clear day (connected, no events) from "no calendar connected"
+  // so the hero only claims "Clear day ahead" when it actually knows.
+  const calendarConnected = !!calendar.data && !calendar.data.needsAuth;
+
+  const heroState = React.useMemo(
+    () => ({
+      status: recording.status,
+      sessionName: recording.sessionName,
+      inProgressEvent,
+      nextSoonEvent,
+      tomorrowPreview,
+      calendarConnected,
+      now: upcomingTickMs,
+    }),
+    [
+      recording.status,
+      recording.sessionName,
+      inProgressEvent,
+      nextSoonEvent,
+      tomorrowPreview,
+      calendarConnected,
+      upcomingTickMs,
+    ],
+  );
+  const greeting = heroHeadline(heroState);
+  const heroSub = heroSubtitle(heroState);
   const dateStr = new Date().toLocaleDateString(undefined, {
     weekday: 'long',
     month: 'long',
@@ -492,7 +543,7 @@ export function Home({ mode }: HomeProps) {
                 className="max-w-[52ch] text-sm leading-[1.55]"
                 style={{ color: 'var(--fg-2)' }}
               >
-                {`Start recording from the top-right, or from anywhere with ${shortcut('⌘⇧R', 'Ctrl+Shift+R')}.`}
+                {heroSub}
               </p>
             </div>
           )}
