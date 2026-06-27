@@ -114,10 +114,10 @@ test('@pipeline importing a file creates a note and leaves the original on disk'
     // Teardown: the app may have spawned its own `ollama serve` despite the
     // mock (probe race); don't let it outlive the test.
     killOllama();
-    // Best-effort: the copy lands in the app's recordings dir. keep_recordings
-    // defaults off so a successful transcribe already unlinked it, but if the
-    // run skipped or failed mid-way, clean up so the dev recordings/ dir (which
-    // isn't STENOAI_USER_DATA_DIR-isolated in an unpackaged run) stays tidy.
+    // Best-effort: the copy lands in the app's recordings dir (now
+    // STENOAI_USER_DATA_DIR-isolated, so the fixture tears it down anyway).
+    // keep_recordings defaults off, so a successful transcribe already unlinked
+    // it; this just tidies a skipped/failed mid-way run.
     if (recordingsDir) {
       rmSync(path.join(recordingsDir, 'imported.wav'), { force: true });
     }
