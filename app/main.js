@@ -80,6 +80,7 @@ const http = require('http');
 const os = require('os');
 const { URL, URLSearchParams } = require('url');
 const crypto = require('crypto');
+const { EXPORT_CANCELED } = require('./ipc-sentinels');
 const { PostHog } = require('posthog-node');
 const { initMain } = require('electron-audio-loopback');
 const { autoUpdater } = require('electron-updater');
@@ -2501,6 +2502,67 @@ ipcMain.handle('save-meeting-notes', async (event, sessionName, notes) => {
   }
 });
 
+// Transcript export bridge. The renderer builds the Markdown bundle and hands us
+// the finished string; we own only the file write. STENOAI_E2E_EXPORT_PATH bypasses
+// the native dialog so the Playwright T2 spec can drive this hermetically (same
+// isolation philosophy as STENOAI_USER_DATA_DIR).
+ipcMain.handle('export-transcript', async (event, defaultFilename, content) => {
+  try {
+    if (typeof content !== 'string' || content.length === 0) {
+      return { success: false, error: 'No transcript content to export.' };
+    }
+
+    // Test-only seam: only honor it under e2e, so a stray env var in a real
+    // launch can't silently redirect a user's export to an arbitrary path.
+    const seamPath = IS_E2E ? process.env.STENOAI_E2E_EXPORT_PATH : undefined;
+    let targetPath = seamPath;
+
+    if (!targetPath) {
+      // The renderer supplies a suggested name only; reduce it to a bare
+      // filename so a malformed value can't steer defaultPath with an absolute
+      // path or traversal components. The user still confirms via the dialog.
+      const suggested =
+        typeof defaultFilename === 'string' && defaultFilename.trim()
+          ? path.basename(defaultFilename).slice(0, 200)
+          : 'transcript.md';
+      const result = await dialog.showSaveDialog(mainWindow, {
+        defaultPath: suggested,
+        filters: [
+          { name: 'Markdown', extensions: ['md'] },
+          { name: 'Text', extensions: ['txt'] },
+        ],
+      });
+      if (result.canceled || !result.filePath) {
+        return { success: false, error: EXPORT_CANCELED };
+      }
+      targetPath = result.filePath;
+    }
+
+    // Atomic write: write to a temp file in the SAME directory, then rename it
+    // into place. A direct writeFile() that fails mid-way (disk full, I/O error)
+    // truncates and corrupts a pre-existing file at targetPath; tmp+rename leaves
+    // the original untouched on failure. Mirrors the chat-sessions persistence
+    // pattern (~line 2056). Async so a large transcript can't block the UI thread.
+    const dir = path.dirname(targetPath);
+    const base = path.basename(targetPath);
+    const tmpPath = path.join(dir, `.${base}.${require('crypto').randomBytes(6).toString('hex')}.tmp`);
+    try {
+      await fs.promises.writeFile(tmpPath, content, 'utf-8');
+      // Node's fs.rename maps to MoveFileExW(MOVEFILE_REPLACE_EXISTING) on
+      // Windows and rename(2) on Unix — both atomically replace an existing
+      // destination on the same volume, so no separate unlink is needed.
+      await fs.promises.rename(tmpPath, targetPath);
+    } catch (writeErr) {
+      // Best-effort cleanup so a failed export doesn't leave a stray temp file.
+      try { await fs.promises.unlink(tmpPath); } catch (_) {}
+      throw writeErr;
+    }
+    return { success: true, path: targetPath };
+  } catch (err) {
+    return { success: false, error: String(err && err.message ? err.message : err) };
+  }
+});
+
 ipcMain.handle('update-meeting', async (event, summaryFilePath, updates) => {
   try {
     const projectRoot = path.join(__dirname, '..');
@@ -2841,7 +2903,22 @@ function spawnLiveTranscribe(sessionName) {
   liveTranscribeSessionName = sessionName;
   liveTranscribeStdoutBuf = '';
 
-  liveTranscribeProcess.stdout.on('data', (data) => {
+  // Per-instance drain promise: resolves when THIS process has fully closed
+  // its stdio (all stdout `data` events processed), not merely exited. We bind
+  // the resolver to `proc` so a quick stop→start can't have the old process's
+  // teardown resolve/null the NEW process's state (#207 review-2, Finding 2).
+  const proc = liveTranscribeProcess;
+  proc._drainResolve = null;
+  proc._drainPromise = new Promise((resolve) => {
+    proc._drainResolve = resolve;
+  });
+
+  proc.stdout.on('data', (data) => {
+    // Drop output from a superseded process. On a quick stop→start the OLD
+    // sidecar may still be draining; without this guard its stdout would write
+    // into the global buffer / liveTranscriptState and contaminate the NEW
+    // recording with stale segments (#207 review, Blocker 1).
+    if (liveTranscribeProcess !== proc) return;
     // Stdout arrives in arbitrary-sized chunks; concatenate then split on
     // newlines so a multi-line frame straddling reads is handled.
     liveTranscribeStdoutBuf += data.toString();
@@ -2853,26 +2930,51 @@ function spawnLiveTranscribe(sessionName) {
     }
   });
 
-  liveTranscribeProcess.stderr.on('data', (data) => {
+  proc.stderr.on('data', (data) => {
     // Python logger output goes to stderr — bubble through debug log
     // without spamming the renderer.
     sendDebugLog(`[live-transcribe] ${data.toString().trim()}`);
   });
 
-  attachProcessingStderr(liveTranscribeProcess, 'live-transcribe');
+  attachProcessingStderr(proc, 'live-transcribe');
 
-  liveTranscribeProcess.on('exit', (code, signal) => {
-    sendDebugLog(`Live transcribe sidecar exited code=${code} signal=${signal}`);
-    liveTranscribeProcess = null;
-    liveTranscribeSessionName = null;
-    liveTranscribeStdoutBuf = '';
-    // Clear the load clock if the sidecar died before LIVE_READY, so a later
-    // path can't log a duration against this stale stamp.
-    parakeetLoadStartedAt = 0;
+  // Wait on `close`, not `exit`: `exit` fires when the child terminates but
+  // does NOT guarantee stdout is fully drained and every `data` event has been
+  // processed — so the FINAL segment may not yet be in liveTranscriptState.
+  // `close` fires only after all stdio streams have closed, which is the
+  // correct barrier for the #207 fallback snapshot (review-2, Finding 1).
+  proc.on('close', (code, signal) => {
+    sendDebugLog(`Live transcribe sidecar closed code=${code} signal=${signal}`);
+    // Only clear globals if THIS process is still the active one. A quick
+    // stop→start may have already installed a fresh sidecar; nulling here
+    // would destroy the new process's state (review-2, Finding 2).
+    if (liveTranscribeProcess === proc) {
+      liveTranscribeProcess = null;
+      liveTranscribeSessionName = null;
+      liveTranscribeStdoutBuf = '';
+      // Clear the load clock if the sidecar died before LIVE_READY, so a later
+      // path can't log a duration against this stale stamp.
+      parakeetLoadStartedAt = 0;
+    }
+    // Unblock this instance's drain waiter (#207, Fix 2) now that all stdout
+    // has been flushed and parsed by the stdout handler above. Resolver is
+    // bound to `proc`, so it only ever resolves for the right process.
+    if (proc._drainResolve) {
+      const resolve = proc._drainResolve;
+      proc._drainResolve = null;
+      resolve();
+    }
   });
 
-  liveTranscribeProcess.on('error', (err) => {
+  proc.on('error', (err) => {
     sendDebugLog(`Live transcribe sidecar error: ${err.message}`);
+    // A spawn-time error means `close` may never fire — unblock the drain
+    // waiter so the fallback snapshot doesn't hang on a process that died.
+    if (proc._drainResolve) {
+      const resolve = proc._drainResolve;
+      proc._drainResolve = null;
+      resolve();
+    }
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('live-transcript-error', {
         sessionName,
@@ -2887,7 +2989,7 @@ function spawnLiveTranscribe(sessionName) {
   // immediate errors). Without a listener, EPIPE bubbles to uncaught and
   // crashes the main process. Race window: chunks queued in the IPC
   // pipeline land here after the sidecar exited (stop, crash, kill).
-  liveTranscribeProcess.stdin.on('error', (err) => {
+  proc.stdin.on('error', (err) => {
     if (err && err.code === 'EPIPE') {
       // Expected when Python exited mid-write. The exit handler will
       // null the ref so subsequent chunks short-circuit at the guard.
@@ -2959,18 +3061,31 @@ function handleLiveTranscribeLine(line) {
 // Tear down the live transcribe sidecar. Closing stdin is the clean
 // shutdown signal — Python's read loop hits EOF, drains the VAD, exits.
 // Falls back to SIGTERM after a short wait if it doesn't exit on its own.
+//
+// Returns a promise that resolves once the sidecar has fully exited (or
+// immediately if there was none). The #207 fallback snapshot awaits this so
+// it captures the FINAL segment of the last utterance, which Python only emits
+// after stdin EOF (Fix 2). Callers that don't care can ignore the return value.
 function stopLiveTranscribe() {
   const proc = liveTranscribeProcess;
-  if (!proc) return;
+  if (!proc) return Promise.resolve();
+  // The per-instance drain promise (installed in spawnLiveTranscribe) resolves
+  // on this process's `close` — bound to `proc`, so a double-stop or a
+  // quick restart can't cross resolvers between processes (review-2, Finding 2).
+  const exited = proc._drainPromise || Promise.resolve();
   try {
     proc.stdin.end();
   } catch (_) { /* already closed */ }
-  // Watchdog: if Python hasn't exited in 5 s, force kill.
+  // Watchdog: if THIS Python process hasn't exited in SIDECAR_KILL_WATCHDOG_MS,
+  // force kill. Bind to `proc`, not the global liveTranscribeProcess: after a
+  // quick stop→start the global already points at the NEW sidecar, so the old
+  // hung process would never be recognized and killed (#207 review, Blocker 1).
   setTimeout(() => {
-    if (liveTranscribeProcess === proc && !proc.killed) {
+    if (!proc.killed) {
       try { proc.kill('SIGTERM'); } catch (_) {}
     }
-  }, 5000);
+  }, SIDECAR_KILL_WATCHDOG_MS);
+  return exited;
 }
 
 // Sync read of the active ASR engine. Reads the JSON directly so we don't
@@ -3034,9 +3149,20 @@ let liveTranscriptState = {
 // the in-process `record --live` stdout is — same LIVE_READY / LIVE_SEG /
 // LIVE_ERROR protocol, same liveTranscriptState mutations, same IPC
 // events emitted to the renderer.
+// How long stopLiveTranscribe() lets Python drain + emit its FINAL segment
+// before force-killing the sidecar. The fallback snapshot's drain wait is
+// aligned to the same value so the snapshot never times out ahead of the kill.
+const SIDECAR_KILL_WATCHDOG_MS = 5000;
 let liveTranscribeProcess = null;
 let liveTranscribeSessionName = null;
 let liveTranscribeStdoutBuf = '';
+// The drain barrier (#207, Fix 2) now lives per process instance on
+// `proc._drainPromise` / `proc._drainResolve` (installed in
+// spawnLiveTranscribe). stopLiveTranscribe() only closes stdin and returns
+// immediately, but Python still needs a moment to drain its VAD and emit the
+// FINAL segment of the last utterance; the fallback snapshot awaits that
+// instance's promise so it captures the final segment instead of racing ahead
+// of it — and a quick restart can't cross resolvers between processes.
 let isProcessing = false;
 let currentProcessingJob = null;
 // Wall-clock start of the in-flight queue job, so the processing timer advances
@@ -3216,6 +3342,11 @@ async function processNextInQueue() {
     const processArgs = ['process-streaming', currentProcessingJob.audioFile, '--name', currentProcessingJob.sessionName];
     if (currentProcessingJob.notesFile && fs.existsSync(currentProcessingJob.notesFile)) {
       processArgs.push('--notes', currentProcessingJob.notesFile);
+    }
+    // Live-transcript fallback (#207): hand Python the live transcript snapshot
+    // so it can rescue the meeting if the batch transcription comes back empty.
+    if (currentProcessingJob.liveTranscriptFile && fs.existsSync(currentProcessingJob.liveTranscriptFile)) {
+      processArgs.push('--live-transcript', currentProcessingJob.liveTranscriptFile);
     }
 
     await new Promise((resolve, reject) => {
@@ -3407,6 +3538,15 @@ async function processNextInQueue() {
       });
     }
   } finally {
+    // Remove the live-transcript snapshot temp file (#207) — it's consumed by
+    // the Python process and not needed once the job is done.
+    if (currentProcessingJob && currentProcessingJob.liveTranscriptFile) {
+      try {
+        if (fs.existsSync(currentProcessingJob.liveTranscriptFile)) {
+          fs.unlinkSync(currentProcessingJob.liveTranscriptFile);
+        }
+      } catch (_) { /* best-effort cleanup */ }
+    }
     isProcessing = false;
     currentProcessingJob = null;
     currentProcessingStartedAtMs = null;
@@ -3415,8 +3555,100 @@ async function processNextInQueue() {
   }
 }
 
-function addToProcessingQueue(audioFile, sessionName, notesFile) {
-  processingQueue.push({ audioFile, sessionName, notesFile });
+// Live-transcript fallback for #207. The user watched the live transcript
+// stream in during the recording, so if the post-stop batch transcription
+// comes back empty (a quiet ASR failure), that live transcript should rescue
+// the meeting instead of being silently discarded as "No speech detected".
+//
+// We snapshot the accumulated live segments to a temp file at stop time and
+// hand the path to process-streaming via --live-transcript. Python owns the
+// decision of whether to USE it (only when the batch result is empty/trivial),
+// because that's where the batch length and failure markers are known.
+//
+// Returns the temp file path, or null when there's no usable live transcript
+// (different session, too short, or write failed — never blocks processing).
+const LIVE_TRANSCRIPT_FALLBACK_MIN_CHARS = 100;
+// Bound the fallback snapshot's wait for the sidecar to flush its FINAL
+// utterance. The drain primarily awaits the per-process `_drainPromise` (which
+// resolves on `close`); this timeout is only a safety-net for a zombie that
+// never closes. It MUST exceed SIDECAR_KILL_WATCHDOG_MS: the watchdog lets the
+// process run that long before SIGTERM, and after the kill Python still needs a
+// moment to finalize() and let `close` fire. If the timeout equalled the
+// watchdog it could win the race against `close` and lose the last segment
+// (#207 review, Blocker 2). Watchdog (5 s) + grace (3 s) for finalize + close.
+const LIVE_TRANSCRIPT_SNAPSHOT_DRAIN_GRACE_MS = 3000;
+const LIVE_TRANSCRIPT_SNAPSHOT_DRAIN_MS =
+  SIDECAR_KILL_WATCHDOG_MS + LIVE_TRANSCRIPT_SNAPSHOT_DRAIN_GRACE_MS;
+
+// Wait (bounded) for the live sidecar to finish exiting so its FINAL segments
+// are in liveTranscriptState before we snapshot (#207, Fix 2). stop-recording-ui
+// already closed stdin via stopLiveTranscribe(); here we just give Python up to
+// LIVE_TRANSCRIPT_SNAPSHOT_DRAIN_MS to drain its VAD and emit that last
+// utterance. Resolves early the moment the process is gone.
+function waitForLiveTranscribeDrain() {
+  const proc = liveTranscribeProcess;
+  if (!proc) return Promise.resolve();
+  // Bind to THIS process's drain promise (resolves on its `close`). A quick
+  // stop→start can't have us awaiting the wrong process (review-2, Finding 2).
+  const drain = proc._drainPromise || Promise.resolve();
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = () => {
+      if (settled) return;
+      settled = true;
+      resolve();
+    };
+    const timer = setTimeout(() => {
+      sendDebugLog('Live transcript drain timed out before snapshot; using segments collected so far');
+      done();
+    }, LIVE_TRANSCRIPT_SNAPSHOT_DRAIN_MS);
+    drain.then(() => {
+      clearTimeout(timer);
+      done();
+    });
+  });
+}
+
+async function snapshotLiveTranscriptForFallback(sessionName) {
+  try {
+    if (!liveTranscriptState || liveTranscriptState.sessionName !== sessionName) {
+      return null;
+    }
+    // Let the sidecar flush its final utterance before we read segments.
+    await waitForLiveTranscribeDrain();
+    if (!liveTranscriptState || liveTranscriptState.sessionName !== sessionName) {
+      return null;
+    }
+    // Only FINAL segments go into the snapshot (#207, Fix 3). Finalised
+    // segments don't replace the partial tails they supersede — a final is
+    // pushed and the next partial is pushed after it — so including partials
+    // would duplicate sentences in the fallback transcript. The non-final
+    // tail is a preview of speech that a final segment will (or already did)
+    // cover, so dropping it loses nothing but the duplication.
+    const text = (liveTranscriptState.segments || [])
+      .filter(s => s && s.isFinal && s.text)
+      .map(s => String(s.text).trim())
+      .filter(Boolean)
+      .join('\n\n')
+      .trim();
+    if (text.length < LIVE_TRANSCRIPT_FALLBACK_MIN_CHARS) {
+      return null;
+    }
+    // Write to the OS temp dir (cross-platform) with a unique name so
+    // overlapping recordings can't clobber each other's snapshot.
+    const fileName = `stenoai-live-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.txt`;
+    const filePath = path.join(os.tmpdir(), fileName);
+    fs.writeFileSync(filePath, text, 'utf-8');
+    sendDebugLog(`Captured live transcript fallback (${text.length} chars): ${filePath}`);
+    return filePath;
+  } catch (e) {
+    sendDebugLog(`Failed to snapshot live transcript fallback: ${e.message}`);
+    return null;
+  }
+}
+
+function addToProcessingQueue(audioFile, sessionName, notesFile, liveTranscriptFile) {
+  processingQueue.push({ audioFile, sessionName, notesFile, liveTranscriptFile });
   console.log(`📋 Added to processing queue: ${sessionName} (Queue size: ${processingQueue.length})`);
   processNextInQueue();
 }
@@ -6619,8 +6851,14 @@ ipcMain.handle('process-system-audio-recording', async (event, audioFilePath, se
     const notesFile = path.join(getBackendCwd(), '_internal', 'output', `${safeName}_notes.txt`);
     const notesPath = fs.existsSync(notesFile) ? notesFile : undefined;
 
+    // Snapshot the live transcript captured during this recording (#207) so the
+    // backend can fall back to it if the batch transcription comes back empty.
+    // Done here at stop time, before liveTranscriptState gets reset by the next
+    // recording.
+    const liveTranscriptFile = await snapshotLiveTranscriptForFallback(actualSessionName);
+
     // Use the existing processing queue to avoid concurrent Ollama/Whisper runs
-    addToProcessingQueue(audioFilePath, actualSessionName, notesPath);
+    addToProcessingQueue(audioFilePath, actualSessionName, notesPath, liveTranscriptFile);
 
     trackEvent('recording_stopped', { recording_mode: 'system_audio' });
     return { success: true, message: 'Added to processing queue' };

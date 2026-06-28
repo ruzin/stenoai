@@ -156,6 +156,7 @@ truth for elapsed time and paused state so remounts recover correctly.
 | `delete-meeting` | R→M invoke | yes | `stenoai.meetings.delete(meeting)` |
 | `reprocess-meeting` | R→M invoke | yes | `stenoai.meetings.reprocess(summaryFile, regenTitle, name)` |
 | `save-meeting-notes` | R→M invoke | yes | `stenoai.meetings.saveNotes(name, notes)` |
+| `export-transcript` | R→M invoke | yes | `stenoai.meetings.exportTranscript(defaultFilename, content)` |
 | `meetings-refreshed` | M→R | **drop** | — (orphan — see note) |
 | `summary-chunk` | M→R | yes | `stenoai.on.summaryChunk(cb)` |
 | `summary-title` | M→R | yes | `stenoai.on.summaryTitle(cb)` |
@@ -202,6 +203,16 @@ type UpdateMeetingResponse = Result<{ message: string; updatedData: Meeting }>;
 type DeleteMeetingResponse = Result<{ message: string }>;
 
 type SaveMeetingNotesResponse = Result<{ path: string }>;
+
+// `path` is the file the transcript bundle was written to. Cancelling the save
+// dialog resolves as { success: false, error: 'canceled' } (not a rejection),
+// so the renderer treats a cancel like any other non-success and shows nothing.
+// `'canceled'` is a NORMATIVE cross-process sentinel: the renderer matches it by
+// exact string to stay silent. Producers define it once in app/ipc-sentinels.js
+// (EXPORT_CANCELED, required by main.js + the mock IPC); the renderer mirrors it
+// as EXPORT_CANCELED_ERROR. This doc is the source of truth — change all three
+// together.
+type ExportTranscriptResponse = Result<{ path: string }>;
 
 // Main → renderer events emitted during reprocess / recording pipelines.
 interface SummaryChunkEvent  { chunk: string; sessionName: string }

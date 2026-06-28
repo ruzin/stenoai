@@ -123,6 +123,21 @@ class ConfigSummaryModelTests(unittest.TestCase):
             # Persisted so the migration doesn't re-run forever.
             self.assertEqual(json.loads(path.read_text())["model"], "gemma4:e2b-it-qat")
 
+    def test_renamed_model_migrates_to_qat_build(self):
+        # A user pinned to a renamed tag (gemma4:12b / gemma4:4b) is moved to
+        # the equivalent quantization-aware build, preserving their model choice
+        # rather than dropping them to the default.
+        for old, new in (("gemma4:12b", "gemma4:12b-it-qat"),
+                         ("gemma4:4b", "gemma4:e4b-it-qat")):
+            with self.subTest(old=old):
+                with tempfile.TemporaryDirectory() as tmp_dir:
+                    path = Path(tmp_dir) / "config.json"
+                    path.write_text(json.dumps({"model": old}))
+                    config = Config(config_path=path)
+                    self.assertEqual(config.get_model(), new)
+                    # Persisted so the migration doesn't re-run forever.
+                    self.assertEqual(json.loads(path.read_text())["model"], new)
+
     def test_custom_pulled_model_is_not_migrated(self):
         # set_model intentionally allows arbitrary user-pulled Ollama models
         # (not in SUPPORTED_MODELS). The migration must only touch the specific

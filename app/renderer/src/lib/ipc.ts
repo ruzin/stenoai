@@ -39,6 +39,9 @@ export interface Meeting {
   is_diarised?: boolean;
   diarised_text?: string | null;
   folders?: string[];
+  /** User notes as persisted + returned by the backend (`_parse_meeting_markdown` -> `user_notes`). */
+  user_notes?: string | null;
+  /** Renderer-side notes for the in-progress / draft recording (live + processing views). */
   notes?: string;
   reports?: Report[];
   active_report?: string;
@@ -697,6 +700,7 @@ export interface StenoaiBridge {
       Result<{ message: string }>
     >;
     saveNotes: RequestFn<[name: string, notes: string], SaveMeetingNotesResponse>;
+    exportTranscript: RequestFn<[defaultFilename: string, content: string], Result<{ path: string }>>;
     regenTitle: RequestFn<[summaryFile: string, name: string], Result<Record<string, never>>>;
     generateReport: RequestFn<[summaryFile: string, templateId: string], Result<{ message: string }>>;
     setActiveReport: RequestFn<[summaryFile: string, reportId: string], Result<Record<string, never>>>;

@@ -20,6 +20,35 @@
  * the T1 spec to drive UI sign-in and watch the provider flip.
  */
 
+const fs = require('fs');
+const { EXPORT_CANCELED } = require('./ipc-sentinels');
+
+// A deterministic meeting the transcript-export T1 spec navigates to. Seeded
+// only when STENOAI_E2E_SEED_MEETING=1 so the other T1 specs keep an empty Home.
+// Shape mirrors the renderer's Meeting (session_info + transcript/notes/etc.);
+// the fields here are exactly what buildTranscriptBundle reads plus the minimum
+// DetailContent renders without a backend.
+const SEED_MEETING = {
+  session_info: {
+    name: 'Epsilon Planning',
+    summary_file: 'epsilon_summary.json',
+    processed_at: '2026-06-19T12:00:00Z',
+    duration_seconds: 1500,
+    transcription_failed: false,
+  },
+  transcript: 'Alice: we ship Friday.\nBob: I will prep the release notes.',
+  is_diarised: false,
+  // The real backend (list-meetings -> _parse_meeting_markdown) returns the
+  // user's notes under `user_notes`, not `notes`; mirror that here so the spec
+  // exercises the same key buildTranscriptBundle reads for saved meetings.
+  user_notes: 'Remember to send the deck.',
+  participants: ['Alice', 'Bob'],
+  summary: '',
+  key_points: [],
+  action_items: [],
+  discussion_areas: [],
+};
+
 function install({ ipcMain }) {
   // In-memory stand-in for the org session + provider config that the real
   // handlers persist to disk. Mutated by the org-login / org-logout / set-ai
@@ -56,6 +85,46 @@ function install({ ipcMain }) {
       }
       state.provider = provider;
       return { success: true, ai_provider: provider };
+    },
+
+    // Seed meetings for the specs that need them, gated per env so the
+    // org/shared-notes specs keep an empty Home. STENOAI_E2E_SEED_MEETING (one
+    // known meeting) drives the transcript-export T1; STENOAI_E2E_SEED_MEETINGS
+    // (the recency-sorted trio) drives the command-palette T1. This handler
+    // lives in MOCKS, which shadows DEFAULTS, so it is the single source for the
+    // channel.
+    'list-meetings': async () => {
+      if (process.env.STENOAI_E2E_SEED_MEETING === '1') {
+        return { success: true, meetings: [SEED_MEETING] };
+      }
+      return { success: true, meetings: SEEDED_MEETINGS };
+    },
+
+    // The detail route loads via get-meeting (the lazy per-meeting fetch), not
+    // by filtering list-meetings — answer it with the same seeded meeting so the
+    // transcript-export detail route resolves and renders the transcript actions.
+    'get-meeting': async (_event, summaryFile) => {
+      if (process.env.STENOAI_E2E_SEED_MEETING === '1') {
+        return { success: true, meeting: SEED_MEETING };
+      }
+      const m = SEEDED_MEETINGS.find(
+        (x) => x.session_info && x.session_info.summary_file === summaryFile,
+      );
+      return m ? { success: true, meeting: m } : { success: false, error: 'meeting not found' };
+    },
+
+    // Mirror the real export-transcript handler's seam: with STENOAI_E2E_EXPORT_PATH
+    // set, write the renderer-built bundle there so a T1 spec can read back exactly
+    // what the Save action passed (the real handler is never installed under mock
+    // IPC). Without the seam there's no dialog here, so report a cancel.
+    'export-transcript': async (_event, _defaultFilename, content) => {
+      if (typeof content !== 'string' || content.length === 0) {
+        return { success: false, error: 'No transcript content to export.' };
+      }
+      const seamPath = process.env.STENOAI_E2E_EXPORT_PATH;
+      if (!seamPath) return { success: false, error: EXPORT_CANCELED };
+      fs.writeFileSync(seamPath, content, 'utf-8');
+      return { success: true, path: seamPath };
     },
 
     'org-status': async () => {
@@ -145,7 +214,6 @@ function install({ ipcMain }) {
         shared_notes_enabled: process.env.STENOAI_E2E_SHARED_NOTES !== '0',
       },
     },
-    'list-meetings': { success: true, meetings: SEEDED_MEETINGS },
     'list-folders': { success: true, folders: [] },
     'get-calendar-events': { success: true, events: [] },
     'parakeet-status': { success: true, model: '', installed: false },

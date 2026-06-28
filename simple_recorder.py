@@ -172,6 +172,53 @@ class MeetingPipeline:
 
         return "en"
 
+    def _transcript_file_path(self, audio_path: Path) -> Path:
+        """Canonical on-disk path for a meeting's transcript text file.
+
+        Single source of truth so the normal path and the live-transcript /
+        crash fallback always agree on the filename (#207).
+        """
+        return self.transcripts_dir / f"{audio_path.stem}_transcript.txt"
+
+    def _write_transcript_file(
+        self,
+        audio_path: Path,
+        transcript_body: str,
+        session_name: str,
+        configured_language: str,
+        detected_language: Optional[str] = None,
+        output_language: Optional[str] = None,
+    ) -> Path:
+        """Format + write the transcript .txt with the standard header.
+
+        Used by both the normal transcription path and the fallback paths so
+        the file format and name stay identical (#207). Returns the path.
+        """
+        from src.config import get_config
+        config = get_config()
+
+        if output_language is None:
+            output_language = self._resolve_output_language(configured_language, detected_language)
+        detected_language_name = (
+            config.get_language_name(detected_language) if detected_language else "Unknown"
+        )
+
+        transcript_path = self._transcript_file_path(audio_path)
+        transcript_content = f"""Session: {session_name}
+File: {audio_path.name}
+Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+Language setting: {config.get_language_name(configured_language)}
+Detected language: {detected_language_name}
+Summary output language: {config.get_language_name(output_language)}
+
+{'='*60}
+
+{transcript_body}
+"""
+        with open(transcript_path, 'w', encoding='utf-8') as f:
+            f.write(transcript_content)
+        return transcript_path
+
     @staticmethod
     def _load_user_notes(session_name: str, output_dir) -> Optional[str]:
         """Load user notes file saved by Electron during recording."""
@@ -300,25 +347,17 @@ class MeetingPipeline:
             diarised_text = transcript_result.get("diarised_text")
 
         output_language = self._resolve_output_language(configured_language, detected_language)
-        detected_language_name = config.get_language_name(detected_language) if detected_language else "Unknown"
 
         # Save transcript (use diarised text if available for the saved file)
-        transcript_path = self.transcripts_dir / f"{audio_path.stem}_transcript.txt"
         saved_transcript = diarised_text if diarised_text else transcript_text
-        transcript_content = f"""Session: {session_name}
-File: {audio_path.name}
-Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-Language setting: {config.get_language_name(configured_language)}
-Detected language: {detected_language_name}
-Summary output language: {config.get_language_name(output_language)}
-
-{'='*60}
-
-{saved_transcript}
-"""
-
-        with open(transcript_path, 'w') as f:
-            f.write(transcript_content)
+        transcript_path = self._write_transcript_file(
+            audio_path,
+            saved_transcript,
+            session_name,
+            configured_language,
+            detected_language=detected_language,
+            output_language=output_language,
+        )
 
         print(f"📄 Transcript saved: {transcript_path}")
 
@@ -829,11 +868,23 @@ def process(audio_file, name, notes):
     asyncio.run(run_process())
 
 
+# Detect a silence-only batch result exactly, kept in sync with the
+# transcriber that produces the sentinel. Mirrors the graceful-import pattern
+# above so a missing transcriber dependency doesn't break the CLI.
+try:
+    from src.transcriber import SILENCE_SENTINEL as _SILENCE_SENTINEL
+except ImportError:
+    _SILENCE_SENTINEL = "No speech detected in audio"
+
+
 @cli.command(name='process-streaming')
 @click.argument('audio_file', default='')
 @click.option('--name', '-n', default='Recording', help='Session name')
 @click.option('--notes', default=None, help='Path to user notes file')
-def process_streaming(audio_file, name, notes):
+@click.option('--live-transcript', 'live_transcript', default=None,
+              help='Path to the live transcript captured during recording, '
+                   'used as a fallback if batch transcription returns empty (#207)')
+def process_streaming(audio_file, name, notes, live_transcript):
     """Process audio with streaming summary output.
 
     Transcribes audio, then streams the summary as CHUNK: prefixed lines
@@ -853,6 +904,18 @@ def process_streaming(audio_file, name, notes):
                     logger.info(f"Loaded user notes ({len(notes_text)} chars)")
             except Exception as e:
                 logger.warning(f"Failed to read notes file: {e}")
+
+        # Read the live transcript fallback (#207). The renderer accumulates
+        # live segments during recording; Electron writes them to this file so
+        # we can rescue a meeting whose batch transcription came back empty.
+        live_transcript_text = None
+        if live_transcript:
+            try:
+                live_transcript_text = Path(live_transcript).read_text(encoding='utf-8').strip()
+                if live_transcript_text:
+                    logger.info(f"Loaded live transcript fallback ({len(live_transcript_text)} chars)")
+            except Exception as e:
+                logger.warning(f"Failed to read live transcript file: {e}")
 
         # Step 1: Transcribe. HEARTBEAT: lines are a liveness signal for the
         # Electron inactivity watchdog — without them a long transcription is
@@ -877,9 +940,72 @@ def process_streaming(audio_file, name, notes):
         finally:
             set_chunk_heartbeat(None)
 
+        # Live-transcript fallback (#207): rescue the meeting with the live
+        # transcript the user watched stream in, instead of discarding it as
+        # "No speech detected", but ONLY when the batch result is genuinely
+        # unusable:
+        #   - the batch transcription crashed (transcription_failed), or
+        #   - it came back as exactly the silence sentinel.
+        # A correct-but-short batch transcript (e.g. a 5-minute stand-up) must
+        # NOT be replaced — the old length threshold did exactly that (Fix 4).
+        # We only swap in the live text when the batch result is genuinely
+        # unusable (failed or silence sentinel). Any non-whitespace live content
+        # is better than a silent failure — even a brief session deserves rescue.
+        batch_text = transcript_data.get("transcript_text", "") or ""
+        batch_failed = bool(transcript_data.get("transcription_failed"))
+        batch_is_silence = batch_text.strip() == _SILENCE_SENTINEL
+        is_live_transcript = False
+        if (batch_failed or batch_is_silence) and live_transcript_text \
+                and live_transcript_text.strip():
+            logger.warning(
+                "Batch transcription %s; falling back to the live transcript "
+                "captured during recording (%d chars)",
+                "failed" if batch_failed else "returned only silence",
+                len(live_transcript_text),
+            )
+            is_live_transcript = True
+            # Always (re)write _transcript.txt with the live text via the shared
+            # formatter so the on-disk file matches the markdown/summary the user
+            # sees and uses the canonical filename/header (#207, review-2
+            # Finding 3). The silence path may already have written the sentinel
+            # (Fix 6); the crash path (transcription_failed) wrote NO transcript
+            # file at all and exposes no "transcript_file" key — the old code
+            # only overwrote a pre-existing file, so the crash fallback left the
+            # .txt missing entirely. Writing unconditionally fixes both.
+            fallback_audio_path = Path(audio_file)
+            existing_transcript_file = None
+            try:
+                written_path = recorder._write_transcript_file(
+                    fallback_audio_path,
+                    live_transcript_text,
+                    name,
+                    transcript_data.get("configured_language") or "auto",
+                    detected_language=transcript_data.get("detected_language"),
+                )
+                existing_transcript_file = str(written_path)
+                logger.info(
+                    "Wrote transcript file with live transcript: %s",
+                    existing_transcript_file,
+                )
+            except Exception as e:
+                logger.warning(
+                    "Failed to write transcript file with live text: %s", e
+                )
+            # Rebuild transcript_data so the rest of the pipeline (summary, save)
+            # uses the live transcript. Live transcripts are not channel-diarised.
+            transcript_data = {
+                "transcript_text": live_transcript_text,
+                "diarised_text": None,
+                "is_diarised": False,
+                "duration_seconds": transcript_data.get("duration_seconds"),
+                "detected_language": transcript_data.get("detected_language"),
+                "transcript_file": existing_transcript_file,
+            }
+
         # A transcription crash (e.g. an MLX OOM on a long system-audio
         # recording) is not silence — preserve the audio and save a marked,
         # reprocessable meeting instead of summarising a fake-empty one.
+        # (Only when there's no live transcript to fall back on.)
         if transcript_data.get("transcription_failed"):
             recorder._handle_transcription_failure(Path(audio_file), name, transcript_data, notes_text)
             return
@@ -970,6 +1096,10 @@ def process_streaming(audio_file, name, notes):
             'language': output_language,
             'is_diarised': transcript_data.get('is_diarised', False),
         }
+        # Mark live-sourced meetings (#207) so the UI and future code know this
+        # transcript came from the live capture, not a batch transcription.
+        if is_live_transcript:
+            md_meta['is_live_transcript'] = True
         md_lines = _render_frontmatter(md_meta)
         md_lines.append('')
         md_lines.append(streamed_md)
@@ -984,9 +1114,12 @@ def process_streaming(audio_file, name, notes):
             md_lines.append(notes_text)
         summary_path.write_text('\n'.join(md_lines), encoding='utf-8')
 
-        # Clean up audio
+        # Clean up audio. When we fell back to the live transcript the batch
+        # transcription was empty/failed, so KEEP the audio regardless of the
+        # keep_recordings setting — it's the user's only retry material if they
+        # want a proper batch transcript later (mirrors the failure path).
         from src.config import get_config
-        if not get_config().get_keep_recordings():
+        if not is_live_transcript and not get_config().get_keep_recordings():
             try:
                 audio_path.unlink()
             except Exception:
@@ -1904,6 +2037,11 @@ def _parse_meeting_markdown(md_path):
             session_info['audio_file'] = meta.get('audio_file')
         if meta.get('error'):
             session_info['error'] = meta.get('error')
+    # A live-sourced meeting (#207): the batch transcription was empty so this
+    # transcript came from the live capture. Surface the flag so the UI can
+    # tell the user no batch transcript exists.
+    if meta.get('is_live_transcript'):
+        session_info['is_live_transcript'] = True
 
     return {
         'session_info': session_info,
@@ -1990,7 +2128,9 @@ def list_meetings():
                         "action_items": data.get("action_items", []),
                         "has_transcript": bool(data.get("transcript")),
                         "is_diarised": data.get("is_diarised", False),
-                        "folders": data.get("folders", [])
+                        "diarised_text": data.get("diarised_text"),
+                        "folders": data.get("folders", []),
+                        "user_notes": data.get("user_notes"),
                     }
             meetings.append((sort_key, essential_meeting))
         except Exception as e:

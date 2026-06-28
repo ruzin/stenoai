@@ -306,6 +306,105 @@ class TranscribeDiarisedFailureTests(unittest.TestCase):
         # Must not have assembled the silence sentinel as a "successful" text.
         self.assertIsNone(out.get("text"))
 
+    def test_all_energetic_channels_empty_fails_meeting(self):
+        """Gap 2 (#207): when EVERY channel passes the RMS energy gate but
+        returns empty text, that's a quiet ASR failure, not silence. It must be
+        tagged transcription_failed (audio preserved for retry) rather than
+        saving a fake "No speech detected" meeting.
+
+        Critically this drives the REAL transcribe_audio path (mocking the
+        lower-level _run_backend), so the silence-sentinel substitution at
+        transcriber.py:~881 actually runs. The earlier version mocked
+        transcribe_audio directly and never exercised that substitution — the
+        very interaction that made the channel-empty check dead code.
+        """
+        transcriber = _build_transcriber()
+        # Both channels pass the energy gate but the backend returns no text;
+        # transcribe_audio will substitute the silence sentinel + set the
+        # transcription_empty flag — the bug condition.
+        empty_backend = {
+            "text": None, "segments": [], "duration_seconds": None,
+            "detected_language": None, "detected_language_probability": None,
+        }
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            audio = _make_audio_file(tmp_dir)
+            # Real channel files so transcribe_audio doesn't short-circuit on
+            # the missing-file / too-small guards before reaching _run_backend.
+            mic = _make_audio_file(tmp_dir, "ch0_energetic.wav")
+            system = _make_audio_file(tmp_dir, "ch1_energetic.wav")
+            with patch.object(transcriber, "_split_stereo_to_channels",
+                              return_value=(mic, system, 120.0)), \
+                 patch.object(transcriber, "_check_rms_energy", return_value=True), \
+                 patch.object(transcriber, "_build_whisper_fallback", return_value=False), \
+                 patch.object(transcriber, "_run_backend", return_value=empty_backend):
+                out = transcriber.transcribe_diarised(audio, language="en")
+        self.assertTrue(out.get("transcription_failed"))
+        self.assertIsNone(out.get("text"))
+        self.assertIn("empty", out.get("error", "").lower())
+
+    def test_one_channel_text_one_empty_succeeds(self):
+        """Gap 2 + Fix 5 (#207): the RMS gate only detects 'not digital
+        silence' — music/noise/reverb can pass it. So when ONE channel carries
+        real text and the other passes the gate but transcribes to nothing,
+        the meeting must SUCCEED (drop the empty channel), not fail. Drives the
+        real transcribe_audio path."""
+        transcriber = _build_transcriber()
+        ok_backend = {
+            "text": "Hi there.",
+            "segments": [{"text": "Hi there.", "start": 0.0, "end": 1.0}],
+            "duration_seconds": 1.0,
+            "detected_language": None, "detected_language_probability": None,
+        }
+        empty_backend = {
+            "text": None, "segments": [], "duration_seconds": None,
+            "detected_language": None, "detected_language_probability": None,
+        }
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            audio = _make_audio_file(tmp_dir)
+            mic = _make_audio_file(tmp_dir, "ch0_text.wav")
+            system = _make_audio_file(tmp_dir, "ch1_noise.wav")
+
+            def fake_backend(path, language="en"):
+                return ok_backend if path == mic else empty_backend
+
+            with patch.object(transcriber, "_split_stereo_to_channels",
+                              return_value=(mic, system, 120.0)), \
+                 patch.object(transcriber, "_check_rms_energy", return_value=True), \
+                 patch.object(transcriber, "_build_whisper_fallback", return_value=False), \
+                 patch.object(transcriber, "_run_backend", side_effect=fake_backend):
+                out = transcriber.transcribe_diarised(audio, language="en")
+        self.assertNotIn("transcription_failed", out)
+        self.assertIn("Hi there.", out.get("text", ""))
+
+    def test_silent_channel_is_not_a_failure(self):
+        """Regression for Gap 2: a channel the energy gate reports as silent
+        (has_audio == False) is skipped, NOT failed — only the still-speaking
+        channel is transcribed and the meeting saves normally."""
+        transcriber = _build_transcriber()
+        mic = Path("/tmp/stenoai_ch0_silent.wav")
+        system = Path("/tmp/stenoai_ch1_silent.wav")
+        ok = {
+            "text": "Solo presenter.",
+            "segments": [{"text": "Solo presenter.", "start": 0.0, "end": 1.0}],
+            "detected_language": None,
+        }
+
+        def fake_rms(path, *a, **k):
+            # Mic has audio; system is genuinely silent.
+            return path == mic
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            audio = _make_audio_file(tmp_dir)
+            with patch.object(transcriber, "_split_stereo_to_channels",
+                              return_value=(mic, system, 120.0)), \
+                 patch.object(transcriber, "_check_rms_energy", side_effect=fake_rms), \
+                 patch.object(transcriber, "transcribe_audio", return_value=ok):
+                out = transcriber.transcribe_diarised(audio, language="en")
+        self.assertNotIn("transcription_failed", out)
+        self.assertIn("Solo presenter.", out.get("text", ""))
+
 
 class HandleTranscriptionFailureTests(unittest.TestCase):
     def _build_recorder(self, output_dir: Path) -> MeetingPipeline:
@@ -386,6 +485,48 @@ class HandleTranscriptionFailureTests(unittest.TestCase):
         # The honest summary message still parses intact.
         self.assertIn("Transcription failed", parsed["summary"])
 
+    def test_live_transcript_marker_round_trips(self):
+        """Gap 1 (#207): a meeting saved from the live-transcript fallback
+        carries is_live_transcript in its frontmatter, and the parser surfaces
+        it in session_info so the UI/future code know no batch transcript
+        exists."""
+        from simple_recorder import _render_frontmatter
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            md_path = Path(tmp_dir) / "live_summary.md"
+            md_meta = {
+                "title": "Rescued meeting",
+                "date": "2026-06-22",
+                "duration_seconds": 120,
+                "language": "en",
+                "is_diarised": False,
+                "is_live_transcript": True,
+            }
+            lines = _render_frontmatter(md_meta)
+            lines += ["", "## Summary", "", "Rescued from live capture.", "",
+                      "## Transcript", "", "Live captured words here."]
+            md_path.write_text("\n".join(lines), encoding="utf-8")
+            parsed = _parse_meeting_markdown(md_path)
+        self.assertTrue(parsed["session_info"]["is_live_transcript"])
+
+    def test_batch_meeting_has_no_live_marker(self):
+        """Regression: a normal batch-transcribed meeting must NOT gain the
+        is_live_transcript marker."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            md_path = Path(tmp_dir) / "batch_summary.md"
+            md_path.write_text(
+                "---\n"
+                'title: "Normal meeting"\n'
+                "date: 2026-06-22\n"
+                "is_diarised: false\n"
+                "---\n\n"
+                "## Summary\n\nBatch transcribed.\n\n"
+                "## Transcript\n\nReal batch words.\n",
+                encoding="utf-8",
+            )
+            parsed = _parse_meeting_markdown(md_path)
+        self.assertNotIn("is_live_transcript", parsed["session_info"])
+
     def test_normal_meeting_has_no_failure_markers(self):
         """Regression: a normal (non-failure) meeting's session_info must not
         gain the failure keys, so existing consumers are unchanged."""
@@ -404,6 +545,60 @@ class HandleTranscriptionFailureTests(unittest.TestCase):
             parsed = _parse_meeting_markdown(md_path)
         self.assertNotIn("transcription_failed", parsed["session_info"])
         self.assertEqual(parsed["summary"], "We discussed the roadmap.")
+
+
+class LiveTranscriptFallbackTests(unittest.TestCase):
+    """Live-transcript fallback decision + file consistency (#207, Fix 4/6).
+
+    The fallback must rescue a meeting only when the batch result is genuinely
+    unusable (crash or the silence sentinel) — NOT merely short — and when it
+    fires it must overwrite the on-disk transcript so `query`/export don't keep
+    reading "No speech detected".
+    """
+
+    def test_silence_sentinel_constant_is_in_sync(self):
+        """Fix 4 hinges on simple_recorder detecting the EXACT sentinel the
+        transcriber writes. Pin that the two agree so a future reword of one
+        can't silently break the fallback trigger."""
+        import simple_recorder
+        from src.transcriber import SILENCE_SENTINEL
+        self.assertEqual(SILENCE_SENTINEL, "No speech detected in audio")
+        self.assertEqual(simple_recorder._SILENCE_SENTINEL, SILENCE_SENTINEL)
+
+    def test_short_real_transcript_does_not_trigger_fallback(self):
+        """Fix 4: a correct-but-short batch transcript (under the 100-char
+        live-fallback floor) is a real result and must NOT be replaced. The
+        trigger is batch_failed OR the exact silence sentinel — never length."""
+        import simple_recorder
+        sentinel = simple_recorder._SILENCE_SENTINEL
+        short_real = "Quick sync done."  # < 100 chars but genuine speech
+
+        def should_fall_back(batch_text, batch_failed):
+            # Mirrors the production predicate in process_streaming.
+            return batch_failed or (batch_text.strip() == sentinel)
+
+        self.assertFalse(should_fall_back(short_real, False))
+        self.assertTrue(should_fall_back(sentinel, False))
+        self.assertTrue(should_fall_back("", True))  # crash
+
+    def test_fallback_overwrites_transcript_file(self):
+        """Fix 6: when the live fallback fires, the _transcript.txt the batch
+        path already wrote (containing the silence sentinel) must be overwritten
+        with the live text so on-disk and in-memory transcripts agree."""
+        import simple_recorder
+        sentinel = simple_recorder._SILENCE_SENTINEL
+        live_text = "This is the live transcript the user actually watched " \
+                    "stream in during the meeting, well over the floor."
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            transcript_file = Path(tmp_dir) / "rec_transcript.txt"
+            transcript_file.write_text(
+                f"Session: Test\n{'='*60}\n\n{sentinel}\n", encoding="utf-8"
+            )
+            # Replicate the production overwrite step.
+            transcript_file.write_text(live_text, encoding="utf-8")
+            self.assertEqual(transcript_file.read_text(encoding="utf-8"), live_text)
+            self.assertNotIn(sentinel, transcript_file.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

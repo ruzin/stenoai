@@ -105,6 +105,13 @@ MIN_RMS_THRESHOLD = 0.0003
 # recording doesn't pull all 30 min of int16 samples into Python lists.
 RMS_MAX_WINDOWS = 60
 
+# Sentinel text substituted when transcription produces no usable output
+# (genuine silence or all-hallucination). Callers compare against this to
+# distinguish "really nothing was said" from a real (possibly short)
+# transcript — keep it in one place so the live-transcript fallback (#207)
+# can detect it exactly.
+SILENCE_SENTINEL = "No speech detected in audio"
+
 
 # Resolve a usable ffmpeg binary. Electron-spawned subprocesses don't inherit
 # the user's shell PATH (no /opt/homebrew/bin), so a bare `ffmpeg` string fails
@@ -880,7 +887,13 @@ class WhisperTranscriber:
 
             if not transcript:
                 logger.warning("Transcription returned empty text (all hallucinations or silent)")
-                result["text"] = "No speech detected in audio"
+                # Structural flag set BEFORE the sentinel substitution so callers
+                # (e.g. transcribe_diarised) can distinguish a genuinely empty
+                # result from one that legitimately produced the sentinel text.
+                # Checking result["text"] downstream is useless once we overwrite
+                # it with the truthy sentinel below (#207, Gap 2 dead-code fix).
+                result["transcription_empty"] = True
+                result["text"] = SILENCE_SENTINEL
 
             result.setdefault("detected_language", None)
             result.setdefault("detected_language_probability", None)
@@ -1052,8 +1065,18 @@ class WhisperTranscriber:
             detected_language = None
             detected_language_probability = None
             engine = None
+            # A hard crash on a channel (MLX OOM, decode abort) is preserved
+            # unconditionally — that's the original Gap 1 honest-failure path.
             channel_failed = False
             channel_error: Optional[str] = None
+            # Gap 2 (#207): a channel that PASSED the RMS energy gate but came
+            # back empty is a quiet ASR failure. But the RMS gate only detects
+            # "not digital silence" — music/noise/reverb can pass it too, so an
+            # empty energetic channel must NOT fail the whole meeting on its own.
+            # We only fail when NO channel produced usable text (decided below).
+            mic_empty_on_energy = False
+            system_empty_on_energy = False
+            empty_error: Optional[str] = None
 
             # Split channels are already 16 kHz mono + high-passed by the
             # split ffmpeg pass above — skip the mono pre-processing pass.
@@ -1063,13 +1086,24 @@ class WhisperTranscriber:
                 if mic_result and mic_result.get("transcription_failed"):
                     channel_failed = True
                     channel_error = channel_error or mic_result.get("error")
-                elif mic_result and mic_result.get("text"):
+                elif mic_result and not mic_result.get("transcription_empty") \
+                        and mic_result.get("text"):
                     mic_segments = mic_result.get("segments") or []
                     if not detected_language and mic_result.get("detected_language"):
                         detected_language = mic_result["detected_language"]
                         detected_language_probability = mic_result.get("detected_language_probability")
                     if not engine:
                         engine = mic_result.get("engine")
+                else:
+                    # Passed the RMS energy gate but produced no real text (the
+                    # text field, if any, is the silence sentinel — see the
+                    # transcription_empty flag set in transcribe_audio). Record
+                    # it, but don't fail yet: the other channel may carry text.
+                    mic_empty_on_energy = True
+                    empty_error = empty_error or "Mic channel had audio but transcription returned empty"
+                    logger.warning(
+                        "Mic channel passed the energy gate but produced no text"
+                    )
             else:
                 logger.info("Mic channel is silent, skipping")
 
@@ -1079,19 +1113,29 @@ class WhisperTranscriber:
                 if sys_result and sys_result.get("transcription_failed"):
                     channel_failed = True
                     channel_error = channel_error or sys_result.get("error")
-                elif sys_result and sys_result.get("text"):
+                elif sys_result and not sys_result.get("transcription_empty") \
+                        and sys_result.get("text"):
                     system_segments = sys_result.get("segments") or []
                     if not detected_language and sys_result.get("detected_language"):
                         detected_language = sys_result["detected_language"]
                         detected_language_probability = sys_result.get("detected_language_probability")
                     if not engine:
                         engine = sys_result.get("engine")
+                else:
+                    # Empty output on an energetic channel — record, don't fail
+                    # yet (see mic above).
+                    system_empty_on_energy = True
+                    empty_error = empty_error or "System channel had audio but transcription returned empty"
+                    logger.warning(
+                        "System channel passed the energy gate but produced no text"
+                    )
             else:
                 logger.info("System channel is silent, skipping")
 
-            # A crash on either channel is not silence. Bail before assembling a
-            # transcript so the caller preserves the audio and surfaces a real
-            # error instead of saving a partial/fake-empty meeting.
+            # A hard crash on either channel is not silence. Bail before
+            # assembling a transcript so the caller preserves the audio and
+            # surfaces a real error instead of saving a partial/fake-empty
+            # meeting.
             if channel_failed:
                 logger.error("Diarised transcription failed on a channel: %s", channel_error)
                 return {
@@ -1103,6 +1147,28 @@ class WhisperTranscriber:
                     "detected_language_probability": detected_language_probability,
                     "transcription_failed": True,
                     "error": channel_error or "transcription failed",
+                }
+
+            # Gap 2 (#207): only fail when NO channel produced usable text AND at
+            # least one energetic channel came back empty. If one channel carries
+            # real text and the other is just empty noise, the meeting is fine —
+            # the empty channel is dropped, not treated as a failure.
+            has_usable_text = bool(mic_segments) or bool(system_segments)
+            if not has_usable_text and (mic_empty_on_energy or system_empty_on_energy):
+                logger.error(
+                    "Diarised transcription: every energetic channel returned "
+                    "empty text — treating as a failure (audio preserved): %s",
+                    empty_error,
+                )
+                return {
+                    "text": None,
+                    "diarised_text": None,
+                    "is_diarised": False,
+                    "duration_seconds": duration,
+                    "detected_language": detected_language,
+                    "detected_language_probability": detected_language_probability,
+                    "transcription_failed": True,
+                    "error": empty_error or "transcription returned empty",
                 }
 
             # Speaker-bleed correction runs in two passes:
@@ -1157,7 +1223,7 @@ class WhisperTranscriber:
                     turns.append((speaker, [text]))
 
             plain_parts = [' '.join(parts) for _speaker, parts in turns]
-            plain_text = "\n\n".join(plain_parts) if plain_parts else "No speech detected in audio"
+            plain_text = "\n\n".join(plain_parts) if plain_parts else SILENCE_SENTINEL
 
             is_diarised = bool(mic_segments) and bool(system_segments)
             if is_diarised:
