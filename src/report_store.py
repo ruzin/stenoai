@@ -26,8 +26,14 @@ def load_sidecar(meeting_path) -> dict:
         try:
             data = json.loads(sp.read_text(encoding="utf-8"))
             if isinstance(data, dict):
-                data.setdefault("reports", [])
-                data.setdefault("active_report", None)
+                # Normalize TYPES, not just presence: a hand-edited or
+                # partially-written sidecar could carry a non-list `reports` or a
+                # non-string `active_report`, which would break iteration/append
+                # downstream. setdefault only fills missing keys, so coerce here.
+                reports = data.get("reports")
+                data["reports"] = reports if isinstance(reports, list) else []
+                active = data.get("active_report")
+                data["active_report"] = active if isinstance(active, str) else None
                 return data
         except Exception:
             pass

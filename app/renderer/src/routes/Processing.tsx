@@ -111,6 +111,11 @@ export function Processing() {
         }
       }),
       ipc().on.processingProgress((e) => {
+        // This screen shows the fresh-recording queue job, which emits bare
+        // {line} progress (no summaryFile). A concurrent reprocess/report of a
+        // DIFFERENT meeting emits summaryFile-scoped progress — ignore those so
+        // another meeting's "Summarizing part N" can't hijack this screen's stage.
+        if (e.summaryFile) return;
         const raw = e.line.replace(/^PROGRESS:summarize:/, '');
         if (raw === 'reducing') {
           setChunkProgress('Merging summaries…');

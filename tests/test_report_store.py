@@ -48,6 +48,20 @@ class LoadSaveSidecarTests(unittest.TestCase):
             self.assertEqual(S.load_sidecar(mp)["active_report"], "r1")
             self.assertTrue((Path(t) / "m_reports.json").exists())
 
+    def test_malformed_types_are_normalized(self):
+        # A hand-edited / partially-written sidecar with wrong-typed keys must
+        # not propagate: reports coerces to a list, active_report to None,
+        # so downstream iteration/append can't blow up.
+        with tempfile.TemporaryDirectory() as t:
+            mp = Path(t) / "m_summary.md"
+            (Path(t) / "m_reports.json").write_text(
+                json.dumps({"reports": "oops", "active_report": {"bad": 1}}),
+                encoding="utf-8",
+            )
+            sc = S.load_sidecar(mp)
+            self.assertEqual(sc["reports"], [])
+            self.assertIsNone(sc["active_report"])
+
 
 class ReadMeetingTests(unittest.TestCase):
     def test_reads_md_transcript_notes_summary(self):
