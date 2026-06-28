@@ -80,6 +80,7 @@ const http = require('http');
 const os = require('os');
 const { URL, URLSearchParams } = require('url');
 const crypto = require('crypto');
+const { EXPORT_CANCELED } = require('./ipc-sentinels');
 const { PostHog } = require('posthog-node');
 const { initMain } = require('electron-audio-loopback');
 const { autoUpdater } = require('electron-updater');
@@ -2324,6 +2325,67 @@ ipcMain.handle('save-meeting-notes', async (event, sessionName, notes) => {
   } catch (error) {
     console.error('Failed to save meeting notes:', error);
     return { success: false, error: error.message };
+  }
+});
+
+// Transcript export bridge. The renderer builds the Markdown bundle and hands us
+// the finished string; we own only the file write. STENOAI_E2E_EXPORT_PATH bypasses
+// the native dialog so the Playwright T2 spec can drive this hermetically (same
+// isolation philosophy as STENOAI_USER_DATA_DIR).
+ipcMain.handle('export-transcript', async (event, defaultFilename, content) => {
+  try {
+    if (typeof content !== 'string' || content.length === 0) {
+      return { success: false, error: 'No transcript content to export.' };
+    }
+
+    // Test-only seam: only honor it under e2e, so a stray env var in a real
+    // launch can't silently redirect a user's export to an arbitrary path.
+    const seamPath = IS_E2E ? process.env.STENOAI_E2E_EXPORT_PATH : undefined;
+    let targetPath = seamPath;
+
+    if (!targetPath) {
+      // The renderer supplies a suggested name only; reduce it to a bare
+      // filename so a malformed value can't steer defaultPath with an absolute
+      // path or traversal components. The user still confirms via the dialog.
+      const suggested =
+        typeof defaultFilename === 'string' && defaultFilename.trim()
+          ? path.basename(defaultFilename).slice(0, 200)
+          : 'transcript.md';
+      const result = await dialog.showSaveDialog(mainWindow, {
+        defaultPath: suggested,
+        filters: [
+          { name: 'Markdown', extensions: ['md'] },
+          { name: 'Text', extensions: ['txt'] },
+        ],
+      });
+      if (result.canceled || !result.filePath) {
+        return { success: false, error: EXPORT_CANCELED };
+      }
+      targetPath = result.filePath;
+    }
+
+    // Atomic write: write to a temp file in the SAME directory, then rename it
+    // into place. A direct writeFile() that fails mid-way (disk full, I/O error)
+    // truncates and corrupts a pre-existing file at targetPath; tmp+rename leaves
+    // the original untouched on failure. Mirrors the chat-sessions persistence
+    // pattern (~line 2056). Async so a large transcript can't block the UI thread.
+    const dir = path.dirname(targetPath);
+    const base = path.basename(targetPath);
+    const tmpPath = path.join(dir, `.${base}.${require('crypto').randomBytes(6).toString('hex')}.tmp`);
+    try {
+      await fs.promises.writeFile(tmpPath, content, 'utf-8');
+      // Node's fs.rename maps to MoveFileExW(MOVEFILE_REPLACE_EXISTING) on
+      // Windows and rename(2) on Unix — both atomically replace an existing
+      // destination on the same volume, so no separate unlink is needed.
+      await fs.promises.rename(tmpPath, targetPath);
+    } catch (writeErr) {
+      // Best-effort cleanup so a failed export doesn't leave a stray temp file.
+      try { await fs.promises.unlink(tmpPath); } catch (_) {}
+      throw writeErr;
+    }
+    return { success: true, path: targetPath };
+  } catch (err) {
+    return { success: false, error: String(err && err.message ? err.message : err) };
   }
 });
 

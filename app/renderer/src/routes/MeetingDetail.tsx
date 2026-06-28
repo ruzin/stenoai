@@ -6,6 +6,8 @@ import {
   Clock,
   CloudOff,
   Copy,
+  Download,
+  FileText,
   Folder as FolderIcon,
   Globe,
   MoreHorizontal,
@@ -57,6 +59,7 @@ import {
 } from '@/hooks/useFolders';
 import { useActiveMeeting } from '@/lib/askBarContext';
 import { ipc, type Meeting } from '@/lib/ipc';
+import { buildTranscriptBundle, defaultExportFilename } from '@/lib/transcriptBundle';
 import { unwrap } from '@/lib/result';
 import { cn } from '@/lib/utils';
 import { navigate } from '@/lib/router';
@@ -67,6 +70,14 @@ import {
 } from '@/lib/meetingDetailState';
 
 const LAST_OPENED_KEY = 'steno-last-opened-meeting';
+
+// Cross-process sentinel: the export-transcript handler returns this exact error
+// when the user dismisses the save dialog, which we treat as a silent no-op
+// rather than a failure. Must match the producers' value (app/ipc-sentinels.js,
+// mirrored in the mock IPC) and app/docs/ipc-contract.md — the renderer is bundled
+// separately and can't require that CJS module, so the contract doc is the source
+// of truth that keeps them aligned.
+const EXPORT_CANCELED_ERROR = 'canceled';
 
 interface MeetingDetailProps {
   summaryFile: string;
@@ -283,6 +294,47 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
     };
   }, [info.name, summaryFile, qc]);
 
+  const [copiedTranscript, setCopiedTranscript] = React.useState(false);
+  const [exportError, setExportError] = React.useState<string | null>(null);
+  // Built once per meeting — the transcript can be large, and it's read on every
+  // render for the buttons' disabled state as well as in both handlers.
+  const transcriptBundle = React.useMemo(() => buildTranscriptBundle(meeting), [meeting]);
+
+  // Await the write and only flip to "Copied" once it actually succeeds — a
+  // rejected clipboard (permission denied, no focus) must not show a false
+  // success. The transcript bundle is large and the only thing a user pastes
+  // into an LLM, so a silent miscopy is worse here than for the small notes copy.
+  const copyTranscriptForAi = async () => {
+    if (!transcriptBundle) return;
+    setExportError(null);
+    try {
+      await navigator.clipboard.writeText(transcriptBundle);
+      setCopiedTranscript(true);
+      setTimeout(() => setCopiedTranscript(false), 1500);
+    } catch (error) {
+      setExportError(`Couldn't copy transcript: ${getErrorMessage(error)}`);
+    }
+  };
+
+  // Save writes a file, which can genuinely fail — so unlike the copy paths we
+  // surface a real failure. A user-cancelled dialog is not an error (the handler
+  // returns error: EXPORT_CANCELED_ERROR) and stays silent.
+  const saveTranscript = async () => {
+    if (!transcriptBundle) return;
+    setExportError(null);
+    try {
+      const res = await ipc().meetings.exportTranscript(
+        defaultExportFilename(meeting),
+        transcriptBundle,
+      );
+      if (!res.success && res.error !== EXPORT_CANCELED_ERROR) {
+        setExportError(`Couldn't save transcript: ${res.error || 'unknown error'}`);
+      }
+    } catch (error) {
+      setExportError(`Couldn't save transcript: ${getErrorMessage(error)}`);
+    }
+  };
+
   const copyNotes = () => {
     const lines: string[] = [info.name];
     const meta = [formatDetailDate(info), formatDuration(info.duration_seconds)]
@@ -354,6 +406,20 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
               </TooltipTrigger>
               <TooltipContent side="bottom">{copied ? 'Copied!' : 'Copy notes'}</TooltipContent>
             </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <ActionIconButton
+                  label={copiedTranscript ? 'Copied' : 'Copy transcript'}
+                  onClick={() => void copyTranscriptForAi()}
+                  disabled={!transcriptBundle}
+                >
+                  {copiedTranscript ? <Check className="size-[13px]" /> : <FileText className="size-[13px]" />}
+                </ActionIconButton>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                {copiedTranscript ? 'Copied!' : 'Copy transcript'}
+              </TooltipContent>
+            </Tooltip>
             {/* Regenerate re-runs summarisation on the existing transcript.
                 A transcription-failure note has no transcript, so reprocess
                 would exit non-zero and strand the UI on a spinner — hide it
@@ -412,6 +478,16 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
                   <FolderIcon className="size-[13px] shrink-0" style={{ color: 'var(--fg-2)' }} />
                   View containing folder
                 </button>
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-sm transition-colors hover:bg-[color:var(--surface-hover)] disabled:opacity-50"
+                  style={{ color: 'var(--fg-1)' }}
+                  onClick={() => void saveTranscript()}
+                  disabled={!transcriptBundle}
+                >
+                  <Download className="size-[13px] shrink-0" style={{ color: 'var(--fg-2)' }} />
+                  Save transcript as .md…
+                </button>
                 {orgSession.data?.signedIn && (
                   isShared ? (
                     <button
@@ -460,6 +536,12 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
             </Popover>
           </div>
         </div>
+
+        {exportError && (
+          <p role="alert" className="text-[12.5px]" style={{ color: 'var(--danger)' }}>
+            {exportError}
+          </p>
+        )}
 
         <h1
           data-testid="meeting-detail-title"

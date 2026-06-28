@@ -143,6 +143,8 @@ const stenoai = {
     reprocess: (summaryFile, regenTitle, name) => invoke('reprocess-meeting', summaryFile, regenTitle, name),
     regenTitle: (summaryFile, name) => invoke('regen-meeting-title', summaryFile, name),
     saveNotes: (name, notes) => invoke('save-meeting-notes', name, notes),
+    exportTranscript: (defaultFilename, content) =>
+      invoke('export-transcript', defaultFilename, content),
   },
 
   query: {
