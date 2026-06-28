@@ -143,6 +143,9 @@ const stenoai = {
     reprocess: (summaryFile, regenTitle, name) => invoke('reprocess-meeting', summaryFile, regenTitle, name),
     regenTitle: (summaryFile, name) => invoke('regen-meeting-title', summaryFile, name),
     saveNotes: (name, notes) => invoke('save-meeting-notes', name, notes),
+    generateReport: (summaryFile, templateId) => invoke('generate-report-meeting', summaryFile, templateId),
+    setActiveReport: (summaryFile, reportId) => invoke('set-active-report', summaryFile, reportId),
+    deleteReport: (summaryFile, reportId) => invoke('delete-report', summaryFile, reportId),
     exportTranscript: (defaultFilename, content) =>
       invoke('export-transcript', defaultFilename, content),
   },
@@ -168,6 +171,14 @@ const stenoai = {
     reorder: (ids) => invoke('reorder-folders', ids),
     addMeeting: (summaryFile, folderId) => invoke('add-meeting-to-folder', summaryFile, folderId),
     removeMeeting: (summaryFile, folderId) => invoke('remove-meeting-from-folder', summaryFile, folderId),
+  },
+
+  templates: {
+    list: () => invoke('list-templates'),
+    save: (template) => invoke('save-template', template),
+    remove: (id) => invoke('delete-template', id),
+    setDefault: (id) => invoke('set-default-template', id),
+    reset: (id) => invoke('reset-template', id),
   },
 
   models: {

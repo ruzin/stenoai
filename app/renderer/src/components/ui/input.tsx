@@ -97,8 +97,12 @@ export const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
         rows={rows}
         onInput={handleInput}
         className={cn(
-          inputVariants({ variant, size: 'default', className }),
-          'min-h-[36px] resize-none py-2',
+          // size 'default' brings horizontal padding; drop its fixed h-9 with
+          // h-auto so `rows` (and any caller min-h) drive the height instead of
+          // clamping the textarea to a single line.
+          inputVariants({ variant, size: 'default' }),
+          'h-auto min-h-[36px] resize-none py-2',
+          className,
         )}
         {...props}
       />

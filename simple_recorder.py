@@ -784,6 +784,49 @@ Transcript:
         }
 
 
+def generate_default_template_report(summary_path, transcript, notes, language,
+                                     duration_minutes, config, summarizer):
+    """Best-effort: if the configured default template is not 'standard', generate
+    its report into the meeting's sidecar and make it active. Additive — the
+    Standard note is untouched. Never raises (a new recording must not fail because
+    of the extra report)."""
+    try:
+        from src import reports as _reports
+        from src import report_store as _store
+        tid = config.get_default_template_id()
+        if not tid or tid == "standard":
+            return None
+        tmpl = config.get_template(tid)
+        if not tmpl or not (tmpl.get("prompt") or "").strip():
+            return None
+        report_language = tmpl["language"] if tmpl.get("language") and tmpl["language"] != "auto" else language
+        # This generation produces NO CHUNK:/PROGRESS: output, so the main-process
+        # inactivity watchdog would otherwise fire on a slow model and FAIL the
+        # recording AFTER the Standard note was already saved. Heartbeat keeps it
+        # alive; a distinct label avoids polluting the parsed summary stream.
+        heartbeat = _start_summary_heartbeat(label="default-report")
+        try:
+            chunks = []
+            for chunk in summarizer.summarize_transcript_streaming(
+                transcript, duration_minutes, report_language, notes,
+                template_prompt=tmpl["prompt"],
+            ):
+                chunks.append(chunk)
+        finally:
+            heartbeat.set()
+        content = "".join(chunks).strip()
+        if not content:
+            return None
+        sidecar = _store.load_sidecar(summary_path)
+        report = _reports.make_report(tid, tmpl["name"], summarizer.model_name, content)
+        _reports.append_report(sidecar, report)
+        _store.save_sidecar(summary_path, sidecar)
+        return report
+    except Exception as e:
+        logger.warning(f"Default-template report generation skipped: {e}")
+        return None
+
+
 # CLI Commands for Electron
 @click.group()
 def cli():
@@ -1083,6 +1126,14 @@ def process_streaming(audio_file, name, notes, live_transcript):
                 pass
 
         print(f"SAVED:{summary_path}", flush=True)
+
+        # B3: if a non-Standard default template is configured, additionally
+        # generate its report into the sidecar (best-effort; the Standard note
+        # is already saved above).
+        generate_default_template_report(
+            summary_path, text_for_summary, notes_text, output_language,
+            duration_minutes, config, recorder.summarizer,
+        )
 
     asyncio.run(run())
 
@@ -2189,8 +2240,6 @@ def reprocess(summary_file, regenerate_title):
 
         streamed_md = ''.join(streamed_chunks)
 
-        print("STREAM_COMPLETE", flush=True)
-
         # Regenerate title if requested
         if regenerate_title:
             try:
@@ -2207,6 +2256,27 @@ def reprocess(summary_file, regenerate_title):
 
         # Add reprocess timestamp
         existing_data["session_info"]["reprocessed_at"] = datetime.now().isoformat()
+
+        # #249: snapshot the prior Standard note as a switchable backup BEFORE we
+        # overwrite the note file, so a regenerate never loses the previous
+        # summary. read_meeting + the sidecar are format-agnostic, so this runs
+        # once for BOTH .md and .json meetings (above the format branch below).
+        # Only snapshot an existing file — a brand-new meeting has nothing to
+        # back up.
+        if summary_path.exists():
+            from src import report_store, reports as _reports
+            _backup_md = report_store.read_meeting(summary_path)["summary_markdown"]
+            if _backup_md.strip():
+                _stamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+                _sidecar = report_store.load_sidecar(summary_path)
+                _reports.append_report(_sidecar, _reports.make_report(
+                    "standard-backup", f"Standard · {_stamp}",
+                    existing_data.get("session_info", {}).get("model")
+                    or recorder.summarizer.model_name, _backup_md))
+                # append_report sets active_report to the backup; the live note
+                # should stay the default view after regenerate, so clear it:
+                _sidecar["active_report"] = None
+                report_store.save_sidecar(summary_path, _sidecar)
 
         # Save updated summary
         if summary_path.suffix == '.md':
@@ -2256,11 +2326,153 @@ def reprocess(summary_file, regenerate_title):
             with open(summary_path, 'w') as f:
                 json.dump(existing_data, f, indent=2)
 
+        # Signal completion only AFTER the note file is fully written. The
+        # renderer reads the note the instant it sees STREAM_COMPLETE, so
+        # emitting it before the write above is a write-after-complete race
+        # (the #249 backup widened the window). It surfaced as a stale read on
+        # Windows CI — map-reduce-chunking.t2 saw the pre-reprocess summary —
+        # while macOS happened to win the race. Mirrors process_streaming's
+        # write-before-complete intent.
+        print("STREAM_COMPLETE", flush=True)
+
         print(f"Summary reprocessed successfully: {summary_path}")
 
     except Exception as e:
         print(f"ERROR: Failed to reprocess summary: {e}")
         sys.exit(1)
+
+
+@cli.command(name='set-active-report')
+@click.argument('summary_file')
+@click.argument('report_id')
+def set_active_report(summary_file, report_id):
+    """Persist which report version is shown (report_id 'standard' clears it)."""
+    from src import report_store, reports as _reports
+    if not Path(summary_file).exists():
+        print(json.dumps({"success": False, "error": "Summary file not found"}))
+        sys.exit(1)
+    sidecar = report_store.load_sidecar(summary_file)
+    ok = _reports.set_active(sidecar, report_id)
+    if ok:
+        report_store.save_sidecar(summary_file, sidecar)
+    print(json.dumps({"success": ok} if ok else {"success": False, "error": "Unknown report"}))
+    if not ok:
+        sys.exit(1)
+
+
+@cli.command(name='delete-report')
+@click.argument('summary_file')
+@click.argument('report_id')
+def delete_report(summary_file, report_id):
+    """Delete a saved report version from a meeting."""
+    from src import report_store, reports as _reports
+    if not Path(summary_file).exists():
+        print(json.dumps({"success": False, "error": "Summary file not found"}))
+        sys.exit(1)
+    sidecar = report_store.load_sidecar(summary_file)
+    ok = _reports.remove_report(sidecar, report_id)
+    if ok:
+        report_store.save_sidecar(summary_file, sidecar)
+    print(json.dumps({"success": ok} if ok else {"success": False, "error": "Unknown report"}))
+    if not ok:
+        sys.exit(1)
+
+
+@cli.command(name='generate-report')
+@click.argument('summary_file', required=True)
+@click.argument('template_id', required=True)
+def generate_report(summary_file, template_id):
+    """Generate a template-based report and write it to the meeting sidecar."""
+    import base64
+    from src import report_store, reports as _rpts
+    from src.config import get_config
+
+    recorder = MeetingPipeline()
+    summary_path = Path(summary_file)
+
+    if not summary_path.exists():
+        print(f"ERROR: Summary file not found: {summary_file}")
+        sys.exit(1)
+
+    try:
+        meeting = report_store.read_meeting(summary_path)
+    except Exception as e:
+        print(f"ERROR: Failed to load summary file: {e}")
+        sys.exit(1)
+
+    # Unknown template → surface as a stream error so the IPC handler (which only
+    # watches the streaming protocol) reports failure instead of silent success.
+    config = get_config()
+    tmpl = config.get_template(template_id)
+    if tmpl is None:
+        print("STREAM_ERROR:Unknown template", flush=True)
+        sys.exit(1)
+
+    transcript = meeting["transcript"]
+    if not transcript:
+        print("ERROR: No transcript found in summary file")
+        sys.exit(1)
+
+    duration_minutes = meeting["duration_minutes"] or 10
+    notes_text = meeting["notes"]
+
+    # Resolve output language: template language takes precedence over "auto"
+    if tmpl.get("language") and tmpl["language"] != "auto":
+        output_language = tmpl["language"]
+    else:
+        output_language = meeting["language"]
+        if not output_language:
+            output_language = recorder._resolve_output_language(
+                config.get_language(), None
+            )
+
+    if recorder.summarizer is None:
+        from src.summarizer import OllamaSummarizer
+        recorder.summarizer = OllamaSummarizer()
+
+    print("Generating report...", flush=True)
+    streamed_chunks = []
+    summary_heartbeat = _start_summary_heartbeat()
+    _stream_error = None
+    try:
+        for chunk in recorder.summarizer.summarize_transcript_streaming(
+            transcript, duration_minutes, output_language, notes_text,
+            progress_callback=_emit_progress,
+            template_prompt=tmpl["prompt"],
+        ):
+            summary_heartbeat.set()
+            encoded = base64.b64encode(chunk.encode('utf-8')).decode('ascii')
+            sys.stdout.write(f"CHUNK:{encoded}\n")
+            sys.stdout.flush()
+            streamed_chunks.append(chunk)
+    except Exception as e:
+        _stream_error = e
+    finally:
+        summary_heartbeat.set()
+
+    if _stream_error is not None:
+        logger.error(f"Report generation failed: {_stream_error}")
+        err_msg = str(_stream_error).replace('\n', ' ').replace('\r', ' ')
+        print(f"STREAM_ERROR:{err_msg}", flush=True)
+        sys.exit(1)
+
+    streamed_md = ''.join(streamed_chunks)
+
+    # Do NOT persist an empty report — surface a stream error instead.
+    if not streamed_md.strip():
+        print("STREAM_ERROR:Model returned an empty report", flush=True)
+        sys.exit(1)
+
+    # Write the sidecar BEFORE emitting STREAM_COMPLETE so the renderer's
+    # refetch (triggered by the completion event) never reads stale data.
+    sidecar = report_store.load_sidecar(summary_path)
+    report = _rpts.make_report(
+        template_id, tmpl["name"], recorder.summarizer.model_name, streamed_md
+    )
+    _rpts.append_report(sidecar, report)
+    report_store.save_sidecar(summary_path, sidecar)
+    print("STREAM_COMPLETE", flush=True)
+    print(f"SAVED:{report_store.sidecar_path(summary_path)}")
 
 
 @cli.command('regen-title')
@@ -3029,6 +3241,69 @@ def set_model(model_name):
         # Exit non-zero so callers (e.g. the setup-ollama-and-model reuse path in
         # main.js) can't read a config-write failure as success — the model was
         # NOT persisted as active. sys.exit (not bare exit) for the PyInstaller bundle.
+        sys.exit(1)
+
+
+@cli.command(name='list-templates')
+def list_templates():
+    """List all report templates (built-in + custom) and the default id."""
+    from src.config import get_config
+    config = get_config()
+    print(json.dumps({
+        "templates": config.get_templates(),
+        "default_template_id": config.get_default_template_id(),
+    }))
+
+
+@cli.command(name='save-template')
+@click.argument('template_json')
+def save_template(template_json):
+    """Create or update a template from a JSON object."""
+    from src.config import get_config
+    try:
+        payload = json.loads(template_json)
+    except json.JSONDecodeError as e:
+        print(json.dumps({"success": False, "error": f"Invalid JSON: {e}"}))
+        sys.exit(1)
+    ok, err, saved = get_config().save_template(payload)
+    # Exit 0 regardless: the JSON on stdout IS the result. The IPC handler parses
+    # it directly; non-zero exit would cause runPythonScript to reject and throw
+    # away the structured error message (returning raw stderr instead).
+    print(json.dumps({"success": ok, "template": saved} if ok
+                     else {"success": False, "error": err}))
+
+
+@cli.command(name='delete-template')
+@click.argument('template_id')
+def delete_template(template_id):
+    """Delete a custom template by id."""
+    from src.config import get_config
+    ok = get_config().delete_template(template_id)
+    print(json.dumps({"success": ok}))
+    if not ok:
+        sys.exit(1)
+
+
+@cli.command(name='set-default-template')
+@click.argument('template_id')
+def set_default_template(template_id):
+    """Set the default template used for auto-generation."""
+    from src.config import get_config
+    ok = get_config().set_default_template(template_id)
+    print(json.dumps({"success": ok} if ok
+                     else {"success": False, "error": "Failed to save config"}))
+    if not ok:
+        sys.exit(1)
+
+
+@cli.command(name='reset-template')
+@click.argument('template_id')
+def reset_template(template_id):
+    """Reset a built-in template to its shipped default (drops the override)."""
+    from src.config import get_config
+    ok = get_config().reset_template(template_id)
+    print(json.dumps({"success": ok}))
+    if not ok:
         sys.exit(1)
 
 

@@ -1649,6 +1649,37 @@ ipcMain.handle('list-meetings', async () => {
 // meetings without a Python round-trip. Returns the FULL data (transcript
 // included) — the size-stripping that list-meetings does is intentionally
 // not applied here because the detail page needs the transcript.
+async function readReportsSidecar(meetingPath, allowedOutputDirs) {
+  // Derive sidecar path: <stem>_summary.(md|json) → <stem>_reports.json
+  const ext = path.extname(meetingPath); // '.md' or '.json'
+  const base = path.basename(meetingPath, ext); // e.g. '20240101_120000_summary'
+  const dir = path.dirname(meetingPath);
+  // Strip trailing '_summary' if present (handles both naming conventions)
+  const stem = base.endsWith('_summary') ? base.slice(0, -'_summary'.length) : base;
+  const sidecarPath = path.join(dir, `${stem}_reports.json`);
+  try {
+    // Path containment (mirrors get-meeting): the derived '_reports.json' is
+    // read directly, so a symlinked sidecar could otherwise escape the allowed
+    // output tree. Resolve its REAL path and require it to live under one of the
+    // same allowed output dirs the meeting passed. realpath needs the file to
+    // exist; a missing sidecar -> caught below -> empty result.
+    const realSidecar = await fs.promises.realpath(path.resolve(sidecarPath));
+    const allowed = Array.isArray(allowedOutputDirs)
+      && allowedOutputDirs.some(b => b && realSidecar.startsWith(b));
+    if (!allowed) {
+      return { reports: [], active_report: null };
+    }
+    const raw = await fs.promises.readFile(realSidecar, 'utf-8');
+    const data = JSON.parse(raw);
+    return {
+      reports: Array.isArray(data.reports) ? data.reports : [],
+      active_report: data.active_report ?? null,
+    };
+  } catch {
+    return { reports: [], active_report: null };
+  }
+}
+
 function parseMeetingMarkdown(content, mdPath) {
   // Split frontmatter
   const meta = {};
@@ -1810,9 +1841,13 @@ ipcMain.handle('get-meeting', async (_event, summaryFile) => {
       // pages route through here. Unlike the list payload, the detail page
       // needs the full data INCLUDING the transcript (for the AskBar /
       // TranscriptPanel), so we return everything parseMeetingMarkdown yields.
-      return { success: true, meeting: parseMeetingMarkdown(content, realResolved) };
+      const mdMeeting = parseMeetingMarkdown(content, realResolved);
+      const mdSidecar = await readReportsSidecar(realResolved, allowedOutputDirs);
+      return { success: true, meeting: { ...mdMeeting, reports: mdSidecar.reports, active_report: mdSidecar.active_report } };
     }
-    return { success: true, meeting: JSON.parse(content) };
+    const jsonMeeting = JSON.parse(content);
+    const jsonSidecar = await readReportsSidecar(realResolved, allowedOutputDirs);
+    return { success: true, meeting: { ...jsonMeeting, reports: jsonSidecar.reports, active_report: jsonSidecar.active_report } };
   } catch (error) {
     return { success: false, error: error.message };
   }
@@ -1877,7 +1912,7 @@ ipcMain.handle('reprocess-meeting', async (event, summaryFile, regenerateTitle, 
               const encoded = line.slice(6);
               const chunk = Buffer.from(encoded, 'base64').toString('utf-8');
               if (mainWindow && !mainWindow.isDestroyed()) {
-                mainWindow.webContents.send('summary-chunk', { chunk, sessionName });
+                mainWindow.webContents.send('summary-chunk', { chunk, sessionName, summaryFile });
               }
             } catch (e) { console.log('CHUNK decode error:', e.message); }
           } else if (line.startsWith('TITLE:')) {
@@ -1887,7 +1922,7 @@ ipcMain.handle('reprocess-meeting', async (event, summaryFile, regenerateTitle, 
             }
           } else if (line === 'STREAM_COMPLETE') {
             if (mainWindow && !mainWindow.isDestroyed()) {
-              mainWindow.webContents.send('summary-complete', { success: true, sessionName });
+              mainWindow.webContents.send('summary-complete', { success: true, sessionName, summaryFile });
             }
           } else if (line.startsWith('PROGRESS:')) {
             if (mainWindow && !mainWindow.isDestroyed()) {
@@ -1897,7 +1932,7 @@ ipcMain.handle('reprocess-meeting', async (event, summaryFile, regenerateTitle, 
             const errMsg = line.slice('STREAM_ERROR:'.length);
             sendDebugLog(`❌ Reprocess stream error: ${errMsg}`);
             if (mainWindow && !mainWindow.isDestroyed()) {
-              mainWindow.webContents.send('summary-complete', { success: false, sessionName });
+              mainWindow.webContents.send('summary-complete', { success: false, sessionName, summaryFile });
             }
           } else if (line.trim()) {
             sendDebugLog(line.trim());
@@ -1949,6 +1984,145 @@ ipcMain.handle('reprocess-meeting', async (event, summaryFile, regenerateTitle, 
   } finally {
     activeReprocessJobs.delete(summaryFile);
   }
+});
+
+ipcMain.handle('generate-report-meeting', async (event, summaryFile, templateId) => {
+  // Resolve the sessionName from the meeting JSON so streaming events carry the
+  // same key as the reprocess flow (keyed by sessionName, disambiguated by summaryFile).
+  let sessionName = null;
+  try {
+    const fs = require('fs');
+    const data = JSON.parse(fs.readFileSync(summaryFile, 'utf-8'));
+    sessionName = data?.session_info?.name || null;
+  } catch (_) { /* non-fatal — sessionName stays null */ }
+
+  try {
+    const args = ['generate-report', summaryFile, templateId];
+
+    sendDebugLog(`📄 Generating report for: ${summaryFile} (template: ${templateId})`);
+    sendDebugLog(`$ stenoai ${args.join(' ')}`);
+
+    activeReprocessJobs.set(summaryFile, { summaryFile, sessionName });
+
+    const aiEnv = getAiEnv();
+    const reportEnv = Object.keys(aiEnv).length > 0 ? { ...require('process').env, ...aiEnv } : undefined;
+
+    await new Promise((resolve, reject) => {
+      const proc = spawn(getBackendPath(), args, {
+        cwd: getBackendCwd(),
+        env: reportEnv
+      });
+
+      let stderrBuf = '';
+
+      const watchdog = makeInactivityWatchdog(proc, TRANSCRIBE_INACTIVITY_MS, 'generate-report');
+
+      proc.on('error', (err) => {
+        watchdog.clear();
+        reject(new Error(`generate-report spawn error: ${err.message}`));
+      });
+
+      proc.stdout.on('data', (data) => {
+        watchdog.reset();
+        const text = data.toString();
+        // CRLF-tolerant: Windows stdout is \r\n; exact-match lines (STREAM_COMPLETE)
+        // would otherwise carry a trailing \r and never match.
+        text.split(/\r?\n/).forEach(line => {
+          if (line.startsWith('CHUNK:')) {
+            try {
+              const encoded = line.slice(6);
+              const chunk = Buffer.from(encoded, 'base64').toString('utf-8');
+              if (mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.webContents.send('summary-chunk', { chunk, sessionName, summaryFile });
+              }
+            } catch (e) { console.log('CHUNK decode error:', e.message); }
+          } else if (line.startsWith('TITLE:')) {
+            const title = line.slice(6);
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('summary-title', { title, sessionName });
+            }
+          } else if (line === 'STREAM_COMPLETE') {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('summary-complete', { success: true, sessionName, summaryFile, report: true });
+            }
+          } else if (line.startsWith('PROGRESS:')) {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('processing-progress', { line, summaryFile });
+            }
+          } else if (line.startsWith('STREAM_ERROR:')) {
+            const errMsg = line.slice('STREAM_ERROR:'.length);
+            sendDebugLog(`❌ Report generation stream error: ${errMsg}`);
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('summary-complete', { success: false, sessionName, summaryFile, report: true });
+            }
+          } else if (line.startsWith('SAVED:')) {
+            sendDebugLog(`Report saved: ${line.slice(6).trim()}`);
+          } else if (line.trim()) {
+            sendDebugLog(line.trim());
+          }
+        });
+      });
+
+      proc.stderr.on('data', (data) => {
+        watchdog.reset();
+        const msg = data.toString().trim();
+        if (msg) {
+          stderrBuf += msg + '\n';
+          sendDebugLog(`STDERR: ${msg}`);
+        }
+      });
+
+      proc.on('close', (code) => {
+        watchdog.clear();
+        if (code === 0) {
+          console.log(`✅ Completed report generation: ${sessionName}`);
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('processing-complete', {
+              success: true,
+              sessionName,
+              summaryFile,
+              report: true,
+              message: 'Report generation completed successfully'
+            });
+          }
+          resolve();
+        } else {
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('processing-complete', {
+              success: false,
+              sessionName,
+              summaryFile,
+              report: true,
+              message: `Report generation failed (exit ${code})`,
+            });
+          }
+          reject(new Error(`generate-report exited with code ${code}: ${stderrBuf.slice(-500)}`));
+        }
+      });
+    });
+
+    sendDebugLog('✅ Report generated successfully');
+    return { success: true };
+  } catch (error) {
+    sendDebugLog(`❌ Report generation failed: ${error.message}`);
+    return { success: false, error: error.message };
+  } finally {
+    activeReprocessJobs.delete(summaryFile);
+  }
+});
+
+ipcMain.handle('set-active-report', async (_e, summaryFile, reportId) => {
+  try {
+    const out = await runPythonScript('simple_recorder.py', ['set-active-report', summaryFile, reportId]);
+    return JSON.parse(out);
+  } catch (error) { return { success: false, error: error.message }; }
+});
+
+ipcMain.handle('delete-report', async (_e, summaryFile, reportId) => {
+  try {
+    const out = await runPythonScript('simple_recorder.py', ['delete-report', summaryFile, reportId]);
+    return JSON.parse(out);
+  } catch (error) { return { success: false, error: error.message }; }
 });
 
 ipcMain.handle('regen-meeting-title', async (event, summaryFile, sessionName) => {
@@ -5293,7 +5467,50 @@ ipcMain.handle('set-model', async (event, modelName) => {
   }
 });
 
+ipcMain.handle('list-templates', async () => {
+  try {
+    const out = await runPythonScript('simple_recorder.py', ['list-templates']);
+    return { success: true, ...JSON.parse(out) };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
 
+ipcMain.handle('save-template', async (_e, template) => {
+  try {
+    const out = await runPythonScript('simple_recorder.py', ['save-template', JSON.stringify(template)]);
+    return JSON.parse(out);
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('delete-template', async (_e, id) => {
+  try {
+    const out = await runPythonScript('simple_recorder.py', ['delete-template', id]);
+    return JSON.parse(out);
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('set-default-template', async (_e, id) => {
+  try {
+    const out = await runPythonScript('simple_recorder.py', ['set-default-template', id]);
+    return JSON.parse(out);
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('reset-template', async (_e, id) => {
+  try {
+    const out = await runPythonScript('simple_recorder.py', ['reset-template', id]);
+    return JSON.parse(out);
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
 
 ipcMain.handle('get-transcription-engine', async () => {
   try {

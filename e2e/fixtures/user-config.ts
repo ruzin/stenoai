@@ -96,3 +96,72 @@ export function writeMeetingSummary(
   writeFileSync(summaryFile, JSON.stringify(data, null, 2));
   return summaryFile;
 }
+
+export interface FixtureMeetingMarkdown {
+  name: string;
+  summaryMarkdown: string;
+  transcript: string;
+  notes?: string;
+}
+
+/**
+ * Write a deterministic `<stem>_summary.md` into <userDataDir>/output so the
+ * real backend's `list-meetings` (which globs get_data_dirs()['output']) finds
+ * it.  The format mirrors `simple_recorder._render_frontmatter` + the section
+ * layout produced by `process_recording_streaming`:
+ *
+ *   ---
+ *   title: "…"
+ *   date: "…"
+ *   duration_seconds: 0
+ *   language: "en"
+ *   is_diarised: false
+ *   ---
+ *
+ *   <summaryMarkdown>
+ *
+ *   ## Transcript
+ *
+ *   <transcript>
+ *
+ *   ## User Notes        ← only when `notes` is provided
+ *
+ *   <notes>
+ *
+ * Returns the absolute path of the written summary file.
+ */
+export function writeMeetingMarkdown(
+  userDataDir: string,
+  stem: string,
+  meeting: FixtureMeetingMarkdown,
+): string {
+  const outputDir = path.join(userDataDir, 'output');
+  mkdirSync(outputDir, { recursive: true });
+  const summaryFile = path.join(outputDir, `${stem}_summary.md`);
+  const now = new Date().toISOString();
+
+  const escapeYaml = (s: string) => s.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+
+  const lines: string[] = [
+    '---',
+    `title: "${escapeYaml(meeting.name)}"`,
+    `date: "${now}"`,
+    `duration_seconds: 0`,
+    `language: "en"`,
+    `is_diarised: false`,
+    '---',
+    '',
+    meeting.summaryMarkdown,
+    '',
+    '## Transcript',
+    '',
+    meeting.transcript,
+  ];
+
+  if (meeting.notes) {
+    lines.push('', '## User Notes', '', meeting.notes);
+  }
+
+  writeFileSync(summaryFile, lines.join('\n'));
+  return summaryFile;
+}

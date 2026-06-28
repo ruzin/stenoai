@@ -329,5 +329,27 @@ class ConfigBedrockSettingsTests(unittest.TestCase):
             )
 
 
+class ConfigTemplateSeedingResilienceTests(unittest.TestCase):
+    def _config_with(self, custom_templates):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        path = Path(tmp.name) / "config.json"
+        path.write_text(
+            json.dumps({"custom_templates": custom_templates}), encoding="utf-8"
+        )
+        # Construction runs _seed_sample_template(); must not raise on bad data.
+        return Config(config_path=path)
+
+    def test_seeding_survives_non_list_custom_templates(self):
+        config = self._config_with({"oops": "not a list"})
+        self.assertIsInstance(config._config["custom_templates"], list)
+
+    def test_seeding_drops_non_dict_entries(self):
+        config = self._config_with(["nope", 42, None, {"id": "keep", "name": "K"}])
+        ids = [t.get("id") for t in config._config["custom_templates"]]
+        self.assertIn("keep", ids)
+        self.assertNotIn("nope", ids)
+
+
 if __name__ == "__main__":
     unittest.main()

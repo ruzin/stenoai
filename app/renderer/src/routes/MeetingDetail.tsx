@@ -1,7 +1,9 @@
 import * as React from 'react';
+import ReactMarkdown from 'react-markdown';
 import {
   Calendar as CalendarIcon,
   Check,
+  ChevronDown,
   ChevronLeft,
   Clock,
   CloudOff,
@@ -29,7 +31,16 @@ import {
   SelectItem,
   SelectSeparator,
 } from '@/components/ui/select';
-import { useMeeting, useReprocessMeeting, useDeleteMeeting, meetingsKeys } from '@/hooks/useMeetings';
+import {
+  useMeeting,
+  useReprocessMeeting,
+  useDeleteMeeting,
+  useGenerateReport,
+  useSetActiveReport,
+  useDeleteReport,
+  meetingsKeys,
+} from '@/hooks/useMeetings';
+import { useTemplates } from '@/hooks/useTemplates';
 import {
   useOrgSession,
   useShareToOrg,
@@ -46,6 +57,7 @@ import {
   DialogClose,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import {
   Tooltip,
   TooltipTrigger,
@@ -58,7 +70,7 @@ import {
   useCreateFolder,
 } from '@/hooks/useFolders';
 import { useActiveMeeting } from '@/lib/askBarContext';
-import { ipc, type Meeting } from '@/lib/ipc';
+import { ipc, type Meeting, type Report, type Template } from '@/lib/ipc';
 import { buildTranscriptBundle, defaultExportFilename } from '@/lib/transcriptBundle';
 import { unwrap } from '@/lib/result';
 import { cn } from '@/lib/utils';
@@ -143,6 +155,10 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
   const [deleteOpen, setDeleteOpen] = React.useState(false);
   const deleteMeeting = useDeleteMeeting();
   const reprocess = useReprocessMeeting();
+  const generateReport = useGenerateReport();
+  const setActiveReport = useSetActiveReport();
+  const deleteReport = useDeleteReport();
+  const { templates } = useTemplates();
   const orgSession = useOrgSession();
   const shareToOrg = useShareToOrg();
   const backupState = useOrgBackupState(orgSession.data?.signedIn ? summaryFile : null);
@@ -238,6 +254,28 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
   const [reprocessFailed, setReprocessFailed] = React.useState(false);
   const qc = useQueryClient();
 
+  // Report switch: null = the structured Standard summary, otherwise the id of
+  // a generated report in meeting.reports. Seeded from the meeting's persisted
+  // active_report so reopening a note lands on whatever was last viewed.
+  const reports = meeting.reports ?? [];
+  const [activeReportId, setActiveReportId] = React.useState<string | null>(
+    meeting.active_report ?? null,
+  );
+  const activeReport = activeReportId
+    ? reports.find((r) => r.id === activeReportId) ?? null
+    : null;
+  // meeting.active_report is the source of truth (the switch persists it). Re-sync
+  // local state whenever it changes so a reprocess (backend clears it to null)
+  // can't leave the UI showing a stale report. Idempotent for user clicks.
+  React.useEffect(() => {
+    setActiveReportId(meeting.active_report ?? null);
+  }, [meeting.active_report]);
+  // When a report generation finishes, summaryComplete fires for THIS meeting
+  // and we want to land on the freshly-created report. The IPC stream doesn't
+  // carry the new report id, so we flag "the active stream is a report" and,
+  // on complete, refetch + adopt the meeting's refreshed active_report.
+  const generatingReportRef = React.useRef(false);
+
   React.useEffect(() => {
     streamCache.set(summaryFile, { text: streamText, phase: streamPhase });
   }, [summaryFile, streamText, streamPhase]);
@@ -245,26 +283,61 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
   React.useEffect(() => {
     const sessionName = info.name;
     const offChunk = ipc().on.summaryChunk((e) => {
-      if (e.sessionName !== sessionName) return;
+      if (e.summaryFile !== summaryFile) return;
       setStreamPhase((prev) => (prev === 'analyzing' ? 'generating' : prev));
       setStreamText((prev) => prev + e.chunk);
     });
     const offComplete = ipc().on.summaryComplete((e) => {
-      if (e.sessionName !== sessionName) return;
+      if (e.summaryFile !== summaryFile) return;
       if (!e.success) {
         setStreamPhase('idle');
         setChunkProgress(null);
-        setReprocessFailed(true);
+        if (e.report) {
+          // A failed report generation is not a reprocess/model-memory failure.
+          // Keyed on the event's `report` flag (not the local ref) so it's
+          // correct regardless of summary-complete vs processing-complete order.
+          generatingReportRef.current = false;
+          setStreamText('');
+          streamCache.delete(summaryFile);
+        } else {
+          setReprocessFailed(true);
+        }
         return;
       }
       setStreamPhase('done');
+      // Report generation reuses the summary stream. On success, refetch this
+      // meeting so reports[]/active_report refresh, then land on the new report
+      // (the backend marks it active) once the fresh detail payload arrives.
+      if (generatingReportRef.current) {
+        generatingReportRef.current = false;
+        void qc
+          .invalidateQueries({ queryKey: meetingsKeys.detail(summaryFile) })
+          .then(() => {
+            const fresh = qc.getQueryData<Meeting>(meetingsKeys.detail(summaryFile));
+            if (fresh?.active_report) setActiveReportId(fresh.active_report);
+          });
+        setChunkProgress(null);
+        setTimeout(() => {
+          setStreamText('');
+          setStreamPhase('idle');
+          streamCache.delete(summaryFile);
+        }, 400);
+      }
     });
     const offProcessing = ipc().on.processingComplete((e) => {
       if (e.sessionName !== sessionName) return;
       setChunkProgress(null);
       if (!e.success) {
         setStreamPhase('idle');
-        setReprocessFailed(true);
+        if (e.report) {
+          // Terminal event of a failed report generation (e.g. non-zero exit
+          // with no STREAM_ERROR). Roll back without the reprocess banner.
+          generatingReportRef.current = false;
+          setStreamText('');
+          streamCache.delete(summaryFile);
+        } else {
+          setReprocessFailed(true);
+        }
         return;
       }
       void qc.invalidateQueries({ queryKey: meetingsKeys.all });
@@ -293,6 +366,46 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
       offProgress();
     };
   }, [info.name, summaryFile, qc]);
+
+  // Non-Standard templates only — the locked `standard` template drives the
+  // structured summary, not an on-demand report.
+  const reportTemplates = templates.filter((t) => !t.locked);
+
+  const onGenerateReport = (templateId: string) => {
+    setStreamText('');
+    setStreamPhase('analyzing');
+    setChunkProgress(null);
+    setReprocessFailed(false);
+    generatingReportRef.current = true;
+    streamCache.set(summaryFile, { text: '', phase: 'analyzing' });
+    generateReport.mutate(
+      { summaryFile, templateId },
+      {
+        // Failures before the first stream event (e.g. the backend never starts
+        // streaming) won't emit summary-complete, so roll the UI back here instead
+        // of stranding it in the analyzing state.
+        onError: () => {
+          generatingReportRef.current = false;
+          setStreamPhase('idle');
+          setStreamText('');
+          setChunkProgress(null);
+          streamCache.delete(summaryFile);
+        },
+      },
+    );
+  };
+
+  // Persist the choice so it survives navigation (B1 review: active_report not
+  // persisted). `null` selects the structured Standard summary → 'standard'.
+  const onSelectReport = (id: string | null) => {
+    setActiveReportId(id);
+    setActiveReport.mutate({ summaryFile, reportId: id ?? 'standard' });
+  };
+
+  const onDeleteReport = (reportId: string) => {
+    if (activeReportId === reportId) setActiveReportId(null);
+    deleteReport.mutate({ summaryFile, reportId });
+  };
 
   const [copiedTranscript, setCopiedTranscript] = React.useState(false);
   const [exportError, setExportError] = React.useState<string | null>(null);
@@ -669,6 +782,17 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
         )}
       </header>
 
+      {streamPhase === 'idle' && (reports.length > 0 || reportTemplates.length > 0) && (
+        <ReportSwitch
+          reports={reports}
+          activeReportId={activeReportId}
+          onSelect={onSelectReport}
+          onDelete={onDeleteReport}
+          templates={reportTemplates}
+          onGenerate={onGenerateReport}
+          generating={generateReport.isPending}
+        />
+      )}
       {reprocessFailed && (
         <div
           className="rounded-lg p-3 text-sm"
@@ -684,6 +808,14 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
       )}
       {streamPhase !== 'idle' ? (
         <StreamingView text={streamText} phase={streamPhase} chunkProgress={chunkProgress} />
+      ) : activeReport ? (
+        <section
+          className="stream-markdown"
+          data-testid="report-content"
+          style={{ color: 'var(--fg-1)', maxWidth: '72ch' }}
+        >
+          <ReactMarkdown>{activeReport.content}</ReactMarkdown>
+        </section>
       ) : (
         <div className="flex flex-col gap-9">
           {transcriptionFailed ? (
@@ -906,6 +1038,171 @@ const ActionIconButton = React.forwardRef<
     </button>
   );
 });
+
+// ---------------------------------------------------------------------------
+// Report switch — segmented pills (Standard + one per generated report) plus a
+// "Generate report" dropdown of the non-Standard templates. Controls which
+// body the detail view renders; generation reuses the summary stream.
+// ---------------------------------------------------------------------------
+
+interface ReportSwitchProps {
+  reports: Report[];
+  activeReportId: string | null;
+  onSelect: (id: string | null) => void;
+  onDelete: (reportId: string) => void;
+  templates: Template[];
+  onGenerate: (templateId: string) => void;
+  generating: boolean;
+}
+
+function ReportSwitch({
+  reports,
+  activeReportId,
+  onSelect,
+  onDelete,
+  templates,
+  onGenerate,
+  generating,
+}: ReportSwitchProps) {
+  const [open, setOpen] = React.useState(false);
+  // Report pending deletion → drives the confirmation dialog.
+  const [deleteTarget, setDeleteTarget] = React.useState<Report | null>(null);
+  return (
+    <div className="flex flex-wrap items-center gap-1.5" data-testid="report-switch">
+      <ReportPill active={activeReportId === null} onClick={() => onSelect(null)}>
+        Standard
+      </ReportPill>
+      {reports.map((r) => {
+        const when = formatReportDate(r.created_at);
+        const meta = [r.model, when].filter(Boolean).join(' · ');
+        return (
+          <ReportPill
+            key={r.id}
+            active={activeReportId === r.id}
+            onClick={() => onSelect(r.id)}
+            onDelete={() => setDeleteTarget(r)}
+            title={meta || undefined}
+          >
+            <span className="flex flex-col items-start leading-tight">
+              <span>{r.template_name}</span>
+              {meta && (
+                <span
+                  className="text-[10.5px]"
+                  style={{ color: 'var(--fg-2)', fontWeight: 400 }}
+                >
+                  {meta}
+                </span>
+              )}
+            </span>
+          </ReportPill>
+        );
+      })}
+      {templates.length > 0 && (
+        <Popover open={open} onOpenChange={setOpen}>
+          <PopoverTrigger asChild>
+            <button
+              type="button"
+              data-testid="generate-report-trigger"
+              disabled={generating}
+              className="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[12.5px] transition-colors hover:bg-[color:var(--surface-hover)] disabled:opacity-50"
+              style={{
+                color: 'var(--fg-2)',
+                border: '1px solid var(--border-subtle)',
+              }}
+            >
+              <FileText className="size-[12px]" />
+              {generating ? 'Generating…' : 'Generate report'}
+              <ChevronDown className="size-[12px]" />
+            </button>
+          </PopoverTrigger>
+          <PopoverContent align="start" className="w-56 p-1">
+            {templates.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                className="flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-sm transition-colors hover:bg-[color:var(--surface-hover)]"
+                style={{ color: 'var(--fg-1)' }}
+                onClick={() => {
+                  setOpen(false);
+                  onGenerate(t.id);
+                }}
+              >
+                <span className="truncate">{t.name}</span>
+              </button>
+            ))}
+          </PopoverContent>
+        </Popover>
+      )}
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        onOpenChange={(o) => !o && setDeleteTarget(null)}
+        title={
+          deleteTarget ? `Delete report "${deleteTarget.template_name}"?` : ''
+        }
+        description="This permanently deletes this generated report. The transcript and other reports are not affected."
+        confirmLabel="Delete"
+        destructive
+        onConfirm={() => {
+          if (!deleteTarget) return;
+          onDelete(deleteTarget.id);
+          setDeleteTarget(null);
+        }}
+      />
+    </div>
+  );
+}
+
+function ReportPill({
+  active,
+  onClick,
+  onDelete,
+  title,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  onDelete?: () => void;
+  title?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <span
+      className="inline-flex items-center rounded-full transition-colors"
+      style={{
+        color: active ? 'var(--fg-1)' : 'var(--fg-2)',
+        background: active ? 'var(--surface-raised)' : 'transparent',
+        border: '1px solid var(--border-subtle)',
+        fontWeight: active ? 600 : 400,
+      }}
+    >
+      <button
+        type="button"
+        onClick={onClick}
+        title={title}
+        aria-pressed={active}
+        className="inline-flex items-center rounded-full py-1 pl-3 text-[12.5px]"
+        style={{ paddingRight: onDelete ? '0.375rem' : '0.75rem' }}
+      >
+        {children}
+      </button>
+      {onDelete && (
+        <button
+          type="button"
+          aria-label="Delete report"
+          title="Delete report"
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete();
+          }}
+          className="mr-1.5 inline-flex items-center rounded-full p-0.5 text-[color:var(--fg-2)] transition-colors hover:bg-[color:var(--danger-bg)] hover:text-[color:var(--danger)]"
+        >
+          <Trash2 className="size-[11px]" />
+        </button>
+      )}
+    </span>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Streaming view (kept in this file because StreamingView's pinned-indicator
@@ -1264,6 +1561,15 @@ function formatDetailDate(info: { processed_at?: string; updated_at?: string }):
     hour: 'numeric',
     minute: '2-digit',
   });
+}
+
+// Compact date for the report-pill secondary line (e.g. "Jun 23"). Kept
+// terser than formatDetailDate so the pill stays small.
+function formatReportDate(raw?: string): string | undefined {
+  if (!raw) return undefined;
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) return undefined;
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
 function formatDuration(seconds?: number): string | undefined {

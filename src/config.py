@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Optional, Dict, Any
 
 from src.whisper_models import SUPPORTED_WHISPER_MODELS as _WHISPER_REGISTRY
+from src import templates as _templates
 
 logger = logging.getLogger(__name__)
 
@@ -264,6 +265,8 @@ class Config:
         self._migrate_whisper_model()
         self._migrate_summary_model()
         self._migrate_transcription_engine()
+        self._normalize_templates()
+        self._seed_sample_template()
 
     def _migrate_transcription_engine(self) -> None:
         """Decide the active ASR engine on first launch of a version that has
@@ -498,6 +501,130 @@ class Config:
             logger.warning(f"Model {model_name} not in supported list, but allowing anyway")
 
         self._config["model"] = model_name
+        return self._save()
+
+    # --- Report templates ---------------------------------------------------
+    def _normalize_templates(self) -> None:
+        """Coerce persisted template state into the shapes the CRUD/merge code
+        assumes — on EVERY load, not gated behind `templates_seeded`.
+
+        A malformed-but-parseable config (`custom_templates` as a non-list or a
+        list with non-dict entries, or `template_overrides` as a non-dict) would
+        otherwise survive past first-run seeding and crash later template reads
+        (`merge_templates`) and writes (`save_template`/`delete_template`). The
+        repair is in-memory; it persists on the next `_save()`.
+        """
+        if self._load_failed:
+            return
+        custom_raw = self._config.get("custom_templates", [])
+        self._config["custom_templates"] = (
+            [t for t in custom_raw if isinstance(t, dict)]
+            if isinstance(custom_raw, list)
+            else []
+        )
+        overrides_raw = self._config.get("template_overrides")
+        self._config["template_overrides"] = (
+            {k: v for k, v in overrides_raw.items() if isinstance(v, dict)}
+            if isinstance(overrides_raw, dict)
+            else {}
+        )
+
+    def _seed_sample_template(self) -> None:
+        """Seed the editable 'Shareable summary' sample once, on fresh configs.
+
+        Guarded by `templates_seeded` so deleting the sample doesn't re-add it.
+        Assumes `_normalize_templates` has already coerced `custom_templates`
+        into a list of dicts.
+        """
+        if self._load_failed:
+            return
+        if self._config.get("templates_seeded"):
+            return
+        custom = self._config.setdefault("custom_templates", [])
+        if not any(t.get("id") == _templates.SAMPLE_TEMPLATE["id"] for t in custom):
+            custom.append(dict(_templates.SAMPLE_TEMPLATE))
+        self._config["templates_seeded"] = True
+        self._save()
+
+    def get_templates(self) -> list:
+        """Merged template list: built-ins (with overrides) then custom."""
+        return _templates.merge_templates(
+            overrides=self._config.get("template_overrides", {}) or {},
+            custom=self._config.get("custom_templates", []) or [],
+        )
+
+    def get_template(self, template_id: str) -> Optional[dict]:
+        """Return the template with the given id, or None if not found."""
+        return next((t for t in self.get_templates() if t["id"] == template_id), None)
+
+    def get_default_template_id(self) -> str:
+        return self._config.get("default_template_id", _templates.STANDARD_TEMPLATE_ID)
+
+    def set_default_template(self, template_id: str) -> bool:
+        if template_id not in {t["id"] for t in self.get_templates()}:
+            logger.error(f"Unknown template id: {template_id}")
+            return False
+        self._config["default_template_id"] = template_id
+        return self._save()
+
+    def save_template(self, t: dict) -> tuple:
+        """Upsert a template. Returns (ok, error, saved_template)."""
+        if not isinstance(t, dict):
+            return False, "Invalid template payload", {}
+        valid_langs = set(self.SUPPORTED_LANGUAGES.keys()) | {"auto"}
+        ok, err = _templates.validate_template(t, valid_langs)
+        if not ok:
+            return False, err, {}
+
+        tid = t.get("id")
+        # Built-in id -> store as an override (Standard is locked: no prompt edit).
+        if tid in _templates.BUILTIN_TEMPLATES:
+            if _templates.BUILTIN_TEMPLATES[tid].get("locked"):
+                return False, "This template is locked and cannot be edited", {}
+            overrides = self._config.setdefault("template_overrides", {})
+            overrides[tid] = {k: t[k] for k in ("name", "icon", "prompt", "language") if k in t}
+            if not self._save():
+                return False, "Failed to save config", {}
+            return True, "", {**_templates.BUILTIN_TEMPLATES[tid], **overrides[tid]}
+
+        custom = self._config.setdefault("custom_templates", [])
+        existing = next((c for c in custom if c.get("id") == tid), None)
+        if existing is not None:
+            existing.update({k: t[k] for k in ("name", "icon", "prompt", "language", "format")
+                             if k in t})
+            saved = dict(existing)
+        else:
+            new_id = _templates.new_template_id(
+                t["name"], {c.get("id") for c in custom} | set(_templates.BUILTIN_TEMPLATES)
+            )
+            saved = {
+                "id": new_id,
+                "name": t["name"],
+                "icon": t.get("icon", "doc"),
+                "prompt": t["prompt"],
+                "language": t.get("language", "auto"),
+                "format": t.get("format", "markdown"),
+            }
+            custom.append(saved)
+        if not self._save():
+            return False, "Failed to save config", {}
+        return True, "", dict(saved)
+
+    def delete_template(self, template_id: str) -> bool:
+        custom = self._config.get("custom_templates", [])
+        remaining = [c for c in custom if c.get("id") != template_id]
+        if len(remaining) == len(custom):
+            return False  # not a custom template (or doesn't exist)
+        self._config["custom_templates"] = remaining
+        if self._config.get("default_template_id") == template_id:
+            self._config["default_template_id"] = _templates.STANDARD_TEMPLATE_ID
+        return self._save()
+
+    def reset_template(self, template_id: str) -> bool:
+        overrides = self._config.get("template_overrides", {})
+        if template_id not in overrides:
+            return True  # already at shipped default — no-op success
+        del overrides[template_id]
         return self._save()
 
     def get_model_info(self, model_name: str) -> Optional[Dict[str, str]]:

@@ -43,6 +43,8 @@ export interface Meeting {
   user_notes?: string | null;
   /** Renderer-side notes for the in-progress / draft recording (live + processing views). */
   notes?: string;
+  reports?: Report[];
+  active_report?: string;
   /** Synthetic flag set by the renderer for the in-progress recording. Never sent by backend. */
   is_recording?: boolean;
   /** Synthetic flag set by the renderer when a recording is in the processing pipeline (post-stop, pre-summary). */
@@ -331,6 +333,31 @@ export type CreateFolderResponse = Result<{ folder: Folder }>;
 
 export type CheckOllamaResponse = Result<{ installed: boolean; path?: string }>;
 export type CheckModelInstalledResponse = Result<{ installed: boolean }>;
+export interface Template {
+  id: string;
+  name: string;
+  icon: string;
+  prompt: string;
+  language: string;
+  format: 'structured' | 'markdown';
+  builtin: boolean;
+  locked: boolean;
+}
+export type ListTemplatesResponse = Result<{
+  templates: Template[];
+  default_template_id: string;
+}>;
+export type SaveTemplateResponse = Result<{ template: Template }>;
+
+export interface Report {
+  id: string;
+  template_id: string;
+  template_name: string;
+  model: string;
+  content: string;
+  created_at: string;
+}
+
 export interface RawSupportedModel {
   name?: string;
   size?: string;
@@ -445,6 +472,7 @@ export interface ProcessingProgressEvent {
 export interface SummaryChunkEvent {
   chunk: string;
   sessionName: string;
+  summaryFile?: string;
 }
 export interface SummaryTitleEvent {
   title: string;
@@ -453,6 +481,11 @@ export interface SummaryTitleEvent {
 export interface SummaryCompleteEvent {
   success: boolean;
   sessionName: string;
+  summaryFile?: string;
+  /** True when this completion belongs to a template report generation rather
+   *  than a reprocess. Lets the renderer suppress the reprocess/model-memory
+   *  failure banner for report failures, independent of event ordering. */
+  report?: boolean;
 }
 export interface ProcessingCompleteEvent {
   success: boolean;
@@ -470,6 +503,11 @@ export interface ProcessingCompleteEvent {
    *  the failure honestly rather than treat it as a normal note. */
   transcriptionFailed?: boolean;
   transcriptionError?: string;
+  /** True when this is the terminal event of a template report generation
+   *  (not a reprocess). The renderer rolls the stream back without the
+   *  reprocess banner regardless of whether STREAM_ERROR or a non-zero exit
+   *  ended it. */
+  report?: boolean;
 }
 export interface QueryChunkEvent {
   queryId: string;
@@ -664,6 +702,9 @@ export interface StenoaiBridge {
     saveNotes: RequestFn<[name: string, notes: string], SaveMeetingNotesResponse>;
     exportTranscript: RequestFn<[defaultFilename: string, content: string], Result<{ path: string }>>;
     regenTitle: RequestFn<[summaryFile: string, name: string], Result<Record<string, never>>>;
+    generateReport: RequestFn<[summaryFile: string, templateId: string], Result<{ message: string }>>;
+    setActiveReport: RequestFn<[summaryFile: string, reportId: string], Result<Record<string, never>>>;
+    deleteReport: RequestFn<[summaryFile: string, reportId: string], Result<Record<string, never>>>;
   };
 
   query: {
@@ -693,6 +734,14 @@ export interface StenoaiBridge {
       [summaryFile: string, folderId: string],
       Result<Record<string, never>>
     >;
+  };
+
+  templates: {
+    list: RequestFn<[], ListTemplatesResponse>;
+    save: RequestFn<[t: Partial<Template>], SaveTemplateResponse>;
+    remove: RequestFn<[id: string], Result<Record<string, never>>>;
+    setDefault: RequestFn<[id: string], Result<Record<string, never>>>;
+    reset: RequestFn<[id: string], Result<Record<string, never>>>;
   };
 
   models: {
