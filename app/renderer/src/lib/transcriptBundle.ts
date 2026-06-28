@@ -21,7 +21,7 @@ export function buildTranscriptBundle(meeting: Meeting | null | undefined): stri
   // the rest of the UI (the Copy notes bundle, headings, etc. are all English);
   // the app isn't localised, so hardcoded German here read as a stray.
   const metaParts: string[] = [];
-  const dateStr = isoToDate(info?.processed_at ?? info?.updated_at);
+  const dateStr = meetingDate(info);
   if (dateStr) metaParts.push(`Date: ${dateStr}`);
   const durStr = secondsToMinutes(info?.duration_seconds);
   if (durStr) metaParts.push(`Duration: ${durStr}`);
@@ -46,7 +46,7 @@ export function buildTranscriptBundle(meeting: Meeting | null | undefined): stri
 // e.g. "2026-06-19-epsilon-planning.md"
 export function defaultExportFilename(meeting: Meeting | null | undefined): string {
   const info = meeting?.session_info;
-  const date = isoToDate(info?.processed_at ?? info?.updated_at) ?? isoToDate(new Date().toISOString())!;
+  const date = meetingDate(info) ?? isoToDate(new Date().toISOString())!;
   const slug =
     transliterate(info?.name ?? '')
       .toLowerCase()
@@ -79,6 +79,17 @@ function transliterate(input: string): string {
     .replace(/[äöüÄÖÜß]/g, (ch) => umlauts[ch] ?? ch)
     .normalize('NFD')
     .replace(/[̀-ͯ]/g, '');
+}
+
+// Resolve a meeting's display date, preferring `processed_at` but falling back
+// to `updated_at` when the former is missing OR present-but-unparseable. The
+// backend stores `processed_at` as '' for a meeting whose .md lacks a `date:`
+// frontmatter (see _parse_meeting_markdown: meta.get('date', '')), and a bare
+// `processed_at ?? updated_at` would stop at that empty string, dropping a valid
+// `updated_at`. Validate each field through isoToDate (which rejects ''/garbage)
+// and take the first that yields a real date.
+function meetingDate(info: { processed_at?: string; updated_at?: string } | undefined): string | null {
+  return isoToDate(info?.processed_at) ?? isoToDate(info?.updated_at);
 }
 
 function isoToDate(iso: string | undefined): string | null {
