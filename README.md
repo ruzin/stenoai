@@ -42,10 +42,10 @@
 If you're looking for a hosted desktop recording API, consider checking out [Recall.ai](https://www.recall.ai/product/desktop-recording-sdk?utm_source=github&utm_medium=sponsorship&utm_campaign=ruzin-stenoai), an API that records Zoom, Google Meet, Microsoft Teams, in-person meetings, and more.
 
 ## 📢 What's New
-- **2026-06-22** 🛡️ Works behind corporate proxies — org backup, AI, and note sync now route through your system proxy (incl. PAC) and trust the OS certificate store, so Steno works on managed enterprise networks that force egress through a proxy or inspect TLS.
-- **2026-06-22** 💾 Backup status you can see — when an org note fails to back up it now shows a quiet "Not backed up" indicator you can click to retry, and the failure is written to the diagnostic log, instead of failing silently.
-- **2026-06-21** 🔎 Instant search (⌘K) — a global command palette to jump to any note from anywhere.
-- **2026-06-21** 🎙️ Import audio files — drag & drop or pick an existing recording to transcribe and summarize it.
+- **2026-06-28** 📝 Report templates & per-meeting reports — define your own report styles and generate them from any note; a meeting can now hold multiple reports (the structured summary plus template-driven ones), switchable in the detail view.
+- **2026-06-28** 📤 Transcript export — copy the full transcript or save it as Markdown (title, metadata, notes, and diarised `[You]`/`[Others]` text) to paste into any external tool.
+- **2026-06-28** 🛟 Never lose a transcript — if batch transcription comes back empty, Steno now falls back to the live transcript you watched during the recording instead of saving a blank note.
+- **2026-06-28** 🧩 Better long-meeting summaries — map-reduce summarization chunks long transcripts so multi-hour meetings summarize reliably without overflowing the model's context.
 
 
 ## Features
@@ -58,6 +58,8 @@ If you're looking for a hosted desktop recording API, consider checking out [Rec
 - **Ask your meetings** — Natural-language Q&A across a single note *or* your entire library via the Chat tab. Pulls from summary, key topics, and the full transcript.
 - **Multi-language (25 live, 99 total)** — Parakeet covers 25 European languages with live transcription; Whisper handles 99 languages including Chinese, Japanese, Arabic, and Hindi post-stop.
 - **Markdown ownership** — Summaries and transcripts save as clean Markdown you can edit, search, or sync to whatever knowledge base you live in.
+- **Report templates** — Define custom report styles and generate them per meeting; a note can hold multiple reports (the structured summary plus template-driven ones), switchable in the detail view.
+- **Transcript export** — Copy the full transcript or save it as Markdown (with metadata, notes, and speaker labels) to drop into any external tool.
 - **Bring your own cloud model** — Optional OpenAI, Anthropic, AWS Bedrock (Claude — including application inference profile ARNs for governed AWS environments), or custom API endpoint for users who prefer a hosted LLM.
 - **Organisation AI** — On managed deployments, sign in to your org's Steno adapter and AI routes through it automatically — no local API key, no per-user setup.
 
