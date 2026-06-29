@@ -36,6 +36,7 @@ if (process.platform !== 'darwin') {
 const path = require('path');
 const { spawn: _spawnRaw, exec } = require('child_process');
 const processingLog = require('./processing-log');
+const { isMeetingApp, allowsDeviceLevelFallback } = require('./meeting-detect');
 
 // Wrap spawn so every backend / ollama launch defaults to windowsHide:true.
 // The PyInstaller backend (stenoai.exe) and bundled ollama.exe are console
@@ -4326,37 +4327,15 @@ const APP_NAME_OVERRIDES = [
 // web, Whereby, Around, etc.) route mic capture through the browser bundle
 // id or a helper sub-process (see APP_NAME_OVERRIDES). Tradeoff: in-browser
 // dictation extensions also match, but browser meetings are far more common.
-const MEETING_APP_ALLOWLIST = [
-  // Native videoconf / meeting apps (prefix match catches helper sub-processes)
-  /^us\.zoom\.xos/,                    // Zoom
-  /^com\.microsoft\.teams/,            // Microsoft Teams (classic + new "teams2")
-  /^com\.cisco\.webexmeetingsapp/,     // Cisco Webex
-  /^com\.webex\.meetingmanager/,       // Cisco Webex (alt id)
-  /^com\.apple\.FaceTime/,             // FaceTime
-  /^com\.hnc\.Discord/,                // Discord
-  /^com\.tinyspeck\.slackmacgap/,      // Slack (huddles)
-  /^com\.logmein\.GoToMeeting/,        // GoToMeeting
-  /^com\.bluejeansnet\.BlueJeans/,     // BlueJeans
-  /^co\.pop\.desktop/,                 // Pop
-  /^com\.google\.meetings/,            // Google Meet (standalone PWA)
-  /^com\.apple\.VoiceMemos/,           // Apple Voice Memos
-  // Browsers — most web meetings route mic capture through here
-  /^com\.apple\.WebKit/,               // Safari (helper)
-  /^com\.apple\.Safari/,               // Safari (main)
-  /^com\.google\.Chrome/,              // Chrome (+ helpers)
-  /^org\.chromium\./,                  // Chromium
-  /^com\.microsoft\.edgemac/,          // Edge
-  /^company\.thebrowser\.Browser/,     // Arc
-  /^com\.brave\.Browser/,              // Brave
-  /^org\.mozilla\./,                   // Firefox
-];
-
-function isMeetingApp(evt) {
-  // macOS 12/13 fallback emits no app_id (device-level signal). We can't
-  // filter there, so preserve legacy behaviour and notify regardless.
-  if (!evt.app_id) return true;
-  return MEETING_APP_ALLOWLIST.some((re) => re.test(evt.app_id));
-}
+// The allowlist + isMeetingApp live in ./meeting-detect (unit-tested). Whether
+// an app_id-less device-level event is treated as a meeting is decided once at
+// startup from the OS version: macOS 12/13 emit such events legitimately;
+// macOS 14+ always carries an app_id, so an app_id-less event there is an
+// AEC / system-audio artifact, not a meeting (see #262).
+const ALLOW_DEVICE_LEVEL_FALLBACK = allowsDeviceLevelFallback(
+  process.platform,
+  (() => { try { return process.getSystemVersion(); } catch (_) { return ''; } })(),
+);
 
 // Wait this long after the meeting app releases the mic before triggering
 // auto-pause + "Meeting ended" prompt. Verified empirically that Zoom/Meet/
@@ -4488,8 +4467,8 @@ async function handleMicEvent(line) {
     return;
   }
 
-  if (!isMeetingApp(evt)) {
-    sendDebugLog(`[auto-detect] ignoring non-meeting app: ${evt.app_name || evt.app_id}`);
+  if (!isMeetingApp(evt, { allowDeviceLevelFallback: ALLOW_DEVICE_LEVEL_FALLBACK })) {
+    sendDebugLog(`[auto-detect] ignoring non-meeting app: ${evt.app_name || evt.app_id || 'device-level (no app_id)'}`);
     return;
   }
 
