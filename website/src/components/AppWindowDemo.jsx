@@ -1,19 +1,14 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 import { motion as Motion, AnimatePresence } from "framer-motion";
 import {
   Search, Settings, Home, ChevronDown, ChevronLeft,
   Calendar as CalendarIcon, Clock, PencilLine, ArrowUp, FolderPlus,
+  Inbox, MessageSquare, Building2, Users, Heart, Loader2,
+  Square, Pause,
 } from "lucide-react";
 
-const SCREENS = ["notes", "summary", "chat"];
-const ADVANCE_MS = 6000;
-
-const MEETINGS = [
-  { id: 1, title: "Q1 Budget Planning", date: "Today" },
-  { id: 2, title: "Product Roadmap Review", date: "Jun 27" },
-  { id: 3, title: "Investor Update Prep", date: "Jun 25" },
-  { id: 4, title: "Series B Legal Review", date: "Jun 22" },
-];
+const SCREENS = ["notes", "generating", "summary", "chat"];
+const SCREEN_MS = { notes: 5500, generating: 4000, summary: 5500, chat: 7000 };
 
 const NOTES_TEXT =
   "- Engineering headcount +20%\n- Marketing flat vs last year\n- Reallocate $40k from Q2 ops\n- Revisit at next quarterly sync";
@@ -36,8 +31,6 @@ const CHAT_Q = "What were the key budget decisions?";
 const CHAT_A =
   "Engineering headcount will increase by 20% and $40k has been reallocated from Q2 ops to the marketing pilot. Priya is actioned to update the Q1 forecast ahead of the board review.";
 
-const CHAT_SUGGESTIONS = ["Key budget decisions?", "Who needs to follow up?", "Action items"];
-
 function fmt(s) {
   const h = String(Math.floor(s / 3600)).padStart(2, "0");
   const m = String(Math.floor((s % 3600) / 60)).padStart(2, "0");
@@ -47,139 +40,164 @@ function fmt(s) {
 
 // ─── Sidebar ──────────────────────────────────────────────────────
 
+function NavRow({ icon, label, count, active }) {
+  return (
+    <div
+      className="flex items-center gap-2 rounded-[6px] mb-px cursor-default"
+      style={{
+        padding: "4px 8px",
+        background: active ? "var(--surface-raised)" : "transparent",
+        boxShadow: active
+          ? "0 1px 2px rgba(27,27,25,0.04), 0 0 0 1px var(--border-subtle)"
+          : "none",
+        color: active ? "var(--fg-1)" : "var(--fg-2)",
+        fontWeight: active ? 500 : 400,
+        fontSize: 13,
+      }}
+    >
+      <span style={{ flexShrink: 0 }}>{icon}</span>
+      <span className="flex-1 truncate">{label}</span>
+      {count != null && (
+        <span style={{ fontSize: 11, color: "var(--fg-muted)", fontVariantNumeric: "tabular-nums" }}>
+          {count}
+        </span>
+      )}
+    </div>
+  );
+}
+
 function AppSidebar({ activeScreen }) {
-  const meetingActive = activeScreen === "summary" || activeScreen === "chat";
+  const homeActive = activeScreen === "notes" || activeScreen === "generating";
+  const chatActive = activeScreen === "chat";
+  const folderActive = activeScreen === "summary";
 
   return (
     <div
       className="flex flex-col flex-shrink-0"
       style={{
-        width: 210,
+        width: 185,
         background: "var(--surface-sunken)",
         borderRight: "1px solid var(--border-subtle)",
         overflow: "hidden",
       }}
     >
-      {/* Brand */}
-      <div className="flex items-center gap-2 px-4 pt-3 pb-2">
-        <span
-          style={{
-            fontFamily: "var(--font-serif)",
-            fontSize: 17,
-            letterSpacing: "-0.02em",
-            color: "var(--fg-1)",
-            lineHeight: 1,
-          }}
-        >
-          Steno
+      <div className="flex items-center gap-[6px] flex-shrink-0" style={{ padding: "14px 16px 6px" }}>
+        <span className="w-[10px] h-[10px] rounded-full bg-[#FF5F57] block" />
+        <span className="w-[10px] h-[10px] rounded-full bg-[#FEBC2E] block" />
+        <span className="w-[10px] h-[10px] rounded-full bg-[#28C840] block" />
+      </div>
+
+      <div className="flex items-center gap-[9px] px-4 pb-2.5 pt-2">
+        <span style={{ display: "inline-flex", width: 22, height: 22, alignItems: "center", justifyContent: "center", color: "var(--fg-1)", flexShrink: 0 }}>
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M28 7 Q29 9.5 30 12.5" />
+            <path d="M36 7 Q35 9.5 34 12.5" />
+            <circle cx="32" cy="15" r="3.8" />
+            <circle cx="30.5" cy="15" r="0.7" fill="currentColor" stroke="none" />
+            <circle cx="33.5" cy="15" r="0.7" fill="currentColor" stroke="none" />
+            <path d="M30 19 Q28 19 28 21 L28 50 L32 60 L36 50 L36 21 Q36 19 34 19 Z" />
+            <line x1="28" y1="32" x2="36" y2="32" />
+            <line x1="28" y1="38" x2="36" y2="38" />
+            <line x1="28" y1="44" x2="36" y2="44" />
+            <line x1="28" y1="50" x2="36" y2="50" />
+            <path d="M28 22 C18 15 8 17 4 22 C10 28 20 28 28 27 Z" />
+            <path d="M36 22 C46 15 56 17 60 22 C50 28 44 28 36 27 Z" />
+            <path d="M28 28 C18 30 10 35 6 40 C14 39 22 36 28 33 Z" />
+            <path d="M36 28 C46 30 54 35 58 40 C50 39 42 36 36 33 Z" />
+          </svg>
         </span>
-        <span
-          className="w-1 h-1 rounded-full flex-shrink-0"
-          style={{ background: "var(--fg-muted)" }}
-        />
+        <span style={{ fontFamily: "var(--font-serif)", fontWeight: 400, fontSize: 18, letterSpacing: "-0.02em", color: "var(--fg-1)", lineHeight: 1 }}>
+          Steno<span style={{ color: "var(--fg-muted)" }}>.</span>
+        </span>
       </div>
 
-      {/* Search */}
-      <div className="px-2.5 pb-2">
-        <div
-          className="flex items-center gap-1.5 px-2 rounded-[6px] text-[12px]"
-          style={{
-            height: 28,
-            background: "rgba(27,27,25,0.04)",
-            color: "var(--fg-muted)",
-          }}
-        >
-          <Search size={11} />
-          Search
-        </div>
-      </div>
-
-      {/* All Meetings nav row */}
-      <div className="px-2 pb-1">
-        <div
-          className="flex items-center gap-2 px-2 rounded-[6px] text-[13px]"
-          style={{
-            padding: "5px 8px",
-            background: meetingActive ? "var(--surface-raised)" : "transparent",
-            boxShadow: meetingActive
-              ? "0 1px 2px rgba(27,27,25,0.04), 0 0 0 1px var(--border-subtle)"
-              : "none",
-            color: "var(--fg-1)",
-            fontWeight: meetingActive ? 500 : 400,
-          }}
-        >
-          <Home size={13} style={{ color: "var(--fg-2)", flexShrink: 0 }} />
-          All meetings
-        </div>
-      </div>
-
-      {/* Meeting list */}
-      <div className="flex-1 overflow-hidden px-2 pt-1">
-        {/* Recording new-note row */}
-        {activeScreen === "notes" && (
-          <div
-            className="flex items-center gap-2 rounded-[6px] mb-0.5 text-[13px]"
-            style={{
-              padding: "5px 8px",
-              background: "var(--surface-raised)",
-              boxShadow: "0 1px 2px rgba(27,27,25,0.04), 0 0 0 1px var(--border-subtle)",
-              fontWeight: 500,
-              color: "var(--fg-1)",
-            }}
-          >
-            <span className="rec-dot flex-shrink-0" style={{ width: 6, height: 6 }} />
-            <span className="truncate flex-1">Q1 Budget Planning</span>
+      <div style={{ padding: "0 12px 10px" }}>
+        <div style={{ position: "relative" }}>
+          <Search size={13} style={{ position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)", color: "var(--fg-2)", pointerEvents: "none" }} />
+          <div style={{ height: 30, borderRadius: 6, background: "rgba(27,27,25,0.04)", color: "var(--fg-muted)", fontFamily: "var(--font-sans)", fontSize: 13, display: "flex", alignItems: "center", paddingLeft: 30, paddingRight: 8 }}>
+            <span style={{ flex: 1 }}>Search</span>
+            <span style={{ fontSize: 11, color: "var(--fg-muted)", background: "rgba(27,27,25,0.04)", borderRadius: 4, padding: "1px 5px", letterSpacing: "0.02em" }}>⌘K</span>
           </div>
-        )}
-
-        {MEETINGS.map((m) => {
-          const active = meetingActive && m.id === 1;
-          return (
-            <div
-              key={m.id}
-              className="flex flex-col rounded-[6px] mb-0.5"
-              style={{
-                padding: "5px 8px",
-                background: active ? "var(--surface-raised)" : "transparent",
-                boxShadow: active
-                  ? "0 1px 2px rgba(27,27,25,0.04), 0 0 0 1px var(--border-subtle)"
-                  : "none",
-              }}
-            >
-              <span
-                className="truncate text-[12.5px]"
-                style={{ color: "var(--fg-1)", fontWeight: active ? 500 : 400 }}
-              >
-                {m.title}
-              </span>
-              <span className="text-[11px]" style={{ color: "var(--fg-2)" }}>
-                {m.date}
-              </span>
-            </div>
-          );
-        })}
+        </div>
       </div>
 
-      {/* Bottom */}
-      <div
-        className="flex items-center justify-between px-3 py-2"
-        style={{ borderTop: "1px solid var(--border-subtle)" }}
-      >
-        <Settings size={13} style={{ color: "var(--fg-2)" }} />
-        <div
-          className="flex items-center gap-1.5 px-2 py-1 rounded-[6px] text-[11.5px]"
-          style={{ background: "var(--surface-hover)", color: "var(--fg-2)" }}
-        >
-          <span
-            className="w-4 h-4 rounded-full flex items-center justify-center text-[9px] font-semibold"
-            style={{ background: "var(--surface-active)", color: "var(--fg-2)" }}
-          >
-            W
-          </span>
-          Will
+      <div style={{ margin: "0 12px 4px", height: 1, background: "var(--border-subtle)", flexShrink: 0 }} />
+
+      <div style={{ padding: "4px 8px 2px" }}>
+        <NavRow icon={<Home size={14} />} label="Home" active={homeActive} />
+        <NavRow icon={<Inbox size={14} />} label="All notes" count={34} />
+        <NavRow icon={<MessageSquare size={14} />} label="Chat" active={chatActive} />
+      </div>
+
+      <div style={{ padding: "4px 8px" }}>
+        <div className="flex items-center gap-1" style={{ padding: "4px 8px 6px", color: "var(--fg-2)", fontSize: 11.5, fontWeight: 500 }}>
+          <ChevronDown size={11} />
+          Folders
         </div>
+        <NavRow icon={<Building2 size={14} />} label="Work" count={7} active={folderActive} />
+        <NavRow icon={<Users size={14} />} label="Personal" count={5} />
+        <NavRow icon={<Heart size={14} />} label="Healthcare" count={0} />
+      </div>
+
+      <div className="flex items-center mt-auto px-3 py-2.5" style={{ borderTop: "1px solid var(--border-subtle)" }}>
+        <Settings size={15} style={{ color: "var(--fg-2)" }} />
       </div>
     </div>
+  );
+}
+
+// ─── Shared: wave bars (used by SummaryScreen + ChatScreen) ───────
+
+function WaveIcon() {
+  const heights = [40, 70, 100, 60, 90, 50, 30];
+  return (
+    <span aria-hidden="true" style={{ display: "inline-flex", alignItems: "flex-end", gap: 2, height: 12, width: 16, flexShrink: 0 }}>
+      {heights.map((h, i) => (
+        <span key={i} style={{ display: "block", width: 2, height: `${h}%`, background: "var(--fg-2)", borderRadius: 2 }} />
+      ))}
+    </span>
+  );
+}
+
+// Animated audio-level bars in var(--recording) red — mirrors AudioWave in the real app
+function RecordingWave() {
+  const delays = [0, 0.15, 0.3, 0.1, 0.25, 0.05, 0.2];
+  return (
+    <span aria-hidden style={{ display: "inline-flex", alignItems: "center", height: 14, gap: 2 }}>
+      {delays.map((d, i) => (
+        <span key={i} style={{
+          display: "inline-block",
+          width: 2,
+          height: "60%",
+          minHeight: 2,
+          background: "var(--recording)",
+          borderRadius: 2,
+          transformOrigin: "50% 100%",
+          animation: `dockWave 1.1s ease-in-out ${d}s infinite`,
+        }} />
+      ))}
+    </span>
+  );
+}
+
+// Shared positioning wrapper for all bottom pills
+function BottomPill({ children }) {
+  return (
+    <div style={{ position: "absolute", bottom: 10, left: 0, right: 0, zIndex: 2 }}>
+      <div style={{ maxWidth: 680, margin: "0 auto", padding: "0 40px" }}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function PillFade() {
+  return (
+    <div style={{
+      position: "absolute", bottom: 50, left: 0, right: 0, height: 40,
+      background: "linear-gradient(transparent, var(--page))",
+      pointerEvents: "none", zIndex: 1,
+    }} />
   );
 }
 
@@ -212,84 +230,212 @@ function NotesScreen() {
   }, []);
 
   return (
-    <div
-      className="flex-1 min-h-0 overflow-y-auto scrollbar-hide"
-      style={{ background: "var(--page)" }}
-    >
-      <div style={{ maxWidth: 680, margin: "0 auto", padding: "28px 40px 40px" }}>
-        <button
-          className="mb-5 inline-flex items-center gap-1 border-0 bg-transparent cursor-default"
-          style={{ fontSize: 13, color: "var(--fg-2)" }}
-        >
-          <ChevronLeft size={14} />
-          Home
-        </button>
+    <div className="flex-1 min-h-0 relative overflow-hidden" style={{ background: "var(--page)" }}>
+      <div className="absolute inset-0 overflow-y-auto scrollbar-hide">
+        <div style={{ maxWidth: 680, margin: "0 auto", padding: "28px 40px 80px" }}>
+          <button className="mb-5 inline-flex items-center gap-1 border-0 bg-transparent cursor-default" style={{ fontSize: 13, color: "var(--fg-2)" }}>
+            <ChevronLeft size={14} /> Home
+          </button>
 
-        <div className="flex items-center gap-2 mb-4">
-          <span className="rec-dot" />
-          <span
-            className="tabular-nums"
-            style={{ fontSize: 13, color: "var(--fg-2)", fontFamily: "var(--font-mono)" }}
+          <div
+            style={{ fontFamily: "var(--font-serif)", fontWeight: 400, fontSize: 34, lineHeight: 1.15, letterSpacing: "-0.02em", color: "var(--fg-1)", marginBottom: 10 }}
           >
-            Recording · {fmt(seconds)}
-          </span>
-        </div>
+            Q1 Budget Planning
+          </div>
 
-        <div
-          style={{
-            fontFamily: "var(--font-serif)",
-            fontWeight: 400,
-            fontSize: 34,
-            lineHeight: 1.15,
-            letterSpacing: "-0.02em",
-            color: "var(--fg-1)",
-            marginBottom: 10,
-          }}
-        >
-          Q1 Budget Planning
-        </div>
-
-        <div className="flex flex-wrap items-center gap-1.5 mb-6">
-          {[
-            { icon: <CalendarIcon size={11} />, label: "Jun 29, 2026" },
-            { icon: <Clock size={11} />, label: "Started 2:14 PM" },
-          ].map((chip) => (
-            <span
-              key={chip.label}
-              className="inline-flex items-center gap-1.5 rounded-full text-[12px]"
-              style={{ padding: "3px 10px", background: "var(--surface-hover)", color: "var(--fg-2)" }}
-            >
-              {chip.icon}
-              {chip.label}
+          <div className="flex flex-wrap items-center gap-1.5 mb-6">
+            {[
+              { icon: <CalendarIcon size={11} />, label: "Jun 29, 2026" },
+              { icon: <Clock size={11} />, label: "Started 2:14 PM" },
+            ].map((chip) => (
+              <span key={chip.label} className="inline-flex items-center gap-1.5 rounded-full text-[12px]" style={{ padding: "3px 10px", background: "var(--surface-hover)", color: "var(--fg-2)" }}>
+                {chip.icon} {chip.label}
+              </span>
+            ))}
+            <span className="inline-flex items-center gap-1.5 rounded-full text-[12px]" style={{ padding: "3px 10px", color: "var(--fg-2)", border: "1px dashed var(--border-subtle)" }}>
+              <FolderPlus size={11} /> Add to folder
             </span>
-          ))}
-          <span
-            className="inline-flex items-center gap-1.5 rounded-full text-[12px]"
-            style={{ padding: "3px 10px", color: "var(--fg-2)", border: "1px dashed var(--border-subtle)" }}
-          >
-            <FolderPlus size={11} />
-            Add to folder
+          </div>
+
+          <div className="flex items-center gap-1.5 mb-2" style={{ fontSize: 13, color: "var(--fg-2)" }}>
+            <PencilLine size={13} /> Notes
+          </div>
+
+          <div style={{ fontSize: 15, lineHeight: 1.6, color: "var(--fg-1)", whiteSpace: "pre-line", minHeight: 96 }}>
+            {typedNotes}
+            {typedNotes.length < NOTES_TEXT.length && (
+              <span className="inline-block align-middle animate-pulse ml-px" style={{ width: 2, height: 15, background: "var(--fg-1)", verticalAlign: "middle" }} />
+            )}
+          </div>
+        </div>
+      </div>
+
+      <PillFade />
+
+      {/* Recording dock — mirrors LiveDock.tsx: centered rounded-full pill */}
+      <div style={{ position: "absolute", bottom: 10, left: 0, right: 0, zIndex: 2, display: "flex", justifyContent: "center" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 12px", background: "var(--surface-raised)", border: "1px solid var(--border-subtle)", borderRadius: 999, boxShadow: "var(--shadow-md)" }}>
+          {/* RecordingPill: wave | label | timer */}
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "0 8px", fontSize: 13 }}>
+            <RecordingWave />
+            <span style={{ color: "var(--fg-2)" }}>Recording</span>
+            <span style={{ fontFamily: "var(--font-mono)", fontSize: 13, color: "var(--fg-1)", fontVariantNumeric: "tabular-nums" }}>
+              {fmt(seconds)}
+            </span>
           </span>
+          {/* Transcript wave toggle */}
+          <button style={{ width: 36, height: 36, borderRadius: 999, border: 0, background: "transparent", color: "var(--fg-1)", display: "inline-flex", alignItems: "center", justifyContent: "center", cursor: "default" }}>
+            <WaveIcon />
+          </button>
+          {/* Pause */}
+          <button style={{ width: 32, height: 32, borderRadius: 999, border: 0, background: "transparent", color: "var(--fg-1)", display: "inline-flex", alignItems: "center", justifyContent: "center", cursor: "default" }}>
+            <Pause size={14} />
+          </button>
+          {/* Stop */}
+          <button style={{ height: 32, padding: "0 12px", borderRadius: 999, border: 0, background: "var(--recording)", color: "#FFFFFF", display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13, fontWeight: 500, cursor: "default" }}>
+            <Square size={12} fill="currentColor" stroke="currentColor" />
+            Stop
+          </button>
         </div>
+      </div>
+    </div>
+  );
+}
 
-        <div
-          className="flex items-center gap-1.5 mb-2"
-          style={{ fontSize: 13, color: "var(--fg-2)" }}
-        >
-          <PencilLine size={13} />
-          Notes
+// ─── Screen: Generating summary ───────────────────────────────────
+
+const GENERATING_TEXT =
+  "The team aligned on Q1 budget priorities. Engineering headcount will grow by 20%.\n\n" +
+  "**Key points**\n\n" +
+  "- Engineering headcount up 20% — two hires in March.\n" +
+  "- $40k reallocated from Q2 ops through March 31.\n" +
+  "- Marketing spend held flat.\n\n" +
+  "**Action items**\n\n" +
+  "- Marcus to file reallocation request by Friday.";
+
+const STAGE_LABELS = ["Analyzing transcript", "Generating notes", "Almost done…"];
+
+function GeneratingScreen() {
+  const [stage, setStage] = useState(0);
+  const [streamText, setStreamText] = useState("");
+  const barRef = useRef(null);
+  const lastTopRef = useRef(null);
+
+  useEffect(() => {
+    setStage(0);
+    setStreamText("");
+    lastTopRef.current = null;
+
+    let streamTimer = null;
+    let stageTimer = null;
+
+    const analysisDelay = setTimeout(() => {
+      setStage(1);
+      let idx = 0;
+      streamTimer = setInterval(() => {
+        idx += 5;
+        setStreamText(GENERATING_TEXT.slice(0, idx));
+        if (idx >= GENERATING_TEXT.length) {
+          clearInterval(streamTimer);
+          stageTimer = setTimeout(() => setStage(2), 300);
+        }
+      }, 28);
+    }, 900);
+
+    return () => {
+      clearTimeout(analysisDelay);
+      clearInterval(streamTimer);
+      clearTimeout(stageTimer);
+    };
+  }, []);
+
+  // FLIP: slide scanner bar smoothly as streamed text pushes it down
+  useEffect(() => {
+    const el = barRef.current;
+    if (!el) return;
+    el.style.transition = "none";
+    el.style.transform = "none";
+    const newTop = el.getBoundingClientRect().top;
+    const last = lastTopRef.current;
+    lastTopRef.current = newTop;
+    if (last === null || last === newTop) return;
+    const delta = last - newTop;
+    el.style.transform = `translateY(${delta}px)`;
+    void el.getBoundingClientRect();
+    el.style.transition = "transform 0.32s cubic-bezier(0.33, 1, 0.68, 1)";
+    el.style.transform = "translateY(0)";
+  }, [streamText]);
+
+  const renderMarkdown = (text) =>
+    text.split("\n").map((line, i) => {
+      if (line.startsWith("**") && line.endsWith("**")) {
+        return <p key={i} style={{ fontWeight: 600, fontSize: 13, color: "var(--fg-2)", letterSpacing: "0.01em", margin: "14px 0 6px", textTransform: "uppercase" }}>{line.replace(/\*\*/g, "")}</p>;
+      }
+      if (line.startsWith("- ")) {
+        return (
+          <div key={i} className="relative" style={{ paddingLeft: 14, marginBottom: 4 }}>
+            <span className="absolute" style={{ left: 4, top: 9, width: 4, height: 4, borderRadius: "50%", background: "var(--fg-2)", display: "block" }} />
+            <span style={{ fontSize: 14.5, lineHeight: 1.55, color: "var(--fg-1)" }}>{line.slice(2)}</span>
+          </div>
+        );
+      }
+      if (line === "") return <div key={i} style={{ height: 6 }} />;
+      return <p key={i} style={{ fontSize: 15, lineHeight: 1.6, color: "var(--fg-1)", margin: "0 0 4px" }}>{line}</p>;
+    });
+
+  return (
+    <div className="flex-1 min-h-0 relative overflow-hidden" style={{ background: "var(--page)" }}>
+      {/* New note button — mirrors MainToolbar record-btn */}
+      <button style={{ position: "absolute", top: 10, right: 12, zIndex: 3, display: "inline-flex", alignItems: "center", gap: 8, height: 30, padding: "0 14px", borderRadius: 999, background: "transparent", color: "var(--fg-1)", fontWeight: 500, fontSize: 13, border: 0, cursor: "default", fontFamily: "var(--font-sans)", boxShadow: "inset 0 0 0 1px var(--border)", letterSpacing: "-0.005em" }}>
+        <PencilLine size={13} /> New note
+      </button>
+
+      <div className="absolute inset-0 overflow-y-auto scrollbar-hide">
+        <div style={{ maxWidth: 680, margin: "0 auto", padding: "28px 40px 110px" }}>
+          <button className="mb-5 inline-flex items-center gap-1 border-0 bg-transparent cursor-default" style={{ fontSize: 13, color: "var(--fg-2)" }}>
+            <ChevronLeft size={14} /> Home
+          </button>
+
+          <h1 style={{ fontFamily: "var(--font-serif)", fontWeight: 400, fontSize: 34, lineHeight: 1.15, letterSpacing: "-0.02em", color: "var(--fg-1)", margin: "0 0 10px" }}>
+            Q1 Budget Planning
+          </h1>
+
+          <div className="flex flex-wrap items-center gap-1.5 mb-6">
+            {[
+              { icon: <CalendarIcon size={11} />, label: "Jun 29, 2026" },
+              { icon: <Clock size={11} />, label: "14 min" },
+            ].map((chip) => (
+              <span key={chip.label} className="inline-flex items-center gap-1.5 rounded-full text-[12px]" style={{ padding: "3px 10px", background: "var(--surface-hover)", color: "var(--fg-2)" }}>
+                {chip.icon} {chip.label}
+              </span>
+            ))}
+            <span className="inline-flex items-center gap-1.5 text-[12px]" style={{ padding: "3px 8px", color: "var(--fg-2)", background: "var(--surface-sunken)", borderRadius: 6 }}>
+              <Loader2 size={11} className="animate-spin" /> Processing
+            </span>
+          </div>
+
+          {streamText && <div className="mb-3">{renderMarkdown(streamText)}</div>}
+          <div
+            ref={barRef}
+            className="flex items-center gap-2.5 rounded-lg"
+            style={{ padding: "10px 14px", background: "var(--surface-raised)", border: "1px solid var(--border-subtle)", boxShadow: "var(--shadow-md)" }}
+          >
+            <Loader2 size={14} className="animate-spin" style={{ color: "var(--fg-2)", flexShrink: 0 }} />
+            <span style={{ fontSize: 13, color: "var(--fg-1)" }}>{STAGE_LABELS[stage]}</span>
+          </div>
         </div>
+      </div>
 
-        <div
-          style={{ fontSize: 15, lineHeight: 1.6, color: "var(--fg-1)", whiteSpace: "pre-line", minHeight: 96 }}
-        >
-          {typedNotes}
-          {typedNotes.length < NOTES_TEXT.length && (
-            <span
-              className="inline-block align-middle animate-pulse ml-px"
-              style={{ width: 2, height: 15, background: "var(--fg-1)", verticalAlign: "middle" }}
-            />
-          )}
+      <PillFade />
+
+      {/* Processing dock — mirrors ProcessingDock.tsx: centered rounded-full */}
+      <div style={{ position: "absolute", bottom: 10, left: 0, right: 0, zIndex: 2, display: "flex", justifyContent: "center" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 12px", background: "var(--surface-raised)", border: "1px solid var(--border-subtle)", borderRadius: 999, boxShadow: "var(--shadow-md)" }}>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "0 8px", fontSize: 13 }}>
+            <Loader2 size={14} className="animate-spin" style={{ color: "var(--fg-2)", flexShrink: 0 }} />
+            <span style={{ color: "var(--fg-2)" }}>Processing</span>
+            <span style={{ color: "var(--fg-1)", fontFamily: "var(--font-sans)", fontSize: 13 }}>14 min</span>
+          </span>
         </div>
       </div>
     </div>
@@ -300,118 +446,74 @@ function NotesScreen() {
 
 function SummaryScreen() {
   return (
-    <div
-      className="flex-1 min-h-0 overflow-y-auto scrollbar-hide"
-      style={{ background: "var(--page)" }}
-    >
-      <div style={{ maxWidth: 680, margin: "0 auto", padding: "28px 40px 40px" }}>
-        <button
-          className="mb-4 inline-flex items-center gap-1 border-0 bg-transparent cursor-default"
-          style={{ fontSize: 12.5, color: "var(--fg-2)" }}
-        >
-          <ChevronLeft size={14} />
-          All meetings
-        </button>
+    <div className="flex-1 min-h-0 relative overflow-hidden" style={{ background: "var(--page)" }}>
+      <button style={{ position: "absolute", top: 10, right: 12, zIndex: 3, display: "inline-flex", alignItems: "center", gap: 8, height: 30, padding: "0 14px", borderRadius: 999, background: "transparent", color: "var(--fg-1)", fontWeight: 500, fontSize: 13, border: 0, cursor: "default", fontFamily: "var(--font-sans)", boxShadow: "inset 0 0 0 1px var(--border)", letterSpacing: "-0.005em" }}>
+        <PencilLine size={13} /> New note
+      </button>
+      <div className="absolute inset-0 overflow-y-auto scrollbar-hide">
+        <div style={{ maxWidth: 680, margin: "0 auto", padding: "28px 40px 80px" }}>
+          <button className="mb-4 inline-flex items-center gap-1 border-0 bg-transparent cursor-default" style={{ fontSize: 12.5, color: "var(--fg-2)" }}>
+            <ChevronLeft size={14} /> All meetings
+          </button>
 
-        <h1
-          style={{
-            fontFamily: "var(--font-serif)",
-            fontWeight: 400,
-            fontSize: 36,
-            lineHeight: 1.1,
-            letterSpacing: "-0.025em",
-            color: "var(--fg-1)",
-            margin: "0 0 10px",
-          }}
-        >
-          Q1 Budget Planning
-        </h1>
+          <h1 style={{ fontFamily: "var(--font-serif)", fontWeight: 400, fontSize: 36, lineHeight: 1.1, letterSpacing: "-0.025em", color: "var(--fg-1)", margin: "0 0 10px" }}>
+            Q1 Budget Planning
+          </h1>
 
-        <div
-          className="flex flex-wrap items-center gap-1.5 pb-5 mb-5"
-          style={{ borderBottom: "1px solid var(--border-subtle)" }}
-        >
-          {[
-            { icon: <CalendarIcon size={11} />, label: "Jun 29, 2026" },
-            { icon: <Clock size={11} />, label: "28 min" },
-          ].map((chip) => (
-            <span
-              key={chip.label}
-              className="inline-flex items-center gap-1.5 rounded-full text-[12px]"
-              style={{ padding: "3px 10px", background: "var(--surface-hover)", color: "var(--fg-2)" }}
-            >
-              {chip.icon}
-              {chip.label}
-            </span>
-          ))}
-        </div>
-
-        <p
-          style={{ fontSize: 15.5, lineHeight: 1.65, color: "var(--fg-1)", margin: "0 0 20px", maxWidth: "64ch" }}
-        >
-          {SUMMARY_INTRO}
-        </p>
-
-        <div className="mb-5">
-          <h3
-            style={{
-              fontSize: 13,
-              fontWeight: 600,
-              letterSpacing: "0.01em",
-              color: "var(--fg-2)",
-              margin: "0 0 10px",
-              fontFamily: "var(--font-sans)",
-            }}
-          >
-            KEY POINTS
-          </h3>
-          <ul className="list-none p-0 m-0 space-y-2">
-            {KEY_POINTS.map((pt) => (
-              <li
-                key={pt}
-                className="relative pl-[18px]"
-                style={{ fontSize: 14.5, lineHeight: 1.55, color: "var(--fg-1)" }}
-              >
-                <span
-                  className="absolute rounded-full"
-                  style={{ left: 4, top: 9, width: 4, height: 4, background: "var(--fg-2)" }}
-                />
-                {pt}
-              </li>
+          <div className="flex flex-wrap items-center gap-1.5 pb-5 mb-5" style={{ borderBottom: "1px solid var(--border-subtle)" }}>
+            {[
+              { icon: <CalendarIcon size={11} />, label: "Jun 29, 2026" },
+              { icon: <Clock size={11} />, label: "28 min" },
+            ].map((chip) => (
+              <span key={chip.label} className="inline-flex items-center gap-1.5 rounded-full text-[12px]" style={{ padding: "3px 10px", background: "var(--surface-hover)", color: "var(--fg-2)" }}>
+                {chip.icon} {chip.label}
+              </span>
             ))}
-          </ul>
-        </div>
+          </div>
 
-        <div>
-          <h3
-            style={{
-              fontSize: 13,
-              fontWeight: 600,
-              letterSpacing: "0.01em",
-              color: "var(--fg-2)",
-              margin: "0 0 10px",
-              fontFamily: "var(--font-sans)",
-            }}
-          >
-            ACTION ITEMS
-          </h3>
-          <ul className="list-none p-0 m-0 space-y-2">
-            {ACTION_ITEMS.map((ai) => (
-              <li
-                key={ai}
-                className="relative pl-[18px]"
-                style={{ fontSize: 14.5, lineHeight: 1.55, color: "var(--fg-1)" }}
-              >
-                <span
-                  className="absolute rounded-full"
-                  style={{ left: 4, top: 9, width: 4, height: 4, background: "var(--fg-2)" }}
-                />
-                {ai}
-              </li>
-            ))}
-          </ul>
+          <p style={{ fontSize: 15.5, lineHeight: 1.65, color: "var(--fg-1)", margin: "0 0 20px", maxWidth: "64ch" }}>
+            {SUMMARY_INTRO}
+          </p>
+
+          <div className="mb-5">
+            <h3 style={{ fontSize: 13, fontWeight: 600, letterSpacing: "0.01em", color: "var(--fg-2)", margin: "0 0 10px", fontFamily: "var(--font-sans)" }}>KEY POINTS</h3>
+            <ul className="list-none p-0 m-0 space-y-2">
+              {KEY_POINTS.map((pt) => (
+                <li key={pt} className="relative pl-[18px]" style={{ fontSize: 14.5, lineHeight: 1.55, color: "var(--fg-1)" }}>
+                  <span className="absolute rounded-full" style={{ left: 4, top: 9, width: 4, height: 4, background: "var(--fg-2)" }} />
+                  {pt}
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          <div>
+            <h3 style={{ fontSize: 13, fontWeight: 600, letterSpacing: "0.01em", color: "var(--fg-2)", margin: "0 0 10px", fontFamily: "var(--font-sans)" }}>ACTION ITEMS</h3>
+            <ul className="list-none p-0 m-0 space-y-2">
+              {ACTION_ITEMS.map((ai) => (
+                <li key={ai} className="relative pl-[18px]" style={{ fontSize: 14.5, lineHeight: 1.55, color: "var(--fg-1)" }}>
+                  <span className="absolute rounded-full" style={{ left: 4, top: 9, width: 4, height: 4, background: "var(--fg-2)" }} />
+                  {ai}
+                </li>
+              ))}
+            </ul>
+          </div>
         </div>
       </div>
+
+      <PillFade />
+
+      <BottomPill>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 8px 8px 12px", background: "var(--surface-raised)", border: "1px solid var(--border-subtle)", borderRadius: 14, boxShadow: "var(--shadow-sm)" }}>
+          <WaveIcon />
+          <div style={{ flex: 1, fontSize: 14, fontWeight: 500, color: "var(--fg-2)" }}>
+            Ask anything about this meeting…
+          </div>
+          <button style={{ width: 30, height: 30, borderRadius: 999, border: 0, background: "var(--surface-active)", color: "var(--fg-2)", display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0, cursor: "default" }}>
+            <ArrowUp size={14} />
+          </button>
+        </div>
+      </BottomPill>
     </div>
   );
 }
@@ -422,17 +524,7 @@ function ThinkingDots() {
   return (
     <div className="flex items-center gap-1 py-1">
       {[0, 0.2, 0.4].map((delay, i) => (
-        <span
-          key={i}
-          style={{
-            display: "inline-block",
-            width: 5,
-            height: 5,
-            borderRadius: "50%",
-            background: "var(--fg-2)",
-            animation: `thinkingBounce 1.2s ease-in-out ${delay}s infinite`,
-          }}
-        />
+        <span key={i} style={{ display: "inline-block", width: 5, height: 5, borderRadius: "50%", background: "var(--fg-2)", animation: `thinkingBounce 1.2s ease-in-out ${delay}s infinite` }} />
       ))}
     </div>
   );
@@ -440,7 +532,7 @@ function ThinkingDots() {
 
 function ChatScreen() {
   const [inputText, setInputText] = useState("");
-  const [phase, setPhase] = useState(0); // 0=typing-in-bar, 1=thinking, 2=streaming
+  const [phase, setPhase] = useState(0);
   const [typedA, setTypedA] = useState("");
 
   useEffect(() => {
@@ -486,132 +578,93 @@ function ChatScreen() {
     };
   }, []);
 
+  const showPanel = phase >= 1;
+
   return (
-    <div className="flex flex-col h-full" style={{ background: "var(--page)" }}>
-      {/* Header */}
-      <div
-        className="flex items-center justify-between px-4 py-2 flex-shrink-0"
-        style={{ borderBottom: "1px solid var(--border-subtle)" }}
-      >
-        <div className="flex items-center gap-1.5 text-sm font-semibold" style={{ color: "var(--fg-1)" }}>
-          Q1 Budget Planning
-          <ChevronDown size={14} style={{ color: "var(--fg-2)" }} />
+    <div className="flex-1 min-h-0 relative overflow-hidden" style={{ background: "var(--page)", textAlign: "left" }}>
+      {/* Faded meeting content — shows notes visible behind the chat panel */}
+      <div style={{ maxWidth: 680, margin: "0 auto", padding: "20px 40px", opacity: 0.3, pointerEvents: "none", userSelect: "none" }}>
+        <div style={{ fontSize: 13, color: "var(--fg-2)", marginBottom: 10, display: "flex", alignItems: "center", gap: 3 }}>
+          <ChevronLeft size={13} /> Work
         </div>
-        <button
-          className="border-0 cursor-default text-[12px] rounded-[6px]"
-          style={{
-            padding: "3px 10px",
-            border: "1px solid var(--border-subtle)",
-            background: "transparent",
-            color: "var(--fg-2)",
-          }}
-        >
-          New chat
-        </button>
+        <div style={{ fontFamily: "var(--font-serif)", fontSize: 30, fontWeight: 400, letterSpacing: "-0.02em", color: "var(--fg-1)", marginBottom: 10 }}>
+          Q1 Budget Planning
+        </div>
+        <div style={{ display: "flex", gap: 6, marginBottom: 16 }}>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "3px 10px", background: "var(--surface-hover)", borderRadius: 20, fontSize: 12, color: "var(--fg-2)" }}>
+            <CalendarIcon size={11} /> Jun 29, 2026
+          </span>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "3px 10px", background: "var(--surface-hover)", borderRadius: 20, fontSize: 12, color: "var(--fg-2)" }}>
+            <Clock size={11} /> 2:14 PM
+          </span>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "var(--fg-2)", marginBottom: 8 }}>
+          <PencilLine size={13} /> Notes
+        </div>
+        <div style={{ fontSize: 14, lineHeight: 1.6, color: "var(--fg-1)", whiteSpace: "pre-line" }}>
+          {NOTES_TEXT}
+        </div>
       </div>
 
-      {/* Messages */}
-      <div className="flex-1 overflow-hidden px-4 py-3 space-y-3">
-        {phase >= 1 && (
-          <Motion.div
-            initial={{ opacity: 0, y: 4 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.2 }}
-            className="flex justify-end"
-          >
-            <div
-              className="text-[14px] max-w-[75%]"
-              style={{
-                padding: "8px 14px",
-                background: "var(--surface-hover)",
-                border: "1px solid var(--border-subtle)",
-                borderRadius: "18px 18px 4px 18px",
-                color: "var(--fg-1)",
-                lineHeight: 1.5,
-              }}
+      {/* Gradient fade above dock */}
+      <div style={{ position: "absolute", bottom: showPanel ? 230 : 72, left: 0, right: 0, height: 80, background: "linear-gradient(transparent, var(--page))", pointerEvents: "none", transition: "bottom 0.25s ease", zIndex: 1 }} />
+
+      {/* Dock */}
+      <div style={{ position: "absolute", bottom: 10, left: 0, right: 0, zIndex: 2 }}>
+        <div style={{ maxWidth: 680, margin: "0 auto", padding: "0 40px", display: "flex", flexDirection: "column", gap: 6 }}>
+
+          <AnimatePresence>
+          {showPanel && (
+            <Motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 6 }}
+              transition={{ duration: 0.22, ease: [0.33, 1, 0.68, 1] }}
             >
-              {CHAT_Q}
+            <div style={{ background: "color-mix(in srgb, var(--surface-raised) 92%, transparent)", backdropFilter: "saturate(160%) blur(10px)", WebkitBackdropFilter: "saturate(160%) blur(10px)", border: "1px solid var(--border-subtle)", borderRadius: 14, boxShadow: "var(--shadow-md)", overflow: "hidden" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", borderBottom: "1px solid var(--border-subtle)" }}>
+                <span style={{ fontSize: 13, fontWeight: 600, color: "var(--fg-1)", flex: 1 }}>
+                  Q1 Budget Planning
+                  <ChevronDown size={11} style={{ display: "inline", marginLeft: 3, color: "var(--fg-2)", verticalAlign: "middle" }} />
+                </span>
+                <button style={{ border: "1px solid var(--border-subtle)", borderRadius: 6, padding: "2px 8px", fontSize: 12, color: "var(--fg-2)", background: "transparent", cursor: "default" }}>
+                  New chat
+                </button>
+              </div>
+              <div className="scrollbar-hide overflow-y-auto" style={{ padding: "10px 14px 12px", maxHeight: 150 }}>
+                <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 10 }}>
+                  <div style={{ background: "var(--surface-hover)", border: "1px solid var(--border-subtle)", borderRadius: "18px 18px 4px 18px", padding: "7px 12px", fontSize: 14, color: "var(--fg-1)", maxWidth: "75%", lineHeight: 1.5 }}>
+                    {CHAT_Q}
+                  </div>
+                </div>
+                {phase === 1 && <ThinkingDots />}
+                {phase >= 2 && (
+                  <div style={{ fontSize: 14, lineHeight: 1.7, color: "var(--fg-1)" }}>
+                    {typedA}
+                  </div>
+                )}
+              </div>
             </div>
-          </Motion.div>
-        )}
+            </Motion.div>
+          )}
+          </AnimatePresence>
 
-        {phase === 1 && <ThinkingDots />}
-
-        {phase === 2 && (
-          <Motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ duration: 0.15 }}
-            className="text-[14px]"
-            style={{ lineHeight: 1.7, color: "var(--fg-1)", maxWidth: "90%" }}
-          >
-            {typedA}
-            {typedA.length < CHAT_A.length && (
-              <span
-                className="inline-block align-middle animate-pulse"
-                style={{ width: 2, height: 14, background: "var(--fg-1)", marginLeft: 1 }}
-              />
-            )}
-          </Motion.div>
-        )}
-      </div>
-
-      {/* Ask bar */}
-      <div className="px-3 pb-3 flex-shrink-0">
-        {phase === 0 && (
-          <div className="flex flex-wrap gap-2 mb-2">
-            {CHAT_SUGGESTIONS.map((s) => (
-              <span
-                key={s}
-                className="text-[12px] rounded-[8px] cursor-default"
-                style={{ padding: "3px 10px", border: "1px solid var(--border-subtle)", color: "var(--fg-2)" }}
-              >
-                {s}
-              </span>
-            ))}
+          {/* Input pill */}
+          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 8px 8px 12px", background: "var(--surface-raised)", border: "1px solid var(--border-subtle)", borderRadius: 14, boxShadow: "var(--shadow-sm)" }}>
+            <button style={{ width: 30, height: 30, borderRadius: 8, border: 0, background: "transparent", color: "var(--fg-2)", display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0, cursor: "default" }}>
+              <WaveIcon />
+            </button>
+            <div style={{ flex: 1, minWidth: 0, height: 32, display: "flex", alignItems: "center", fontSize: 14, fontWeight: 500, color: inputText ? "var(--fg-1)" : "var(--fg-2)", overflow: "hidden", whiteSpace: "nowrap" }}>
+              {inputText || (showPanel ? "Continue chat…" : "Ask anything about this meeting…")}
+              {phase === 0 && inputText.length > 0 && inputText.length < CHAT_Q.length && (
+                <span style={{ display: "inline-block", width: 2, height: 14, background: "var(--fg-1)", marginLeft: 1, verticalAlign: "middle" }} />
+              )}
+            </div>
+            <button style={{ width: 30, height: 30, borderRadius: 999, border: 0, background: inputText ? "var(--fg-1)" : "var(--surface-active)", color: inputText ? "var(--fg-inverse)" : "var(--fg-2)", display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0, cursor: "default" }}>
+              <ArrowUp size={14} />
+            </button>
           </div>
-        )}
 
-        <div
-          className="flex items-center gap-2 rounded-[14px]"
-          style={{
-            padding: "8px 8px 8px 12px",
-            background: "var(--surface-raised)",
-            border: "1px solid var(--border-subtle)",
-            boxShadow: "var(--shadow-sm)",
-          }}
-        >
-          <div
-            className="flex-1 text-[14px] font-medium"
-            style={{
-              height: 32,
-              display: "flex",
-              alignItems: "center",
-              color: inputText ? "var(--fg-1)" : "var(--fg-2)",
-              minWidth: 0,
-              overflow: "hidden",
-              whiteSpace: "nowrap",
-            }}
-          >
-            {inputText || "Ask about your meetings…"}
-            {phase === 0 && inputText.length > 0 && inputText.length < CHAT_Q.length && (
-              <span
-                className="inline-block align-middle ml-px flex-shrink-0"
-                style={{ width: 2, height: 14, background: "var(--fg-1)" }}
-              />
-            )}
-          </div>
-          <button
-            className="flex items-center justify-center flex-shrink-0 rounded-full border-0 cursor-default"
-            style={{
-              width: 30,
-              height: 30,
-              background: inputText ? "var(--fg-1)" : "var(--surface-active)",
-              color: inputText ? "var(--fg-inverse)" : "var(--fg-2)",
-            }}
-          >
-            <ArrowUp size={14} />
-          </button>
         </div>
       </div>
     </div>
@@ -622,87 +675,31 @@ function ChatScreen() {
 
 export function AppWindowDemo() {
   const [screenIdx, setScreenIdx] = useState(0);
-  const timerRef = useRef(null);
-
-  const startTimer = useCallback(() => {
-    clearInterval(timerRef.current);
-    timerRef.current = setInterval(() => {
-      setScreenIdx((i) => (i + 1) % SCREENS.length);
-    }, ADVANCE_MS);
-  }, []);
-
-  const goTo = useCallback(
-    (idx) => {
-      setScreenIdx(idx);
-      startTimer();
-    },
-    [startTimer]
-  );
-
-  useEffect(() => {
-    startTimer();
-    return () => clearInterval(timerRef.current);
-  }, [startTimer]);
-
   const screen = SCREENS[screenIdx];
 
+  useEffect(() => {
+    const ms = SCREEN_MS[screen] ?? 8000;
+    const t = setTimeout(() => setScreenIdx((i) => (i + 1) % SCREENS.length), ms);
+    return () => clearTimeout(t);
+  }, [screen]);
+
   return (
-    <div className="relative max-w-full overflow-x-auto">
+    <div className="relative max-w-full" style={{ padding: "2px 2px 32px", textAlign: "left" }}>
       <div
         className="rounded-[14px] overflow-hidden"
-        style={{ background: "var(--surface-raised)", boxShadow: "var(--shadow-lg)" }}
+        style={{ background: "var(--surface-raised)", boxShadow: "var(--shadow-lg)", border: "1px solid var(--border)" }}
       >
-        {/* Title bar */}
-        <div
-          className="flex items-center gap-[6px] px-[14px] py-[10px] flex-shrink-0"
-          style={{ background: "var(--surface-sunken)", borderBottom: "1px solid var(--border-subtle)" }}
-        >
-          <span className="w-[10px] h-[10px] rounded-full bg-[#FF5F57] block" />
-          <span className="w-[10px] h-[10px] rounded-full bg-[#FEBC2E] block" />
-          <span className="w-[10px] h-[10px] rounded-full bg-[#28C840] block" />
-          <span className="ml-3 text-[12px]" style={{ color: "var(--fg-2)", fontFamily: "var(--font-sans)" }}>
-            Steno
-          </span>
-        </div>
-
-        {/* Body */}
         <div className="flex" style={{ height: 480 }}>
           <AppSidebar activeScreen={screen} />
-
           <div className="flex-1 min-w-0 overflow-hidden relative">
-            <AnimatePresence mode="wait">
-              <Motion.div
-                key={screen}
-                initial={{ opacity: 0, y: 4 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -4 }}
-                transition={{ duration: 0.2 }}
-                className="absolute inset-0 flex flex-col"
-              >
-                {screen === "notes" && <NotesScreen />}
-                {screen === "summary" && <SummaryScreen />}
-                {screen === "chat" && <ChatScreen />}
-              </Motion.div>
-            </AnimatePresence>
+            <div className="absolute inset-0 flex flex-col">
+              {screen === "notes" && <NotesScreen />}
+              {screen === "generating" && <GeneratingScreen />}
+              {screen === "summary" && <SummaryScreen />}
+              {screen === "chat" && <ChatScreen />}
+            </div>
           </div>
         </div>
-      </div>
-
-      {/* Progress dots */}
-      <div className="flex justify-center gap-[6px] mt-3">
-        {SCREENS.map((_, i) => (
-          <button
-            key={i}
-            onClick={() => goTo(i)}
-            className="rounded-full border-0 cursor-pointer p-0 transition-all duration-200"
-            style={{
-              width: 6,
-              height: 6,
-              background: i === screenIdx ? "var(--fg-1)" : "var(--border-strong)",
-            }}
-            aria-label={`View screen ${i + 1}`}
-          />
-        ))}
       </div>
     </div>
   );

@@ -45,73 +45,73 @@ export function Hero() {
 
   return (
     <section className="pt-[40px] pb-[56px] md:pt-[56px] md:pb-[80px]">
-      <div className="container-site grid md:grid-cols-[320px_1fr] gap-10 md:gap-10 items-start">
+      <div className="container-site text-center">
 
-        {/* Copy */}
-        <div>
-          <Motion.h1
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5 }}
-            style={{
-              fontFamily: "var(--font-serif)",
-              fontWeight: 400,
-              fontSize: "clamp(44px, 6.2vw, 72px)",
-              lineHeight: 1.02,
-              letterSpacing: "-0.025em",
-              color: "var(--fg-1)",
-              maxWidth: "14ch",
-            }}
-          >
-            AI for your confidential workflows.
-          </Motion.h1>
+        <Motion.h1
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5 }}
+          style={{
+            fontFamily: "var(--font-serif)",
+            fontWeight: 400,
+            fontSize: "clamp(40px, 5.6vw, 68px)",
+            lineHeight: 1.02,
+            letterSpacing: "-0.025em",
+            color: "var(--fg-1)",
+            maxWidth: "18ch",
+            margin: "0 auto",
+          }}
+        >
+          AI for your confidential workflows.
+        </Motion.h1>
 
-          <Motion.p
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: 0.1 }}
-            className="text-fg-2 text-lg leading-[1.55] mt-7 mb-9"
-            style={{ maxWidth: "44ch" }}
-          >
-            Steno is the AI powered intelligence layer for all your confidential workflows.
-            No cloud, no usage limits and full control of your data.
-          </Motion.p>
-
-          <Motion.div
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: 0.15 }}
-            className="flex gap-[10px] flex-wrap"
-          >
-            <a href={primary.href} onClick={() => trackDownload('hero', primary.arch)} className="btn-base btn-primary inline-flex items-center gap-2 no-underline hover:no-underline">
-              <Download size={15} aria-hidden="true" /> {primary.label}
-            </a>
-            {showSecondary && (
-              <a href={secondary.href} onClick={() => trackDownload('hero', secondary.arch)} className="btn-base btn-ghost inline-flex items-center gap-2 no-underline hover:no-underline">
-                <Download size={15} aria-hidden="true" /> {secondary.label}
-              </a>
-            )}
-          </Motion.div>
-
-          <Motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ duration: 0.5, delay: 0.25 }}
-            className="flex gap-5 flex-wrap mt-7"
-          >
-            <span className="inline-flex items-center gap-1.5 text-fg-2 text-[13px]">
-              <ShieldCheck size={13} aria-hidden="true" /> No network requests after install
-            </span>
-            <span className="inline-flex items-center gap-1.5 text-fg-2 text-[13px]">
-              <Lock size={13} aria-hidden="true" /> Open source, verify it yourself
-            </span>
-          </Motion.div>
-        </div>
+        <Motion.p
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5, delay: 0.1 }}
+          className="text-fg-2 text-lg leading-[1.55] mt-6 mb-8 mx-auto"
+          style={{ maxWidth: "48ch" }}
+        >
+          Steno is the AI powered intelligence layer for all your confidential workflows.
+          No cloud, no usage limits and full control of your data.
+        </Motion.p>
 
         <Motion.div
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.6, delay: 0.1 }}
+          transition={{ duration: 0.5, delay: 0.15 }}
+          className="flex gap-[10px] flex-wrap justify-center"
+        >
+          <a href={primary.href} onClick={() => trackDownload('hero', primary.arch)} className="btn-base btn-primary inline-flex items-center gap-2 no-underline hover:no-underline">
+            <Download size={15} aria-hidden="true" /> {primary.label}
+          </a>
+          {showSecondary && (
+            <a href={secondary.href} onClick={() => trackDownload('hero', secondary.arch)} className="btn-base btn-ghost inline-flex items-center gap-2 no-underline hover:no-underline">
+              <Download size={15} aria-hidden="true" /> {secondary.label}
+            </a>
+          )}
+        </Motion.div>
+
+        <Motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.5, delay: 0.25 }}
+          className="flex gap-5 flex-wrap justify-center mt-6 mb-12"
+        >
+          <span className="inline-flex items-center gap-1.5 text-fg-2 text-[13px]">
+            <ShieldCheck size={13} aria-hidden="true" /> No network requests after install
+          </span>
+          <span className="inline-flex items-center gap-1.5 text-fg-2 text-[13px]">
+            <Lock size={13} aria-hidden="true" /> Open source, verify it yourself
+          </span>
+        </Motion.div>
+
+        <Motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.6, delay: 0.35 }}
+          className="mx-auto"
+          style={{ maxWidth: 960 }}
         >
           <AppWindowDemo />
         </Motion.div>

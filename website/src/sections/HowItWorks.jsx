@@ -4,29 +4,41 @@ import { motion as Motion } from "framer-motion";
 const steps = [
   {
     n: "01",
-    icon: <Mic size={18} aria-hidden="true" />,
+    Icon: Mic,
     title: "Record",
-    body: "Capture microphone, system audio, or both. Even with headphones, both sides of a virtual meeting are recorded without any bot joining the call.",
+    body: "Captures your mic, system audio, or both. Both sides of a video call are recorded without any bot or app joining.",
   },
   {
     n: "02",
-    icon: <FileText size={18} aria-hidden="true" />,
+    Icon: FileText,
     title: "Transcribe",
-    body: "Parakeet TDT v3 transcribes live as you speak, entirely on device. Whisper.cpp covers 99 languages, auto-detected. Fast on Apple Silicon, and runs on Windows too.",
+    body: "Your words are transcribed in real time, entirely on your device. Works in 99 languages with automatic detection — on Mac and Windows.",
   },
   {
     n: "03",
-    icon: <Sparkles size={18} aria-hidden="true" />,
+    Icon: Sparkles,
     title: "Summarize",
-    body: "A local language model extracts the summary, key topics, and action items. Nothing is uploaded. Ever.",
+    body: "Pulls out a summary, key topics, and action items automatically. Nothing ever leaves your device.",
   },
 ];
+
+const cardVariants = {
+  hidden: { opacity: 0, y: 30, filter: "blur(4px)" },
+  show: { opacity: 1, y: 0, filter: "blur(0px)" },
+};
 
 export function HowItWorks() {
   return (
     <section id="how" className="sect">
       <div className="container-site">
-        <div className="mb-[48px] md:mb-[72px]" style={{ maxWidth: 640 }}>
+        <Motion.div
+          initial={{ y: -10, opacity: 0 }}
+          whileInView={{ y: 0, opacity: 1 }}
+          viewport={{ once: true }}
+          transition={{ duration: 0.8, ease: [0.21, 0.47, 0.32, 0.98] }}
+          className="mb-[48px] md:mb-[72px]"
+          style={{ maxWidth: 640 }}
+        >
           <h2
             style={{
               fontFamily: "var(--font-serif)",
@@ -43,38 +55,42 @@ export function HowItWorks() {
           <p className="text-fg-2 text-lg leading-[1.55]" style={{ maxWidth: "56ch" }}>
             From raw audio to structured notes, every step happens on your machine, including the language model.
           </p>
-        </div>
+        </Motion.div>
 
-        <div className="grid md:grid-cols-3 gap-8 md:gap-12">
-          {steps.map((s, i) => (
+        <Motion.div
+          variants={{
+            hidden: { opacity: 0 },
+            show: { opacity: 1, transition: { staggerChildren: 0.1 } },
+          }}
+          initial="hidden"
+          whileInView="show"
+          viewport={{ once: true }}
+          className="grid md:grid-cols-3 gap-6"
+        >
+          {steps.map((s) => (
             <Motion.div
               key={s.n}
-              initial={{ opacity: 0, y: 8 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true }}
-              transition={{ duration: 0.4, delay: i * 0.1 }}
+              variants={cardVariants}
+              transition={{ duration: 0.8, ease: [0.21, 0.47, 0.32, 0.98] }}
             >
-              <div className="flex items-center gap-3 mb-5">
-                <div
-                  className="text-[13px] text-fg-2 tabular-nums"
-                  style={{ fontVariantNumeric: "tabular-nums" }}
-                >
-                  {s.n}
+              <div className="step-card">
+                <s.Icon size={28} strokeWidth={1.2} style={{ color: "var(--fg-1)" }} aria-hidden="true" />
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  <h3
+                    className="text-fg-1"
+                    style={{ fontWeight: 500, fontSize: 19, letterSpacing: "-0.01em", margin: 0 }}
+                  >
+                    <span className="text-fg-2 tabular-nums" style={{ fontWeight: 400 }}>{s.n} </span>
+                    {s.title}
+                  </h3>
+                  <p className="text-fg-2 text-[15px] leading-[1.6]">
+                    {s.body}
+                  </p>
                 </div>
-                <div className="text-fg-2">{s.icon}</div>
               </div>
-              <h3
-                className="text-fg-1 mb-2.5"
-                style={{ fontWeight: 500, fontSize: 20, letterSpacing: "-0.01em" }}
-              >
-                {s.title}
-              </h3>
-              <p className="text-fg-2 text-[15px] leading-[1.6]" style={{ maxWidth: "34ch" }}>
-                {s.body}
-              </p>
             </Motion.div>
           ))}
-        </div>
+        </Motion.div>
       </div>
     </section>
   );
