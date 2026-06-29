@@ -45,7 +45,7 @@ export function Hero() {
 
   return (
     <section className="pt-[40px] pb-[56px] md:pt-[56px] md:pb-[80px]">
-      <div className="container-site grid md:grid-cols-[1.1fr_1fr] gap-10 md:gap-16 items-center">
+      <div className="container-site grid md:grid-cols-[320px_1fr] gap-10 md:gap-10 items-start">
 
         {/* Copy */}
         <div>
