@@ -282,3 +282,13 @@
 @media (min-width: 641px) and (max-width: 900px) {
   .sect { padding-top: 80px; padding-bottom: 80px; }
 }
+
+/* Scrollbar hide utility */
+.scrollbar-hide::-webkit-scrollbar { display: none; }
+.scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* Thinking dots animation for chat */
+@keyframes thinkingBounce {
+  0%, 100% { transform: scale(0.6); opacity: 0.4; }
+  50%       { transform: scale(1);   opacity: 1;   }
+}

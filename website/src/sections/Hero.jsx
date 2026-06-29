@@ -108,7 +108,13 @@ export function Hero() {
           </Motion.div>
         </div>
 
-        <AppWindowDemo />
+        <Motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.6, delay: 0.1 }}
+        >
+          <AppWindowDemo />
+        </Motion.div>
 
       </div>
     </section>
