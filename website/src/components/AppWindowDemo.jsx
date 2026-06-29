@@ -325,25 +325,31 @@ function ChatScreen() {
     setTypedA("");
 
     let qIdx = 0;
+    let pauseHandle = null;
+    let aTimer = null;
+
     const qTimer = setInterval(() => {
       qIdx++;
       setTypedQ(CHAT_QUESTION.slice(0, qIdx));
       if (qIdx >= CHAT_QUESTION.length) {
         clearInterval(qTimer);
-        const pause = setTimeout(() => {
+        pauseHandle = setTimeout(() => {
           setShowAnswer(true);
           let aIdx = 0;
-          const aTimer = setInterval(() => {
+          aTimer = setInterval(() => {
             aIdx++;
             setTypedA(CHAT_ANSWER.slice(0, aIdx));
             if (aIdx >= CHAT_ANSWER.length) clearInterval(aTimer);
           }, 18);
         }, 600);
-        return () => clearTimeout(pause);
       }
     }, 45);
 
-    return () => clearInterval(qTimer);
+    return () => {
+      clearInterval(qTimer);
+      clearTimeout(pauseHandle);
+      clearInterval(aTimer);
+    };
   }, []);
 
   return (
