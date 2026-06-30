@@ -217,6 +217,11 @@ function install({ ipcMain }) {
     'list-folders': { success: true, folders: [] },
     'get-calendar-events': { success: true, events: [] },
     'parakeet-status': { success: true, model: '', installed: false },
+    // Transcribe tab reads these on first paint. Default to Parakeet (the new
+    // default engine) + auto so the language picker renders enabled and shows
+    // the Parakeet language set (parakeet-language-picker.t1).
+    'get-transcription-engine': { success: true, engine: 'parakeet' },
+    'get-language': { success: true, language: 'auto' },
     'list-whisper-models': {
       success: true,
       supported_models: {},

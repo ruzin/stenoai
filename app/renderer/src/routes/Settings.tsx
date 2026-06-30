@@ -33,6 +33,7 @@ import {
 } from '@/components/ui/dialog';
 import { MeetingsShell } from '@/components/MeetingsShell';
 import { useNavigate, getLastNonSettingsRoute, useRoute, getRouteParam } from '@/lib/router';
+import { PARAKEET_LANGUAGE_CODES } from '@/lib/transcription-languages';
 import {
   clearDebugLogs,
   getDebugLogs,
@@ -127,11 +128,7 @@ type LangOption = { value: string; label: string };
 
 // Curated language list shown in Settings → Transcribe. Whisper supports
 // all 12 (it covers 99 languages at the model level; the dropdown is just
-// the tested curation). Parakeet TDT v3 supports 25 European languages
-// and is language-agnostic at inference — per-language hints don't bias
-// the decoder, so we expose only Auto vs English-only. Picking a
-// non-European concrete code (e.g. Hindi) on Parakeet would produce
-// garbage; hiding the option avoids that footgun.
+// the tested curation).
 const LANGUAGES_WHISPER: LangOption[] = [
   { value: 'auto', label: 'Auto (detect)' },
   { value: 'en', label: 'English' },
@@ -146,10 +143,13 @@ const LANGUAGES_WHISPER: LangOption[] = [
   { value: 'hi', label: 'Hindi' },
   { value: 'ar', label: 'Arabic' },
 ];
-const LANGUAGES_PARAKEET: LangOption[] = [
-  { value: 'auto', label: 'Auto (detect)' },
-  { value: 'en', label: 'English' },
-];
+// Parakeet exposes the European subset (see transcription-languages.ts for
+// why pinning matters even though the decoder is language-agnostic). Derived
+// from the Whisper list so labels stay identical and the picker can't drift
+// from the shared code set.
+const LANGUAGES_PARAKEET: LangOption[] = LANGUAGES_WHISPER.filter((l) =>
+  PARAKEET_LANGUAGE_CODES.has(l.value),
+);
 
 const TABS = [
   { id: 'general', label: 'General' },
@@ -864,7 +864,7 @@ function TranscriptionTab() {
   const displayValue = options.some((o) => o.value === persisted) ? persisted : 'auto';
   const helperText =
     engine === 'parakeet'
-      ? 'Auto-detect covers 25 European languages. For other languages, switch to Whisper.'
+      ? 'Pick your meeting language so summaries and notes come out in it. Parakeet covers European languages; for Japanese, Chinese, Korean, Hindi or Arabic, switch to Whisper.'
       : 'Language for transcription and summaries';
 
   return (

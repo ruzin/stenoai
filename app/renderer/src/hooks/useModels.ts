@@ -2,6 +2,7 @@ import * as React from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ipc, type ListedModel, type TranscriptionEngine } from '@/lib/ipc';
 import { unwrap } from '@/lib/result';
+import { PARAKEET_LANGUAGE_CODES } from '@/lib/transcription-languages';
 
 export const modelsKeys = {
   all: ['models'] as const,
@@ -249,6 +250,9 @@ export function usePullParakeetModel() {
         return rest;
       });
       if (success && pendingSelect === key) {
+        // Same coercion as an explicit switch: auto-selecting Parakeet after a
+        // download must not leave a Whisper-only pin (e.g. 'ja') in config.
+        await coerceLanguageForParakeet();
         await ipc().transcriptionEngine.set('parakeet');
         setPendingSelect(null);
       }
@@ -288,12 +292,23 @@ export function useTranscriptionEngine() {
   });
 }
 
-// Language sets the engine-aware dropdown lists honour. Mirrors the
-// LANGUAGES_PARAKEET / LANGUAGES_WHISPER arrays in Settings.tsx — kept in
-// useModels because the coercion below needs to run regardless of where
-// the engine switch was triggered from (Settings card click, Setup
-// wizard, future shortcut, etc.).
-const PARAKEET_LANGUAGES = new Set(['auto', 'en']);
+// Activating Parakeet must drop a pin Parakeet can't honour as an output
+// language (a Whisper-only 'hi'/'ja'/…) back to 'auto' — otherwise the config
+// and live-recording metadata keep a language outside PARAKEET_LANGUAGE_CODES.
+// Default to 'auto' (not 'en') so the user's "detect / multi-language" intent
+// survives. Shared by every Parakeet-activation path: the explicit engine
+// switch (useSetActiveTranscription) and the post-download auto-select
+// (usePullParakeetModel's complete handler).
+async function coerceLanguageForParakeet(): Promise<void> {
+  try {
+    const current = unwrap(await ipc().settings.getLanguage()).language;
+    if (!PARAKEET_LANGUAGE_CODES.has(current)) {
+      unwrap(await ipc().settings.setLanguage('auto'));
+    }
+  } catch {
+    // Best-effort: activation shouldn't fail because the language read errored.
+  }
+}
 
 export function useSetActiveTranscription() {
   const qc = useQueryClient();
@@ -305,22 +320,8 @@ export function useSetActiveTranscription() {
       engine: TranscriptionEngine;
       whisperModel?: string;
     }) => {
-      // Coerce config.language when switching to an engine that doesn't
-      // support the current pick (e.g. Whisper → Parakeet with language=hi).
-      // Default to 'auto' rather than 'en' so the user's "I want
-      // detection / multi-language" intent is preserved across the switch.
-      // Per-engine memory ("restore the Parakeet language I had last
-      // time") is a richer UX but needs a new config field; deferred.
       if (engine === 'parakeet') {
-        try {
-          const current = unwrap(await ipc().settings.getLanguage()).language;
-          if (!PARAKEET_LANGUAGES.has(current)) {
-            unwrap(await ipc().settings.setLanguage('auto'));
-          }
-        } catch {
-          // Best-effort coercion; the engine switch itself shouldn't fail
-          // just because the language read errored.
-        }
+        await coerceLanguageForParakeet();
       }
       unwrap(await ipc().transcriptionEngine.set(engine));
       if (engine === 'whisper' && whisperModel) {

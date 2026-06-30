@@ -19,6 +19,7 @@ import { cn } from '@/lib/utils';
 import { useLiveTranscript } from '@/hooks/useLiveTranscript';
 import { useRecording } from '@/hooks/useRecording';
 import { useLanguageSetting, useSetLanguage } from '@/hooks/useSettings';
+import { PARAKEET_LANGUAGE_CODES } from '@/lib/transcription-languages';
 import { useLiveTranscriptOpen } from '@/hooks/liveTranscriptOpenStore';
 import { formatElapsed } from '@/lib/utils';
 
@@ -315,10 +316,22 @@ interface LanguageOption {
   hint: string;
 }
 
-const LANGUAGE_OPTIONS: LanguageOption[] = [
-  { code: 'en', label: 'English only', hint: 'Best accuracy when meetings are always in English' },
-  { code: 'auto', label: 'Multi-language', hint: '25 European languages, auto-detect per recording' },
+// Two quick presets (Multi / English) plus the concrete European languages a
+// user can pin so summaries/notes come out in them. This writes the same
+// global language setting as Settings → Transcribe, so it must surface a
+// concrete pin (not relabel it "Multi" and clobber it to 'auto' on the next
+// pick). Filtered against PARAKEET_LANGUAGE_CODES so it stays in sync with the
+// Settings picker.
+const ALL_LANGUAGE_OPTIONS: LanguageOption[] = [
+  { code: 'auto', label: 'Multi-language', hint: 'Auto-detect per recording (European languages)' },
+  { code: 'en', label: 'English', hint: 'Best accuracy when meetings are always in English' },
+  { code: 'fr', label: 'French', hint: 'Transcribe and summarise in French' },
+  { code: 'de', label: 'German', hint: 'Transcribe and summarise in German' },
+  { code: 'es', label: 'Spanish', hint: 'Transcribe and summarise in Spanish' },
+  { code: 'nl', label: 'Dutch', hint: 'Transcribe and summarise in Dutch' },
+  { code: 'pt', label: 'Portuguese', hint: 'Transcribe and summarise in Portuguese' },
 ];
+const LANGUAGE_OPTIONS = ALL_LANGUAGE_OPTIONS.filter((o) => PARAKEET_LANGUAGE_CODES.has(o.code));
 
 function LanguageSelector() {
   const language = useLanguageSetting();
@@ -326,8 +339,11 @@ function LanguageSelector() {
   const [popoverOpen, setPopoverOpen] = React.useState(false);
 
   const current = language.data ?? 'auto';
-  const isEnglish = current === 'en';
-  const display = isEnglish ? 'English' : 'Multi';
+  const selected = LANGUAGE_OPTIONS.find((o) => o.code === current);
+  // Concrete pins show their name; 'auto' shows the compact "Multi". An
+  // out-of-list pin (e.g. a Whisper-only language set in Settings) shows its
+  // code rather than being mislabelled "Multi" and silently reset.
+  const display = current === 'auto' ? 'Multi' : (selected?.label ?? current.toUpperCase());
 
   const pick = (code: string) => {
     setLanguage.mutate(code);
@@ -353,7 +369,7 @@ function LanguageSelector() {
       </PopoverTrigger>
       <PopoverContent align="end" sideOffset={8} className="w-56 p-1">
         {LANGUAGE_OPTIONS.map((opt) => {
-          const active = isEnglish ? opt.code === 'en' : opt.code === 'auto';
+          const active = opt.code === current;
           return (
             <button
               key={opt.code}
