@@ -11,7 +11,7 @@ Audio capture is done in the Electron renderer (Web Audio); this backend
 transcribes/summarizes the resulting file. Usage (called by Electron):
     python simple_recorder.py process-streaming recording.webm --name "Session"
     python simple_recorder.py transcribe-stream   # live partials over stdin
-    python simple_recorder.py process recording.wav --name "Session"
+    python simple_recorder.py process-streaming recording.wav --name "Session"
     python simple_recorder.py status
 """
 
@@ -374,80 +374,6 @@ Summary output language: {config.get_language_name(output_language)}
             "output_language": output_language,
         }
 
-    async def summarize_transcript(
-        self,
-        transcript_text: str,
-        session_name: str = "Recording",
-        duration_minutes: int = 10,
-        language: Optional[str] = None,
-        notes_text: Optional[str] = None
-    ) -> dict:
-        """Summarize transcript text."""
-        print("🧠 Generating summary...")
-        
-        # Initialize summarizer only when needed
-        if self.summarizer is None:
-            self.summarizer = OllamaSummarizer()
-        
-        # Create summary prompt
-        prompt = f"""
-Please analyze and summarize this audio transcript from a recording session.
-
-Session: {session_name}
-
-Please provide:
-1. Brief overview of the content
-2. Key points discussed
-3. Important decisions or conclusions
-4. Action items (if any)
-5. Notable quotes or insights
-
-Transcript:
-{transcript_text}
-"""
-        
-        # Resolve output language
-        from src.config import get_config
-        if language is None:
-            configured_language = get_config().get_language()
-            language = self._resolve_output_language(configured_language)
-
-        # Generate summary (using correct method name and parameters)
-        summary_result = self.summarizer.summarize_transcript(transcript_text, duration_minutes, language=language, notes=notes_text)
-        
-        if summary_result is None:
-            return {
-                "summary": "Failed to generate summary",
-                "participants": [],
-                "discussion_areas": [],
-                "key_points": [],
-                "action_items": []
-            }
-        
-        # Defensive extraction from summary_result
-        try:
-            return {
-                "summary": getattr(summary_result, 'overview', '') or '',
-                "participants": getattr(summary_result, 'participants', []) or [],
-                "discussion_areas": [
-                    {
-                        "title": getattr(area, 'title', ''),
-                        "analysis": getattr(area, 'analysis', '')
-                    } for area in getattr(summary_result, 'discussion_areas', [])
-                ],
-                "key_points": [getattr(decision, 'decision', '') for decision in getattr(summary_result, 'key_points', [])],
-                "action_items": [getattr(action, 'description', '') for action in getattr(summary_result, 'next_steps', [])]
-            }
-        except Exception as e:
-            print(f"⚠️ Error extracting summary data: {e}")
-            return {
-                "summary": "Summary extraction failed",
-                "participants": [],
-                "discussion_areas": [],
-                "key_points": [],
-                "action_items": []
-            }
-    
     def _handle_transcription_failure(
         self,
         audio_path: Path,
@@ -535,120 +461,6 @@ Transcript:
                 "error": short_error,
             }
         }
-
-    async def process_recording(self, audio_file: str, session_name: str = "Recording", notes_text: Optional[str] = None) -> dict:
-        """Complete processing: transcribe + summarize."""
-        print(f"🔄 Processing recording: {audio_file}")
-        
-        if not audio_file:
-            raise Exception("No audio file specified")
-        
-        # Ensure we have a proper path
-        audio_file = str(audio_file)  # Convert to string if it's a Path object
-        audio_path = Path(audio_file)
-        
-        # Step 1: Transcribe (also returns duration from the converted WAV)
-        transcript_data = await self.transcribe_audio(audio_file, session_name)
-
-        # A transcription crash is not silence — preserve the audio and save a
-        # marked, reprocessable meeting instead of summarising a fake-empty one.
-        if transcript_data.get("transcription_failed"):
-            return self._handle_transcription_failure(audio_path, session_name, transcript_data, notes_text)
-
-        # Determine duration: use transcriber's value (works for all formats)
-        duration_seconds = transcript_data.get("duration_seconds")
-        if duration_seconds is not None:
-            if duration_seconds < 60:
-                duration_minutes = 0
-                print(f"📏 Audio duration: {duration_seconds:.1f} seconds ({int(duration_seconds)}s)")
-            else:
-                duration_minutes = int(duration_seconds / 60)
-                print(f"📏 Audio duration: {duration_seconds:.1f} seconds ({duration_minutes}m)")
-        else:
-            duration_minutes = 0
-            print("⚠️ Could not determine audio duration")
-
-        # Step 2: Summarize — prefer diarised text so LLM sees speaker labels
-        text_for_summary = transcript_data.get("diarised_text") or transcript_data["transcript_text"]
-        summary_data = await self.summarize_transcript(
-            text_for_summary,
-            session_name,
-            duration_minutes,
-            language=transcript_data.get("output_language"),
-            notes_text=notes_text
-        )
-
-        # Step 2b: Auto-generate title for auto-named meetings
-        if _AUTO_NAMED_PATTERN.match(session_name):
-            try:
-                language = transcript_data.get("output_language")
-                generated_title = self.summarizer.generate_title(
-                    summary_data.get("summary", ""),
-                    transcript_data["transcript_text"],
-                    language=language
-                )
-                if generated_title:
-                    print(f"Auto-generated title: {generated_title}")
-                    session_name = generated_title
-            except Exception as e:
-                print(f"Title generation skipped: {e}")
-
-        # Step 3: Save complete summary
-        summary_path = self.output_dir / f"{audio_path.stem}_summary.json"
-
-        complete_data = {
-            "session_info": {
-                "name": session_name,
-                "audio_file": str(audio_path),
-                "transcript_file": transcript_data["transcript_file"],
-                "summary_file": str(summary_path),
-                "processed_at": datetime.now().isoformat(),
-                "duration_seconds": int(duration_seconds) if duration_seconds is not None else None,
-                "duration_minutes": duration_minutes,
-                "configured_language": transcript_data.get("configured_language"),
-                "detected_language": transcript_data.get("detected_language"),
-                "output_language": transcript_data.get("output_language"),
-            },
-            "summary": summary_data.get("summary", "") or "",
-            "participants": summary_data.get("participants", []) or [],
-            "discussion_areas": summary_data.get("discussion_areas", []) or [],
-            "key_points": summary_data.get("key_points", []) or [],
-            "action_items": summary_data.get("action_items", []) or [],
-            "transcript": transcript_data["transcript_text"],
-            "is_diarised": transcript_data.get("is_diarised", False),
-            "diarised_text": transcript_data.get("diarised_text"),
-            "user_notes": notes_text,
-        }
-        
-        # Atomic write: a crash here previously left a half-written
-        # multi-MB summary JSON and the source WAV gets deleted below,
-        # so the meeting was unrecoverable. Now the prior file (if any)
-        # stays intact unless the new one writes fully.
-        _atomic_write_json(summary_path, complete_data)
-
-        print(f"✅ Complete processing saved: {summary_path}")
-        
-        # Clean up WAV file after successful processing
-        from src.config import get_config
-        if not get_config().get_keep_recordings():
-            try:
-                audio_path.unlink()
-                print(f"🗑️ Cleaned up audio file: {audio_path}")
-            except Exception as e:
-                print(f"⚠️ Could not delete audio file: {e}")
-        
-        # Clear any recording state after successful processing
-        state_file = Path("recorder_state.json")
-        if state_file.exists():
-            try:
-                state_file.unlink()
-                print(f"🧹 Cleared recording state")
-            except Exception as e:
-                print(f"⚠️ Could not clear state: {e}")
-        
-        print(f"📋 Processing complete - meeting available in list")
-
-        return complete_data
 
     async def process_recording_streaming(self, audio_file: str, session_name: str = "Recording", notes_text: Optional[str] = None) -> dict:
         """Process recording with streaming summary output via CHUNK: protocol."""
@@ -832,40 +644,6 @@ def generate_default_template_report(summary_path, transcript, notes, language,
 def cli():
     """Simple Audio Recorder & Transcriber Backend"""
     pass
-
-
-@cli.command()
-@click.argument('audio_file', default='')
-@click.option('--name', '-n', default='Recording', help='Session name for the recording')
-@click.option('--notes', default=None, help='Path to user notes file')
-def process(audio_file, name, notes):
-    """Process audio file: transcribe + summarize"""
-
-    async def run_process():
-        recorder = MeetingPipeline()
-
-        # Read user notes if provided
-        notes_text = None
-        if notes:
-            try:
-                notes_text = Path(notes).read_text(encoding='utf-8').strip()
-                if notes_text:
-                    logger.info(f"Loaded user notes ({len(notes_text)} chars)")
-            except Exception as e:
-                logger.warning(f"Failed to read notes file: {e}")
-
-        try:
-            result = await recorder.process_recording(audio_file, name, notes_text=notes_text)
-            
-            print("SUCCESS: Processing complete!")
-            print(f"Transcript: {result['session_info']['transcript_file']}")
-            print(f"Summary: {result['session_info']['summary_file']}")
-            
-        except Exception as e:
-            print(f"ERROR: {e}")
-            sys.exit(1)
-    
-    asyncio.run(run_process())
 
 
 # Detect a silence-only batch result exactly, kept in sync with the
