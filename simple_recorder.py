@@ -72,11 +72,14 @@ _AUTO_NAMED_PATTERN = re.compile(
 
 # Regex to normalize markdown headers that incorrectly start on the same line as
 # the closing tag of a reasoning block (e.g. `</thought>## Summary`). This ensures
-# the parser correctly splits and identifies sections.
-_REASONING_TAG_HEADER_PATTERN = re.compile(r'(</?[a-zA-Z0-9_-]+>)\s*(#{1,6}\s)')
+# the parser correctly splits and identifies sections. Scoped to think/thought
+# tags specifically (not any HTML-like tag) so unrelated inline markup in the
+# model's output can't be mistaken for a reasoning block and get a spurious
+# section break inserted ahead of it.
+_REASONING_TAG_HEADER_PATTERN = re.compile(r'(</(?:think|thought)>)\s*(#{1,6}\s)', re.IGNORECASE)
 
 def _normalize_markdown_for_parsing(md_text: str) -> str:
-    """Ensure headers immediately following HTML-like tags start on a new line."""
+    """Ensure headers immediately following a reasoning tag start on a new line."""
     return _REASONING_TAG_HEADER_PATTERN.sub(r'\1\n\2', md_text)
 
 # Shared atomic JSON writer (tempfile + os.replace + Windows PermissionError
