@@ -19,6 +19,14 @@ test('isMeetingApp ignores an app_id-less (device-level) event by default', () =
   assert.strictEqual(isMeetingApp({ app_id: '' }), false);
 });
 
+test('isMeetingApp rejects a null/undefined event even with the fallback allowed', () => {
+  // A missing event is not a meeting, regardless of the device-level fallback —
+  // the fallback only applies to an event that exists but carries no app_id.
+  assert.strictEqual(isMeetingApp(null, { allowDeviceLevelFallback: true }), false);
+  assert.strictEqual(isMeetingApp(undefined, { allowDeviceLevelFallback: true }), false);
+  assert.strictEqual(isMeetingApp(null), false);
+});
+
 test('isMeetingApp honors the device-level fallback when explicitly allowed', () => {
   // Legacy macOS 12/13 path: device-level events have no app_id and we still
   // want to notify there.

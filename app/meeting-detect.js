@@ -40,7 +40,8 @@ function allowsDeviceLevelFallback(platform, systemVersion) {
 }
 
 function isMeetingApp(evt, { allowDeviceLevelFallback = false } = {}) {
-  if (!evt || !evt.app_id) return allowDeviceLevelFallback;
+  if (!evt) return false;
+  if (!evt.app_id) return allowDeviceLevelFallback;
   return MEETING_APP_ALLOWLIST.some((re) => re.test(evt.app_id));
 }
 
