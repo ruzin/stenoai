@@ -129,6 +129,88 @@ export function usePullModel() {
 }
 
 // ---------------------------------------------------------------------------
+// "Switch to faster build" -- pulls a model's NVFP4/MLX sibling, smoke-tests
+// it, and (on success) leaves it to the caller to offer deleting the old
+// GGUF tag. Deliberately does NOT call models.set() -- config.json already
+// points at the canonical GGUF id, and src/summarizer.py resolves it to the
+// MLX tag at runtime on Apple Silicon. See docs/superpowers/specs/
+// 2026-07-01-ollama-mlx-tag-adoption-design.md.
+// ---------------------------------------------------------------------------
+
+export type SwitchToFasterBuildState = 'idle' | 'pulling' | 'verifying' | 'done' | 'error';
+
+export function useSwitchToFasterBuild(onVerified?: (mlxTag: string) => void) {
+  const qc = useQueryClient();
+  const [state, setState] = React.useState<SwitchToFasterBuildState>('idle');
+  const [error, setError] = React.useState<string | null>(null);
+  const [activeTag, setActiveTag] = React.useState<string | null>(null);
+  const [progress, setProgress] = React.useState<Record<string, string>>({});
+
+  // activeTag is mirrored into a ref so the event listeners below (subscribed
+  // exactly once, on mount) always read the CURRENT tag rather than the value
+  // captured when the effect last ran. Without this, switchTo() below sets
+  // activeTag and immediately fires the pull in the same tick; a completion
+  // event racing the effect's re-subscription (before React has committed the
+  // new activeTag into this closure) would otherwise be silently dropped by
+  // the `model !== activeTag` check.
+  const activeTagRef = React.useRef<string | null>(null);
+  const onVerifiedRef = React.useRef(onVerified);
+  onVerifiedRef.current = onVerified;
+
+  React.useEffect(() => {
+    const offProgress = ipc().on.modelPullProgress(({ model, progress: p }) => {
+      setProgress((prev) => ({ ...prev, [model]: p }));
+    });
+    const offComplete = ipc().on.modelPullComplete(async ({ model, success, error: pullError }) => {
+      if (model !== activeTagRef.current) return;
+      setProgress((prev) => {
+        const { [model]: _drop, ...rest } = prev;
+        return rest;
+      });
+      if (!success) {
+        setState('error');
+        setError(pullError ?? 'Failed to download the faster build.');
+        return;
+      }
+      setState('verifying');
+      const verifyResult = await ipc().models.verify(model);
+      if (verifyResult.success) {
+        setState('done');
+        qc.invalidateQueries({ queryKey: modelsKeys.all });
+        onVerifiedRef.current?.(model);
+      } else {
+        setState('error');
+        setError(verifyResult.error ?? "Couldn't verify the faster build.");
+      }
+    });
+    return () => {
+      offProgress();
+      offComplete();
+    };
+    // Empty deps: subscribe once. activeTagRef (not activeTag state) is what
+    // the listeners consult, so they never need to be re-subscribed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const switchTo = (mlxTag: string) => {
+    setState('pulling');
+    setError(null);
+    setActiveTag(mlxTag);
+    activeTagRef.current = mlxTag;
+    void ipc().models.pull(mlxTag);
+  };
+
+  const reset = () => {
+    setState('idle');
+    setError(null);
+    setActiveTag(null);
+    activeTagRef.current = null;
+  };
+
+  return { state, error, activeTag, progress: activeTag ? progress[activeTag] : undefined, switchTo, reset };
+}
+
+// ---------------------------------------------------------------------------
 // Whisper models (mirrors the Ollama pattern above)
 // ---------------------------------------------------------------------------
 
