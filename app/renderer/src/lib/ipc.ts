@@ -388,6 +388,10 @@ export type GetCurrentModelResponse = Result<{ model: string }>;
 // `{ success, error }` JSON verbatim, with no additional wrapping.
 export type VerifyModelResponse = { success: boolean; error: string | null };
 export type DeleteModelResponse = { success: boolean; error: string | null };
+// model -> last known progress string, for any pull-model download still
+// running in the main process. Flat for the same reason as the two types
+// above: main.js returns Object.fromEntries() of its in-memory map verbatim.
+export type GetActivePullsResponse = Record<string, string>;
 
 export type ListWhisperModelsResponse = Result<{
   supported_models: Record<string, RawSupportedModel>;
@@ -766,6 +770,7 @@ export interface StenoaiBridge {
     pull: RequestFn<[name: string], Result<Record<string, never>>>;
     verify: RequestFn<[name: string], VerifyModelResponse>;
     delete: RequestFn<[name: string], DeleteModelResponse>;
+    getActivePulls: RequestFn<[], GetActivePullsResponse>;
   };
 
   whisperModels: {

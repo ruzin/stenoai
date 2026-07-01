@@ -190,6 +190,7 @@ const stenoai = {
     pull: (name) => invoke('pull-model', name),
     verify: (name) => invoke('verify-model', name),
     delete: (name) => invoke('delete-model', name),
+    getActivePulls: () => invoke('get-active-pulls'),
   },
 
   whisperModels: {

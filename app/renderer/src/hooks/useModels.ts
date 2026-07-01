@@ -218,6 +218,38 @@ export function useSwitchToFasterBuild(onVerified?: (mlxTag: string) => void) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // On mount, ask the main process whether a switch-to-faster-build download
+  // is already running from before this component (re)mounted -- e.g. the
+  // user navigated away from Settings and back. The download itself lives in
+  // the main process and keeps going regardless of what the renderer does;
+  // without this rehydration, the UI would show "Switch to faster build" as
+  // if nothing were happening until the user clicked it again. Filtered to
+  // "-nvfp4" tags so a regular (non-faster-build) model download in progress
+  // elsewhere in the app isn't mistaken for one of ours.
+  React.useEffect(() => {
+    let cancelled = false;
+    void ipc()
+      .models.getActivePulls()
+      .then((pulls) => {
+        if (cancelled) return;
+        const activeEntry = Object.entries(pulls).find(([model]) => model.endsWith('-nvfp4'));
+        if (!activeEntry) return;
+        const [model, progressValue] = activeEntry;
+        setActiveTag(model);
+        activeTagRef.current = model;
+        setState('pulling');
+        setProgress((prev) => ({ ...prev, [model]: progressValue }));
+        const byteMatch = progressValue.match(/\((\d+)\/(\d+)\)/);
+        if (byteMatch) {
+          rateSamplesRef.current[model] = { bytes: Number(byteMatch[1]), at: Date.now() };
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const switchTo = (mlxTag: string) => {
     setState('pulling');
     setError(null);

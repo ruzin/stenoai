@@ -6923,10 +6923,19 @@ ipcMain.on('system-audio-recording-state', (event, isRecording) => {
   updateTrayMenu();
 });
 
+// Tracks in-flight pull-model downloads (model -> last progress string) so a
+// renderer that remounts (e.g. navigating away from Settings and back) can
+// ask "is anything still downloading?" instead of only finding out via
+// events it wasn't subscribed to receive while unmounted. The download
+// itself lives in this main process regardless of what the renderer is
+// doing, so this map is the source of truth for "is it still going".
+const activePulls = new Map();
+
 ipcMain.handle('pull-model', async (event, modelName) => {
   try {
     sendDebugLog(`Pulling model: ${modelName}`);
     sendDebugLog('This may take several minutes...');
+    activePulls.set(modelName, '');
 
     return new Promise((resolve) => {
       const proc = spawn(getBackendPath(), ['pull-model', modelName], {
@@ -6944,6 +6953,7 @@ ipcMain.handle('pull-model', async (event, modelName) => {
       let lastProgressSentAt = 0;
       const PROGRESS_THROTTLE_MS = 200;
       const sendProgress = (output) => {
+        activePulls.set(modelName, output);
         if (!mainWindow || mainWindow.isDestroyed()) return;
         const now = Date.now();
         if (now - lastProgressSentAt < PROGRESS_THROTTLE_MS) return;
@@ -6968,6 +6978,8 @@ ipcMain.handle('pull-model', async (event, modelName) => {
       });
 
       proc.on('close', (code) => {
+        activePulls.delete(modelName);
+
         // The backend prints a JSON result as the last stdout line.
         // Check it even on exit code 0, since the Python CLI may
         // catch errors and still exit cleanly.
@@ -7004,6 +7016,7 @@ ipcMain.handle('pull-model', async (event, modelName) => {
       });
 
       proc.on('error', (error) => {
+        activePulls.delete(modelName);
         sendDebugLog(`Error pulling model: ${error.message}`);
 
         if (mainWindow && !mainWindow.isDestroyed()) {
@@ -7018,10 +7031,13 @@ ipcMain.handle('pull-model', async (event, modelName) => {
       });
     });
   } catch (error) {
+    activePulls.delete(modelName);
     sendDebugLog(`Error in pull-model handler: ${error.message}`);
     return { success: false, error: error.message };
   }
 });
+
+ipcMain.handle('get-active-pulls', () => Object.fromEntries(activePulls));
 
 // Helper to build env vars for running the bundled Ollama binary directly.
 // Mirrors src/ollama_manager.get_ollama_env() so the dylib/DLL search path
