@@ -92,20 +92,55 @@ export function useSetCurrentModel() {
   });
 }
 
+// Shared by usePullModel and useSwitchToFasterBuild: both parse the same
+// "<status> <pct>% (<completed>/<total>)" progress string (see pull_model's
+// print format in simple_recorder.py) into a live bytes/sec figure, keyed by
+// model so multiple downloads can be tracked independently.
+function useByteRateTracker() {
+  const [bytesPerSecond, setBytesPerSecond] = React.useState<Record<string, number>>({});
+  const rateSamplesRef = React.useRef<Record<string, { bytes: number; at: number }>>({});
+
+  const sample = (model: string, progress: string) => {
+    const byteMatch = progress.match(/\((\d+)\/(\d+)\)/);
+    if (!byteMatch) return;
+    const completed = Number(byteMatch[1]);
+    const now = Date.now();
+    const prevSample = rateSamplesRef.current[model];
+    if (prevSample && now > prevSample.at && completed >= prevSample.bytes) {
+      const rate = (completed - prevSample.bytes) / ((now - prevSample.at) / 1000);
+      setBytesPerSecond((prev) => ({ ...prev, [model]: rate }));
+    }
+    rateSamplesRef.current[model] = { bytes: completed, at: now };
+  };
+
+  const drop = (model: string) => {
+    delete rateSamplesRef.current[model];
+    setBytesPerSecond((prev) => {
+      const { [model]: _drop, ...rest } = prev;
+      return rest;
+    });
+  };
+
+  return { bytesPerSecond, sample, drop };
+}
+
 export function usePullModel() {
   const qc = useQueryClient();
   const [progress, setProgress] = React.useState<Record<string, string>>({});
   const [pendingSelect, setPendingSelect] = React.useState<string | null>(null);
+  const rate = useByteRateTracker();
 
   React.useEffect(() => {
     const offProgress = ipc().on.modelPullProgress(({ model, progress: p }) => {
       setProgress((prev) => ({ ...prev, [model]: p }));
+      rate.sample(model, p);
     });
     const offComplete = ipc().on.modelPullComplete(async ({ model, success }) => {
       setProgress((prev) => {
         const { [model]: _drop, ...rest } = prev;
         return rest;
       });
+      rate.drop(model);
       if (success && pendingSelect === model) {
         await ipc().models.set(model);
         setPendingSelect(null);
@@ -116,6 +151,7 @@ export function usePullModel() {
       offProgress();
       offComplete();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [qc, pendingSelect]);
 
   const pullAndSelect = async (name: string) => {
@@ -131,7 +167,7 @@ export function usePullModel() {
     void ipc().models.cancelPull(name);
   };
 
-  return { ...mutation, progress, cancel };
+  return { ...mutation, progress, bytesPerSecond: rate.bytesPerSecond, cancel };
 }
 
 // ---------------------------------------------------------------------------
@@ -163,12 +199,7 @@ export function useSwitchToFasterBuild(onVerified?: (mlxTag: string) => void) {
   const onVerifiedRef = React.useRef(onVerified);
   onVerifiedRef.current = onVerified;
 
-  // Transfer-rate tracking: the CLI prints "<status> <pct>% (<completed>/<total>)"
-  // (bytes). rateSamplesRef keeps the last {bytes, timestamp} sample per model so
-  // consecutive throttled progress ticks (~200ms apart, per the main-process
-  // throttle) can be diffed into a live bytes/sec figure.
-  const [bytesPerSecond, setBytesPerSecond] = React.useState<Record<string, number>>({});
-  const rateSamplesRef = React.useRef<Record<string, { bytes: number; at: number }>>({});
+  const rate = useByteRateTracker();
 
   // Shared by the live model-pull-complete listener and the on-mount
   // rehydration effect below -- both need to react identically to a pull's
@@ -187,11 +218,7 @@ export function useSwitchToFasterBuild(onVerified?: (mlxTag: string) => void) {
       const { [model]: _drop, ...rest } = prev;
       return rest;
     });
-    setBytesPerSecond((prev) => {
-      const { [model]: _drop, ...rest } = prev;
-      return rest;
-    });
-    delete rateSamplesRef.current[model];
+    rate.drop(model);
     ipc().models.ackPullComplete(model);
     if (cancelled) {
       // A user-initiated cancel isn't a failure -- go back to the plain
@@ -222,18 +249,7 @@ export function useSwitchToFasterBuild(onVerified?: (mlxTag: string) => void) {
   React.useEffect(() => {
     const offProgress = ipc().on.modelPullProgress(({ model, progress: p }) => {
       setProgress((prev) => ({ ...prev, [model]: p }));
-
-      const byteMatch = p.match(/\((\d+)\/(\d+)\)/);
-      if (byteMatch) {
-        const completed = Number(byteMatch[1]);
-        const now = Date.now();
-        const prevSample = rateSamplesRef.current[model];
-        if (prevSample && now > prevSample.at && completed >= prevSample.bytes) {
-          const rate = (completed - prevSample.bytes) / ((now - prevSample.at) / 1000);
-          setBytesPerSecond((prev) => ({ ...prev, [model]: rate }));
-        }
-        rateSamplesRef.current[model] = { bytes: completed, at: now };
-      }
+      rate.sample(model, p);
     });
     const offComplete = ipc().on.modelPullComplete(({ model, success, error: pullError, cancelled: wasCancelled }) => {
       if (model !== activeTagRef.current) return;
@@ -279,10 +295,7 @@ export function useSwitchToFasterBuild(onVerified?: (mlxTag: string) => void) {
         setState('pulling');
         const progressValue = entry.progress ?? '';
         setProgress((prev) => ({ ...prev, [model]: progressValue }));
-        const byteMatch = progressValue.match(/\((\d+)\/(\d+)\)/);
-        if (byteMatch) {
-          rateSamplesRef.current[model] = { bytes: Number(byteMatch[1]), at: Date.now() };
-        }
+        rate.sample(model, progressValue);
       });
     return () => {
       cancelled = true;
@@ -318,7 +331,7 @@ export function useSwitchToFasterBuild(onVerified?: (mlxTag: string) => void) {
     error,
     activeTag,
     progress: activeTag ? progress[activeTag] : undefined,
-    bytesPerSecond: activeTag ? bytesPerSecond[activeTag] : undefined,
+    bytesPerSecond: activeTag ? rate.bytesPerSecond[activeTag] : undefined,
     switchTo,
     reset,
     cancel,

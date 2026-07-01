@@ -367,6 +367,63 @@ function formatBytesPerSecond(bytesPerSecond: number | undefined): string {
   return `${mbPerSecond.toFixed(1)} MB/s`;
 }
 
+// Shared by the general "Select an uninstalled model" download and the
+// "switch to faster build" pull -- both drive the same fixed-width
+// bar+percent+MB/s+Cancel row from the same "<status> <pct>% (<bytes>)"
+// progress string, so a naive per-flow copy would drift on cosmetic tweaks.
+// Fixed-width (not just the bar's fill) so rapid ticks never reflow the row.
+function PullProgressBar({
+  progress,
+  bytesPerSecond,
+  onCancel,
+}: {
+  progress: string | undefined;
+  bytesPerSecond: number | undefined;
+  onCancel: (() => void) | undefined;
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1.5" style={{ width: 96 }}>
+        <div
+          className="h-1.5 flex-1 overflow-hidden rounded-full"
+          style={{ background: 'var(--surface-sunken)' }}
+        >
+          <div
+            className="h-full rounded-full"
+            style={{
+              width: `${parsePullPercent(progress) ?? 0}%`,
+              background: 'var(--fg-1)',
+            }}
+          />
+        </div>
+        <span
+          className="shrink-0 text-right text-[11px] tabular-nums"
+          style={{ color: 'var(--fg-muted)', width: 28 }}
+        >
+          {parsePullPercent(progress) ?? 0}%
+        </span>
+        {/* Fixed width + overflow-hidden: "8.8 MB/s" and "120 KB/s" are
+            different widths, so a naive inline text here would reflow the
+            row on every tick. */}
+        <span
+          className="shrink-0 overflow-hidden whitespace-nowrap text-[11px] tabular-nums"
+          style={{ color: 'var(--fg-muted)', width: 60 }}
+        >
+          {formatBytesPerSecond(bytesPerSecond)}
+        </span>
+      </div>
+      <button
+        type="button"
+        onClick={onCancel}
+        className="shrink-0 cursor-pointer border-0 bg-transparent p-0 text-[11px] underline"
+        style={{ color: 'var(--fg-muted)' }}
+      >
+        Cancel
+      </button>
+    </div>
+  );
+}
+
 interface ModelCardProps {
   name: string;
   sizeLabel?: string;
@@ -376,10 +433,17 @@ interface ModelCardProps {
   deprecated?: boolean;
   isDownloading?: boolean;
   downloadProgress?: string;
+  downloadBytesPerSecond?: number;
   onSelect: () => void;
   // Lets a user on a slow connection (or a misclick on a large model) back
   // out of a download in progress instead of being stuck waiting for it.
   onCancelDownload?: () => void;
+  // Shown for an installed, non-current model so disk space can be reclaimed
+  // without needing the Ollama CLI. Omitted entirely while the model is
+  // downloading (that's what onCancelDownload is for) or is the active
+  // selection (deleting it would break the app until another is chosen).
+  isInstalled?: boolean;
+  onDeleteModel?: () => void;
   fasterBuildTag?: string;
   fasterBuildInstalled?: boolean;
   fasterBuildState?: 'idle' | 'pulling' | 'verifying' | 'done' | 'error';
@@ -406,8 +470,11 @@ function ModelCard({
   deprecated = false,
   isDownloading = false,
   downloadProgress,
+  downloadBytesPerSecond,
   onSelect,
   onCancelDownload,
+  isInstalled = false,
+  onDeleteModel,
   fasterBuildTag,
   fasterBuildInstalled = false,
   fasterBuildState = 'idle',
@@ -498,11 +565,12 @@ function ModelCard({
           </div>
         )}
         {isDownloading && downloadProgress && (
-          <div
-            className="mt-1 font-mono text-[12px]"
-            style={{ color: 'var(--fg-2)' }}
-          >
-            {downloadProgress}
+          <div className="mt-1">
+            <PullProgressBar
+              progress={downloadProgress}
+              bytesPerSecond={downloadBytesPerSecond}
+              onCancel={onCancelDownload}
+            />
           </div>
         )}
       </div>
@@ -518,52 +586,11 @@ function ModelCard({
             Faster build available
           </span>
           {fasterBuildState === 'pulling' ? (
-            <div className="flex items-center gap-2">
-              {/* Fixed-width bar instead of a variable-width percentage label:
-                  Ollama's pull progress can update dozens of times per second on
-                  a multi-GB download, and a text label whose width changes on
-                  every tick reflows this whole row each time, which read as
-                  window-level flicker. The bar's own footprint never changes —
-                  only the fill width and a fixed-width, tabular-nums percentage
-                  do — so rapid updates no longer shift any layout. */}
-              <div className="flex items-center gap-1.5" style={{ width: 96 }}>
-                <div
-                  className="h-1.5 flex-1 overflow-hidden rounded-full"
-                  style={{ background: 'var(--surface-sunken)' }}
-                >
-                  <div
-                    className="h-full rounded-full"
-                    style={{
-                      width: `${parsePullPercent(fasterBuildProgress) ?? 0}%`,
-                      background: 'var(--fg-1)',
-                    }}
-                  />
-                </div>
-                <span
-                  className="shrink-0 text-right text-[11px] tabular-nums"
-                  style={{ color: 'var(--fg-muted)', width: 28 }}
-                >
-                  {parsePullPercent(fasterBuildProgress) ?? 0}%
-                </span>
-                {/* Fixed width + overflow-hidden for the same reason as the bar
-                    above: "8.8 MB/s" and "120 KB/s" are different widths, so a
-                    naive inline text here would reflow the row on every tick. */}
-                <span
-                  className="shrink-0 overflow-hidden whitespace-nowrap text-[11px] tabular-nums"
-                  style={{ color: 'var(--fg-muted)', width: 60 }}
-                >
-                  {formatBytesPerSecond(fasterBuildBytesPerSecond)}
-                </span>
-              </div>
-              <button
-                type="button"
-                onClick={onCancelFasterBuild}
-                className="shrink-0 cursor-pointer border-0 bg-transparent p-0 text-[11px] underline"
-                style={{ color: 'var(--fg-muted)' }}
-              >
-                Cancel
-              </button>
-            </div>
+            <PullProgressBar
+              progress={fasterBuildProgress}
+              bytesPerSecond={fasterBuildBytesPerSecond}
+              onCancel={onCancelFasterBuild}
+            />
           ) : (
             <button
               type="button"
@@ -589,21 +616,34 @@ function ModelCard({
           Selected
         </span>
       ) : !deprecated ? (
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-[28px] shrink-0 px-3.5 text-[13px]"
-          onClick={isDownloading ? onCancelDownload : onSelect}
-        >
-          {isDownloading ? (
-            <>
-              <X className="mr-1.5 size-3" />
-              Cancel
-            </>
-          ) : (
-            'Select'
+        <div className="flex shrink-0 items-center gap-1.5">
+          {isInstalled && !isDownloading && onDeleteModel && (
+            <button
+              type="button"
+              onClick={onDeleteModel}
+              title="Delete this model to free up disk space"
+              className="flex size-[28px] cursor-pointer items-center justify-center rounded-[6px] border-0 bg-transparent"
+              style={{ color: 'var(--fg-muted)' }}
+            >
+              <Trash2 size={14} />
+            </button>
           )}
-        </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-[28px] px-3.5 text-[13px]"
+            onClick={isDownloading ? onCancelDownload : onSelect}
+          >
+            {isDownloading ? (
+              <>
+                <X className="mr-1.5 size-3" />
+                Cancel
+              </>
+            ) : (
+              'Select'
+            )}
+          </Button>
+        </div>
       ) : null}
     </div>
   );
@@ -2009,12 +2049,22 @@ function ModelList() {
   const setCurrent = useSetCurrentModel();
   const pull = usePullModel();
   const [showDeprecated, setShowDeprecated] = React.useState(false);
-  const [deleteCandidate, setDeleteCandidate] = React.useState<{ tag: string; sizeLabel?: string } | null>(null);
+  // Backs two distinct triggers that both end in "confirm, then delete one or
+  // more tags": the automatic post-switch offer to remove the now-redundant
+  // GGUF build, and the manual "delete this model to free up disk space"
+  // action. Only one delete can be in flight/confirmed at a time in this UI,
+  // so a single piece of state covers both.
+  const [deleteCandidate, setDeleteCandidate] = React.useState<{ tags: string[]; description: string } | null>(
+    null,
+  );
   const deleteModel = useDeleteModel();
   const fasterBuild = useSwitchToFasterBuild((mlxTag) => {
     const match = models.data?.models.find((m) => m.mlxTag === mlxTag);
     if (match) {
-      setDeleteCandidate({ tag: match.name, sizeLabel: formatModelSize(match.size_gb) });
+      setDeleteCandidate({
+        tags: [match.name],
+        description: `${match.name} (${formatModelSize(match.size_gb) ?? 'unknown size'}) is no longer needed now that the faster build is active. Delete it to free up disk space?`,
+      });
     }
   });
 
@@ -2082,6 +2132,16 @@ function ModelList() {
       }
     };
 
+    const onDeleteModel = () => {
+      const tags = m.mlxInstalled && m.mlxTag ? [m.name, m.mlxTag] : [m.name];
+      const label = tags.length > 1 ? `${m.name} and its faster build` : m.name;
+      const pronoun = tags.length > 1 ? 'them' : 'it';
+      setDeleteCandidate({
+        tags,
+        description: `Delete ${label} (${sizeLabel ?? 'unknown size'}) to free up disk space? You can re-download ${pronoun} anytime.`,
+      });
+    };
+
     return (
       <ModelCard
         key={m.name}
@@ -2093,8 +2153,11 @@ function ModelList() {
         deprecated={Boolean(m.deprecated)}
         isDownloading={isDownloading}
         downloadProgress={downloadProgress}
+        downloadBytesPerSecond={pull.bytesPerSecond[m.name]}
         onSelect={onSelect}
         onCancelDownload={() => pull.cancel(m.name)}
+        isInstalled={Boolean(m.installed)}
+        onDeleteModel={onDeleteModel}
         fasterBuildTag={m.installed ? m.mlxTag : undefined}
         fasterBuildInstalled={Boolean(m.mlxInstalled)}
         fasterBuildState={isFasterBuildActive ? fasterBuild.state : 'idle'}
@@ -2145,12 +2208,12 @@ function ModelList() {
               fasterBuild.reset();
             }
           }}
-          title="Delete the old build?"
-          description={`${deleteCandidate.tag} (${deleteCandidate.sizeLabel ?? 'unknown size'}) is no longer needed now that the faster build is active. Delete it to free up disk space?`}
+          title="Delete model?"
+          description={deleteCandidate.description}
           confirmLabel="Delete"
           destructive
           onConfirm={async () => {
-            await deleteModel.mutateAsync(deleteCandidate.tag);
+            await Promise.all(deleteCandidate.tags.map((tag) => deleteModel.mutateAsync(tag)));
             setDeleteCandidate(null);
             fasterBuild.reset();
           }}

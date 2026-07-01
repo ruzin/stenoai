@@ -174,6 +174,33 @@ test('switch-to-faster-build: pull, verify, and delete the old tag all round-tri
   }
 });
 
+test('delete-model: the general "free up disk space" action can remove a GGUF model and its NVFP4 sibling directly', async ({
+  launchApp,
+}) => {
+  killOllama();
+  const mockOllama = await startMockOllama();
+  try {
+    const { page } = await launchApp();
+
+    // Unlike the switch-to-faster-build flow (which only ever deletes the
+    // GGUF id), the general delete action can target either tag on its own.
+    const ggufDelete = await page.evaluate(() =>
+      (window as StenoWindow).stenoai.models.delete('gemma4:e4b-it-qat'),
+    );
+    expect(ggufDelete.success).toBe(true);
+    expect(mockOllama.lastDeletedModel()).toBe('gemma4:e4b-it-qat');
+
+    const nvfp4Delete = await page.evaluate(() =>
+      (window as StenoWindow).stenoai.models.delete('gemma4:e4b-nvfp4'),
+    );
+    expect(nvfp4Delete.success).toBe(true);
+    expect(mockOllama.lastDeletedModel()).toBe('gemma4:e4b-nvfp4');
+    expect(mockOllama.deleteCalls()).toBe(2);
+  } finally {
+    await mockOllama.close();
+  }
+});
+
 test('cancel-pull: stops an in-flight download and reports it as cancelled, not a failure', async ({
   launchApp,
 }) => {

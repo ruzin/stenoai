@@ -4065,15 +4065,18 @@ def verify_model(model_name):
 def delete_model(model_name):
     """Delete a locally-pulled Ollama model (uses HTTP API).
 
-    Only ever called by the Settings "switch to faster build" flow, and only
-    with the OLD GGUF tag, after its NVFP4 sibling has been pulled and
-    verified -- never the tag currently in active use. Restricted to
-    supported GGUF ids: this is a destructive IPC-reachable operation, so it
-    must not delete an arbitrary caller-supplied model name.
+    Called by the Settings "switch to faster build" flow (the old GGUF tag,
+    after its NVFP4 sibling has been pulled and verified) and by the general
+    "delete this model to free up disk space" action (either the GGUF id or
+    its NVFP4 sibling) -- never a tag currently in active use. Restricted to
+    supported GGUF ids and their NVFP4 siblings: this is a destructive
+    IPC-reachable operation, so it must not delete an arbitrary
+    caller-supplied model name.
     """
-    from src.config import get_config
+    from src.config import get_config, Config
 
-    if model_name not in get_config().list_supported_models():
+    allowed = set(get_config().list_supported_models()) | set(Config._MLX_EQUIVALENTS.values())
+    if model_name not in allowed:
         print(json.dumps({"success": False, "error": f"Refusing to delete unsupported model: {model_name}"}))
         return
     try:

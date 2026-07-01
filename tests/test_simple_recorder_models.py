@@ -192,9 +192,10 @@ class DeleteModelCommandTests(unittest.TestCase):
         self.assertIn("not-a-real-model", data["error"])
         delete_mock.assert_not_called()
 
-    def test_delete_model_refuses_nvfp4_tag(self):
-        """The NVFP4/MLX tag itself is never a valid delete target -- only
-        its canonical GGUF sibling (the one actually in config.json)."""
+    def test_delete_model_allows_nvfp4_sibling(self):
+        """The general "delete this model to free up disk space" action can
+        target either the GGUF id or its NVFP4 sibling directly -- e.g. to
+        remove just the faster build while keeping the GGUF installed."""
         from simple_recorder import cli
 
         runner = CliRunner()
@@ -203,8 +204,8 @@ class DeleteModelCommandTests(unittest.TestCase):
 
         self.assertEqual(result.exit_code, 0, result.output)
         data = json.loads(result.output)
-        self.assertFalse(data["success"])
-        delete_mock.assert_not_called()
+        self.assertTrue(data["success"])
+        delete_mock.assert_called_once_with(model="gemma4:e2b-nvfp4")
 
 
 if __name__ == "__main__":
