@@ -19,6 +19,7 @@ import { cn } from '@/lib/utils';
 import { useLiveTranscript } from '@/hooks/useLiveTranscript';
 import { useRecording } from '@/hooks/useRecording';
 import { useLanguageSetting, useSetLanguage } from '@/hooks/useSettings';
+import { PARAKEET_LANGUAGES } from '@/lib/transcription-languages';
 import { useLiveTranscriptOpen } from '@/hooks/liveTranscriptOpenStore';
 import { formatElapsed } from '@/lib/utils';
 
@@ -315,10 +316,11 @@ interface LanguageOption {
   hint: string;
 }
 
-const LANGUAGE_OPTIONS: LanguageOption[] = [
-  { code: 'en', label: 'English only', hint: 'Best accuracy when meetings are always in English' },
-  { code: 'auto', label: 'Multi-language', hint: '25 European languages, auto-detect per recording' },
-];
+// The pinnable languages (a "Multi" preset + concrete European pins) come
+// straight from the shared PARAKEET_LANGUAGES source of truth, so this picker
+// can't drift from Settings or the engine-switch coercion. Writes the same
+// global language setting as Settings → Transcribe.
+const LANGUAGE_OPTIONS: LanguageOption[] = PARAKEET_LANGUAGES.map((l) => ({ ...l }));
 
 function LanguageSelector() {
   const language = useLanguageSetting();
@@ -326,8 +328,11 @@ function LanguageSelector() {
   const [popoverOpen, setPopoverOpen] = React.useState(false);
 
   const current = language.data ?? 'auto';
-  const isEnglish = current === 'en';
-  const display = isEnglish ? 'English' : 'Multi';
+  const selected = LANGUAGE_OPTIONS.find((o) => o.code === current);
+  // Concrete pins show their name; 'auto' shows the compact "Multi". An
+  // out-of-list pin (e.g. a Whisper-only language set in Settings) shows its
+  // code rather than being mislabelled "Multi" and silently reset.
+  const display = current === 'auto' ? 'Multi' : (selected?.label ?? current.toUpperCase());
 
   const pick = (code: string) => {
     setLanguage.mutate(code);
@@ -353,7 +358,7 @@ function LanguageSelector() {
       </PopoverTrigger>
       <PopoverContent align="end" sideOffset={8} className="w-56 p-1">
         {LANGUAGE_OPTIONS.map((opt) => {
-          const active = isEnglish ? opt.code === 'en' : opt.code === 'auto';
+          const active = opt.code === current;
           return (
             <button
               key={opt.code}
