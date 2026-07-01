@@ -1,6 +1,8 @@
 import { test, expect } from '../fixtures/electron';
 import { realUserDataDir, fileSig } from '../fixtures/real-user-data';
 import { readUserConfig } from '../fixtures/user-config';
+import { startMockOllama } from '../fixtures/mock-ollama';
+import { killOllama } from '../fixtures/kill-ollama';
 
 /**
  * T2 — model management (the deterministic, model-free subset). Covers the
@@ -22,12 +24,18 @@ type ListResult = {
 type CurrentModel = { success: boolean; model?: string };
 type StatusResult = { success: boolean; model?: string; installed?: boolean };
 type Result = { success?: boolean };
+type PullResult = { success: boolean; error?: string };
+type VerifyResult = { success: boolean; error: string | null };
+type DeleteResult = { success: boolean; error: string | null };
 
 type StenoWindow = Window & {
   stenoai: {
     models: {
       getCurrent: () => Promise<CurrentModel>;
       set: (name: string) => Promise<Result>;
+      pull: (name: string) => Promise<PullResult>;
+      verify: (name: string) => Promise<VerifyResult>;
+      delete: (name: string) => Promise<DeleteResult>;
     };
     whisperModels: {
       list: () => Promise<ListResult>;
@@ -130,4 +138,36 @@ test('parakeet models: list + status return a coherent installed shape', async (
   expect(typeof status.installed).toBe('boolean');
   // status + list agree on the default model id.
   expect(status.model).toBe(listed.current_model);
+});
+
+test('switch-to-faster-build: pull, verify, and delete the old tag all round-trip through IPC', async ({
+  launchApp,
+}) => {
+  killOllama();
+  const mockOllama = await startMockOllama();
+  try {
+    const { page } = await launchApp();
+
+    const pullResult = await page.evaluate(() =>
+      (window as StenoWindow).stenoai.models.pull('gemma4:e2b-nvfp4'),
+    );
+    expect(pullResult.success).toBe(true);
+    expect(mockOllama.lastPulledModel()).toBe('gemma4:e2b-nvfp4');
+
+    const verifyResult = await page.evaluate(() =>
+      (window as StenoWindow).stenoai.models.verify('gemma4:e2b-nvfp4'),
+    );
+    expect(verifyResult.success).toBe(true);
+    expect(verifyResult.error).toBeNull();
+
+    const deleteResult = await page.evaluate(() =>
+      (window as StenoWindow).stenoai.models.delete('gemma4:e2b-it-qat'),
+    );
+    expect(deleteResult.success).toBe(true);
+    expect(deleteResult.error).toBeNull();
+    expect(mockOllama.deleteCalls()).toBe(1);
+    expect(mockOllama.lastDeletedModel()).toBe('gemma4:e2b-it-qat');
+  } finally {
+    await mockOllama.close();
+  }
 });

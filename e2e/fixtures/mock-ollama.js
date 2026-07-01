@@ -2,7 +2,7 @@
 // src/ollama_manager.py checks http://127.0.0.1:11434/api/tags first and skips
 // starting its own `ollama serve` on a 200 (ollama_manager.py ~148), so
 // prebinding here keeps the real/ bundled Ollama out of the test. Answers
-// /api/tags, /api/pull, and a streaming NDJSON /api/chat.
+// /api/tags, /api/pull, /api/delete, and a streaming NDJSON /api/chat.
 //
 // Bind is hard by design (listen throws on EADDRINUSE): if a real Ollama is
 // already answering on 11434 the test would silently hit the live LLM instead
@@ -23,14 +23,21 @@ const OLLAMA_PORT = 11434;
  * @param {object} [opts]
  * @param {string} [opts.chatReply='ok'] assistant content returned by /api/chat.
  * @param {string[]} [opts.chatReplyQueue=[]] queue of replies to dequeue per call; falls back to chatReply when exhausted.
- * @returns {Promise<{ close: () => Promise<void>, lastChatPrompt: () => string|null, chatCalls: () => number, pullCalls: () => number, remainingQueueLength: () => number }>}
+ * @param {string[]} [opts.installedModels=['gemma4:e2b-it-qat','llama3.2:3b']] models /api/tags reports as installed.
+ * @returns {Promise<{ close: () => Promise<void>, lastChatPrompt: () => string|null, chatCalls: () => number, pullCalls: () => number, remainingQueueLength: () => number, lastPulledModel: () => string|null, deleteCalls: () => number, lastDeletedModel: () => string|null }>}
  */
 function startMockOllama(opts = {}) {
   const chatReply = opts.chatReply ?? 'ok';
   const chatReplyQueue = Array.isArray(opts.chatReplyQueue) ? [...opts.chatReplyQueue] : [];
+  const installedModels = Array.isArray(opts.installedModels)
+    ? opts.installedModels
+    : ['gemma4:e2b-it-qat', 'llama3.2:3b'];
   let lastChatPrompt = null;
   let chatCalls = 0;
   let pullCalls = 0;
+  let lastPulledModel = null;
+  let deleteCalls = 0;
+  let lastDeletedModel = null;
 
   return new Promise((resolve, reject) => {
     const server = http.createServer((req, res) => {
@@ -39,29 +46,21 @@ function startMockOllama(opts = {}) {
       // configured model isn't found it tries to PULL it, so we must list it
       // under `model` or the pull path 404s and crashes summarisation.
       if (req.method === 'GET' && req.url === '/api/tags') {
+        // gemma4:e2b-it-qat is the config default (Config.DEFAULT_MODEL); listed
+        // by default so the summarizer finds the configured model installed
+        // instead of taking the pull path. llama3.2:3b kept for tests that pin
+        // the older model explicitly. Callers can override via opts.installedModels
+        // (e.g. [] to force the pull path).
         res.writeHead(200, { 'content-type': 'application/json' });
         res.end(
           JSON.stringify({
-            models: [
-              // gemma4:e2b-it-qat is the config default (Config.DEFAULT_MODEL);
-              // list it so the summarizer finds the configured model installed
-              // instead of taking the pull path. llama3.2:3b kept for tests that
-              // pin the older model explicitly.
-              {
-                name: 'gemma4:e2b-it-qat',
-                model: 'gemma4:e2b-it-qat',
-                modified_at: '2024-01-01T00:00:00Z',
-                size: 4301000000,
-                digest: 'mock',
-              },
-              {
-                name: 'llama3.2:3b',
-                model: 'llama3.2:3b',
-                modified_at: '2024-01-01T00:00:00Z',
-                size: 2019393189,
-                digest: 'mock',
-              },
-            ],
+            models: installedModels.map((name) => ({
+              name,
+              model: name,
+              modified_at: '2024-01-01T00:00:00Z',
+              size: 4301000000,
+              digest: 'mock',
+            })),
           }),
         );
         return;
@@ -69,9 +68,18 @@ function startMockOllama(opts = {}) {
       // /api/pull — defensive: if the model is ever considered missing, answer
       // a success stream rather than 404 so summarisation doesn't crash.
       if (req.method === 'POST' && req.url === '/api/pull') {
-        pullCalls++;
-        res.writeHead(200, { 'content-type': 'application/x-ndjson' });
-        res.end(JSON.stringify({ status: 'success' }) + '\n');
+        const chunks = [];
+        req.on('data', (c) => chunks.push(c));
+        req.on('end', () => {
+          pullCalls++;
+          let body = {};
+          try {
+            body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
+          } catch { /* ignore */ }
+          lastPulledModel = body.name || body.model || null;
+          res.writeHead(200, { 'content-type': 'application/x-ndjson' });
+          res.end(JSON.stringify({ status: 'success' }) + '\n');
+        });
         return;
       }
       if (req.method === 'POST' && req.url === '/api/chat') {
@@ -109,6 +117,21 @@ function startMockOllama(opts = {}) {
         });
         return;
       }
+      if (req.method === 'DELETE' && req.url === '/api/delete') {
+        const chunks = [];
+        req.on('data', (c) => chunks.push(c));
+        req.on('end', () => {
+          deleteCalls++;
+          let body = {};
+          try {
+            body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
+          } catch { /* ignore */ }
+          lastDeletedModel = body.model || body.name || null;
+          res.writeHead(200, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({ status: 'success' }));
+        });
+        return;
+      }
       res.writeHead(404, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ error: 'mock: not found' }));
     });
@@ -121,6 +144,9 @@ function startMockOllama(opts = {}) {
         chatCalls: () => chatCalls,
         pullCalls: () => pullCalls,
         remainingQueueLength: () => chatReplyQueue.length,
+        lastPulledModel: () => lastPulledModel,
+        deleteCalls: () => deleteCalls,
+        lastDeletedModel: () => lastDeletedModel,
       });
     });
   });
