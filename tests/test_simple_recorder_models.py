@@ -32,6 +32,35 @@ class ListModelsMlxEnrichmentTests(unittest.TestCase):
         # "Select" now resolves to that on Apple Silicon) is fully usable,
         # and "installed: false" would leave "Select" offered forever.
         self.assertTrue(e2b_entry["installed"])
+        # But 'gguf_installed' must stay false so a caller (e.g. the Settings
+        # delete-to-free-space action) can tell the GGUF blob itself was
+        # never pulled, and not attempt to delete a tag that was never
+        # there (regression: this used to throw and leave the confirm
+        # dialog stuck, since ollama.delete() on a nonexistent tag errors).
+        self.assertFalse(e2b_entry["gguf_installed"])
+
+    def test_gguf_installed_true_when_gguf_blob_actually_present(self):
+        """The ordinary case: both the GGUF id and its NVFP4 sibling are
+        actually installed (e.g. after "switch to faster build")."""
+        from simple_recorder import cli
+
+        runner = CliRunner()
+        fake_models = [
+            mock.Mock(model="gemma4:e2b-it-qat"),
+            mock.Mock(model="gemma4:e2b-nvfp4"),
+        ]
+        fake_response = mock.Mock(models=fake_models)
+
+        with mock.patch("src.config.is_apple_silicon", return_value=True), \
+             mock.patch("ollama.list", return_value=fake_response):
+            result = runner.invoke(cli, ["list-models"])
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        data = json.loads(result.output)
+        e2b_entry = data["supported_models"]["gemma4:e2b-it-qat"]
+        self.assertTrue(e2b_entry["gguf_installed"])
+        self.assertTrue(e2b_entry["mlx_installed"])
+        self.assertTrue(e2b_entry["installed"])
 
         # A model with no MLX equivalent gets neither field.
         llama_entry = data["supported_models"]["llama3.2:3b"]

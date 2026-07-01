@@ -71,6 +71,7 @@ export interface ListedModel {
   quality?: string;
   mlxTag?: string;
   mlxInstalled?: boolean;
+  ggufInstalled?: boolean;
 }
 
 export interface CalendarEvent {
@@ -369,6 +370,11 @@ export interface RawSupportedModel {
   quality?: string;
   deprecated?: boolean;
   installed?: boolean;
+  // Distinct from `installed`, which is also true when only the NVFP4
+  // sibling is present (see mlx_installed) -- this is specifically whether
+  // the GGUF id itself was pulled, needed by anything that must not act on
+  // a tag that was never actually downloaded (e.g. deleting it).
+  gguf_installed?: boolean;
   mlx_tag?: string;
   mlx_installed?: boolean;
 }

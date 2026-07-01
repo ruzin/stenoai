@@ -3190,10 +3190,19 @@ def list_models():
         for model_id, info in models.items():
             # Match exactly, or where Ollama appended extra detail after the tag
             # e.g. "deepseek-r1:14b" matches "deepseek-r1:14b-qwen-distill-q4_K_M"
-            info['installed'] = any(
+            gguf_installed = any(
                 name == model_id or name.startswith(model_id + '-')
                 for name in installed_names
             )
+            # Kept distinct from 'installed' below: a model pulled straight to
+            # its NVFP4 tag (general "Select" resolves to that on Apple
+            # Silicon) never has the GGUF blob itself in Ollama, so callers
+            # that need to know "is the GGUF id actually there" (e.g. the
+            # Settings delete-to-free-space action, which must not try to
+            # delete a tag that was never pulled) can't rely on 'installed'
+            # alone once it's true-via-NVFP4-fallback.
+            info['gguf_installed'] = gguf_installed
+            info['installed'] = gguf_installed
             if apple_silicon:
                 mlx_tag = Config._MLX_EQUIVALENTS.get(model_id)
                 if mlx_tag:
@@ -3202,11 +3211,9 @@ def list_models():
                         name == mlx_tag or name.startswith(mlx_tag + '-')
                         for name in installed_names
                     )
-                    # A model pulled straight to its NVFP4 tag (general
-                    # "Select" now resolves to that on Apple Silicon, same as
-                    # setup's pull_target) is fully usable even though the
-                    # GGUF id itself was never downloaded -- report it
-                    # installed rather than leaving "Select" re-offered.
+                    # Fully usable even though the GGUF id itself was never
+                    # downloaded -- report it installed rather than leaving
+                    # "Select" re-offered.
                     if info['mlx_installed']:
                         info['installed'] = True
         result = {

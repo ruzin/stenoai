@@ -2171,8 +2171,16 @@ function ModelList() {
     };
 
     const onDeleteModel = () => {
-      const tags = m.mlxInstalled && m.mlxTag ? [m.name, m.mlxTag] : [m.name];
-      const label = tags.length > 1 ? `${m.name} and its faster build` : m.name;
+      // Only tags actually present in Ollama -- a model pulled straight to
+      // its NVFP4 tag (general "Select" on Apple Silicon) never has the
+      // GGUF blob itself installed, and ollama.delete() on a tag that was
+      // never pulled throws. Blindly including m.name here caused exactly
+      // that: a stuck confirm dialog on a model with no GGUF blob.
+      const tags: string[] = [];
+      if (m.ggufInstalled) tags.push(m.name);
+      if (m.mlxInstalled && m.mlxTag) tags.push(m.mlxTag);
+      if (tags.length === 0) return;
+      const label = tags.length > 1 ? `${m.name} and its faster build` : tags[0];
       const pronoun = tags.length > 1 ? 'them' : 'it';
       setDeleteCandidate({
         tags,
@@ -2251,9 +2259,17 @@ function ModelList() {
           confirmLabel="Delete"
           destructive
           onConfirm={async () => {
-            await Promise.all(deleteCandidate.tags.map((tag) => deleteModel.mutateAsync(tag)));
-            setDeleteCandidate(null);
-            fasterBuild.reset();
+            // finally, not just a trailing statement: a delete call
+            // rejecting (unexpected -- e.g. Ollama briefly unreachable)
+            // must not leave this dialog stuck open with no way to close
+            // it except Cancel (which, since some deletes may have already
+            // succeeded, looked like "cancel deletes it anyway").
+            try {
+              await Promise.all(deleteCandidate.tags.map((tag) => deleteModel.mutateAsync(tag)));
+            } finally {
+              setDeleteCandidate(null);
+              fasterBuild.reset();
+            }
           }}
         />
       )}
