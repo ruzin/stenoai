@@ -4838,9 +4838,13 @@ ipcMain.handle('setup-ollama-and-model', async () => {
     // and skip the pull entirely, so the default Local path needs no network for
     // anyone with a usable Ollama already set up. Best-effort: any failure here
     // falls through to the normal download below.
+    let pullTarget = DEFAULT_AI_MODEL;
     try {
       const resolvedRaw = await runPythonScript('simple_recorder.py', ['resolve-setup-model'], true);
       const resolved = JSON.parse(resolvedRaw.trim());
+      if (resolved && resolved.pull_target) {
+        pullTarget = resolved.pull_target;
+      }
       if (resolved && resolved.installed) {
         sendDebugLog(`Found already-installed model "${resolved.installed}" — skipping download`);
         // Persist it as the active model, and only report success once that
@@ -4868,11 +4872,11 @@ ipcMain.handle('setup-ollama-and-model', async () => {
     }
 
     sendDebugLog('Downloading AI model (this may take several minutes)...');
-    sendDebugLog(`POST http://127.0.0.1:11434/api/pull {name: "${DEFAULT_AI_MODEL}"}`);
+    sendDebugLog(`POST http://127.0.0.1:11434/api/pull {name: "${pullTarget}"}`);
 
     const http = require('http');
     return new Promise((resolve) => {
-      const postData = JSON.stringify({ name: DEFAULT_AI_MODEL });
+      const postData = JSON.stringify({ name: pullTarget });
       const req = http.request({
         hostname: '127.0.0.1',
         port: 11434,
@@ -5463,6 +5467,36 @@ ipcMain.handle('set-model', async (event, modelName) => {
     return { success: true, model: modelName };
   } catch (error) {
     sendDebugLog(`Error setting model: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('verify-model', async (event, modelName) => {
+  try {
+    sendDebugLog(`Verifying model: ${modelName}`);
+    const result = await runPythonScript('simple_recorder.py', ['verify-model', modelName]);
+    const jsonMatch = result.match(/\{.*\}/s);
+    if (jsonMatch) {
+      return JSON.parse(jsonMatch[0]);
+    }
+    return { success: true };
+  } catch (error) {
+    sendDebugLog(`Error verifying model: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('delete-model', async (event, modelName) => {
+  try {
+    sendDebugLog(`Deleting model: ${modelName}`);
+    const result = await runPythonScript('simple_recorder.py', ['delete-model', modelName]);
+    const jsonMatch = result.match(/\{.*\}/s);
+    if (jsonMatch) {
+      return JSON.parse(jsonMatch[0]);
+    }
+    return { success: true };
+  } catch (error) {
+    sendDebugLog(`Error deleting model: ${error.message}`);
     return { success: false, error: error.message };
   }
 });
