@@ -70,6 +70,18 @@ _AUTO_NAMED_PATTERN = re.compile(
     r'|.+ — \d{4}-\d{2}-\d{2} \d{2}:\d{2})$'
 )
 
+# Regex to normalize markdown headers that incorrectly start on the same line as
+# the closing tag of a reasoning block (e.g. `</thought>## Summary`). This ensures
+# the parser correctly splits and identifies sections. Scoped to think/thought
+# tags specifically (not any HTML-like tag) so unrelated inline markup in the
+# model's output can't be mistaken for a reasoning block and get a spurious
+# section break inserted ahead of it.
+_REASONING_TAG_HEADER_PATTERN = re.compile(r'(</(?:think|thought)>)\s*(#{1,6}\s)', re.IGNORECASE)
+
+def _normalize_markdown_for_parsing(md_text: str) -> str:
+    """Ensure headers immediately following a reasoning tag start on a new line."""
+    return _REASONING_TAG_HEADER_PATTERN.sub(r'\1\n\2', md_text)
+
 # Shared atomic JSON writer (tempfile + os.replace + Windows PermissionError
 # retry). One implementation for recorder_state.json, the summary JSON, and
 # config.json — re-exported here so existing imports keep working. The
@@ -241,6 +253,8 @@ Summary output language: {config.get_language_name(output_language)}
     @staticmethod
     def _parse_streamed_markdown(md_text: str) -> dict:
         """Parse streamed markdown summary into structured fields."""
+        md_text = _normalize_markdown_for_parsing(md_text)
+
         summary_parts = []
         participants = []
         discussion_areas = []
@@ -1740,6 +1754,8 @@ def _parse_meeting_markdown(md_path):
                             pass
                     meta[key.strip()] = value
             body = parts[2].strip()
+
+    body = _normalize_markdown_for_parsing(body)
 
     # Parse markdown body into sections
     sections = {}
