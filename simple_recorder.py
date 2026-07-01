@@ -4056,6 +4056,23 @@ def verify_model(model_name):
         print(json.dumps({"success": False, "error": str(e)}))
 
 
+@cli.command(name='delete-model')
+@click.argument('model_name')
+def delete_model(model_name):
+    """Delete a locally-pulled Ollama model (uses HTTP API).
+
+    Only ever called by the Settings "switch to faster build" flow, and only
+    with the OLD GGUF tag, after its NVFP4 sibling has been pulled and
+    verified -- never the tag currently in active use.
+    """
+    try:
+        import ollama
+        ollama.delete(model=model_name)
+        print(json.dumps({"success": True, "error": None}))
+    except Exception as e:
+        print(json.dumps({"success": False, "error": str(e)}))
+
+
 def pick_installed_supported_model(installed_names, preferred, supported_order, deprecated=()):
     """Pick the best already-installed supported Ollama model id, or None (#123).
 

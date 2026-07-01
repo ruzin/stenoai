@@ -132,5 +132,31 @@ class VerifyModelCommandTests(unittest.TestCase):
         self.assertIn("model not found", data["error"])
 
 
+class DeleteModelCommandTests(unittest.TestCase):
+    def test_delete_model_success(self):
+        from simple_recorder import cli
+
+        runner = CliRunner()
+        with mock.patch("ollama.delete") as delete_mock:
+            result = runner.invoke(cli, ["delete-model", "gemma4:e2b-it-qat"])
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        data = json.loads(result.output)
+        self.assertTrue(data["success"])
+        delete_mock.assert_called_once_with(model="gemma4:e2b-it-qat")
+
+    def test_delete_model_reports_failure(self):
+        from simple_recorder import cli
+
+        runner = CliRunner()
+        with mock.patch("ollama.delete", side_effect=RuntimeError("not found")):
+            result = runner.invoke(cli, ["delete-model", "gemma4:e2b-it-qat"])
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        data = json.loads(result.output)
+        self.assertFalse(data["success"])
+        self.assertIn("not found", data["error"])
+
+
 if __name__ == "__main__":
     unittest.main()
