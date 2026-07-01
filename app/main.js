@@ -6931,7 +6931,22 @@ ipcMain.on('system-audio-recording-state', (event, isRecording) => {
 // doing, so this map is the source of truth for "is it still going".
 const activePulls = new Map();
 
+// Tracks a pull's terminal outcome (model -> {success, error}) after it
+// leaves activePulls, so a renderer that was unmounted for the whole
+// download (missed the live model-pull-progress/model-pull-complete events
+// entirely) can still discover on remount that it finished, rather than
+// silently going back to "not started". A client clears its own entry via
+// 'ack-pull-complete' once it has acted on it (see useSwitchToFasterBuild).
+const completedPulls = new Map();
+
 ipcMain.handle('pull-model', async (event, modelName) => {
+  // Guards against a duplicate pull of the SAME model racing in (e.g. a
+  // double-click before React re-renders the button as disabled) -- without
+  // this, two subprocesses would run concurrently and the first one's close
+  // handler would delete activePulls' entry out from under the second.
+  if (activePulls.has(modelName)) {
+    return { success: false, error: `A pull for ${modelName} is already in progress.` };
+  }
   try {
     sendDebugLog(`Pulling model: ${modelName}`);
     sendDebugLog('This may take several minutes...');
@@ -6990,6 +7005,7 @@ ipcMain.handle('pull-model', async (event, modelName) => {
 
         if (succeeded) {
           sendDebugLog(`Successfully pulled model: ${modelName}`);
+          completedPulls.set(modelName, { success: true });
 
           if (mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.webContents.send('model-pull-complete', {
@@ -7002,6 +7018,7 @@ ipcMain.handle('pull-model', async (event, modelName) => {
         } else {
           const errorMsg = (pullResult && pullResult.error) || `Process exited with code ${code}`;
           sendDebugLog(`Failed to pull model: ${modelName} - ${errorMsg}`);
+          completedPulls.set(modelName, { success: false, error: errorMsg });
 
           if (mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.webContents.send('model-pull-complete', {
@@ -7018,6 +7035,7 @@ ipcMain.handle('pull-model', async (event, modelName) => {
       proc.on('error', (error) => {
         activePulls.delete(modelName);
         sendDebugLog(`Error pulling model: ${error.message}`);
+        completedPulls.set(modelName, { success: false, error: error.message });
 
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send('model-pull-complete', {
@@ -7037,7 +7055,23 @@ ipcMain.handle('pull-model', async (event, modelName) => {
   }
 });
 
-ipcMain.handle('get-active-pulls', () => Object.fromEntries(activePulls));
+ipcMain.handle('get-active-pulls', () => {
+  const result = {};
+  for (const [model, progress] of activePulls) {
+    result[model] = { progress, done: false };
+  }
+  for (const [model, outcome] of completedPulls) {
+    result[model] = { done: true, ...outcome };
+  }
+  return result;
+});
+
+// Lets a renderer that consumed a completedPulls entry (via getActivePulls
+// on remount, or the live model-pull-complete listener) tell main it's been
+// handled, so a later remount doesn't replay an already-resolved outcome.
+ipcMain.on('ack-pull-complete', (event, modelName) => {
+  completedPulls.delete(modelName);
+});
 
 // Helper to build env vars for running the bundled Ollama binary directly.
 // Mirrors src/ollama_manager.get_ollama_env() so the dylib/DLL search path

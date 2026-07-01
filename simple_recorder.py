@@ -4067,8 +4067,15 @@ def delete_model(model_name):
 
     Only ever called by the Settings "switch to faster build" flow, and only
     with the OLD GGUF tag, after its NVFP4 sibling has been pulled and
-    verified -- never the tag currently in active use.
+    verified -- never the tag currently in active use. Restricted to
+    supported GGUF ids: this is a destructive IPC-reachable operation, so it
+    must not delete an arbitrary caller-supplied model name.
     """
+    from src.config import get_config
+
+    if model_name not in get_config().list_supported_models():
+        print(json.dumps({"success": False, "error": f"Refusing to delete unsupported model: {model_name}"}))
+        return
     try:
         import ollama
         ollama.delete(model=model_name)

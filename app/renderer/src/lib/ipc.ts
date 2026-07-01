@@ -388,10 +388,15 @@ export type GetCurrentModelResponse = Result<{ model: string }>;
 // `{ success, error }` JSON verbatim, with no additional wrapping.
 export type VerifyModelResponse = { success: boolean; error: string | null };
 export type DeleteModelResponse = { success: boolean; error: string | null };
-// model -> last known progress string, for any pull-model download still
-// running in the main process. Flat for the same reason as the two types
-// above: main.js returns Object.fromEntries() of its in-memory map verbatim.
-export type GetActivePullsResponse = Record<string, string>;
+// model -> either its still-running progress string, or (done: true) its
+// terminal outcome if it finished while nothing was around to consume the
+// live model-pull-complete event (e.g. Settings was unmounted). Flat for the
+// same reason as the two types above: main.js returns its in-memory maps
+// verbatim, no Result<T> wrapping.
+export type GetActivePullsResponse = Record<
+  string,
+  { progress?: string; done: boolean; success?: boolean; error?: string }
+>;
 
 export type ListWhisperModelsResponse = Result<{
   supported_models: Record<string, RawSupportedModel>;
@@ -771,6 +776,7 @@ export interface StenoaiBridge {
     verify: RequestFn<[name: string], VerifyModelResponse>;
     delete: RequestFn<[name: string], DeleteModelResponse>;
     getActivePulls: RequestFn<[], GetActivePullsResponse>;
+    ackPullComplete: SendFn<[name: string]>;
   };
 
   whisperModels: {

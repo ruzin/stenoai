@@ -166,6 +166,41 @@ export function useSwitchToFasterBuild(onVerified?: (mlxTag: string) => void) {
   const [bytesPerSecond, setBytesPerSecond] = React.useState<Record<string, number>>({});
   const rateSamplesRef = React.useRef<Record<string, { bytes: number; at: number }>>({});
 
+  // Shared by the live model-pull-complete listener and the on-mount
+  // rehydration effect below -- both need to react identically to a pull's
+  // terminal outcome (drop progress tracking, verify on success, surface the
+  // error otherwise), the only difference being whether the outcome arrived
+  // as a live event or was discovered after the fact via getActivePulls().
+  // Only closes over stable setters/refs, so it's safe for the once-run
+  // effects to capture the copy from their first render.
+  const handlePullOutcome = async (model: string, success: boolean, pullError?: string) => {
+    setProgress((prev) => {
+      const { [model]: _drop, ...rest } = prev;
+      return rest;
+    });
+    setBytesPerSecond((prev) => {
+      const { [model]: _drop, ...rest } = prev;
+      return rest;
+    });
+    delete rateSamplesRef.current[model];
+    ipc().models.ackPullComplete(model);
+    if (!success) {
+      setState('error');
+      setError(pullError ?? 'Failed to download the faster build.');
+      return;
+    }
+    setState('verifying');
+    const verifyResult = await ipc().models.verify(model);
+    if (verifyResult.success) {
+      setState('done');
+      qc.invalidateQueries({ queryKey: modelsKeys.all });
+      onVerifiedRef.current?.(model);
+    } else {
+      setState('error');
+      setError(verifyResult.error ?? "Couldn't verify the faster build.");
+    }
+  };
+
   React.useEffect(() => {
     const offProgress = ipc().on.modelPullProgress(({ model, progress: p }) => {
       setProgress((prev) => ({ ...prev, [model]: p }));
@@ -182,32 +217,9 @@ export function useSwitchToFasterBuild(onVerified?: (mlxTag: string) => void) {
         rateSamplesRef.current[model] = { bytes: completed, at: now };
       }
     });
-    const offComplete = ipc().on.modelPullComplete(async ({ model, success, error: pullError }) => {
+    const offComplete = ipc().on.modelPullComplete(({ model, success, error: pullError }) => {
       if (model !== activeTagRef.current) return;
-      setProgress((prev) => {
-        const { [model]: _drop, ...rest } = prev;
-        return rest;
-      });
-      setBytesPerSecond((prev) => {
-        const { [model]: _drop, ...rest } = prev;
-        return rest;
-      });
-      delete rateSamplesRef.current[model];
-      if (!success) {
-        setState('error');
-        setError(pullError ?? 'Failed to download the faster build.');
-        return;
-      }
-      setState('verifying');
-      const verifyResult = await ipc().models.verify(model);
-      if (verifyResult.success) {
-        setState('done');
-        qc.invalidateQueries({ queryKey: modelsKeys.all });
-        onVerifiedRef.current?.(model);
-      } else {
-        setState('error');
-        setError(verifyResult.error ?? "Couldn't verify the faster build.");
-      }
+      void handlePullOutcome(model, success, pullError);
     });
     return () => {
       offProgress();
@@ -234,10 +246,20 @@ export function useSwitchToFasterBuild(onVerified?: (mlxTag: string) => void) {
         if (cancelled) return;
         const activeEntry = Object.entries(pulls).find(([model]) => model.endsWith('-nvfp4'));
         if (!activeEntry) return;
-        const [model, progressValue] = activeEntry;
+        const [model, entry] = activeEntry;
         setActiveTag(model);
         activeTagRef.current = model;
+        if (entry.done) {
+          // The pull finished while this component was unmounted (e.g. the
+          // user navigated away from Settings mid-download), so the live
+          // model-pull-complete listener never ran for it. Replay the same
+          // outcome handling now instead of showing "Switch to faster
+          // build" as if nothing had happened.
+          void handlePullOutcome(model, Boolean(entry.success), entry.error);
+          return;
+        }
         setState('pulling');
+        const progressValue = entry.progress ?? '';
         setProgress((prev) => ({ ...prev, [model]: progressValue }));
         const byteMatch = progressValue.match(/\((\d+)\/(\d+)\)/);
         if (byteMatch) {

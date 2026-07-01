@@ -176,6 +176,36 @@ class DeleteModelCommandTests(unittest.TestCase):
         self.assertFalse(data["success"])
         self.assertIn("not found", data["error"])
 
+    def test_delete_model_refuses_unsupported_model(self):
+        """delete-model is IPC-reachable and destructive, so it must not
+        forward an arbitrary caller-supplied name straight to ollama.delete()
+        -- only the canonical supported GGUF ids."""
+        from simple_recorder import cli
+
+        runner = CliRunner()
+        with mock.patch("ollama.delete") as delete_mock:
+            result = runner.invoke(cli, ["delete-model", "not-a-real-model"])
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        data = json.loads(result.output)
+        self.assertFalse(data["success"])
+        self.assertIn("not-a-real-model", data["error"])
+        delete_mock.assert_not_called()
+
+    def test_delete_model_refuses_nvfp4_tag(self):
+        """The NVFP4/MLX tag itself is never a valid delete target -- only
+        its canonical GGUF sibling (the one actually in config.json)."""
+        from simple_recorder import cli
+
+        runner = CliRunner()
+        with mock.patch("ollama.delete") as delete_mock:
+            result = runner.invoke(cli, ["delete-model", "gemma4:e2b-nvfp4"])
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        data = json.loads(result.output)
+        self.assertFalse(data["success"])
+        delete_mock.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

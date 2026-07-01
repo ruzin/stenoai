@@ -191,6 +191,7 @@ const stenoai = {
     verify: (name) => invoke('verify-model', name),
     delete: (name) => invoke('delete-model', name),
     getActivePulls: () => invoke('get-active-pulls'),
+    ackPullComplete: (name) => send('ack-pull-complete', name),
   },
 
   whisperModels: {
