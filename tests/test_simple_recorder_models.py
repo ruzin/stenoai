@@ -50,5 +50,53 @@ class ListModelsMlxEnrichmentTests(unittest.TestCase):
             self.assertNotIn("mlx_installed", entry)
 
 
+class ResolveSetupModelPullTargetTests(unittest.TestCase):
+    def test_pull_target_is_nvfp4_on_apple_silicon(self):
+        from simple_recorder import cli
+
+        runner = CliRunner()
+        fake_response = mock.Mock(models=[])
+        with mock.patch("src.ollama_manager.start_ollama_server", return_value=True), \
+             mock.patch("src.config.is_apple_silicon", return_value=True), \
+             mock.patch("ollama.list", return_value=fake_response):
+            result = runner.invoke(cli, ["resolve-setup-model"])
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        data = json.loads(result.output)
+        self.assertEqual(data["pull_target"], "gemma4:e2b-nvfp4")
+        self.assertIsNone(data["installed"])
+
+    def test_pull_target_is_gguf_default_off_apple_silicon(self):
+        from simple_recorder import cli
+
+        runner = CliRunner()
+        fake_response = mock.Mock(models=[])
+        with mock.patch("src.ollama_manager.start_ollama_server", return_value=True), \
+             mock.patch("src.config.is_apple_silicon", return_value=False), \
+             mock.patch("ollama.list", return_value=fake_response):
+            result = runner.invoke(cli, ["resolve-setup-model"])
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        data = json.loads(result.output)
+        self.assertEqual(data["pull_target"], "gemma4:e2b-it-qat")
+
+    def test_existing_nvfp4_install_is_recognised_as_supported(self):
+        from simple_recorder import cli
+
+        runner = CliRunner()
+        # Only the NVFP4 tag is installed (e.g. from a prior manual switch) --
+        # pick_installed_supported_model must canonicalize it back to the
+        # GGUF id to recognise "a supported model is already present".
+        fake_response = mock.Mock(models=[mock.Mock(model="gemma4:e2b-nvfp4")])
+        with mock.patch("src.ollama_manager.start_ollama_server", return_value=True), \
+             mock.patch("src.config.is_apple_silicon", return_value=True), \
+             mock.patch("ollama.list", return_value=fake_response):
+            result = runner.invoke(cli, ["resolve-setup-model"])
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        data = json.loads(result.output)
+        self.assertEqual(data["installed"], "gemma4:e2b-it-qat")
+
+
 if __name__ == "__main__":
     unittest.main()

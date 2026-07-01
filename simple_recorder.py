@@ -4072,8 +4072,9 @@ def resolve_setup_model():
     """
     from src.config import get_config, Config
     from src.ollama_manager import start_ollama_server
+    from src.config import is_apple_silicon
 
-    result = {"installed": None}
+    result = {"installed": None, "pull_target": Config.DEFAULT_MODEL}
     try:
         start_ollama_server()
         import ollama
@@ -4088,11 +4089,22 @@ def resolve_setup_model():
             mid for mid, meta in Config.SUPPORTED_MODELS.items()
             if meta.get('deprecated')
         ]
+        # Canonicalize any already-installed MLX tag back to its GGUF id so an
+        # Apple-Silicon machine that only has e.g. gemma4:e2b-nvfp4 (from a
+        # prior manual switch) is still recognised as "has a supported model".
+        canonical_installed = {
+            Config._MLX_TO_GGUF.get(name, name) for name in installed
+        }
         result["installed"] = pick_installed_supported_model(
-            installed_names=installed,
+            installed_names=canonical_installed,
             preferred=[config.get_model(), Config.DEFAULT_MODEL],
             supported_order=list(Config.SUPPORTED_MODELS.keys()),
             deprecated=deprecated,
+        )
+        result["pull_target"] = (
+            Config._MLX_EQUIVALENTS.get(Config.DEFAULT_MODEL, Config.DEFAULT_MODEL)
+            if is_apple_silicon()
+            else Config.DEFAULT_MODEL
         )
     except Exception as e:
         result["error"] = str(e)
