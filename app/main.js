@@ -6935,29 +6935,36 @@ ipcMain.handle('pull-model', async (event, modelName) => {
 
       let lastStdoutLine = '';
 
+      // Ollama's own pull-progress stream can emit dozens of updates per
+      // second on a large download (multi-GB models like the NVFP4/MLX
+      // builds) — forwarding every single one drove the renderer's model
+      // list to re-render faster than the compositor could keep up,
+      // visible as window flicker/tearing. Throttling to 5/sec keeps the
+      // UI smooth without making the progress text feel laggy.
+      let lastProgressSentAt = 0;
+      const PROGRESS_THROTTLE_MS = 200;
+      const sendProgress = (output) => {
+        if (!mainWindow || mainWindow.isDestroyed()) return;
+        const now = Date.now();
+        if (now - lastProgressSentAt < PROGRESS_THROTTLE_MS) return;
+        lastProgressSentAt = now;
+        mainWindow.webContents.send('model-pull-progress', {
+          model: modelName,
+          progress: output
+        });
+      };
+
       proc.stdout.on('data', (data) => {
         const output = data.toString().trim();
         sendDebugLog(output);
         if (output) lastStdoutLine = output;
-
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.webContents.send('model-pull-progress', {
-            model: modelName,
-            progress: output
-          });
-        }
+        sendProgress(output);
       });
 
       proc.stderr.on('data', (data) => {
         const output = data.toString().trim();
         sendDebugLog(output);
-
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.webContents.send('model-pull-progress', {
-            model: modelName,
-            progress: output
-          });
-        }
+        sendProgress(output);
       });
 
       proc.on('close', (code) => {
