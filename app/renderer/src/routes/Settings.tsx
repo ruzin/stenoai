@@ -394,10 +394,17 @@ function PullProgressBar({
 }) {
   return (
     <div className="flex items-center gap-2">
-      <div className="flex items-center gap-1.5" style={{ width: 96 }}>
+      {/* No outer fixed width here -- it previously hardcoded 96px, which
+          fit only the bar+percent pair it was designed for. Adding the
+          MB/s and Part columns later pushed the total past 96px, so they
+          silently overflowed the box and collided with whatever sat to its
+          right (the Cancel button). Each child below still has its own
+          fixed width, so per-tick reflow is still fully prevented -- this
+          container just needs to actually be wide enough for all of them. */}
+      <div className="flex items-center gap-1.5">
         <div
-          className="h-1.5 flex-1 overflow-hidden rounded-full"
-          style={{ background: 'var(--surface-sunken)' }}
+          className="h-1.5 overflow-hidden rounded-full"
+          style={{ width: 56, background: 'var(--surface-sunken)' }}
         >
           <div
             className="h-full rounded-full"
@@ -428,7 +435,7 @@ function PullProgressBar({
           className="shrink-0 overflow-hidden whitespace-nowrap text-[11px] tabular-nums"
           style={{ color: 'var(--fg-muted)', width: 44 }}
         >
-          {parsePullPart(progress) ? `Part ${parsePullPart(progress)}` : ''}
+          {parsePullPart(progress) !== null ? `Part ${parsePullPart(progress)}` : ''}
         </span>
       </div>
       {/* Only rendered when the caller doesn't already have its own cancel
