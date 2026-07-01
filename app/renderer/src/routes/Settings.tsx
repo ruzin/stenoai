@@ -469,6 +469,19 @@ function ModelCard({
               Deprecated
             </span>
           )}
+          {fasterBuildTag && fasterBuildInstalled && (
+            <span
+              className="rounded-[3px] px-1.5 py-px text-[11px]"
+              title={`Running the MLX build (${fasterBuildTag}) instead of ${name}`}
+              style={{
+                background: 'var(--surface-sunken)',
+                color: 'var(--fg-muted)',
+                border: '1px solid var(--border)',
+              }}
+            >
+              MLX model
+            </span>
+          )}
         </div>
         {note && (
           <div
