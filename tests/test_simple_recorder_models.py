@@ -12,7 +12,6 @@ class ListModelsMlxEnrichmentTests(unittest.TestCase):
         # Exercises the real Config.SUPPORTED_MODELS + list_supported_models(),
         # only mocking the Ollama HTTP call and the platform gate.
         from simple_recorder import cli
-        from src.config import Config
 
         runner = CliRunner()
         fake_models = [mock.Mock(model="gemma4:e2b-nvfp4")]
