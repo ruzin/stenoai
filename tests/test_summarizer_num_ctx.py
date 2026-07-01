@@ -67,14 +67,26 @@ class ResolveNumCtxTests(unittest.TestCase):
         )
 
     def test_nvfp4_tag_resolves_to_same_num_ctx_as_its_gguf_sibling(self):
-        self.assertEqual(
-            resolve_num_ctx("gemma4:12b-nvfp4"),
-            resolve_num_ctx("gemma4:12b-it-qat"),
-        )
-        self.assertEqual(
-            resolve_num_ctx("gemma4:e2b-nvfp4"),
-            resolve_num_ctx("gemma4:e2b-it-qat"),
-        )
+        # A value deliberately different from OLLAMA_NUM_CTX_DEFAULT proves the
+        # NVFP4 tag is actually canonicalized to its GGUF sibling before lookup,
+        # rather than merely falling through to the default (which happens to
+        # equal today's real Gemma entries, making a same-value test pass
+        # either way regardless of whether canonicalization runs).
+        with mock.patch.dict(
+            _OLLAMA_MODEL_NUM_CTX,
+            {"gemma4:12b-it-qat": 65536, "gemma4:e2b-it-qat": 16384},
+        ):
+            self.assertEqual(
+                resolve_num_ctx("gemma4:12b-nvfp4"),
+                resolve_num_ctx("gemma4:12b-it-qat"),
+            )
+            self.assertEqual(resolve_num_ctx("gemma4:12b-nvfp4"), 65536)
+
+            self.assertEqual(
+                resolve_num_ctx("gemma4:e2b-nvfp4"),
+                resolve_num_ctx("gemma4:e2b-it-qat"),
+            )
+            self.assertEqual(resolve_num_ctx("gemma4:e2b-nvfp4"), 16384)
 
 
 class LocalProviderModelResolutionTests(unittest.TestCase):
