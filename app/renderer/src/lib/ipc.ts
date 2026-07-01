@@ -69,6 +69,8 @@ export interface ListedModel {
   description?: string;
   speed?: string;
   quality?: string;
+  mlxTag?: string;
+  mlxInstalled?: boolean;
 }
 
 export interface CalendarEvent {

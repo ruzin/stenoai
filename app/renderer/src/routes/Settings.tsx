@@ -82,6 +82,7 @@ import {
 } from '@/hooks/useAi';
 import {
   useCurrentModel,
+  useDeleteModel,
   useModels,
   useParakeetModels,
   usePullModel,
@@ -89,6 +90,7 @@ import {
   usePullWhisperModel,
   useSetActiveTranscription,
   useSetCurrentModel,
+  useSwitchToFasterBuild,
   useTranscriptionEngine,
   useWhisperModels,
 } from '@/hooks/useModels';
@@ -361,6 +363,11 @@ interface ModelCardProps {
   isDownloading?: boolean;
   downloadProgress?: string;
   onSelect: () => void;
+  fasterBuildTag?: string;
+  fasterBuildInstalled?: boolean;
+  fasterBuildState?: 'idle' | 'pulling' | 'verifying' | 'done' | 'error';
+  fasterBuildProgress?: string;
+  onSwitchToFasterBuild?: () => void;
 }
 
 function ModelCard({
@@ -373,6 +380,11 @@ function ModelCard({
   isDownloading = false,
   downloadProgress,
   onSelect,
+  fasterBuildTag,
+  fasterBuildInstalled = false,
+  fasterBuildState = 'idle',
+  fasterBuildProgress,
+  onSwitchToFasterBuild,
 }: ModelCardProps) {
   return (
     <div
@@ -450,6 +462,31 @@ function ModelCard({
           </div>
         )}
       </div>
+      {fasterBuildTag && !fasterBuildInstalled && (
+        <div className="mt-1.5 flex items-center gap-2">
+          <span
+            className="rounded-[3px] px-1.5 py-px text-[11px]"
+            style={{
+              color: 'var(--fg-muted)',
+              border: '1px solid var(--border-subtle)',
+            }}
+          >
+            Faster build available
+          </span>
+          <button
+            type="button"
+            onClick={onSwitchToFasterBuild}
+            disabled={fasterBuildState === 'pulling' || fasterBuildState === 'verifying'}
+            className="cursor-pointer border-0 bg-transparent p-0 text-[12px] underline disabled:cursor-default disabled:no-underline disabled:opacity-60"
+            style={{ color: 'var(--fg-1)' }}
+          >
+            {fasterBuildState === 'pulling' && (fasterBuildProgress ?? 'Downloading…')}
+            {fasterBuildState === 'verifying' && 'Verifying…'}
+            {fasterBuildState === 'error' && 'Retry: switch to faster build'}
+            {(fasterBuildState === 'idle' || fasterBuildState === 'done') && 'Switch to faster build'}
+          </button>
+        </div>
+      )}
       {isCurrent ? (
         <span
           className="inline-flex shrink-0 items-center gap-1.5 text-[13px] font-medium"
@@ -1880,6 +1917,14 @@ function ModelList() {
   const setCurrent = useSetCurrentModel();
   const pull = usePullModel();
   const [showDeprecated, setShowDeprecated] = React.useState(false);
+  const [deleteCandidate, setDeleteCandidate] = React.useState<{ tag: string; sizeLabel?: string } | null>(null);
+  const deleteModel = useDeleteModel();
+  const fasterBuild = useSwitchToFasterBuild((mlxTag) => {
+    const match = models.data?.models.find((m) => m.mlxTag === mlxTag);
+    if (match) {
+      setDeleteCandidate({ tag: match.name, sizeLabel: formatModelSize(match.size_gb) });
+    }
+  });
 
   if (models.isLoading) {
     return (
@@ -1931,6 +1976,7 @@ function ModelList() {
     }
 
     const sizeLabel = formatModelSize(m.size_gb);
+    const isFasterBuildActive = fasterBuild.activeTag === m.mlxTag;
 
     const onSelect = () => {
       if (m.installed) {
@@ -1952,6 +1998,14 @@ function ModelList() {
         isDownloading={isDownloading}
         downloadProgress={downloadProgress}
         onSelect={onSelect}
+        fasterBuildTag={m.mlxTag}
+        fasterBuildInstalled={Boolean(m.mlxInstalled)}
+        fasterBuildState={isFasterBuildActive ? fasterBuild.state : 'idle'}
+        fasterBuildProgress={isFasterBuildActive ? fasterBuild.progress : undefined}
+        onSwitchToFasterBuild={() => {
+          if (!m.mlxTag) return;
+          fasterBuild.switchTo(m.mlxTag);
+        }}
       />
     );
   };
@@ -1980,6 +2034,27 @@ function ModelList() {
             <div className="mt-2">{deprecated.map(renderCard)}</div>
           )}
         </>
+      )}
+
+      {deleteCandidate && (
+        <ConfirmDialog
+          open={Boolean(deleteCandidate)}
+          onOpenChange={(open) => {
+            if (!open) {
+              setDeleteCandidate(null);
+              fasterBuild.reset();
+            }
+          }}
+          title="Delete the old build?"
+          description={`${deleteCandidate.tag} (${deleteCandidate.sizeLabel ?? 'unknown size'}) is no longer needed now that the faster build is active. Delete it to free up disk space?`}
+          confirmLabel="Delete"
+          destructive
+          onConfirm={async () => {
+            await deleteModel.mutateAsync(deleteCandidate.tag);
+            setDeleteCandidate(null);
+            fasterBuild.reset();
+          }}
+        />
       )}
     </div>
   );

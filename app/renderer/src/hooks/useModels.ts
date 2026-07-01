@@ -53,6 +53,8 @@ export function useModels() {
         description: info.description,
         speed: info.speed,
         quality: info.quality,
+        mlxTag: info.mlx_tag,
+        mlxInstalled: info.mlx_installed,
       }));
       return { models, current: raw.current_model, provider: raw.provider };
     },
@@ -208,6 +210,18 @@ export function useSwitchToFasterBuild(onVerified?: (mlxTag: string) => void) {
   };
 
   return { state, error, activeTag, progress: activeTag ? progress[activeTag] : undefined, switchTo, reset };
+}
+
+export function useDeleteModel() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (tag: string) => {
+      const result = await ipc().models.delete(tag);
+      if (!result.success) throw new Error(result.error ?? 'Failed to delete the old build.');
+      return result;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: modelsKeys.all }),
+  });
 }
 
 // ---------------------------------------------------------------------------
