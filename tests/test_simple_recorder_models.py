@@ -98,5 +98,40 @@ class ResolveSetupModelPullTargetTests(unittest.TestCase):
         self.assertEqual(data["installed"], "gemma4:e2b-it-qat")
 
 
+class VerifyModelCommandTests(unittest.TestCase):
+    def test_verify_model_success(self):
+        from simple_recorder import cli
+
+        runner = CliRunner()
+        with mock.patch("src.ollama_manager.start_ollama_server", return_value=True), \
+             mock.patch("ollama.Client") as client_cls:
+            client_cls.return_value.chat.return_value = {
+                "message": {"role": "assistant", "content": "hi"}
+            }
+            result = runner.invoke(cli, ["verify-model", "gemma4:e2b-nvfp4"])
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        data = json.loads(result.output)
+        self.assertTrue(data["success"])
+        self.assertIsNone(data.get("error"))
+        client_cls.return_value.chat.assert_called_once()
+        _, kwargs = client_cls.return_value.chat.call_args
+        self.assertEqual(kwargs["model"], "gemma4:e2b-nvfp4")
+
+    def test_verify_model_reports_failure(self):
+        from simple_recorder import cli
+
+        runner = CliRunner()
+        with mock.patch("src.ollama_manager.start_ollama_server", return_value=True), \
+             mock.patch("ollama.Client") as client_cls:
+            client_cls.return_value.chat.side_effect = RuntimeError("model not found")
+            result = runner.invoke(cli, ["verify-model", "gemma4:e2b-nvfp4"])
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        data = json.loads(result.output)
+        self.assertFalse(data["success"])
+        self.assertIn("model not found", data["error"])
+
+
 if __name__ == "__main__":
     unittest.main()

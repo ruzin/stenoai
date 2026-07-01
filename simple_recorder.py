@@ -4030,6 +4030,32 @@ def pull_model(model_name):
         print(json.dumps({"success": False, "error": str(e)}))
 
 
+@cli.command(name='verify-model')
+@click.argument('model_name')
+def verify_model(model_name):
+    """Smoke-test a just-pulled model with a 1-token chat call (uses HTTP API).
+
+    Used only by the Settings "switch to faster build" flow, to prove an
+    MLX/NVFP4 tag actually loads and responds before offering to delete the
+    old GGUF build. A generous timeout accounts for MLX cold-load (several
+    seconds after a fresh pull, per local benchmarking) -- a slow-but-working
+    model must not be reported as a failure.
+    """
+    from src.ollama_manager import start_ollama_server
+    start_ollama_server()
+    try:
+        import ollama
+        client = ollama.Client(timeout=90)
+        client.chat(
+            model=model_name,
+            messages=[{"role": "user", "content": "hi"}],
+            options={"num_predict": 1},
+        )
+        print(json.dumps({"success": True, "error": None}))
+    except Exception as e:
+        print(json.dumps({"success": False, "error": str(e)}))
+
+
 def pick_installed_supported_model(installed_names, preferred, supported_order, deprecated=()):
     """Pick the best already-installed supported Ollama model id, or None (#123).
 
