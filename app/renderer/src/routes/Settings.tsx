@@ -353,6 +353,13 @@ function isDefaultModel(description: string | undefined): boolean {
   return /\((default|recommended)\)/i.test(description ?? '');
 }
 
+function parsePullPercent(progress: string | undefined): number | null {
+  const match = progress?.match(/(\d{1,3})%/);
+  if (!match) return null;
+  const value = Number(match[1]);
+  return Number.isFinite(value) ? Math.min(100, Math.max(0, value)) : null;
+}
+
 interface ModelCardProps {
   name: string;
   sizeLabel?: string;
@@ -473,18 +480,47 @@ function ModelCard({
           >
             Faster build available
           </span>
-          <button
-            type="button"
-            onClick={onSwitchToFasterBuild}
-            disabled={fasterBuildState === 'pulling' || fasterBuildState === 'verifying'}
-            className="cursor-pointer border-0 bg-transparent p-0 text-[12px] underline disabled:cursor-default disabled:no-underline disabled:opacity-60"
-            style={{ color: 'var(--fg-1)' }}
-          >
-            {fasterBuildState === 'pulling' && (fasterBuildProgress ?? 'Downloading…')}
-            {fasterBuildState === 'verifying' && 'Verifying…'}
-            {fasterBuildState === 'error' && 'Retry: switch to faster build'}
-            {(fasterBuildState === 'idle' || fasterBuildState === 'done') && 'Switch to faster build'}
-          </button>
+          {fasterBuildState === 'pulling' ? (
+            // Fixed-width bar instead of a variable-width percentage label:
+            // Ollama's pull progress can update dozens of times per second on
+            // a multi-GB download, and a text label whose width changes on
+            // every tick reflows this whole row each time, which read as
+            // window-level flicker. The bar's own footprint never changes —
+            // only the fill width and a fixed-width, tabular-nums percentage
+            // do — so rapid updates no longer shift any layout.
+            <div className="flex items-center gap-1.5" style={{ width: 96 }}>
+              <div
+                className="h-1.5 flex-1 overflow-hidden rounded-full"
+                style={{ background: 'var(--surface-sunken)' }}
+              >
+                <div
+                  className="h-full rounded-full"
+                  style={{
+                    width: `${parsePullPercent(fasterBuildProgress) ?? 0}%`,
+                    background: 'var(--fg-1)',
+                  }}
+                />
+              </div>
+              <span
+                className="shrink-0 text-right text-[11px] tabular-nums"
+                style={{ color: 'var(--fg-muted)', width: 28 }}
+              >
+                {parsePullPercent(fasterBuildProgress) ?? 0}%
+              </span>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={onSwitchToFasterBuild}
+              disabled={fasterBuildState === 'verifying'}
+              className="cursor-pointer border-0 bg-transparent p-0 text-[12px] underline disabled:cursor-default disabled:no-underline disabled:opacity-60"
+              style={{ color: 'var(--fg-1)' }}
+            >
+              {fasterBuildState === 'verifying' && 'Verifying…'}
+              {fasterBuildState === 'error' && 'Retry: switch to faster build'}
+              {(fasterBuildState === 'idle' || fasterBuildState === 'done') && 'Switch to faster build'}
+            </button>
+          )}
         </div>
       )}
       {isCurrent ? (
