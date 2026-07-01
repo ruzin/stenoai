@@ -255,6 +255,10 @@ export function usePullParakeetModel() {
         await coerceLanguageForParakeet();
         await ipc().transcriptionEngine.set('parakeet');
         setPendingSelect(null);
+        // Coercion may have reset the pin to 'auto'; refresh the language query
+        // so the Settings dropdown + live dock toggle don't show the stale
+        // pre-coercion code. Mirrors useSetActiveTranscription's onSuccess.
+        qc.invalidateQueries({ queryKey: ['settings', 'language'] });
       }
       qc.invalidateQueries({ queryKey: parakeetKeys.all });
       qc.invalidateQueries({ queryKey: transcriptionEngineKeys.all });

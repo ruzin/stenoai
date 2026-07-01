@@ -19,7 +19,7 @@ import { cn } from '@/lib/utils';
 import { useLiveTranscript } from '@/hooks/useLiveTranscript';
 import { useRecording } from '@/hooks/useRecording';
 import { useLanguageSetting, useSetLanguage } from '@/hooks/useSettings';
-import { PARAKEET_LANGUAGE_CODES } from '@/lib/transcription-languages';
+import { PARAKEET_LANGUAGES } from '@/lib/transcription-languages';
 import { useLiveTranscriptOpen } from '@/hooks/liveTranscriptOpenStore';
 import { formatElapsed } from '@/lib/utils';
 
@@ -316,22 +316,11 @@ interface LanguageOption {
   hint: string;
 }
 
-// Two quick presets (Multi / English) plus the concrete European languages a
-// user can pin so summaries/notes come out in them. This writes the same
-// global language setting as Settings → Transcribe, so it must surface a
-// concrete pin (not relabel it "Multi" and clobber it to 'auto' on the next
-// pick). Filtered against PARAKEET_LANGUAGE_CODES so it stays in sync with the
-// Settings picker.
-const ALL_LANGUAGE_OPTIONS: LanguageOption[] = [
-  { code: 'auto', label: 'Multi-language', hint: 'Auto-detect per recording (European languages)' },
-  { code: 'en', label: 'English', hint: 'Best accuracy when meetings are always in English' },
-  { code: 'fr', label: 'French', hint: 'Transcribe and summarise in French' },
-  { code: 'de', label: 'German', hint: 'Transcribe and summarise in German' },
-  { code: 'es', label: 'Spanish', hint: 'Transcribe and summarise in Spanish' },
-  { code: 'nl', label: 'Dutch', hint: 'Transcribe and summarise in Dutch' },
-  { code: 'pt', label: 'Portuguese', hint: 'Transcribe and summarise in Portuguese' },
-];
-const LANGUAGE_OPTIONS = ALL_LANGUAGE_OPTIONS.filter((o) => PARAKEET_LANGUAGE_CODES.has(o.code));
+// The pinnable languages (a "Multi" preset + concrete European pins) come
+// straight from the shared PARAKEET_LANGUAGES source of truth, so this picker
+// can't drift from Settings or the engine-switch coercion. Writes the same
+// global language setting as Settings → Transcribe.
+const LANGUAGE_OPTIONS: LanguageOption[] = PARAKEET_LANGUAGES.map((l) => ({ ...l }));
 
 function LanguageSelector() {
   const language = useLanguageSetting();
