@@ -4022,7 +4022,11 @@ def pull_model(model_name):
             completed = getattr(progress, 'completed', 0) or 0
             if total > 0:
                 pct = int(completed / total * 100)
-                print(f"{status} {pct}%", flush=True)
+                # Byte counts appended in a machine-parseable suffix, on the
+                # SAME line as the percentage (not a separate print), so the
+                # renderer can compute a live transfer rate without it ever
+                # desyncing from the percentage it corresponds to.
+                print(f"{status} {pct}% ({completed}/{total})", flush=True)
             elif status:
                 print(status, flush=True)
         print(json.dumps({"success": True, "model": model_name}))

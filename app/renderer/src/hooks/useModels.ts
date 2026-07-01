@@ -159,9 +159,28 @@ export function useSwitchToFasterBuild(onVerified?: (mlxTag: string) => void) {
   const onVerifiedRef = React.useRef(onVerified);
   onVerifiedRef.current = onVerified;
 
+  // Transfer-rate tracking: the CLI prints "<status> <pct>% (<completed>/<total>)"
+  // (bytes). rateSamplesRef keeps the last {bytes, timestamp} sample per model so
+  // consecutive throttled progress ticks (~200ms apart, per the main-process
+  // throttle) can be diffed into a live bytes/sec figure.
+  const [bytesPerSecond, setBytesPerSecond] = React.useState<Record<string, number>>({});
+  const rateSamplesRef = React.useRef<Record<string, { bytes: number; at: number }>>({});
+
   React.useEffect(() => {
     const offProgress = ipc().on.modelPullProgress(({ model, progress: p }) => {
       setProgress((prev) => ({ ...prev, [model]: p }));
+
+      const byteMatch = p.match(/\((\d+)\/(\d+)\)/);
+      if (byteMatch) {
+        const completed = Number(byteMatch[1]);
+        const now = Date.now();
+        const prevSample = rateSamplesRef.current[model];
+        if (prevSample && now > prevSample.at && completed >= prevSample.bytes) {
+          const rate = (completed - prevSample.bytes) / ((now - prevSample.at) / 1000);
+          setBytesPerSecond((prev) => ({ ...prev, [model]: rate }));
+        }
+        rateSamplesRef.current[model] = { bytes: completed, at: now };
+      }
     });
     const offComplete = ipc().on.modelPullComplete(async ({ model, success, error: pullError }) => {
       if (model !== activeTagRef.current) return;
@@ -169,6 +188,11 @@ export function useSwitchToFasterBuild(onVerified?: (mlxTag: string) => void) {
         const { [model]: _drop, ...rest } = prev;
         return rest;
       });
+      setBytesPerSecond((prev) => {
+        const { [model]: _drop, ...rest } = prev;
+        return rest;
+      });
+      delete rateSamplesRef.current[model];
       if (!success) {
         setState('error');
         setError(pullError ?? 'Failed to download the faster build.');
@@ -209,7 +233,15 @@ export function useSwitchToFasterBuild(onVerified?: (mlxTag: string) => void) {
     activeTagRef.current = null;
   };
 
-  return { state, error, activeTag, progress: activeTag ? progress[activeTag] : undefined, switchTo, reset };
+  return {
+    state,
+    error,
+    activeTag,
+    progress: activeTag ? progress[activeTag] : undefined,
+    bytesPerSecond: activeTag ? bytesPerSecond[activeTag] : undefined,
+    switchTo,
+    reset,
+  };
 }
 
 export function useDeleteModel() {

@@ -132,6 +132,25 @@ class VerifyModelCommandTests(unittest.TestCase):
         self.assertIn("model not found", data["error"])
 
 
+class PullModelCommandTests(unittest.TestCase):
+    def test_progress_line_includes_raw_byte_counts(self):
+        from simple_recorder import cli
+
+        runner = CliRunner()
+        progress_events = [
+            mock.Mock(status="pulling manifest", total=0, completed=0),
+            mock.Mock(status="pulling model", total=1000, completed=210),
+        ]
+        with mock.patch("src.ollama_manager.start_ollama_server", return_value=True), \
+             mock.patch("ollama.pull", return_value=iter(progress_events)):
+            result = runner.invoke(cli, ["pull-model", "gemma4:e2b-nvfp4"])
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIn("pulling model 21% (210/1000)", result.output)
+        data = json.loads(result.output.strip().splitlines()[-1])
+        self.assertTrue(data["success"])
+
+
 class DeleteModelCommandTests(unittest.TestCase):
     def test_delete_model_success(self):
         from simple_recorder import cli

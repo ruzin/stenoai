@@ -360,6 +360,13 @@ function parsePullPercent(progress: string | undefined): number | null {
   return Number.isFinite(value) ? Math.min(100, Math.max(0, value)) : null;
 }
 
+function formatBytesPerSecond(bytesPerSecond: number | undefined): string {
+  if (!bytesPerSecond || bytesPerSecond <= 0) return '';
+  const mbPerSecond = bytesPerSecond / (1024 * 1024);
+  if (mbPerSecond < 1) return `${Math.round(bytesPerSecond / 1024)} KB/s`;
+  return `${mbPerSecond.toFixed(1)} MB/s`;
+}
+
 interface ModelCardProps {
   name: string;
   sizeLabel?: string;
@@ -374,6 +381,7 @@ interface ModelCardProps {
   fasterBuildInstalled?: boolean;
   fasterBuildState?: 'idle' | 'pulling' | 'verifying' | 'done' | 'error';
   fasterBuildProgress?: string;
+  fasterBuildBytesPerSecond?: number;
   onSwitchToFasterBuild?: () => void;
 }
 
@@ -391,6 +399,7 @@ function ModelCard({
   fasterBuildInstalled = false,
   fasterBuildState = 'idle',
   fasterBuildProgress,
+  fasterBuildBytesPerSecond,
   onSwitchToFasterBuild,
 }: ModelCardProps) {
   return (
@@ -506,6 +515,15 @@ function ModelCard({
                 style={{ color: 'var(--fg-muted)', width: 28 }}
               >
                 {parsePullPercent(fasterBuildProgress) ?? 0}%
+              </span>
+              {/* Fixed width + overflow-hidden for the same reason as the bar
+                  above: "8.8 MB/s" and "120 KB/s" are different widths, so a
+                  naive inline text here would reflow the row on every tick. */}
+              <span
+                className="shrink-0 overflow-hidden whitespace-nowrap text-[11px] tabular-nums"
+                style={{ color: 'var(--fg-muted)', width: 60 }}
+              >
+                {formatBytesPerSecond(fasterBuildBytesPerSecond)}
               </span>
             </div>
           ) : (
@@ -2038,6 +2056,7 @@ function ModelList() {
         fasterBuildInstalled={Boolean(m.mlxInstalled)}
         fasterBuildState={isFasterBuildActive ? fasterBuild.state : 'idle'}
         fasterBuildProgress={isFasterBuildActive ? fasterBuild.progress : undefined}
+        fasterBuildBytesPerSecond={isFasterBuildActive ? fasterBuild.bytesPerSecond : undefined}
         onSwitchToFasterBuild={() => {
           if (!m.mlxTag) return;
           fasterBuild.switchTo(m.mlxTag);
