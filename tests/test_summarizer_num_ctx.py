@@ -66,6 +66,16 @@ class ResolveNumCtxTests(unittest.TestCase):
             msg=f"active registry models missing a num_ctx entry: {missing}",
         )
 
+    def test_nvfp4_tag_resolves_to_same_num_ctx_as_its_gguf_sibling(self):
+        self.assertEqual(
+            resolve_num_ctx("gemma4:12b-nvfp4"),
+            resolve_num_ctx("gemma4:12b-it-qat"),
+        )
+        self.assertEqual(
+            resolve_num_ctx("gemma4:e2b-nvfp4"),
+            resolve_num_ctx("gemma4:e2b-it-qat"),
+        )
+
 
 class LocalProviderModelResolutionTests(unittest.TestCase):
     def _make_config(self, model_id):

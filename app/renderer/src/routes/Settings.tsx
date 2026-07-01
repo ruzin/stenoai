@@ -1998,7 +1998,7 @@ function ModelList() {
         isDownloading={isDownloading}
         downloadProgress={downloadProgress}
         onSelect={onSelect}
-        fasterBuildTag={m.mlxTag}
+        fasterBuildTag={m.installed ? m.mlxTag : undefined}
         fasterBuildInstalled={Boolean(m.mlxInstalled)}
         fasterBuildState={isFasterBuildActive ? fasterBuild.state : 'idle'}
         fasterBuildProgress={isFasterBuildActive ? fasterBuild.progress : undefined}
