@@ -367,6 +367,8 @@ export interface RawSupportedModel {
   quality?: string;
   deprecated?: boolean;
   installed?: boolean;
+  mlx_tag?: string;
+  mlx_installed?: boolean;
 }
 
 export type ListModelsResponse = Result<{
@@ -375,6 +377,15 @@ export type ListModelsResponse = Result<{
   provider: string;
 }>;
 export type GetCurrentModelResponse = Result<{ model: string }>;
+
+// Deliberately NOT wrapped in Result<T>: Result<T> is `({ success: true } & T)`,
+// and these responses already have their own `success` field, so wrapping would
+// collapse both `success` fields into one (`true & boolean` narrows to `true`)
+// and silently hide the real success/failure the caller needs to branch on.
+// main.js's verify-model/delete-model handlers (Task 8) return the Python CLI's
+// `{ success, error }` JSON verbatim, with no additional wrapping.
+export type VerifyModelResponse = { success: boolean; error: string | null };
+export type DeleteModelResponse = { success: boolean; error: string | null };
 
 export type ListWhisperModelsResponse = Result<{
   supported_models: Record<string, RawSupportedModel>;
@@ -751,6 +762,8 @@ export interface StenoaiBridge {
     set: RequestFn<[name: string], Result<Record<string, never>>>;
     checkInstalled: RequestFn<[name: string], CheckModelInstalledResponse>;
     pull: RequestFn<[name: string], Result<Record<string, never>>>;
+    verify: RequestFn<[name: string], VerifyModelResponse>;
+    delete: RequestFn<[name: string], DeleteModelResponse>;
   };
 
   whisperModels: {

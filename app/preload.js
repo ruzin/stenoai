@@ -188,6 +188,8 @@ const stenoai = {
     set: (name) => invoke('set-model', name),
     checkInstalled: (name) => invoke('check-model-installed', name),
     pull: (name) => invoke('pull-model', name),
+    verify: (name) => invoke('verify-model', name),
+    delete: (name) => invoke('delete-model', name),
   },
 
   whisperModels: {
