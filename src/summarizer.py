@@ -11,6 +11,7 @@ import time
 import os
 from typing import Optional, Dict, Any
 from .models import MeetingTranscript, ActionItem, Decision
+from .config import resolve_runtime_tag
 from . import ollama_manager
 
 logger = logging.getLogger(__name__)
@@ -207,7 +208,7 @@ class OllamaSummarizer:
                     logger.warning(f"Failed to load model from config: {e}, using default")
                     model_name = config.DEFAULT_MODEL
 
-            self.model_name = model_name
+            self.model_name = resolve_runtime_tag(model_name)
             self._ensure_ollama_ready()
             self.client = ollama.Client()
     

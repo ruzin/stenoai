@@ -67,5 +67,43 @@ class ResolveNumCtxTests(unittest.TestCase):
         )
 
 
+class LocalProviderModelResolutionTests(unittest.TestCase):
+    def _make_config(self, model_id):
+        cfg = mock.Mock()
+        cfg.get_ai_provider.return_value = "local"
+        cfg.get_remote_ollama_url.return_value = None
+        cfg.get_model.return_value = model_id
+        return cfg
+
+    def test_local_provider_resolves_to_nvfp4_on_apple_silicon(self):
+        from src.summarizer import OllamaSummarizer
+        cfg = self._make_config("gemma4:e2b-it-qat")
+        with mock.patch.object(OllamaSummarizer, "_ensure_ollama_ready"), \
+             mock.patch("src.summarizer.ollama.Client"), \
+             mock.patch("src.config.is_apple_silicon", return_value=True):
+            summarizer = OllamaSummarizer(config=cfg)
+        self.assertEqual(summarizer.model_name, "gemma4:e2b-nvfp4")
+
+    def test_local_provider_keeps_gguf_off_apple_silicon(self):
+        from src.summarizer import OllamaSummarizer
+        cfg = self._make_config("gemma4:e2b-it-qat")
+        with mock.patch.object(OllamaSummarizer, "_ensure_ollama_ready"), \
+             mock.patch("src.summarizer.ollama.Client"), \
+             mock.patch("src.config.is_apple_silicon", return_value=False):
+            summarizer = OllamaSummarizer(config=cfg)
+        self.assertEqual(summarizer.model_name, "gemma4:e2b-it-qat")
+
+    def test_remote_provider_is_never_resolved(self):
+        from src.summarizer import OllamaSummarizer
+        cfg = mock.Mock()
+        cfg.get_ai_provider.return_value = "remote"
+        cfg.get_remote_ollama_url.return_value = "http://192.168.1.50:11434"
+        cfg.get_model.return_value = "gemma4:e2b-it-qat"
+        with mock.patch("src.summarizer.ollama.Client"), \
+             mock.patch("src.config.is_apple_silicon", return_value=True):
+            summarizer = OllamaSummarizer(config=cfg)
+        self.assertEqual(summarizer.model_name, "gemma4:e2b-it-qat")
+
+
 if __name__ == "__main__":
     unittest.main()
