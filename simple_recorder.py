@@ -3174,12 +3174,19 @@ def list_models():
                 "error": error_msg
             }
     else:
-        models = config.list_supported_models()
+        # Per-entry dicts must be copied, not mutated in place: list_supported_models()
+        # returns a shallow copy whose nested dicts are the SAME objects as
+        # Config.SUPPORTED_MODELS. Mutating them directly would leak 'installed' /
+        # 'mlx_tag' / 'mlx_installed' into the class-level dict, contaminating any
+        # later call within the same process (e.g. repeated invocations in tests).
+        models = {model_id: dict(info) for model_id, info in config.list_supported_models().items()}
         try:
             import ollama as ollama_pkg
             installed_names = {getattr(m, 'model', '') for m in (getattr(ollama_pkg.list(), 'models', []) or [])}
         except Exception:
             installed_names = set()
+        from src.config import is_apple_silicon, Config
+        apple_silicon = provider == "local" and is_apple_silicon()
         for model_id, info in models.items():
             # Match exactly, or where Ollama appended extra detail after the tag
             # e.g. "deepseek-r1:14b" matches "deepseek-r1:14b-qwen-distill-q4_K_M"
@@ -3187,6 +3194,14 @@ def list_models():
                 name == model_id or name.startswith(model_id + '-')
                 for name in installed_names
             )
+            if apple_silicon:
+                mlx_tag = Config._MLX_EQUIVALENTS.get(model_id)
+                if mlx_tag:
+                    info['mlx_tag'] = mlx_tag
+                    info['mlx_installed'] = any(
+                        name == mlx_tag or name.startswith(mlx_tag + '-')
+                        for name in installed_names
+                    )
         result = {
             "current_model": current_model,
             "supported_models": models,
