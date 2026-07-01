@@ -127,7 +127,12 @@ function useByteRateTracker() {
 export function usePullModel() {
   const qc = useQueryClient();
   const [progress, setProgress] = React.useState<Record<string, string>>({});
-  const [pendingSelect, setPendingSelect] = React.useState<string | null>(null);
+  // `name` is the canonical GGUF id -- what models.set() must receive once
+  // the pull succeeds. `pullTarget` is what was actually requested from
+  // Ollama, which on Apple Silicon is the NVFP4 sibling (see pullAndSelect
+  // below) -- IPC progress/completion events report THAT string, so
+  // matching against it (not `name`) is what lets this resolve correctly.
+  const [pendingSelect, setPendingSelect] = React.useState<{ name: string; pullTarget: string } | null>(null);
   const rate = useByteRateTracker();
 
   React.useEffect(() => {
@@ -141,8 +146,8 @@ export function usePullModel() {
         return rest;
       });
       rate.drop(model);
-      if (success && pendingSelect === model) {
-        await ipc().models.set(model);
+      if (success && pendingSelect?.pullTarget === model) {
+        await ipc().models.set(pendingSelect.name);
         setPendingSelect(null);
       }
       qc.invalidateQueries({ queryKey: modelsKeys.all });
@@ -154,17 +159,20 @@ export function usePullModel() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [qc, pendingSelect]);
 
-  const pullAndSelect = async (name: string) => {
-    setPendingSelect(name);
-    unwrap(await ipc().models.pull(name));
+  // `pullTarget` defaults to `name` (the pre-existing behavior) for callers
+  // that don't need MLX resolution (e.g. off Apple Silicon, or no MLX
+  // equivalent exists for this model).
+  const pullAndSelect = async ({ name, pullTarget }: { name: string; pullTarget: string }) => {
+    setPendingSelect({ name, pullTarget });
+    unwrap(await ipc().models.pull(pullTarget));
   };
 
   const mutation = useMutation({
     mutationFn: pullAndSelect,
   });
 
-  const cancel = (name: string) => {
-    void ipc().models.cancelPull(name);
+  const cancel = (pullTarget: string) => {
+    void ipc().models.cancelPull(pullTarget);
   };
 
   return { ...mutation, progress, bytesPerSecond: rate.bytesPerSecond, cancel };

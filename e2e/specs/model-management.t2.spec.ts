@@ -14,7 +14,7 @@ import { killOllama } from '../fixtures/kill-ollama';
  * never a specific install state.
  */
 
-type ModelInfo = { installed?: boolean };
+type ModelInfo = { installed?: boolean; mlx_tag?: string; mlx_installed?: boolean };
 type ListResult = {
   success: boolean;
   current_model?: string;
@@ -32,6 +32,7 @@ type CancelPullResult = { success: boolean; error: string | null };
 type StenoWindow = Window & {
   stenoai: {
     models: {
+      list: () => Promise<ListResult>;
       getCurrent: () => Promise<CurrentModel>;
       set: (name: string) => Promise<Result>;
       pull: (name: string) => Promise<PullResult>;
@@ -140,6 +141,30 @@ test('parakeet models: list + status return a coherent installed shape', async (
   expect(typeof status.installed).toBe('boolean');
   // status + list agree on the default model id.
   expect(status.model).toBe(listed.current_model);
+});
+
+test('a model pulled straight to its NVFP4 tag (no GGUF ever downloaded) still reports installed', async ({
+  launchApp,
+}) => {
+  test.skip(process.platform !== 'darwin' || process.arch !== 'arm64', 'MLX enrichment only applies on Apple Silicon');
+  killOllama();
+  // Only the NVFP4 tag is "installed" -- the GGUF blob was never pulled,
+  // e.g. because "Select" resolved straight to the faster build.
+  const mockOllama = await startMockOllama({ installedModels: ['gemma4:e2b-nvfp4'] });
+  try {
+    const { page } = await launchApp();
+
+    const listed = await page.evaluate(() => (window as StenoWindow).stenoai.models.list());
+    expect(listed.success).toBe(true);
+    const e2bEntry = listed.supported_models?.['gemma4:e2b-it-qat'];
+    expect(e2bEntry?.mlx_tag).toBe('gemma4:e2b-nvfp4');
+    expect(e2bEntry?.mlx_installed).toBe(true);
+    // The GGUF id itself was never pulled, but the model is fully usable via
+    // its NVFP4 sibling -- must not leave "Select" offered forever.
+    expect(e2bEntry?.installed).toBe(true);
+  } finally {
+    await mockOllama.close();
+  }
 });
 
 test('switch-to-faster-build: pull, verify, and delete the old tag all round-trip through IPC', async ({

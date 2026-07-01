@@ -360,6 +360,17 @@ function parsePullPercent(progress: string | undefined): number | null {
   return Number.isFinite(value) ? Math.min(100, Math.max(0, value)) : null;
 }
 
+// Ollama models are made of several blobs, each streamed as its own 0-100%
+// phase (see pull_model's "[Part N]" suffix in simple_recorder.py) -- without
+// this, the percentage restarting from a new blob reads as a second,
+// unrelated download starting.
+function parsePullPart(progress: string | undefined): number | null {
+  const match = progress?.match(/\[Part (\d+)\]/);
+  if (!match) return null;
+  const value = Number(match[1]);
+  return Number.isFinite(value) ? value : null;
+}
+
 function formatBytesPerSecond(bytesPerSecond: number | undefined): string {
   if (!bytesPerSecond || bytesPerSecond <= 0) return '';
   const mbPerSecond = bytesPerSecond / (1024 * 1024);
@@ -410,6 +421,14 @@ function PullProgressBar({
           style={{ color: 'var(--fg-muted)', width: 60 }}
         >
           {formatBytesPerSecond(bytesPerSecond)}
+        </span>
+        {/* Reserved even when blank so the one-time appearance of a second
+            blob's part number doesn't shift anything else in the row. */}
+        <span
+          className="shrink-0 overflow-hidden whitespace-nowrap text-[11px] tabular-nums"
+          style={{ color: 'var(--fg-muted)', width: 44 }}
+        >
+          {parsePullPart(progress) ? `Part ${parsePullPart(progress)}` : ''}
         </span>
       </div>
       <button
@@ -2103,8 +2122,16 @@ function ModelList() {
 
   const renderCard = (m: (typeof sorted)[number]) => {
     const isCurrent = m.name === current.data;
-    const isDownloading = Boolean(pull.progress[m.name]);
-    const downloadProgress = pull.progress[m.name];
+    // On Apple Silicon, an uninstalled model is pulled straight to its NVFP4
+    // sibling (matching what first-run setup's pull_target already does) --
+    // config.json still ends up with the canonical GGUF id via models.set()
+    // (see usePullModel's pendingSelect), but the actual download, and so
+    // the IPC events this row's progress/cancel keys off of, are for the
+    // NVFP4 tag. Off Apple Silicon (no mlxTag) this is just m.name, same as
+    // before.
+    const pullTarget = m.mlxTag ?? m.name;
+    const isDownloading = Boolean(pull.progress[pullTarget]);
+    const downloadProgress = pull.progress[pullTarget];
     const isDefault = !isRemote && isDefaultModel(m.description);
 
     let note: string | undefined;
@@ -2128,7 +2155,7 @@ function ModelList() {
       if (m.installed) {
         setCurrent.mutate(m.name);
       } else {
-        pull.mutate(m.name);
+        pull.mutate({ name: m.name, pullTarget });
       }
     };
 
@@ -2153,9 +2180,9 @@ function ModelList() {
         deprecated={Boolean(m.deprecated)}
         isDownloading={isDownloading}
         downloadProgress={downloadProgress}
-        downloadBytesPerSecond={pull.bytesPerSecond[m.name]}
+        downloadBytesPerSecond={pull.bytesPerSecond[pullTarget]}
         onSelect={onSelect}
-        onCancelDownload={() => pull.cancel(m.name)}
+        onCancelDownload={() => pull.cancel(pullTarget)}
         isInstalled={Boolean(m.installed)}
         onDeleteModel={onDeleteModel}
         fasterBuildTag={m.installed ? m.mlxTag : undefined}

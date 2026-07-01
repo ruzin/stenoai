@@ -26,6 +26,12 @@ class ListModelsMlxEnrichmentTests(unittest.TestCase):
         e2b_entry = data["supported_models"]["gemma4:e2b-it-qat"]
         self.assertEqual(e2b_entry["mlx_tag"], "gemma4:e2b-nvfp4")
         self.assertTrue(e2b_entry["mlx_installed"])
+        # Only the NVFP4 tag is in the fake `ollama.list()` response above --
+        # the GGUF blob itself was never pulled. It must still report as
+        # installed: a model fetched straight to its NVFP4 tag (general
+        # "Select" now resolves to that on Apple Silicon) is fully usable,
+        # and "installed: false" would leave "Select" offered forever.
+        self.assertTrue(e2b_entry["installed"])
 
         # A model with no MLX equivalent gets neither field.
         llama_entry = data["supported_models"]["llama3.2:3b"]
@@ -146,9 +152,33 @@ class PullModelCommandTests(unittest.TestCase):
             result = runner.invoke(cli, ["pull-model", "gemma4:e2b-nvfp4"])
 
         self.assertEqual(result.exit_code, 0, result.output)
-        self.assertIn("pulling model 21% (210/1000)", result.output)
+        self.assertIn("pulling model 21% (210/1000) [Part 1]", result.output)
         data = json.loads(result.output.strip().splitlines()[-1])
         self.assertTrue(data["success"])
+
+    def test_progress_line_increments_part_on_each_new_blob(self):
+        """A real model pull streams several weighted (total>0) blobs in
+        sequence -- the part index must advance once per distinct blob, not
+        once per repeated progress tick of the same blob."""
+        from simple_recorder import cli
+
+        runner = CliRunner()
+        progress_events = [
+            mock.Mock(status="pulling abc123", total=1000, completed=500),
+            mock.Mock(status="pulling abc123", total=1000, completed=1000),
+            mock.Mock(status="pulling def456", total=2000, completed=1000),
+            mock.Mock(status="verifying sha256 digest", total=0, completed=0),
+        ]
+        with mock.patch("src.ollama_manager.start_ollama_server", return_value=True), \
+             mock.patch("ollama.pull", return_value=iter(progress_events)):
+            result = runner.invoke(cli, ["pull-model", "gemma4:e2b-nvfp4"])
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        lines = result.output.strip().splitlines()
+        self.assertIn("pulling abc123 50% (500/1000) [Part 1]", lines)
+        self.assertIn("pulling abc123 100% (1000/1000) [Part 1]", lines)
+        self.assertIn("pulling def456 50% (1000/2000) [Part 2]", lines)
+        self.assertIn("verifying sha256 digest", lines)
 
 
 class DeleteModelCommandTests(unittest.TestCase):

@@ -3202,6 +3202,13 @@ def list_models():
                         name == mlx_tag or name.startswith(mlx_tag + '-')
                         for name in installed_names
                     )
+                    # A model pulled straight to its NVFP4 tag (general
+                    # "Select" now resolves to that on Apple Silicon, same as
+                    # setup's pull_target) is fully usable even though the
+                    # GGUF id itself was never downloaded -- report it
+                    # installed rather than leaving "Select" re-offered.
+                    if info['mlx_installed']:
+                        info['installed'] = True
         result = {
             "current_model": current_model,
             "supported_models": models,
@@ -4016,17 +4023,30 @@ def pull_model(model_name):
     start_ollama_server()
     try:
         import ollama
+        # Ollama models are made of several blobs (weights, params, tokenizer,
+        # ...), each streamed as its own 0-100% phase with a distinct status
+        # string -- without a marker, the percentage appearing to "restart"
+        # reads as a second, unrelated download. seen_statuses tracks which
+        # weighted (total>0) phases have already started so blob_index only
+        # advances on a genuinely new one, not on every repeated tick of the
+        # same blob.
+        seen_statuses = set()
+        blob_index = 0
         for progress in ollama.pull(model_name, stream=True):
             status = getattr(progress, 'status', '') or ''
             total = getattr(progress, 'total', 0) or 0
             completed = getattr(progress, 'completed', 0) or 0
             if total > 0:
+                if status not in seen_statuses:
+                    seen_statuses.add(status)
+                    blob_index += 1
                 pct = int(completed / total * 100)
-                # Byte counts appended in a machine-parseable suffix, on the
-                # SAME line as the percentage (not a separate print), so the
-                # renderer can compute a live transfer rate without it ever
-                # desyncing from the percentage it corresponds to.
-                print(f"{status} {pct}% ({completed}/{total})", flush=True)
+                # Byte counts and the blob/part index are appended in a
+                # machine-parseable suffix, on the SAME line as the
+                # percentage (not a separate print), so the renderer can
+                # compute a live transfer rate and part label without either
+                # ever desyncing from the percentage it corresponds to.
+                print(f"{status} {pct}% ({completed}/{total}) [Part {blob_index}]", flush=True)
             elif status:
                 print(status, flush=True)
         print(json.dumps({"success": True, "model": model_name}))
