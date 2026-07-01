@@ -431,14 +431,19 @@ function PullProgressBar({
           {parsePullPart(progress) ? `Part ${parsePullPart(progress)}` : ''}
         </span>
       </div>
-      <button
-        type="button"
-        onClick={onCancel}
-        className="shrink-0 cursor-pointer border-0 bg-transparent p-0 text-[11px] underline"
-        style={{ color: 'var(--fg-muted)' }}
-      >
-        Cancel
-      </button>
+      {/* Only rendered when the caller doesn't already have its own cancel
+          control (e.g. the general download flow's top-right Select/Cancel
+          button) -- otherwise this duplicates it right below the name. */}
+      {onCancel && (
+        <button
+          type="button"
+          onClick={onCancel}
+          className="shrink-0 cursor-pointer border-0 bg-transparent p-0 text-[11px] underline"
+          style={{ color: 'var(--fg-muted)' }}
+        >
+          Cancel
+        </button>
+      )}
     </div>
   );
 }
@@ -583,16 +588,15 @@ function ModelCard({
             {note}
           </div>
         )}
-        {isDownloading && downloadProgress && (
-          <div className="mt-1">
-            <PullProgressBar
-              progress={downloadProgress}
-              bytesPerSecond={downloadBytesPerSecond}
-              onCancel={onCancelDownload}
-            />
-          </div>
-        )}
       </div>
+      {isDownloading && downloadProgress && (
+        // Inline, to the right of the name -- matching where the
+        // switch-to-faster-build progress bar sits, instead of a separate
+        // line below the name (that read as a second, unrelated download).
+        // No onCancel here -- the top-right Button already doubles as
+        // Cancel while isDownloading (see the button block below).
+        <PullProgressBar progress={downloadProgress} bytesPerSecond={downloadBytesPerSecond} onCancel={undefined} />
+      )}
       {fasterBuildTag && !fasterBuildInstalled && (
         <div className="mt-1.5 flex items-center gap-2">
           <span
