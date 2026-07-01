@@ -351,5 +351,50 @@ class ConfigTemplateSeedingResilienceTests(unittest.TestCase):
         self.assertNotIn("nope", ids)
 
 
+class MlxTagResolutionTests(unittest.TestCase):
+    def test_is_apple_silicon_true_on_darwin_arm64(self):
+        with patch("src.config.sys.platform", "darwin"), \
+             patch("src.config.platform.machine", return_value="arm64"):
+            from src.config import is_apple_silicon
+            self.assertTrue(is_apple_silicon())
+
+    def test_is_apple_silicon_false_on_darwin_x86_64(self):
+        with patch("src.config.sys.platform", "darwin"), \
+             patch("src.config.platform.machine", return_value="x86_64"):
+            from src.config import is_apple_silicon
+            self.assertFalse(is_apple_silicon())
+
+    def test_is_apple_silicon_false_on_windows(self):
+        with patch("src.config.sys.platform", "win32"), \
+             patch("src.config.platform.machine", return_value="ARM64"):
+            from src.config import is_apple_silicon
+            self.assertFalse(is_apple_silicon())
+
+    def test_resolve_runtime_tag_maps_gguf_to_nvfp4_on_apple_silicon(self):
+        from src.config import resolve_runtime_tag
+        with patch("src.config.is_apple_silicon", return_value=True):
+            self.assertEqual(resolve_runtime_tag("gemma4:e2b-it-qat"), "gemma4:e2b-nvfp4")
+            self.assertEqual(resolve_runtime_tag("gemma4:e4b-it-qat"), "gemma4:e4b-nvfp4")
+            self.assertEqual(resolve_runtime_tag("gemma4:12b-it-qat"), "gemma4:12b-nvfp4")
+
+    def test_resolve_runtime_tag_is_noop_off_apple_silicon(self):
+        from src.config import resolve_runtime_tag
+        with patch("src.config.is_apple_silicon", return_value=False):
+            self.assertEqual(resolve_runtime_tag("gemma4:e2b-it-qat"), "gemma4:e2b-it-qat")
+
+    def test_resolve_runtime_tag_is_noop_for_non_gemma_models(self):
+        from src.config import resolve_runtime_tag
+        with patch("src.config.is_apple_silicon", return_value=True):
+            self.assertEqual(resolve_runtime_tag("llama3.2:3b"), "llama3.2:3b")
+            self.assertEqual(resolve_runtime_tag("qwen3.5:9b"), "qwen3.5:9b")
+            self.assertEqual(resolve_runtime_tag("gpt-oss:20b"), "gpt-oss:20b")
+
+    def test_mlx_to_gguf_is_exact_reverse_of_mlx_equivalents(self):
+        from src.config import Config
+        for gguf_id, mlx_tag in Config._MLX_EQUIVALENTS.items():
+            self.assertEqual(Config._MLX_TO_GGUF[mlx_tag], gguf_id)
+        self.assertEqual(len(Config._MLX_TO_GGUF), len(Config._MLX_EQUIVALENTS))
+
+
 if __name__ == "__main__":
     unittest.main()
