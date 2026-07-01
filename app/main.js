@@ -6939,6 +6939,15 @@ const activePulls = new Map();
 // 'ack-pull-complete' once it has acted on it (see useSwitchToFasterBuild).
 const completedPulls = new Map();
 
+// The live ChildProcess per in-flight pull, so 'cancel-pull' can kill the
+// right one. Deliberately NOT exposed via get-active-pulls -- a ChildProcess
+// handle isn't IPC-serializable, and nothing outside this handler needs it.
+const activeProcs = new Map();
+
+// Models whose pull was explicitly cancelled, so the close handler below
+// can report "Cancelled" instead of a confusing "exited with code null".
+const cancelledPulls = new Set();
+
 ipcMain.handle('pull-model', async (event, modelName) => {
   // Guards against a duplicate pull of the SAME model racing in (e.g. a
   // double-click before React re-renders the button as disabled) -- without
@@ -6956,6 +6965,7 @@ ipcMain.handle('pull-model', async (event, modelName) => {
       const proc = spawn(getBackendPath(), ['pull-model', modelName], {
         cwd: getBackendCwd()
       });
+      activeProcs.set(modelName, proc);
 
       let lastStdoutLine = '';
 
@@ -6994,6 +7004,24 @@ ipcMain.handle('pull-model', async (event, modelName) => {
 
       proc.on('close', (code) => {
         activePulls.delete(modelName);
+        activeProcs.delete(modelName);
+
+        if (cancelledPulls.delete(modelName)) {
+          sendDebugLog(`Cancelled pull: ${modelName}`);
+          completedPulls.set(modelName, { success: false, error: 'Cancelled', cancelled: true });
+
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('model-pull-complete', {
+              model: modelName,
+              success: false,
+              error: 'Cancelled',
+              cancelled: true
+            });
+          }
+
+          resolve({ success: false, error: 'Cancelled', cancelled: true });
+          return;
+        }
 
         // The backend prints a JSON result as the last stdout line.
         // Check it even on exit code 0, since the Python CLI may
@@ -7034,6 +7062,8 @@ ipcMain.handle('pull-model', async (event, modelName) => {
 
       proc.on('error', (error) => {
         activePulls.delete(modelName);
+        activeProcs.delete(modelName);
+        cancelledPulls.delete(modelName);
         sendDebugLog(`Error pulling model: ${error.message}`);
         completedPulls.set(modelName, { success: false, error: error.message });
 
@@ -7050,9 +7080,21 @@ ipcMain.handle('pull-model', async (event, modelName) => {
     });
   } catch (error) {
     activePulls.delete(modelName);
+    activeProcs.delete(modelName);
+    cancelledPulls.delete(modelName);
     sendDebugLog(`Error in pull-model handler: ${error.message}`);
     return { success: false, error: error.message };
   }
+});
+
+ipcMain.handle('cancel-pull', (event, modelName) => {
+  const proc = activeProcs.get(modelName);
+  if (!proc) {
+    return { success: false, error: 'No active pull for this model.' };
+  }
+  cancelledPulls.add(modelName);
+  proc.kill();
+  return { success: true, error: null };
 });
 
 ipcMain.handle('get-active-pulls', () => {

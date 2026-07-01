@@ -24,6 +24,8 @@ const OLLAMA_PORT = 11434;
  * @param {string} [opts.chatReply='ok'] assistant content returned by /api/chat.
  * @param {string[]} [opts.chatReplyQueue=[]] queue of replies to dequeue per call; falls back to chatReply when exhausted.
  * @param {string[]} [opts.installedModels=['gemma4:e2b-it-qat','llama3.2:3b']] models /api/tags reports as installed.
+ * @param {number} [opts.pullDelayMs=0] hold the /api/pull response open this long before completing it -- gives a
+ *   cancel-mid-download test a real window to call cancel-pull before the mock would otherwise finish first.
  * @returns {Promise<{ close: () => Promise<void>, lastChatPrompt: () => string|null, chatCalls: () => number, pullCalls: () => number, remainingQueueLength: () => number, lastPulledModel: () => string|null, deleteCalls: () => number, lastDeletedModel: () => string|null }>}
  */
 function startMockOllama(opts = {}) {
@@ -32,6 +34,7 @@ function startMockOllama(opts = {}) {
   const installedModels = Array.isArray(opts.installedModels)
     ? opts.installedModels
     : ['gemma4:e2b-it-qat', 'llama3.2:3b'];
+  const pullDelayMs = opts.pullDelayMs ?? 0;
   let lastChatPrompt = null;
   let chatCalls = 0;
   let pullCalls = 0;
@@ -78,7 +81,19 @@ function startMockOllama(opts = {}) {
           } catch { /* ignore */ }
           lastPulledModel = body.name || body.model || null;
           res.writeHead(200, { 'content-type': 'application/x-ndjson' });
-          res.end(JSON.stringify({ status: 'success' }) + '\n');
+          const finish = () => {
+            if (res.writableEnded || res.destroyed) return;
+            res.end(JSON.stringify({ status: 'success' }) + '\n');
+          };
+          if (pullDelayMs > 0) {
+            const timer = setTimeout(finish, pullDelayMs);
+            // If the client (our pull-model subprocess) disconnects early --
+            // e.g. it was killed by a cancel-pull -- don't fire the delayed
+            // write against an already-closed socket.
+            res.on('close', () => clearTimeout(timer));
+          } else {
+            finish();
+          }
         });
         return;
       }

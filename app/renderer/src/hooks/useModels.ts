@@ -127,7 +127,11 @@ export function usePullModel() {
     mutationFn: pullAndSelect,
   });
 
-  return { ...mutation, progress };
+  const cancel = (name: string) => {
+    void ipc().models.cancelPull(name);
+  };
+
+  return { ...mutation, progress, cancel };
 }
 
 // ---------------------------------------------------------------------------
@@ -173,7 +177,12 @@ export function useSwitchToFasterBuild(onVerified?: (mlxTag: string) => void) {
   // as a live event or was discovered after the fact via getActivePulls().
   // Only closes over stable setters/refs, so it's safe for the once-run
   // effects to capture the copy from their first render.
-  const handlePullOutcome = async (model: string, success: boolean, pullError?: string) => {
+  const handlePullOutcome = async (
+    model: string,
+    success: boolean,
+    pullError?: string,
+    cancelled?: boolean,
+  ) => {
     setProgress((prev) => {
       const { [model]: _drop, ...rest } = prev;
       return rest;
@@ -184,6 +193,15 @@ export function useSwitchToFasterBuild(onVerified?: (mlxTag: string) => void) {
     });
     delete rateSamplesRef.current[model];
     ipc().models.ackPullComplete(model);
+    if (cancelled) {
+      // A user-initiated cancel isn't a failure -- go back to the plain
+      // "Switch to faster build" prompt rather than an error state.
+      setState('idle');
+      setError(null);
+      setActiveTag(null);
+      activeTagRef.current = null;
+      return;
+    }
     if (!success) {
       setState('error');
       setError(pullError ?? 'Failed to download the faster build.');
@@ -217,9 +235,9 @@ export function useSwitchToFasterBuild(onVerified?: (mlxTag: string) => void) {
         rateSamplesRef.current[model] = { bytes: completed, at: now };
       }
     });
-    const offComplete = ipc().on.modelPullComplete(({ model, success, error: pullError }) => {
+    const offComplete = ipc().on.modelPullComplete(({ model, success, error: pullError, cancelled: wasCancelled }) => {
       if (model !== activeTagRef.current) return;
-      void handlePullOutcome(model, success, pullError);
+      void handlePullOutcome(model, success, pullError, wasCancelled);
     });
     return () => {
       offProgress();
@@ -255,7 +273,7 @@ export function useSwitchToFasterBuild(onVerified?: (mlxTag: string) => void) {
           // model-pull-complete listener never ran for it. Replay the same
           // outcome handling now instead of showing "Switch to faster
           // build" as if nothing had happened.
-          void handlePullOutcome(model, Boolean(entry.success), entry.error);
+          void handlePullOutcome(model, Boolean(entry.success), entry.error, entry.cancelled);
           return;
         }
         setState('pulling');
@@ -287,6 +305,14 @@ export function useSwitchToFasterBuild(onVerified?: (mlxTag: string) => void) {
     activeTagRef.current = null;
   };
 
+  // Only meaningful while state === 'pulling' -- the actual state reset
+  // happens when the resulting model-pull-complete(cancelled: true) event
+  // arrives via handlePullOutcome, not optimistically here.
+  const cancel = () => {
+    if (!activeTagRef.current) return;
+    void ipc().models.cancelPull(activeTagRef.current);
+  };
+
   return {
     state,
     error,
@@ -295,6 +321,7 @@ export function useSwitchToFasterBuild(onVerified?: (mlxTag: string) => void) {
     bytesPerSecond: activeTag ? bytesPerSecond[activeTag] : undefined,
     switchTo,
     reset,
+    cancel,
   };
 }
 

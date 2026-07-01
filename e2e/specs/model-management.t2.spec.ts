@@ -24,9 +24,10 @@ type ListResult = {
 type CurrentModel = { success: boolean; model?: string };
 type StatusResult = { success: boolean; model?: string; installed?: boolean };
 type Result = { success?: boolean };
-type PullResult = { success: boolean; error?: string };
+type PullResult = { success: boolean; error?: string; cancelled?: boolean };
 type VerifyResult = { success: boolean; error: string | null };
 type DeleteResult = { success: boolean; error: string | null };
+type CancelPullResult = { success: boolean; error: string | null };
 
 type StenoWindow = Window & {
   stenoai: {
@@ -34,6 +35,7 @@ type StenoWindow = Window & {
       getCurrent: () => Promise<CurrentModel>;
       set: (name: string) => Promise<Result>;
       pull: (name: string) => Promise<PullResult>;
+      cancelPull: (name: string) => Promise<CancelPullResult>;
       verify: (name: string) => Promise<VerifyResult>;
       delete: (name: string) => Promise<DeleteResult>;
     };
@@ -167,6 +169,48 @@ test('switch-to-faster-build: pull, verify, and delete the old tag all round-tri
     expect(deleteResult.error).toBeNull();
     expect(mockOllama.deleteCalls()).toBe(1);
     expect(mockOllama.lastDeletedModel()).toBe('gemma4:e2b-it-qat');
+  } finally {
+    await mockOllama.close();
+  }
+});
+
+test('cancel-pull: stops an in-flight download and reports it as cancelled, not a failure', async ({
+  launchApp,
+}) => {
+  killOllama();
+  // Holds the mock's /api/pull response open so there's a real window to
+  // cancel before it would otherwise complete on its own.
+  const mockOllama = await startMockOllama({ pullDelayMs: 3000 });
+  try {
+    const { page } = await launchApp();
+
+    const pullPromise = page.evaluate(() =>
+      (window as StenoWindow).stenoai.models.pull('gemma4:e2b-nvfp4'),
+    );
+
+    // Wait for the pull-model subprocess to actually reach the mock server
+    // (PyInstaller cold start can take longer than a short fixed sleep)
+    // before cancelling, so this exercises a real in-flight download rather
+    // than racing the subprocess's own startup time.
+    await expect.poll(() => mockOllama.pullCalls()).toBeGreaterThan(0);
+
+    const cancelResult = await page.evaluate(() =>
+      (window as StenoWindow).stenoai.models.cancelPull('gemma4:e2b-nvfp4'),
+    );
+    expect(cancelResult.success).toBe(true);
+    expect(cancelResult.error).toBeNull();
+
+    const pullResult = await pullPromise;
+    expect(pullResult.success).toBe(false);
+    expect(pullResult.cancelled).toBe(true);
+    expect(mockOllama.pullCalls()).toBe(1);
+
+    // Nothing left to cancel now -- a second call must fail cleanly rather
+    // than silently succeeding or throwing.
+    const secondCancel = await page.evaluate(() =>
+      (window as StenoWindow).stenoai.models.cancelPull('gemma4:e2b-nvfp4'),
+    );
+    expect(secondCancel.success).toBe(false);
   } finally {
     await mockOllama.close();
   }

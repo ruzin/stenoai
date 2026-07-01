@@ -395,8 +395,9 @@ export type DeleteModelResponse = { success: boolean; error: string | null };
 // verbatim, no Result<T> wrapping.
 export type GetActivePullsResponse = Record<
   string,
-  { progress?: string; done: boolean; success?: boolean; error?: string }
+  { progress?: string; done: boolean; success?: boolean; error?: string; cancelled?: boolean }
 >;
+export type CancelPullResponse = { success: boolean; error: string | null };
 
 export type ListWhisperModelsResponse = Result<{
   supported_models: Record<string, RawSupportedModel>;
@@ -548,6 +549,7 @@ export interface ModelPullCompleteEvent {
   model: string;
   success: boolean;
   error?: string;
+  cancelled?: boolean;
 }
 export interface WhisperPullProgressEvent {
   model: string;
@@ -773,6 +775,7 @@ export interface StenoaiBridge {
     set: RequestFn<[name: string], Result<Record<string, never>>>;
     checkInstalled: RequestFn<[name: string], CheckModelInstalledResponse>;
     pull: RequestFn<[name: string], Result<Record<string, never>>>;
+    cancelPull: RequestFn<[name: string], CancelPullResponse>;
     verify: RequestFn<[name: string], VerifyModelResponse>;
     delete: RequestFn<[name: string], DeleteModelResponse>;
     getActivePulls: RequestFn<[], GetActivePullsResponse>;

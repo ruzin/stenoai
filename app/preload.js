@@ -188,6 +188,7 @@ const stenoai = {
     set: (name) => invoke('set-model', name),
     checkInstalled: (name) => invoke('check-model-installed', name),
     pull: (name) => invoke('pull-model', name),
+    cancelPull: (name) => invoke('cancel-pull', name),
     verify: (name) => invoke('verify-model', name),
     delete: (name) => invoke('delete-model', name),
     getActivePulls: () => invoke('get-active-pulls'),

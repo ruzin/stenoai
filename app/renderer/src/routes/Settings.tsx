@@ -377,6 +377,9 @@ interface ModelCardProps {
   isDownloading?: boolean;
   downloadProgress?: string;
   onSelect: () => void;
+  // Lets a user on a slow connection (or a misclick on a large model) back
+  // out of a download in progress instead of being stuck waiting for it.
+  onCancelDownload?: () => void;
   fasterBuildTag?: string;
   fasterBuildInstalled?: boolean;
   fasterBuildState?: 'idle' | 'pulling' | 'verifying' | 'done' | 'error';
@@ -391,6 +394,7 @@ interface ModelCardProps {
   // switches were never a requested use case.
   fasterBuildBlocked?: boolean;
   onSwitchToFasterBuild?: () => void;
+  onCancelFasterBuild?: () => void;
 }
 
 function ModelCard({
@@ -403,6 +407,7 @@ function ModelCard({
   isDownloading = false,
   downloadProgress,
   onSelect,
+  onCancelDownload,
   fasterBuildTag,
   fasterBuildInstalled = false,
   fasterBuildState = 'idle',
@@ -410,6 +415,7 @@ function ModelCard({
   fasterBuildBytesPerSecond,
   fasterBuildBlocked = false,
   onSwitchToFasterBuild,
+  onCancelFasterBuild,
 }: ModelCardProps) {
   return (
     <div
@@ -512,41 +518,51 @@ function ModelCard({
             Faster build available
           </span>
           {fasterBuildState === 'pulling' ? (
-            // Fixed-width bar instead of a variable-width percentage label:
-            // Ollama's pull progress can update dozens of times per second on
-            // a multi-GB download, and a text label whose width changes on
-            // every tick reflows this whole row each time, which read as
-            // window-level flicker. The bar's own footprint never changes —
-            // only the fill width and a fixed-width, tabular-nums percentage
-            // do — so rapid updates no longer shift any layout.
-            <div className="flex items-center gap-1.5" style={{ width: 96 }}>
-              <div
-                className="h-1.5 flex-1 overflow-hidden rounded-full"
-                style={{ background: 'var(--surface-sunken)' }}
-              >
+            <div className="flex items-center gap-2">
+              {/* Fixed-width bar instead of a variable-width percentage label:
+                  Ollama's pull progress can update dozens of times per second on
+                  a multi-GB download, and a text label whose width changes on
+                  every tick reflows this whole row each time, which read as
+                  window-level flicker. The bar's own footprint never changes —
+                  only the fill width and a fixed-width, tabular-nums percentage
+                  do — so rapid updates no longer shift any layout. */}
+              <div className="flex items-center gap-1.5" style={{ width: 96 }}>
                 <div
-                  className="h-full rounded-full"
-                  style={{
-                    width: `${parsePullPercent(fasterBuildProgress) ?? 0}%`,
-                    background: 'var(--fg-1)',
-                  }}
-                />
+                  className="h-1.5 flex-1 overflow-hidden rounded-full"
+                  style={{ background: 'var(--surface-sunken)' }}
+                >
+                  <div
+                    className="h-full rounded-full"
+                    style={{
+                      width: `${parsePullPercent(fasterBuildProgress) ?? 0}%`,
+                      background: 'var(--fg-1)',
+                    }}
+                  />
+                </div>
+                <span
+                  className="shrink-0 text-right text-[11px] tabular-nums"
+                  style={{ color: 'var(--fg-muted)', width: 28 }}
+                >
+                  {parsePullPercent(fasterBuildProgress) ?? 0}%
+                </span>
+                {/* Fixed width + overflow-hidden for the same reason as the bar
+                    above: "8.8 MB/s" and "120 KB/s" are different widths, so a
+                    naive inline text here would reflow the row on every tick. */}
+                <span
+                  className="shrink-0 overflow-hidden whitespace-nowrap text-[11px] tabular-nums"
+                  style={{ color: 'var(--fg-muted)', width: 60 }}
+                >
+                  {formatBytesPerSecond(fasterBuildBytesPerSecond)}
+                </span>
               </div>
-              <span
-                className="shrink-0 text-right text-[11px] tabular-nums"
-                style={{ color: 'var(--fg-muted)', width: 28 }}
+              <button
+                type="button"
+                onClick={onCancelFasterBuild}
+                className="shrink-0 cursor-pointer border-0 bg-transparent p-0 text-[11px] underline"
+                style={{ color: 'var(--fg-muted)' }}
               >
-                {parsePullPercent(fasterBuildProgress) ?? 0}%
-              </span>
-              {/* Fixed width + overflow-hidden for the same reason as the bar
-                  above: "8.8 MB/s" and "120 KB/s" are different widths, so a
-                  naive inline text here would reflow the row on every tick. */}
-              <span
-                className="shrink-0 overflow-hidden whitespace-nowrap text-[11px] tabular-nums"
-                style={{ color: 'var(--fg-muted)', width: 60 }}
-              >
-                {formatBytesPerSecond(fasterBuildBytesPerSecond)}
-              </span>
+                Cancel
+              </button>
             </div>
           ) : (
             <button
@@ -577,13 +593,12 @@ function ModelCard({
           variant="outline"
           size="sm"
           className="h-[28px] shrink-0 px-3.5 text-[13px]"
-          disabled={isDownloading}
-          onClick={onSelect}
+          onClick={isDownloading ? onCancelDownload : onSelect}
         >
           {isDownloading ? (
             <>
-              <Loader2 className="mr-1.5 size-3 animate-spin" />
-              Downloading
+              <X className="mr-1.5 size-3" />
+              Cancel
             </>
           ) : (
             'Select'
@@ -2079,6 +2094,7 @@ function ModelList() {
         isDownloading={isDownloading}
         downloadProgress={downloadProgress}
         onSelect={onSelect}
+        onCancelDownload={() => pull.cancel(m.name)}
         fasterBuildTag={m.installed ? m.mlxTag : undefined}
         fasterBuildInstalled={Boolean(m.mlxInstalled)}
         fasterBuildState={isFasterBuildActive ? fasterBuild.state : 'idle'}
@@ -2089,6 +2105,7 @@ function ModelList() {
           if (!m.mlxTag || fasterBuildBlocked) return;
           fasterBuild.switchTo(m.mlxTag);
         }}
+        onCancelFasterBuild={isFasterBuildActive ? fasterBuild.cancel : undefined}
       />
     );
   };
