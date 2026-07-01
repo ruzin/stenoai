@@ -382,6 +382,14 @@ interface ModelCardProps {
   fasterBuildState?: 'idle' | 'pulling' | 'verifying' | 'done' | 'error';
   fasterBuildProgress?: string;
   fasterBuildBytesPerSecond?: number;
+  // True when a DIFFERENT model's switch-to-faster-build is in flight. The
+  // hook backing this only tracks one in-progress switch at a time, so
+  // starting a second one while the first is still pulling/verifying/awaiting
+  // its delete-confirmation silently drops the first one's completion event
+  // (see useSwitchToFasterBuild's activeTagRef check) -- blocking here rather
+  // than fixing that hook to track many at once, since real concurrent
+  // switches were never a requested use case.
+  fasterBuildBlocked?: boolean;
   onSwitchToFasterBuild?: () => void;
 }
 
@@ -400,6 +408,7 @@ function ModelCard({
   fasterBuildState = 'idle',
   fasterBuildProgress,
   fasterBuildBytesPerSecond,
+  fasterBuildBlocked = false,
   onSwitchToFasterBuild,
 }: ModelCardProps) {
   return (
@@ -530,7 +539,8 @@ function ModelCard({
             <button
               type="button"
               onClick={onSwitchToFasterBuild}
-              disabled={fasterBuildState === 'verifying'}
+              disabled={fasterBuildState === 'verifying' || fasterBuildBlocked}
+              title={fasterBuildBlocked ? 'Finish the current switch first' : undefined}
               className="cursor-pointer border-0 bg-transparent p-0 text-[12px] underline disabled:cursor-default disabled:no-underline disabled:opacity-60"
               style={{ color: 'var(--fg-1)' }}
             >
@@ -2031,6 +2041,10 @@ function ModelList() {
 
     const sizeLabel = formatModelSize(m.size_gb);
     const isFasterBuildActive = fasterBuild.activeTag === m.mlxTag;
+    const fasterBuildBlocked =
+      Boolean(fasterBuild.activeTag) &&
+      !isFasterBuildActive &&
+      (fasterBuild.state === 'pulling' || fasterBuild.state === 'verifying' || fasterBuild.state === 'done');
 
     const onSelect = () => {
       if (m.installed) {
@@ -2057,8 +2071,9 @@ function ModelList() {
         fasterBuildState={isFasterBuildActive ? fasterBuild.state : 'idle'}
         fasterBuildProgress={isFasterBuildActive ? fasterBuild.progress : undefined}
         fasterBuildBytesPerSecond={isFasterBuildActive ? fasterBuild.bytesPerSecond : undefined}
+        fasterBuildBlocked={fasterBuildBlocked}
         onSwitchToFasterBuild={() => {
-          if (!m.mlxTag) return;
+          if (!m.mlxTag || fasterBuildBlocked) return;
           fasterBuild.switchTo(m.mlxTag);
         }}
       />
