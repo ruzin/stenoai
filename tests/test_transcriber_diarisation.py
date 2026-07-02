@@ -15,6 +15,7 @@ import tempfile
 import unittest
 import wave
 from pathlib import Path
+from unittest.mock import Mock
 
 from src.transcriber import (
     BLEED_JACCARD_THRESHOLD,
@@ -22,10 +23,93 @@ from src.transcriber import (
     MIN_RMS_THRESHOLD,
     WhisperTranscriber,
     _diarised_split_timeout,
+    _format_timestamp,
     _parse_channels_from_ffmpeg_stderr,
     _parse_duration_from_ffmpeg_stderr,
     _token_jaccard,
 )
+
+
+class FormatTimestampTests(unittest.TestCase):
+    def test_zero(self):
+        self.assertEqual(_format_timestamp(0), "00:00")
+
+    def test_under_a_minute_pads_seconds(self):
+        self.assertEqual(_format_timestamp(5), "00:05")
+
+    def test_minutes_and_seconds(self):
+        self.assertEqual(_format_timestamp(65), "01:05")
+
+    def test_floors_fractional_seconds(self):
+        self.assertEqual(_format_timestamp(1.8), "00:01")
+
+    def test_hour_switches_to_h_mm_ss(self):
+        self.assertEqual(_format_timestamp(3661), "1:01:01")
+
+    def test_exactly_one_hour(self):
+        self.assertEqual(_format_timestamp(3600), "1:00:00")
+
+    def test_negative_clamps_to_zero(self):
+        self.assertEqual(_format_timestamp(-5), "00:00")
+
+    def test_non_finite_falls_back_to_zero(self):
+        # A backend emitting NaN/inf in a segment's start must not crash the
+        # diarised assembly (int(NaN) raises ValueError, int(inf) OverflowError).
+        self.assertEqual(_format_timestamp(float("nan")), "00:00")
+        self.assertEqual(_format_timestamp(float("inf")), "00:00")
+        self.assertEqual(_format_timestamp(float("-inf")), "00:00")
+
+
+class TranscribeDiarisedTimestampTests(unittest.TestCase):
+    """The diarised transcript prefixes each turn with an [MM:SS] timestamp
+    from the turn's first segment. Mocks the per-channel transcription so no
+    model/audio is needed. Disjoint mock text avoids the bleed-correction RMS
+    read (which would need real WAVs)."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        d = Path(self._tmp.name)
+        self.audio_path = d / "source.wav"
+        self.mic_path = d / "mic.wav"
+        self.system_path = d / "system.wav"
+        for p in (self.audio_path, self.mic_path, self.system_path):
+            p.write_bytes(b"stub")
+        self.transcriber = WhisperTranscriber.__new__(WhisperTranscriber)
+        self.transcriber.backend = "parakeet"
+        self.transcriber._split_stereo_to_channels = Mock(
+            return_value=(self.mic_path, self.system_path, 3.0)
+        )
+        self.transcriber._check_rms_energy = Mock(return_value=True)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_interleaves_diarised_segments_with_timestamps(self):
+        self.transcriber.transcribe_audio = Mock(side_effect=[
+            {"text": "Hello. Later.", "segments": [
+                {"text": "Hello.", "start": 1.2, "end": 1.8},
+                {"text": "Later.", "start": 4.0, "end": 4.5},
+            ]},
+            {"text": "Reply.", "segments": [{"text": "Reply.", "start": 2.1, "end": 2.8}]},
+        ])
+        result = self.transcriber.transcribe_diarised(self.audio_path)
+        self.assertTrue(result["is_diarised"])
+        self.assertEqual(
+            result["diarised_text"],
+            "[00:01] [You] Hello.\n\n[00:02] [Others] Reply.\n\n[00:04] [You] Later.",
+        )
+        # The plain text field stays timestamp- and label-free.
+        self.assertNotIn("[00:0", result["text"])
+        self.assertNotIn("[You]", result["text"])
+
+    def test_single_source_is_not_timestamped_or_diarised(self):
+        self.transcriber.transcribe_audio = Mock(side_effect=[
+            {"text": "Only mic.", "segments": [{"text": "Only mic.", "start": 0.4, "end": 1.0}]},
+            {"text": "", "segments": []},
+        ])
+        result = self.transcriber.transcribe_diarised(self.audio_path)
+        self.assertFalse(result["is_diarised"])
+        self.assertIsNone(result["diarised_text"])
 
 
 class TokenJaccardTests(unittest.TestCase):

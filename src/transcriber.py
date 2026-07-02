@@ -29,6 +29,7 @@ anything; the model is the source of truth.
 
 import inspect
 import logging
+import math
 import os
 import re
 import subprocess
@@ -251,6 +252,29 @@ def _scan_max_rms(wf, window: int, step: int, early_exit_threshold: float) -> fl
             return max_rms
         pos += step
     return max_rms
+
+
+def _format_timestamp(seconds: float) -> str:
+    """Format a segment offset (seconds since recording start) as a transcript
+    timestamp: ``MM:SS`` under an hour, ``H:MM:SS`` beyond it.
+
+    Same MM:SS / H:MM:SS shape as the live-dock formatter (fmtTimestamp in
+    LiveTranscriptBar.tsx) so the live view and the saved transcript read
+    alike. (They aren't 1:1: the live dock stamps every segment, the saved
+    transcript stamps each collapsed turn's first segment.) Only used for the
+    diarised (labelled) transcript — the plain ``text`` field stays clean.
+    """
+    # A non-finite start (a backend emitting NaN/inf) must not crash the whole
+    # diarised assembly — int(NaN) raises ValueError, int(inf) OverflowError.
+    # Fall back to 00:00 rather than blowing up the transcription.
+    if not math.isfinite(seconds):
+        seconds = 0
+    total = max(0, int(seconds))
+    hh, rem = divmod(total, 3600)
+    mm, ss = divmod(rem, 60)
+    if hh:
+        return f"{hh:d}:{mm:02d}:{ss:02d}"
+    return f"{mm:02d}:{ss:02d}"
 
 
 def _token_jaccard(a: str, b: str) -> float:
@@ -1215,20 +1239,29 @@ class WhisperTranscriber:
                     tagged.append((float(s.get("start") or 0.0), "Others", text))
             tagged.sort(key=lambda t: t[0])
 
-            turns: list[tuple[str, list[str]]] = []
-            for _start, speaker, text in tagged:
-                if turns and turns[-1][0] == speaker:
-                    turns[-1][1].append(text)
+            # Each turn carries the start offset of its FIRST segment so the
+            # diarised transcript can be timestamped. Only diarised_text is
+            # timestamped (it's what the UI displays + what #215 exports); the
+            # plain text field stays clean. NOTE: diarised_text is also the
+            # summariser input (simple_recorder: text_for_summary = diarised_text
+            # or transcript_text), so the summariser strips these [MM:SS] markers
+            # back out on the way in (summarizer._strip_leading_timestamps) —
+            # summarisation is unaffected by this display feature.
+            turns: list[tuple[float, str, list[str]]] = []
+            for start, speaker, text in tagged:
+                if turns and turns[-1][1] == speaker:
+                    turns[-1][2].append(text)
                 else:
-                    turns.append((speaker, [text]))
+                    turns.append((start, speaker, [text]))
 
-            plain_parts = [' '.join(parts) for _speaker, parts in turns]
+            plain_parts = [' '.join(parts) for _start, _speaker, parts in turns]
             plain_text = "\n\n".join(plain_parts) if plain_parts else SILENCE_SENTINEL
 
             is_diarised = bool(mic_segments) and bool(system_segments)
             if is_diarised:
                 labelled_parts = [
-                    f"[{speaker}] {' '.join(parts)}" for speaker, parts in turns
+                    f"[{_format_timestamp(start)}] [{speaker}] {' '.join(parts)}"
+                    for start, speaker, parts in turns
                 ]
                 diarised_text = "\n\n".join(labelled_parts)
             else:

@@ -23,6 +23,21 @@ import { PARAKEET_LANGUAGES } from '@/lib/transcription-languages';
 import { useLiveTranscriptOpen } from '@/hooks/liveTranscriptOpenStore';
 import { formatElapsed } from '@/lib/utils';
 
+// Format a segment's start offset (seconds since recording start): MM:SS under
+// an hour, H:MM:SS beyond it. The live pipeline already emits per-segment
+// `start` on every LIVE_SEG, so this is a pure render of data we already have.
+// Kept in the same MM:SS / H:MM:SS shape as the saved-transcript formatter
+// (_format_timestamp in src/transcriber.py, which TranscriptPanel then parses
+// back out) so the live view and the saved transcript read the same.
+function fmtTimestamp(seconds: number): string {
+  const s = Math.max(0, Math.floor(seconds));
+  const hh = Math.floor(s / 3600);
+  const mm = Math.floor((s % 3600) / 60);
+  const ss = s % 60;
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return hh ? `${hh}:${pad(mm)}:${pad(ss)}` : `${pad(mm)}:${pad(ss)}`;
+}
+
 /**
  * Live transcript dock — Granola-style.
  *
@@ -270,11 +285,17 @@ function LiveTranscriptBodyState({ status, error, segments, filtering, slow }: B
           <li
             key={i}
             className={cn(
-              'flex px-1 py-0.5',
-              isYou ? 'justify-end' : 'justify-start',
+              'flex flex-col gap-0.5 px-1 py-0.5',
+              isYou ? 'items-end' : 'items-start',
             )}
             style={{ opacity: seg.isFinal ? 1 : 0.55 }}
           >
+            <span
+              className="px-1.5 text-[10.5px] tabular-nums"
+              style={{ color: 'var(--fg-2)' }}
+            >
+              {fmtTimestamp(seg.start)}
+            </span>
             <div
               className={cn(
                 'max-w-[78%] rounded-2xl px-3 py-1.5 text-sm leading-[1.5]',
