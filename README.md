@@ -42,10 +42,10 @@
 If you're looking for a hosted desktop recording API, consider checking out [Recall.ai](https://www.recall.ai/product/desktop-recording-sdk?utm_source=github&utm_medium=sponsorship&utm_campaign=ruzin-stenoai), an API that records Zoom, Google Meet, Microsoft Teams, in-person meetings, and more.
 
 ## 📢 What's New
-- **2026-06-28** 📝 Report templates & per-meeting reports — define your own report styles and generate them from any note; a meeting can now hold multiple reports (the structured summary plus template-driven ones), switchable in the detail view.
-- **2026-06-28** 📤 Transcript export — copy the full transcript or save it as Markdown (title, metadata, notes, and diarised `[You]`/`[Others]` text) to paste into any external tool.
-- **2026-06-28** 🛟 Never lose a transcript — if batch transcription comes back empty, Steno now falls back to the live transcript you watched during the recording instead of saving a blank note.
-- **2026-06-28** 🧩 Better long-meeting summaries — map-reduce summarization chunks long transcripts so multi-hour meetings summarize reliably without overflowing the model's context.
+- **2026-07-02** ⏱️ Transcript timestamps — every turn of your live and saved transcripts now shows a `[MM:SS]` timestamp, so you can see (and cite) when things were said.
+- **2026-07-02** ⚡ Faster on Apple Silicon — opt into Ollama's native MLX model builds for quicker summaries (Settings → "Switch to faster build"); your model choice and settings are preserved.
+- **2026-07-02** 🌍 Pin your meeting language — Parakeet users can now pin a European language (French, German, Spanish, Dutch, Portuguese) so summaries and notes come out in it, not English.
+- **2026-07-02** 🧹 Cleaner summaries — reasoning-model "thinking" blocks are stripped before your notes render, so scratchpad text never leaks into a summary.
 
 
 ## Features
