@@ -1788,6 +1788,9 @@ function parseMeetingMarkdown(content, mdPath) {
     if (meta.audio_file) sessionInfo.audio_file = meta.audio_file;
     if (meta.error) sessionInfo.error = meta.error;
   }
+  if (meta.notes_generated === false) {
+    sessionInfo.notes_generated = false;
+  }
 
   return {
     session_info: sessionInfo,

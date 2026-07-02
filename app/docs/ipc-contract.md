@@ -442,6 +442,8 @@ are string-cased (`"True"`/`"False"`) — that translation lives in main.js.
 | `show-silence-auto-stop-notification` | R→M invoke | yes | `stenoai.settings.showSilenceAutoStopNotification({ minutes, sessionName })` |
 | `show-note-ready-notification` | R→M invoke | yes | `stenoai.settings.showNoteReadyNotification({ title, failed?, hardFailure? })` — `failed`: graceful transcription failure (marked note written); `hardFailure`: processing crash / import that never enqueued (no note) |
 | `get-telemetry` / `set-telemetry` | R→M invoke | yes | `stenoai.settings.getTelemetry()` / `setTelemetry(b)` |
+| `get-keep-recordings` / `set-keep-recordings` | R→M invoke | yes | `stenoai.settings.getKeepRecordings()` / `setKeepRecordings(b)` |
+| `get-auto-summarize` / `set-auto-summarize` | R→M invoke | yes | `stenoai.settings.getAutoSummarize()` / `setAutoSummarize(b)` — gates automatic note generation after transcription (#258); off leaves a transcript-only note (`notes_generated: false`) until the user reprocesses it |
 | `get-dock-icon` / `set-dock-icon` | R→M invoke | yes | `stenoai.settings.getDockIcon()` / `setDockIcon(b)` |
 | `get-system-audio` / `set-system-audio` | R→M invoke | yes | `stenoai.settings.getSystemAudio()` / `setSystemAudio(b)` |
 | `get-language` / `set-language` | R→M invoke | yes | `stenoai.settings.getLanguage()` / `setLanguage(code)` |
@@ -452,6 +454,8 @@ are string-cased (`"True"`/`"False"`) — that translation lives in main.js.
 ```ts
 type GetNotificationsResponse = Result<{ notifications_enabled: boolean }>;
 type GetTelemetryResponse     = Result<{ telemetry_enabled: boolean }>;
+type GetKeepRecordingsResponse = Result<{ keep_recordings: boolean }>;
+type GetAutoSummarizeResponse  = Result<{ auto_summarize_enabled: boolean }>;
 type GetDockIconResponse      = Result<{ hide_dock_icon: boolean }>;
 type GetSystemAudioResponse   = Result<{ system_audio_enabled: boolean }>;
 type GetLanguageResponse      = Result<{ language: string }>;

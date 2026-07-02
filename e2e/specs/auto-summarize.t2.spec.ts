@@ -149,8 +149,77 @@ test('auto-summarize off writes a transcript-only note with no LLM call; the Gen
     expect(summaryMd).not.toMatch(/notes_generated:\s*false/i);
     expect(ollama.chatCalls()).toBe(1);
 
+    // The UI must actually reflect the new state, not just the on-disk file — a
+    // stale query would leave the old "No notes yet" CTA showing even though the
+    // note now has a summary.
+    await expect(page.getByTestId('no-notes-yet')).toHaveCount(0);
+    await expect(page.getByTestId('tab-summary-content')).toBeVisible();
+
     // Keystone: the real user-data dir is byte-for-byte untouched.
     expect(fileSig(realUserDataDir())).toBe(realDirBefore);
+  } finally {
+    await ollama.close();
+    killOllama();
+  }
+});
+
+test('auto-summarize off also skips title generation and the default-template report (not just the main summary)', async ({
+  userDataDir,
+}) => {
+  test.setTimeout(120_000);
+  if (!existsSync(BACKEND)) {
+    test.skip(true, 'backend bundle not built');
+  }
+
+  // default_template_id != 'standard' makes generate_default_template_report
+  // attempt a SECOND /api/chat call after the main summary; 'shareable-summary'
+  // is the pre-seeded builtin sample template, so no template setup is needed.
+  // 'Meeting' matches _AUTO_NAMED_PATTERN, so title generation would also fire a
+  // /api/chat call if the auto-summarize gate didn't return before reaching it.
+  // A regression that gates only the main summary call (but leaves title-gen or
+  // the default-template report unconditional) would show up here as
+  // chatCalls() > 0 or a reports sidecar appearing, even though the earlier test
+  // (which uses the 'standard' default template and an explicit name) would
+  // still pass.
+  writeUserConfig(userDataDir, {
+    ai_provider: 'local',
+    auto_summarize_enabled: false,
+    default_template_id: 'shareable-summary',
+  });
+
+  const recordingsDir = path.join(userDataDir, 'recordings');
+  mkdirSync(recordingsDir, { recursive: true });
+  const wavPath = path.join(recordingsDir, 'notesofftemplate.wav');
+  makeWav(wavPath, { seconds: 4, amplitude: 0, channels: 2 });
+
+  const liveFile = path.join(userDataDir, 'live-transcript.txt');
+  writeFileSync(liveFile, LIVE_TRANSCRIPT, 'utf-8');
+
+  const summaryPath = path.join(userDataDir, 'output', 'notesofftemplate_summary.md');
+  const sidecarPath = path.join(userDataDir, 'output', 'notesofftemplate_reports.json');
+
+  killOllama();
+  const ollama = await startMockOllama({ chatReply: FIXED_REPLY });
+  try {
+    const res = await runBackend(
+      ['process-streaming', wavPath, '--name', 'Meeting', '--live-transcript', liveFile],
+      userDataDir,
+    );
+    expect(res.code, `backend stderr:\n${res.stderr}`).toBe(0);
+    expect(res.stdout).toContain('SUMMARY_SKIPPED');
+    expect(res.stdout).not.toContain('TITLE:');
+
+    expect(existsSync(summaryPath)).toBe(true);
+    const summaryMd = readFileSync(summaryPath, 'utf8');
+    expect(summaryMd).toMatch(/notes_generated:\s*false/i);
+    expect(summaryMd).not.toContain('## Summary');
+
+    // No default-template report was generated into the sidecar.
+    expect(existsSync(sidecarPath)).toBe(false);
+
+    // Zero Ollama calls total: main summary, title generation, AND the
+    // default-template report are all skipped by the same gate.
+    expect(ollama.chatCalls()).toBe(0);
   } finally {
     await ollama.close();
     killOllama();

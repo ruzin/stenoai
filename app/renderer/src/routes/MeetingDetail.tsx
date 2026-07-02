@@ -402,7 +402,23 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
     setChunkProgress(null);
     setReprocessFailed(false);
     streamCache.set(summaryFile, { text: '', phase: 'analyzing' });
-    reprocess.mutate({ summaryFile, regenTitle: false, name: info.name });
+    reprocess.mutate(
+      { summaryFile, regenTitle: false, name: info.name },
+      {
+        // A rejection here means the IPC call itself failed (e.g. the backend
+        // never spawned) BEFORE any processing-complete/summary-complete event
+        // could fire to roll the UI back — without this the analyzing/streaming
+        // state would be stuck forever with no way to retry (mirrors
+        // onGenerateReport's onError below).
+        onError: () => {
+          setStreamPhase('idle');
+          setStreamText('');
+          setChunkProgress(null);
+          streamCache.delete(summaryFile);
+          setReprocessFailed(true);
+        },
+      },
+    );
   };
 
   // Persist the choice so it survives navigation (B1 review: active_report not
@@ -499,6 +515,11 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
   const discussionAreas = asDiscussionAreas(meeting.discussion_areas);
   const transcriptionFailed = Boolean(meeting.session_info.transcription_failed);
   const transcriptionError = meeting.session_info.error?.trim();
+  // The real signal for "auto-summarize was off" (#258) — NOT `!summary`, which
+  // also matches an older/imported meeting whose ## Summary section is empty or
+  // unparsable for unrelated reasons and would otherwise be misclassified as
+  // transcript-only.
+  const notesNotGenerated = meeting.session_info.notes_generated === false;
 
   return (
     <article data-testid="meeting-detail" className="space-y-9">
@@ -867,7 +888,7 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
                 ))}
               </div>
             </section>
-          ) : meeting.transcript ? (
+          ) : notesNotGenerated && meeting.transcript ? (
             <section
               className="flex flex-col items-start gap-2 rounded-lg p-4"
               style={{
