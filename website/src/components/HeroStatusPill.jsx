@@ -1,35 +1,13 @@
 import { useState, useEffect } from "react";
 import { m as Motion, AnimatePresence } from "framer-motion";
 import { Loader2, Check } from "lucide-react";
+import { RecordingWave } from "./RecordingWave";
 
 const STEPS = [
   { key: "recording", label: "Recording", ms: 3000 },
   { key: "processing", label: "Processing", ms: 2200 },
   { key: "ready", label: "Summary ready", ms: 2200 },
 ];
-
-function RecordingWave() {
-  const delays = [0, 0.15, 0.3, 0.1, 0.25, 0.05, 0.2];
-  return (
-    <span aria-hidden="true" style={{ display: "inline-flex", alignItems: "center", height: 14, gap: 2 }}>
-      {delays.map((d, i) => (
-        <span
-          key={i}
-          style={{
-            display: "inline-block",
-            width: 2,
-            height: "60%",
-            minHeight: 2,
-            background: "var(--recording)",
-            borderRadius: 2,
-            transformOrigin: "50% 100%",
-            animation: `dockWave 1.1s ease-in-out ${d}s infinite`,
-          }}
-        />
-      ))}
-    </span>
-  );
-}
 
 function fmt(s) {
   const m = String(Math.floor(s / 60)).padStart(2, "0");

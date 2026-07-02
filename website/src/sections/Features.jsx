@@ -5,6 +5,30 @@ import {
   Calendar as CalendarIcon, Clock, PencilLine, ArrowUp,
 } from "lucide-react";
 
+// ─── Shared: Steno mic icon path group ─────────────────────────
+// Callers wrap this in their own <g transform=... stroke=... strokeWidth=...>
+// to position/scale it — only the path data is shared here.
+function StenoMicIcon() {
+  return (
+    <g transform="translate(-32,-32)">
+      <path d="M28 7 Q29 9.5 30 12.5" />
+      <path d="M36 7 Q35 9.5 34 12.5" />
+      <circle cx="32" cy="15" r="3.8" />
+      <circle cx="30.5" cy="15" r="0.7" fill="var(--fg-1)" stroke="none" />
+      <circle cx="33.5" cy="15" r="0.7" fill="var(--fg-1)" stroke="none" />
+      <path d="M30 19 Q28 19 28 21 L28 50 L32 60 L36 50 L36 21 Q36 19 34 19 Z" />
+      <line x1="28" y1="32" x2="36" y2="32" />
+      <line x1="28" y1="38" x2="36" y2="38" />
+      <line x1="28" y1="44" x2="36" y2="44" />
+      <line x1="28" y1="50" x2="36" y2="50" />
+      <path d="M28 22 C18 15 8 17 4 22 C10 28 20 28 28 27 Z" />
+      <path d="M36 22 C46 15 56 17 60 22 C50 28 44 28 36 27 Z" />
+      <path d="M28 28 C18 30 10 35 6 40 C14 39 22 36 28 33 Z" />
+      <path d="M36 28 C46 30 54 35 58 40 C50 39 42 36 36 33 Z" />
+    </g>
+  );
+}
+
 // ─── Scale wrapper ────────────────────────────────────────────
 // Measures its container and scales children (written at 680px wide)
 // to fill whatever space is available.
@@ -369,6 +393,8 @@ function ChatWithNotesImage() {
             )}
           </div>
           <button
+            type="button"
+            aria-label="Send message"
             style={{
               width: 26, height: 26, borderRadius: 999, border: 0,
               background: inputText ? "var(--fg-1)" : "var(--surface-active)",
@@ -582,22 +608,7 @@ function NoDataLeavesImage() {
 
       {/* Steno icon, centered inside the ring */}
       <g transform="translate(150,140) scale(0.75)" stroke="var(--fg-1)" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" fill="none">
-        <g transform="translate(-32,-32)">
-          <path d="M28 7 Q29 9.5 30 12.5" />
-          <path d="M36 7 Q35 9.5 34 12.5" />
-          <circle cx="32" cy="15" r="3.8" />
-          <circle cx="30.5" cy="15" r="0.7" fill="var(--fg-1)" stroke="none" />
-          <circle cx="33.5" cy="15" r="0.7" fill="var(--fg-1)" stroke="none" />
-          <path d="M30 19 Q28 19 28 21 L28 50 L32 60 L36 50 L36 21 Q36 19 34 19 Z" />
-          <line x1="28" y1="32" x2="36" y2="32" />
-          <line x1="28" y1="38" x2="36" y2="38" />
-          <line x1="28" y1="44" x2="36" y2="44" />
-          <line x1="28" y1="50" x2="36" y2="50" />
-          <path d="M28 22 C18 15 8 17 4 22 C10 28 20 28 28 27 Z" />
-          <path d="M36 22 C46 15 56 17 60 22 C50 28 44 28 36 27 Z" />
-          <path d="M28 28 C18 30 10 35 6 40 C14 39 22 36 28 33 Z" />
-          <path d="M36 28 C46 30 54 35 58 40 C50 39 42 36 36 33 Z" />
-        </g>
+        <StenoMicIcon />
       </g>
     </svg>
   );
@@ -730,22 +741,7 @@ function AiAgentReadyImage() {
         strokeLinejoin="round"
         fill="none"
       >
-        <g transform="translate(-32,-32)">
-          <path d="M28 7 Q29 9.5 30 12.5" />
-          <path d="M36 7 Q35 9.5 34 12.5" />
-          <circle cx="32" cy="15" r="3.8" />
-          <circle cx="30.5" cy="15" r="0.7" fill="var(--fg-1)" stroke="none" />
-          <circle cx="33.5" cy="15" r="0.7" fill="var(--fg-1)" stroke="none" />
-          <path d="M30 19 Q28 19 28 21 L28 50 L32 60 L36 50 L36 21 Q36 19 34 19 Z" />
-          <line x1="28" y1="32" x2="36" y2="32" />
-          <line x1="28" y1="38" x2="36" y2="38" />
-          <line x1="28" y1="44" x2="36" y2="44" />
-          <line x1="28" y1="50" x2="36" y2="50" />
-          <path d="M28 22 C18 15 8 17 4 22 C10 28 20 28 28 27 Z" />
-          <path d="M36 22 C46 15 56 17 60 22 C50 28 44 28 36 27 Z" />
-          <path d="M28 28 C18 30 10 35 6 40 C14 39 22 36 28 33 Z" />
-          <path d="M36 28 C46 30 54 35 58 40 C50 39 42 36 36 33 Z" />
-        </g>
+        <StenoMicIcon />
       </g>
 
       {/* ── Claude — cream bg, official Claude sunburst mark ── */}

@@ -6,6 +6,7 @@ import {
   Inbox, MessageSquare, Building2, Users, Heart, Loader2,
   Square, Pause,
 } from "lucide-react";
+import { RecordingWave } from "./RecordingWave";
 
 const SCREENS = ["notes", "generating", "summary", "chat"];
 const SCREEN_MS = { notes: 5500, generating: 4000, summary: 5500, chat: 7000 };
@@ -154,27 +155,6 @@ function WaveIcon() {
     <span aria-hidden="true" style={{ display: "inline-flex", alignItems: "flex-end", gap: 2, height: 12, width: 16, flexShrink: 0 }}>
       {heights.map((h, i) => (
         <span key={i} style={{ display: "block", width: 2, height: `${h}%`, background: "var(--fg-2)", borderRadius: 2 }} />
-      ))}
-    </span>
-  );
-}
-
-// Animated audio-level bars in var(--recording) red — mirrors AudioWave in the real app
-function RecordingWave() {
-  const delays = [0, 0.15, 0.3, 0.1, 0.25, 0.05, 0.2];
-  return (
-    <span aria-hidden style={{ display: "inline-flex", alignItems: "center", height: 14, gap: 2 }}>
-      {delays.map((d, i) => (
-        <span key={i} style={{
-          display: "inline-block",
-          width: 2,
-          height: "60%",
-          minHeight: 2,
-          background: "var(--recording)",
-          borderRadius: 2,
-          transformOrigin: "50% 100%",
-          animation: `dockWave 1.1s ease-in-out ${d}s infinite`,
-        }} />
       ))}
     </span>
   );

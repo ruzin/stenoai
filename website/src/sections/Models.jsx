@@ -2,7 +2,7 @@ import { createElement, useState } from "react";
 import {
   Check, Lock, Cloud, KeyRound,
   ShieldCheck, WifiOff, Package, Zap,
-  Sparkles, RefreshCw, ScrollText, TrendingUp,
+  Sparkles, RefreshCw, TrendingUp,
 } from "lucide-react";
 import { m as Motion } from "framer-motion";
 
@@ -88,7 +88,7 @@ const advantages = {
     },
     {
       Icon: Package,
-      title: "Five models included",
+      title: `${localModels.length} models included`,
       desc:  "Everything bundled at install — no downloads, no configuration.",
     },
   ],
@@ -156,7 +156,7 @@ export function Models() {
           className="text-fg-2"
           style={{ fontSize: "clamp(16px, 1.4vw, 19px)", lineHeight: 1.5, margin: "0 0 28px" }}
         >
-          Five models run entirely on your machine. Or connect to any major provider with your own key.
+          {localModels.length} models run entirely on your machine. Or connect to any major provider with your own key.
         </p>
 
         {/* Toggle */}
