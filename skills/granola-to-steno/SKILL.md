@@ -142,13 +142,15 @@ python3 "$SKILL_DIR/scripts/steno_gen.py" "$WORK/granola_sync" /tmp/steno_out --
 
 cp_retry(){ for i in 1 2 3 4 5 6; do cp -f "$1" "$2" 2>/dev/null && return 0; sleep 2; done; echo "FAIL $2"; }
 mkdir -p "$STENO_DIR/output" "$STENO_DIR/transcripts"
-for f in /tmp/steno_out/output/*;      do cp_retry "$f" "$STENO_DIR/output/$(basename "$f")"; done
-for f in /tmp/steno_out/transcripts/*; do cp_retry "$f" "$STENO_DIR/transcripts/$(basename "$f")"; done
+for f in /tmp/steno_out/output/*;      do [ -e "$f" ] || continue; cp_retry "$f" "$STENO_DIR/output/$(basename "$f")"; done
+for f in /tmp/steno_out/transcripts/*; do [ -e "$f" ] || continue; cp_retry "$f" "$STENO_DIR/transcripts/$(basename "$f")"; done
 ```
 
 Verify by comparing file **sizes** between `/tmp/steno_out/...` and
-`STENO_DIR/...` (use `stat -c %s`, which does not trigger the iCloud read lock
-that `cmp`/`diff` can). If any file failed to copy because of an iCloud
+`STENO_DIR/...` — use `stat -f %z "$f"` on macOS (or `stat -c %s "$f"` on
+Linux), which reports the byte size without triggering the iCloud read lock
+that `cmp`/`diff` can. StenoAI + iCloud Drive run on macOS, so `stat -f %z` is
+the one you'll normally need. If any file failed to copy because of an iCloud
 *"Resource deadlock avoided"* lock, write that one file through the **host file
 tools** instead: read the generated file's content and Write it directly to the
 `STENO_DIR` path (the host filesystem handles iCloud natively).
