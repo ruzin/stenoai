@@ -1,3 +1,5 @@
-# Require @ruzin review on all changes. With require_code_owner_reviews
-# enabled on main, every PR needs the owner's approval before merge.
-* @ruzin
+# Require a code-owner review on all changes. With require_code_owner_reviews
+# enabled on main, every PR needs approval from one of these owners before
+# merge. @Optic00 (top contributor) is a co-owner alongside @ruzin — a review
+# from either satisfies the requirement.
+* @ruzin @Optic00
