@@ -69,6 +69,10 @@ export interface ListedModel {
   description?: string;
   speed?: string;
   quality?: string;
+  mlxTag?: string;
+  mlxInstalled?: boolean;
+  mlxSizeGb?: number;
+  ggufInstalled?: boolean;
 }
 
 export interface CalendarEvent {
@@ -367,6 +371,16 @@ export interface RawSupportedModel {
   quality?: string;
   deprecated?: boolean;
   installed?: boolean;
+  // Distinct from `installed`, which is also true when only the NVFP4
+  // sibling is present (see mlx_installed) -- this is specifically whether
+  // the GGUF id itself was pulled, needed by anything that must not act on
+  // a tag that was never actually downloaded (e.g. deleting it).
+  gguf_installed?: boolean;
+  mlx_tag?: string;
+  mlx_installed?: boolean;
+  // The NVFP4 blob's own size -- a different (often larger) download than
+  // this entry's `size`, which describes the GGUF variant only.
+  mlx_size?: string;
 }
 
 export type ListModelsResponse = Result<{
@@ -375,6 +389,25 @@ export type ListModelsResponse = Result<{
   provider: string;
 }>;
 export type GetCurrentModelResponse = Result<{ model: string }>;
+
+// Deliberately NOT wrapped in Result<T>: Result<T> is `({ success: true } & T)`,
+// and these responses already have their own `success` field, so wrapping would
+// collapse both `success` fields into one (`true & boolean` narrows to `true`)
+// and silently hide the real success/failure the caller needs to branch on.
+// main.js's verify-model/delete-model handlers (Task 8) return the Python CLI's
+// `{ success, error }` JSON verbatim, with no additional wrapping.
+export type VerifyModelResponse = { success: boolean; error: string | null };
+export type DeleteModelResponse = { success: boolean; error: string | null };
+// model -> either its still-running progress string, or (done: true) its
+// terminal outcome if it finished while nothing was around to consume the
+// live model-pull-complete event (e.g. Settings was unmounted). Flat for the
+// same reason as the two types above: main.js returns its in-memory maps
+// verbatim, no Result<T> wrapping.
+export type GetActivePullsResponse = Record<
+  string,
+  { progress?: string; done: boolean; success?: boolean; error?: string; cancelled?: boolean }
+>;
+export type CancelPullResponse = { success: boolean; error: string | null };
 
 export type ListWhisperModelsResponse = Result<{
   supported_models: Record<string, RawSupportedModel>;
@@ -526,6 +559,7 @@ export interface ModelPullCompleteEvent {
   model: string;
   success: boolean;
   error?: string;
+  cancelled?: boolean;
 }
 export interface WhisperPullProgressEvent {
   model: string;
@@ -751,6 +785,11 @@ export interface StenoaiBridge {
     set: RequestFn<[name: string], Result<Record<string, never>>>;
     checkInstalled: RequestFn<[name: string], CheckModelInstalledResponse>;
     pull: RequestFn<[name: string], Result<Record<string, never>>>;
+    cancelPull: RequestFn<[name: string], CancelPullResponse>;
+    verify: RequestFn<[name: string], VerifyModelResponse>;
+    delete: RequestFn<[name: string], DeleteModelResponse>;
+    getActivePulls: RequestFn<[], GetActivePullsResponse>;
+    ackPullComplete: SendFn<[name: string]>;
   };
 
   whisperModels: {

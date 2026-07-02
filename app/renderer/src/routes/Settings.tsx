@@ -83,6 +83,7 @@ import {
 } from '@/hooks/useAi';
 import {
   useCurrentModel,
+  useDeleteModel,
   useModels,
   useParakeetModels,
   usePullModel,
@@ -90,6 +91,7 @@ import {
   usePullWhisperModel,
   useSetActiveTranscription,
   useSetCurrentModel,
+  useSwitchToFasterBuild,
   useTranscriptionEngine,
   useWhisperModels,
 } from '@/hooks/useModels';
@@ -351,6 +353,108 @@ function isDefaultModel(description: string | undefined): boolean {
   return /\((default|recommended)\)/i.test(description ?? '');
 }
 
+function parsePullPercent(progress: string | undefined): number | null {
+  const match = progress?.match(/(\d{1,3})%/);
+  if (!match) return null;
+  const value = Number(match[1]);
+  return Number.isFinite(value) ? Math.min(100, Math.max(0, value)) : null;
+}
+
+// Ollama models are made of several blobs, each streamed as its own 0-100%
+// phase (see pull_model's "[Part N]" suffix in simple_recorder.py) -- without
+// this, the percentage restarting from a new blob reads as a second,
+// unrelated download starting.
+function parsePullPart(progress: string | undefined): number | null {
+  const match = progress?.match(/\[Part (\d+)\]/);
+  if (!match) return null;
+  const value = Number(match[1]);
+  return Number.isFinite(value) ? value : null;
+}
+
+function formatBytesPerSecond(bytesPerSecond: number | undefined): string {
+  if (!bytesPerSecond || bytesPerSecond <= 0) return '';
+  const mbPerSecond = bytesPerSecond / (1024 * 1024);
+  if (mbPerSecond < 1) return `${Math.round(bytesPerSecond / 1024)} KB/s`;
+  return `${mbPerSecond.toFixed(1)} MB/s`;
+}
+
+// Shared by the general "Select an uninstalled model" download and the
+// "switch to faster build" pull -- both drive the same fixed-width
+// bar+percent+MB/s+Cancel row from the same "<status> <pct>% (<bytes>)"
+// progress string, so a naive per-flow copy would drift on cosmetic tweaks.
+// Fixed-width (not just the bar's fill) so rapid ticks never reflow the row.
+function PullProgressBar({
+  progress,
+  bytesPerSecond,
+  onCancel,
+}: {
+  progress: string | undefined;
+  bytesPerSecond: number | undefined;
+  onCancel: (() => void) | undefined;
+}) {
+  return (
+    <div className="flex shrink-0 items-center gap-2">
+      {/* No outer fixed width here -- it previously hardcoded 96px, which
+          fit only the bar+percent pair it was designed for. Adding the
+          MB/s and Part columns later pushed the total past 96px, so they
+          silently overflowed the box and collided with whatever sat to its
+          right (the Cancel button). Each child below still has its own
+          fixed width, so per-tick reflow is still fully prevented -- this
+          container just needs to actually be wide enough for all of them. */}
+      <div className="flex items-center gap-1.5">
+        <div
+          className="h-1.5 overflow-hidden rounded-full"
+          style={{ width: 56, background: 'var(--surface-sunken)' }}
+        >
+          <div
+            className="h-full rounded-full"
+            style={{
+              width: `${parsePullPercent(progress) ?? 0}%`,
+              background: 'var(--fg-1)',
+            }}
+          />
+        </div>
+        <span
+          className="shrink-0 text-right text-[11px] tabular-nums"
+          style={{ color: 'var(--fg-muted)', width: 28 }}
+        >
+          {parsePullPercent(progress) ?? 0}%
+        </span>
+        {/* Fixed width + overflow-hidden: "8.8 MB/s" and "120 KB/s" are
+            different widths, so a naive inline text here would reflow the
+            row on every tick. */}
+        <span
+          className="shrink-0 overflow-hidden whitespace-nowrap text-[11px] tabular-nums"
+          style={{ color: 'var(--fg-muted)', width: 60 }}
+        >
+          {formatBytesPerSecond(bytesPerSecond)}
+        </span>
+        {/* Reserved even when blank so the one-time appearance of a second
+            blob's part number doesn't shift anything else in the row. */}
+        <span
+          className="shrink-0 overflow-hidden whitespace-nowrap text-[11px] tabular-nums"
+          style={{ color: 'var(--fg-muted)', width: 44 }}
+        >
+          {parsePullPart(progress) !== null ? `Part ${parsePullPart(progress)}` : ''}
+        </span>
+      </div>
+      {/* Only rendered when the caller doesn't already have its own cancel
+          control (e.g. the general download flow's top-right Select/Cancel
+          button) -- otherwise this duplicates it right below the name. */}
+      {onCancel && (
+        <button
+          type="button"
+          onClick={onCancel}
+          className="shrink-0 cursor-pointer border-0 bg-transparent p-0 text-[11px] underline"
+          style={{ color: 'var(--fg-muted)' }}
+        >
+          Cancel
+        </button>
+      )}
+    </div>
+  );
+}
+
 interface ModelCardProps {
   name: string;
   sizeLabel?: string;
@@ -360,7 +464,36 @@ interface ModelCardProps {
   deprecated?: boolean;
   isDownloading?: boolean;
   downloadProgress?: string;
+  downloadBytesPerSecond?: number;
   onSelect: () => void;
+  // Lets a user on a slow connection (or a misclick on a large model) back
+  // out of a download in progress instead of being stuck waiting for it.
+  onCancelDownload?: () => void;
+  // Shown for an installed, non-current model so disk space can be reclaimed
+  // without needing the Ollama CLI. Omitted entirely while the model is
+  // downloading (that's what onCancelDownload is for) or is the active
+  // selection (deleting it would break the app until another is chosen).
+  isInstalled?: boolean;
+  onDeleteModel?: () => void;
+  // Whether the GGUF id itself was ever actually pulled -- false when
+  // "Select" resolved straight to the NVFP4 tag on Apple Silicon, in which
+  // case there's nothing to have "switched" from (see the MLX badge tooltip).
+  ggufInstalled?: boolean;
+  fasterBuildTag?: string;
+  fasterBuildInstalled?: boolean;
+  fasterBuildState?: 'idle' | 'pulling' | 'verifying' | 'done' | 'error';
+  fasterBuildProgress?: string;
+  fasterBuildBytesPerSecond?: number;
+  // True when a DIFFERENT model's switch-to-faster-build is in flight. The
+  // hook backing this only tracks one in-progress switch at a time, so
+  // starting a second one while the first is still pulling/verifying/awaiting
+  // its delete-confirmation silently drops the first one's completion event
+  // (see useSwitchToFasterBuild's activeTagRef check) -- blocking here rather
+  // than fixing that hook to track many at once, since real concurrent
+  // switches were never a requested use case.
+  fasterBuildBlocked?: boolean;
+  onSwitchToFasterBuild?: () => void;
+  onCancelFasterBuild?: () => void;
 }
 
 function ModelCard({
@@ -372,11 +505,29 @@ function ModelCard({
   deprecated = false,
   isDownloading = false,
   downloadProgress,
+  downloadBytesPerSecond,
   onSelect,
+  onCancelDownload,
+  isInstalled = false,
+  onDeleteModel,
+  ggufInstalled = false,
+  fasterBuildTag,
+  fasterBuildInstalled = false,
+  fasterBuildState = 'idle',
+  fasterBuildProgress,
+  fasterBuildBytesPerSecond,
+  fasterBuildBlocked = false,
+  onSwitchToFasterBuild,
+  onCancelFasterBuild,
 }: ModelCardProps) {
   return (
     <div
-      className="mb-1.5 flex items-center gap-4 rounded-[8px] px-4 py-[13px] transition-colors"
+      // flex-wrap + gap-y lets the wide faster-build row (badge + progress bar
+      // + Cancel) drop onto its own line under the name at a realistic Settings
+      // width, instead of being forced onto one line that squeezes the name to
+      // near-zero (char-wrapping it) and overflows the fixed-width progress
+      // columns into an overlapping mess. The name/button row stays on line 1.
+      className="mb-1.5 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-[8px] px-4 py-[13px] transition-colors"
       style={{
         border: `1px solid ${
           isCurrent ? 'var(--border-strong)' : 'var(--border-subtle)'
@@ -432,6 +583,23 @@ function ModelCard({
               Deprecated
             </span>
           )}
+          {fasterBuildTag && fasterBuildInstalled && (
+            <span
+              className="rounded-[3px] px-1.5 py-px text-[11px]"
+              title={
+                ggufInstalled
+                  ? `Running the MLX build (${fasterBuildTag}) instead of ${name}`
+                  : `Downloaded directly as the MLX build (${fasterBuildTag}) -- ${name} was never pulled`
+              }
+              style={{
+                background: 'var(--surface-sunken)',
+                color: 'var(--fg-muted)',
+                border: '1px solid var(--border)',
+              }}
+            >
+              MLX model
+            </span>
+          )}
         </div>
         {note && (
           <div
@@ -441,15 +609,16 @@ function ModelCard({
             {note}
           </div>
         )}
-        {isDownloading && downloadProgress && (
-          <div
-            className="mt-1 font-mono text-[12px]"
-            style={{ color: 'var(--fg-2)' }}
-          >
-            {downloadProgress}
-          </div>
-        )}
       </div>
+      {isDownloading && downloadProgress && (
+        // Inline, to the right of the name, on the same row as the Select /
+        // Cancel button (it's shrink-0, so it stays intact; the name gives way
+        // via its own min-w-0 block). No onCancel here -- the top-right Button
+        // already doubles as Cancel while isDownloading (see the button block
+        // below). A faster-build switch is excluded from isDownloading upstream,
+        // so this never double-renders with the faster-build progress bar.
+        <PullProgressBar progress={downloadProgress} bytesPerSecond={downloadBytesPerSecond} onCancel={undefined} />
+      )}
       {isCurrent ? (
         <span
           className="inline-flex shrink-0 items-center gap-1.5 text-[13px] font-medium"
@@ -459,23 +628,83 @@ function ModelCard({
           Selected
         </span>
       ) : !deprecated ? (
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-[28px] shrink-0 px-3.5 text-[13px]"
-          disabled={isDownloading}
-          onClick={onSelect}
-        >
-          {isDownloading ? (
-            <>
-              <Loader2 className="mr-1.5 size-3 animate-spin" />
-              Downloading
-            </>
-          ) : (
-            'Select'
+        <div className="flex shrink-0 items-center gap-1.5">
+          {isInstalled && !isDownloading && onDeleteModel && (
+            <button
+              type="button"
+              onClick={onDeleteModel}
+              title="Delete this model to free up disk space"
+              className="flex size-[28px] cursor-pointer items-center justify-center rounded-[6px] border-0 bg-transparent"
+              style={{ color: 'var(--fg-muted)' }}
+            >
+              <Trash2 size={14} />
+            </button>
           )}
-        </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-[28px] px-3.5 text-[13px]"
+            // Whisper/Parakeet share this component but don't wire cancel
+            // support -- without the `onCancelDownload` check, this showed
+            // an active-looking "Cancel" for them that did nothing on click.
+            disabled={isDownloading && !onCancelDownload}
+            onClick={isDownloading ? onCancelDownload : onSelect}
+          >
+            {isDownloading ? (
+              onCancelDownload ? (
+                <>
+                  <X className="mr-1.5 size-3" />
+                  Cancel
+                </>
+              ) : (
+                <>
+                  <Loader2 className="mr-1.5 size-3 animate-spin" />
+                  Downloading
+                </>
+              )
+            ) : (
+              'Select'
+            )}
+          </Button>
+        </div>
       ) : null}
+      {/* Rendered LAST and w-full so flex-wrap pushes it onto its own line
+          below the name + Select/Selected row, rather than fighting them for
+          horizontal space. The badge + progress bar (or switch button) can
+          then sit comfortably at full width. */}
+      {fasterBuildTag && !fasterBuildInstalled && (
+        <div className="flex w-full items-center gap-2">
+          <span
+            className="shrink-0 rounded-[3px] px-1.5 py-px text-[11px]"
+            style={{
+              color: 'var(--fg-muted)',
+              border: '1px solid var(--border-subtle)',
+            }}
+          >
+            Faster build available
+          </span>
+          {fasterBuildState === 'pulling' ? (
+            <PullProgressBar
+              progress={fasterBuildProgress}
+              bytesPerSecond={fasterBuildBytesPerSecond}
+              onCancel={onCancelFasterBuild}
+            />
+          ) : (
+            <button
+              type="button"
+              onClick={onSwitchToFasterBuild}
+              disabled={fasterBuildState === 'verifying' || fasterBuildBlocked}
+              title={fasterBuildBlocked ? 'Finish the current switch first' : undefined}
+              className="shrink-0 cursor-pointer border-0 bg-transparent p-0 text-[12px] underline disabled:cursor-default disabled:no-underline disabled:opacity-60"
+              style={{ color: 'var(--fg-1)' }}
+            >
+              {fasterBuildState === 'verifying' && 'Verifying…'}
+              {fasterBuildState === 'error' && 'Retry: switch to faster build'}
+              {(fasterBuildState === 'idle' || fasterBuildState === 'done') && 'Switch to faster build'}
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -1880,6 +2109,24 @@ function ModelList() {
   const setCurrent = useSetCurrentModel();
   const pull = usePullModel();
   const [showDeprecated, setShowDeprecated] = React.useState(false);
+  // Backs two distinct triggers that both end in "confirm, then delete one or
+  // more tags": the automatic post-switch offer to remove the now-redundant
+  // GGUF build, and the manual "delete this model to free up disk space"
+  // action. Only one delete can be in flight/confirmed at a time in this UI,
+  // so a single piece of state covers both.
+  const [deleteCandidate, setDeleteCandidate] = React.useState<{ tags: string[]; description: string } | null>(
+    null,
+  );
+  const deleteModel = useDeleteModel();
+  const fasterBuild = useSwitchToFasterBuild((mlxTag) => {
+    const match = models.data?.models.find((m) => m.mlxTag === mlxTag);
+    if (match) {
+      setDeleteCandidate({
+        tags: [match.name],
+        description: `${match.name} (${formatModelSize(match.size_gb) ?? 'unknown size'}) is no longer needed now that the faster build is active. Delete it to free up disk space?`,
+      });
+    }
+  });
 
   if (models.isLoading) {
     return (
@@ -1916,8 +2163,24 @@ function ModelList() {
 
   const renderCard = (m: (typeof sorted)[number]) => {
     const isCurrent = m.name === current.data;
-    const isDownloading = Boolean(pull.progress[m.name]);
-    const downloadProgress = pull.progress[m.name];
+    // On Apple Silicon, an uninstalled model is pulled straight to its NVFP4
+    // sibling (matching what first-run setup's pull_target already does) --
+    // config.json still ends up with the canonical GGUF id via models.set()
+    // (see usePullModel's pendingSelect), but the actual download, and so
+    // the IPC events this row's progress/cancel keys off of, are for the
+    // NVFP4 tag. Off Apple Silicon (no mlxTag) this is just m.name, same as
+    // before.
+    const pullTarget = m.mlxTag ?? m.name;
+    const isFasterBuildActive = fasterBuild.activeTag === m.mlxTag;
+    // A "switch to faster build" pulls the SAME -nvfp4 tag a general "Select"
+    // would, and usePullModel's progress listener is a global (unfiltered) IPC
+    // subscription -- so it records that tag's progress too. Without this guard
+    // pull.progress[pullTarget] lights up during a switch, and the card renders
+    // a SECOND, duplicate progress bar (plus a duplicate Cancel) on top of the
+    // faster-build one. While a switch is in flight the faster-build block owns
+    // that UI, so suppress the general-download surface for this row.
+    const isDownloading = Boolean(pull.progress[pullTarget]) && !isFasterBuildActive;
+    const downloadProgress = isDownloading ? pull.progress[pullTarget] : undefined;
     const isDefault = !isRemote && isDefaultModel(m.description);
 
     let note: string | undefined;
@@ -1930,14 +2193,42 @@ function ModelList() {
       note = parts.length ? parts.join(' · ') : undefined;
     }
 
-    const sizeLabel = formatModelSize(m.size_gb);
+    // The NVFP4 blob is a different (often larger) download than the GGUF
+    // entry's own size -- show it instead whenever NVFP4 is what's actually
+    // installed, or (nothing installed yet) what "Select" will actually
+    // pull on Apple Silicon. Otherwise (GGUF installed, no NVFP4) the GGUF
+    // size is what's really on disk.
+    const showMlxSize = m.mlxTag && m.mlxSizeGb !== undefined && (m.mlxInstalled || !m.ggufInstalled);
+    const sizeLabel = formatModelSize(showMlxSize ? m.mlxSizeGb : m.size_gb);
+    const fasterBuildBlocked =
+      Boolean(fasterBuild.activeTag) &&
+      !isFasterBuildActive &&
+      (fasterBuild.state === 'pulling' || fasterBuild.state === 'verifying' || fasterBuild.state === 'done');
 
     const onSelect = () => {
       if (m.installed) {
         setCurrent.mutate(m.name);
       } else {
-        pull.mutate(m.name);
+        pull.mutate({ name: m.name, pullTarget });
       }
+    };
+
+    const onDeleteModel = () => {
+      // Only tags actually present in Ollama -- a model pulled straight to
+      // its NVFP4 tag (general "Select" on Apple Silicon) never has the
+      // GGUF blob itself installed, and ollama.delete() on a tag that was
+      // never pulled throws. Blindly including m.name here caused exactly
+      // that: a stuck confirm dialog on a model with no GGUF blob.
+      const tags: string[] = [];
+      if (m.ggufInstalled) tags.push(m.name);
+      if (m.mlxInstalled && m.mlxTag) tags.push(m.mlxTag);
+      if (tags.length === 0) return;
+      const label = tags.length > 1 ? `${m.name} and its faster build` : tags[0];
+      const pronoun = tags.length > 1 ? 'them' : 'it';
+      setDeleteCandidate({
+        tags,
+        description: `Delete ${label} (${sizeLabel ?? 'unknown size'}) to free up disk space? You can re-download ${pronoun} anytime.`,
+      });
     };
 
     return (
@@ -1951,7 +2242,23 @@ function ModelList() {
         deprecated={Boolean(m.deprecated)}
         isDownloading={isDownloading}
         downloadProgress={downloadProgress}
+        downloadBytesPerSecond={pull.bytesPerSecond[pullTarget]}
         onSelect={onSelect}
+        onCancelDownload={() => pull.cancel(pullTarget)}
+        isInstalled={Boolean(m.installed)}
+        onDeleteModel={onDeleteModel}
+        ggufInstalled={Boolean(m.ggufInstalled)}
+        fasterBuildTag={m.installed ? m.mlxTag : undefined}
+        fasterBuildInstalled={Boolean(m.mlxInstalled)}
+        fasterBuildState={isFasterBuildActive ? fasterBuild.state : 'idle'}
+        fasterBuildProgress={isFasterBuildActive ? fasterBuild.progress : undefined}
+        fasterBuildBytesPerSecond={isFasterBuildActive ? fasterBuild.bytesPerSecond : undefined}
+        fasterBuildBlocked={fasterBuildBlocked}
+        onSwitchToFasterBuild={() => {
+          if (!m.mlxTag || fasterBuildBlocked) return;
+          fasterBuild.switchTo(m.mlxTag);
+        }}
+        onCancelFasterBuild={isFasterBuildActive ? fasterBuild.cancel : undefined}
       />
     );
   };
@@ -1980,6 +2287,45 @@ function ModelList() {
             <div className="mt-2">{deprecated.map(renderCard)}</div>
           )}
         </>
+      )}
+
+      {deleteCandidate && (
+        <ConfirmDialog
+          open={Boolean(deleteCandidate)}
+          onOpenChange={(open) => {
+            if (!open) {
+              setDeleteCandidate(null);
+              fasterBuild.reset();
+            }
+          }}
+          title="Delete model?"
+          description={deleteCandidate.description}
+          confirmLabel="Delete"
+          destructive
+          onConfirm={async () => {
+            // finally, not just a trailing statement: a delete call
+            // rejecting (unexpected -- e.g. Ollama briefly unreachable)
+            // must not leave this dialog stuck open with no way to close
+            // it except Cancel (which, since some deletes may have already
+            // succeeded, looked like "cancel deletes it anyway").
+            // allSettled (not all): waits for every tag's attempt to finish
+            // rather than returning as soon as the first one rejects, so the
+            // dialog doesn't close while a sibling delete is still pending.
+            try {
+              const results = await Promise.allSettled(
+                deleteCandidate.tags.map((tag) => deleteModel.mutateAsync(tag)),
+              );
+              const failed = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
+              if (failed.length > 0) {
+                // eslint-disable-next-line no-console -- no toast/error-surface system exists yet; at least don't fail silently.
+                console.error('Failed to delete some model tags:', failed.map((f) => f.reason));
+              }
+            } finally {
+              setDeleteCandidate(null);
+              fasterBuild.reset();
+            }
+          }}
+        />
       )}
     </div>
   );

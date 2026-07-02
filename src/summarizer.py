@@ -11,6 +11,7 @@ import time
 import os
 from typing import Optional, Dict, Any
 from .models import MeetingTranscript, ActionItem, Decision
+from .config import Config, resolve_runtime_tag
 from . import ollama_manager
 
 logger = logging.getLogger(__name__)
@@ -86,7 +87,13 @@ def resolve_num_ctx(model_name: str) -> int:
     Sized per known model, clamped to ``[FLOOR, CEILING]``; unknown models fall
     back to the conservative default. Pure function — unit-testable without a
     running model or Ollama.
+
+    ``model_name`` may be an NVFP4 tag (the resolved runtime model on Apple
+    Silicon) rather than the canonical GGUF id the lookup table is keyed by —
+    canonicalize back to the GGUF id first so both runtime variants share the
+    same window.
     """
+    model_name = Config._MLX_TO_GGUF.get(model_name, model_name)
     base = _OLLAMA_MODEL_NUM_CTX.get(model_name, OLLAMA_NUM_CTX_DEFAULT)
     return max(OLLAMA_NUM_CTX_FLOOR, min(base, OLLAMA_NUM_CTX_CEILING))
 
@@ -207,7 +214,7 @@ class OllamaSummarizer:
                     logger.warning(f"Failed to load model from config: {e}, using default")
                     model_name = config.DEFAULT_MODEL
 
-            self.model_name = model_name
+            self.model_name = resolve_runtime_tag(model_name)
             self._ensure_ollama_ready()
             self.client = ollama.Client()
     

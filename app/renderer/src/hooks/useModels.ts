@@ -54,6 +54,10 @@ export function useModels() {
         description: info.description,
         speed: info.speed,
         quality: info.quality,
+        mlxTag: info.mlx_tag,
+        mlxInstalled: info.mlx_installed,
+        mlxSizeGb: parseSizeGb(info.mlx_size),
+        ggufInstalled: info.gguf_installed,
       }));
       return { models, current: raw.current_model, provider: raw.provider };
     },
@@ -91,22 +95,70 @@ export function useSetCurrentModel() {
   });
 }
 
+// Shared by usePullModel and useSwitchToFasterBuild: both parse the same
+// "<status> <pct>% (<completed>/<total>)" progress string (see pull_model's
+// print format in simple_recorder.py) into a live bytes/sec figure, keyed by
+// model so multiple downloads can be tracked independently.
+function useByteRateTracker() {
+  const [bytesPerSecond, setBytesPerSecond] = React.useState<Record<string, number>>({});
+  const rateSamplesRef = React.useRef<Record<string, { bytes: number; at: number }>>({});
+
+  const sample = (model: string, progress: string) => {
+    const byteMatch = progress.match(/\((\d+)\/(\d+)\)/);
+    if (!byteMatch) return;
+    const completed = Number(byteMatch[1]);
+    const now = Date.now();
+    const prevSample = rateSamplesRef.current[model];
+    if (prevSample && now > prevSample.at && completed >= prevSample.bytes) {
+      const rate = (completed - prevSample.bytes) / ((now - prevSample.at) / 1000);
+      setBytesPerSecond((prev) => ({ ...prev, [model]: rate }));
+    }
+    rateSamplesRef.current[model] = { bytes: completed, at: now };
+  };
+
+  const drop = (model: string) => {
+    delete rateSamplesRef.current[model];
+    setBytesPerSecond((prev) => {
+      const { [model]: _drop, ...rest } = prev;
+      return rest;
+    });
+  };
+
+  return { bytesPerSecond, sample, drop };
+}
+
 export function usePullModel() {
   const qc = useQueryClient();
   const [progress, setProgress] = React.useState<Record<string, string>>({});
-  const [pendingSelect, setPendingSelect] = React.useState<string | null>(null);
+  // `name` is the canonical GGUF id -- what models.set() must receive once
+  // the pull succeeds. `pullTarget` is what was actually requested from
+  // Ollama, which on Apple Silicon is the NVFP4 sibling (see pullAndSelect
+  // below) -- IPC progress/completion events report THAT string, so
+  // matching against it (not `name`) is what lets this resolve correctly.
+  const [pendingSelect, setPendingSelect] = React.useState<{ name: string; pullTarget: string } | null>(null);
+  const rate = useByteRateTracker();
 
   React.useEffect(() => {
     const offProgress = ipc().on.modelPullProgress(({ model, progress: p }) => {
       setProgress((prev) => ({ ...prev, [model]: p }));
+      rate.sample(model, p);
     });
     const offComplete = ipc().on.modelPullComplete(async ({ model, success }) => {
       setProgress((prev) => {
         const { [model]: _drop, ...rest } = prev;
         return rest;
       });
-      if (success && pendingSelect === model) {
-        await ipc().models.set(model);
+      rate.drop(model);
+      // Clear pendingSelect on ANY outcome for its own pullTarget, not just
+      // success -- modelPullComplete is a global event with no per-hook
+      // filtering, so a stale pendingSelect left behind by a cancelled/failed
+      // pull could otherwise be matched later by an unrelated pull of the
+      // same tag (e.g. a "switch to faster build" for the same model),
+      // silently calling models.set() for a selection change nothing asked for.
+      if (pendingSelect?.pullTarget === model) {
+        if (success) {
+          await ipc().models.set(pendingSelect.name);
+        }
         setPendingSelect(null);
       }
       qc.invalidateQueries({ queryKey: modelsKeys.all });
@@ -115,18 +167,213 @@ export function usePullModel() {
       offProgress();
       offComplete();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [qc, pendingSelect]);
 
-  const pullAndSelect = async (name: string) => {
-    setPendingSelect(name);
-    unwrap(await ipc().models.pull(name));
+  // `pullTarget` defaults to `name` (the pre-existing behavior) for callers
+  // that don't need MLX resolution (e.g. off Apple Silicon, or no MLX
+  // equivalent exists for this model).
+  const pullAndSelect = async ({ name, pullTarget }: { name: string; pullTarget: string }) => {
+    setPendingSelect({ name, pullTarget });
+    unwrap(await ipc().models.pull(pullTarget));
   };
 
   const mutation = useMutation({
     mutationFn: pullAndSelect,
   });
 
-  return { ...mutation, progress };
+  const cancel = (pullTarget: string) => {
+    void ipc().models.cancelPull(pullTarget);
+  };
+
+  return { ...mutation, progress, bytesPerSecond: rate.bytesPerSecond, cancel };
+}
+
+// ---------------------------------------------------------------------------
+// "Switch to faster build" -- pulls a model's NVFP4/MLX sibling, smoke-tests
+// it, and (on success) leaves it to the caller to offer deleting the old
+// GGUF tag. Deliberately does NOT call models.set() -- config.json already
+// points at the canonical GGUF id, and src/summarizer.py resolves it to the
+// MLX tag at runtime on Apple Silicon. See docs/superpowers/specs/
+// 2026-07-01-ollama-mlx-tag-adoption-design.md.
+// ---------------------------------------------------------------------------
+
+export type SwitchToFasterBuildState = 'idle' | 'pulling' | 'verifying' | 'done' | 'error';
+
+export function useSwitchToFasterBuild(onVerified?: (mlxTag: string) => void) {
+  const qc = useQueryClient();
+  const [state, setState] = React.useState<SwitchToFasterBuildState>('idle');
+  const [error, setError] = React.useState<string | null>(null);
+  const [activeTag, setActiveTag] = React.useState<string | null>(null);
+  const [progress, setProgress] = React.useState<Record<string, string>>({});
+
+  // activeTag is mirrored into a ref so the event listeners below (subscribed
+  // exactly once, on mount) always read the CURRENT tag rather than the value
+  // captured when the effect last ran. Without this, switchTo() below sets
+  // activeTag and immediately fires the pull in the same tick; a completion
+  // event racing the effect's re-subscription (before React has committed the
+  // new activeTag into this closure) would otherwise be silently dropped by
+  // the `model !== activeTag` check.
+  const activeTagRef = React.useRef<string | null>(null);
+  const onVerifiedRef = React.useRef(onVerified);
+  onVerifiedRef.current = onVerified;
+
+  const rate = useByteRateTracker();
+
+  // Shared by the live model-pull-complete listener and the on-mount
+  // rehydration effect below -- both need to react identically to a pull's
+  // terminal outcome (drop progress tracking, verify on success, surface the
+  // error otherwise), the only difference being whether the outcome arrived
+  // as a live event or was discovered after the fact via getActivePulls().
+  // Only closes over stable setters/refs, so it's safe for the once-run
+  // effects to capture the copy from their first render.
+  const handlePullOutcome = async (
+    model: string,
+    success: boolean,
+    pullError?: string,
+    cancelled?: boolean,
+  ) => {
+    setProgress((prev) => {
+      const { [model]: _drop, ...rest } = prev;
+      return rest;
+    });
+    rate.drop(model);
+    if (cancelled) {
+      // A user-initiated cancel isn't a failure -- go back to the plain
+      // "Switch to faster build" prompt rather than an error state.
+      ipc().models.ackPullComplete(model);
+      setState('idle');
+      setError(null);
+      setActiveTag(null);
+      activeTagRef.current = null;
+      return;
+    }
+    if (!success) {
+      ipc().models.ackPullComplete(model);
+      setState('error');
+      setError(pullError ?? 'Failed to download the faster build.');
+      return;
+    }
+    setState('verifying');
+    const verifyResult = await ipc().models.verify(model);
+    // Deferred until after verify (not right after the download) so that
+    // navigating away mid-verify and back replays this whole outcome --
+    // including a redundant but harmless re-verify -- on the new mount,
+    // instead of the completedPulls entry already being consumed and the
+    // "offer to delete the old build" (onVerified) never firing for anyone.
+    ipc().models.ackPullComplete(model);
+    if (verifyResult.success) {
+      setState('done');
+      qc.invalidateQueries({ queryKey: modelsKeys.all });
+      onVerifiedRef.current?.(model);
+    } else {
+      setState('error');
+      setError(verifyResult.error ?? "Couldn't verify the faster build.");
+    }
+  };
+
+  React.useEffect(() => {
+    const offProgress = ipc().on.modelPullProgress(({ model, progress: p }) => {
+      setProgress((prev) => ({ ...prev, [model]: p }));
+      rate.sample(model, p);
+    });
+    const offComplete = ipc().on.modelPullComplete(({ model, success, error: pullError, cancelled: wasCancelled }) => {
+      if (model !== activeTagRef.current) return;
+      void handlePullOutcome(model, success, pullError, wasCancelled);
+    });
+    return () => {
+      offProgress();
+      offComplete();
+    };
+    // Empty deps: subscribe once. activeTagRef (not activeTag state) is what
+    // the listeners consult, so they never need to be re-subscribed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // On mount, ask the main process whether a switch-to-faster-build download
+  // is already running from before this component (re)mounted -- e.g. the
+  // user navigated away from Settings and back. The download itself lives in
+  // the main process and keeps going regardless of what the renderer does;
+  // without this rehydration, the UI would show "Switch to faster build" as
+  // if nothing were happening until the user clicked it again. Filtered to
+  // "-nvfp4" tags so a regular (non-faster-build) model download in progress
+  // elsewhere in the app isn't mistaken for one of ours.
+  React.useEffect(() => {
+    let cancelled = false;
+    void ipc()
+      .models.getActivePulls()
+      .then((pulls) => {
+        if (cancelled) return;
+        const activeEntry = Object.entries(pulls).find(([model]) => model.endsWith('-nvfp4'));
+        if (!activeEntry) return;
+        const [model, entry] = activeEntry;
+        setActiveTag(model);
+        activeTagRef.current = model;
+        if (entry.done) {
+          // The pull finished while this component was unmounted (e.g. the
+          // user navigated away from Settings mid-download), so the live
+          // model-pull-complete listener never ran for it. Replay the same
+          // outcome handling now instead of showing "Switch to faster
+          // build" as if nothing had happened.
+          void handlePullOutcome(model, Boolean(entry.success), entry.error, entry.cancelled);
+          return;
+        }
+        setState('pulling');
+        const progressValue = entry.progress ?? '';
+        setProgress((prev) => ({ ...prev, [model]: progressValue }));
+        rate.sample(model, progressValue);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const switchTo = (mlxTag: string) => {
+    setState('pulling');
+    setError(null);
+    setActiveTag(mlxTag);
+    activeTagRef.current = mlxTag;
+    void ipc().models.pull(mlxTag);
+  };
+
+  const reset = () => {
+    setState('idle');
+    setError(null);
+    setActiveTag(null);
+    activeTagRef.current = null;
+  };
+
+  // Only meaningful while state === 'pulling' -- the actual state reset
+  // happens when the resulting model-pull-complete(cancelled: true) event
+  // arrives via handlePullOutcome, not optimistically here.
+  const cancel = () => {
+    if (!activeTagRef.current) return;
+    void ipc().models.cancelPull(activeTagRef.current);
+  };
+
+  return {
+    state,
+    error,
+    activeTag,
+    progress: activeTag ? progress[activeTag] : undefined,
+    bytesPerSecond: activeTag ? rate.bytesPerSecond[activeTag] : undefined,
+    switchTo,
+    reset,
+    cancel,
+  };
+}
+
+export function useDeleteModel() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (tag: string) => {
+      const result = await ipc().models.delete(tag);
+      if (!result.success) throw new Error(result.error ?? 'Failed to delete the old build.');
+      return result;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: modelsKeys.all }),
+  });
 }
 
 // ---------------------------------------------------------------------------

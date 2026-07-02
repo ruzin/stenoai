@@ -4817,9 +4817,13 @@ ipcMain.handle('setup-ollama-and-model', async () => {
     // and skip the pull entirely, so the default Local path needs no network for
     // anyone with a usable Ollama already set up. Best-effort: any failure here
     // falls through to the normal download below.
+    let pullTarget = DEFAULT_AI_MODEL;
     try {
       const resolvedRaw = await runPythonScript('simple_recorder.py', ['resolve-setup-model'], true);
       const resolved = JSON.parse(resolvedRaw.trim());
+      if (resolved && resolved.pull_target) {
+        pullTarget = resolved.pull_target;
+      }
       if (resolved && resolved.installed) {
         sendDebugLog(`Found already-installed model "${resolved.installed}" — skipping download`);
         // Persist it as the active model, and only report success once that
@@ -4847,11 +4851,11 @@ ipcMain.handle('setup-ollama-and-model', async () => {
     }
 
     sendDebugLog('Downloading AI model (this may take several minutes)...');
-    sendDebugLog(`POST http://127.0.0.1:11434/api/pull {name: "${DEFAULT_AI_MODEL}"}`);
+    sendDebugLog(`POST http://127.0.0.1:11434/api/pull {name: "${pullTarget}"}`);
 
     const http = require('http');
     return new Promise((resolve) => {
-      const postData = JSON.stringify({ name: DEFAULT_AI_MODEL });
+      const postData = JSON.stringify({ name: pullTarget });
       const req = http.request({
         hostname: '127.0.0.1',
         port: 11434,
@@ -5442,6 +5446,36 @@ ipcMain.handle('set-model', async (event, modelName) => {
     return { success: true, model: modelName };
   } catch (error) {
     sendDebugLog(`Error setting model: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('verify-model', async (event, modelName) => {
+  try {
+    sendDebugLog(`Verifying model: ${modelName}`);
+    const result = await runPythonScript('simple_recorder.py', ['verify-model', modelName]);
+    const jsonMatch = result.match(/\{.*\}/s);
+    if (jsonMatch) {
+      return JSON.parse(jsonMatch[0]);
+    }
+    return { success: true };
+  } catch (error) {
+    sendDebugLog(`Error verifying model: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('delete-model', async (event, modelName) => {
+  try {
+    sendDebugLog(`Deleting model: ${modelName}`);
+    const result = await runPythonScript('simple_recorder.py', ['delete-model', modelName]);
+    const jsonMatch = result.match(/\{.*\}/s);
+    if (jsonMatch) {
+      return JSON.parse(jsonMatch[0]);
+    }
+    return { success: true };
+  } catch (error) {
+    sendDebugLog(`Error deleting model: ${error.message}`);
     return { success: false, error: error.message };
   }
 });
@@ -6868,44 +6902,113 @@ ipcMain.on('system-audio-recording-state', (event, isRecording) => {
   updateTrayMenu();
 });
 
+// Tracks in-flight pull-model downloads (model -> last progress string) so a
+// renderer that remounts (e.g. navigating away from Settings and back) can
+// ask "is anything still downloading?" instead of only finding out via
+// events it wasn't subscribed to receive while unmounted. The download
+// itself lives in this main process regardless of what the renderer is
+// doing, so this map is the source of truth for "is it still going".
+const activePulls = new Map();
+
+// Tracks a pull's terminal outcome (model -> {success, error}) after it
+// leaves activePulls, so a renderer that was unmounted for the whole
+// download (missed the live model-pull-progress/model-pull-complete events
+// entirely) can still discover on remount that it finished, rather than
+// silently going back to "not started". A client clears its own entry via
+// 'ack-pull-complete' once it has acted on it (see useSwitchToFasterBuild).
+const completedPulls = new Map();
+
+// The live ChildProcess per in-flight pull, so 'cancel-pull' can kill the
+// right one. Deliberately NOT exposed via get-active-pulls -- a ChildProcess
+// handle isn't IPC-serializable, and nothing outside this handler needs it.
+const activeProcs = new Map();
+
+// Models whose pull was explicitly cancelled, so the close handler below
+// can report "Cancelled" instead of a confusing "exited with code null".
+const cancelledPulls = new Set();
+
 ipcMain.handle('pull-model', async (event, modelName) => {
+  // Guards against a duplicate pull of the SAME model racing in (e.g. a
+  // double-click before React re-renders the button as disabled) -- without
+  // this, two subprocesses would run concurrently and the first one's close
+  // handler would delete activePulls' entry out from under the second.
+  if (activePulls.has(modelName)) {
+    return { success: false, error: `A pull for ${modelName} is already in progress.` };
+  }
   try {
     sendDebugLog(`Pulling model: ${modelName}`);
     sendDebugLog('This may take several minutes...');
+    activePulls.set(modelName, '');
 
     return new Promise((resolve) => {
       const proc = spawn(getBackendPath(), ['pull-model', modelName], {
         cwd: getBackendCwd()
       });
+      activeProcs.set(modelName, proc);
 
       let lastStdoutLine = '';
+
+      // Ollama's own pull-progress stream can emit dozens of updates per
+      // second on a large download (multi-GB models like the NVFP4/MLX
+      // builds) — forwarding every single one drove the renderer's model
+      // list to re-render faster than the compositor could keep up,
+      // visible as window flicker/tearing. Throttling to 5/sec keeps the
+      // UI smooth without making the progress text feel laggy.
+      let lastProgressSentAt = 0;
+      const PROGRESS_THROTTLE_MS = 200;
+      const sendProgress = (output) => {
+        activePulls.set(modelName, output);
+        if (!mainWindow || mainWindow.isDestroyed()) return;
+        const now = Date.now();
+        if (now - lastProgressSentAt < PROGRESS_THROTTLE_MS) return;
+        lastProgressSentAt = now;
+        mainWindow.webContents.send('model-pull-progress', {
+          model: modelName,
+          progress: output
+        });
+      };
 
       proc.stdout.on('data', (data) => {
         const output = data.toString().trim();
         sendDebugLog(output);
         if (output) lastStdoutLine = output;
-
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.webContents.send('model-pull-progress', {
-            model: modelName,
-            progress: output
-          });
-        }
+        sendProgress(output);
       });
 
       proc.stderr.on('data', (data) => {
         const output = data.toString().trim();
         sendDebugLog(output);
-
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.webContents.send('model-pull-progress', {
-            model: modelName,
-            progress: output
-          });
-        }
+        sendProgress(output);
       });
 
-      proc.on('close', (code) => {
+      proc.on('close', (code, signal) => {
+        activePulls.delete(modelName);
+        activeProcs.delete(modelName);
+
+        // Only trust this as a real cancellation if the process was
+        // actually signal-killed. If cancel-pull's kill() arrived after the
+        // process had already finished on its own (a narrow but real race:
+        // proc.kill() is a no-op on an already-exited process, but the
+        // 'close' event for that natural exit hasn't been delivered yet),
+        // `signal` is null here -- treat it as its real outcome below
+        // instead of reporting a successful pull as cancelled.
+        if (cancelledPulls.delete(modelName) && signal) {
+          sendDebugLog(`Cancelled pull: ${modelName}`);
+          completedPulls.set(modelName, { success: false, error: 'Cancelled', cancelled: true });
+
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('model-pull-complete', {
+              model: modelName,
+              success: false,
+              error: 'Cancelled',
+              cancelled: true
+            });
+          }
+
+          resolve({ success: false, error: 'Cancelled', cancelled: true });
+          return;
+        }
+
         // The backend prints a JSON result as the last stdout line.
         // Check it even on exit code 0, since the Python CLI may
         // catch errors and still exit cleanly.
@@ -6916,6 +7019,7 @@ ipcMain.handle('pull-model', async (event, modelName) => {
 
         if (succeeded) {
           sendDebugLog(`Successfully pulled model: ${modelName}`);
+          completedPulls.set(modelName, { success: true });
 
           if (mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.webContents.send('model-pull-complete', {
@@ -6928,6 +7032,7 @@ ipcMain.handle('pull-model', async (event, modelName) => {
         } else {
           const errorMsg = (pullResult && pullResult.error) || `Process exited with code ${code}`;
           sendDebugLog(`Failed to pull model: ${modelName} - ${errorMsg}`);
+          completedPulls.set(modelName, { success: false, error: errorMsg });
 
           if (mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.webContents.send('model-pull-complete', {
@@ -6942,7 +7047,11 @@ ipcMain.handle('pull-model', async (event, modelName) => {
       });
 
       proc.on('error', (error) => {
+        activePulls.delete(modelName);
+        activeProcs.delete(modelName);
+        cancelledPulls.delete(modelName);
         sendDebugLog(`Error pulling model: ${error.message}`);
+        completedPulls.set(modelName, { success: false, error: error.message });
 
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send('model-pull-complete', {
@@ -6956,9 +7065,40 @@ ipcMain.handle('pull-model', async (event, modelName) => {
       });
     });
   } catch (error) {
+    activePulls.delete(modelName);
+    activeProcs.delete(modelName);
+    cancelledPulls.delete(modelName);
     sendDebugLog(`Error in pull-model handler: ${error.message}`);
     return { success: false, error: error.message };
   }
+});
+
+ipcMain.handle('cancel-pull', (event, modelName) => {
+  const proc = activeProcs.get(modelName);
+  if (!proc) {
+    return { success: false, error: 'No active pull for this model.' };
+  }
+  cancelledPulls.add(modelName);
+  proc.kill();
+  return { success: true, error: null };
+});
+
+ipcMain.handle('get-active-pulls', () => {
+  const result = {};
+  for (const [model, progress] of activePulls) {
+    result[model] = { progress, done: false };
+  }
+  for (const [model, outcome] of completedPulls) {
+    result[model] = { done: true, ...outcome };
+  }
+  return result;
+});
+
+// Lets a renderer that consumed a completedPulls entry (via getActivePulls
+// on remount, or the live model-pull-complete listener) tell main it's been
+// handled, so a later remount doesn't replay an already-resolved outcome.
+ipcMain.on('ack-pull-complete', (event, modelName) => {
+  completedPulls.delete(modelName);
 });
 
 // Helper to build env vars for running the bundled Ollama binary directly.

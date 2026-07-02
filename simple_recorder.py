@@ -2968,19 +2968,51 @@ def list_models():
                 "error": error_msg
             }
     else:
-        models = config.list_supported_models()
+        # Per-entry dicts must be copied, not mutated in place: list_supported_models()
+        # returns a shallow copy whose nested dicts are the SAME objects as
+        # Config.SUPPORTED_MODELS. Mutating them directly would leak 'installed' /
+        # 'mlx_tag' / 'mlx_installed' into the class-level dict, contaminating any
+        # later call within the same process (e.g. repeated invocations in tests).
+        models = {model_id: dict(info) for model_id, info in config.list_supported_models().items()}
         try:
             import ollama as ollama_pkg
             installed_names = {getattr(m, 'model', '') for m in (getattr(ollama_pkg.list(), 'models', []) or [])}
         except Exception:
             installed_names = set()
+        from src.config import is_apple_silicon, Config
+        apple_silicon = provider == "local" and is_apple_silicon()
         for model_id, info in models.items():
             # Match exactly, or where Ollama appended extra detail after the tag
             # e.g. "deepseek-r1:14b" matches "deepseek-r1:14b-qwen-distill-q4_K_M"
-            info['installed'] = any(
+            gguf_installed = any(
                 name == model_id or name.startswith(model_id + '-')
                 for name in installed_names
             )
+            # Kept distinct from 'installed' below: a model pulled straight to
+            # its NVFP4 tag (general "Select" resolves to that on Apple
+            # Silicon) never has the GGUF blob itself in Ollama, so callers
+            # that need to know "is the GGUF id actually there" (e.g. the
+            # Settings delete-to-free-space action, which must not try to
+            # delete a tag that was never pulled) can't rely on 'installed'
+            # alone once it's true-via-NVFP4-fallback.
+            info['gguf_installed'] = gguf_installed
+            info['installed'] = gguf_installed
+            if apple_silicon:
+                mlx_tag = Config._MLX_EQUIVALENTS.get(model_id)
+                if mlx_tag:
+                    info['mlx_tag'] = mlx_tag
+                    mlx_size = Config._MLX_SIZES.get(mlx_tag)
+                    if mlx_size:
+                        info['mlx_size'] = mlx_size
+                    info['mlx_installed'] = any(
+                        name == mlx_tag or name.startswith(mlx_tag + '-')
+                        for name in installed_names
+                    )
+                    # Fully usable even though the GGUF id itself was never
+                    # downloaded -- report it installed rather than leaving
+                    # "Select" re-offered.
+                    if info['mlx_installed']:
+                        info['installed'] = True
         result = {
             "current_model": current_model,
             "supported_models": models,
@@ -3795,16 +3827,86 @@ def pull_model(model_name):
     start_ollama_server()
     try:
         import ollama
+        # Ollama models are made of several blobs (weights, params, tokenizer,
+        # ...), each streamed as its own 0-100% phase with a distinct status
+        # string -- without a marker, the percentage appearing to "restart"
+        # reads as a second, unrelated download. seen_statuses tracks which
+        # weighted (total>0) phases have already started so blob_index only
+        # advances on a genuinely new one, not on every repeated tick of the
+        # same blob.
+        seen_statuses = set()
+        blob_index = 0
         for progress in ollama.pull(model_name, stream=True):
             status = getattr(progress, 'status', '') or ''
             total = getattr(progress, 'total', 0) or 0
             completed = getattr(progress, 'completed', 0) or 0
             if total > 0:
+                if status not in seen_statuses:
+                    seen_statuses.add(status)
+                    blob_index += 1
                 pct = int(completed / total * 100)
-                print(f"{status} {pct}%", flush=True)
+                # Byte counts and the blob/part index are appended in a
+                # machine-parseable suffix, on the SAME line as the
+                # percentage (not a separate print), so the renderer can
+                # compute a live transfer rate and part label without either
+                # ever desyncing from the percentage it corresponds to.
+                print(f"{status} {pct}% ({completed}/{total}) [Part {blob_index}]", flush=True)
             elif status:
                 print(status, flush=True)
         print(json.dumps({"success": True, "model": model_name}))
+    except Exception as e:
+        print(json.dumps({"success": False, "error": str(e)}))
+
+
+@cli.command(name='verify-model')
+@click.argument('model_name')
+def verify_model(model_name):
+    """Smoke-test a just-pulled model with a 1-token chat call (uses HTTP API).
+
+    Used only by the Settings "switch to faster build" flow, to prove an
+    MLX/NVFP4 tag actually loads and responds before offering to delete the
+    old GGUF build. A generous timeout accounts for MLX cold-load (several
+    seconds after a fresh pull, per local benchmarking) -- a slow-but-working
+    model must not be reported as a failure.
+    """
+    from src.ollama_manager import start_ollama_server
+    start_ollama_server()
+    try:
+        import ollama
+        client = ollama.Client(timeout=90)
+        client.chat(
+            model=model_name,
+            messages=[{"role": "user", "content": "hi"}],
+            options={"num_predict": 1},
+        )
+        print(json.dumps({"success": True, "error": None}))
+    except Exception as e:
+        print(json.dumps({"success": False, "error": str(e)}))
+
+
+@cli.command(name='delete-model')
+@click.argument('model_name')
+def delete_model(model_name):
+    """Delete a locally-pulled Ollama model (uses HTTP API).
+
+    Called by the Settings "switch to faster build" flow (the old GGUF tag,
+    after its NVFP4 sibling has been pulled and verified) and by the general
+    "delete this model to free up disk space" action (either the GGUF id or
+    its NVFP4 sibling) -- never a tag currently in active use. Restricted to
+    supported GGUF ids and their NVFP4 siblings: this is a destructive
+    IPC-reachable operation, so it must not delete an arbitrary
+    caller-supplied model name.
+    """
+    from src.config import get_config, Config
+
+    allowed = set(get_config().list_supported_models()) | set(Config._MLX_EQUIVALENTS.values())
+    if model_name not in allowed:
+        print(json.dumps({"success": False, "error": f"Refusing to delete unsupported model: {model_name}"}))
+        return
+    try:
+        import ollama
+        ollama.delete(model=model_name)
+        print(json.dumps({"success": True, "error": None}))
     except Exception as e:
         print(json.dumps({"success": False, "error": str(e)}))
 
@@ -3851,8 +3953,9 @@ def resolve_setup_model():
     """
     from src.config import get_config, Config
     from src.ollama_manager import start_ollama_server
+    from src.config import is_apple_silicon
 
-    result = {"installed": None}
+    result = {"installed": None, "pull_target": Config.DEFAULT_MODEL}
     try:
         start_ollama_server()
         import ollama
@@ -3867,11 +3970,33 @@ def resolve_setup_model():
             mid for mid, meta in Config.SUPPORTED_MODELS.items()
             if meta.get('deprecated')
         ]
+        # Canonicalize any already-installed MLX tag back to its GGUF id so an
+        # Apple-Silicon machine that only has e.g. gemma4:e2b-nvfp4 (from a
+        # prior manual switch) is still recognised as "has a supported model".
+        # Also matches an NVFP4 tag with extra detail Ollama appended after
+        # it (the same fuzzy pattern list_models() uses for GGUF ids below,
+        # e.g. "deepseek-r1:14b" matching "deepseek-r1:14b-qwen-distill-q4_K_M")
+        # -- an exact dict lookup alone would miss that and cause a redundant
+        # re-download here even though list_models() already recognises it.
+        def _canonicalize_mlx_tag(name):
+            if name in Config._MLX_TO_GGUF:
+                return Config._MLX_TO_GGUF[name]
+            for mlx_tag, gguf_id in Config._MLX_TO_GGUF.items():
+                if name.startswith(mlx_tag + '-'):
+                    return gguf_id
+            return name
+
+        canonical_installed = {_canonicalize_mlx_tag(name) for name in installed}
         result["installed"] = pick_installed_supported_model(
-            installed_names=installed,
+            installed_names=canonical_installed,
             preferred=[config.get_model(), Config.DEFAULT_MODEL],
             supported_order=list(Config.SUPPORTED_MODELS.keys()),
             deprecated=deprecated,
+        )
+        result["pull_target"] = (
+            Config._MLX_EQUIVALENTS.get(Config.DEFAULT_MODEL, Config.DEFAULT_MODEL)
+            if is_apple_silicon()
+            else Config.DEFAULT_MODEL
         )
     except Exception as e:
         result["error"] = str(e)

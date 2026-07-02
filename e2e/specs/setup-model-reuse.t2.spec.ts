@@ -80,3 +80,46 @@ test('setup reuses an installed supported model and skips the pull (#123)', asyn
   // Keystone: the real user-data dir is byte-for-byte untouched.
   expect(fileSig(realUserDataDir())).toBe(realDirBefore);
 });
+
+test('setup pulls the NVFP4 tag on Apple Silicon, but still persists the canonical GGUF id', async ({
+  launchApp,
+  userDataDir,
+}) => {
+  if (!ollamaBinaryExists()) {
+    // eslint-disable-next-line no-console
+    console.warn('[t2] SKIPPED setup-model-reuse (mlx pull_target): bundled bin/ollama absent on this host.');
+    test.info().annotations.push({
+      type: 'skip-reason',
+      description: 'bin/ollama not present; setup-ollama-and-model refuses to proceed',
+    });
+  }
+  test.skip(!ollamaBinaryExists(), 'bundled bin/ollama unavailable on this runner');
+  test.skip(process.platform !== 'darwin' || process.arch !== 'arm64', 'pull_target only diverges on Apple Silicon');
+
+  const realDirBefore = fileSig(realUserDataDir());
+  killOllama();
+  // installedModels: [] -- unlike every other test in this file, this one
+  // needs setup to actually issue a pull rather than reuse an "already
+  // installed" default, so the mock must report nothing installed.
+  const mock = await startMockOllama({ installedModels: [] });
+  try {
+    // No config seeded and the mock lists nothing installed, so setup must pull.
+    const { page } = await launchApp();
+
+    const res = await page.evaluate(() =>
+      (window as StenoWindow).stenoai.setup.ollamaAndModel(),
+    );
+    expect(res.success).toBe(true);
+
+    // The Electron main process pulled the NVFP4 tag (pull_target from
+    // resolve-setup-model on Apple Silicon)...
+    expect(mock.lastPulledModel()).toBe('gemma4:e2b-nvfp4');
+    // ...but config.json still holds the canonical GGUF id -- config never
+    // stores an MLX tag (see docs/superpowers/specs/2026-07-01-ollama-mlx-tag-adoption-design.md).
+    await expect.poll(() => readUserConfig(userDataDir).model).toBe('gemma4:e2b-it-qat');
+  } finally {
+    await mock.close();
+  }
+
+  expect(fileSig(realUserDataDir())).toBe(realDirBefore);
+});

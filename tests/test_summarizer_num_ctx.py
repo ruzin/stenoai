@@ -66,6 +66,66 @@ class ResolveNumCtxTests(unittest.TestCase):
             msg=f"active registry models missing a num_ctx entry: {missing}",
         )
 
+    def test_nvfp4_tag_resolves_to_same_num_ctx_as_its_gguf_sibling(self):
+        # A value deliberately different from OLLAMA_NUM_CTX_DEFAULT proves the
+        # NVFP4 tag is actually canonicalized to its GGUF sibling before lookup,
+        # rather than merely falling through to the default (which happens to
+        # equal today's real Gemma entries, making a same-value test pass
+        # either way regardless of whether canonicalization runs).
+        with mock.patch.dict(
+            _OLLAMA_MODEL_NUM_CTX,
+            {"gemma4:12b-it-qat": 65536, "gemma4:e2b-it-qat": 16384},
+        ):
+            self.assertEqual(
+                resolve_num_ctx("gemma4:12b-nvfp4"),
+                resolve_num_ctx("gemma4:12b-it-qat"),
+            )
+            self.assertEqual(resolve_num_ctx("gemma4:12b-nvfp4"), 65536)
+
+            self.assertEqual(
+                resolve_num_ctx("gemma4:e2b-nvfp4"),
+                resolve_num_ctx("gemma4:e2b-it-qat"),
+            )
+            self.assertEqual(resolve_num_ctx("gemma4:e2b-nvfp4"), 16384)
+
+
+class LocalProviderModelResolutionTests(unittest.TestCase):
+    def _make_config(self, model_id):
+        cfg = mock.Mock()
+        cfg.get_ai_provider.return_value = "local"
+        cfg.get_remote_ollama_url.return_value = None
+        cfg.get_model.return_value = model_id
+        return cfg
+
+    def test_local_provider_resolves_to_nvfp4_on_apple_silicon(self):
+        from src.summarizer import OllamaSummarizer
+        cfg = self._make_config("gemma4:e2b-it-qat")
+        with mock.patch.object(OllamaSummarizer, "_ensure_ollama_ready"), \
+             mock.patch("src.summarizer.ollama.Client"), \
+             mock.patch("src.config.is_apple_silicon", return_value=True):
+            summarizer = OllamaSummarizer(config=cfg)
+        self.assertEqual(summarizer.model_name, "gemma4:e2b-nvfp4")
+
+    def test_local_provider_keeps_gguf_off_apple_silicon(self):
+        from src.summarizer import OllamaSummarizer
+        cfg = self._make_config("gemma4:e2b-it-qat")
+        with mock.patch.object(OllamaSummarizer, "_ensure_ollama_ready"), \
+             mock.patch("src.summarizer.ollama.Client"), \
+             mock.patch("src.config.is_apple_silicon", return_value=False):
+            summarizer = OllamaSummarizer(config=cfg)
+        self.assertEqual(summarizer.model_name, "gemma4:e2b-it-qat")
+
+    def test_remote_provider_is_never_resolved(self):
+        from src.summarizer import OllamaSummarizer
+        cfg = mock.Mock()
+        cfg.get_ai_provider.return_value = "remote"
+        cfg.get_remote_ollama_url.return_value = "http://192.168.1.50:11434"
+        cfg.get_model.return_value = "gemma4:e2b-it-qat"
+        with mock.patch("src.summarizer.ollama.Client"), \
+             mock.patch("src.config.is_apple_silicon", return_value=True):
+            summarizer = OllamaSummarizer(config=cfg)
+        self.assertEqual(summarizer.model_name, "gemma4:e2b-it-qat")
+
 
 if __name__ == "__main__":
     unittest.main()

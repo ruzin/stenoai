@@ -7,6 +7,7 @@ Handles storing and loading user preferences like model selection.
 import json
 import logging
 import os
+import platform
 import shutil
 import sys
 import tempfile
@@ -105,6 +106,15 @@ def is_bundled() -> bool:
         return True
     path = str(Path(__file__))
     return "StenoAI.app" in path or "Applications" in path
+
+
+def is_apple_silicon() -> bool:
+    """True on macOS running on Apple Silicon (arm64/aarch64).
+
+    The single gate for every Ollama-MLX-tag decision in this module — no
+    other function should re-derive this check.
+    """
+    return sys.platform == "darwin" and platform.machine() in ("arm64", "aarch64")
 
 
 class Config:
@@ -308,6 +318,28 @@ class Config:
     _RENAMED_SUMMARY_MODELS = {
         "gemma4:4b": "gemma4:e4b-it-qat",
         "gemma4:12b": "gemma4:12b-it-qat",
+    }
+
+    # The three curated Gemma 4 QAT models' NVFP4/MLX-engine equivalents,
+    # adopted on Apple Silicon for a large generation-speed win (Ollama's MLX
+    # engine is GA there). Deliberately NOT applied to llama3.2:3b/qwen3.5:9b/
+    # gpt-oss:20b — Ollama does not ship MLX builds of those.
+    _MLX_EQUIVALENTS = {
+        "gemma4:e2b-it-qat": "gemma4:e2b-nvfp4",
+        "gemma4:e4b-it-qat": "gemma4:e4b-nvfp4",
+        "gemma4:12b-it-qat": "gemma4:12b-nvfp4",
+    }
+    _MLX_TO_GGUF = {mlx_tag: gguf_id for gguf_id, mlx_tag in _MLX_EQUIVALENTS.items()}
+
+    # NVFP4 blobs are a different quantization than their GGUF counterpart in
+    # SUPPORTED_MODELS and can be meaningfully larger -- shown instead of the
+    # GGUF size whenever the NVFP4 tag is what's actually installed or (on a
+    # fresh pull) what "Select" will actually download. Keyed by the NVFP4
+    # tag, not the GGUF id, matching how it's looked up in list_models().
+    _MLX_SIZES = {
+        "gemma4:e2b-nvfp4": "6.5GB",
+        "gemma4:e4b-nvfp4": "8.8GB",
+        "gemma4:12b-nvfp4": "7.7GB",
     }
 
     # Curated models we retired — a user pinned to one is migrated to the
@@ -1116,3 +1148,18 @@ def get_data_dirs() -> Dict[str, Path]:
         d.mkdir(parents=True, exist_ok=True)
 
     return dirs
+
+
+def resolve_runtime_tag(model_id: str) -> str:
+    """Map a canonical GGUF model id to its NVFP4/MLX-engine tag on Apple
+    Silicon; a no-op everywhere else (including for models with no MLX
+    equivalent, e.g. llama3.2:3b).
+
+    This is the ONLY place a GGUF id is ever translated to an NVFP4 tag.
+    config.json, SUPPORTED_MODELS, and every migration/validation path keep
+    using the canonical GGUF id — callers must call this at the point a
+    literal Ollama model string is about to be sent, not before.
+    """
+    if not is_apple_silicon():
+        return model_id
+    return Config._MLX_EQUIVALENTS.get(model_id, model_id)
