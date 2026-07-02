@@ -5796,6 +5796,22 @@ ipcMain.handle('set-keep-recordings', async (event, enabled) => {
   } catch (e) { return { success: false, error: e.message }; }
 });
 
+ipcMain.handle('get-auto-summarize', async () => {
+  try {
+    const result = await runPythonScript('simple_recorder.py', ['get-auto-summarize'], true);
+    const jsonData = JSON.parse(result.trim());
+    return { success: true, ...jsonData };
+  } catch (e) { return { success: false, error: e.message }; }
+});
+
+ipcMain.handle('set-auto-summarize', async (event, enabled) => {
+  try {
+    const result = await runPythonScript('simple_recorder.py', ['set-auto-summarize', enabled.toString()]);
+    const jsonData = JSON.parse(result.trim());
+    return { success: true, ...jsonData };
+  } catch (e) { return { success: false, error: e.message }; }
+});
+
 ipcMain.handle('get-silence-auto-stop', async () => {
   try {
     const result = await runPythonScript('simple_recorder.py', ['get-silence-auto-stop'], true);

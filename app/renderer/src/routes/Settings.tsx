@@ -62,6 +62,8 @@ import {
   useSetAutoDetectMeetings,
   useKeepRecordingsSetting,
   useSetKeepRecordings,
+  useAutoSummarizeSetting,
+  useSetAutoSummarize,
   useSilenceAutoStopSetting,
   useSetSilenceAutoStopEnabled,
   useSetSilenceAutoStopMinutes,
@@ -1079,6 +1081,8 @@ function TranscriptionTab() {
   const setLanguage = useSetLanguage();
   const keepRecordings = useKeepRecordingsSetting();
   const setKeepRecordings = useSetKeepRecordings();
+  const autoSummarize = useAutoSummarizeSetting();
+  const setAutoSummarize = useSetAutoSummarize();
   const engineQuery = useTranscriptionEngine();
 
   const engine = engineQuery.data ?? 'parakeet';
@@ -1128,6 +1132,17 @@ function TranscriptionTab() {
           checked={keepRecordings.data ?? false}
           onCheckedChange={(v) => setKeepRecordings.mutate(v)}
           disabled={keepRecordings.data === undefined}
+        />
+      </SettingRow>
+
+      <SettingRow
+        label="Generate notes automatically"
+        description="Summarise each recording right after transcription. Turn off to stop at a transcript and generate notes on demand."
+      >
+        <Switch
+          checked={autoSummarize.data ?? true}
+          onCheckedChange={(v) => setAutoSummarize.mutate(v)}
+          disabled={autoSummarize.data === undefined}
         />
       </SettingRow>
 

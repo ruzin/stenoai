@@ -26,6 +26,10 @@ export interface SessionInfo {
   transcription_failed?: boolean;
   reprocessable?: boolean;
   error?: string;
+  /** Set to false when the meeting has a transcript but notes were not
+   *  generated automatically (auto-summarize off, #258). The detail view
+   *  offers a "Generate notes" CTA instead of a blank/"no summary" state. */
+  notes_generated?: boolean;
 }
 
 export interface Meeting {
@@ -444,6 +448,8 @@ export type GetAutoDetectMeetingsResponse = Result<{ auto_detect_meetings_enable
 export type GetWhisperModelResponse = Result<{ whisper_model: string; supported_models: string[] }>;
 export type GetKeepRecordingsResponse = Result<{ keep_recordings: boolean }>;
 
+export type GetAutoSummarizeResponse = Result<{ auto_summarize_enabled: boolean }>;
+
 export type GetSilenceAutoStopResponse = Result<{
   silence_auto_stop_enabled: boolean;
   silence_auto_stop_minutes: number;
@@ -824,6 +830,8 @@ export interface StenoaiBridge {
     setWhisperModel: RequestFn<[model: string], Result<Record<string, never>>>;
     getKeepRecordings: RequestFn<[], GetKeepRecordingsResponse>;
     setKeepRecordings: RequestFn<[v: boolean], Result<Record<string, never>>>;
+    getAutoSummarize: RequestFn<[], GetAutoSummarizeResponse>;
+    setAutoSummarize: RequestFn<[v: boolean], Result<Record<string, never>>>;
     getSilenceAutoStop: RequestFn<[], GetSilenceAutoStopResponse>;
     setSilenceAutoStopEnabled: RequestFn<[v: boolean], SetSilenceAutoStopEnabledResponse>;
     setSilenceAutoStopMinutes: RequestFn<[v: number], SetSilenceAutoStopMinutesResponse>;

@@ -396,6 +396,15 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
     );
   };
 
+  const startReprocess = () => {
+    setStreamText('');
+    setStreamPhase('analyzing');
+    setChunkProgress(null);
+    setReprocessFailed(false);
+    streamCache.set(summaryFile, { text: '', phase: 'analyzing' });
+    reprocess.mutate({ summaryFile, regenTitle: false, name: info.name });
+  };
+
   // Persist the choice so it survives navigation (B1 review: active_report not
   // persisted). `null` selects the structured Standard summary → 'standard'.
   const onSelectReport = (id: string | null) => {
@@ -543,14 +552,7 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
                 <TooltipTrigger asChild>
                   <ActionIconButton
                     label="Regenerate notes"
-                    onClick={() => {
-                      setStreamText('');
-                      setStreamPhase('analyzing');
-                      setChunkProgress(null);
-                      setReprocessFailed(false);
-                      streamCache.set(summaryFile, { text: '', phase: 'analyzing' });
-                      reprocess.mutate({ summaryFile, regenTitle: false, name: info.name });
-                    }}
+                    onClick={startReprocess}
                     disabled={reprocess.isPending || streamPhase !== 'idle'}
                   >
                     <RefreshCw
@@ -864,6 +866,38 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
                   </p>
                 ))}
               </div>
+            </section>
+          ) : meeting.transcript ? (
+            <section
+              className="flex flex-col items-start gap-2 rounded-lg p-4"
+              style={{
+                background: 'var(--surface-raised)',
+                border: '1px solid var(--border-subtle, var(--surface-raised))',
+              }}
+              data-testid="no-notes-yet"
+            >
+              <div
+                className="text-[15px] font-medium"
+                style={{ color: 'var(--fg-1)' }}
+              >
+                No notes yet
+              </div>
+              <p
+                className="text-[14px] leading-[1.6]"
+                style={{ color: 'var(--fg-2)', maxWidth: '64ch' }}
+              >
+                This recording was transcribed but notes were not generated
+                automatically. Copy or save the transcript from the actions
+                above, or generate notes whenever you like.
+              </p>
+              <Button
+                className="mt-1"
+                data-testid="generate-notes-cta"
+                onClick={startReprocess}
+                disabled={reprocess.isPending || streamPhase !== 'idle'}
+              >
+                Generate notes
+              </Button>
             </section>
           ) : (
             <p className="py-2 text-sm" style={{ color: 'var(--fg-2)' }}>
