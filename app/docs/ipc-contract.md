@@ -325,7 +325,7 @@ type CreateFolderResponse = Result<{ folder: Folder }>;
 | `pull-model` | R→M invoke | yes | `stenoai.models.pull(name)` |
 | `cancel-pull` | R→M invoke | yes | `stenoai.models.cancelPull(name)` |
 | `verify-model` | R→M invoke | yes | `stenoai.models.verify(name)` |
-| `delete-model` | R→M invoke | yes | `stenoai.models.delete(name)` |
+| `delete-model` | R→M invoke | yes | `stenoai.models.delete(name)` — **`name` is checked against an allowlist** (`Config.list_supported_models()` keys + `Config._MLX_EQUIVALENTS.values()`) in `simple_recorder.py`; any other value returns `{success: false}` without calling `ollama.delete()` |
 | `get-active-pulls` | R→M invoke | yes | `stenoai.models.getActivePulls()` |
 | `ack-pull-complete` | R→M send (one-way) | yes | `stenoai.models.ackPullComplete(name)` |
 | `model-pull-progress` | M→R | yes | `stenoai.on.modelPullProgress(cb)` |

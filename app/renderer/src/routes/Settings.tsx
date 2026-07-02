@@ -393,7 +393,7 @@ function PullProgressBar({
   onCancel: (() => void) | undefined;
 }) {
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex shrink-0 items-center gap-2">
       {/* No outer fixed width here -- it previously hardcoded 96px, which
           fit only the bar+percent pair it was designed for. Adding the
           MB/s and Part columns later pushed the total past 96px, so they
@@ -522,7 +522,12 @@ function ModelCard({
 }: ModelCardProps) {
   return (
     <div
-      className="mb-1.5 flex items-center gap-4 rounded-[8px] px-4 py-[13px] transition-colors"
+      // flex-wrap + gap-y lets the wide faster-build row (badge + progress bar
+      // + Cancel) drop onto its own line under the name at a realistic Settings
+      // width, instead of being forced onto one line that squeezes the name to
+      // near-zero (char-wrapping it) and overflows the fixed-width progress
+      // columns into an overlapping mess. The name/button row stays on line 1.
+      className="mb-1.5 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-[8px] px-4 py-[13px] transition-colors"
       style={{
         border: `1px solid ${
           isCurrent ? 'var(--border-strong)' : 'var(--border-subtle)'
@@ -606,45 +611,13 @@ function ModelCard({
         )}
       </div>
       {isDownloading && downloadProgress && (
-        // Inline, to the right of the name -- matching where the
-        // switch-to-faster-build progress bar sits, instead of a separate
-        // line below the name (that read as a second, unrelated download).
-        // No onCancel here -- the top-right Button already doubles as
-        // Cancel while isDownloading (see the button block below).
+        // Inline, to the right of the name, on the same row as the Select /
+        // Cancel button (it's shrink-0, so it stays intact; the name gives way
+        // via its own min-w-0 block). No onCancel here -- the top-right Button
+        // already doubles as Cancel while isDownloading (see the button block
+        // below). A faster-build switch is excluded from isDownloading upstream,
+        // so this never double-renders with the faster-build progress bar.
         <PullProgressBar progress={downloadProgress} bytesPerSecond={downloadBytesPerSecond} onCancel={undefined} />
-      )}
-      {fasterBuildTag && !fasterBuildInstalled && (
-        <div className="mt-1.5 flex items-center gap-2">
-          <span
-            className="rounded-[3px] px-1.5 py-px text-[11px]"
-            style={{
-              color: 'var(--fg-muted)',
-              border: '1px solid var(--border-subtle)',
-            }}
-          >
-            Faster build available
-          </span>
-          {fasterBuildState === 'pulling' ? (
-            <PullProgressBar
-              progress={fasterBuildProgress}
-              bytesPerSecond={fasterBuildBytesPerSecond}
-              onCancel={onCancelFasterBuild}
-            />
-          ) : (
-            <button
-              type="button"
-              onClick={onSwitchToFasterBuild}
-              disabled={fasterBuildState === 'verifying' || fasterBuildBlocked}
-              title={fasterBuildBlocked ? 'Finish the current switch first' : undefined}
-              className="cursor-pointer border-0 bg-transparent p-0 text-[12px] underline disabled:cursor-default disabled:no-underline disabled:opacity-60"
-              style={{ color: 'var(--fg-1)' }}
-            >
-              {fasterBuildState === 'verifying' && 'Verifying…'}
-              {fasterBuildState === 'error' && 'Retry: switch to faster build'}
-              {(fasterBuildState === 'idle' || fasterBuildState === 'done') && 'Switch to faster build'}
-            </button>
-          )}
-        </div>
       )}
       {isCurrent ? (
         <span
@@ -695,6 +668,43 @@ function ModelCard({
           </Button>
         </div>
       ) : null}
+      {/* Rendered LAST and w-full so flex-wrap pushes it onto its own line
+          below the name + Select/Selected row, rather than fighting them for
+          horizontal space. The badge + progress bar (or switch button) can
+          then sit comfortably at full width. */}
+      {fasterBuildTag && !fasterBuildInstalled && (
+        <div className="flex w-full items-center gap-2">
+          <span
+            className="shrink-0 rounded-[3px] px-1.5 py-px text-[11px]"
+            style={{
+              color: 'var(--fg-muted)',
+              border: '1px solid var(--border-subtle)',
+            }}
+          >
+            Faster build available
+          </span>
+          {fasterBuildState === 'pulling' ? (
+            <PullProgressBar
+              progress={fasterBuildProgress}
+              bytesPerSecond={fasterBuildBytesPerSecond}
+              onCancel={onCancelFasterBuild}
+            />
+          ) : (
+            <button
+              type="button"
+              onClick={onSwitchToFasterBuild}
+              disabled={fasterBuildState === 'verifying' || fasterBuildBlocked}
+              title={fasterBuildBlocked ? 'Finish the current switch first' : undefined}
+              className="shrink-0 cursor-pointer border-0 bg-transparent p-0 text-[12px] underline disabled:cursor-default disabled:no-underline disabled:opacity-60"
+              style={{ color: 'var(--fg-1)' }}
+            >
+              {fasterBuildState === 'verifying' && 'Verifying…'}
+              {fasterBuildState === 'error' && 'Retry: switch to faster build'}
+              {(fasterBuildState === 'idle' || fasterBuildState === 'done') && 'Switch to faster build'}
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -2161,8 +2171,16 @@ function ModelList() {
     // NVFP4 tag. Off Apple Silicon (no mlxTag) this is just m.name, same as
     // before.
     const pullTarget = m.mlxTag ?? m.name;
-    const isDownloading = Boolean(pull.progress[pullTarget]);
-    const downloadProgress = pull.progress[pullTarget];
+    const isFasterBuildActive = fasterBuild.activeTag === m.mlxTag;
+    // A "switch to faster build" pulls the SAME -nvfp4 tag a general "Select"
+    // would, and usePullModel's progress listener is a global (unfiltered) IPC
+    // subscription -- so it records that tag's progress too. Without this guard
+    // pull.progress[pullTarget] lights up during a switch, and the card renders
+    // a SECOND, duplicate progress bar (plus a duplicate Cancel) on top of the
+    // faster-build one. While a switch is in flight the faster-build block owns
+    // that UI, so suppress the general-download surface for this row.
+    const isDownloading = Boolean(pull.progress[pullTarget]) && !isFasterBuildActive;
+    const downloadProgress = isDownloading ? pull.progress[pullTarget] : undefined;
     const isDefault = !isRemote && isDefaultModel(m.description);
 
     let note: string | undefined;
@@ -2182,7 +2200,6 @@ function ModelList() {
     // size is what's really on disk.
     const showMlxSize = m.mlxTag && m.mlxSizeGb !== undefined && (m.mlxInstalled || !m.ggufInstalled);
     const sizeLabel = formatModelSize(showMlxSize ? m.mlxSizeGb : m.size_gb);
-    const isFasterBuildActive = fasterBuild.activeTag === m.mlxTag;
     const fasterBuildBlocked =
       Boolean(fasterBuild.activeTag) &&
       !isFasterBuildActive &&
