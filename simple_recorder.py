@@ -4179,9 +4179,20 @@ def resolve_setup_model():
         # Canonicalize any already-installed MLX tag back to its GGUF id so an
         # Apple-Silicon machine that only has e.g. gemma4:e2b-nvfp4 (from a
         # prior manual switch) is still recognised as "has a supported model".
-        canonical_installed = {
-            Config._MLX_TO_GGUF.get(name, name) for name in installed
-        }
+        # Also matches an NVFP4 tag with extra detail Ollama appended after
+        # it (the same fuzzy pattern list_models() uses for GGUF ids below,
+        # e.g. "deepseek-r1:14b" matching "deepseek-r1:14b-qwen-distill-q4_K_M")
+        # -- an exact dict lookup alone would miss that and cause a redundant
+        # re-download here even though list_models() already recognises it.
+        def _canonicalize_mlx_tag(name):
+            if name in Config._MLX_TO_GGUF:
+                return Config._MLX_TO_GGUF[name]
+            for mlx_tag, gguf_id in Config._MLX_TO_GGUF.items():
+                if name.startswith(mlx_tag + '-'):
+                    return gguf_id
+            return name
+
+        canonical_installed = {_canonicalize_mlx_tag(name) for name in installed}
         result["installed"] = pick_installed_supported_model(
             installed_names=canonical_installed,
             preferred=[config.get_model(), Config.DEFAULT_MODEL],

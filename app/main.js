@@ -7002,11 +7002,18 @@ ipcMain.handle('pull-model', async (event, modelName) => {
         sendProgress(output);
       });
 
-      proc.on('close', (code) => {
+      proc.on('close', (code, signal) => {
         activePulls.delete(modelName);
         activeProcs.delete(modelName);
 
-        if (cancelledPulls.delete(modelName)) {
+        // Only trust this as a real cancellation if the process was
+        // actually signal-killed. If cancel-pull's kill() arrived after the
+        // process had already finished on its own (a narrow but real race:
+        // proc.kill() is a no-op on an already-exited process, but the
+        // 'close' event for that natural exit hasn't been delivered yet),
+        // `signal` is null here -- treat it as its real outcome below
+        // instead of reporting a successful pull as cancelled.
+        if (cancelledPulls.delete(modelName) && signal) {
           sendDebugLog(`Cancelled pull: ${modelName}`);
           completedPulls.set(modelName, { success: false, error: 'Cancelled', cancelled: true });
 

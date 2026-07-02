@@ -137,6 +137,25 @@ class ResolveSetupModelPullTargetTests(unittest.TestCase):
         data = json.loads(result.output)
         self.assertEqual(data["installed"], "gemma4:e2b-it-qat")
 
+    def test_nvfp4_install_with_extra_tag_detail_is_recognised(self):
+        """Ollama can append extra detail after a tag (the same pattern
+        list_models() already handles for GGUF ids, e.g. "deepseek-r1:14b"
+        matching "deepseek-r1:14b-qwen-distill-q4_K_M"). An exact dict
+        lookup alone would miss this for NVFP4 tags and cause a redundant
+        re-download even though a supported model is already present."""
+        from simple_recorder import cli
+
+        runner = CliRunner()
+        fake_response = mock.Mock(models=[mock.Mock(model="gemma4:e2b-nvfp4-extra-detail")])
+        with mock.patch("src.ollama_manager.start_ollama_server", return_value=True), \
+             mock.patch("src.config.is_apple_silicon", return_value=True), \
+             mock.patch("ollama.list", return_value=fake_response):
+            result = runner.invoke(cli, ["resolve-setup-model"])
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        data = json.loads(result.output)
+        self.assertEqual(data["installed"], "gemma4:e2b-it-qat")
+
 
 class VerifyModelCommandTests(unittest.TestCase):
     def test_verify_model_success(self):

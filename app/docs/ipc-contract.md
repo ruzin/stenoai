@@ -323,8 +323,20 @@ type CreateFolderResponse = Result<{ folder: Folder }>;
 | `set-model` | R→M invoke | yes | `stenoai.models.set(name)` |
 | `check-model-installed` | R→M invoke | yes | `stenoai.models.checkInstalled(name)` |
 | `pull-model` | R→M invoke | yes | `stenoai.models.pull(name)` |
+| `cancel-pull` | R→M invoke | yes | `stenoai.models.cancelPull(name)` |
+| `verify-model` | R→M invoke | yes | `stenoai.models.verify(name)` |
+| `delete-model` | R→M invoke | yes | `stenoai.models.delete(name)` |
+| `get-active-pulls` | R→M invoke | yes | `stenoai.models.getActivePulls()` |
+| `ack-pull-complete` | R→M send (one-way) | yes | `stenoai.models.ackPullComplete(name)` |
 | `model-pull-progress` | M→R | yes | `stenoai.on.modelPullProgress(cb)` |
 | `model-pull-complete` | M→R | yes | `stenoai.on.modelPullComplete(cb)` |
+
+On Apple Silicon, a model's canonical (GGUF) id and its NVFP4/MLX runtime
+sibling are two different Ollama tags -- see
+`docs/superpowers/specs/2026-07-01-ollama-mlx-tag-adoption-design.md`.
+`config.json`'s `model` field always holds the GGUF id; the NVFP4 tag is
+resolved transiently at summarization time and is what `pull`/`cancelPull`
+actually target once "Select" or "switch to faster build" resolve to it.
 
 ```ts
 type CheckOllamaResponse = Result<{ installed: boolean; path?: string }>;
@@ -335,12 +347,31 @@ interface ListedModel {
   size_gb?: number;
   installed: boolean;
   current?: boolean;
+  mlxTag?: string;          // Apple Silicon only -- this model's NVFP4 sibling tag
+  mlxInstalled?: boolean;   // Apple Silicon only -- whether mlxTag is actually pulled
+  mlxSizeGb?: number;       // Apple Silicon only -- the NVFP4 blob's own (often larger) size
+  ggufInstalled?: boolean;  // whether the GGUF id itself was pulled (can differ from `installed`,
+                            // which is also true when only the NVFP4 sibling is installed)
 }
 type ListModelsResponse = Result<{ models: ListedModel[]; current?: string }>;
 type GetCurrentModelResponse = Result<{ model: string }>;
 
+// Flat, NOT Result<T>-wrapped: these responses already carry their own
+// `success` field, and Result<T>'s `{success:true} & T` intersection would
+// collapse it.
+type VerifyModelResponse = { success: boolean; error: string | null };
+type DeleteModelResponse = { success: boolean; error: string | null };
+type CancelPullResponse = { success: boolean; error: string | null };
+// model -> either its still-running progress string, or (done: true) its
+// terminal outcome, for a pull that finished with nothing mounted to
+// consume the live model-pull-complete event (e.g. Settings was unmounted).
+type GetActivePullsResponse = Record<
+  string,
+  { progress?: string; done: boolean; success?: boolean; error?: string; cancelled?: boolean }
+>;
+
 interface ModelPullProgressEvent { model: string; progress: string }
-interface ModelPullCompleteEvent  { model: string; success: boolean; error?: string }
+interface ModelPullCompleteEvent { model: string; success: boolean; error?: string; cancelled?: boolean }
 ```
 
 ---

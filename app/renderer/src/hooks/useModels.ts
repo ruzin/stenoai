@@ -148,8 +148,16 @@ export function usePullModel() {
         return rest;
       });
       rate.drop(model);
-      if (success && pendingSelect?.pullTarget === model) {
-        await ipc().models.set(pendingSelect.name);
+      // Clear pendingSelect on ANY outcome for its own pullTarget, not just
+      // success -- modelPullComplete is a global event with no per-hook
+      // filtering, so a stale pendingSelect left behind by a cancelled/failed
+      // pull could otherwise be matched later by an unrelated pull of the
+      // same tag (e.g. a "switch to faster build" for the same model),
+      // silently calling models.set() for a selection change nothing asked for.
+      if (pendingSelect?.pullTarget === model) {
+        if (success) {
+          await ipc().models.set(pendingSelect.name);
+        }
         setPendingSelect(null);
       }
       qc.invalidateQueries({ queryKey: modelsKeys.all });
@@ -229,10 +237,10 @@ export function useSwitchToFasterBuild(onVerified?: (mlxTag: string) => void) {
       return rest;
     });
     rate.drop(model);
-    ipc().models.ackPullComplete(model);
     if (cancelled) {
       // A user-initiated cancel isn't a failure -- go back to the plain
       // "Switch to faster build" prompt rather than an error state.
+      ipc().models.ackPullComplete(model);
       setState('idle');
       setError(null);
       setActiveTag(null);
@@ -240,12 +248,19 @@ export function useSwitchToFasterBuild(onVerified?: (mlxTag: string) => void) {
       return;
     }
     if (!success) {
+      ipc().models.ackPullComplete(model);
       setState('error');
       setError(pullError ?? 'Failed to download the faster build.');
       return;
     }
     setState('verifying');
     const verifyResult = await ipc().models.verify(model);
+    // Deferred until after verify (not right after the download) so that
+    // navigating away mid-verify and back replays this whole outcome --
+    // including a redundant but harmless re-verify -- on the new mount,
+    // instead of the completedPulls entry already being consumed and the
+    // "offer to delete the old build" (onVerified) never firing for anyone.
+    ipc().models.ackPullComplete(model);
     if (verifyResult.success) {
       setState('done');
       qc.invalidateQueries({ queryKey: modelsKeys.all });

@@ -671,13 +671,24 @@ function ModelCard({
             variant="outline"
             size="sm"
             className="h-[28px] px-3.5 text-[13px]"
+            // Whisper/Parakeet share this component but don't wire cancel
+            // support -- without the `onCancelDownload` check, this showed
+            // an active-looking "Cancel" for them that did nothing on click.
+            disabled={isDownloading && !onCancelDownload}
             onClick={isDownloading ? onCancelDownload : onSelect}
           >
             {isDownloading ? (
-              <>
-                <X className="mr-1.5 size-3" />
-                Cancel
-              </>
+              onCancelDownload ? (
+                <>
+                  <X className="mr-1.5 size-3" />
+                  Cancel
+                </>
+              ) : (
+                <>
+                  <Loader2 className="mr-1.5 size-3 animate-spin" />
+                  Downloading
+                </>
+              )
             ) : (
               'Select'
             )}
@@ -2280,8 +2291,18 @@ function ModelList() {
             // must not leave this dialog stuck open with no way to close
             // it except Cancel (which, since some deletes may have already
             // succeeded, looked like "cancel deletes it anyway").
+            // allSettled (not all): waits for every tag's attempt to finish
+            // rather than returning as soon as the first one rejects, so the
+            // dialog doesn't close while a sibling delete is still pending.
             try {
-              await Promise.all(deleteCandidate.tags.map((tag) => deleteModel.mutateAsync(tag)));
+              const results = await Promise.allSettled(
+                deleteCandidate.tags.map((tag) => deleteModel.mutateAsync(tag)),
+              );
+              const failed = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
+              if (failed.length > 0) {
+                // eslint-disable-next-line no-console -- no toast/error-surface system exists yet; at least don't fail silently.
+                console.error('Failed to delete some model tags:', failed.map((f) => f.reason));
+              }
             } finally {
               setDeleteCandidate(null);
               fasterBuild.reset();
