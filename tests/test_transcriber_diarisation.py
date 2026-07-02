@@ -52,6 +52,13 @@ class FormatTimestampTests(unittest.TestCase):
     def test_negative_clamps_to_zero(self):
         self.assertEqual(_format_timestamp(-5), "00:00")
 
+    def test_non_finite_falls_back_to_zero(self):
+        # A backend emitting NaN/inf in a segment's start must not crash the
+        # diarised assembly (int(NaN) raises ValueError, int(inf) OverflowError).
+        self.assertEqual(_format_timestamp(float("nan")), "00:00")
+        self.assertEqual(_format_timestamp(float("inf")), "00:00")
+        self.assertEqual(_format_timestamp(float("-inf")), "00:00")
+
 
 class TranscribeDiarisedTimestampTests(unittest.TestCase):
     """The diarised transcript prefixes each turn with an [MM:SS] timestamp

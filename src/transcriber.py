@@ -29,6 +29,7 @@ anything; the model is the source of truth.
 
 import inspect
 import logging
+import math
 import os
 import re
 import subprocess
@@ -263,6 +264,11 @@ def _format_timestamp(seconds: float) -> str:
     transcript stamps each collapsed turn's first segment.) Only used for the
     diarised (labelled) transcript — the plain ``text`` field stays clean.
     """
+    # A non-finite start (a backend emitting NaN/inf) must not crash the whole
+    # diarised assembly — int(NaN) raises ValueError, int(inf) OverflowError.
+    # Fall back to 00:00 rather than blowing up the transcription.
+    if not math.isfinite(seconds):
+        seconds = 0
     total = max(0, int(seconds))
     hh, rem = divmod(total, 3600)
     mm, ss = divmod(rem, 60)
