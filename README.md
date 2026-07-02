@@ -63,6 +63,18 @@ If you're looking for a hosted desktop recording API, consider checking out [Rec
 - **Bring your own cloud model** — Optional OpenAI, Anthropic, AWS Bedrock (Claude — including application inference profile ARNs for governed AWS environments), or custom API endpoint for users who prefer a hosted LLM.
 - **Organisation AI** — On managed deployments, sign in to your org's Steno adapter and AI routes through it automatically — no local API key, no per-user setup.
 
+## Coming from Granola?
+
+If you already use Claude Code / Cowork with a connected Granola MCP, the
+[`granola-to-steno`](skills/granola-to-steno/README.md) skill syncs your Granola
+meeting notes (titles, dates, participants, summaries, and transcripts) into
+Steno's file-based store. It is idempotent and re-runnable, so you can backfill
+your history once and keep it in sync on a schedule. This is an agent skill you
+drop into your skills folder and invoke conversationally ("sync Granola to
+Steno"), not an in-app feature. See
+[`skills/granola-to-steno/README.md`](skills/granola-to-steno/README.md) for
+setup and limitations.
+
 ## macOS Shortcuts (Optional)
 
 <details>
