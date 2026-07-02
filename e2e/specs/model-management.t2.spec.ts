@@ -243,8 +243,11 @@ test('cancel-pull: stops an in-flight download and reports it as cancelled, not 
     // Wait for the pull-model subprocess to actually reach the mock server
     // (PyInstaller cold start can take longer than a short fixed sleep)
     // before cancelling, so this exercises a real in-flight download rather
-    // than racing the subprocess's own startup time.
-    await expect.poll(() => mockOllama.pullCalls()).toBeGreaterThan(0);
+    // than racing the subprocess's own startup time. Windows CI cold-starts
+    // the bundled exe slower than the 5s default (seen exceeding it when
+    // the backend bundle was just downloaded in the same job) -- 15s matches
+    // the same wait-on-spawned-backend pattern in org-lock-lifecycle.t2.
+    await expect.poll(() => mockOllama.pullCalls(), { timeout: 15_000 }).toBeGreaterThan(0);
 
     const cancelResult = await page.evaluate(() =>
       (window as StenoWindow).stenoai.models.cancelPull('gemma4:e2b-nvfp4'),
