@@ -257,10 +257,11 @@ def _format_timestamp(seconds: float) -> str:
     """Format a segment offset (seconds since recording start) as a transcript
     timestamp: ``MM:SS`` under an hour, ``H:MM:SS`` beyond it.
 
-    Kept identical to the live-dock formatter (fmtTimestamp in
-    LiveTranscriptBar.tsx) so the saved transcript and the live view read the
-    same. Only used for the diarised (labelled) transcript — the plain ``text``
-    field stays timestamp-free.
+    Same MM:SS / H:MM:SS shape as the live-dock formatter (fmtTimestamp in
+    LiveTranscriptBar.tsx) so the live view and the saved transcript read
+    alike. (They aren't 1:1: the live dock stamps every segment, the saved
+    transcript stamps each collapsed turn's first segment.) Only used for the
+    diarised (labelled) transcript — the plain ``text`` field stays clean.
     """
     total = max(0, int(seconds))
     hh, rem = divmod(total, 3600)
@@ -1233,8 +1234,13 @@ class WhisperTranscriber:
             tagged.sort(key=lambda t: t[0])
 
             # Each turn carries the start offset of its FIRST segment so the
-            # diarised transcript can be timestamped. The plain text field stays
-            # timestamp-free (it's the summary/fallback body without labels).
+            # diarised transcript can be timestamped. Only diarised_text is
+            # timestamped (it's what the UI displays + what #215 exports); the
+            # plain text field stays clean. NOTE: diarised_text is also the
+            # summariser input (simple_recorder: text_for_summary = diarised_text
+            # or transcript_text), so the summariser strips these [MM:SS] markers
+            # back out on the way in (summarizer._strip_leading_timestamps) —
+            # summarisation is unaffected by this display feature.
             turns: list[tuple[float, str, list[str]]] = []
             for start, speaker, text in tagged:
                 if turns and turns[-1][1] == speaker:

@@ -6,15 +6,30 @@ except ImportError:
     OLLAMA_AVAILABLE = False
 import json
 import logging
+import re
 import subprocess
 import time
-import os
 from typing import Optional, Dict, Any
 from .models import MeetingTranscript, ActionItem, Decision
 from .config import Config, resolve_runtime_tag
 from . import ollama_manager
 
 logger = logging.getLogger(__name__)
+
+# The diarised transcript carries a leading per-turn `[MM:SS]`/`[H:MM:SS]`
+# timestamp for display (see transcriber._format_timestamp). Those markers are
+# a UI/export concern only — strip them before the transcript reaches the LLM
+# so summarisation input (token cost + output) is unchanged by the timestamp
+# feature. The `[You]`/`[Others]` speaker labels are deliberately kept (the
+# prompt relies on them). Anchored to line start so a bracketed time inside
+# body text isn't touched.
+_LEADING_TIMESTAMP_RE = re.compile(r'(?m)^\[\d{1,3}:\d{2}(?::\d{2})?\]\s*')
+
+
+def _strip_leading_timestamps(transcript: str) -> str:
+    if not transcript:
+        return transcript
+    return _LEADING_TIMESTAMP_RE.sub('', transcript)
 
 
 def bedrock_converse_url(region: str, target_id: str) -> str:
@@ -1133,6 +1148,7 @@ Return ONLY the response in this exact JSON format:
         Returns:
             MeetingTranscript object or None if summarization failed
         """
+        transcript = _strip_leading_timestamps(transcript)
         try:
             # Handle empty or None transcripts
             if not transcript or transcript.strip() == "" or transcript.lower().strip() == "none":
@@ -1513,6 +1529,7 @@ TRANSCRIPT:
         Yields:
             str: Text chunks as they arrive from the LLM
         """
+        transcript = _strip_leading_timestamps(transcript)
         if template_prompt:
             # Free-form template report: no chunking/map-reduce (those prompts are
             # summary-schema specific and don't apply here). Stream through the
@@ -1627,7 +1644,7 @@ TRANSCRIPT:
         """
         try:
             # Use summary if available, otherwise fall back to first part of transcript
-            context = summary if summary else transcript[:2000]
+            context = summary if summary else _strip_leading_timestamps(transcript)[:2000]
             if not context or context.strip() == "":
                 return None
 
