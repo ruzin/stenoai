@@ -253,6 +253,23 @@ def _scan_max_rms(wf, window: int, step: int, early_exit_threshold: float) -> fl
     return max_rms
 
 
+def _format_timestamp(seconds: float) -> str:
+    """Format a segment offset (seconds since recording start) as a transcript
+    timestamp: ``MM:SS`` under an hour, ``H:MM:SS`` beyond it.
+
+    Kept identical to the live-dock formatter (fmtTimestamp in
+    LiveTranscriptBar.tsx) so the saved transcript and the live view read the
+    same. Only used for the diarised (labelled) transcript — the plain ``text``
+    field stays timestamp-free.
+    """
+    total = max(0, int(seconds))
+    hh, rem = divmod(total, 3600)
+    mm, ss = divmod(rem, 60)
+    if hh:
+        return f"{hh:d}:{mm:02d}:{ss:02d}"
+    return f"{mm:02d}:{ss:02d}"
+
+
 def _token_jaccard(a: str, b: str) -> float:
     """Jaccard similarity over normalised word tokens.
 
@@ -1215,20 +1232,24 @@ class WhisperTranscriber:
                     tagged.append((float(s.get("start") or 0.0), "Others", text))
             tagged.sort(key=lambda t: t[0])
 
-            turns: list[tuple[str, list[str]]] = []
-            for _start, speaker, text in tagged:
-                if turns and turns[-1][0] == speaker:
-                    turns[-1][1].append(text)
+            # Each turn carries the start offset of its FIRST segment so the
+            # diarised transcript can be timestamped. The plain text field stays
+            # timestamp-free (it's the summary/fallback body without labels).
+            turns: list[tuple[float, str, list[str]]] = []
+            for start, speaker, text in tagged:
+                if turns and turns[-1][1] == speaker:
+                    turns[-1][2].append(text)
                 else:
-                    turns.append((speaker, [text]))
+                    turns.append((start, speaker, [text]))
 
-            plain_parts = [' '.join(parts) for _speaker, parts in turns]
+            plain_parts = [' '.join(parts) for _start, _speaker, parts in turns]
             plain_text = "\n\n".join(plain_parts) if plain_parts else SILENCE_SENTINEL
 
             is_diarised = bool(mic_segments) and bool(system_segments)
             if is_diarised:
                 labelled_parts = [
-                    f"[{speaker}] {' '.join(parts)}" for speaker, parts in turns
+                    f"[{_format_timestamp(start)}] [{speaker}] {' '.join(parts)}"
+                    for start, speaker, parts in turns
                 ]
                 diarised_text = "\n\n".join(labelled_parts)
             else:

@@ -4,11 +4,7 @@ import { Search as SearchIcon } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import { useMeeting } from '@/hooks/useMeetings';
-
-interface Segment {
-  speaker: 'You' | 'Others' | null;
-  text: string;
-}
+import { parseTranscript, type Segment } from '@/lib/transcriptSegments';
 
 /** Local-meeting wrapper — fetches the meeting JSON, then renders. Kept as
  *  the original API so existing callers don't change. */
@@ -140,7 +136,12 @@ function TranscriptRow({ segment, highlight }: { segment: Segment; highlight: st
   // `Others` markers still render as grey/left.
   const isYou = segment.speaker !== 'Others';
   return (
-    <div className={cn('flex px-1 py-0.5', isYou ? 'justify-end' : 'justify-start')}>
+    <div className={cn('flex flex-col gap-0.5 px-1 py-0.5', isYou ? 'items-end' : 'items-start')}>
+      {segment.timestamp && (
+        <span className="px-1.5 text-[10.5px] tabular-nums" style={{ color: 'var(--fg-2)' }}>
+          {segment.timestamp}
+        </span>
+      )}
       <div
         className={cn(
           'max-w-[78%] rounded-2xl px-3 py-1.5 text-sm leading-[1.5]',
@@ -183,25 +184,4 @@ function renderHighlighted(text: string, highlight: string): React.ReactNode {
   return parts;
 }
 
-function parseTranscript(text: string, isDiarised: boolean): Segment[] {
-  if (isDiarised) {
-    const blocks = text.split(/(?=\[You\]|\[Others\])/);
-    return blocks
-      .map((b) => b.trim())
-      .filter(Boolean)
-      .map((b): Segment => {
-        if (b.startsWith('[You]')) return { speaker: 'You', text: b.replace('[You]', '').trim() };
-        if (b.startsWith('[Others]'))
-          return { speaker: 'Others', text: b.replace('[Others]', '').trim() };
-        return { speaker: null, text: b };
-      });
-  }
-  const trimmed = text.trim();
-  if (!trimmed) return [];
-  const sentences = trimmed
-    .split(/(?<=[.!?])\s+(?=[A-Z"'([])/)
-    .map((s) => s.trim())
-    .filter(Boolean);
-  return (sentences.length > 1 ? sentences : [trimmed]).map((s) => ({ speaker: null, text: s }));
-}
 
