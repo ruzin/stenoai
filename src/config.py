@@ -331,6 +331,17 @@ class Config:
     }
     _MLX_TO_GGUF = {mlx_tag: gguf_id for gguf_id, mlx_tag in _MLX_EQUIVALENTS.items()}
 
+    # NVFP4 blobs are a different quantization than their GGUF counterpart in
+    # SUPPORTED_MODELS and can be meaningfully larger -- shown instead of the
+    # GGUF size whenever the NVFP4 tag is what's actually installed or (on a
+    # fresh pull) what "Select" will actually download. Keyed by the NVFP4
+    # tag, not the GGUF id, matching how it's looked up in list_models().
+    _MLX_SIZES = {
+        "gemma4:e2b-nvfp4": "6.5GB",
+        "gemma4:e4b-nvfp4": "8.8GB",
+        "gemma4:12b-nvfp4": "7.7GB",
+    }
+
     # Curated models we retired — a user pinned to one is migrated to the
     # default on load. Deliberately a specific allow-list, NOT "anything not in
     # SUPPORTED_MODELS": set_model intentionally allows arbitrary user-pulled

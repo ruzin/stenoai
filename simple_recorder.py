@@ -3207,6 +3207,9 @@ def list_models():
                 mlx_tag = Config._MLX_EQUIVALENTS.get(model_id)
                 if mlx_tag:
                     info['mlx_tag'] = mlx_tag
+                    mlx_size = Config._MLX_SIZES.get(mlx_tag)
+                    if mlx_size:
+                        info['mlx_size'] = mlx_size
                     info['mlx_installed'] = any(
                         name == mlx_tag or name.startswith(mlx_tag + '-')
                         for name in installed_names

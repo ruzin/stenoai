@@ -475,6 +475,10 @@ interface ModelCardProps {
   // selection (deleting it would break the app until another is chosen).
   isInstalled?: boolean;
   onDeleteModel?: () => void;
+  // Whether the GGUF id itself was ever actually pulled -- false when
+  // "Select" resolved straight to the NVFP4 tag on Apple Silicon, in which
+  // case there's nothing to have "switched" from (see the MLX badge tooltip).
+  ggufInstalled?: boolean;
   fasterBuildTag?: string;
   fasterBuildInstalled?: boolean;
   fasterBuildState?: 'idle' | 'pulling' | 'verifying' | 'done' | 'error';
@@ -506,6 +510,7 @@ function ModelCard({
   onCancelDownload,
   isInstalled = false,
   onDeleteModel,
+  ggufInstalled = false,
   fasterBuildTag,
   fasterBuildInstalled = false,
   fasterBuildState = 'idle',
@@ -576,7 +581,11 @@ function ModelCard({
           {fasterBuildTag && fasterBuildInstalled && (
             <span
               className="rounded-[3px] px-1.5 py-px text-[11px]"
-              title={`Running the MLX build (${fasterBuildTag}) instead of ${name}`}
+              title={
+                ggufInstalled
+                  ? `Running the MLX build (${fasterBuildTag}) instead of ${name}`
+                  : `Downloaded directly as the MLX build (${fasterBuildTag}) -- ${name} was never pulled`
+              }
               style={{
                 background: 'var(--surface-sunken)',
                 color: 'var(--fg-muted)',
@@ -2155,7 +2164,13 @@ function ModelList() {
       note = parts.length ? parts.join(' · ') : undefined;
     }
 
-    const sizeLabel = formatModelSize(m.size_gb);
+    // The NVFP4 blob is a different (often larger) download than the GGUF
+    // entry's own size -- show it instead whenever NVFP4 is what's actually
+    // installed, or (nothing installed yet) what "Select" will actually
+    // pull on Apple Silicon. Otherwise (GGUF installed, no NVFP4) the GGUF
+    // size is what's really on disk.
+    const showMlxSize = m.mlxTag && m.mlxSizeGb !== undefined && (m.mlxInstalled || !m.ggufInstalled);
+    const sizeLabel = formatModelSize(showMlxSize ? m.mlxSizeGb : m.size_gb);
     const isFasterBuildActive = fasterBuild.activeTag === m.mlxTag;
     const fasterBuildBlocked =
       Boolean(fasterBuild.activeTag) &&
@@ -2204,6 +2219,7 @@ function ModelList() {
         onCancelDownload={() => pull.cancel(pullTarget)}
         isInstalled={Boolean(m.installed)}
         onDeleteModel={onDeleteModel}
+        ggufInstalled={Boolean(m.ggufInstalled)}
         fasterBuildTag={m.installed ? m.mlxTag : undefined}
         fasterBuildInstalled={Boolean(m.mlxInstalled)}
         fasterBuildState={isFasterBuildActive ? fasterBuild.state : 'idle'}

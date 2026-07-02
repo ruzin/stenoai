@@ -55,6 +55,7 @@ export function useModels() {
         quality: info.quality,
         mlxTag: info.mlx_tag,
         mlxInstalled: info.mlx_installed,
+        mlxSizeGb: parseSizeGb(info.mlx_size),
         ggufInstalled: info.gguf_installed,
       }));
       return { models, current: raw.current_model, provider: raw.provider };

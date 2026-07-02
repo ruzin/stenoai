@@ -26,6 +26,11 @@ class ListModelsMlxEnrichmentTests(unittest.TestCase):
         e2b_entry = data["supported_models"]["gemma4:e2b-it-qat"]
         self.assertEqual(e2b_entry["mlx_tag"], "gemma4:e2b-nvfp4")
         self.assertTrue(e2b_entry["mlx_installed"])
+        # The NVFP4 blob is a different (larger) download than the GGUF
+        # entry's own 'size' -- shown separately so the UI doesn't claim the
+        # GGUF size while the NVFP4 tag is what's actually installed/pulled.
+        self.assertEqual(e2b_entry["mlx_size"], "6.5GB")
+        self.assertNotEqual(e2b_entry["mlx_size"], e2b_entry["size"])
         # Only the NVFP4 tag is in the fake `ollama.list()` response above --
         # the GGUF blob itself was never pulled. It must still report as
         # installed: a model fetched straight to its NVFP4 tag (general
@@ -82,6 +87,7 @@ class ListModelsMlxEnrichmentTests(unittest.TestCase):
         for entry in data["supported_models"].values():
             self.assertNotIn("mlx_tag", entry)
             self.assertNotIn("mlx_installed", entry)
+            self.assertNotIn("mlx_size", entry)
 
 
 class ResolveSetupModelPullTargetTests(unittest.TestCase):

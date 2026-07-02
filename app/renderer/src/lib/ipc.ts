@@ -71,6 +71,7 @@ export interface ListedModel {
   quality?: string;
   mlxTag?: string;
   mlxInstalled?: boolean;
+  mlxSizeGb?: number;
   ggufInstalled?: boolean;
 }
 
@@ -377,6 +378,9 @@ export interface RawSupportedModel {
   gguf_installed?: boolean;
   mlx_tag?: string;
   mlx_installed?: boolean;
+  // The NVFP4 blob's own size -- a different (often larger) download than
+  // this entry's `size`, which describes the GGUF variant only.
+  mlx_size?: string;
 }
 
 export type ListModelsResponse = Result<{
