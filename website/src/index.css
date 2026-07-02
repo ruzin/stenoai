@@ -49,6 +49,7 @@
   --shadow-sm: 0 1px 2px rgba(27, 27, 25, 0.05);
   --shadow-md: 0 8px 24px -8px rgba(27, 27, 25, 0.14), 0 2px 4px -2px rgba(27, 27, 25, 0.06);
   --shadow-lg: 0 24px 48px -16px rgba(27, 27, 25, 0.22), 0 4px 8px -4px rgba(27, 27, 25, 0.08);
+  --shadow-demo: 0 0 0 1px rgba(27, 27, 25, 0.06), 0 0 40px rgba(27, 27, 25, 0.12), 0 16px 40px -8px rgba(27, 27, 25, 0.16);
 
   --font-serif: 'Charter', 'Bitstream Charter', 'Sitka Text', 'Iowan Old Style', Cambria, Georgia, serif;
   --font-sans:  'Inter', -apple-system, 'Segoe UI', 'Helvetica Neue', sans-serif;
@@ -91,6 +92,7 @@
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.45);
   --shadow-md: 0 8px 24px -8px rgba(0, 0, 0, 0.55), 0 2px 4px -2px rgba(0, 0, 0, 0.3);
   --shadow-lg: 0 24px 48px -16px rgba(0, 0, 0, 0.6), 0 4px 8px -4px rgba(0, 0, 0, 0.3);
+  --shadow-demo: 0 0 0 1px rgba(0, 0, 0, 0.18), 0 0 48px rgba(0, 0, 0, 0.45), 0 16px 40px -8px rgba(0, 0, 0, 0.55);
 }
 
 /* ═══════════════════════════════════════════════════
@@ -224,6 +226,23 @@
 .btn-primary:hover { background-color: var(--primary-hover); text-decoration: none; }
 .btn-ghost:hover   { background-color: var(--surface-hover); text-decoration: none; }
 
+.btn-ghost-strong:hover { background-color: var(--surface-active); }
+
+.gh-stars-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 9999px;
+  font-size: 12px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+  background: var(--surface-sunken);
+  border: 1px solid var(--border);
+  color: var(--fg-2);
+  line-height: 1.5;
+}
+
 /* CTA section - inverted button colors on the dark ink block */
 .cta-wrap .btn-primary {
   background-color: var(--primary-fg);
@@ -330,4 +349,14 @@
 @keyframes dockWave {
   0%, 100% { transform: scaleY(0.6); }
   50%       { transform: scaleY(1.0); }
+}
+
+/* Marquee scrolling for language chips */
+@keyframes marqueeLTR {
+  from { transform: translateX(-50%); }
+  to   { transform: translateX(0); }
+}
+@keyframes marqueeRTL {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
 }

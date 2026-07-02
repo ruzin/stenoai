@@ -1,5 +1,5 @@
 import { Mic, FileText, Sparkles } from "lucide-react";
-import { motion as Motion } from "framer-motion";
+import { m as Motion } from "framer-motion";
 
 const steps = [
   {
@@ -50,7 +50,7 @@ export function HowItWorks() {
               margin: "0 0 18px",
             }}
           >
-            Three steps. Zero cloud.
+            Everything runs locally. Zero cloud. Maximum privacy.
           </h2>
           <p className="text-fg-2 text-lg leading-[1.55]" style={{ maxWidth: "56ch" }}>
             From raw audio to structured notes, every step happens on your machine, including the language model.

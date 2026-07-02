@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { motion as Motion, AnimatePresence } from "framer-motion";
+import { m as Motion, AnimatePresence } from "framer-motion";
 import {
   Search, Settings, Home, ChevronDown, ChevronLeft,
   Calendar as CalendarIcon, Clock, PencilLine, ArrowUp, FolderPlus,
@@ -396,9 +396,9 @@ function GeneratingScreen() {
             <ChevronLeft size={14} /> Home
           </button>
 
-          <h1 style={{ fontFamily: "var(--font-serif)", fontWeight: 400, fontSize: 34, lineHeight: 1.15, letterSpacing: "-0.02em", color: "var(--fg-1)", margin: "0 0 10px" }}>
+          <div style={{ fontFamily: "var(--font-serif)", fontWeight: 400, fontSize: 34, lineHeight: 1.15, letterSpacing: "-0.02em", color: "var(--fg-1)", margin: "0 0 10px" }}>
             Q1 Budget Planning
-          </h1>
+          </div>
 
           <div className="flex flex-wrap items-center gap-1.5 mb-6">
             {[
@@ -456,9 +456,9 @@ function SummaryScreen() {
             <ChevronLeft size={14} /> All meetings
           </button>
 
-          <h1 style={{ fontFamily: "var(--font-serif)", fontWeight: 400, fontSize: 36, lineHeight: 1.1, letterSpacing: "-0.025em", color: "var(--fg-1)", margin: "0 0 10px" }}>
+          <div style={{ fontFamily: "var(--font-serif)", fontWeight: 400, fontSize: 36, lineHeight: 1.1, letterSpacing: "-0.025em", color: "var(--fg-1)", margin: "0 0 10px" }}>
             Q1 Budget Planning
-          </h1>
+          </div>
 
           <div className="flex flex-wrap items-center gap-1.5 pb-5 mb-5" style={{ borderBottom: "1px solid var(--border-subtle)" }}>
             {[
@@ -476,7 +476,7 @@ function SummaryScreen() {
           </p>
 
           <div className="mb-5">
-            <h3 style={{ fontSize: 13, fontWeight: 600, letterSpacing: "0.01em", color: "var(--fg-2)", margin: "0 0 10px", fontFamily: "var(--font-sans)" }}>KEY POINTS</h3>
+            <div style={{ fontSize: 13, fontWeight: 600, letterSpacing: "0.01em", color: "var(--fg-2)", margin: "0 0 10px", fontFamily: "var(--font-sans)" }}>KEY POINTS</div>
             <ul className="list-none p-0 m-0 space-y-2">
               {KEY_POINTS.map((pt) => (
                 <li key={pt} className="relative pl-[18px]" style={{ fontSize: 14.5, lineHeight: 1.55, color: "var(--fg-1)" }}>
@@ -488,7 +488,7 @@ function SummaryScreen() {
           </div>
 
           <div>
-            <h3 style={{ fontSize: 13, fontWeight: 600, letterSpacing: "0.01em", color: "var(--fg-2)", margin: "0 0 10px", fontFamily: "var(--font-sans)" }}>ACTION ITEMS</h3>
+            <div style={{ fontSize: 13, fontWeight: 600, letterSpacing: "0.01em", color: "var(--fg-2)", margin: "0 0 10px", fontFamily: "var(--font-sans)" }}>ACTION ITEMS</div>
             <ul className="list-none p-0 m-0 space-y-2">
               {ACTION_ITEMS.map((ai) => (
                 <li key={ai} className="relative pl-[18px]" style={{ fontSize: 14.5, lineHeight: 1.55, color: "var(--fg-1)" }}>
@@ -673,9 +673,21 @@ function ChatScreen() {
 
 // ─── Root ─────────────────────────────────────────────────────────
 
+// Window is built at a native 680×480 reference size (matching Features.jsx's
+// ScaledApp convention). On containers narrower than that — phones — it
+// scales down as a unit via a CSS transform so the sidebar/text/spacing
+// shrink together instead of the sidebar just eating a bigger share of a
+// squeezed flex row. Containers at or above the reference width (desktop)
+// get scale clamped to 1 and render with the original unscaled, fluid-width
+// layout untouched.
+const NATIVE_W = 680;
+const NATIVE_H = 480;
+
 export function AppWindowDemo() {
   const [screenIdx, setScreenIdx] = useState(0);
   const screen = SCREENS[screenIdx];
+  const outerRef = useRef(null);
+  const [scale, setScale] = useState(1);
 
   useEffect(() => {
     const ms = SCREEN_MS[screen] ?? 8000;
@@ -683,13 +695,37 @@ export function AppWindowDemo() {
     return () => clearTimeout(t);
   }, [screen]);
 
+  useEffect(() => {
+    const el = outerRef.current;
+    if (!el) return;
+    const measure = () => setScale(Math.min(1, el.offsetWidth / NATIVE_W));
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   return (
-    <div className="relative max-w-full" style={{ padding: "2px 2px 32px", textAlign: "left" }}>
+    <div aria-hidden="true" className="relative max-w-full" style={{ padding: "2px 2px 32px", textAlign: "left", pointerEvents: "none", userSelect: "none" }}>
       <div
+        ref={outerRef}
         className="rounded-[14px] overflow-hidden"
-        style={{ background: "var(--surface-raised)", boxShadow: "var(--shadow-lg)", border: "1px solid var(--border)" }}
+        style={{
+          background: "var(--surface-raised)",
+          boxShadow: "var(--shadow-demo)",
+          border: "1px solid var(--border)",
+          height: NATIVE_H * scale,
+        }}
       >
-        <div className="flex" style={{ height: 480 }}>
+        <div
+          className="flex"
+          style={{
+            width: scale < 1 ? NATIVE_W : "100%",
+            height: NATIVE_H,
+            transform: scale < 1 ? `scale(${scale})` : "none",
+            transformOrigin: "top left",
+          }}
+        >
           <AppSidebar activeScreen={screen} />
           <div className="flex-1 min-w-0 overflow-hidden relative">
             <div className="absolute inset-0 flex flex-col">

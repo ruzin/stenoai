@@ -1,10 +1,10 @@
-import { useState } from "react";
+import { createElement, useState } from "react";
 import {
   Check, Lock, Cloud, KeyRound,
   ShieldCheck, WifiOff, Package, Zap,
   Sparkles, RefreshCw, ScrollText, TrendingUp,
 } from "lucide-react";
-import { motion as Motion, AnimatePresence } from "framer-motion";
+import { m as Motion } from "framer-motion";
 
 // ── Brand icons ──────────────────────────────────────────────────────────────
 
@@ -116,15 +116,6 @@ const advantages = {
   ],
 };
 
-// ── Animation helpers ─────────────────────────────────────────────────────────
-
-const fadeProps = {
-  initial:    { opacity: 0, y: 6 },
-  animate:    { opacity: 1, y: 0 },
-  exit:       { opacity: 0, y: -6 },
-  transition: { duration: 0.2 },
-};
-
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export function Models() {
@@ -202,7 +193,7 @@ export function Models() {
                   transition: `background var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease)`,
                 }}
               >
-                <Icon size={13} />
+                {createElement(Icon, { size: 13 })}
                 {label}
               </button>
             ))}
@@ -216,59 +207,56 @@ export function Models() {
         whileInView={{ opacity: 1, y: 0 }}
         viewport={{ once: true }}
         transition={{ duration: 0.5, delay: 0.08 }}
-        className="container-site grid md:grid-cols-2 gap-10 md:gap-16 items-center"
+        className="container-site grid md:grid-cols-2 gap-10 md:gap-16 md:min-h-[440px] items-start"
       >
 
         {/* Left: advantages */}
-        <AnimatePresence mode="wait" initial={false}>
-          <Motion.ul
-            key={mode}
-            {...fadeProps}
-            style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: "1.5rem" }}
-          >
-            {advantages[mode].map(({ Icon, title, desc }) => (
-              <li key={title} style={{ display: "flex", gap: "1rem", alignItems: "flex-start" }}>
-                <div
-                  style={{
-                    width: 36,
-                    height: 36,
-                    borderRadius: 9,
-                    background: "var(--surface-sunken)",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    flexShrink: 0,
-                    marginTop: 1,
-                  }}
-                >
-                  <Icon size={16} style={{ color: "var(--fg-2)" }} />
+        <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: "1.5rem" }}>
+          {advantages[mode].map(({ Icon, title, desc }) => (
+            <li key={title} style={{ display: "flex", gap: "1rem", alignItems: "flex-start" }}>
+              <div
+                style={{
+                  width: 36,
+                  height: 36,
+                  borderRadius: 9,
+                  background: "var(--surface-sunken)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                  marginTop: 1,
+                }}
+              >
+                {createElement(Icon, { size: 16, style: { color: "var(--fg-2)" } })}
+              </div>
+              <div>
+                <div style={{ fontSize: 15, fontWeight: 600, color: "var(--fg-1)", lineHeight: 1.4, marginBottom: 4 }}>
+                  {title}
                 </div>
-                <div>
-                  <div style={{ fontSize: 15, fontWeight: 600, color: "var(--fg-1)", lineHeight: 1.4, marginBottom: 4 }}>
-                    {title}
-                  </div>
-                  <div style={{ fontSize: 14, color: "var(--fg-2)", lineHeight: 1.6 }}>
-                    {desc}
-                  </div>
+                <div style={{ fontSize: 14, color: "var(--fg-2)", lineHeight: 1.6 }}>
+                  {desc}
                 </div>
-              </li>
-            ))}
-          </Motion.ul>
-        </AnimatePresence>
+              </div>
+            </li>
+          ))}
+        </ul>
 
         {/* Right: model list or provider key panel */}
         <div
           style={{
+            position: "relative",
             background: "var(--surface-raised)",
             borderRadius: 14,
             border: "1px solid var(--border-subtle)",
             overflow: "hidden",
             padding: "14px 10px",
+            maskImage: "linear-gradient(to bottom, black 40%, transparent 100%)",
+            WebkitMaskImage: "linear-gradient(to bottom, black 40%, transparent 100%)",
           }}
         >
-        <AnimatePresence mode="wait" initial={false}>
+        <>
           {mode === "local" ? (
-            <Motion.div key="local" {...fadeProps} className="flex flex-col gap-0.5">
+            <div className="flex flex-col gap-0.5">
               {localModels.map((m) => {
                 const BrandIcon = brandIcons[m.brand];
                 return (
@@ -293,9 +281,9 @@ export function Models() {
                   </button>
                 );
               })}
-            </Motion.div>
+            </div>
           ) : (
-            <Motion.div key="remote" {...fadeProps} className="flex flex-col gap-0.5">
+            <div className="flex flex-col gap-0.5">
               {providers.map((p) => {
                 const BrandIcon = brandIcons[p.brand];
                 return (
@@ -332,9 +320,9 @@ export function Models() {
                   </div>
                 );
               })}
-            </Motion.div>
+            </div>
           )}
-        </AnimatePresence>
+        </>
         </div>
 
       </Motion.div>
