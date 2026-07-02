@@ -1590,10 +1590,41 @@ ipcMain.handle('process-recording', async (event, audioFile, sessionName) => {
     // 'process-streaming' label), serialises behind any in-flight job, and
     // emits 'processing-complete' when done.
     //
+    // Security: this handler imports a USER-PICKED file (native dialog OR
+    // drag-drop → webUtils.getPathForFile), so — unlike the meeting-file
+    // handlers — we deliberately can't require containment in
+    // getAllowedBaseDirs: importing an external ~/Desktop/interview.m4a is the
+    // whole point. The path is still renderer-supplied, though, so harden the
+    // trust boundary: resolve symlinks, then require a REGULAR FILE with a
+    // supported audio extension. This rejects directories, device/FIFO/socket
+    // special files (copyFile on which could hang or exhaust disk) and non-audio
+    // arbitrary-read targets like /etc/passwd — the same constraints the picker
+    // dialog filter and drag-drop isAudioFile() already apply upstream, now also
+    // enforced where the renderer's trust actually crosses into main.
+    if (!audioFile || typeof audioFile !== 'string') {
+      return { success: false, error: 'Invalid file path' };
+    }
+    let realAudioFile;
+    try {
+      // realpath (not just resolve) follows symlinks to the true target, so the
+      // isFile()/extension checks and the copy all act on the same real file.
+      realAudioFile = await fs.promises.realpath(path.resolve(audioFile));
+      const stat = await fs.promises.stat(realAudioFile);
+      if (!stat.isFile()) {
+        return { success: false, error: 'Invalid file path' };
+      }
+    } catch {
+      return { success: false, error: 'Audio file not found' };
+    }
+    const ext = path.extname(realAudioFile).slice(1).toLowerCase();
+    if (!IMPORT_AUDIO_EXTENSIONS.includes(ext)) {
+      return { success: false, error: 'Unsupported file type' };
+    }
+
     // Copy the import into our recordings/ dir first: process-streaming
     // unlinks the source after a successful transcribe (keep_recordings
     // defaults off), so queueing the user's original path would delete it.
-    const queuedFile = await copyImportIntoRecordings(audioFile);
+    const queuedFile = await copyImportIntoRecordings(realAudioFile);
     addToProcessingQueue(queuedFile, sessionName, null);
     return { success: true };
   } catch (error) {
@@ -1804,38 +1835,57 @@ function parseMeetingMarkdown(content, mdPath) {
   };
 }
 
+/**
+ * Validate a renderer-supplied meeting summary path (symlink-safe containment).
+ *
+ * Returns { realPath, allowedOutputDirs } when `summaryFile` is a .md/.json that
+ * resolves — with symlinks followed — into one of the app's known output/
+ * directories, or { error } describing why it was rejected. Extracted from
+ * get-meeting so every handler taking a summaryFile applies the SAME check:
+ * realpath BOTH the target and each <baseDir>/output before the prefix test, so
+ * a symlink planted inside an allowed dir can't escape the allowlist into an
+ * arbitrary-file read/write (path.resolve only collapses '..', it does not
+ * follow symlinks), while a legitimately symlinked base dir (macOS
+ * /tmp -> /private/tmp, which the e2e temp data dir uses) still matches. The
+ * output/ scoping + extension gate also stop a renderer-controlled path to some
+ * other JSON inside an allowed root from being treated as a meeting file.
+ * Callers MUST use the returned realPath downstream (backend CLI args, file
+ * reads) rather than the original string, so the thing validated is the thing
+ * used. realpath needs the path to exist; a missing target -> denied.
+ */
+async function validateMeetingFilePath(summaryFile) {
+  if (!summaryFile || (!summaryFile.endsWith('.json') && !summaryFile.endsWith('.md'))) {
+    return { error: 'Invalid file path' };
+  }
+  let realPath;
+  try {
+    realPath = await fs.promises.realpath(path.resolve(summaryFile));
+  } catch {
+    return { error: 'Access denied' };
+  }
+  const allowedOutputDirs = await Promise.all(
+    getAllowedBaseDirs().map(async d => {
+      try {
+        return (await fs.promises.realpath(path.resolve(d, 'output'))) + path.sep;
+      } catch {
+        return null; // output dir may not exist yet
+      }
+    }),
+  );
+  const allowed = allowedOutputDirs.some(base => base && realPath.startsWith(base));
+  if (!allowed) {
+    return { error: 'Access denied' };
+  }
+  return { realPath, allowedOutputDirs };
+}
+
 ipcMain.handle('get-meeting', async (_event, summaryFile) => {
   try {
-    if (!summaryFile || (!summaryFile.endsWith('.json') && !summaryFile.endsWith('.md'))) {
-      return { success: false, error: 'Invalid file path' };
+    const validated = await validateMeetingFilePath(summaryFile);
+    if (validated.error) {
+      return { success: false, error: validated.error };
     }
-    // Path containment: the file's REAL path (symlinks resolved) must live under
-    // one of the known output directories (default data dir, custom storage, or
-    // dev project root). We canonicalize BOTH the target and the allowed dirs
-    // with realpath so (a) a symlink planted in the output dir can't escape the
-    // allowlist into an arbitrary-file read — path.resolve only collapses '..',
-    // it does not follow symlinks — and (b) a legitimately symlinked base dir
-    // (e.g. macOS /tmp -> /private/tmp, which the e2e temp data dir uses) still
-    // matches. realpath needs the path to exist; a missing target -> denied.
-    let realResolved;
-    try {
-      realResolved = await fs.promises.realpath(path.resolve(summaryFile));
-    } catch {
-      return { success: false, error: 'Access denied' };
-    }
-    const allowedOutputDirs = await Promise.all(
-      getAllowedBaseDirs().map(async d => {
-        try {
-          return (await fs.promises.realpath(path.resolve(d, 'output'))) + path.sep;
-        } catch {
-          return null; // output dir may not exist yet
-        }
-      }),
-    );
-    const allowed = allowedOutputDirs.some(base => base && realResolved.startsWith(base));
-    if (!allowed) {
-      return { success: false, error: 'Access denied' };
-    }
+    const { realPath: realResolved, allowedOutputDirs } = validated;
     const content = await fs.promises.readFile(realResolved, 'utf-8');
     if (summaryFile.endsWith('.md')) {
       // Legacy .md meetings are still listed by list-meetings, so their detail
@@ -1865,7 +1915,17 @@ ipcMain.handle('clear-state', async () => {
 
 ipcMain.handle('reprocess-meeting', async (event, summaryFile, regenerateTitle, sessionName) => {
   try {
-    const args = ['reprocess', summaryFile];
+    // Security: symlink-safe containment-check the renderer-supplied summary path
+    // before it reaches the backend CLI, and pass the canonical realPath (not the
+    // original string) downstream. Event/map keys stay keyed on the original
+    // summaryFile — that's UI correlation the renderer matches on, not file access.
+    const validated = await validateMeetingFilePath(summaryFile);
+    if (validated.error) {
+      return { success: false, error: validated.error };
+    }
+    const { realPath } = validated;
+
+    const args = ['reprocess', realPath];
     if (regenerateTitle) args.push('--regenerate-title');
 
     sendDebugLog(`🔄 Reprocessing meeting: ${summaryFile}`);
@@ -1988,17 +2048,27 @@ ipcMain.handle('reprocess-meeting', async (event, summaryFile, regenerateTitle, 
 });
 
 ipcMain.handle('generate-report-meeting', async (event, summaryFile, templateId) => {
+  // Security: symlink-safe containment-check the renderer-supplied summary path
+  // before ANY use of it — including the sessionName read below, which opens the
+  // file directly — and use the canonical realPath downstream. Event/map keys
+  // stay keyed on the original summaryFile (UI correlation the renderer matches).
+  const validated = await validateMeetingFilePath(summaryFile);
+  if (validated.error) {
+    return { success: false, error: validated.error };
+  }
+  const { realPath } = validated;
+
   // Resolve the sessionName from the meeting JSON so streaming events carry the
   // same key as the reprocess flow (keyed by sessionName, disambiguated by summaryFile).
   let sessionName = null;
   try {
     const fs = require('fs');
-    const data = JSON.parse(fs.readFileSync(summaryFile, 'utf-8'));
+    const data = JSON.parse(fs.readFileSync(realPath, 'utf-8'));
     sessionName = data?.session_info?.name || null;
   } catch (_) { /* non-fatal — sessionName stays null */ }
 
   try {
-    const args = ['generate-report', summaryFile, templateId];
+    const args = ['generate-report', realPath, templateId];
 
     sendDebugLog(`📄 Generating report for: ${summaryFile} (template: ${templateId})`);
     sendDebugLog(`$ stenoai ${args.join(' ')}`);
@@ -2114,25 +2184,47 @@ ipcMain.handle('generate-report-meeting', async (event, summaryFile, templateId)
 
 ipcMain.handle('set-active-report', async (_e, summaryFile, reportId) => {
   try {
-    const out = await runPythonScript('simple_recorder.py', ['set-active-report', summaryFile, reportId]);
+    // Security: symlink-safe containment-check + canonical realPath. The backend's
+    // report_store derives a <stem>_reports.json sidecar NEXT TO this path, so the
+    // realpath'd, output-scoped path is what must be passed — not the raw string.
+    const validated = await validateMeetingFilePath(summaryFile);
+    if (validated.error) {
+      return { success: false, error: validated.error };
+    }
+    const out = await runPythonScript('simple_recorder.py', ['set-active-report', validated.realPath, reportId]);
     return JSON.parse(out);
   } catch (error) { return { success: false, error: error.message }; }
 });
 
 ipcMain.handle('delete-report', async (_e, summaryFile, reportId) => {
   try {
-    const out = await runPythonScript('simple_recorder.py', ['delete-report', summaryFile, reportId]);
+    // Security: symlink-safe containment-check + canonical realPath. The backend's
+    // report_store derives a <stem>_reports.json sidecar NEXT TO this path, so the
+    // realpath'd, output-scoped path is what must be passed — not the raw string.
+    const validated = await validateMeetingFilePath(summaryFile);
+    if (validated.error) {
+      return { success: false, error: validated.error };
+    }
+    const out = await runPythonScript('simple_recorder.py', ['delete-report', validated.realPath, reportId]);
     return JSON.parse(out);
   } catch (error) { return { success: false, error: error.message }; }
 });
 
 ipcMain.handle('regen-meeting-title', async (event, summaryFile, sessionName) => {
   try {
+    // Security: symlink-safe containment-check the renderer-supplied summary path
+    // and pass the canonical realPath to the backend CLI, not the raw string.
+    const validated = await validateMeetingFilePath(summaryFile);
+    if (validated.error) {
+      return { success: false, error: validated.error };
+    }
+    const { realPath } = validated;
+
     const aiEnv = getAiEnv();
     const regenEnv = Object.keys(aiEnv).length > 0 ? { ...require('process').env, ...aiEnv } : undefined;
 
     await new Promise((resolve, reject) => {
-      const proc = spawn(getBackendPath(), ['regen-title', summaryFile], {
+      const proc = spawn(getBackendPath(), ['regen-title', realPath], {
         cwd: getBackendCwd(),
         env: regenEnv,
       });
@@ -3535,7 +3627,11 @@ async function processNextInQueue() {
       mainWindow.webContents.send('processing-complete', {
         success: false,
         sessionName: currentProcessingJob.sessionName,
-        error: error.message
+        error: error.message,
+        // The source audio is preserved above; hand its path to the renderer
+        // so the Processing screen's "Try again" can re-queue it via
+        // process-recording instead of dead-ending on an infinite spinner.
+        audioFile: currentProcessingJob.audioFile || undefined
       });
     }
   } finally {

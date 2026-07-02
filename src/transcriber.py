@@ -721,8 +721,21 @@ class WhisperTranscriber:
             pass  # not a readable WAV — fall through to ffmpeg
 
         ffmpeg = _resolve_ffmpeg() or 'ffmpeg'
-        temp_dir = tempfile.gettempdir()
-        converted_path = Path(temp_dir) / f"stenoai_16khz_{audio_filepath.stem}.wav"
+        # mkstemp (not a name derived from the input stem) so concurrent CLI
+        # invocations over same-named files can't overwrite or unlink each
+        # other's converted audio mid-transcription — same guard as
+        # _preprocess_audio. The caller (_run_whisper_cpp) owns deleting this
+        # temp when it returns as the converted path; on any failure we return
+        # the original audio, so we must clean up the mkstemp file ourselves.
+        try:
+            fd, temp_name = tempfile.mkstemp(
+                prefix=f"stenoai_16khz_{audio_filepath.stem}_", suffix=".wav"
+            )
+            os.close(fd)
+        except OSError as e:
+            logger.error("Could not create 16 kHz temp file: %s", e)
+            return audio_filepath, None
+        converted_path = Path(temp_name)
         try:
             result = subprocess.run(
                 [ffmpeg, '-y', '-i', str(audio_filepath),
@@ -731,7 +744,7 @@ class WhisperTranscriber:
                 capture_output=True,
                 timeout=60,
             )
-            if result.returncode == 0 and converted_path.exists():
+            if result.returncode == 0 and converted_path.exists() and converted_path.stat().st_size > 0:
                 duration_seconds = None
                 try:
                     with wave.open(str(converted_path), 'rb') as wf:
@@ -740,10 +753,15 @@ class WhisperTranscriber:
                     logger.warning("Could not read duration from converted WAV: %s", e)
                 return converted_path, duration_seconds
             logger.error("ffmpeg conversion failed: %s", result.stderr.decode())
-            return audio_filepath, None
         except Exception as e:
             logger.error("Audio conversion error: %s", e)
-            return audio_filepath, None
+        # Clean up the (empty or partial) temp output before falling back.
+        try:
+            if converted_path.exists():
+                converted_path.unlink()
+        except OSError:
+            pass
+        return audio_filepath, None
 
     def _run_whisper_cpp(self, audio_filepath: Path, language: str) -> dict:
         """Call into pywhispercpp on the converted 16 kHz mono WAV.
