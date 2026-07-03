@@ -832,7 +832,14 @@ export interface StenoaiBridge {
       Result<Record<string, never>>
     >;
     showNoteReadyNotification: RequestFn<
-      [payload: { title: string; failed?: boolean; hardFailure?: boolean }],
+      [
+        payload: {
+          title: string;
+          failed?: boolean;
+          hardFailure?: boolean;
+          summaryFile?: string | null;
+        },
+      ],
       Result<Record<string, never>>
     >;
     /** Design-for-test seam for the pre-meeting notification (production fire
@@ -924,6 +931,7 @@ export interface StenoaiBridge {
     autoPauseRequested: Subscribe<void>;
     autoResumeRequested: Subscribe<void>;
     autoSummariseRequested: Subscribe<void>;
+    navigateToMeeting: Subscribe<{ summaryFile: string }>;
     trayOpenSettings: Subscribe<void>;
     showQuitDialog: Subscribe<{ type: 'recording' | 'processing'; jobCount?: number }>;
   };

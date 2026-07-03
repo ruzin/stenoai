@@ -5867,16 +5867,17 @@ ipcMain.handle('show-silence-auto-stop-notification', async (_event, payload) =>
 
 // Fired by the renderer's processing-complete handler when we skipped
 // auto-navigate (user was on a route other than /meetings/processing).
-// Click just focuses Steno — same predictable behaviour as the auto-stop
-// notification. We don't navigate anywhere: the new note appears at the
-// top of the sidebar / Home list, so once Steno is focused the user
-// can see it instantly. Navigating away (especially when the user is
-// recording another note back-to-back) is worse than no navigation.
+// Clicking the banner is an explicit "take me there" from the user (unlike
+// the idle auto-navigate case this mirrors in spirit), so it navigates
+// straight to the finished note when one was written — via the
+// navigate-to-meeting event — and only falls back to focus-only when
+// `summaryFile` is absent (the hardFailure case: nothing was ever written,
+// so there's nothing to open).
 ipcMain.handle('show-note-ready-notification', async (_event, payload) => {
   try {
     // `shown` = passed the notifications_enabled gate (see show-silence-auto-stop).
     if (!(await notificationsEnabled())) return { success: true, shown: false };
-    const { title, failed, hardFailure } = payload || {};
+    const { title, failed, hardFailure, summaryFile } = payload || {};
     // Three honest states:
     //  - hardFailure: processing crashed (or an import never enqueued) so no
     //    note was written — there's nothing to "open". Keep the message
@@ -5902,6 +5903,7 @@ ipcMain.handle('show-note-ready-notification', async (_event, payload) => {
       if (mainWindow && !mainWindow.isDestroyed()) {
         if (!mainWindow.isVisible()) mainWindow.show();
         mainWindow.focus();
+        if (summaryFile) mainWindow.webContents.send('navigate-to-meeting', { summaryFile });
       }
     });
     notif.show();
