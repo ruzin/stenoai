@@ -25,7 +25,11 @@ on:
   push:
     branches:
       - main
+    paths-ignore:
+      - 'website/**'
   pull_request:
+    paths-ignore:
+      - 'website/**'
 
 permissions:
   contents: read
