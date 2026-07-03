@@ -1907,12 +1907,10 @@ ipcMain.handle('reprocess-meeting', async (event, summaryFile, regenerateTitle, 
         reject(new Error(`reprocess spawn error: ${err.message}`));
       });
 
+      const stdoutReader = makeLineReader();
       proc.stdout.on('data', (data) => {
         watchdog.reset();
-        const text = data.toString();
-        // CRLF-tolerant: Windows stdout is \r\n; exact-match lines (STREAM_COMPLETE)
-        // would otherwise carry a trailing \r and never match.
-        text.split(/\r?\n/).forEach(line => {
+        for (const line of stdoutReader.feed(data)) {
           if (line.startsWith('CHUNK:')) {
             try {
               const encoded = line.slice(6);
@@ -1943,7 +1941,7 @@ ipcMain.handle('reprocess-meeting', async (event, summaryFile, regenerateTitle, 
           } else if (line.trim()) {
             sendDebugLog(line.trim());
           }
-        });
+        }
       });
 
       proc.stderr.on('data', (data) => {
