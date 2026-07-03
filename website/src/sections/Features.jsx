@@ -927,6 +927,7 @@ export function Features() {
                     Fluid below the desktop size so a single mobile column doesn't
                     turn into a wall of oversized previews. */}
                 <div
+                  aria-hidden="true"
                   style={{
                     height: "clamp(180px, 45vw, 320px)",
                     position: "relative",

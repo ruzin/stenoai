@@ -19,6 +19,27 @@ function formatStars(n) {
   return String(n);
 }
 
+// NAV_LINKS point at ids owned by lazy-loaded sections (HowItWorks, Features,
+// Industries, FAQ, CTAFooter). All those chunks start fetching as soon as App
+// mounts, but there's still a real window where a click lands before the
+// target id exists — a plain <a href="#..."> is a silent no-op then. Only
+// intervene in that case; if the id already exists, let native behavior run.
+function scrollToHash(e, href) {
+  const id = href.slice(1);
+  if (!id || document.getElementById(id)) return;
+  e.preventDefault();
+  const deadline = Date.now() + 3000;
+  const tryScroll = () => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
+    if (Date.now() < deadline) requestAnimationFrame(tryScroll);
+  };
+  tryScroll();
+}
+
 export function Nav() {
   const [scrolled, setScrolled] = useState(false);
   const [stars, setStars] = useState(null);
@@ -64,7 +85,7 @@ export function Nav() {
 
         <div className="hidden md:flex gap-7 items-center">
           {NAV_LINKS.map(({ href, label }) => (
-            <a key={href} href={href} className="text-fg-2 text-sm no-underline hover:text-fg-1 transition-colors">{label}</a>
+            <a key={href} href={href} onClick={(e) => scrollToHash(e, href)} className="text-fg-2 text-sm no-underline hover:text-fg-1 transition-colors">{label}</a>
           ))}
         </div>
 
@@ -85,7 +106,7 @@ export function Nav() {
           </a>
           <a
             href="#download"
-            onClick={() => trackDownload('nav', 'unknown')}
+            onClick={(e) => { trackDownload('nav', 'unknown'); scrollToHash(e, '#download'); }}
             className="btn-base btn-primary btn-sm inline-flex items-center gap-2 no-underline hover:no-underline"
           >
             Download
@@ -118,7 +139,7 @@ export function Nav() {
                 <a
                   key={href}
                   href={href}
-                  onClick={() => setMenuOpen(false)}
+                  onClick={(e) => { scrollToHash(e, href); setMenuOpen(false); }}
                   className="text-fg-2 text-sm no-underline hover:text-fg-1 transition-colors"
                   style={{ padding: "10px 0" }}
                 >

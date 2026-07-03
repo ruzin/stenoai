@@ -22,9 +22,25 @@ function loadPosthog() {
   return posthogPromise
 }
 
+let gtagLoaded = false
+
+function loadGtag() {
+  if (gtagLoaded) return
+  gtagLoaded = true
+  window.dataLayer = window.dataLayer || []
+  window.gtag = window.gtag || function () { window.dataLayer.push(arguments) }
+  window.gtag('js', new Date())
+  window.gtag('config', 'G-48VX3C2M17')
+  const script = document.createElement('script')
+  script.async = true
+  script.src = 'https://www.googletagmanager.com/gtag/js?id=G-48VX3C2M17'
+  document.head.appendChild(script)
+}
+
 export function initAnalytics() {
   if (!import.meta.env.PROD) return
   loadPosthog()
+  loadGtag()
 }
 
 export function trackDownload(location, arch) {

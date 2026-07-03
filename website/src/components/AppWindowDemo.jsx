@@ -678,7 +678,11 @@ export function AppWindowDemo() {
   useEffect(() => {
     const el = outerRef.current;
     if (!el) return;
-    const measure = () => setScale(Math.min(1, el.offsetWidth / NATIVE_W));
+    const measure = () => {
+      const s = Math.min(1, el.offsetWidth / NATIVE_W);
+      if (!s) return; // transient 0-width measurement (e.g. bfcache restore) — skip, keep last good scale
+      setScale(s);
+    };
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(el);
@@ -686,7 +690,7 @@ export function AppWindowDemo() {
   }, []);
 
   return (
-    <div aria-hidden="true" className="relative max-w-full" style={{ padding: "2px 2px 32px", textAlign: "left", pointerEvents: "none", userSelect: "none" }}>
+    <div aria-hidden="true" inert className="relative max-w-full" style={{ padding: "2px 2px 32px", textAlign: "left", pointerEvents: "none", userSelect: "none" }}>
       <div
         ref={outerRef}
         className="rounded-[14px] overflow-hidden"
