@@ -34,11 +34,7 @@ will implement exactly what is listed here, exposed through
 | `test-system` | R→M invoke | yes | `stenoai.system.test()` |
 | `clear-state` | R→M invoke | yes | `stenoai.system.clearState()` |
 | `startup-setup-check` | R→M invoke | yes | `stenoai.setup.check()` |
-| `setup-system-check` | R→M invoke | yes | `stenoai.setup.systemCheck()` |
-| `setup-ffmpeg` | R→M invoke | yes | `stenoai.setup.ffmpeg()` |
-| `setup-python` | R→M invoke | yes | `stenoai.setup.python()` |
 | `setup-ollama-and-model` | R→M invoke | yes | `stenoai.setup.ollamaAndModel()` |
-| `setup-whisper` | R→M invoke | yes | `stenoai.setup.whisper()` |
 | `setup-parakeet` | R→M invoke | yes | `stenoai.setup.parakeet()` |
 | `setup-test` | R→M invoke | yes | `stenoai.setup.test()` |
 | `trigger-setup-wizard` | R→M invoke | yes | `stenoai.setup.triggerWizard()` |
