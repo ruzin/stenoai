@@ -812,16 +812,20 @@ function createWindow(options = {}) {
       preload: path.join(__dirname, 'preload.js'),
       scrollBounce: true,
     },
-    titleBarStyle: 'hiddenInset',
     // Windows/Linux render the Electron application menu as an in-window menu
     // bar (File/Edit/View/…); macOS puts it in the global bar. Hide it off-mac
     // so the app keeps its clean custom-toolbar look (Alt still reveals it).
     autoHideMenuBar: true,
     show: false,
     backgroundColor: '#FAF9F5',
-    // React UI renders the macOS traffic lights inside the sidebar's top
-    // band rather than floating above a fixed titlebar.
-    trafficLightPosition: { x: 18, y: 18 },
+    ...(process.platform === 'darwin'
+      ? {
+          titleBarStyle: 'hiddenInset',
+          // React UI renders the macOS traffic lights inside the sidebar's
+          // top band rather than floating above a fixed titlebar.
+          trafficLightPosition: { x: 18, y: 18 },
+        }
+      : {}),
   };
   if (options.bounds && typeof options.bounds.x === 'number') {
     Object.assign(windowOpts, options.bounds);
