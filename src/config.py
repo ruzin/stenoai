@@ -859,7 +859,11 @@ class Config:
 
     def get_language(self) -> str:
         """Get the configured language code for transcription and summarization."""
-        return self._config.get("language", "en")
+        # Fall back to "auto" (not "en") so legacy configs saved before the
+        # "language" field existed, or ones missing just that key, agree with
+        # the "auto" default in _get_default_config() and auto-detect the
+        # transcript's language instead of silently defaulting to English (#281).
+        return self._config.get("language", "auto")
 
     def set_language(self, language_code: str) -> bool:
         """

@@ -37,6 +37,17 @@ class ConfigLanguageTests(unittest.TestCase):
             config = Config(config_path=Path(tmp_dir) / "config.json")
             self.assertEqual(config.get_language(), "auto")
 
+    def test_legacy_config_missing_language_key_reads_as_auto(self):
+        # A config file saved before the "language" field existed (or a
+        # hand-edited one missing just that key) must still auto-detect, not
+        # fall back to English. Regression guard for the get_language() read
+        # path agreeing with the "auto" default (#281).
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config_path = Path(tmp_dir) / "config.json"
+            config_path.write_text(json.dumps({"ai_provider": "local"}))
+            config = Config(config_path=config_path)
+            self.assertEqual(config.get_language(), "auto")
+
     def test_set_language_accepts_supported_dutch_code(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             config = Config(config_path=Path(tmp_dir) / "config.json")
