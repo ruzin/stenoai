@@ -243,5 +243,3 @@ def start_ollama_server(wait: bool = True, timeout: int = 30) -> bool:
     except Exception as e:
         logger.error(f"Failed to start Ollama server: {e}")
         return False
-
-
