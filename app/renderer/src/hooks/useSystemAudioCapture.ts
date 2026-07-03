@@ -1,11 +1,6 @@
 import * as React from 'react';
 import { ipc } from '@/lib/ipc';
 import { isMac } from '@/lib/utils';
-import {
-  LIVE_RMS_HZ,
-  pushRmsSample,
-  resetRmsBuffer,
-} from '@/lib/liveRmsBuffer';
 import { useRecording } from './useRecording';
 import { useTranscriptionEngine } from './useModels';
 import {
@@ -99,12 +94,6 @@ export function useSystemAudioCapture() {
   // setting and pause state are read via refs so the polling loop sees
   // current values without re-creating the interval.
   const silenceIntervalRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
-  // Higher-cadence interval that feeds the per-channel RMS buffer
-  // useLiveTranscript reads from to attribute each LIVE_SEG to You vs
-  // Others. Kept separate from the silence-auto-stop interval (1 Hz):
-  // the silence detector is decision-heavy and runs cheap; speaker
-  // attribution needs finer time resolution (~100 ms) than 1 s.
-  const rmsIntervalRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
   const silenceConfigRef = React.useRef<{ enabled: boolean; minutes: number }>({
     enabled: true,
     minutes: 15,
@@ -137,20 +126,8 @@ export function useSystemAudioCapture() {
       }
     };
 
-    const teardownRmsSampler = () => {
-      if (rmsIntervalRef.current !== null) {
-        clearInterval(rmsIntervalRef.current);
-        rmsIntervalRef.current = null;
-      }
-      // Don't reset the buffer on teardown — useLiveTranscript may still
-      // be processing the final LIVE_SEG events that arrived after
-      // recorder.stop(). Reset only happens at the START of the next
-      // recording.
-    };
-
     const teardownStreams = () => {
       teardownSilenceDetector();
-      teardownRmsSampler();
       micStreamRef.current?.getTracks().forEach((t) => t.stop());
       sysStreamRef.current?.getTracks().forEach((t) => t.stop());
       mixedStreamRef.current?.getTracks().forEach((t) => t.stop());
@@ -287,15 +264,19 @@ export function useSystemAudioCapture() {
 
         mixedStreamRef.current = dest.stream;
 
-        // 4a. Live transcription tap — Parakeet only. Sums mic + system
-        //     to a mono mix, decimates 48 kHz → 16 kHz (exact 3:1 — speech
-        //     energy lives well below the 8 kHz Nyquist limit at 16 kHz,
-        //     so plain decimation is adequate without an anti-alias filter),
-        //     and pushes 4096-sample chunks (≈256 ms) to main's transcribe-
-        //     stream sidecar via IPC. Main pipes those bytes into the
-        //     Python subprocess's stdin; the same Silero VAD + Parakeet
-        //     pipeline that drives the mic-only path emits LIVE_SEG events
-        //     the renderer's useLiveTranscript hook subscribes to.
+        // 4a. Live transcription tap — Parakeet only. Keeps mic and system
+        //     on SEPARATE channels (mic=L, system=R) all the way to the
+        //     sidecar — unlike the mono recording mix above, this tap is
+        //     never summed. Each side is decimated 48 kHz → 16 kHz (exact
+        //     3:1 — speech energy lives well below the 8 kHz Nyquist limit
+        //     at 16 kHz, so plain decimation is adequate without an
+        //     anti-alias filter), interleaved L/R, and pushed as 4096-frame
+        //     (8192-sample) chunks (≈256 ms) to main's transcribe-stream
+        //     sidecar via IPC. Main pipes those bytes into the Python
+        //     subprocess's stdin, which de-interleaves and runs two
+        //     independent Silero VAD + Parakeet pipelines — one per
+        //     channel — so each LIVE_SEG's speaker label is a structural
+        //     fact (which channel it came from), not a guess.
         //
         //     Whisper recordings skip this section entirely — main.js
         //     doesn't spawn the sidecar so any chunks we'd push would be
@@ -308,18 +289,16 @@ export function useSystemAudioCapture() {
         //     connected to ctx.destination only because the node needs a
         //     downstream consumer to fire — no audio plays.
         if (liveTapEnabledRef.current) {
-          const liveMono = ctx.createGain();
-          liveMono.channelCount = 1;
-          liveMono.channelCountMode = 'explicit';
-          liveMono.channelInterpretation = 'speakers';
-          micGain.connect(liveMono);
-          if (sysGain) sysGain.connect(liveMono);
+          const tapMerger = ctx.createChannelMerger(2);
+          micGain.connect(tapMerger, 0, 0);  // mic → L
+          if (sysGain) sysGain.connect(tapMerger, 0, 1);  // sys → R (silent when mic-only)
 
           const TAP_BUFFER = 4096;       // 48 kHz frames per callback (~85 ms)
           const DECIMATION = 3;           // 48 kHz / 16 kHz
-          const SEND_SAMPLES = 4096;      // 16 kHz samples per IPC push (~256 ms)
-          const tapNode = ctx.createScriptProcessor(TAP_BUFFER, 1, 1);
-          const tapBuffer: number[] = [];
+          const SEND_FRAMES = 4096;       // 16 kHz stereo frames per IPC push (~256 ms)
+          const tapNode = ctx.createScriptProcessor(TAP_BUFFER, 2, 2);
+          const micTapBuffer: number[] = [];
+          const sysTapBuffer: number[] = [];
           tapNode.onaudioprocess = (ev) => {
             // Re-check each callback so a flip to whisper mid-recording
             // stops pushing (chunks would otherwise stack up in main).
@@ -328,27 +307,40 @@ export function useSystemAudioCapture() {
             // underlying MediaStream keeps flowing — without this guard
             // we'd keep feeding the live consumer audio during a pause
             // and the transcript would keep growing after the user
-            // explicitly told us to stop. Drop the chunk buffer too so
+            // explicitly told us to stop. Drop the chunk buffers too so
             // the half-collected samples don't leak across the pause.
             if (isPausedRef.current) {
-              tapBuffer.length = 0;
+              micTapBuffer.length = 0;
+              sysTapBuffer.length = 0;
               return;
             }
-            const input = ev.inputBuffer.getChannelData(0);
-            for (let i = 0; i < input.length; i += DECIMATION) {
-              tapBuffer.push(input[i]);
+            const micInput = ev.inputBuffer.getChannelData(0);
+            const sysInput = ev.inputBuffer.getChannelData(1);
+            for (let i = 0; i < micInput.length; i += DECIMATION) {
+              micTapBuffer.push(micInput[i]);
+              sysTapBuffer.push(sysInput[i]);
             }
-            while (tapBuffer.length >= SEND_SAMPLES) {
-              const slice = tapBuffer.splice(0, SEND_SAMPLES);
-              const f32 = new Float32Array(slice);
+            while (micTapBuffer.length >= SEND_FRAMES) {
+              const micSlice = micTapBuffer.splice(0, SEND_FRAMES);
+              const sysSlice = sysTapBuffer.splice(0, SEND_FRAMES);
+              // Interleave L/R into a single stereo buffer — the sidecar's
+              // stdin protocol is a raw, undelimited byte stream, so this
+              // is the only framing-free way to keep both channels
+              // distinguishable on the other end (Python de-interleaves
+              // via a plain reshape(-1, 2)).
+              const interleaved = new Float32Array(SEND_FRAMES * 2);
+              for (let i = 0; i < SEND_FRAMES; i++) {
+                interleaved[i * 2] = micSlice[i];
+                interleaved[i * 2 + 1] = sysSlice[i];
+              }
               // Send the underlying ArrayBuffer — Electron's structured-
               // clone path encodes typed arrays as Buffers on the main side.
-              ipc().liveTranscript.pushChunk(f32.buffer);
+              ipc().liveTranscript.pushChunk(interleaved.buffer);
             }
           };
           const tapSilencer = ctx.createGain();
           tapSilencer.gain.value = 0;
-          liveMono.connect(tapNode);
+          tapMerger.connect(tapNode);
           tapNode.connect(tapSilencer);
           tapSilencer.connect(ctx.destination);
         }
@@ -526,27 +518,6 @@ export function useSystemAudioCapture() {
           })();
         }, SILENCE_SAMPLE_INTERVAL_MS);
 
-        // 5b. Per-channel RMS sampler — feeds liveRmsBuffer so
-        //     useLiveTranscript can attribute each LIVE_SEG to You vs
-        //     Others. Only meaningful when the live tap is engaged
-        //     (Parakeet engine): no live segments → no consumers of
-        //     this data. Reset the buffer here so it starts at t=0 for
-        //     this recording.
-        if (liveTapEnabledRef.current) {
-          resetRmsBuffer();
-          const recordingStartMs = Date.now();
-          rmsIntervalRef.current = setInterval(() => {
-            if (!activeRef.current || isPausedRef.current) return;
-            const micRms = computeRms(micAnalyser, micBuf);
-            const sysRms = sysAnalyser && sysBuf ? computeRms(sysAnalyser, sysBuf) : 0;
-            pushRmsSample({
-              tSec: (Date.now() - recordingStartMs) / 1000,
-              micRms,
-              sysRms,
-            });
-          }, 1000 / LIVE_RMS_HZ);
-        }
-
         // 6. Confirm to main that the renderer-driven recording is live.
         //    Idempotent — main.js already flipped systemAudioRecordingActive
         //    when start-recording-ui ran, but this re-affirms it.
@@ -655,19 +626,15 @@ export function useSystemAudioCapture() {
   React.useEffect(() => {
     const bridge = ipc();
     return () => {
-      // Clear any live intervals first — the per-recording teardown helpers
-      // live in the other useEffect's scope so they aren't reachable here,
-      // and without explicit clears the silence-auto-stop poll and the
-      // per-channel RMS sampler would survive across unmount/remount
-      // cycles (visible in dev hot-reload, and a slow leak in any setup
-      // that conditionally mounts the app shell).
+      // Clear any live intervals first — the per-recording teardown helper
+      // lives in the other useEffect's scope so it isn't reachable here,
+      // and without an explicit clear the silence-auto-stop poll would
+      // survive across unmount/remount cycles (visible in dev hot-reload,
+      // and a slow leak in any setup that conditionally mounts the app
+      // shell).
       if (silenceIntervalRef.current !== null) {
         clearInterval(silenceIntervalRef.current);
         silenceIntervalRef.current = null;
-      }
-      if (rmsIntervalRef.current !== null) {
-        clearInterval(rmsIntervalRef.current);
-        rmsIntervalRef.current = null;
       }
       // Close the incremental-write file so the partial recording is flushed
       // and the main-side stream isn't leaked across unmount. Reading

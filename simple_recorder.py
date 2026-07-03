@@ -1266,8 +1266,202 @@ def status():
             print(f"  • {recording.name} ({size_mb:.1f}MB)")
 
 
+class _PendingFinalsCoordinator:
+    """Holds each channel's finalised-but-unshown utterance for up to
+    ``PER_SEGMENT_BLEED_WINDOW_S`` so a same-instant utterance on the OTHER
+    channel has a chance to arrive before either reaches the user — the
+    live equivalent of the batch pipeline's ``_drop_per_segment_bleed``
+    (``src/transcriber.py``), reusing its constants and Jaccard function
+    directly instead of re-deriving them.
+
+    An entry releases early, after ``MIN_HOLD_S``, once the other
+    channel's VAD is confirmed idle — there's no plausible overlap
+    incoming, so holding it out for the full window would just be added
+    latency with no dedup benefit. This bounds mic-only recordings (system
+    channel never active) and ordinary non-overlapping turn-taking to a
+    fixed ``MIN_HOLD_S`` floor rather than the old single-channel path's
+    true zero delay — a deliberate, small (500 ms) latency trade for the
+    bleed-detection window; only genuine cross-channel overlap pays the
+    full window.
+    """
+
+    # Grace period after the other channel goes idle before giving up on a
+    # possible bleed match. Bridges the gap between a SpeechEnd event and
+    # that channel's _finalise() actually landing an entry here (VAD flush
+    # + Parakeet decode aren't instantaneous).
+    MIN_HOLD_S = 0.5
+
+    def __init__(self):
+        self._pending = []
+        # (entry, emitted_at) pairs already released to the user, kept for
+        # PER_SEGMENT_BLEED_WINDOW_S so a late-arriving bleed partner whose
+        # counterpart already left self._pending can still be caught — see
+        # _resolve_against_recent.
+        self._recent_emitted = []
+
+    def add(self, channel, text, start, end, samples):
+        if not text:
+            return
+        self._pending.append({
+            "channel": channel,
+            "text": text,
+            "start": start,
+            "end": end,
+            "samples": samples,
+            "added_at": time.monotonic(),
+        })
+
+    def _is_bleed_pair(self, e, other):
+        """True if `e` and `other` (opposite channels) overlap in time and
+        their text is similar enough to be the same underlying speech —
+        the shared Jaccard/window/min-chars gate used by both
+        _resolve_bleed and _resolve_against_recent."""
+        from src.transcriber import (
+            _token_jaccard, PER_SEGMENT_BLEED_JACCARD,
+            PER_SEGMENT_BLEED_WINDOW_S, PER_SEGMENT_BLEED_MIN_CHARS,
+        )
+        if abs(other["start"] - e["start"]) > PER_SEGMENT_BLEED_WINDOW_S:
+            return False
+        if (len(e["text"]) < PER_SEGMENT_BLEED_MIN_CHARS
+                or len(other["text"]) < PER_SEGMENT_BLEED_MIN_CHARS):
+            return False
+        return _token_jaccard(e["text"], other["text"]) >= PER_SEGMENT_BLEED_JACCARD
+
+    def _resolve_bleed(self, entries):
+        """Return the set of entry ids (all still in `entries`, i.e. not
+        yet shown) to drop as bleed echoes. Compares every entry against
+        every OTHER-channel entry in ``entries`` (ready or not — a
+        not-yet-ready entry still carries real text and RMS, so there's
+        no reason to wait on it before using it as a comparison point).
+        Same rule as batch: Jaccard >= threshold on time-overlapping text
+        means bleed; the lower-RMS side is the echo and gets dropped.
+        Ties always favor mic ('You'), matching src/transcriber.py's
+        _drop_per_segment_bleed default (`if mic_rms >= sys_rms:
+        drop_sys`) — entries are compared from the mic side's
+        perspective regardless of loop/insertion order, so a tie can't
+        non-deterministically drop mic depending on which channel
+        happened to finalise first."""
+        drop_ids = set()
+        for e in entries:
+            for other in entries:
+                if other is e or other["channel"] == e["channel"]:
+                    continue
+                if id(e) in drop_ids or id(other) in drop_ids:
+                    continue
+                if not self._is_bleed_pair(e, other):
+                    continue
+                mic_entry, sys_entry = (e, other) if e["channel"] == "You" else (other, e)
+                mic_rms = _samples_rms(mic_entry["samples"])
+                sys_rms = _samples_rms(sys_entry["samples"])
+                if mic_rms >= sys_rms:
+                    drop_ids.add(id(sys_entry))
+                else:
+                    drop_ids.add(id(mic_entry))
+        return drop_ids
+
+    def _resolve_against_recent(self, ready_entries):
+        """Return the set of `ready_entries` ids to drop because they
+        bleed-match something already emitted (in self._recent_emitted).
+
+        A genuine bleed pair's two sides can become "ready" in different
+        flush_ready() calls — the earlier side is already gone from
+        self._pending by the time the later side is checked, so
+        _resolve_bleed alone misses it (see flush_ready). There's no
+        retraction mechanism (v1 constraint — see the module's live-
+        speaker-fix design notes), so the earlier, already-shown side
+        can't be un-shown; the only thing left to do is suppress the
+        later duplicate outright, regardless of which side has higher
+        RMS."""
+        drop_ids = set()
+        for e in ready_entries:
+            for other, _emitted_at in self._recent_emitted:
+                if other["channel"] == e["channel"]:
+                    continue
+                if self._is_bleed_pair(e, other):
+                    drop_ids.add(id(e))
+                    break
+        return drop_ids
+
+    def _remember_emitted(self, results, now):
+        """Prune self._recent_emitted to the bleed window and record newly
+        -released entries in it, so a later-arriving bleed partner can
+        still be matched against them (_resolve_against_recent)."""
+        from src.transcriber import PER_SEGMENT_BLEED_WINDOW_S
+        self._recent_emitted = [
+            (e, t) for (e, t) in self._recent_emitted
+            if now - t <= PER_SEGMENT_BLEED_WINDOW_S
+        ]
+        self._recent_emitted.extend((e, now) for e in results)
+
+    def flush_ready(self, other_idle):
+        """``other_idle``: ``{"You": bool, "Others": bool}`` — True when
+        that channel's VAD is not currently mid-utterance. Returns entries
+        ready to emit (bleed losers already excluded), removing them from
+        the pending set."""
+        from src.transcriber import PER_SEGMENT_BLEED_WINDOW_S
+        now = time.monotonic()
+        drop_ids = self._resolve_bleed(self._pending)
+        ready, not_ready = [], []
+        for e in self._pending:
+            age = now - e["added_at"]
+            other_channel = "Others" if e["channel"] == "You" else "You"
+            released = age >= PER_SEGMENT_BLEED_WINDOW_S or (
+                other_idle.get(other_channel, True) and age >= self.MIN_HOLD_S
+            )
+            (ready if released else not_ready).append(e)
+        self._pending = not_ready
+        drop_ids |= self._resolve_against_recent(
+            [e for e in ready if id(e) not in drop_ids],
+        )
+        results = [e for e in ready if id(e) not in drop_ids]
+        results.sort(key=lambda e: e["start"])
+        self._remember_emitted(results, now)
+        return results
+
+    def flush_all(self):
+        """Force-emit every remaining entry regardless of hold age. Called
+        once at shutdown so a trailing utterance inside the hold window
+        still reaches the user instead of being silently dropped."""
+        now = time.monotonic()
+        drop_ids = self._resolve_bleed(self._pending)
+        drop_ids |= self._resolve_against_recent(
+            [e for e in self._pending if id(e) not in drop_ids],
+        )
+        results = [e for e in self._pending if id(e) not in drop_ids]
+        self._pending = []
+        results.sort(key=lambda e: e["start"])
+        self._remember_emitted(results, now)
+        return results
+
+
+def _samples_rms(samples) -> float:
+    """Mean RMS amplitude of an in-memory float32 sample array. Live
+    analogue of src/transcriber.py's ``_segment_rms`` (which reads the
+    same metric from a WAV file) — the live path already holds each
+    channel's utterance in memory, so there's no file to read. Only used
+    to compare RMS BETWEEN the two channels for the same utterance, so the
+    absolute scale doesn't need to match ``_segment_rms``'s PCM16 scale."""
+    if samples is None or len(samples) == 0:
+        return 0.0
+    import numpy as np
+    return float(np.sqrt(np.mean(np.square(samples, dtype=np.float64))))
+
+
+def _emit_live_seg(speaker, text, start, end, is_final):
+    if not text:
+        return
+    print("LIVE_SEG:" + json.dumps({
+        "text": text,
+        "start": start,
+        "end": end,
+        "is_final": is_final,
+        "speaker": speaker,
+    }), flush=True)
+
+
 class _LiveVadPipeline:
-    """VAD-gated batch transcription pipeline for the live-transcript consumer.
+    """VAD-gated batch transcription pipeline for ONE audio channel (mic or
+    system) of the live-transcript consumer.
 
     Replaces the earlier parakeet-mlx streaming approach with the
     Granola / OpenOats / Meetily pattern: Silero VAD detects utterance
@@ -1277,22 +1471,32 @@ class _LiveVadPipeline:
     so the user sees text forming in real time without flicker between
     unrelated decoder hypotheses.
 
+    Two independent instances are driven by ``_live_stdin_consumer`` (see
+    ``create_pair()``) — one per channel, each with its own Silero VAD
+    state — so speaker identity comes from which channel actually
+    contains the speech, not a post-hoc RMS guess on a pre-mixed mono
+    stream. ``process()`` itself is channel-agnostic; it only touches this
+    instance's own state.
+
     Protocol emitted on stdout (unchanged from earlier streaming consumer
-    so main.js / preload / ipc.ts wiring is reused):
+    so main.js / preload / ipc.ts wiring is reused, plus a new `speaker`
+    field):
 
       LIVE_READY:<config json>     once, after both models are loaded
-      LIVE_SEG:<segment json>      per partial OR final
+      LIVE_SEG:<segment json>      per partial OR final; carries "speaker"
       LIVE_ERROR:<error json>      on any unrecoverable failure
 
-    Driven by ``_live_stdin_consumer`` (stdin bytes input, the renderer-driven
-    capture path), which drives ``process(chunk)`` from its own input loop and
-    calls ``finalize()`` on shutdown. The class owns all VAD + partial/final
-    state so the live path is in one place.
+    Partials are emitted directly (``_emit`` → stdout, no delay). Finals
+    are NOT emitted directly — ``_finalise`` hands them to a shared
+    ``_PendingFinalsCoordinator`` so a same-instant utterance on the other
+    channel can be checked for bleed before either reaches the user; see
+    ``_live_stdin_consumer``.
 
     Architecture notes:
-      * Audio is consumed at 16 kHz mono float32 (Parakeet + Silero
-        native rate). Callers must downsample / decimate / mono-mix
-        upstream — the pipeline doesn't resample.
+      * Audio is consumed at 16 kHz mono float32, already split to this
+        channel by the caller (the combined stdin stream is interleaved
+        stereo; ``_live_stdin_consumer`` de-interleaves before calling
+        ``process()``). The pipeline itself doesn't resample or split.
       * Preroll ring holds the most recent ``PREROLL_CHUNKS`` chunks of
         pre-speech audio so the first syllable of every utterance is
         recovered after VAD fires (Silero always trips slightly late).
@@ -1315,11 +1519,16 @@ class _LiveVadPipeline:
     PREROLL_CHUNKS = 2  # ≈ 512 ms at 256 ms per callback
 
     @classmethod
-    def create(cls, source_rate, source_label):
-        """Load Parakeet + Silero, emit LIVE_READY, return a ready pipeline.
-
-        Returns ``None`` if any setup step fails (after emitting
-        LIVE_ERROR). Callers should ``return`` on ``None``.
+    def _load_shared(cls, source_rate, source_label):
+        """Load Parakeet config shared by both channel pipelines. Returns
+        ``(init_kwargs, ready_payload)`` — ``init_kwargs`` is a dict of
+        shared __init__ kwargs (np, sr, SpeechStart, SpeechEnd,
+        transcribe_samples, language); ``ready_payload`` is the LIVE_READY
+        body for the caller to print once it has also finished
+        constructing the per-channel VAD state. Returns ``None`` if any
+        setup step fails (after emitting LIVE_ERROR). Callers should bail
+        out on ``None``. Does NOT emit LIVE_READY itself — see
+        ``create_pair``.
         """
         try:
             import numpy as _np
@@ -1368,7 +1577,7 @@ class _LiveVadPipeline:
 
         try:
             from src.silero_vad import (
-                SileroProcessor, SpeechStart, SpeechEnd, VAD_SAMPLE_RATE,
+                SpeechStart, SpeechEnd, VAD_SAMPLE_RATE, VAD_CHUNK_SAMPLES,
             )
         except ImportError as e:
             print("LIVE_ERROR:" + json.dumps({
@@ -1394,13 +1603,19 @@ class _LiveVadPipeline:
             }), flush=True)
             return None
 
-        try:
-            vad = SileroProcessor()
-        except Exception as e:
-            print("LIVE_ERROR:" + json.dumps({
-                "stage": "load_silero", "error": str(e),
-            }), flush=True)
-            return None
+        ready_payload = {
+            "engine": engine,
+            "language": language,
+            "sample_rate": sr,
+            "vad_chunk_samples": VAD_CHUNK_SAMPLES,
+            "min_utterance_s": cls.MIN_UTTERANCE_S,
+            "max_utterance_s": cls.MAX_UTTERANCE_S,
+            "partial_interval_s": cls.PARTIAL_INTERVAL_S,
+        }
+        if source_rate is not None:
+            ready_payload["source_rate"] = source_rate
+        if source_label is not None:
+            ready_payload["source"] = source_label
 
         # Pre-load the active engine so the first SpeechEnd doesn't pay
         # warm-load latency on the user's very first utterance.
@@ -1412,39 +1627,64 @@ class _LiveVadPipeline:
             }), flush=True)
             return None
 
-        ready_payload = {
-            "engine": engine,
+        # LIVE_READY is NOT emitted here — the caller (create_pair) still
+        # has to construct both channels' Silero VAD instances, and
+        # LIVE_READY is documented (and main.js relies on it) to mean
+        # "fully ready, both models loaded." Emitting it before that would
+        # let the renderer flip to 'streaming' and then immediately get a
+        # LIVE_ERROR if VAD construction fails.
+        return {
+            "np": _np,
+            "sr": sr,
+            "SpeechStart": SpeechStart,
+            "SpeechEnd": SpeechEnd,
+            "transcribe_samples": transcribe_samples,
             "language": language,
-            "sample_rate": sr,
-            "vad_chunk_samples": vad.chunk_samples,
-            "min_utterance_s": cls.MIN_UTTERANCE_S,
-            "max_utterance_s": cls.MAX_UTTERANCE_S,
-            "partial_interval_s": cls.PARTIAL_INTERVAL_S,
-        }
-        if source_rate is not None:
-            ready_payload["source_rate"] = source_rate
-        if source_label is not None:
-            ready_payload["source"] = source_label
-        print("LIVE_READY:" + json.dumps(ready_payload), flush=True)
+        }, ready_payload
 
-        return cls(
-            np=_np,
-            vad=vad,
-            sr=sr,
-            SpeechStart=SpeechStart,
-            SpeechEnd=SpeechEnd,
-            transcribe_samples=transcribe_samples,
-            language=language,
-        )
+    @classmethod
+    def create_pair(cls, source_rate, source_label):
+        """Load the shared model/VAD config once, construct both channels'
+        Silero VAD state, and only THEN emit LIVE_READY (once) — so
+        LIVE_READY genuinely means "both models loaded," matching what
+        main.js/the renderer treat it as. Returns two independent pipeline
+        instances — mic ("You") and system ("Others") — each with its own
+        VAD state and a shared ``_PendingFinalsCoordinator`` for
+        cross-channel bleed dedup. Returns ``(None, None)`` on failure
+        (LIVE_ERROR already emitted)."""
+        loaded = cls._load_shared(source_rate, source_label)
+        if loaded is None:
+            return None, None
+        shared, ready_payload = loaded
+        try:
+            from src.silero_vad import SileroProcessor
+            mic_vad = SileroProcessor()
+            sys_vad = SileroProcessor()
+        except Exception as e:
+            print("LIVE_ERROR:" + json.dumps({
+                "stage": "load_silero", "error": str(e),
+            }), flush=True)
+            return None, None
+        print("LIVE_READY:" + json.dumps(ready_payload), flush=True)
+        pending_finals = _PendingFinalsCoordinator()
+        mic_pipeline = cls(vad=mic_vad, speaker="You",
+                            pending_finals=pending_finals, **shared)
+        sys_pipeline = cls(vad=sys_vad, speaker="Others",
+                            pending_finals=pending_finals, **shared)
+        return mic_pipeline, sys_pipeline
 
     def __init__(self, np, vad, sr, SpeechStart, SpeechEnd, transcribe_samples,
-                 language="auto"):
+                 speaker, pending_finals, language="auto"):
         self.np = np
         self.vad = vad
         self.sr = sr
         self.SpeechStart = SpeechStart
         self.SpeechEnd = SpeechEnd
         self.transcribe_samples = transcribe_samples
+        # "You" (mic) or "Others" (system) — fixed for this instance's
+        # lifetime, carried on every emitted LIVE_SEG.
+        self.speaker = speaker
+        self.pending_finals = pending_finals
         # Passed through to every transcribe_samples() call. Parakeet is
         # multilingual + language-agnostic at inference, so "auto" and a
         # concrete code both produce the same decoding. The hint is
@@ -1468,8 +1708,9 @@ class _LiveVadPipeline:
         """Parse raw little-endian float32 bytes into a 1-D float32 array.
 
         Used by the stdin consumer so the consumer itself doesn't need a
-        guarded numpy import — the pipeline already failed at create()
-        time if numpy was missing, so by the time we get here it exists.
+        guarded numpy import — the pipeline already failed at
+        create_pair() time if numpy was missing, so by the time we get
+        here it exists.
         ``.copy()`` because ``frombuffer`` returns a read-only view of
         the input bytes; downstream VAD code mutates in place.
         """
@@ -1528,14 +1769,13 @@ class _LiveVadPipeline:
             self._finalise()
 
     def _emit(self, text, start_samples, end_samples, is_final):
-        if not text:
-            return
-        print("LIVE_SEG:" + json.dumps({
-            "text": text,
-            "start": start_samples / self.sr,
-            "end": end_samples / self.sr,
-            "is_final": is_final,
-        }), flush=True)
+        _emit_live_seg(
+            speaker=self.speaker,
+            text=text,
+            start=start_samples / self.sr,
+            end=end_samples / self.sr,
+            is_final=is_final,
+        )
 
     def _finalise(self):
         if len(self.speech_samples) < self.min_utterance_samples:
@@ -1555,11 +1795,16 @@ class _LiveVadPipeline:
             self.last_partial_text = ""
             return
         end_sample = self.speech_start_offset + len(self.speech_samples)
-        self._emit(
-            text,
-            start_samples=self.speech_start_offset,
-            end_samples=end_sample,
-            is_final=True,
+        # Route through the shared coordinator instead of emitting
+        # directly — it holds the segment briefly so a same-instant
+        # utterance on the other channel can be checked for bleed before
+        # either reaches the user (see _live_stdin_consumer).
+        self.pending_finals.add(
+            channel=self.speaker,
+            text=text,
+            start=self.speech_start_offset / self.sr,
+            end=end_sample / self.sr,
+            samples=self.speech_samples,
         )
         # Advance the offset so a continued utterance (e.g. when
         # MAX_UTTERANCE_S forces a mid-monologue final) doesn't reuse the
@@ -1602,24 +1847,30 @@ class _LiveVadPipeline:
 
 def _live_stdin_consumer():
     """Live consumer fed by raw float32 stdin (renderer-driven system-audio
-    path). The renderer captures mic + system audio via Web Audio,
-    downsamples its 48 kHz mix to 16 kHz mono float32, and pushes chunks
-    to main.js over IPC. main.js spawns this subprocess and writes those
-    chunks to our stdin.
+    path). The renderer captures mic + system audio via Web Audio and
+    pushes 16 kHz INTERLEAVED STEREO float32 chunks (mic=L, system=R) to
+    main.js over IPC; main.js spawns this subprocess and writes those
+    chunks to our stdin. Each channel is de-interleaved here and driven
+    through its own independent ``_LiveVadPipeline`` so speaker identity
+    is a structural fact (which channel the audio came from), not a
+    post-hoc RMS guess on a pre-mixed mono stream.
 
     Exits cleanly on stdin EOF (main.js closes the pipe on stop) or on
-    SIGTERM. Input format is contract: 16 kHz mono float32, native byte
-    order. Any other input is undefined behaviour.
+    SIGTERM. Input format is contract: 16 kHz interleaved stereo float32,
+    native byte order. Any other input is undefined behaviour.
     """
     import sys
     import signal
 
-    # numpy is imported (and guarded) inside _LiveVadPipeline.create() so
-    # an absent install emits LIVE_ERROR and returns None rather than
+    # numpy is imported (and guarded) inside _LiveVadPipeline._load_shared()
+    # so an absent install emits LIVE_ERROR and returns None rather than
     # crashing the subprocess before main.js sees any signal.
-    pipeline = _LiveVadPipeline.create(source_rate=None, source_label="stdin")
-    if pipeline is None:
+    mic_pipeline, sys_pipeline = _LiveVadPipeline.create_pair(
+        source_rate=None, source_label="stdin",
+    )
+    if mic_pipeline is None or sys_pipeline is None:
         return
+    coordinator = mic_pipeline.pending_finals  # shared with sys_pipeline
 
     # Signal handler: SIGTERM from main.js (on stop) should flush + exit
     # cleanly. SIGINT covers terminal Ctrl-C in dev runs.
@@ -1632,9 +1883,22 @@ def _live_stdin_consumer():
     except (AttributeError, ValueError):
         pass
 
-    # Read stdin in 4 KB blocks (~1024 samples per read at 16 kHz). The
-    # block size is a latency-vs-syscall-overhead trade; smaller blocks
-    # give finer VAD timing but more read() calls. 4 KB is comfortable.
+    def _flush_ready():
+        other_idle = {
+            "You": not mic_pipeline.vad.in_speech,
+            "Others": not sys_pipeline.vad.in_speech,
+        }
+        for e in coordinator.flush_ready(other_idle):
+            _emit_live_seg(
+                speaker=e["channel"], text=e["text"],
+                start=e["start"], end=e["end"], is_final=True,
+            )
+
+    # Read stdin in 4 KB blocks (~512 stereo frames per read at 16 kHz).
+    # The block size is a latency-vs-syscall-overhead trade; smaller
+    # blocks give finer VAD timing but more read() calls. 4 KB is
+    # comfortable. Must stay a multiple of 8 bytes (one stereo frame = 2
+    # float32 samples) — the pending-tail slicing below enforces that.
     BLOCK_BYTES = 4096
     pending = bytearray()
     try:
@@ -1644,15 +1908,25 @@ def _live_stdin_consumer():
             if not block:
                 break  # EOF
             pending.extend(block)
-            n_floats = len(pending) // 4
-            if n_floats == 0:
+            n_frames = (len(pending) // 4) // 2  # stereo frames (L+R pairs)
+            if n_frames == 0:
                 continue
-            # Slice off complete float32 samples; leave any partial-sample
+            # Slice off complete stereo frames; leave any partial-frame
             # tail in pending for the next read.
-            usable = bytes(pending[: n_floats * 4])
-            del pending[: n_floats * 4]
-            pipeline.process(pipeline.parse_float32_bytes(usable))
-        pipeline.finalize()
+            usable_bytes = n_frames * 2 * 4
+            usable = bytes(pending[:usable_bytes])
+            del pending[:usable_bytes]
+            stereo = mic_pipeline.parse_float32_bytes(usable).reshape(-1, 2)
+            mic_pipeline.process(mic_pipeline.np.ascontiguousarray(stereo[:, 0]))
+            sys_pipeline.process(sys_pipeline.np.ascontiguousarray(stereo[:, 1]))
+            _flush_ready()
+        mic_pipeline.finalize()
+        sys_pipeline.finalize()
+        for e in coordinator.flush_all():
+            _emit_live_seg(
+                speaker=e["channel"], text=e["text"],
+                start=e["start"], end=e["end"], is_final=True,
+            )
     except Exception as e:
         print("LIVE_ERROR:" + json.dumps({
             "stage": "consumer_loop", "error": str(e),
@@ -1663,11 +1937,13 @@ def _live_stdin_consumer():
 def transcribe_stream_cmd():
     """Run the VAD-gated live transcription consumer over raw stdin audio.
 
-    The pipe contract: caller writes raw 16 kHz mono float32 little-endian
-    samples to our stdin; we emit LIVE_READY / LIVE_SEG / LIVE_ERROR
-    NDJSON lines to stdout. Used by main.js for the renderer-driven
-    system-audio path, where the Web Audio mix is downsampled in the
-    renderer and pushed to us through IPC.
+    The pipe contract: caller writes raw 16 kHz INTERLEAVED STEREO
+    float32 little-endian samples (mic=L, system=R) to our stdin; we emit
+    LIVE_READY / LIVE_SEG / LIVE_ERROR NDJSON lines to stdout, each
+    LIVE_SEG carrying a "speaker": "You"|"Others" field set directly from
+    which channel produced it. Used by main.js for the renderer-driven
+    system-audio path, where the Web Audio capture is downsampled and
+    interleaved in the renderer and pushed to us through IPC.
     """
     _live_stdin_consumer()
 

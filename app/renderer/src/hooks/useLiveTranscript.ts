@@ -1,6 +1,5 @@
 import * as React from 'react';
 import { ipc, type LiveSegment } from '@/lib/ipc';
-import { decideSpeaker } from '@/lib/liveRmsBuffer';
 
 export type LiveTranscriptStatus =
   | 'idle'
@@ -20,15 +19,64 @@ export interface UseLiveTranscriptResult {
   slow: boolean;
 }
 
+/** 'You' | 'Others', normalised the same way the UI's charitable default
+ *  treats a missing/undefined speaker tag. */
+function speakerKey(segment: LiveSegment): 'You' | 'Others' {
+  return segment.speaker === 'Others' ? 'Others' : 'You';
+}
+
+/**
+ * Insert a LIVE_SEG update into the segment list, maintaining the same
+ * invariant main.js keeps on `liveTranscriptState.segments`: chronologically
+ * sorted finals first, followed by at most one in-progress partial per
+ * speaker trailing at the end.
+ *
+ * Two independent channels (mic + system) emit interleaved streams, so a
+ * naive "replace whatever the last array entry is" would clobber one
+ * channel's in-progress partial with the other's the moment they overlap,
+ * and a final released late by the live path's bleed-dedup hold (up to
+ * PER_SEGMENT_BLEED_WINDOW_S) could land out of chronological order
+ * relative to a still-ongoing utterance on the other channel. Splitting
+ * finals from trailing partials and inserting each in its own lane fixes
+ * both.
+ */
+function insertLiveSegment(prev: LiveSegment[], segment: LiveSegment): LiveSegment[] {
+  let splitIdx = prev.length;
+  while (splitIdx > 0 && !prev[splitIdx - 1].isFinal) splitIdx--;
+  const finals = prev.slice(0, splitIdx);
+  const partials = prev.slice(splitIdx);
+  const key = speakerKey(segment);
+  if (segment.isFinal) {
+    let insertAt = finals.length;
+    while (insertAt > 0 && finals[insertAt - 1].start > segment.start) insertAt--;
+    const nextFinals = [...finals.slice(0, insertAt), segment, ...finals.slice(insertAt)];
+    // Only drop a same-speaker partial if it could plausibly BE the
+    // utterance this final supersedes (started before this final's
+    // utterance ended). A bleed-delayed final can arrive well after the
+    // SAME speaker has already started a newer, unrelated utterance —
+    // dropping every same-speaker partial indiscriminately would clobber
+    // that unrelated one until its next partial tick.
+    const remainingPartials = partials.filter(
+      (s) => speakerKey(s) !== key || s.start > segment.end,
+    );
+    return [...nextFinals, ...remainingPartials];
+  }
+  const otherPartials = partials.filter((s) => speakerKey(s) !== key);
+  return [...finals, ...otherPartials, segment];
+}
+
 /**
  * Subscribes to Parakeet live-transcript events for the active recording.
  *
  * Flow:
  *   1. On mount, snapshot the buffer that main.js has been accumulating
  *      since the recording started — this catches a late-mounting panel up
- *      with any segments it missed.
- *   2. Subscribe to `live-transcript-chunk` for the tail. Finals append;
- *      partials replace the trailing partial entry.
+ *      with any segments it missed. main.js maintains the same
+ *      finals-then-per-speaker-partials invariant, so the snapshot is used
+ *      as-is.
+ *   2. Subscribe to `live-transcript-chunk` for the tail and fold each
+ *      update in via `insertLiveSegment` (see above for why a naive
+ *      replace-the-tail approach doesn't work with two channels).
  *   3. Track ready/error state via the dedicated channels so the UI can
  *      distinguish "no speech yet" from "model still loading" from
  *      "model failed to load."
@@ -69,35 +117,10 @@ export function useLiveTranscript(sessionName: string | null): UseLiveTranscript
     const offChunk = ipc().on.liveTranscriptChunk((ev) => {
       if (ev.sessionName !== sessionName) return;
       receivedEventRef.current = true;
-      // Attribute the speaker from the per-channel RMS buffer the
-      // useSystemAudioCapture hook populates. Decided here (not in
-      // useSystemAudioCapture, not in main.js) because the decision
-      // depends on the segment's start/end which only exist on the
-      // LIVE_SEG event. Mic-only recordings: no system channel, no
-      // samples in the buffer → decideSpeaker returns 'You' which
-      // matches the TranscriptPanel charitable default.
-      const segment: LiveSegment = {
-        ...ev.segment,
-        speaker: decideSpeaker(ev.segment.start, ev.segment.end),
-      };
-      setSegments((prev) => {
-        if (segment.isFinal) {
-          // Append-only on final. If the previous tail was a partial, it's
-          // promoted (replaced by the final) — Parakeet's contract is that
-          // a new sentence supersedes the previous tail.
-          const tail = prev[prev.length - 1];
-          if (tail && !tail.isFinal) {
-            return [...prev.slice(0, -1), segment];
-          }
-          return [...prev, segment];
-        }
-        // Partial: overwrite the trailing partial, otherwise append.
-        const tail = prev[prev.length - 1];
-        if (tail && !tail.isFinal) {
-          return [...prev.slice(0, -1), segment];
-        }
-        return [...prev, segment];
-      });
+      // ev.segment.speaker already carries the true mic/system channel
+      // tag from the Python sidecar — no client-side attribution needed.
+      const segment: LiveSegment = ev.segment;
+      setSegments((prev) => insertLiveSegment(prev, segment));
     });
 
     const offError = ipc().on.liveTranscriptError((ev) => {
@@ -115,15 +138,9 @@ export function useLiveTranscript(sessionName: string | null): UseLiveTranscript
         if (cancelled || !res.success) return;
         if (res.sessionName !== sessionName) return;
         if (receivedEventRef.current) return;
-        // Attribute each backfilled segment from the same RMS buffer. The
-        // RMS samples for these segments were captured at the time the
-        // chunks streamed through, so decideSpeaker is a meaningful lookup
-        // even though the segments were stored before this hook mounted.
-        const attributed: LiveSegment[] = res.segments.map((seg) => ({
-          ...seg,
-          speaker: decideSpeaker(seg.start, seg.end),
-        }));
-        setSegments(attributed);
+        // Backfilled segments already carry their true speaker tag —
+        // main.js stores it verbatim in liveTranscriptState.segments.
+        setSegments(res.segments);
         setReady(res.ready);
         if (res.error) {
           setError({ stage: res.error.stage, message: res.error.message ?? res.error.error });

@@ -2823,11 +2823,12 @@ ipcMain.handle('get-queue-status', async () => {
   };
 });
 
-// Push a chunk of raw 16 kHz mono float32 audio to the live transcribe
-// sidecar's stdin. Renderer downsamples its Web Audio mix and calls this
-// every ~256 ms. We expect either a Node Buffer or a TypedArray; both
-// stringify safely to bytes via the same write() call. No-op if the
-// sidecar isn't running (e.g. spawn failed, or recording ended).
+// Push a chunk of raw 16 kHz INTERLEAVED STEREO float32 audio (mic=L,
+// system=R) to the live transcribe sidecar's stdin. Renderer decimates its
+// two pre-merge Web Audio taps and calls this every ~256 ms. We expect
+// either a Node Buffer or a TypedArray; both stringify safely to bytes via
+// the same write() call. No-op if the sidecar isn't running (e.g. spawn
+// failed, or recording ended).
 ipcMain.on('live-transcribe-chunk', (event, payload) => {
   const proc = liveTranscribeProcess;
   if (!proc || proc.killed) return;
@@ -3025,16 +3026,45 @@ function handleLiveTranscribeLine(line) {
         start: seg.start,
         end: seg.end,
         isFinal: !!seg.is_final,
+        // 'You' | 'Others', set directly by the Python sidecar from which
+        // channel (mic vs system) produced this segment — a structural
+        // fact, not a client-side RMS guess.
+        speaker: seg.speaker,
       };
+      // Invariant maintained on liveTranscriptState.segments: chronologically
+      // sorted finals first, followed by at most one in-progress partial per
+      // speaker trailing at the end. With two independent channels now
+      // emitting interleaved streams, "replace whatever the last array entry
+      // is" (the old single-stream logic) would clobber one channel's
+      // in-progress partial with the other's, and a final released late by
+      // the bleed-dedup hold could land out of chronological order relative
+      // to a still-ongoing utterance on the other channel. Splitting finals
+      // from trailing partials and inserting each in its own lane fixes both.
+      const speakerKey = segment.speaker === 'Others' ? 'Others' : 'You';
+      let splitIdx = liveTranscriptState.segments.length;
+      while (splitIdx > 0 && !liveTranscriptState.segments[splitIdx - 1].isFinal) splitIdx--;
+      const finals = liveTranscriptState.segments.slice(0, splitIdx);
+      const partials = liveTranscriptState.segments.slice(splitIdx);
       if (segment.isFinal) {
-        liveTranscriptState.segments.push(segment);
+        let insertAt = finals.length;
+        while (insertAt > 0 && finals[insertAt - 1].start > segment.start) insertAt--;
+        finals.splice(insertAt, 0, segment);
+        // Only drop a same-speaker partial if it could plausibly BE the
+        // utterance this final supersedes (started before this final's
+        // utterance ended). A bleed-delayed final can arrive well after
+        // the SAME speaker has already started a newer, unrelated
+        // utterance — dropping every same-speaker partial indiscriminately
+        // would clobber that unrelated one until its next partial tick.
+        const remainingPartials = partials.filter(
+          (s) => (s.speaker === 'Others' ? 'Others' : 'You') !== speakerKey
+            || s.start > segment.end,
+        );
+        liveTranscriptState.segments = [...finals, ...remainingPartials];
       } else {
-        const tail = liveTranscriptState.segments[liveTranscriptState.segments.length - 1];
-        if (tail && !tail.isFinal) {
-          liveTranscriptState.segments[liveTranscriptState.segments.length - 1] = segment;
-        } else {
-          liveTranscriptState.segments.push(segment);
-        }
+        const otherPartials = partials.filter(
+          (s) => (s.speaker === 'Others' ? 'Others' : 'You') !== speakerKey,
+        );
+        liveTranscriptState.segments = [...finals, ...otherPartials, segment];
       }
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('live-transcript-chunk', { sessionName, segment });
@@ -3144,9 +3174,13 @@ let liveTranscriptState = {
 };
 
 // Sidecar Python `transcribe-stream` subprocess used by the system-audio
-// path. The renderer captures + mixes in Web Audio, downsamples to 16 kHz
-// mono float32, and pushes chunks here via `live-transcribe-chunk`; we
-// pipe them into this process's stdin. Its stdout is parsed the same way
+// path. The renderer captures mic + system audio on separate Web Audio
+// taps, downsamples each to 16 kHz, interleaves them into stereo (mic=L,
+// system=R — NOT mixed to mono), and pushes chunks here via
+// `live-transcribe-chunk`; we pipe them into this process's stdin. The
+// sidecar de-interleaves and transcribes each channel independently so
+// LIVE_SEG's `speaker` field is a structural fact, not a guess. Its
+// stdout is parsed the same way
 // the in-process `record --live` stdout is — same LIVE_READY / LIVE_SEG /
 // LIVE_ERROR protocol, same liveTranscriptState mutations, same IPC
 // events emitted to the renderer.
