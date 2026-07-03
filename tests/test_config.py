@@ -28,6 +28,15 @@ class ConfigStoragePathTests(unittest.TestCase):
 
 
 class ConfigLanguageTests(unittest.TestCase):
+    def test_default_language_is_auto_detect(self):
+        # A fresh config (no explicit language ever set) must default to
+        # "auto" so _resolve_output_language() picks up the transcript's
+        # detected language, not silently produce English-only summaries
+        # for every user who never visits Settings.
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config = Config(config_path=Path(tmp_dir) / "config.json")
+            self.assertEqual(config.get_language(), "auto")
+
     def test_set_language_accepts_supported_dutch_code(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             config = Config(config_path=Path(tmp_dir) / "config.json")

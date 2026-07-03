@@ -465,7 +465,10 @@ class Config:
             # any non-Steno app starts capturing the mic. Helper is gated
             # to macOS 14+ in main.js; users can flip off in Settings.
             "auto_detect_meetings_enabled": True,
-            "language": "en",
+            # "auto" so _resolve_output_language() picks the transcript's
+            # detected language instead of silently defaulting every
+            # unconfigured install to English summaries (#281).
+            "language": "auto",
             "ai_provider": "local",
             "remote_ollama_url": "",
             "cloud_api_url": "",
