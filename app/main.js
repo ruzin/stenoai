@@ -808,7 +808,7 @@ function createWindow(options = {}) {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
-      sandbox: false,
+      sandbox: true,
       preload: path.join(__dirname, 'preload.js'),
       scrollBounce: true,
     },
