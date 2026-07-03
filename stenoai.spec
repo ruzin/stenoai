@@ -210,6 +210,28 @@ import os
 # re-adds it. No-op on macOS — these dirs don't exist there (Metal is built
 # into the darwin binary + its mlx_metal_v3/ runner, which we keep).
 _OLLAMA_GPU_MARKERS = ('lib/ollama/cuda', 'lib/ollama/rocm', 'lib/ollama/vulkan')
+
+# On darwin, Ollama's runner tree is routed into a COLLECT-stage DATA TOC
+# (`ollama_datas`) instead of `Analysis.binaries`. This is load-bearing, not a
+# style choice - DO NOT "simplify" it back into binaries/Analysis(datas=...):
+#   Both Ollama and the pip `mlx` package ship their OWN, ABI-INCOMPATIBLE build
+#   of `libmlx.dylib`. Ollama's copies live beside `libmlxc.dylib` in
+#   `mlx_metal_v*/` with an `@loader_path` rpath, so each one resolves
+#   `@rpath/libmlx.dylib` to its own co-located sibling. If these files go
+#   through Analysis's binary-dependency walk, PyInstaller rewrites their
+#   LC_RPATHs and dedups `libmlx.dylib` by basename onto ONE shared file at
+#   `_internal/libmlx.dylib` (the pip build), so every MLX-tagged Ollama model
+#   call dies at runtime with a missing-symbol error (mlx::core::astype). And
+#   putting them in `Analysis(datas=...)` doesn't help: PyInstaller 6.x
+#   content-sniffs each `datas` entry and silently reclassifies anything that
+#   looks like a binary back into `binaries`, re-triggering the same rewrite.
+#   Only raw COLLECT-stage TOC entries are copied verbatim (shutil.copyfile, no
+#   dependency analysis, no rpath rewrite, no re-signing), preserving Ollama's
+#   self-contained runner exactly as shipped. COLLECT still chmods 0o755 any
+#   DATA entry whose source has the exec bit, so the ollama binary + dylibs stay
+#   executable. Windows keeps the old `binaries` path (no libmlx collision there
+#   - the GPU runner libs are pruned above and there's no pip-mlx build).
+ollama_datas: list[tuple[str, str, str]] = []
 ollama_bin_dir = os.path.join(SPECPATH, 'bin')
 if os.path.exists(ollama_bin_dir):
     for root, _dirs, files in os.walk(ollama_bin_dir):
@@ -224,8 +246,15 @@ if os.path.exists(ollama_bin_dir):
             if base in ('ffmpeg', 'ffmpeg.exe'):
                 # Put ffmpeg at the root of the bundle for easy PATH access
                 binaries.append((filepath, '.'))
+            elif _IS_DARWIN:
+                # COLLECT DATA TOC 3-tuple: (dest_path_including_filename,
+                # abs_src_path, 'DATA'). Everything lives under ollama/,
+                # preserving subdirs like mlx_metal_v*/.
+                dest_name = os.path.join('ollama', rel) if rel_dir else os.path.join('ollama', filename)
+                ollama_datas.append((dest_name, filepath, 'DATA'))
             else:
-                # Everything else lives under ollama/ (preserving subdirs like lib/ollama/)
+                # Windows/Linux: unchanged - everything else lives under ollama/
+                # (preserving subdirs like lib/ollama/).
                 dest = 'ollama' if not rel_dir else os.path.join('ollama', rel_dir)
                 binaries.append((filepath, dest))
 
@@ -302,6 +331,10 @@ coll = COLLECT(
     a.binaries,
     a.zipfiles,
     a.datas,
+    # Ollama's runner tree, verbatim (darwin only; empty list off-darwin, so
+    # this is an unconditional no-op there). See the ollama_datas rationale
+    # above for why these MUST bypass Analysis and land at the COLLECT stage.
+    ollama_datas,
     strip=False,
     upx=_USE_UPX,
     upx_exclude=[],
