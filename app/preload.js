@@ -77,11 +77,7 @@ const stenoai = {
 
   setup: {
     check: () => invoke('startup-setup-check'),
-    systemCheck: () => invoke('setup-system-check'),
-    ffmpeg: () => invoke('setup-ffmpeg'),
-    python: () => invoke('setup-python'),
     ollamaAndModel: () => invoke('setup-ollama-and-model'),
-    whisper: () => invoke('setup-whisper'),
     parakeet: () => invoke('setup-parakeet'),
     test: () => invoke('setup-test'),
     triggerWizard: () => invoke('trigger-setup-wizard'),

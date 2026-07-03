@@ -34,9 +34,10 @@ if (process.platform !== 'darwin') {
 }
 
 const path = require('path');
-const { spawn: _spawnRaw, exec } = require('child_process');
+const { spawn: _spawnRaw } = require('child_process');
 const processingLog = require('./processing-log');
 const { isMeetingApp, allowsDeviceLevelFallback } = require('./meeting-detect');
+const { makeLineReader } = require('./backend-stream');
 
 // Wrap spawn so every backend / ollama launch defaults to windowsHide:true.
 // The PyInstaller backend (stenoai.exe) and bundled ollama.exe are console
@@ -808,20 +809,24 @@ function createWindow(options = {}) {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
-      sandbox: false,
+      sandbox: true,
       preload: path.join(__dirname, 'preload.js'),
       scrollBounce: true,
     },
-    titleBarStyle: 'hiddenInset',
     // Windows/Linux render the Electron application menu as an in-window menu
     // bar (File/Edit/View/…); macOS puts it in the global bar. Hide it off-mac
     // so the app keeps its clean custom-toolbar look (Alt still reveals it).
     autoHideMenuBar: true,
     show: false,
     backgroundColor: '#FAF9F5',
-    // React UI renders the macOS traffic lights inside the sidebar's top
-    // band rather than floating above a fixed titlebar.
-    trafficLightPosition: { x: 18, y: 18 },
+    ...(process.platform === 'darwin'
+      ? {
+          titleBarStyle: 'hiddenInset',
+          // React UI renders the macOS traffic lights inside the sidebar's
+          // top band rather than floating above a fixed titlebar.
+          trafficLightPosition: { x: 18, y: 18 },
+        }
+      : {}),
   };
   if (options.bounds && typeof options.bounds.x === 'number') {
     Object.assign(windowOpts, options.bounds);
@@ -1902,12 +1907,10 @@ ipcMain.handle('reprocess-meeting', async (event, summaryFile, regenerateTitle, 
         reject(new Error(`reprocess spawn error: ${err.message}`));
       });
 
+      const stdoutReader = makeLineReader();
       proc.stdout.on('data', (data) => {
         watchdog.reset();
-        const text = data.toString();
-        // CRLF-tolerant: Windows stdout is \r\n; exact-match lines (STREAM_COMPLETE)
-        // would otherwise carry a trailing \r and never match.
-        text.split(/\r?\n/).forEach(line => {
+        for (const line of stdoutReader.feed(data)) {
           if (line.startsWith('CHUNK:')) {
             try {
               const encoded = line.slice(6);
@@ -1938,7 +1941,7 @@ ipcMain.handle('reprocess-meeting', async (event, summaryFile, regenerateTitle, 
           } else if (line.trim()) {
             sendDebugLog(line.trim());
           }
-        });
+        }
       });
 
       proc.stderr.on('data', (data) => {
@@ -3382,12 +3385,14 @@ async function processNextInQueue() {
         reject(new Error(`process-streaming spawn error: ${err.message}`));
       });
 
+      const stdoutReader = makeLineReader();
       proc.stdout.on('data', (data) => {
         watchdog.reset();
-        const text = data.toString();
         // Parse protocol lines (CRLF-tolerant: Windows stdout is \r\n, and the
         // STREAM_COMPLETE exact-match below must not carry a trailing \r).
-        text.split(/\r?\n/).forEach(line => {
+        // Buffered across chunk boundaries via makeLineReader — a sentinel
+        // like SAVED: or STREAM_COMPLETE can straddle two 'data' events.
+        for (const line of stdoutReader.feed(data)) {
           logPipelineStdoutLine(line, 'process-streaming');
           if (line.startsWith('CHUNK:')) {
             try {
@@ -3436,7 +3441,7 @@ async function processNextInQueue() {
           } else if (line.trim()) {
             sendDebugLog(line.trim());
           }
-        });
+        }
       });
 
       proc.stderr.on('data', (data) => {
@@ -3900,317 +3905,6 @@ ipcMain.handle('startup-setup-check', async () => {
     };
   } catch (error) {
     console.error('Setup check error:', error);
-    return { success: false, error: error.message };
-  }
-});
-
-ipcMain.handle('setup-system-check', async () => {
-  try {
-    // Check Python installation
-    const pythonResult = await new Promise((resolve) => {
-      exec('python3 --version', (error, stdout, stderr) => {
-        if (error) {
-          resolve(false);
-        } else {
-          resolve(true);
-        }
-      });
-    });
-    
-    if (!pythonResult) {
-      return { success: false, error: 'Python 3 not found. Please install Python 3.8+' };
-    }
-    
-    // Create required directories. Mirror src/config.get_user_data_dir() so the
-    // Electron and Python sides agree on the storage root on every OS.
-    //   macOS:   ~/Library/Application Support/stenoai
-    //   Windows: %APPDATA%/stenoai
-    //   Linux:   ~/.config/stenoai (electron's appData)
-    let baseDir;
-    if (app.isPackaged) {
-      baseDir = path.join(app.getPath('appData'), 'stenoai');
-    } else {
-      // Development: Use project relative paths
-      baseDir = path.join(__dirname, '..');
-    }
-    
-    const dirs = ['recordings', 'transcripts', 'output'];
-    
-    for (const dir of dirs) {
-      const dirPath = path.join(baseDir, dir);
-      if (!fs.existsSync(dirPath)) {
-        fs.mkdirSync(dirPath, { recursive: true });
-      }
-    }
-    
-    // Create venv directory if it doesn't exist  
-    const projectRoot = path.join(__dirname, '..');
-    const venvPath = path.join(projectRoot, 'venv');
-    if (!fs.existsSync(venvPath)) {
-      await new Promise((resolve, reject) => {
-        const process = spawn('python3', ['-m', 'venv', 'venv'], {
-          cwd: projectRoot
-        });
-        
-        process.on('close', (code) => {
-          if (code === 0) {
-            resolve();
-          } else {
-            reject(new Error('Failed to create virtual environment'));
-          }
-        });
-        
-        process.on('error', reject);
-      });
-    }
-    
-    trackEvent('setup_completed', { step: 'system_check' });
-    return { success: true, message: 'System setup complete - Python and directories ready' };
-  } catch (error) {
-    trackEvent('setup_failed', { step: 'system_check' });
-    return { success: false, error: error.message };
-  }
-});
-
-ipcMain.handle('setup-ffmpeg', async () => {
-  try {
-    sendDebugLog('$ Checking for existing ffmpeg installation...');
-
-    // Check bundled ffmpeg first (shipped with the app), then system paths
-    const bundledFfmpeg = app.isPackaged
-      ? path.join(process.resourcesPath, 'stenoai', 'ffmpeg')
-      : path.join(__dirname, '..', 'dist', 'stenoai', 'ffmpeg');
-    const ffmpegPaths = [bundledFfmpeg, 'ffmpeg', '/opt/homebrew/bin/ffmpeg', '/usr/local/bin/ffmpeg'];
-    sendDebugLog(`$ Checking: ${ffmpegPaths.join(', ')}`);
-    let ffmpegPath = null;
-
-    for (const testPath of ffmpegPaths) {
-      try {
-        const found = await new Promise((resolve) => {
-          const proc = spawn(testPath, ['-version'], { timeout: 5000 });
-          proc.on('error', () => resolve(false));
-          proc.on('close', (code) => resolve(code === 0));
-        });
-
-        if (found) {
-          ffmpegPath = testPath;
-          sendDebugLog(`Found ffmpeg at: ${testPath}`);
-          break;
-        }
-      } catch (error) {
-        // Try next path
-        continue;
-      }
-    }
-
-    if (!ffmpegPath) {
-      sendDebugLog('ffmpeg not found in any common locations');
-    }
-    
-    // Install ffmpeg if not present
-    if (!ffmpegPath) {
-      sendDebugLog('ffmpeg not found, checking for Homebrew...');
-      sendDebugLog('$ Checking: brew, /opt/homebrew/bin/brew, /usr/local/bin/brew');
-
-      // First check if Homebrew is installed and get its path
-      const brewPaths = ['brew', '/opt/homebrew/bin/brew', '/usr/local/bin/brew'];
-      let brewPath = null;
-
-      for (const testPath of brewPaths) {
-        try {
-          const found = await new Promise((resolve) => {
-            const proc = spawn(testPath, ['--version'], { timeout: 5000 });
-            proc.on('error', () => resolve(false));
-            proc.on('close', (code) => resolve(code === 0));
-          });
-
-          if (found) {
-            brewPath = testPath;
-            sendDebugLog(`Found Homebrew at: ${testPath}`);
-            break;
-          }
-        } catch (error) {
-          // Try next path
-          continue;
-        }
-      }
-
-      if (!brewPath) {
-        sendDebugLog('Homebrew not found in any common locations');
-      }
-      
-      // Install Homebrew if missing
-      if (!brewPath) {
-        sendDebugLog('Homebrew not found, installing...');
-        sendDebugLog('$ /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"');
-
-        // Note: This uses the official Homebrew installation script
-        // Using exec here is intentional as this is the documented installation method
-        // The URL is hardcoded and not user-controlled
-        await new Promise((resolve, reject) => {
-          const process = exec('/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"',
-               { timeout: 600000 });
-
-          process.stdout.on('data', (data) => {
-            sendDebugLog(data.toString().trim());
-          });
-
-          process.stderr.on('data', (data) => {
-            sendDebugLog('STDERR: ' + data.toString().trim());
-          });
-
-          process.on('close', (code) => {
-            if (code === 0) {
-              sendDebugLog('Homebrew installation completed successfully');
-              resolve();
-            } else {
-              sendDebugLog(`Homebrew installation failed with exit code: ${code}`);
-              reject(new Error('Failed to install Homebrew automatically'));
-            }
-          });
-        });
-
-        // After installing, set brewPath to the default location
-        brewPath = '/opt/homebrew/bin/brew';
-      } else {
-        sendDebugLog('Homebrew found, proceeding with ffmpeg installation...');
-      }
-
-      // Now install ffmpeg via Homebrew using spawn for security
-      sendDebugLog(`$ ${brewPath} install ffmpeg`);
-      await new Promise((resolve, reject) => {
-        const process = spawn(brewPath, ['install', 'ffmpeg'], { timeout: 300000 });
-
-        process.stdout.on('data', (data) => {
-          sendDebugLog(data.toString().trim());
-        });
-
-        process.stderr.on('data', (data) => {
-          sendDebugLog('STDERR: ' + data.toString().trim());
-        });
-
-        process.on('close', (code) => {
-          if (code === 0) {
-            sendDebugLog('ffmpeg installation completed successfully');
-            resolve();
-          } else {
-            sendDebugLog(`ffmpeg installation failed with exit code: ${code}`);
-            reject(new Error('Failed to install ffmpeg via Homebrew'));
-          }
-        });
-
-        process.on('error', (error) => {
-          sendDebugLog(`ffmpeg installation error: ${error.message}`);
-          reject(error);
-        });
-      });
-    } else {
-      sendDebugLog('ffmpeg already installed, skipping installation');
-    }
-    
-    return { success: true, message: 'ffmpeg ready' };
-  } catch (error) {
-    sendDebugLog(`ffmpeg setup failed: ${error.message}`);
-    return { success: false, error: error.message };
-  }
-});
-
-ipcMain.handle('setup-python', async () => {
-  try {
-    // Python backend is bundled via PyInstaller - no setup needed
-    sendDebugLog('Python backend is bundled, skipping setup');
-    return { success: true, message: 'Python backend bundled' };
-
-    // Legacy code below - kept for reference but never runs
-    const projectRoot = path.join(__dirname, '..');
-    const venvPath = path.join(projectRoot, 'venv');
-
-    sendDebugLog(`Working directory: ${projectRoot}`);
-    
-    // Create virtual environment if it doesn't exist
-    if (!fs.existsSync(venvPath)) {
-      sendDebugLog('Python virtual environment not found, creating...');
-      sendDebugLog('$ python3 -m venv venv');
-      
-      await new Promise((resolve, reject) => {
-        const process = spawn('python3', ['-m', 'venv', 'venv'], {
-          cwd: projectRoot,
-          stdio: 'pipe'
-        });
-        
-        process.stdout.on('data', (data) => {
-          sendDebugLog(data.toString().trim());
-        });
-        
-        process.stderr.on('data', (data) => {
-          sendDebugLog('STDERR: ' + data.toString().trim());
-        });
-        
-        process.on('close', (code) => {
-          if (code === 0) {
-            sendDebugLog('Virtual environment created successfully');
-            resolve();
-          } else {
-            sendDebugLog(`Virtual environment creation failed with exit code: ${code}`);
-            reject(new Error('Failed to create virtual environment'));
-          }
-        });
-        
-        process.on('error', (error) => {
-          sendDebugLog(`Process error: ${error.message}`);
-          reject(error);
-        });
-      });
-    } else {
-      sendDebugLog('Python virtual environment already exists');
-    }
-    
-    // Install requirements including Whisper
-    sendDebugLog('Installing Python dependencies...');
-    sendDebugLog('$ pip install -r requirements.txt openai-whisper');
-    
-    return new Promise((resolve) => {
-      const pythonPath = path.join(venvPath, 'bin', 'python');
-      const process = spawn(pythonPath, ['-m', 'pip', 'install', '-r', 'requirements.txt', 'openai-whisper'], {
-        cwd: projectRoot,
-        stdio: 'pipe'
-      });
-      
-      let output = '';
-      
-      process.stdout.on('data', (data) => {
-        const text = data.toString().trim();
-        if (text) {
-          sendDebugLog(text);
-          output += text;
-        }
-      });
-      
-      process.stderr.on('data', (data) => {
-        const text = data.toString().trim();
-        if (text) {
-          sendDebugLog('STDERR: ' + text);
-          output += text;
-        }
-      });
-      
-      process.on('close', (code) => {
-        if (code === 0) {
-          sendDebugLog('Python dependencies installation completed successfully');
-          trackEvent('setup_completed', { step: 'python_dependencies' });
-          resolve({ success: true, message: 'Python dependencies and Whisper installed' });
-        } else {
-          sendDebugLog(`Python dependencies installation failed with exit code: ${code}`);
-          trackEvent('setup_failed', { step: 'python_dependencies' });
-          resolve({ success: false, error: `Installation failed: ${output}` });
-        }
-      });
-      
-      process.on('error', (error) => {
-        resolve({ success: false, error: `Process error: ${error.message}` });
-      });
-    });
-  } catch (error) {
     return { success: false, error: error.message };
   }
 });
@@ -4985,94 +4679,6 @@ ipcMain.handle('setup-parakeet', async () => {
       proc.on('error', (error) => {
         sendDebugLog(`Process error: ${error.message}`);
         resolve({ success: false, error: error.message });
-      });
-    });
-  } catch (error) {
-    return { success: false, error: error.message };
-  }
-});
-
-ipcMain.handle('setup-whisper', async () => {
-  try {
-    // Download whisper model using the bundled backend
-    const backendPath = getBackendPath();
-    sendDebugLog('Downloading Whisper transcription model (~500MB)...');
-    sendDebugLog(`$ ${backendPath} download-whisper-model`);
-
-    return new Promise((resolve) => {
-      const process = spawn(backendPath, ['download-whisper-model'], {
-        stdio: 'pipe'
-      });
-
-      process.stdout.on('data', (data) => {
-        const text = data.toString().trim();
-        if (text) sendDebugLog(text);
-      });
-
-      process.stderr.on('data', (data) => {
-        const text = data.toString().trim();
-        if (text) sendDebugLog('STDERR: ' + text);
-      });
-
-      process.on('close', (code) => {
-        if (code === 0) {
-          sendDebugLog('Whisper model downloaded successfully');
-          resolve({ success: true, message: 'Whisper model ready' });
-        } else {
-          sendDebugLog(`Whisper model download failed with exit code: ${code}`);
-          resolve({ success: false, error: 'Failed to download Whisper model' });
-        }
-      });
-
-      process.on('error', (error) => {
-        sendDebugLog(`Process error: ${error.message}`);
-        resolve({ success: false, error: error.message });
-      });
-    });
-
-    // Legacy code below - kept for reference but never runs
-    const projectRoot = path.join(__dirname, '..');
-    const pythonPath = path.join(projectRoot, 'venv', 'bin', 'python');
-
-    sendDebugLog('Installing Whisper speech recognition...');
-    sendDebugLog(`$ ${pythonPath} -m pip install openai-whisper`);
-    
-    return new Promise((resolve) => {
-      const process = spawn(pythonPath, ['-m', 'pip', 'install', 'openai-whisper'], {
-        cwd: projectRoot,
-        stdio: 'pipe'
-      });
-      
-      let output = '';
-      
-      process.stdout.on('data', (data) => {
-        const text = data.toString().trim();
-        if (text) {
-          sendDebugLog(text);
-          output += text;
-        }
-      });
-      
-      process.stderr.on('data', (data) => {
-        const text = data.toString().trim();
-        if (text) {
-          sendDebugLog('STDERR: ' + text);
-          output += text;
-        }
-      });
-      
-      process.on('close', (code) => {
-        if (code === 0) {
-          sendDebugLog('Whisper installation completed successfully');
-          resolve({ success: true, message: 'Whisper installed successfully' });
-        } else {
-          sendDebugLog(`Whisper installation failed with exit code: ${code}`);
-          resolve({ success: false, error: `Whisper installation failed: ${output}` });
-        }
-      });
-      
-      process.on('error', (error) => {
-        resolve({ success: false, error: `Process error: ${error.message}` });
       });
     });
   } catch (error) {
@@ -7117,7 +6723,13 @@ function getOllamaEnv() {
   if (process.platform === 'darwin') {
     const existing = env.DYLD_LIBRARY_PATH || '';
     env.DYLD_LIBRARY_PATH = existing ? `${ollamaDir}:${existing}` : ollamaDir;
-    env.MLX_METAL_PATH = path.join(ollamaDir, 'mlx.metallib');
+    // Do NOT set MLX_METAL_PATH: Ollama (v0.31.1+) ships its Metal library
+    // under versioned subdirectories (mlx_metal_v3/, mlx_metal_v4/) selected
+    // by its own internal GPU-family detection, not a flat
+    // <ollamaDir>/mlx.metallib file. Pointing this at the old flat path
+    // (stale since Ollama moved to the versioned layout) makes it point at
+    // a file that no longer exists. Leaving it unset matches how a
+    // standalone (non-bundled) Ollama install behaves.
   } else if (process.platform === 'win32') {
     const existing = env.PATH || '';
     env.PATH = existing ? `${ollamaDir};${existing}` : ollamaDir;

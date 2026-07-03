@@ -660,11 +660,7 @@ export interface StenoaiBridge {
 
   setup: {
     check: RequestFn<[], SetupCheckResponse>;
-    systemCheck: RequestFn<[], Result<Record<string, unknown>>>;
-    ffmpeg: RequestFn<[], Result<Record<string, unknown>>>;
-    python: RequestFn<[], Result<Record<string, unknown>>>;
     ollamaAndModel: RequestFn<[], Result<Record<string, unknown>>>;
-    whisper: RequestFn<[], Result<Record<string, unknown>>>;
     parakeet: RequestFn<[], Result<Record<string, unknown>>>;
     test: RequestFn<[], Result<Record<string, unknown>>>;
     triggerWizard: RequestFn<[], Result<Record<string, unknown>>>;

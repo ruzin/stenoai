@@ -12,7 +12,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -125,8 +125,14 @@ def get_ollama_env() -> dict:
             env['DYLD_LIBRARY_PATH'] = (
                 f"{ollama_dir_str}:{existing}" if existing else ollama_dir_str
             )
-            # Metal library only exists on the mac bundle
-            env['MLX_METAL_PATH'] = str(bundled_dir / 'mlx.metallib')
+            # Do NOT set MLX_METAL_PATH: Ollama (v0.31.1+) ships its Metal
+            # library under versioned subdirectories (mlx_metal_v3/,
+            # mlx_metal_v4/) selected by its own internal GPU-family
+            # detection, not a flat <bundle>/mlx.metallib file. Pointing
+            # this at the old flat path (stale since Ollama moved to the
+            # versioned layout) makes it point at a file that no longer
+            # exists. Leaving it unset matches how a standalone
+            # (non-bundled) Ollama install behaves.
             logger.debug(f"Set DYLD_LIBRARY_PATH: {env['DYLD_LIBRARY_PATH']}")
         elif sys.platform == "win32":
             # Windows uses PATH for DLL resolution; ollama's GPU libs live under
@@ -243,129 +249,3 @@ def start_ollama_server(wait: bool = True, timeout: int = 30) -> bool:
     except Exception as e:
         logger.error(f"Failed to start Ollama server: {e}")
         return False
-
-
-def run_ollama_command(args: list, timeout: int = 300) -> Tuple[bool, str, str]:
-    """
-    Run an Ollama CLI command.
-
-    Args:
-        args: Command arguments (e.g., ['pull', 'gemma4:e2b-it-qat'])
-        timeout: Command timeout in seconds
-
-    Returns:
-        Tuple of (success, stdout, stderr)
-    """
-    ollama_binary = get_ollama_binary()
-    if not ollama_binary:
-        return False, "", "Ollama binary not found"
-
-    try:
-        env = get_ollama_env()
-        result = subprocess.run(
-            [str(ollama_binary)] + args,
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=timeout
-        )
-        return result.returncode == 0, result.stdout, result.stderr
-    except subprocess.TimeoutExpired:
-        return False, "", f"Command timed out after {timeout} seconds"
-    except Exception as e:
-        return False, "", str(e)
-
-
-def pull_model(model_name: str, progress_callback=None) -> bool:
-    """
-    Pull an Ollama model.
-
-    Args:
-        model_name: Name of model to pull (e.g., 'gemma4:e2b-it-qat')
-        progress_callback: Optional callback function for progress updates
-
-    Returns:
-        True if model was pulled successfully
-    """
-    # Ensure server is running
-    if not start_ollama_server():
-        return False
-
-    ollama_binary = get_ollama_binary()
-    if not ollama_binary:
-        return False
-
-    try:
-        env = get_ollama_env()
-
-        logger.info(f"Pulling model: {model_name}")
-
-        # Run pull command with streaming output
-        process = subprocess.Popen(
-            [str(ollama_binary), 'pull', model_name],
-            env=env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1
-        )
-
-        # Stream output
-        for line in iter(process.stdout.readline, ''):
-            line = line.strip()
-            if line:
-                logger.debug(f"Ollama pull: {line}")
-                if progress_callback:
-                    progress_callback(line)
-
-        process.wait()
-
-        if process.returncode == 0:
-            logger.info(f"Successfully pulled model: {model_name}")
-            return True
-        else:
-            logger.error(f"Failed to pull model: {model_name}")
-            return False
-
-    except Exception as e:
-        logger.error(f"Error pulling model: {e}")
-        return False
-
-
-def list_models() -> list:
-    """
-    List available Ollama models.
-
-    Returns:
-        List of model names, or empty list if failed
-    """
-    if not is_ollama_running():
-        if not start_ollama_server():
-            return []
-
-    success, stdout, stderr = run_ollama_command(['list'], timeout=10)
-    if not success:
-        return []
-
-    models = []
-    for line in stdout.strip().split('\n')[1:]:  # Skip header
-        if line.strip():
-            parts = line.split()
-            if parts:
-                models.append(parts[0])
-
-    return models
-
-
-def has_model(model_name: str) -> bool:
-    """
-    Check if a model is available locally.
-
-    Args:
-        model_name: Name of model to check
-
-    Returns:
-        True if model is available
-    """
-    models = list_models()
-    return model_name in models

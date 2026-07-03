@@ -161,6 +161,12 @@ jobs:
       - name: Build backend with PyInstaller
         run: pyinstaller stenoai.spec --noconfirm
 
+      # Guards the Ollama/pip-mlx libmlx.dylib ABI collision (see
+      # scripts/verify_mlx_bundle.py). dlopen probes run here too - GitHub's
+      # macos-latest arm64 runners resolve symbols fine without a Metal GPU.
+      - name: Verify MLX bundle (libmlx ABI-collision guard)
+        run: python scripts/verify_mlx_bundle.py
+
       - name: Upload backend bundle
         uses: actions/upload-artifact@v4
         with:

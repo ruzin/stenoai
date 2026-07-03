@@ -124,6 +124,12 @@ jobs:
         echo "Expected arch: ${{ matrix.arch }}"
         echo "Backend built successfully"
 
+    # Blocks the DMG build if the Ollama/pip-mlx libmlx.dylib ABI collision has
+    # re-appeared (see scripts/verify_mlx_bundle.py) - a shipped-but-broken MLX
+    # summarization path is exactly what this release gate must catch.
+    - name: Verify MLX bundle (libmlx ABI-collision guard)
+      run: python scripts/verify_mlx_bundle.py
+
     - name: Install Electron dependencies
       working-directory: app
       run: npm ci
