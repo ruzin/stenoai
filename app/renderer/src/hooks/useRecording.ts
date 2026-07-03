@@ -436,10 +436,11 @@ export function useRecordingProcessingEffects() {
           // notification, because the route hasn't changed. They'll see
           // the static summary the moment they come back.
           //
-          // Click just focuses Steno (mirrors the auto-stop notification)
-          // — no navigation, so a back-to-back recording isn't yanked
-          // out and the user can find the new note in the sidebar / Home
-          // list at the top once Steno is focused.
+          // Clicking the banner navigates straight to this note (see the
+          // `navigate-to-meeting` listener below) — unlike the idle-route
+          // comparison above, a click is an explicit "take me there" from
+          // the user, so it doesn't have the back-to-back-recording
+          // interruption risk that auto-navigating here would.
           const title =
             data.meetingData?.session_info.name?.trim() ||
             data.sessionName?.trim() ||
@@ -454,6 +455,7 @@ export function useRecordingProcessingEffects() {
           void ipc()
             .settings.showNoteReadyNotification({
               title,
+              summaryFile: finishedSummaryFile,
               failed:
                 Boolean(data.transcriptionFailed) ||
                 Boolean(data.meetingData?.session_info.transcription_failed),
@@ -480,4 +482,12 @@ export function useRecordingProcessingEffects() {
     });
     return off;
   }, [qc]);
+
+  // Fired by main when the user clicks the "Note ready" notification —
+  // an explicit request to jump to that note, so navigate unconditionally.
+  React.useEffect(() => {
+    return ipc().on.navigateToMeeting(({ summaryFile }) => {
+      if (summaryFile) navigate(`/meetings/${encodeURIComponent(summaryFile)}`);
+    });
+  }, []);
 }

@@ -347,6 +347,7 @@ const stenoai = {
     autoPauseRequested: (cb) => subscribe('auto-pause-requested', cb),
     autoResumeRequested: (cb) => subscribe('auto-resume-requested', cb),
     autoSummariseRequested: (cb) => subscribe('auto-summarise-requested', cb),
+    navigateToMeeting: (cb) => subscribe('navigate-to-meeting', cb),
     trayOpenSettings: (cb) => subscribe('tray-open-settings', cb),
     showQuitDialog: (cb) => subscribe('show-quit-dialog', cb),
   },

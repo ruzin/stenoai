@@ -163,6 +163,7 @@ truth for elapsed time and paused state so remounts recover correctly.
 | `summary-complete` | M→R | yes | `stenoai.on.summaryComplete(cb)` |
 | `processing-complete` | M→R | yes | `stenoai.on.processingComplete(cb)` |
 | `processing-progress` | M→R | yes | `stenoai.on.processingProgress(cb)` |
+| `navigate-to-meeting` | M→R | yes | `stenoai.on.navigateToMeeting(cb)` — fired on "Note ready" notification click when a `summaryFile` exists; renderer navigates to that note's detail route |
 
 ```ts
 interface SessionInfo {
@@ -440,7 +441,7 @@ are string-cased (`"True"`/`"False"`) — that translation lives in main.js.
 | `set-silence-auto-stop-enabled` | R→M invoke | yes | `stenoai.settings.setSilenceAutoStopEnabled(b)` |
 | `set-silence-auto-stop-minutes` | R→M invoke | yes | `stenoai.settings.setSilenceAutoStopMinutes(n)` |
 | `show-silence-auto-stop-notification` | R→M invoke | yes | `stenoai.settings.showSilenceAutoStopNotification({ minutes, sessionName })` |
-| `show-note-ready-notification` | R→M invoke | yes | `stenoai.settings.showNoteReadyNotification({ title, failed?, hardFailure? })` — `failed`: graceful transcription failure (marked note written); `hardFailure`: processing crash / import that never enqueued (no note) |
+| `show-note-ready-notification` | R→M invoke | yes | `stenoai.settings.showNoteReadyNotification({ title, failed?, hardFailure?, summaryFile? })` — `failed`: graceful transcription failure (marked note written); `hardFailure`: processing crash / import that never enqueued (no note); `summaryFile`: when present, clicking the notification fires `navigate-to-meeting` to open that note |
 | `get-telemetry` / `set-telemetry` | R→M invoke | yes | `stenoai.settings.getTelemetry()` / `setTelemetry(b)` |
 | `get-dock-icon` / `set-dock-icon` | R→M invoke | yes | `stenoai.settings.getDockIcon()` / `setDockIcon(b)` |
 | `get-system-audio` / `set-system-audio` | R→M invoke | yes | `stenoai.settings.getSystemAudio()` / `setSystemAudio(b)` |
@@ -756,6 +757,6 @@ but the new renderer should not re-export them in `preload.js`:
 
 - `ipcMain.handle` channels: **78**
 - `ipcMain.on` channels: **6** (`focus-window`, `shortcut-renderer-ready`, `query-transcript-stream`, `query-cancel`, `install-update`, `system-audio-recording-state`)
-- `webContents.send` channels: **19** (`shortcut-start-recording`, `shortcut-stop-recording`, `tray-start-recording`, `tray-stop-recording`, `tray-open-settings`, `toggle-recording-hotkey`, `debug-log`, `trigger-setup-flow`, `summary-chunk`, `summary-title`, `summary-complete`, `processing-complete`, `query-chunk`, `query-done`, `model-pull-progress`, `model-pull-complete`, `update-available`, `update-download-progress`, `update-downloaded`, `google-auth-changed`, `outlook-auth-changed`)
+- `webContents.send` channels: **22** (`shortcut-start-recording`, `shortcut-stop-recording`, `tray-start-recording`, `tray-stop-recording`, `tray-open-settings`, `toggle-recording-hotkey`, `debug-log`, `trigger-setup-flow`, `summary-chunk`, `summary-title`, `summary-complete`, `processing-complete`, `query-chunk`, `query-done`, `model-pull-progress`, `model-pull-complete`, `update-available`, `update-download-progress`, `update-downloaded`, `google-auth-changed`, `outlook-auth-changed`, `navigate-to-meeting`)
 
 Total IPC surface to port: **~100 channels**.

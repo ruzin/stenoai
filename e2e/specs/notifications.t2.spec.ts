@@ -33,7 +33,10 @@ const showSilence = (page: import('@playwright/test').Page) =>
   );
 const showNote = (page: import('@playwright/test').Page) =>
   page.evaluate(() =>
-    (window as StenoWindow).stenoai.settings.showNoteReadyNotification({ title: 'E2E note' }),
+    (window as StenoWindow).stenoai.settings.showNoteReadyNotification({
+      title: 'E2E note',
+      summaryFile: 'e2e-note.json',
+    }),
   );
 
 test('notifications toggle persists and gates the note-ready / silence notifications; real dir untouched', async ({
