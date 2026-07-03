@@ -5,7 +5,11 @@
 // re-rendering while a summary streams in) a protocol line's boundary can
 // land inside a chunk, or a \r\n pair can straddle two chunks entirely.
 // makeLineReader() accumulates a remainder across feed() calls so callers
-// never see a split line or a sentinel with a stray trailing \r.
+// never see a split line or a sentinel with a stray trailing \r. Relies on
+// every protocol line being newline-terminated (true for this codebase's
+// print()-based backends) — a final unterminated line stays buffered and
+// is never surfaced, so a future non-newline-terminated source would need
+// its own flush() on process exit.
 function makeLineReader() {
   let buf = '';
   return {
