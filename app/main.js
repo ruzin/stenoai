@@ -6721,7 +6721,13 @@ function getOllamaEnv() {
   if (process.platform === 'darwin') {
     const existing = env.DYLD_LIBRARY_PATH || '';
     env.DYLD_LIBRARY_PATH = existing ? `${ollamaDir}:${existing}` : ollamaDir;
-    env.MLX_METAL_PATH = path.join(ollamaDir, 'mlx.metallib');
+    // Do NOT set MLX_METAL_PATH: Ollama (v0.31.1+) ships its Metal library
+    // under versioned subdirectories (mlx_metal_v3/, mlx_metal_v4/) selected
+    // by its own internal GPU-family detection, not a flat
+    // <ollamaDir>/mlx.metallib file. Pointing this at the old flat path
+    // (stale since Ollama moved to the versioned layout) makes it point at
+    // a file that no longer exists. Leaving it unset matches how a
+    // standalone (non-bundled) Ollama install behaves.
   } else if (process.platform === 'win32') {
     const existing = env.PATH || '';
     env.PATH = existing ? `${ollamaDir};${existing}` : ollamaDir;

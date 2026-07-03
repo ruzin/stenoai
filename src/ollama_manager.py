@@ -125,8 +125,14 @@ def get_ollama_env() -> dict:
             env['DYLD_LIBRARY_PATH'] = (
                 f"{ollama_dir_str}:{existing}" if existing else ollama_dir_str
             )
-            # Metal library only exists on the mac bundle
-            env['MLX_METAL_PATH'] = str(bundled_dir / 'mlx.metallib')
+            # Do NOT set MLX_METAL_PATH: Ollama (v0.31.1+) ships its Metal
+            # library under versioned subdirectories (mlx_metal_v3/,
+            # mlx_metal_v4/) selected by its own internal GPU-family
+            # detection, not a flat <bundle>/mlx.metallib file. Pointing
+            # this at the old flat path (stale since Ollama moved to the
+            # versioned layout) makes it point at a file that no longer
+            # exists. Leaving it unset matches how a standalone
+            # (non-bundled) Ollama install behaves.
             logger.debug(f"Set DYLD_LIBRARY_PATH: {env['DYLD_LIBRARY_PATH']}")
         elif sys.platform == "win32":
             # Windows uses PATH for DLL resolution; ollama's GPU libs live under
