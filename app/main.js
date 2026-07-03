@@ -37,6 +37,7 @@ const path = require('path');
 const { spawn: _spawnRaw } = require('child_process');
 const processingLog = require('./processing-log');
 const { isMeetingApp, allowsDeviceLevelFallback } = require('./meeting-detect');
+const { makeLineReader } = require('./backend-stream');
 
 // Wrap spawn so every backend / ollama launch defaults to windowsHide:true.
 // The PyInstaller backend (stenoai.exe) and bundled ollama.exe are console
@@ -3386,12 +3387,14 @@ async function processNextInQueue() {
         reject(new Error(`process-streaming spawn error: ${err.message}`));
       });
 
+      const stdoutReader = makeLineReader();
       proc.stdout.on('data', (data) => {
         watchdog.reset();
-        const text = data.toString();
         // Parse protocol lines (CRLF-tolerant: Windows stdout is \r\n, and the
         // STREAM_COMPLETE exact-match below must not carry a trailing \r).
-        text.split(/\r?\n/).forEach(line => {
+        // Buffered across chunk boundaries via makeLineReader — a sentinel
+        // like SAVED: or STREAM_COMPLETE can straddle two 'data' events.
+        for (const line of stdoutReader.feed(data)) {
           logPipelineStdoutLine(line, 'process-streaming');
           if (line.startsWith('CHUNK:')) {
             try {
@@ -3440,7 +3443,7 @@ async function processNextInQueue() {
           } else if (line.trim()) {
             sendDebugLog(line.trim());
           }
-        });
+        }
       });
 
       proc.stderr.on('data', (data) => {
