@@ -34,7 +34,7 @@ if (process.platform !== 'darwin') {
 }
 
 const path = require('path');
-const { spawn: _spawnRaw, exec } = require('child_process');
+const { spawn: _spawnRaw } = require('child_process');
 const processingLog = require('./processing-log');
 const { isMeetingApp, allowsDeviceLevelFallback } = require('./meeting-detect');
 
