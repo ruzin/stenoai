@@ -3,13 +3,66 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/stenoai-logo.svg" />
-    <link rel="icon" type="image/png" href="/dragonfly-logo-512.png" />
+    <link rel="icon" type="image/png" href="/favicon-64.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="Steno is the AI powered intelligence layer for all your confidential workflows. No cloud, no usage limits and no bots joining your calls." />
-    <title>stenoAI - confidential intelligence layer</title>
+    <meta name="description" content="Free AI meeting notes with full privacy. Steno transcribes and summarizes meetings entirely on your device — no cloud, no bots joining calls, no usage limits." />
+    <title>stenoAI — Free, Private AI Meeting Notes (No Cloud)</title>
+    <link rel="canonical" href="https://stenoai.co/" />
+
+    <!-- Open Graph -->
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://stenoai.co/" />
+    <meta property="og:title" content="stenoAI — Free, Private AI Meeting Notes (No Cloud)" />
+    <meta property="og:description" content="Free AI meeting notes with full privacy. Steno transcribes and summarizes meetings entirely on your device — no cloud, no bots joining calls, no usage limits." />
+    <meta property="og:image" content="https://stenoai.co/og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+
+    <!-- Twitter -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="stenoAI — Free, Private AI Meeting Notes (No Cloud)" />
+    <meta name="twitter:description" content="Free AI meeting notes with full privacy. Steno transcribes and summarizes meetings entirely on your device — no cloud, no bots joining calls, no usage limits." />
+    <meta name="twitter:image" content="https://stenoai.co/og-image.png" />
+
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;600&family=JetBrains+Mono:wght@400;500&display=swap" />
+    <link rel="preconnect" href="https://us.i.posthog.com" />
+    <link rel="preconnect" href="https://us-assets.i.posthog.com" />
+    <link rel="preconnect" href="https://www.googletagmanager.com" />
+    <!-- Non-blocking font load: fetch in parallel, apply once ready, no render-blocking round trip -->
+    <link
+      rel="preload"
+      as="style"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;600&family=JetBrains+Mono:wght@400;500&display=swap"
+    />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;600&family=JetBrains+Mono:wght@400;500&display=swap"
+      media="print"
+      onload="this.media='all'"
+    />
+    <noscript>
+      <link
+        rel="stylesheet"
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;600&family=JetBrains+Mono:wght@400;500&display=swap"
+      />
+    </noscript>
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "Steno",
+        "url": "https://stenoai.co/",
+        "description": "Free AI meeting notes with full privacy. Steno transcribes and summarizes meetings entirely on your device — no cloud, no bots joining calls, no usage limits.",
+        "applicationCategory": "BusinessApplication",
+        "operatingSystem": "macOS, Windows",
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "USD"
+        }
+      }
+    </script>
     <!-- No-flash dark mode: apply class before React renders -->
     <script>
       (function() {

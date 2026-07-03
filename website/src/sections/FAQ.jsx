@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Plus, Minus } from "lucide-react";
-import { AnimatePresence, motion as Motion } from "framer-motion";
+import { AnimatePresence, m as Motion } from "framer-motion";
 
 const faqs = [
   { q: "What's included for free?", a: "Unlimited local transcription and summarization. No account, no tier, no upsell. Steno is open source. You can build and run it yourself if you prefer." },
@@ -9,13 +9,30 @@ const faqs = [
   { q: "How accurate is the transcription?", a: "Steno uses Parakeet TDT v3 for live transcription (25 European languages) and Whisper for languages outside that set, including Chinese, Japanese, Arabic, Korean, and Hindi (99 languages total). Results depend on audio clarity — quiet rooms and good microphones produce the best outcomes." },
   { q: "What Mac do I need?", a: "Apple Silicon Mac (M1 or later) running macOS 12 (Monterey) or later. The app runs comfortably on an M1 MacBook Air. Intel Macs are no longer supported as of v0.4.0 — Intel users should stay on v0.3.8." },
   { q: "Does it work with remote meetings?", a: "Yes. Steno captures system audio and microphone simultaneously. Both sides of a Zoom, Teams, or Meet call are transcribed without any bot joining the meeting." },
+  { q: "Does it need an internet connection to run?", a: "No. Once the models are downloaded during first-run setup, recording, transcription, and summarization all happen offline. Steno makes no network requests after install." },
+  { q: "What happens to my data if I lose my laptop or uninstall the app?", a: "Recordings and transcripts are stored only in local app storage on your device — nothing is synced to a server. That means full privacy, but also no cloud backup: if the device is lost or the app is uninstalled without exporting first, that data is gone." },
+  { q: "Does it identify different speakers?", a: "Yes. Steno labels who's talking with live [You] / [Others] attribution during the recording, carried through to the final transcript." },
 ];
+
+const faqJsonLd = {
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  mainEntity: faqs.map((f) => ({
+    "@type": "Question",
+    name: f.q,
+    acceptedAnswer: { "@type": "Answer", text: f.a },
+  })),
+};
 
 export function FAQ() {
   const [open, setOpen] = useState(null);
 
   return (
     <section id="faq" className="sect">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(faqJsonLd).replace(/</g, "\\u003c") }}
+      />
       <div className="container-site" style={{ maxWidth: 820 }}>
         <div className="mb-10">
           <h2

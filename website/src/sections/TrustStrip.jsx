@@ -1,10 +1,10 @@
 const logos = [
-  { name: "AWS", src: "/logos/aws.svg" },
-  { name: "HashiCorp", src: "/logos/hashicorp.svg" },
-  { name: "Tesco", src: "/logos/tesco.svg", h: "h-10 sm:h-12" },
-  { name: "Deliveroo", src: "/logos/deliveroo.svg" },
-  { name: "Rutgers", src: "/logos/rutgers.svg" },
-  { name: "European Union", src: "/logos/european-union.svg" },
+  { name: "AWS", src: "/logos/aws.svg", w: 80, hpx: 32 },
+  { name: "HashiCorp", src: "/logos/hashicorp.svg", w: 24, hpx: 24 },
+  { name: "Tesco", src: "/logos/tesco.svg", h: "h-10 sm:h-12", w: 24, hpx: 24 },
+  { name: "Deliveroo", src: "/logos/deliveroo.svg", w: 24, hpx: 24 },
+  { name: "Rutgers", src: "/logos/rutgers.svg", w: 100, hpx: 32 },
+  { name: "European Union", src: "/logos/european-union.svg", w: 150, hpx: 32 },
 ];
 
 export function TrustStrip() {
@@ -20,6 +20,8 @@ export function TrustStrip() {
               key={l.name}
               src={l.src}
               alt={l.name}
+              width={l.w}
+              height={l.hpx}
               className={`${l.h || "h-6 sm:h-7"} w-auto dark:invert`}
               style={{ opacity: 0.5 }}
             />

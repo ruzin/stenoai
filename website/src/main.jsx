@@ -1,19 +1,19 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
-import posthog from 'posthog-js'
 import './index.css'
 import App from './App.jsx'
-
-if (import.meta.env.PROD) {
-  posthog.init('phc_U2cnTyIyKGNSVaK18FyBMltd8nmN7uHxhhm21fAHwqb', {
-    api_host: 'https://us.i.posthog.com',
-    person_profiles: 'identified_only',
-    capture_pageview: true,
-  })
-}
+import { initAnalytics } from './analytics'
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>
     <App />
   </StrictMode>,
 )
+
+// Defer analytics init until the browser is idle so it never competes
+// with the initial render/hydration for main-thread time.
+if ('requestIdleCallback' in window) {
+  requestIdleCallback(initAnalytics)
+} else {
+  setTimeout(initAnalytics, 1)
+}

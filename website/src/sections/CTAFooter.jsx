@@ -1,5 +1,5 @@
 import { Download } from "lucide-react";
-import { motion as Motion } from "framer-motion";
+import { m as Motion } from "framer-motion";
 import { trackDownload } from "../analytics";
 
 const DOWNLOAD_ARM = "https://github.com/ruzin/stenoai/releases/latest/download/stenoAI-macos-arm64.dmg";
