@@ -20,10 +20,15 @@ from unittest.mock import patch
 from src.config import Config
 
 
-def _worker_set_key(path_str: str, key: str, value) -> None:
-    """Top-level (picklable) worker for the multiprocess stress test: each
-    process loads the shared config and writes one distinct key via set()."""
-    Config(config_path=Path(path_str)).set(key, value)
+def _worker_set_key(path_str: str, key: str, value, barrier) -> None:
+    """Top-level (picklable) worker for the multiprocess stress test: load the
+    shared config, wait at the barrier so every worker has loaded the SAME
+    baseline, then write one distinct key. The barrier forces the concurrent
+    read-modify-write the race needs — without it the workers would serialize
+    and even the old whole-file save would pass."""
+    cfg = Config(config_path=Path(path_str))
+    barrier.wait(timeout=30)
+    cfg.set(key, value)
 
 
 class AtomicSaveTests(unittest.TestCase):
@@ -191,6 +196,48 @@ class LostUpdateTests(unittest.TestCase):
             self.assertIs(on_disk["keep_recordings"], True)
 
 
+    def test_concurrent_edits_to_same_nested_dict_both_survive(self):
+        # Two processes editing DIFFERENT sub-keys of the SAME top-level dict
+        # (per-provider cloud_models) must not clobber each other. A top-level-
+        # only merge would overlay the whole cloud_models dict and lose the
+        # other provider's entry; the recursive merge keeps both.
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "config.json"
+            Config(config_path=path)  # baseline with cloud_models = {}
+
+            c1 = Config(config_path=path)
+            c1.set_cloud_provider("openai")
+            c2 = Config(config_path=path)
+            c2.set_cloud_provider("anthropic")
+
+            # Each writes its own provider's model into the shared cloud_models.
+            self.assertTrue(c1.set_cloud_model("gpt-4o"))
+            self.assertTrue(c2.set_cloud_model("claude-x"))
+
+            on_disk = json.loads(path.read_text())
+            self.assertEqual(on_disk["cloud_models"]["openai"], "gpt-4o")
+            self.assertEqual(on_disk["cloud_models"]["anthropic"], "claude-x")
+
+    def test_nested_deletion_still_propagates(self):
+        # The recursive merge must not resurrect a nested key this process
+        # deleted (reset_template drops a template_overrides entry — config's
+        # only nested-deletion path). Guards against the recursion silently
+        # keeping disk's stale sub-key.
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "config.json"
+            path.write_text(json.dumps({
+                "template_overrides": {"brief": {"name": "B", "prompt": "p"}},
+                "templates_seeded": True,
+            }))
+
+            config = Config(config_path=path)
+            self.assertIn("brief", config._config["template_overrides"])
+
+            self.assertTrue(config.reset_template("brief"))
+            on_disk = json.loads(path.read_text())
+            self.assertNotIn("brief", on_disk.get("template_overrides", {}))
+
+
 class MigrationVsSetterTests(unittest.TestCase):
     def test_load_time_migration_and_concurrent_setter_both_survive(self):
         # A pre-migration config: legacy flat cloud_model triggers the
@@ -236,17 +283,28 @@ class MultiprocessStressTests(unittest.TestCase):
             Config(config_path=path)
 
             n = 6
+            barrier = ctx.Barrier(n)
             procs = [
                 ctx.Process(
                     target=_worker_set_key,
-                    args=(str(path), f"stress_key_{i}", i),
+                    args=(str(path), f"stress_key_{i}", i, barrier),
                 )
                 for i in range(n)
             ]
             for p in procs:
                 p.start()
+            try:
+                for p in procs:
+                    p.join(timeout=60)
+            finally:
+                # Never leave live children behind (CI/Windows cleanup) if a
+                # worker hung on the barrier or the lock.
+                for p in procs:
+                    if p.is_alive():
+                        p.terminate()
+                        p.join(timeout=10)
+
             for p in procs:
-                p.join(timeout=60)
                 self.assertEqual(p.exitcode, 0)
 
             on_disk = json.loads(path.read_text())
