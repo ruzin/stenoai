@@ -466,29 +466,59 @@ class Config:
             return None
         return data if isinstance(data, dict) else None
 
+    @classmethod
+    def _apply_changes(
+        cls, base: Dict[str, Any], current: Dict[str, Any], snapshot: Any
+    ) -> Dict[str, Any]:
+        """Overlay onto `base` (fresh from disk) only the changes between
+        `snapshot` (what we loaded) and `current` (our in-memory dict).
+
+        Recurses into dict-valued keys so two processes editing DIFFERENT
+        sub-keys of the SAME nested dict (e.g. per-provider `cloud_models`, or
+        `template_overrides`) don't clobber each other — we assert only the
+        sub-keys THIS process actually touched and keep the concurrent writer's
+        sub-keys straight from disk. Scalars and lists are overlaid wholesale
+        (a list has no clean per-element three-way merge, so last-writer-wins,
+        matching the design's genuine-conflict stance). A key whose type
+        changed between dict and non-dict also falls back to a wholesale
+        overlay. Nested deletions (config's only deletion path, reset_template
+        dropping a `template_overrides` entry) are propagated too.
+
+        Returns a new dict; does not mutate `base`, `current`, or `snapshot`."""
+        result = dict(base)
+        snap = snapshot if isinstance(snapshot, dict) else {}
+        for key, cur_val in current.items():
+            if key in snap and snap[key] == cur_val:
+                continue  # unchanged by us — keep disk's (possibly newer) value
+            base_val = result.get(key)
+            if isinstance(cur_val, dict) and isinstance(base_val, dict):
+                result[key] = cls._apply_changes(base_val, cur_val, snap.get(key))
+            else:
+                result[key] = cur_val
+        # Propagate keys we removed since load (present in our load snapshot,
+        # gone from current). Our removal wins over a concurrent edit, symmetric
+        # with how our edits overlay theirs.
+        for key in snap:
+            if key not in current:
+                result.pop(key, None)
+        return result
+
     def _merge_for_save(self) -> Dict[str, Any]:
-        """Build the dict to persist: a fresh on-disk read overlaid with only
-        the top-level keys this process changed since load.
+        """Build the dict to persist: a fresh on-disk read with only the
+        changes this process made since load overlaid on top (recursively for
+        nested dicts — see _apply_changes).
 
         Diffing against self._snapshot (what we loaded) rather than writing
         self._config wholesale is what prevents the lost update — a concurrent
-        writer's unrelated keys, which are present in the fresh read but absent
-        from (or unchanged in) our in-memory copy, survive. config.py never
-        deletes a top-level key (only nested dict entries, e.g.
-        template_overrides), so a value diff captures every change; no removed-
-        key tracking is needed. Must be called under the file lock."""
+        writer's unrelated keys, present in the fresh read but untouched by us,
+        survive. Must be called under the file lock."""
         base = self._read_disk_for_merge()
         if base is None:
             # Missing / corrupt / non-dict on disk: write our own config
             # wholesale. Preserves the corrupt-file recovery semantics — a
             # set() after a corrupt load still lays down a valid file.
             return dict(self._config)
-        changed = {
-            k: v for k, v in self._config.items()
-            if k not in self._snapshot or self._snapshot[k] != v
-        }
-        base.update(changed)
-        return base
+        return self._apply_changes(base, self._config, self._snapshot)
 
     def _save(self) -> bool:
         """Save configuration to disk without clobbering concurrent writers.
@@ -506,6 +536,8 @@ class Config:
         """
         lock_path = str(self.config_path) + ".lock"
         try:
+            # filelock is NOT reentrant: _save() must never be called while
+            # already holding this lock (no current path does).
             with filelock.FileLock(lock_path, timeout=self._SAVE_LOCK_TIMEOUT):
                 merged = self._merge_for_save()
                 _atomic_write_json(self.config_path, merged)
@@ -522,6 +554,9 @@ class Config:
             )
             try:
                 _atomic_write_json(self.config_path, self._config)
+                # Keep the snapshot consistent with what we just wrote so a
+                # later save on this instance diffs correctly.
+                self._snapshot = copy.deepcopy(self._config)
                 return True
             except Exception as e:
                 logger.error(f"Error saving config: {e}")
