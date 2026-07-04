@@ -3958,32 +3958,22 @@ ipcMain.handle('stop-recording-ui', async () => {
 ipcMain.handle('startup-setup-check', async () => {
   try {
     console.log('Running startup setup check...');
-    
-    // Use Python backend to check setup
-    const result = await runPythonScript('simple_recorder.py', ['setup-check']);
+
+    // Ask the backend for machine-readable JSON rather than scraping emoji out
+    // of the human-readable report. The `--json` path emits a single object:
+    //   { allGood: boolean, checks: [{ name, ok, status, detail }, ...] }
+    const result = await runPythonScript('simple_recorder.py', ['setup-check', '--json']);
     console.log('Setup check result:', result);
-    
-    // Parse the output to determine if setup is complete
-    const allGood = result.includes('🎉 System check passed!');
-    
-    // Extract check results for UI display
-    const lines = result.split('\n');
-    const checks = [];
-    
-    lines.forEach(line => {
-      if (line.includes('✅') || line.includes('❌') || line.includes('⚠️')) {
-        const parts = line.split(/\s{2,}/); // Split on multiple spaces
-        if (parts.length >= 2) {
-          checks.push([parts[0].trim(), parts[1].trim()]);
-        }
-      }
-    });
-    
+
+    const parsed = JSON.parse(result);
+    const allGood = parsed.allGood === true;
+    const checks = Array.isArray(parsed.checks) ? parsed.checks : [];
+
     console.log('Parsed checks:', checks);
     console.log('All good:', allGood);
-    
-    return { 
-      success: true, 
+
+    return {
+      success: true,
       allGood,
       checks
     };
