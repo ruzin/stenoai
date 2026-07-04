@@ -11,7 +11,7 @@ import subprocess
 import time
 from typing import Optional, Dict, Any
 from .models import MeetingTranscript, ActionItem, Decision
-from .config import Config, resolve_runtime_tag
+from .config import Config, resolve_runtime_tag, BEDROCK_REGION_RE
 from . import ollama_manager
 
 logger = logging.getLogger(__name__)
@@ -52,7 +52,16 @@ def bedrock_converse_url(region: str, target_id: str) -> str:
     HTTP 400 "The provided model identifier is invalid". Keeping ``/``
     literal lets ARNs flow through; non-ARN ids (no slashes) are
     unaffected because there's nothing to leave alone.
+
+    ``region`` must be shaped like a real AWS region code — rejected here
+    too (not just in Config.set_bedrock_region()) because this function is
+    the actual network-request sink and must not trust its caller. Without
+    this, a region string like "x@127.0.0.1:8443/" would use `user@host`
+    URL syntax to silently redirect the request (with the real Bedrock
+    bearer credential attached) to a different host. See issue #299.
     """
+    if not BEDROCK_REGION_RE.match(region):
+        raise ValueError(f"Invalid Bedrock region: {region!r}")
     import urllib.parse
     encoded = urllib.parse.quote(target_id, safe=":.-/")
     return f"https://bedrock-runtime.{region}.amazonaws.com/model/{encoded}/converse"

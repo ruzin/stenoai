@@ -58,6 +58,19 @@ class BedrockConverseUrlTests(unittest.TestCase):
         url = bedrock_converse_url("ap-southeast-2", "model-x")
         self.assertIn("bedrock-runtime.ap-southeast-2.amazonaws.com", url)
 
+    def test_rejects_region_shaped_to_redirect_the_host(self):
+        # `user@host` URL syntax: an attacker- or accident-crafted region
+        # value that would silently point the request (with the real
+        # Bedrock bearer credential attached) at a different host instead
+        # of AWS. See issue #299 — set_bedrock_region() also guards this,
+        # but the sink itself must not trust its caller either.
+        with self.assertRaises(ValueError):
+            bedrock_converse_url("x@127.0.0.1:8443/", "model-x")
+
+    def test_rejects_non_aws_shaped_region(self):
+        with self.assertRaises(ValueError):
+            bedrock_converse_url("not a region", "model-x")
+
 
 if __name__ == "__main__":
     unittest.main()

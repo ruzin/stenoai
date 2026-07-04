@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import platform
+import re
 import shutil
 import sys
 import tempfile
@@ -20,6 +21,15 @@ from src.whisper_models import SUPPORTED_WHISPER_MODELS as _WHISPER_REGISTRY
 from src import templates as _templates
 
 logger = logging.getLogger(__name__)
+
+# AWS region shape: <code>[-gov]-<name>-<digit(s)>, e.g. us-east-1, eu-west-2,
+# us-gov-west-1, cn-northwest-1. Centralised here (not just format-checked at
+# one call site) because both this config layer and bedrock_converse_url()
+# (src/summarizer.py, which imports this) must agree — a region string
+# crafted to redirect the request via `user@host` URL syntax (e.g.
+# "x@127.0.0.1:8443/") has to be rejected by both, not just whichever one an
+# attacker didn't think to route around. See issue #299.
+BEDROCK_REGION_RE = re.compile(r"^[a-z]{2}(-gov)?-[a-z]+-\d{1,2}$")
 
 
 def _atomic_write_json(path: Path, payload) -> None:
@@ -993,12 +1003,17 @@ class Config:
         return value.strip()
 
     def set_bedrock_region(self, region: str) -> bool:
-        """Persist the AWS region. Accepts any non-empty string — Bedrock
-        validates the region on the wire, so a typo surfaces as a clear
-        404 / DNS error at request time rather than silently here."""
+        """Persist the AWS region. A legitimate typo (e.g. "us-eest-1")
+        still surfaces as a clear 404 / DNS error at request time rather
+        than silently here — but the value must at least be shaped like a
+        real AWS region code, so a string crafted to redirect the request
+        to a different host (`user@host` URL syntax) can't be saved."""
         cleaned = (region or "").strip()
         if not cleaned:
             logger.error("Bedrock region cannot be empty")
+            return False
+        if not BEDROCK_REGION_RE.match(cleaned):
+            logger.error(f"Rejected malformed Bedrock region: {cleaned!r}")
             return False
         self._config["bedrock_region"] = cleaned
         return self._save()
