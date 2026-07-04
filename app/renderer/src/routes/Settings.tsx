@@ -1238,7 +1238,7 @@ function AiTab() {
 const TEMPLATE_LANGUAGES: LangOption[] = LANGUAGES_WHISPER;
 
 function TemplatesTab() {
-  const { templates, defaultId, isLoading } = useTemplates();
+  const { templates, defaultId } = useTemplates();
   const setDefault = useSetDefaultTemplate();
   const reset = useResetTemplate();
   const del = useDeleteTemplate();
