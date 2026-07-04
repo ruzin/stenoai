@@ -1,0 +1,366 @@
+import * as React from 'react';
+import { ExternalLink, Loader2 } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Switch } from '@/components/ui/switch';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { isMac } from '@/lib/utils';
+import { useTheme } from '@/hooks/useTheme';
+import {
+  useAutoDetectMeetingsSetting,
+  useDockIconSetting,
+  useNotificationsSetting,
+  useSetAutoDetectMeetings,
+  useSetDockIcon,
+  useSetNotifications,
+  useSetSilenceAutoStopEnabled,
+  useSetSilenceAutoStopMinutes,
+  useSetSystemAudio,
+  useSetUserName,
+  useSilenceAutoStopSetting,
+  useSystemAudioSetting,
+  useSystemAudioSupport,
+  useUserName,
+} from '@/hooks/useSettings';
+import {
+  useGoogleCalendarAuth,
+  useOutlookCalendarAuth,
+} from '@/hooks/useCalendarEvents';
+import { COMPACT_BTN, COMPACT_TRIGGER, SettingRow } from './primitives';
+
+export function GeneralTab() {
+  const { theme, setTheme } = useTheme();
+  const notifications = useNotificationsSetting();
+  const setNotifications = useSetNotifications();
+  const systemAudio = useSystemAudioSetting();
+  const setSystemAudio = useSetSystemAudio();
+  const systemAudioSupport = useSystemAudioSupport();
+  const autoDetect = useAutoDetectMeetingsSetting();
+  const setAutoDetect = useSetAutoDetectMeetings();
+  const silenceAutoStop = useSilenceAutoStopSetting();
+  const setSilenceAutoStopEnabled = useSetSilenceAutoStopEnabled();
+  const setSilenceAutoStopMinutes = useSetSilenceAutoStopMinutes();
+  const dockIcon = useDockIconSetting();
+  const setDockIcon = useSetDockIcon();
+  const google = useGoogleCalendarAuth();
+  const outlook = useOutlookCalendarAuth();
+  const userName = useUserName();
+  const setUserName = useSetUserName();
+  const [nameDraft, setNameDraft] = React.useState('');
+  const nameSeededRef = React.useRef(false);
+  // Wait for the real query (not the sessionStorage placeholder) before
+  // seeding — otherwise we lock onto a stale empty string and ignore the
+  // canonical value when it arrives from disk.
+  React.useEffect(() => {
+    if (nameSeededRef.current) return;
+    if (userName.isPending || userName.isPlaceholderData) return;
+    if (userName.data !== undefined) {
+      setNameDraft(userName.data);
+      nameSeededRef.current = true;
+    }
+  }, [userName.data, userName.isPending, userName.isPlaceholderData]);
+  const persistName = () => {
+    const trimmed = nameDraft.trim();
+    if (trimmed === (userName.data ?? '')) return;
+    setUserName.mutate(trimmed);
+  };
+
+  const calendarConnected =
+    google.status.data?.connected || outlook.status.data?.connected;
+  const calendarProvider = google.status.data?.connected
+    ? 'Google'
+    : outlook.status.data?.connected
+      ? 'Outlook'
+      : null;
+
+  const [oauth, setOauth] = React.useState<
+    | {
+        provider: 'google' | 'outlook';
+        state: 'pending' | 'error';
+        message?: string;
+      }
+    | null
+  >(null);
+
+  React.useEffect(() => {
+    if (!oauth) return;
+    if (oauth.provider === 'google' && google.status.data?.connected) {
+      setOauth(null);
+    }
+    if (oauth.provider === 'outlook' && outlook.status.data?.connected) {
+      setOauth(null);
+    }
+  }, [oauth, google.status.data?.connected, outlook.status.data?.connected]);
+
+  const startConnect = async (provider: 'google' | 'outlook') => {
+    setOauth({ provider, state: 'pending' });
+    try {
+      if (provider === 'google') await google.connect.mutateAsync();
+      else await outlook.connect.mutateAsync();
+    } catch (err) {
+      setOauth({
+        provider,
+        state: 'error',
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  };
+
+  return (
+    <section data-settings-tab="general">
+      <SettingRow
+        label="Your name"
+        description="First name only — used for in-app greetings. Stored locally."
+      >
+        <Input
+          value={nameDraft}
+          onChange={(e) => setNameDraft(e.target.value)}
+          onBlur={persistName}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              // Just blur — onBlur runs persistName, so calling it directly
+              // here would queue a duplicate setUserName mutation.
+              (e.target as HTMLInputElement).blur();
+            }
+          }}
+          placeholder="Ruzin"
+          autoComplete="given-name"
+          className="h-[30px] w-[180px] rounded-[6px] text-[13px]"
+          data-testid="user-name-input"
+        />
+      </SettingRow>
+
+      <SettingRow
+        label="Appearance"
+        description="Choose light, dark, or match your system"
+      >
+        <Select
+          value={theme}
+          onValueChange={(v) => setTheme(v as 'light' | 'dark' | 'system')}
+        >
+          <SelectTrigger
+            className={COMPACT_TRIGGER}
+            data-testid="theme-select"
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="system">System</SelectItem>
+            <SelectItem value="light">Light</SelectItem>
+            <SelectItem value="dark">Dark</SelectItem>
+          </SelectContent>
+        </Select>
+      </SettingRow>
+
+      <SettingRow
+        label="Calendar"
+        description={
+          calendarConnected
+            ? `Connected to ${calendarProvider}`
+            : 'Show upcoming meetings on the home screen'
+        }
+      >
+        {calendarConnected ? (
+          <Button
+            variant="outline"
+            size="sm"
+            className={COMPACT_BTN}
+            onClick={() => {
+              if (google.status.data?.connected) google.disconnect.mutate();
+              else outlook.disconnect.mutate();
+            }}
+          >
+            Disconnect
+          </Button>
+        ) : (
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className={COMPACT_BTN}
+              onClick={() => void startConnect('google')}
+            >
+              Google
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className={COMPACT_BTN}
+              onClick={() => void startConnect('outlook')}
+            >
+              Outlook
+            </Button>
+          </div>
+        )}
+      </SettingRow>
+
+      <OAuthPrompt
+        state={oauth}
+        onClose={() => setOauth(null)}
+        onRetry={() => oauth && void startConnect(oauth.provider)}
+      />
+
+      <SettingRow
+        label="Desktop notifications"
+        description="App Notifications"
+      >
+        <Switch
+          checked={notifications.data ?? false}
+          onCheckedChange={(v) => setNotifications.mutate(v)}
+          disabled={notifications.data === undefined}
+        />
+      </SettingRow>
+
+      {/* macOS only: chooses mic-only vs mic+system. Windows always records
+          mic+system (toggle hidden), so this control isn't shown there. */}
+      {isMac && (
+        <SettingRow
+          label="Record system audio"
+          description={
+            systemAudioSupport.data && !systemAudioSupport.data.supported
+              ? `Capture both sides of a call (requires macOS 14.4+, you're on ${systemAudioSupport.data.osVersion || 'an older version'}). Mic-only recording still works.`
+              : 'Capture both sides of a call. Turn off to record your mic only.'
+          }
+        >
+          <Switch
+            checked={(systemAudio.data ?? true) && (systemAudioSupport.data?.supported ?? true)}
+            onCheckedChange={(v) => setSystemAudio.mutate(v)}
+            disabled={systemAudio.data === undefined || systemAudioSupport.data?.supported === false}
+          />
+        </SettingRow>
+      )}
+
+      <SettingRow
+        label="Auto-detect meetings"
+        description="Show a notification when another app starts using the microphone, with a one-click button to start recording."
+      >
+        <Switch
+          checked={autoDetect.data ?? true}
+          onCheckedChange={(v) => setAutoDetect.mutate(v)}
+          disabled={autoDetect.data === undefined}
+        />
+      </SettingRow>
+
+      <SettingRow
+        label="Auto-stop on silence"
+        description="End the recording and start processing it once both the mic and system audio have been silent for the chosen duration. Useful when you forget to stop after a meeting ends."
+      >
+        <div className="flex items-center gap-3">
+          <Select
+            value={String(silenceAutoStop.data?.minutes ?? 15)}
+            onValueChange={(v) => setSilenceAutoStopMinutes.mutate(Number(v))}
+            disabled={
+              silenceAutoStop.data === undefined || silenceAutoStop.data.enabled === false
+            }
+          >
+            <SelectTrigger className="h-8 w-28 text-sm">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {(silenceAutoStop.data?.supportedMinutes ?? [2, 5, 10, 15, 30]).map((m) => (
+                <SelectItem key={m} value={String(m)}>
+                  {m} minutes
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Switch
+            checked={silenceAutoStop.data?.enabled ?? true}
+            onCheckedChange={(v) => setSilenceAutoStopEnabled.mutate(v)}
+            disabled={silenceAutoStop.data === undefined}
+          />
+        </div>
+      </SettingRow>
+
+      {/* Dock + menu bar are macOS-only concepts and the apply logic in
+          main.js is darwin-gated, so the toggle is a no-op off-mac. Hide it
+          entirely on Windows/Linux rather than show a broken control. */}
+      {isMac && (
+        <SettingRow
+          label="Hide dock icon"
+          description="Run as menu bar app only"
+          noBorder
+        >
+          <Switch
+            checked={dockIcon.data ?? false}
+            onCheckedChange={(v) => setDockIcon.mutate(v)}
+            disabled={dockIcon.data === undefined}
+          />
+        </SettingRow>
+      )}
+    </section>
+  );
+}
+
+interface OAuthPromptProps {
+  state:
+    | {
+        provider: 'google' | 'outlook';
+        state: 'pending' | 'error';
+        message?: string;
+      }
+    | null;
+  onClose: () => void;
+  onRetry: () => void;
+}
+
+function OAuthPrompt({ state, onClose, onRetry }: OAuthPromptProps) {
+  const open = !!state;
+  const providerName = state?.provider === 'outlook' ? 'Outlook' : 'Google';
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-md" data-oauth-prompt>
+        <DialogHeader>
+          <DialogTitle>
+            {state?.state === 'error'
+              ? `Couldn't connect to ${providerName}`
+              : `Connecting to ${providerName}`}
+          </DialogTitle>
+          <DialogDescription>
+            {state?.state === 'error'
+              ? state.message || 'The authorization flow did not complete.'
+              : 'Complete the authorization in your browser. This dialog will close automatically once access is granted.'}
+          </DialogDescription>
+        </DialogHeader>
+
+        {state?.state === 'pending' && (
+          <div className="flex items-center gap-3 rounded-md border border-border bg-paper-0 p-3 text-sm text-muted-foreground dark:bg-paper-1">
+            <Loader2 className="size-4 animate-spin text-foreground" />
+            <span className="flex-1">Waiting for authorization…</span>
+            <ExternalLink className="size-3.5" />
+          </div>
+        )}
+
+        <DialogFooter>
+          {state?.state === 'error' ? (
+            <>
+              <Button variant="outline" onClick={onClose}>
+                Close
+              </Button>
+              <Button onClick={onRetry}>Try again</Button>
+            </>
+          ) : (
+            <Button variant="outline" onClick={onClose}>
+              Cancel
+            </Button>
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
