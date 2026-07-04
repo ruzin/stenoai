@@ -177,6 +177,8 @@ config.json
 CODE_REVIEW.md
 SESSION_LOG.md
 FEATURES.md
+# Private, local-only working notes (design docs, benchmarks, review scratch) - never publish
+notes/
 
 # Bundled Ollama binary (downloaded during build)
 bin/
