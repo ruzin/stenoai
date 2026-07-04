@@ -142,15 +142,16 @@ export function Setup() {
   // Wait for the real query to settle — placeholderData (sessionStorage cache)
   // could be stale or empty, and we don't want to seed from it and then ignore
   // the canonical value when it arrives from disk.
-  const seededRef = React.useRef(false);
-  React.useEffect(() => {
-    if (seededRef.current) return;
-    if (userName.isPending || userName.isPlaceholderData) return;
-    if (userName.data !== undefined) {
-      setName(userName.data);
-      seededRef.current = true;
-    }
-  }, [userName.data, userName.isPending, userName.isPlaceholderData]);
+  const [seeded, setSeeded] = React.useState(false);
+  if (
+    !seeded &&
+    !userName.isPending &&
+    !userName.isPlaceholderData &&
+    userName.data !== undefined
+  ) {
+    setName(userName.data);
+    setSeeded(true);
+  }
   const persistName = () => {
     const trimmed = name.trim();
     if (trimmed === (userName.data ?? '')) return;
