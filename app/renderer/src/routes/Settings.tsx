@@ -1356,6 +1356,17 @@ function TemplatesTab() {
                   className="flex shrink-0 items-center justify-end gap-2 px-4 py-3 border-t" 
                   style={{ borderColor: 'var(--border-subtle)' }}
                 >
+                  {!isDefault && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className={cn(COMPACT_BTN, "mr-auto")}
+                      disabled={setDefault.isPending}
+                      onClick={() => setDefault.mutate(t.id)}
+                    >
+                      Make Default
+                    </Button>
+                  )}
                   {t.builtin ? (
                     !t.locked && (
                       <>
