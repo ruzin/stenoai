@@ -881,7 +881,7 @@ class OllamaSummarizer:
                     try:
                         record = _json.loads(line)
                     except _json.JSONDecodeError:
-                        logger.warning(f"Adapter stream: malformed NDJSON line dropped: {line[:120]}")
+                        logger.warning(f"Adapter stream: malformed NDJSON line dropped ({len(line)} chars)")
                         continue
                     kind = record.get("type")
                     if kind == "chunk":
@@ -1340,7 +1340,13 @@ Return ONLY the response in this exact JSON format:
             logger.error(f"Transcript length: {len(transcript)} characters")
             logger.error(f"Error type: {type(e).__name__}")
             if hasattr(e, 'response'):
-                logger.error(f"HTTP response: {e.response}")
+                # Log only the status, never the response object: its str/repr
+                # can embed the response body (model content) or headers.
+                status = getattr(e.response, 'status_code', None)
+                logger.error(
+                    f"HTTP response status: {status}" if status is not None
+                    else f"HTTP response: <{type(e.response).__name__}>"
+                )
             return None
     
     def _create_markdown_prompt(self, transcript: str, language: str = "en", notes: str = None) -> str:

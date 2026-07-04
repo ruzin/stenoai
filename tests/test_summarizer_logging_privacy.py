@@ -46,5 +46,42 @@ class QueryLoggingPrivacyTests(unittest.TestCase):
         self.assertNotIn(question, joined)
 
 
+class _FakeStreamResponse:
+    """Minimal stand-in for the urlopen() context manager: a context manager
+    that iterates the raw NDJSON byte lines the adapter would stream."""
+
+    def __init__(self, lines):
+        self._lines = lines
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def __iter__(self):
+        return iter(self._lines)
+
+
+class AdapterStreamLoggingPrivacyTests(unittest.TestCase):
+    def test_malformed_ndjson_logs_length_not_content(self):
+        s = _make_summarizer()
+        s.adapter_url = "http://adapter.test"
+        s.adapter_token = "token"
+        secret = "not-json but definitely CONFIDENTIAL response body content"
+        lines = [
+            b'{"type": "chunk", "text": "hi"}\n',
+            (secret + "\n").encode("utf-8"),
+            b'{"type": "done"}\n',
+        ]
+        with mock.patch("urllib.request.urlopen", return_value=_FakeStreamResponse(lines)):
+            with self.assertLogs("src.summarizer", level="WARNING") as cm:
+                list(s._adapter_stream("prompt"))
+        joined = "\n".join(cm.output)
+        self.assertIn(f"malformed NDJSON line dropped ({len(secret)} chars)", joined)
+        self.assertNotIn(secret, joined)
+        self.assertNotIn("CONFIDENTIAL", joined)
+
+
 if __name__ == "__main__":
     unittest.main()
