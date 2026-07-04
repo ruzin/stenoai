@@ -71,6 +71,21 @@ class BedrockConverseUrlTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             bedrock_converse_url("not a region", "model-x")
 
+    def test_rejects_unicode_digit_lookalikes(self):
+        # Python's \d matches non-ASCII decimal digits under re.UNICODE
+        # (the default) — e.g. Arabic-Indic ١ or fullwidth １ — which would
+        # otherwise slip a visually-similar-but-wrong region past the
+        # regex. Region codes are ASCII by definition.
+        with self.assertRaises(ValueError):
+            bedrock_converse_url("us-east-١", "model-x")  # Arabic-Indic 1
+
+    def test_rejects_trailing_newline(self):
+        # `re.match(..., "$")` allows a trailing "\n" ("$" matches just
+        # before it). fullmatch() must be used so a region smuggled with a
+        # trailing newline (e.g. from a config/env value) is rejected too.
+        with self.assertRaises(ValueError):
+            bedrock_converse_url("us-east-1\n", "model-x")
+
 
 if __name__ == "__main__":
     unittest.main()

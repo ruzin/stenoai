@@ -29,7 +29,11 @@ logger = logging.getLogger(__name__)
 # crafted to redirect the request via `user@host` URL syntax (e.g.
 # "x@127.0.0.1:8443/") has to be rejected by both, not just whichever one an
 # attacker didn't think to route around. See issue #299.
-BEDROCK_REGION_RE = re.compile(r"^[a-z]{2}(-gov)?-[a-z]+-\d{1,2}$")
+#
+# Match with fullmatch() (never match()+"$" — "$" alone still allows a
+# trailing "\n"). Digits are [0-9], not \d — \d is Unicode-aware by default
+# and would accept visually-similar non-ASCII digits (e.g. Arabic-Indic "١").
+BEDROCK_REGION_RE = re.compile(r"[a-z]{2}(-gov)?-[a-z]+-[0-9]{1,2}")
 
 
 def _atomic_write_json(path: Path, payload) -> None:
@@ -1012,7 +1016,7 @@ class Config:
         if not cleaned:
             logger.error("Bedrock region cannot be empty")
             return False
-        if not BEDROCK_REGION_RE.match(cleaned):
+        if not BEDROCK_REGION_RE.fullmatch(cleaned):
             logger.error(f"Rejected malformed Bedrock region: {cleaned!r}")
             return False
         self._config["bedrock_region"] = cleaned

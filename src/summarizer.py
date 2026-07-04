@@ -60,7 +60,7 @@ def bedrock_converse_url(region: str, target_id: str) -> str:
     URL syntax to silently redirect the request (with the real Bedrock
     bearer credential attached) to a different host. See issue #299.
     """
-    if not BEDROCK_REGION_RE.match(region):
+    if not BEDROCK_REGION_RE.fullmatch(region):
         raise ValueError(f"Invalid Bedrock region: {region!r}")
     import urllib.parse
     encoded = urllib.parse.quote(target_id, safe=":.-/")

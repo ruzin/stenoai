@@ -287,7 +287,18 @@ class ConfigBedrockSettingsTests(unittest.TestCase):
             self.assertFalse(config.set_bedrock_region("x@127.0.0.1:8443/"))
             self.assertFalse(config.set_bedrock_region("us-east-1/../evil"))
             self.assertFalse(config.set_bedrock_region("not a region"))
+            self.assertFalse(config.set_bedrock_region("us-east-١"))  # Arabic-Indic 1
             self.assertEqual(config.get_bedrock_region(), "ap-southeast-2")
+
+    def test_set_bedrock_region_strips_trailing_whitespace_before_validating(self):
+        # set_bedrock_region() strips before validating (unlike
+        # bedrock_converse_url(), the sink, which must reject a trailing
+        # "\n" defensively since it can't assume every caller stripped).
+        # A trailing newline here is just whitespace, not a bypass.
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config = Config(config_path=Path(tmp_dir) / "config.json")
+            self.assertTrue(config.set_bedrock_region("us-east-1\n"))
+            self.assertEqual(config.get_bedrock_region(), "us-east-1")
 
     def test_set_bedrock_region_accepts_real_aws_shapes(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
