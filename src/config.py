@@ -4,6 +4,7 @@ Configuration management for StenoAI.
 Handles storing and loading user preferences like model selection.
 """
 
+import copy
 import json
 import logging
 import os
@@ -15,6 +16,8 @@ import time
 import uuid
 from pathlib import Path
 from typing import Optional, Dict, Any
+
+import filelock
 
 from src.whisper_models import SUPPORTED_WHISPER_MODELS as _WHISPER_REGISTRY
 from src import templates as _templates
@@ -271,6 +274,11 @@ class Config:
         # gets its in-memory defaults persisted over the recoverable file.
         self._load_failed = False
         self._config: Dict[str, Any] = self._load()
+        # Snapshot of exactly what was read from disk (or the defaults on a
+        # fresh/corrupt load). _save() diffs self._config against this to write
+        # back ONLY the keys this process actually changed, so a concurrent
+        # writer's unrelated keys aren't clobbered (the lost-update fix).
+        self._snapshot: Dict[str, Any] = copy.deepcopy(self._config)
         self._migrate_cloud_model_map()
         self._migrate_whisper_model()
         self._migrate_summary_model()
@@ -437,12 +445,87 @@ class Config:
             )
         return self._get_default_config()
 
-    def _save(self) -> bool:
-        """Save configuration to file (atomic tempfile + os.replace)."""
+    # Seconds to wait for the cross-process config lock before giving up and
+    # falling back to an unlocked write. Generous enough to cover a normal
+    # save on a busy disk, short enough that a truly stuck lock never blocks
+    # the CLI for long.
+    _SAVE_LOCK_TIMEOUT = 10
+
+    def _read_disk_for_merge(self) -> Optional[Dict[str, Any]]:
+        """Re-read config.json fresh for use as the merge base. Returns the
+        parsed dict, or None if the file is missing / unparseable / not a dict
+        (in which case the caller writes its own config wholesale). Must be
+        called under the file lock so the read reflects any concurrent writer's
+        just-completed atomic replace."""
+        if not self.config_path.exists():
+            return None
         try:
-            _atomic_write_json(self.config_path, self._config)
-            logger.info(f"Saved config to {self.config_path}")
-            return True
+            with open(self.config_path, 'r') as f:
+                data = json.load(f)
+        except Exception:
+            return None
+        return data if isinstance(data, dict) else None
+
+    def _merge_for_save(self) -> Dict[str, Any]:
+        """Build the dict to persist: a fresh on-disk read overlaid with only
+        the top-level keys this process changed since load.
+
+        Diffing against self._snapshot (what we loaded) rather than writing
+        self._config wholesale is what prevents the lost update — a concurrent
+        writer's unrelated keys, which are present in the fresh read but absent
+        from (or unchanged in) our in-memory copy, survive. config.py never
+        deletes a top-level key (only nested dict entries, e.g.
+        template_overrides), so a value diff captures every change; no removed-
+        key tracking is needed. Must be called under the file lock."""
+        base = self._read_disk_for_merge()
+        if base is None:
+            # Missing / corrupt / non-dict on disk: write our own config
+            # wholesale. Preserves the corrupt-file recovery semantics — a
+            # set() after a corrupt load still lays down a valid file.
+            return dict(self._config)
+        changed = {
+            k: v for k, v in self._config.items()
+            if k not in self._snapshot or self._snapshot[k] != v
+        }
+        base.update(changed)
+        return base
+
+    def _save(self) -> bool:
+        """Save configuration to disk without clobbering concurrent writers.
+
+        The app spawns a fresh CLI subprocess per operation (no daemon), so two
+        near-simultaneous writers each do load-whole-config -> mutate one key ->
+        write-whole-file and silently revert each other's unrelated keys
+        (classic lost update). _atomic_write_json fixes torn files but not this.
+
+        Fix: under a cross-process file lock (filelock: fcntl on POSIX / msvcrt
+        on Windows, auto-released if a holder crashes) re-read config.json fresh
+        as the merge base and overlay only the top-level keys this process
+        changed. On lock timeout, degrade to a plain unlocked atomic write of
+        our own config — a stuck lock must never block saves or raise.
+        """
+        lock_path = str(self.config_path) + ".lock"
+        try:
+            with filelock.FileLock(lock_path, timeout=self._SAVE_LOCK_TIMEOUT):
+                merged = self._merge_for_save()
+                _atomic_write_json(self.config_path, merged)
+                # Adopt the merged result so a second _save() in this process
+                # diffs against what we just wrote, not the stale load snapshot.
+                self._config = merged
+                self._snapshot = copy.deepcopy(merged)
+                logger.info(f"Saved config to {self.config_path}")
+                return True
+        except filelock.Timeout:
+            logger.warning(
+                f"Timed out acquiring config lock at {lock_path}; "
+                f"falling back to an unlocked atomic write"
+            )
+            try:
+                _atomic_write_json(self.config_path, self._config)
+                return True
+            except Exception as e:
+                logger.error(f"Error saving config: {e}")
+                return False
         except Exception as e:
             logger.error(f"Error saving config: {e}")
             return False
