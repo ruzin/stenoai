@@ -53,6 +53,15 @@ describe('redactDiagnostics - custom storage root', () => {
   test('empty storage root is a no-op', () => {
     expect(redact('nothing here', '')).toBe('nothing here');
   });
+
+  test('trailing-slash storage root still lets the data-dir rule redact', () => {
+    // Without stripping the trailing slash the literal replace yields
+    // `~output/Board.md` (no separator) and the basename survives.
+    const root = '/Volumes/Client Acme/steno/';
+    expect(redact(`SAVED:${root}output/Board.md`, root)).toBe(
+      'SAVED:~/output/<redacted>.md',
+    );
+  });
 });
 
 describe('redactDiagnostics - data-dir basename', () => {
@@ -81,8 +90,26 @@ describe('redactDiagnostics - data-dir basename', () => {
   });
 
   test('no-extension single-token basename is redacted to <redacted>', () => {
-    expect(redact('SAVED:/Users/a/x/recordings/rawclip end')).toBe(
-      'SAVED:~/x/recordings/<redacted> end',
+    expect(redact('SAVED:/Users/a/x/recordings/rawclip')).toBe(
+      'SAVED:~/x/recordings/<redacted>',
+    );
+  });
+
+  test('no-extension basename WITH spaces redacts whole (end-of-line)', () => {
+    expect(redact('SAVED:/Users/a/x/output/Weekly Sync')).toBe(
+      'SAVED:~/x/output/<redacted>',
+    );
+  });
+
+  test('no-extension basename WITH spaces redacts whole (quoted)', () => {
+    expect(redact('reprocess "/Users/a/x/output/Weekly Sync"')).toBe(
+      'reprocess "~/x/output/<redacted>"',
+    );
+  });
+
+  test('no-extension basename WITH spaces redacts whole (followed by ;)', () => {
+    expect(redact('path=/Users/a/x/transcripts/Board Meeting Q3;next')).toBe(
+      'path=~/x/transcripts/<redacted>;next',
     );
   });
 
@@ -109,6 +136,28 @@ describe('redactDiagnostics - URLs', () => {
       'remote https://ollama.corp.internal:11434',
     );
   });
+
+  test('URL inside JSON does not swallow the following field or path', () => {
+    expect(
+      redact('{"url":"https://u:p@host/api","path":"/Users/a/x/output/Board.md"}'),
+    ).toBe('{"url":"https://host","path":"~/x/output/<redacted>.md"}');
+  });
+});
+
+describe('redactDiagnostics - scheme-less credentials', () => {
+  test('strips user:pass@ before a host:port even without a scheme', () => {
+    expect(redact('connecting alice:secret@ollama.corp:11434/x')).toBe(
+      'connecting ollama.corp:11434/x',
+    );
+  });
+
+  test('strips user@ before a dotted host without a port', () => {
+    expect(redact('login bob@ollama.corp.internal/api')).toBe('login ollama.corp.internal/api');
+  });
+
+  test('leaves ordinary word@word prose untouched (no host-shape after @)', () => {
+    expect(redact('see foo@bar in the log')).toBe('see foo@bar in the log');
+  });
 });
 
 describe('redactDiagnostics - idempotence + no over-redaction', () => {
@@ -118,8 +167,11 @@ describe('redactDiagnostics - idempotence + no over-redaction', () => {
       'POST https://alice:secret@ollama.corp.internal:11434/api/x',
       'SAVED:C:\\Users\\Alice\\x\\recordings\\Board Meeting.webm',
       'SAVED:/Volumes/NAS/steno/transcripts/Standup.txt',
+      'SAVED:/Volumes/NAS/steno/output/Weekly Sync',
+      'connecting alice:secret@ollama.corp:11434/x',
+      '{"url":"https://u:p@host/api","path":"/Volumes/NAS/steno/output/Board.md"}',
     ];
-    const opts = { storageRoot: '/Volumes/NAS/steno' };
+    const opts = { storageRoot: '/Volumes/NAS/steno/' };
     const once = redactDiagnostics(lines, opts);
     const twice = redactDiagnostics(once, opts);
     expect(twice).toEqual(once);

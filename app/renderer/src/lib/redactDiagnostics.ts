@@ -13,6 +13,17 @@
 // in an order chosen so each stage can't re-expose what a later stage would
 // hide, and the whole function is idempotent
 // (`redact(redact(x)) === redact(x)`).
+//
+// Accepted residuals (documented, out of scope for regex):
+//  - A scheme-less BARE hostname with no credentials (e.g. `ollama.corp:11434`)
+//    is left as-is: it's an internal hostname, not a secret, and fully hiding it
+//    would need the Python source to stop logging it (deferred out of this PR).
+//  - Nested sub-directories under a data dir (`.../output/Team/Sync.md`) are NOT
+//    matched: stenoai writes FLAT data dirs so this isn't currently produced,
+//    but it's a known limitation of the separator-anchored basename rules.
+//  - A space-containing data-dir path with NO extension that runs mid-line into
+//    following prose with no delimiter is best-effort: the common end-of-line /
+//    quoted / delimited forms fully redact.
 
 export interface RedactOptions {
   /**
@@ -30,16 +41,35 @@ export interface RedactOptions {
 const DATA_DIRS = ['recordings', 'transcripts', 'output'];
 const DATA_DIR_ALT = DATA_DIRS.join('|');
 
-// Characters that terminate a path token in free text (whitespace, quotes,
-// closing brackets, and common trailing punctuation). Used as a lookahead so a
-// path embedded mid-line is bounded without consuming the delimiter.
-const TOKEN_END = `[\\s"'\`)\\]},;]`;
+// Characters (inside a char class) that terminate a path token in free text:
+// whitespace, quotes, closing brackets, and common trailing punctuation.
+const TOKEN_END_CHARS = `\\s"'\`)\\]},;`;
+// Used as a lookahead so a path embedded mid-line is bounded without consuming
+// the delimiter.
+const TOKEN_END = `[${TOKEN_END_CHARS}]`;
+// The same terminators EXCLUDING whitespace. A data-dir basename may legitimately
+// contain spaces (meeting titles do), so for the no-extension case only these
+// strong terminators (or a separator / end-of-line) end the basename.
+const STRONG_TERM = `"'\`)\\]},;`;
 
 // scheme://[user:pass@]host[:port][/path...] -> scheme://host[:port]
 // Keeps the scheme + host (+ port) for diagnosis, strips credentials and the
 // path/query that could carry identifiers. Requires a real host char after
-// `://` so `file:///Users/...` (triple slash) is left for the path rules.
-const URL_RE = /\b([a-z][a-z0-9+.-]*):\/\/(?:[^/@\s]*@)?([^/\s:]+(?::\d+)?)[^\s]*/gi;
+// `://` so `file:///Users/...` (triple slash) is left for the path rules. The
+// trailing path match is bounded by the token-end set (not `[^\s]*`) so a URL
+// embedded in JSON/quoted text can't swallow the following field or path.
+const URL_RE = new RegExp(
+  `\\b([a-z][a-z0-9+.-]*):\\/\\/(?:[^/@${TOKEN_END_CHARS}]*@)?([^/:${TOKEN_END_CHARS}]+(?::\\d+)?)[^${TOKEN_END_CHARS}]*`,
+  'gi',
+);
+
+// Scheme-less credentials: `user[:pass]@host[:port]` with NO `scheme://`, as the
+// Python summarizer can log on stderr. We strip the `user[:pass]@` and keep the
+// host. To avoid eating ordinary `word@word` prose, the part after `@` must look
+// like a host: either a dotted domain (`host.tld`, optional `:port`) or a bare
+// host WITH a port (`host:11434`). A bare dot-less/port-less host is left alone.
+const SCHEMELESS_CREDS_RE =
+  /([A-Za-z0-9._%+-]+(?::[^\s@/]+)?)@((?:[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+(?::\d+)?|[A-Za-z0-9-]+:\d+))/g;
 
 // macOS home: /Users/<name>/ -> ~/   (any username)
 const MAC_HOME_RE = /\/Users\/[^/\\]+\//gi;
@@ -56,15 +86,16 @@ const DATA_DIR_WITH_EXT_RE = new RegExp(
   'gi',
 );
 
-// A data-dir path segment with NO extension and NO spaces: `.../recordings/foo`.
-// The basename excludes separators, whitespace, token-enders AND dots, and the
-// lookahead forbids a following dot - so this never touches an already-extension
-// redaction (`.../recordings/<redacted>.webm`) and keeps it idempotent. A
-// space-containing basename with no extension is the documented, accepted
-// residual (best-effort): matching it here would only redact its first word, so
-// we deliberately leave it whole rather than partially mangle it.
+// A data-dir path segment with NO extension: `.../recordings/Weekly Sync`. The
+// basename is GREEDY and INCLUDES internal spaces, stopping only at a separator,
+// a strong terminator (quote/bracket/`,`/`;`) or end-of-line - so a space-
+// containing title is redacted WHOLE (not just its first word). Dots are
+// excluded from the basename and the lookahead has no dot, so this never touches
+// an already-extension redaction (`.../recordings/<redacted>.webm`) nor a real
+// extensioned file (both handled by DATA_DIR_WITH_EXT_RE, which runs first),
+// keeping the pass idempotent.
 const DATA_DIR_NO_EXT_RE = new RegExp(
-  `([/\\\\](?:${DATA_DIR_ALT})[/\\\\])([^/\\\\\\s"'\`)\\]},;.]+)(?=$|${TOKEN_END})`,
+  `([/\\\\](?:${DATA_DIR_ALT})[/\\\\])([^/\\\\${STRONG_TERM}.]+)(?=$|${TOKEN_END})`,
   'gi',
 );
 
@@ -79,10 +110,21 @@ function redactLine(line: string, storageRoot?: string): string {
   //    URL's internals (and can't mistake a URL path for a filesystem path).
   out = out.replace(URL_RE, (_m, scheme: string, host: string) => `${scheme}://${host}`);
 
+  // 1b. Scheme-less credentials (`user:pass@host[:port]`) the URL rule can't see
+  //     because there's no scheme. Runs after the URL rule (which already
+  //     stripped scheme'd creds, leaving no `@`), so the two never overlap.
+  out = out.replace(SCHEMELESS_CREDS_RE, (_m, _creds: string, host: string) => host);
+
   // 2. Custom storage root literal -> ~ (before home, so a root that itself
-  //    lives under home is hidden whole rather than left as ~/<folder>).
+  //    lives under home is hidden whole rather than left as ~/<folder>). Strip
+  //    any trailing separator first: replacing `/Volumes/x/steno/` wholesale
+  //    would yield `~output/...` (no separator), which the data-dir rule can't
+  //    match - stripping it leaves `~/output/...` so the basename still redacts.
   if (typeof storageRoot === 'string' && storageRoot.length > 0) {
-    out = out.replace(new RegExp(escapeRegExp(storageRoot), 'g'), '~');
+    const root = storageRoot.replace(/[/\\]+$/, '');
+    if (root.length > 0) {
+      out = out.replace(new RegExp(escapeRegExp(root), 'g'), '~');
+    }
   }
 
   // 3. Home dir -> ~ (both platforms). Covers the default app-support path too.
