@@ -591,9 +591,10 @@ export interface LiveSegment {
    *  start a new partial. False means the segment is the trailing partial
    *  and may be replaced by the next event. */
   isFinal: boolean;
-  /** Speaker attribution from the per-channel RMS comparison performed
-   *  client-side when the segment arrives. 'You' / 'Others' / undefined
-   *  when the mic-only path is active (no system channel to compare). */
+  /** Speaker attribution set by the Python sidecar from which physical
+   *  channel (mic vs system loopback) produced this segment — a
+   *  structural fact, not a heuristic. Undefined on a mic-only recording
+   *  before the first LIVE_SEG arrives; the UI treats undefined as 'You'. */
   speaker?: 'You' | 'Others';
 }
 
