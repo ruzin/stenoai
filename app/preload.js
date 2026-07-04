@@ -2,9 +2,9 @@
  * Preload — contextBridge boundary for the React renderer.
  *
  * This is the only surface the renderer gets. Every function here is a thin
- * wrapper over ipcRenderer.invoke / .send / .on, whitelisted to the channels
- * listed in app/docs/ipc-contract.md. Any drift between this file and that
- * doc is a contract break — update both in the same commit.
+ * wrapper over ipcRenderer.invoke / .send / .on. The channel contract across
+ * this file, main.js, the renderer's ipc.ts and the e2e mock is enforced by
+ * app/ipc-contract.test.js — a rename/removal that drifts them fails there.
  */
 
 const { contextBridge, ipcRenderer, webUtils } = require('electron');

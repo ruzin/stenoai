@@ -83,10 +83,10 @@ def _normalize_markdown_for_parsing(md_text: str) -> str:
     return _REASONING_TAG_HEADER_PATTERN.sub(r'\1\n\2', md_text)
 
 # Shared atomic JSON writer (tempfile + os.replace + Windows PermissionError
-# retry). One implementation for recorder_state.json, the summary JSON, and
-# config.json — re-exported here so existing imports keep working. The
-# canonical copy lives in src.config because this module already imports
-# from src (the reverse import would be circular).
+# retry). One implementation for the summary JSON and config.json (recorder_state.json
+# is no longer written — see MeetingPipeline.state_file) — re-exported here so
+# existing imports keep working. The canonical copy lives in src.config because
+# this module already imports from src (the reverse import would be circular).
 from src.config import _atomic_write_json  # noqa: E402
 
 

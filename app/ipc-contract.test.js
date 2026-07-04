@@ -130,17 +130,59 @@ test('every e2e-mock stub names a real renderer-callable channel (no stale stub)
   );
 });
 
-test('every M->R subscribe channel is emitted somewhere in main.js', () => {
-  // webContents.send targets are sometimes a ternary/helper arg, so assert the
-  // channel literal appears in main.js rather than matching a rigid .send(...)
-  // shape — robust to `send(cond ? 'a' : 'b')` and indirection.
-  const missing = [...preloadSubscribeChannels()].filter(
-    (ch) => !MAIN.includes(`'${ch}'`) && !MAIN.includes(`"${ch}"`),
-  );
+// The channel name in main.js's M->R events is always the FIRST argument of a
+// send call — `mainWindow.webContents.send('<ch>', payload)`, `event.sender.send`,
+// or `sender.send` — and is sometimes a ternary of literals
+// (`send(cond ? 'a' : 'b')`). Extract just that first argument (up to the first
+// top-level comma / the closing paren, honoring quotes so a ')' or ',' inside a
+// string never ends it early) and collect the channel literals from it. Scoping
+// to the first argument keeps channel-shaped strings in a *payload* object from
+// counting as a send site, and matching a real `.send(` call — not a bare
+// substring anywhere — means a channel named only in a comment can't satisfy it.
+function firstSendArg(src, i) {
+  let depth = 1;
+  let quote = null;
+  let out = '';
+  for (; i < src.length; i++) {
+    const c = src[i];
+    if (quote) {
+      out += c;
+      if (c === quote && src[i - 1] !== '\\') quote = null;
+      continue;
+    }
+    if (c === "'" || c === '"' || c === '`') {
+      quote = c;
+      out += c;
+      continue;
+    }
+    if (c === '(') depth++;
+    else if (c === ')') {
+      depth--;
+      if (depth === 0) break;
+    } else if (c === ',' && depth === 1) break;
+    out += c;
+  }
+  return out;
+}
+
+function channelsEmittedViaSend() {
+  const emitted = new Set();
+  const re = /\.send\(/g;
+  let m;
+  while ((m = re.exec(MAIN))) {
+    const arg = firstSendArg(MAIN, re.lastIndex);
+    for (const lit of arg.matchAll(/["']([^"']+)["']/g)) emitted.add(lit[1]);
+  }
+  return emitted;
+}
+
+test('every M->R subscribe channel is emitted at a real send() site in main.js', () => {
+  const emitted = channelsEmittedViaSend();
+  const missing = [...preloadSubscribeChannels()].filter((ch) => !emitted.has(ch));
   assert.deepStrictEqual(
     missing.sort(),
     [],
-    `preload subscribes to M->R channel(s) main.js never emits: ${missing.join(', ')}`,
+    `preload subscribes to M->R channel(s) main.js never send()s: ${missing.join(', ')}`,
   );
 });
 
