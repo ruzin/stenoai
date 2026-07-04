@@ -178,7 +178,12 @@ export function Setup() {
   const setBedrockProfile = useSetBedrockInferenceProfile();
   const setCloudUrl = useSetCloudApiUrl();
 
-  const cloudReady = summaryMode === 'cloud' && cloudApiKey.trim().length > 0;
+  const cloudReady = (() => {
+    if (summaryMode !== 'cloud' || !cloudApiKey.trim()) return false;
+    if (cloudProvider === 'bedrock') return bedrockRegion.trim().length > 0;
+    if (cloudProvider === 'custom') return apiUrl.trim().length > 0;
+    return true;
+  })();
   const canBegin = summaryMode === 'local' || cloudReady;
 
   const setStatus = (id: Step['id'], s: StepStatus, detail?: string) => {
@@ -254,10 +259,10 @@ export function Setup() {
         await setAiProvider.mutateAsync('cloud');
         await setCloudProviderMut.mutateAsync(cloudProvider);
         if (cloudProvider === 'bedrock') {
-          if (bedrockRegion) await setBedrockRegion.mutateAsync(bedrockRegion);
+          if (bedrockRegion) await setBedrockRegion.mutateAsync(bedrockRegion.trim());
           if (bedrockProfile) await setBedrockProfile.mutateAsync(bedrockProfile.trim());
         } else if (cloudProvider === 'custom') {
-          if (apiUrl) await setCloudUrl.mutateAsync(apiUrl);
+          if (apiUrl) await setCloudUrl.mutateAsync(apiUrl.trim());
         }
         await setCloudKeyMut.mutateAsync(cloudApiKey.trim());
         setStatus('ollama', 'running', 'Testing connection...');

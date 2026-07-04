@@ -1347,7 +1347,7 @@ function TemplatesTab() {
                   style={{ color: 'var(--fg-muted)', opacity: t.prompt ? 1 : 0.6 }}
                   title={t.prompt}
                 >
-                  {t.prompt || 'No prompt provided.'}
+                  {t.prompt || (t.builtin ? 'Uses structured format' : 'No prompt provided.')}
                 </div>
               </div>
 
@@ -1489,6 +1489,7 @@ function TemplateEditor({
               variant="outline"
               size="sm"
               className={COMPACT_BTN}
+              disabled={setDefault.isPending}
               onClick={() => {
                 if (editing.id) setDefault.mutate(editing.id);
               }}
