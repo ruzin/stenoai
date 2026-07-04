@@ -1270,17 +1270,17 @@ function TemplatesTab() {
 
       <SectionHeading>Templates</SectionHeading>
 
-      {templates.map((t) => (
-        <div
-          key={t.id}
-          className="mb-1.5 flex items-center gap-4 rounded-[8px] px-4 py-[13px]"
-          style={{
-            border: '1px solid var(--border-subtle)',
-            background:
-              t.id === defaultId ? 'var(--surface-raised)' : 'transparent',
-          }}
-        >
-          <div className="min-w-0 flex-1">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        {templates.map((t) => (
+          <div
+            key={t.id}
+            className="flex flex-col gap-3 rounded-[8px] p-4"
+            style={{
+              border: '1px solid var(--border-subtle)',
+              background:
+                t.id === defaultId ? 'var(--surface-raised)' : 'transparent',
+            }}
+          >
             <div className="flex items-center gap-2">
               <span
                 className="truncate text-[13px] font-medium"
@@ -1290,7 +1290,7 @@ function TemplatesTab() {
               </span>
               {t.locked && (
                 <span
-                  className="inline-flex items-center gap-1 text-[11px]"
+                  className="inline-flex shrink-0 items-center gap-1 text-[11px]"
                   style={{ color: 'var(--fg-muted)' }}
                   title="Built-in template — protected from editing and deletion"
                 >
@@ -1300,7 +1300,7 @@ function TemplatesTab() {
               )}
               {t.builtin && !t.locked && (
                 <span
-                  className="rounded-[3px] px-1.5 py-px text-[11px]"
+                  className="shrink-0 rounded-[3px] px-1.5 py-px text-[11px]"
                   style={{
                     color: 'var(--fg-muted)',
                     border: '1px solid var(--border-subtle)',
@@ -1310,24 +1310,44 @@ function TemplatesTab() {
                 </span>
               )}
             </div>
-          </div>
-          <div className="flex shrink-0 items-center gap-2">
-            {t.builtin ? (
-              // A locked built-in (Standard) can't be edited, so there is no
-              // override to reset and nothing to edit — show no actions (the
-              // "Locked" badge above already conveys its state). Only an
-              // editable built-in offers Reset + Edit.
-              !t.locked && (
+
+            <div 
+              className="text-[12px] leading-relaxed line-clamp-3" 
+              style={{ color: 'var(--fg-muted)' }}
+              title={t.prompt}
+            >
+              {t.prompt || 'No prompt provided.'}
+            </div>
+
+            <div className="mt-auto flex shrink-0 items-center justify-end gap-2">
+              {t.builtin ? (
+                // A locked built-in (Standard) can't be edited, so there is no
+                // override to reset and nothing to edit — show no actions (the
+                // "Locked" badge above already conveys its state). Only an
+                // editable built-in offers Reset + Edit.
+                !t.locked && (
+                  <>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className={COMPACT_BTN}
+                      disabled={reset.isPending}
+                      onClick={() => reset.mutate(t.id)}
+                    >
+                      Reset
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className={COMPACT_BTN}
+                      onClick={() => setEditing(t)}
+                    >
+                      Edit
+                    </Button>
+                  </>
+                )
+              ) : (
                 <>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className={COMPACT_BTN}
-                    disabled={reset.isPending}
-                    onClick={() => reset.mutate(t.id)}
-                  >
-                    Reset
-                  </Button>
                   <Button
                     variant="outline"
                     size="sm"
@@ -1336,35 +1356,24 @@ function TemplatesTab() {
                   >
                     Edit
                   </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className={cn(
+                      COMPACT_BTN,
+                      'text-[color:var(--fg-2)] hover:bg-[color:var(--danger-bg)] hover:text-[color:var(--danger)]',
+                    )}
+                    onClick={() => setDeleteTarget(t)}
+                    aria-label={`Delete ${t.name}`}
+                  >
+                    <Trash2 size={14} />
+                  </Button>
                 </>
-              )
-            ) : (
-              <>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className={COMPACT_BTN}
-                  onClick={() => setEditing(t)}
-                >
-                  Edit
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className={cn(
-                    COMPACT_BTN,
-                    'text-[color:var(--fg-2)] hover:bg-[color:var(--danger-bg)] hover:text-[color:var(--danger)]',
-                  )}
-                  onClick={() => setDeleteTarget(t)}
-                  aria-label={`Delete ${t.name}`}
-                >
-                  <Trash2 size={14} />
-                </Button>
-              </>
-            )}
+              )}
+            </div>
           </div>
-        </div>
-      ))}
+        ))}
+      </div>
 
       {editing ? (
         <TemplateEditor

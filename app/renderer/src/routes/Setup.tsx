@@ -24,6 +24,9 @@ import {
   useSetCloudApiKey,
   useSetCloudProvider,
   useTestCloudApi,
+  useSetBedrockInferenceProfile,
+  useSetBedrockRegion,
+  useSetCloudApiUrl,
 } from '@/hooks/useAi';
 import { ipc, type CloudProvider } from '@/lib/ipc';
 import { cn, isMac } from '@/lib/utils';
@@ -161,10 +164,18 @@ export function Setup() {
   const [summaryMode, setSummaryMode] = React.useState<SummaryMode>('local');
   const [cloudProvider, setCloudProviderChoice] = React.useState<CloudProvider>('openai');
   const [cloudApiKey, setCloudApiKey] = React.useState('');
+  
+  const [bedrockRegion, setBedrockRegionState] = React.useState('');
+  const [bedrockProfile, setBedrockProfileState] = React.useState('');
+  const [apiUrl, setApiUrl] = React.useState('');
+
   const setAiProvider = useSetAiProvider();
   const setCloudProviderMut = useSetCloudProvider();
   const setCloudKeyMut = useSetCloudApiKey();
   const testCloudApi = useTestCloudApi();
+  const setBedrockRegion = useSetBedrockRegion();
+  const setBedrockProfile = useSetBedrockInferenceProfile();
+  const setCloudUrl = useSetCloudApiUrl();
 
   const cloudReady = summaryMode === 'cloud' && cloudApiKey.trim().length > 0;
   const canBegin = summaryMode === 'local' || cloudReady;
@@ -241,6 +252,12 @@ export function Setup() {
         // call so the user gets immediate feedback if the key is bad.
         await setAiProvider.mutateAsync('cloud');
         await setCloudProviderMut.mutateAsync(cloudProvider);
+        if (cloudProvider === 'bedrock') {
+          if (bedrockRegion) await setBedrockRegion.mutateAsync(bedrockRegion);
+          if (bedrockProfile) await setBedrockProfile.mutateAsync(bedrockProfile.trim());
+        } else if (cloudProvider === 'custom') {
+          if (apiUrl) await setCloudUrl.mutateAsync(apiUrl);
+        }
         await setCloudKeyMut.mutateAsync(cloudApiKey.trim());
         setStatus('ollama', 'running', 'Testing connection...');
         // unwrap throws on { success: false } so reaching this line means the
@@ -424,10 +441,66 @@ export function Setup() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="openai">OpenAI</SelectItem>
-                      <SelectItem value="anthropic">Anthropic</SelectItem>
+                      <SelectItem value="anthropic">Anthropic (Claude)</SelectItem>
+                      <SelectItem value="bedrock">AWS Bedrock (Claude)</SelectItem>
+                      <SelectItem value="custom">Custom (OpenAI-compatible)</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
+                {cloudProvider === 'bedrock' && (
+                  <>
+                    <div>
+                      <label
+                        className="mb-1 block text-[12px] font-medium text-foreground"
+                        htmlFor="setup-bedrock-region"
+                      >
+                        AWS region
+                      </label>
+                      <Input
+                        id="setup-bedrock-region"
+                        value={bedrockRegion}
+                        onChange={(e) => setBedrockRegionState(e.target.value)}
+                        placeholder="us-east-1"
+                        autoComplete="off"
+                        spellCheck={false}
+                      />
+                    </div>
+                    <div>
+                      <label
+                        className="mb-1 block text-[12px] font-medium text-foreground"
+                        htmlFor="setup-bedrock-profile"
+                      >
+                        Inference profile (optional)
+                      </label>
+                      <Input
+                        id="setup-bedrock-profile"
+                        value={bedrockProfile}
+                        onChange={(e) => setBedrockProfileState(e.target.value)}
+                        placeholder="us.anthropic.claude-…"
+                        autoComplete="off"
+                        spellCheck={false}
+                      />
+                    </div>
+                  </>
+                )}
+                {cloudProvider === 'custom' && (
+                  <div>
+                    <label
+                      className="mb-1 block text-[12px] font-medium text-foreground"
+                      htmlFor="setup-custom-api"
+                    >
+                      API base URL
+                    </label>
+                    <Input
+                      id="setup-custom-api"
+                      value={apiUrl}
+                      onChange={(e) => setApiUrl(e.target.value)}
+                      placeholder="https://api.example.com/v1"
+                      autoComplete="off"
+                      spellCheck={false}
+                    />
+                  </div>
+                )}
                 <div>
                   <label
                     className="mb-1 block text-[12px] font-medium text-foreground"
