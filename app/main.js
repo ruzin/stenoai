@@ -47,6 +47,7 @@ const {
   sanitizeShortcutUrlForLogs,
   parseShortcutUrl,
 } = require('./shortcut-url');
+const { parseSetupCheckOutput } = require('./setup-check-parse');
 
 // Wrap spawn so every backend / ollama launch defaults to windowsHide:true.
 // The PyInstaller backend (stenoai.exe) and bundled ollama.exe are console
@@ -3965,9 +3966,12 @@ ipcMain.handle('startup-setup-check', async () => {
     const result = await runPythonScript('simple_recorder.py', ['setup-check', '--json']);
     console.log('Setup check result:', result);
 
-    const parsed = JSON.parse(result);
-    const allGood = parsed.allGood === true;
-    const checks = Array.isArray(parsed.checks) ? parsed.checks : [];
+    // Extract + validate the JSON payload from stdout. We don't JSON.parse the
+    // whole buffer because the checks import third-party libs that can print to
+    // stdout; parseSetupCheckOutput scans for the JSON line and validates the
+    // schema, throwing (→ caught below as an error) if the backend is broken so a
+    // malformed payload isn't masked as a clean "setup incomplete".
+    const { allGood, checks } = parseSetupCheckOutput(result);
 
     console.log('Parsed checks:', checks);
     console.log('All good:', allGood);
