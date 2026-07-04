@@ -53,6 +53,48 @@ test('isValidSetupCheckPayload rejects valid-but-wrong payloads', () => {
   );
 });
 
+test('isValidSetupCheckPayload rejects payloads that violate the derived invariants', () => {
+  // (a) allGood:true while a check is failing — an inconsistent payload must not
+  // masquerade as a clean pass on the startup-gating path.
+  assert.strictEqual(
+    isValidSetupCheckPayload({
+      allGood: true,
+      checks: [
+        { name: 'Python', ok: true, status: 'pass', detail: 'd' },
+        { name: 'Ollama', ok: false, status: 'fail', detail: 'not found' },
+      ],
+    }),
+    false
+  );
+  // (b) ok and status disagree within a single check (ok:true but status:'fail').
+  assert.strictEqual(
+    isValidSetupCheckPayload({
+      allGood: false,
+      checks: [{ name: 'Ollama', ok: true, status: 'fail', detail: 'not found' }],
+    }),
+    false
+  );
+  // A consistent failing payload (allGood:false, ok matches status) is still valid.
+  assert.strictEqual(
+    isValidSetupCheckPayload({
+      allGood: false,
+      checks: [
+        { name: 'Python', ok: true, status: 'pass', detail: 'd' },
+        { name: 'Ollama', ok: false, status: 'fail', detail: 'not found' },
+      ],
+    }),
+    true
+  );
+  // A warn check counts as ok, so an all-warn/pass payload stays allGood:true.
+  assert.strictEqual(
+    isValidSetupCheckPayload({
+      allGood: true,
+      checks: [{ name: 'whisper-model', ok: true, status: 'warn', detail: 'will download' }],
+    }),
+    true
+  );
+});
+
 test('parseSetupCheckOutput returns {allGood, checks} for a good buffer with chatter', () => {
   const out = ['import noise line', JSON.stringify(VALID)].join('\n');
   assert.deepStrictEqual(parseSetupCheckOutput(out), VALID);

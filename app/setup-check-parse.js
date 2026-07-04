@@ -52,7 +52,7 @@ function isValidSetupCheckPayload(payload) {
   if (!payload || typeof payload !== 'object') return false;
   if (typeof payload.allGood !== 'boolean') return false;
   if (!Array.isArray(payload.checks) || payload.checks.length === 0) return false;
-  return payload.checks.every(
+  const typesOk = payload.checks.every(
     (c) =>
       c &&
       typeof c === 'object' &&
@@ -63,6 +63,14 @@ function isValidSetupCheckPayload(payload) {
       VALID_STATUS.has(c.status) &&
       typeof c.detail === 'string'
   );
+  if (!typesOk) return false;
+  // Re-check the backend's derived invariants so an inconsistent payload (a
+  // future backend bug or a tampered response) can't masquerade as a clean pass
+  // on this startup-gating path: each check's `ok` is exactly "not a failure",
+  // and `allGood` is exactly "every check ok".
+  if (!payload.checks.every((c) => c.ok === (c.status !== 'fail'))) return false;
+  if (payload.allGood !== payload.checks.every((c) => c.ok)) return false;
+  return true;
 }
 
 /**
