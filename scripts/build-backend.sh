@@ -44,7 +44,6 @@ fi
 # Install project dependencies
 echo "Installing project dependencies..."
 pip install -r requirements.txt
-pip install -e .
 echo ""
 
 # Clean previous builds
