@@ -127,6 +127,20 @@ function install({ ipcMain }) {
       return { success: true, path: seamPath };
     },
 
+    // Mirror the real save-diagnostics handler's seam: with
+    // STENOAI_E2E_DIAGNOSTICS_PATH set, write the renderer-built (redacted)
+    // bundle there so a T1 spec can read back exactly what Save passed. Without
+    // the seam there's no dialog here, so report a cancel.
+    'save-diagnostics': async (_event, _defaultFilename, content) => {
+      if (typeof content !== 'string' || content.length === 0) {
+        return { success: false, error: 'No diagnostics content to save.' };
+      }
+      const seamPath = process.env.STENOAI_E2E_DIAGNOSTICS_PATH;
+      if (!seamPath) return { success: false, error: EXPORT_CANCELED };
+      fs.writeFileSync(seamPath, content, 'utf-8');
+      return { success: true, path: seamPath };
+    },
+
     'org-status': async () => {
       if (!state.orgSession) {
         return { signedIn: false, everSignedIn: state.everSignedIn };

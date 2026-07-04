@@ -5,6 +5,17 @@ import {
   getDebugLogs,
   subscribeDebugLogs,
 } from '@/lib/debugLogs';
+import { ipc } from '@/lib/ipc';
+import { redactDiagnostics } from '@/lib/redactDiagnostics';
+import {
+  useStoragePath,
+  useAppVersion,
+  useSystemAudioSupport,
+  useSystemAudioSetting,
+  useSilenceAutoStopSetting,
+} from '@/hooks/useSettings';
+import { useAiProvider } from '@/hooks/useAi';
+import { useTranscriptionEngine } from '@/hooks/useModels';
 
 export function DeveloperTab() {
   // Read from the global store so we get the full session backlog, not just
@@ -22,8 +33,52 @@ export function DeveloperTab() {
     if (el) el.scrollTop = el.scrollHeight;
   }, [logs]);
 
+  // Data for redaction (custom storage root) + the anonymized env header. All
+  // already cached by other Settings surfaces, so these reads are free here.
+  const storage = useStoragePath();
+  const version = useAppVersion();
+  const systemAudioSupport = useSystemAudioSupport();
+  const systemAudio = useSystemAudioSetting();
+  const silenceAutoStop = useSilenceAutoStopSetting();
+  const engine = useTranscriptionEngine();
+  const aiProvider = useAiProvider();
+
+  // The custom storage root (only set when the user moved storage off the
+  // default under-home location). It may live outside home, so redaction needs
+  // the literal string; undefined means the home-dir rule already covers it.
+  const storageRoot = storage.data?.custom_path ?? undefined;
+
   const copyLogs = () => {
-    void navigator.clipboard.writeText(logs.join('\n'));
+    void navigator.clipboard.writeText(
+      redactDiagnostics(logs, { storageRoot }).join('\n'),
+    );
+  };
+
+  // Build the anonymized env header (no PII: provider TYPE not URL/key, no
+  // telemetry id) + a blank line + the redacted buffer, and save it to a file
+  // the user picks. Header values come from the same hooks the Settings/About
+  // surfaces already use.
+  const saveLogs = async () => {
+    const platform = systemAudioSupport.data?.platform ?? '(unknown)';
+    const osVersion = systemAudioSupport.data?.osVersion ?? '(unknown)';
+    const header = [
+      '# stenoai diagnostics',
+      '# Paths, URLs and meeting titles are redacted. No account/telemetry id.',
+      `app version: ${version.data?.version ?? '(unknown)'}`,
+      `platform: ${platform}`,
+      `os version: ${osVersion}`,
+      `transcription engine: ${engine.data ?? '(unknown)'}`,
+      `ai provider: ${aiProvider.data?.ai_provider ?? '(unknown)'}`,
+      `system audio enabled: ${systemAudio.data ? 'yes' : 'no'}`,
+      `silence auto-stop enabled: ${silenceAutoStop.data?.enabled ? 'yes' : 'no'}`,
+      `silence auto-stop minutes: ${silenceAutoStop.data?.minutes ?? '(unknown)'}`,
+    ];
+    const body = redactDiagnostics(logs, { storageRoot });
+    const content = [...header, '', ...body].join('\n');
+
+    const now = new Date();
+    const stamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
+    await ipc().settings.saveDiagnostics(`stenoai-diagnostics-${stamp}.txt`, content);
   };
 
   const placeholder =
@@ -60,6 +115,15 @@ export function DeveloperTab() {
             disabled={!logs.length}
           >
             Copy
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 px-2.5 text-[13px]"
+            onClick={() => void saveLogs()}
+            disabled={!logs.length}
+          >
+            Save
           </Button>
         </div>
       </div>

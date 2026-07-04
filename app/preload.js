@@ -241,6 +241,8 @@ const stenoai = {
     setStoragePath: (p) => invoke('set-storage-path', p),
     pickStorageFolder: () => invoke('select-storage-folder'),
     getAiPrompts: () => invoke('get-ai-prompts'),
+    saveDiagnostics: (defaultFilename, content) =>
+      invoke('save-diagnostics', defaultFilename, content),
   },
 
   ai: {
