@@ -63,13 +63,19 @@ const URL_RE = new RegExp(
   'gi',
 );
 
-// Scheme-less credentials: `user[:pass]@host[:port]` with NO `scheme://`, as the
-// Python summarizer can log on stderr. We strip the `user[:pass]@` and keep the
-// host. To avoid eating ordinary `word@word` prose, the part after `@` must look
-// like a host: either a dotted domain (`host.tld`, optional `:port`) or a bare
-// host WITH a port (`host:11434`). A bare dot-less/port-less host is left alone.
-const SCHEMELESS_CREDS_RE =
-  /([A-Za-z0-9._%+-]+(?::[^\s@/]+)?)@((?:[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+(?::\d+)?|[A-Za-z0-9-]+:\d+))/g;
+// Scheme-less credentials: `user[:pass]@host[:port][/path?query]` with NO
+// `scheme://`, as the Python summarizer can log on stderr. We strip the
+// `user[:pass]@` AND the trailing path/query (symmetric with the scheme'd URL
+// rule, which keeps only scheme://host - so a `?token=SECRET` can't leak),
+// keeping just `host[:port]`. To avoid eating ordinary `word@word` prose, the
+// part after `@` must look like a host: either a dotted domain (`host.tld`,
+// optional `:port`) or a bare host WITH a port (`host:11434`). A bare
+// dot-less/port-less host is left alone. The trailing match is bounded by the
+// token-end set so it can't swallow across a quote/JSON delimiter.
+const SCHEMELESS_CREDS_RE = new RegExp(
+  `([A-Za-z0-9._%+-]+(?::[^\\s@/]+)?)@((?:[A-Za-z0-9-]+(?:\\.[A-Za-z0-9-]+)+(?::\\d+)?|[A-Za-z0-9-]+:\\d+))[^${TOKEN_END_CHARS}]*`,
+  'g',
+);
 
 // macOS home: /Users/<name>/ -> ~/   (any username)
 const MAC_HOME_RE = /\/Users\/[^/\\]+\//gi;

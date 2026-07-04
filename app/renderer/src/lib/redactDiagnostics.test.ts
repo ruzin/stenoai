@@ -145,14 +145,22 @@ describe('redactDiagnostics - URLs', () => {
 });
 
 describe('redactDiagnostics - scheme-less credentials', () => {
-  test('strips user:pass@ before a host:port even without a scheme', () => {
-    expect(redact('connecting alice:secret@ollama.corp:11434/x')).toBe(
-      'connecting ollama.corp:11434/x',
+  test('strips user:pass@ AND the trailing path/query, keeping host[:port]', () => {
+    // The path/query can carry a secret (?token=...), so - like the scheme'd URL
+    // rule - the scheme-less rule keeps only host[:port].
+    expect(redact('connecting alice:secret@ollama.corp:11434/api/tags?token=SECRET')).toBe(
+      'connecting ollama.corp:11434',
     );
   });
 
-  test('strips user@ before a dotted host without a port', () => {
-    expect(redact('login bob@ollama.corp.internal/api')).toBe('login ollama.corp.internal/api');
+  test('strips user@ and the path before a dotted host without a port', () => {
+    expect(redact('login bob@ollama.corp.internal/api')).toBe('login ollama.corp.internal');
+  });
+
+  test('does not swallow across a delimiter (JSON) when stripping the path', () => {
+    expect(redact('{"dsn":"alice:secret@ollama.corp:11434/api","k":"v"}')).toBe(
+      '{"dsn":"ollama.corp:11434","k":"v"}',
+    );
   });
 
   test('leaves ordinary word@word prose untouched (no host-shape after @)', () => {

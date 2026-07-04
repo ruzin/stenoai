@@ -17,6 +17,12 @@ import {
 import { useAiProvider } from '@/hooks/useAi';
 import { useTranscriptionEngine } from '@/hooks/useModels';
 
+// Cross-process sentinel: the save-diagnostics handler (and its e2e mock) return
+// this exact error string when the user dismisses the save dialog. Kept in sync
+// with app/ipc-sentinels.js (EXPORT_CANCELED); the renderer can't require that
+// CJS module, so it mirrors the literal (same as MeetingDetail's copy).
+const DIAGNOSTICS_CANCELED = 'canceled';
+
 export function DeveloperTab() {
   // Read from the global store so we get the full session backlog, not just
   // lines emitted after this tab mounted.
@@ -48,6 +54,10 @@ export function DeveloperTab() {
   // the literal string; undefined means the home-dir rule already covers it.
   const storageRoot = storage.data?.custom_path ?? undefined;
 
+  // Surfaced when a Save genuinely fails (disk error / rejection). A cancelled
+  // save dialog is not an error and stays silent.
+  const [saveError, setSaveError] = React.useState<string | null>(null);
+
   const copyLogs = () => {
     void navigator.clipboard.writeText(
       redactDiagnostics(logs, { storageRoot }).join('\n'),
@@ -78,7 +88,25 @@ export function DeveloperTab() {
 
     const now = new Date();
     const stamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
-    await ipc().settings.saveDiagnostics(`stenoai-diagnostics-${stamp}.txt`, content);
+
+    // Save writes a file, which can genuinely fail. A user-cancelled dialog
+    // resolves with error === DIAGNOSTICS_CANCELED and stays silent; a real
+    // failure (or a rejection) is surfaced inline. Mirrors MeetingDetail's
+    // save-transcript consumer.
+    setSaveError(null);
+    try {
+      const res = await ipc().settings.saveDiagnostics(
+        `stenoai-diagnostics-${stamp}.txt`,
+        content,
+      );
+      if (!res.success && res.error !== DIAGNOSTICS_CANCELED) {
+        setSaveError(`Couldn't save diagnostics: ${res.error || 'unknown error'}`);
+      }
+    } catch (err) {
+      setSaveError(
+        `Couldn't save diagnostics: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   };
 
   const placeholder =
@@ -127,6 +155,15 @@ export function DeveloperTab() {
           </Button>
         </div>
       </div>
+      {saveError && (
+        <div
+          className="mb-2 text-[12px]"
+          style={{ color: 'var(--accent-danger, var(--fg-1))' }}
+          role="alert"
+        >
+          {saveError}
+        </div>
+      )}
       <textarea
         ref={textareaRef}
         readOnly
