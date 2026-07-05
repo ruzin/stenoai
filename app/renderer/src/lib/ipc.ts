@@ -878,6 +878,7 @@ export interface StenoaiBridge {
     setStoragePath: RequestFn<[p: string], Result<Record<string, never>>>;
     pickStorageFolder: RequestFn<[], PickStorageFolderResponse>;
     getAiPrompts: RequestFn<[], GetAiPromptsResponse>;
+    saveDiagnostics: RequestFn<[defaultFilename: string, content: string], Result<{ path: string }>>;
   };
 
   ai: {

@@ -2624,6 +2624,57 @@ ipcMain.handle('export-transcript', async (event, defaultFilename, content) => {
   }
 });
 
+// Save the (already redacted, renderer-built) diagnostics bundle to a file the
+// user picks. Mirrors export-transcript: basename-only defaultPath, atomic
+// tmp+rename, and the e2e save-path seam. The renderer owns redaction + the env
+// header (redactDiagnostics + header build); this handler only writes bytes.
+ipcMain.handle('save-diagnostics', async (event, defaultFilename, content) => {
+  try {
+    if (typeof content !== 'string' || content.length === 0) {
+      return { success: false, error: 'No diagnostics content to save.' };
+    }
+
+    // Test-only seam: only honor it under e2e, so a stray env var in a real
+    // launch can't silently redirect a user's save to an arbitrary path.
+    const seamPath = IS_E2E ? process.env.STENOAI_E2E_DIAGNOSTICS_PATH : undefined;
+    let targetPath = seamPath;
+
+    if (!targetPath) {
+      // The renderer supplies a suggested name only; reduce it to a bare
+      // filename so a malformed value can't steer defaultPath with an absolute
+      // path or traversal components. The user still confirms via the dialog.
+      const suggested =
+        typeof defaultFilename === 'string' && defaultFilename.trim()
+          ? path.basename(defaultFilename).slice(0, 200)
+          : 'stenoai-diagnostics.txt';
+      const result = await dialog.showSaveDialog(mainWindow, {
+        defaultPath: suggested,
+        filters: [{ name: 'Text', extensions: ['txt'] }],
+      });
+      if (result.canceled || !result.filePath) {
+        return { success: false, error: EXPORT_CANCELED };
+      }
+      targetPath = result.filePath;
+    }
+
+    // Atomic write: tmp file in the SAME directory, then rename into place, so a
+    // failed write can't truncate a pre-existing file. Mirrors export-transcript.
+    const dir = path.dirname(targetPath);
+    const base = path.basename(targetPath);
+    const tmpPath = path.join(dir, `.${base}.${require('crypto').randomBytes(6).toString('hex')}.tmp`);
+    try {
+      await fs.promises.writeFile(tmpPath, content, 'utf-8');
+      await fs.promises.rename(tmpPath, targetPath);
+    } catch (writeErr) {
+      try { await fs.promises.unlink(tmpPath); } catch (_) {}
+      throw writeErr;
+    }
+    return { success: true, path: targetPath };
+  } catch (err) {
+    return { success: false, error: String(err && err.message ? err.message : err) };
+  }
+});
+
 ipcMain.handle('update-meeting', async (event, summaryFilePath, updates) => {
   try {
     const projectRoot = path.join(__dirname, '..');
