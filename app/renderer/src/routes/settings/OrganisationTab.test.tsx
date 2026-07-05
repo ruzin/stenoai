@@ -1,6 +1,5 @@
-import * as React from 'react';
 import { describe, test, expect, beforeEach, vi } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { OrganisationTab } from './OrganisationTab';
 import { orgKeys } from '@/hooks/useOrg';
@@ -70,8 +69,11 @@ describe('OrganisationTab', () => {
     // Enter shortcut must respect the same guard and be a no-op.
     fireEvent.keyDown(password, { key: 'Enter' });
 
-    // Give any (incorrect) async login a chance to fire before asserting.
-    await new Promise((r) => setTimeout(r, 0));
+    // Give any (incorrect) async login a chance to fire, and let the
+    // background status/auto-backup queries settle, before asserting.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
     expect(login).not.toHaveBeenCalled();
   });
 
