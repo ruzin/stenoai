@@ -62,11 +62,17 @@ export function GeneralTab() {
   const setUserName = useSetUserName();
   const [nameDraft, setNameDraft] = React.useState('');
   const nameSeededRef = React.useRef(false);
+  // Tracks in-flight typing so a late initial fetch can't clobber the user's
+  // draft. Set on the first edit, and released again by persistName on blur —
+  // the danger window is only mount → first commit, so once the edit is
+  // committed the seeding effect is free to re-sync from userName.data.
+  const nameDirtyRef = React.useRef(false);
   // Wait for the real query (not the sessionStorage placeholder) before
   // seeding — otherwise we lock onto a stale empty string and ignore the
   // canonical value when it arrives from disk.
   React.useEffect(() => {
     if (nameSeededRef.current) return;
+    if (nameDirtyRef.current) return;
     if (userName.isPending || userName.isPlaceholderData) return;
     if (userName.data !== undefined) {
       setNameDraft(userName.data);
@@ -75,8 +81,16 @@ export function GeneralTab() {
   }, [userName.data, userName.isPending, userName.isPlaceholderData]);
   const persistName = () => {
     const trimmed = nameDraft.trim();
-    if (trimmed === (userName.data ?? '')) return;
-    setUserName.mutate(trimmed);
+    if (trimmed !== (userName.data ?? '')) {
+      setUserName.mutate(trimmed);
+    }
+    // The editing session is over (committed on blur/Enter), so there's no more
+    // in-flight typing to protect. Release the dirty guard so the seeding effect
+    // can re-sync from any later userName.data change — the backend's canonical
+    // value, or a refetch after the mutation invalidates. Otherwise a no-op
+    // commit (draft equal to the not-yet-resolved placeholder) would leave the
+    // guard stuck and the field stranded on a stale/blank draft.
+    nameDirtyRef.current = false;
   };
 
   const calendarConnected =
@@ -106,18 +120,60 @@ export function GeneralTab() {
     }
   }, [oauth, google.status.data?.connected, outlook.status.data?.connected]);
 
+  // Synchronous in-flight lock. react-query's isPending only flips true on the
+  // NEXT render, so two clicks handled in the same tick both read a stale
+  // false and slip past an isPending-based guard; a ref set before the first
+  // mutate closes that exact window. The token distinguishes attempts so a
+  // superseded attempt's settle (a cancel or a newer startConnect took over)
+  // can't release a still-active attempt's lock.
+  const connectingRef = React.useRef(false);
+  const connectTokenRef = React.useRef(0);
+
   const startConnect = async (provider: 'google' | 'outlook') => {
+    if (connectingRef.current) return;
+    connectingRef.current = true;
+    const token = ++connectTokenRef.current;
     setOauth({ provider, state: 'pending' });
     try {
       if (provider === 'google') await google.connect.mutateAsync();
       else await outlook.connect.mutateAsync();
     } catch (err) {
-      setOauth({
-        provider,
-        state: 'error',
-        message: err instanceof Error ? err.message : String(err),
-      });
+      const message = err instanceof Error ? err.message : String(err);
+      // A user-initiated Cancel rejects the connect mutation with "Cancelled"
+      // (see useGoogleCalendarAuth/useOutlookCalendarAuth) — not an error to
+      // surface back to the user.
+      if (message === 'Cancelled') return;
+      // Only surface the error if THIS attempt is still the active one. The
+      // token check catches a cancel-then-immediate-retry of the same provider,
+      // where a newer attempt is also `pending`/same-provider — provider+state
+      // alone can't tell the stale rejection apart from the fresh dialog. It
+      // also covers a dismissed dialog or a switch to a different provider.
+      setOauth((current) =>
+        connectTokenRef.current === token &&
+        current?.provider === provider &&
+        current.state === 'pending'
+          ? { provider, state: 'error', message }
+          : current,
+      );
+    } finally {
+      // Release only if this is still the active attempt — a cancel or a newer
+      // startConnect may have superseded it and now owns the lock.
+      if (connectTokenRef.current === token) connectingRef.current = false;
     }
+  };
+
+  const cancelConnect = () => {
+    // Abort the in-flight handshake so we don't leak a loopback OAuth server
+    // that could silently complete the connection (and save tokens) after the
+    // user has already backed out of the dialog.
+    if (oauth?.state === 'pending') {
+      if (oauth.provider === 'google') google.cancel.mutate();
+      else outlook.cancel.mutate();
+    }
+    // Release the lock immediately so the user can retry or switch providers
+    // without waiting for the abandoned mutation to reject.
+    connectingRef.current = false;
+    setOauth(null);
   };
 
   return (
@@ -128,7 +184,10 @@ export function GeneralTab() {
       >
         <Input
           value={nameDraft}
-          onChange={(e) => setNameDraft(e.target.value)}
+          onChange={(e) => {
+            nameDirtyRef.current = true;
+            setNameDraft(e.target.value);
+          }}
           onBlur={persistName}
           onKeyDown={(e) => {
             if (e.key === 'Enter') {
@@ -211,7 +270,7 @@ export function GeneralTab() {
 
       <OAuthPrompt
         state={oauth}
-        onClose={() => setOauth(null)}
+        onClose={cancelConnect}
         onRetry={() => oauth && void startConnect(oauth.provider)}
       />
 
