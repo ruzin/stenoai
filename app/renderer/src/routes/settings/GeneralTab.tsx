@@ -143,12 +143,15 @@ export function GeneralTab() {
       // (see useGoogleCalendarAuth/useOutlookCalendarAuth) — not an error to
       // surface back to the user.
       if (message === 'Cancelled') return;
-      // Only surface the error if the dialog is STILL showing this same
-      // provider as pending. A stale/late rejection (e.g. from a provider the
-      // user cancelled and then switched away from) must not resurrect a
-      // dismissed dialog or clobber a different provider's newer attempt.
+      // Only surface the error if THIS attempt is still the active one. The
+      // token check catches a cancel-then-immediate-retry of the same provider,
+      // where a newer attempt is also `pending`/same-provider — provider+state
+      // alone can't tell the stale rejection apart from the fresh dialog. It
+      // also covers a dismissed dialog or a switch to a different provider.
       setOauth((current) =>
-        current?.provider === provider && current.state === 'pending'
+        connectTokenRef.current === token &&
+        current?.provider === provider &&
+        current.state === 'pending'
           ? { provider, state: 'error', message }
           : current,
       );

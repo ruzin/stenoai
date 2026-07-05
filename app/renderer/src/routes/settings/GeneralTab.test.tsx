@@ -192,6 +192,37 @@ describe('GeneralTab OAuth connect/cancel race (#306)', () => {
     expect(screen.queryByText("Couldn't connect to Google")).toBeNull();
   });
 
+  test("a stale same-provider retry's late rejection does not overwrite the fresh attempt", async () => {
+    const firstAttempt = h.defer<void>();
+    // First Google attempt gets a controllable promise; the retry falls back to
+    // the default never-resolving mock, so it stays pending.
+    h.google.connect.mutateAsync.mockReturnValueOnce(firstAttempt.promise);
+    render(<GeneralTab />);
+
+    await act(async () => {
+      clickConnect('Google');
+    });
+    await act(async () => {
+      clickCancel();
+    });
+    // Immediately retry the SAME provider — a fresh pending attempt.
+    await act(async () => {
+      clickConnect('Google');
+    });
+    expect(screen.getByText('Connecting to Google')).toBeTruthy();
+
+    // The original (abandoned) attempt rejects late with a non-Cancelled error.
+    // provider + state still superficially match the fresh attempt, so only the
+    // attempt token can tell them apart.
+    await act(async () => {
+      firstAttempt.reject(new Error('Timed out — no response from Google.'));
+      await firstAttempt.promise.catch(() => {});
+    });
+
+    expect(screen.getByText('Connecting to Google')).toBeTruthy();
+    expect(screen.queryByText("Couldn't connect to Google")).toBeNull();
+  });
+
   test('two synchronous Connect clicks fire only one connect mutation', async () => {
     render(<GeneralTab />);
     const btn = screen.getByRole('button', { name: 'Google' });
