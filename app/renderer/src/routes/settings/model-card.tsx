@@ -298,6 +298,7 @@ export function ModelCard({
             <button
               type="button"
               onClick={onDeleteModel}
+              aria-label="Delete model"
               title="Delete this model to free up disk space"
               className="flex size-[28px] cursor-pointer items-center justify-center rounded-[6px] border-0 bg-transparent"
               style={{ color: 'var(--fg-muted)' }}

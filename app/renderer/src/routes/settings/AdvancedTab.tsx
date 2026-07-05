@@ -74,11 +74,11 @@ export function AdvancedTab() {
     }
   };
 
-  const resetFolder = () => {
-    if (storage.data?.default_path) {
-      setStorage.mutate(storage.data.default_path);
-    }
-  };
+  // Send '' — the backend treats an empty path as "use the default location"
+  // and clears the custom override. Passing the default *path* instead would
+  // be recorded as a fresh custom override, so Reset would hide itself without
+  // actually resetting anything (#304).
+  const resetFolder = () => setStorage.mutate('');
 
   const custom =
     storage.data?.custom_path &&
