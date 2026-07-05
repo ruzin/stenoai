@@ -56,6 +56,13 @@ export function Processing() {
   const [chunkProgress, setChunkProgress] = React.useState<string | null>(null);
   const [streamText, setStreamText] = React.useState('');
   const [streamedTitle, setStreamedTitle] = React.useState<string | null>(null);
+  // Preserved source-audio path from a hard processing crash — the only handle
+  // we have to actually re-run the failed job (no note/summaryFile is written
+  // on that path). Null when unavailable, which disables "Try again" so it can
+  // never re-arm the spinner without a real backing job.
+  const [retryAudioFile, setRetryAudioFile] = React.useState<string | null>(null);
+  const [retrying, setRetrying] = React.useState(false);
+  const [retryError, setRetryError] = React.useState<string | null>(null);
 
   // Buffer streamed chunks and flush at most every 50ms (~20fps). At a
   // typical token rate of 30-60 tokens/sec, this batches ~3 tokens per
@@ -97,6 +104,7 @@ export function Processing() {
       ipc().on.processingComplete((e) => {
         if (activeSession && e.sessionName !== activeSession) return;
         if (!e.success) {
+          setRetryAudioFile(e.audioFile ?? null);
           setStage('error');
           return;
         }
@@ -131,6 +139,36 @@ export function Processing() {
     ];
     return () => offs.forEach((fn) => fn());
   }, [activeSession, updateMeeting]);
+
+  // Actually re-run the failed job: re-queue the preserved source audio via the
+  // same import pipeline a stopped recording uses. Its copy-then-queue semantics
+  // keep the original safe across repeated retries. Only re-arm the loading UI
+  // once the queue call is confirmed issued — a failed/rejected call stays in
+  // the error state instead of spinning forever.
+  const handleRetry = React.useCallback(async () => {
+    if (!retryAudioFile || !activeSession || retrying) return;
+    setRetrying(true);
+    setRetryError(null);
+    try {
+      const res = await ipc().recording.processFile(retryAudioFile, activeSession);
+      if (!res.success) {
+        setRetryError(res.error || 'Couldn’t restart processing. Please try again.');
+        return;
+      }
+      pendingChunkRef.current = '';
+      setStreamText('');
+      setStreamedTitle(null);
+      setChunkProgress(null);
+      setRetryAudioFile(null);
+      setStage('transcribing');
+    } catch (err) {
+      setRetryError(
+        err instanceof Error ? err.message : 'Couldn’t restart processing. Please try again.',
+      );
+    } finally {
+      setRetrying(false);
+    }
+  }, [retryAudioFile, activeSession, retrying]);
 
   const displayTitle =
     streamedTitle ?? draft?.title ?? activeSession ?? 'Note';
@@ -177,7 +215,12 @@ export function Processing() {
         </header>
 
         {stage === 'error' ? (
-          <ErrorPanel onRetry={() => setStage('transcribing')} />
+          <ErrorPanel
+            onRetry={handleRetry}
+            canRetry={Boolean(retryAudioFile && activeSession)}
+            retrying={retrying}
+            error={retryError}
+          />
         ) : (
           <StageCard stage={stage} streamText={streamText} chunkProgress={chunkProgress} />
         )}
@@ -313,7 +356,17 @@ function StageCard({
   );
 }
 
-function ErrorPanel({ onRetry }: { onRetry: () => void }) {
+function ErrorPanel({
+  onRetry,
+  canRetry,
+  retrying,
+  error,
+}: {
+  onRetry: () => void;
+  canRetry: boolean;
+  retrying: boolean;
+  error: string | null;
+}) {
   return (
     <div className="py-3">
       <p
@@ -326,19 +379,31 @@ function ErrorPanel({ onRetry }: { onRetry: () => void }) {
         className="mt-1 text-[14px]"
         style={{ color: 'var(--fg-2)' }}
       >
-        Try again, or reprocess the recording from the meeting list once it
-        appears.
+        {canRetry
+          ? 'Try again to re-run processing on this recording.'
+          : 'This recording couldn’t be recovered automatically. Try importing the audio file again from Home.'}
       </p>
+      {error && (
+        <p
+          className="mt-2 text-[14px]"
+          role="alert"
+          style={{ color: 'var(--danger, #b4231f)' }}
+        >
+          {error}
+        </p>
+      )}
       <button
         type="button"
         onClick={onRetry}
-        className="mt-4 inline-flex h-9 cursor-pointer items-center rounded-[8px] border-0 px-4 text-[14px] font-medium"
+        disabled={!canRetry || retrying}
+        className="mt-4 inline-flex h-9 cursor-pointer items-center gap-2 rounded-[8px] border-0 px-4 text-[14px] font-medium disabled:cursor-not-allowed disabled:opacity-60"
         style={{
           background: 'var(--fg-1)',
           color: 'var(--fg-inverse)',
         }}
       >
-        Try again
+        {retrying && <Loader2 className="animate-spin" size={14} />}
+        {retrying ? 'Retrying…' : 'Try again'}
       </button>
     </div>
   );

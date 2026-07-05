@@ -536,6 +536,12 @@ export interface ProcessingCompleteEvent {
    *  app-level cleanup find the matching streamCache entry to clear
    *  even when MeetingDetail unmounted mid-reprocess. */
   summaryFile?: string;
+  /** Preserved source-audio path on a HARD processing crash (success: false).
+   *  No note/summaryFile is written on that path, so this is the only handle
+   *  the Processing screen's "Try again" has to re-queue the recording via
+   *  `recording.processFile`. Absent on success and on the graceful
+   *  transcription-failure path (which writes a reprocessable note instead). */
+  audioFile?: string;
   /** Set when the backend gracefully marked a transcription crash: the
    *  audio was preserved and a reprocessable meeting was saved, so the
    *  flow still succeeds (success: true) but the renderer should surface
