@@ -119,6 +119,7 @@ export function OrganisationTab() {
   };
 
   const onSignOut = async () => {
+    setError(null);
     try {
       await logoutMutation.mutateAsync();
     } catch (e) {
@@ -271,7 +272,18 @@ export function OrganisationTab() {
                   className="h-[30px] rounded-[6px] text-[13px]"
                   disabled={busy}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter') void onSignIn();
+                    // Mirror the Sign-in button's own disabled guard so the
+                    // Enter shortcut can't fire a login while it's busy or a
+                    // required field is empty (#305).
+                    if (
+                      e.key === 'Enter' &&
+                      !busy &&
+                      adapterUrl &&
+                      email &&
+                      password
+                    ) {
+                      void onSignIn();
+                    }
                   }}
                 />
               </div>
