@@ -3139,15 +3139,18 @@ def clear_state():
 
 
 @cli.command()
-def setup_check():
+@click.option('--json', 'as_json', is_flag=True,
+              help='Emit a single machine-readable JSON object instead of the human-readable report.')
+def setup_check(as_json):
     """Check system setup and dependencies"""
     import subprocess
     import sys
     import os
-    
-    print("🔧 StenoAI Setup Check")
-    print("=" * 25)
-    
+
+    if not as_json:
+        print("🔧 StenoAI Setup Check")
+        print("=" * 25)
+
     checks = []
     
     # Check Python version
@@ -3294,19 +3297,40 @@ def setup_check():
     else:
         checks.append(("❌ llm-model", "no model installed - needed for summaries"))
 
-    # Print results
+    # Derive a structured, machine-readable view of the checks. This is the
+    # single source of truth for each check's (name, status, detail) and for the
+    # overall verdict; both the JSON output and the human summary below read from
+    # it, so the pass/fail logic is never duplicated. Status is decoded from the
+    # emoji the check-building code above attached to each label:
+    #   ✅ -> pass (ok),  ⚠️ -> warn (ok),  ❌ -> fail (not ok).
+    structured = []
     all_good = True
-    for status, detail in checks:
-        print(f"{status:<20} {detail}")
-        if status.startswith("❌"):
+    for label, detail in checks:
+        if label.startswith("❌"):
+            status, ok = "fail", False
             all_good = False
-    
+        elif label.startswith("⚠"):
+            status, ok = "warn", True
+        else:
+            status, ok = "pass", True
+        # Strip the leading status emoji to get the bare check name.
+        name = label.split(" ", 1)[1] if " " in label else label
+        structured.append({"name": name, "ok": ok, "status": status, "detail": detail})
+
+    if as_json:
+        print(json.dumps({"allGood": all_good, "checks": structured}))
+        return {"success": all_good, "checks": checks}
+
+    # Human-readable summary
+    for label, detail in checks:
+        print(f"{label:<20} {detail}")
+
     print("\n" + "=" * 25)
     if all_good:
         print("🎉 System check passed! Ready to record meetings.")
     else:
         print("⚠️ Setup incomplete. Please install missing dependencies.")
-    
+
     return {"success": all_good, "checks": checks}
 
 

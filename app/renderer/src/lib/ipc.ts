@@ -292,9 +292,19 @@ export type CloudProvider = 'openai' | 'anthropic' | 'bedrock' | 'custom';
 // ---------- response envelopes ----------
 export type AppVersionResponse = Result<{ version: string; name: string }>;
 export type StatusResponse = Result<{ status: string; details?: unknown }>;
+export type SetupCheckStatus = 'pass' | 'fail' | 'warn';
+export interface SetupCheckItem {
+  /** Bare check name, e.g. "Python", "ffmpeg", "recordings/". */
+  name: string;
+  /** true unless the check failed; warnings are still ok. */
+  ok: boolean;
+  status: SetupCheckStatus;
+  /** Human-readable detail, e.g. "3.11.5" or "not found - run: brew install ffmpeg". */
+  detail: string;
+}
 export type SetupCheckResponse = Result<{
   allGood: boolean;
-  checks: Array<[icon: string, label: string]>;
+  checks: SetupCheckItem[];
 }>;
 
 export type MicPermissionResponse = Result<{ status: MicPermissionStatus }>;

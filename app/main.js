@@ -47,6 +47,7 @@ const {
   sanitizeShortcutUrlForLogs,
   parseShortcutUrl,
 } = require('./shortcut-url');
+const { parseSetupCheckOutput } = require('./setup-check-parse');
 
 // Wrap spawn so every backend / ollama launch defaults to windowsHide:true.
 // The PyInstaller backend (stenoai.exe) and bundled ollama.exe are console
@@ -3958,32 +3959,25 @@ ipcMain.handle('stop-recording-ui', async () => {
 ipcMain.handle('startup-setup-check', async () => {
   try {
     console.log('Running startup setup check...');
-    
-    // Use Python backend to check setup
-    const result = await runPythonScript('simple_recorder.py', ['setup-check']);
+
+    // Ask the backend for machine-readable JSON rather than scraping emoji out
+    // of the human-readable report. The `--json` path emits a single object:
+    //   { allGood: boolean, checks: [{ name, ok, status, detail }, ...] }
+    const result = await runPythonScript('simple_recorder.py', ['setup-check', '--json']);
     console.log('Setup check result:', result);
-    
-    // Parse the output to determine if setup is complete
-    const allGood = result.includes('🎉 System check passed!');
-    
-    // Extract check results for UI display
-    const lines = result.split('\n');
-    const checks = [];
-    
-    lines.forEach(line => {
-      if (line.includes('✅') || line.includes('❌') || line.includes('⚠️')) {
-        const parts = line.split(/\s{2,}/); // Split on multiple spaces
-        if (parts.length >= 2) {
-          checks.push([parts[0].trim(), parts[1].trim()]);
-        }
-      }
-    });
-    
+
+    // Extract + validate the JSON payload from stdout. We don't JSON.parse the
+    // whole buffer because the checks import third-party libs that can print to
+    // stdout; parseSetupCheckOutput scans for the JSON line and validates the
+    // schema, throwing (→ caught below as an error) if the backend is broken so a
+    // malformed payload isn't masked as a clean "setup incomplete".
+    const { allGood, checks } = parseSetupCheckOutput(result);
+
     console.log('Parsed checks:', checks);
     console.log('All good:', allGood);
-    
-    return { 
-      success: true, 
+
+    return {
+      success: true,
       allGood,
       checks
     };

@@ -11,7 +11,7 @@ import { realUserDataDir, fileSig } from '../fixtures/real-user-data';
  * deferred to manual /verify + the nightly packaged cold-start.
  */
 
-type Check = [icon: string, label: string];
+type Check = { name: string; ok: boolean; status: 'pass' | 'fail' | 'warn'; detail: string };
 type SetupResult = { success: boolean; allGood?: boolean; checks?: Check[]; error?: string };
 
 type StenoWindow = Window & {
@@ -32,19 +32,30 @@ test('setup.check returns a coherent allGood + checks contract on a clean profil
   // without the LLM model reports false — so we assert the type, not the value).
   expect(typeof res.allGood).toBe('boolean');
 
-  // checks is a non-empty list of [status, detail] pairs the wizard renders. The
-  // handler splits each "<emoji> <label>   <detail>" line on 2+ spaces, so
-  // entry[0] is the emoji-prefixed "<emoji> <label>" and entry[1] is the detail.
+  // checks is a non-empty list of structured records the backend emits as JSON
+  // (setup-check --json) — no emoji-scraping. Each entry is
+  // { name, ok, status, detail } with status in {pass, fail, warn} and ok mirroring
+  // status !== 'fail'.
   expect(Array.isArray(res.checks)).toBe(true);
   expect(res.checks!.length).toBeGreaterThan(0);
   for (const entry of res.checks!) {
-    expect(Array.isArray(entry)).toBe(true);
-    expect(entry).toHaveLength(2);
-    const [status, detail] = entry;
-    expect(['✅', '❌', '⚠️'].some((e) => status.startsWith(e))).toBe(true);
-    expect(status.length).toBeGreaterThan(1); // emoji + a label
-    expect(typeof detail).toBe('string');
+    expect(typeof entry).toBe('object');
+    expect(typeof entry.name).toBe('string');
+    expect(entry.name.length).toBeGreaterThan(0);
+    expect(['pass', 'fail', 'warn']).toContain(entry.status);
+    expect(entry.ok).toBe(entry.status !== 'fail');
+    expect(typeof entry.detail).toBe('string');
   }
+
+  // allGood is exactly "no failing check" — the same verdict the backend computes.
+  expect(res.allGood).toBe(res.checks!.every((c) => c.ok));
+
+  // The Python check is deterministic on any runner (the interpreter is running
+  // the backend), so it must be present and passing.
+  const python = res.checks!.find((c) => c.name === 'Python');
+  expect(python).toBeDefined();
+  expect(python!.status).toBe('pass');
+  expect(python!.ok).toBe(true);
 
   // setup.check is a read — it must not write into the real user-data dir.
   expect(fileSig(realUserDataDir())).toBe(realDirBefore);
