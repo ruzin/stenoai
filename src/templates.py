@@ -47,12 +47,13 @@ BUILTIN_TEMPLATES = {
         "name": "Product Demo",
         "icon": "presentation",
         "prompt": (
-            "Summarise this call from the perspective of someone evaluating a "
-            "product or service being demonstrated to them. Cover: what was "
-            "demoed and the problem it's meant to solve, key features or "
-            "capabilities shown, pricing or commercial terms if mentioned, how "
-            "it fits (or doesn't fit) the stated needs, concerns or open "
-            "questions raised, and next steps. Write in the language of the "
+            "Summarise this call for someone evaluating a product or service "
+            "being demonstrated to them. Cover: what was demoed and the "
+            "problem it's meant to solve; key features or capabilities shown; "
+            "pricing or commercial terms if mentioned; how well it fits the "
+            "stated needs; concerns or open questions raised; and next steps. "
+            "Structure the report with a short markdown heading per area, and "
+            "omit any area that wasn't discussed. Write in the language of the "
             "meeting."
         ),
         "language": "auto",
@@ -63,12 +64,13 @@ BUILTIN_TEMPLATES = {
         "name": "Sales Call",
         "icon": "handshake",
         "prompt": (
-            "Summarise this call from the perspective of the person running "
-            "the sales conversation. Cover: the prospect's stated needs, pain "
-            "points, and priorities; objections or concerns raised; budget, "
-            "timeline, or decision-process details mentioned; competitors or "
-            "alternatives referenced; and agreed next steps. Write in the "
-            "language of the meeting."
+            "Summarise this call for the person running the sales "
+            "conversation. Cover: the prospect's stated needs, pain points, "
+            "and priorities; objections or concerns raised; budget, timeline, "
+            "or decision-process details mentioned; competitors or "
+            "alternatives referenced; and agreed next steps. Structure the "
+            "report with a short markdown heading per area, and omit any area "
+            "that wasn't discussed. Write in the language of the meeting."
         ),
         "language": "auto",
         "format": "markdown",
@@ -81,8 +83,9 @@ BUILTIN_TEMPLATES = {
             "Summarise this 1:1 conversation. Cover: topics discussed and any "
             "updates shared, feedback given in either direction, concerns or "
             "blockers raised, decisions made, and follow-up actions with who "
-            "owns them. Keep it factual and don't add interpretation beyond "
-            "what was said. Write in the language of the meeting."
+            "owns them. Structure the report with a short markdown heading per "
+            "area, and omit any area that wasn't discussed. Write in the "
+            "language of the meeting."
         ),
         "language": "auto",
         "format": "markdown",
@@ -93,10 +96,10 @@ BUILTIN_TEMPLATES = {
         "icon": "list-checks",
         "prompt": (
             "Summarise this standup/status meeting concisely. For each "
-            "participant or topic, capture what was done, what's planned "
-            "next, and any blockers raised. Keep it brief — this is a quick "
-            "status sync, not a detailed report. Write in the language of "
-            "the meeting."
+            "update, capture what was done, what's planned next, and any "
+            "blockers raised. List updates as brief bullet points, grouped by "
+            "person or topic. Keep it brief - this is a quick status sync, "
+            "not a detailed report. Write in the language of the meeting."
         ),
         "language": "auto",
         "format": "markdown",
