@@ -48,6 +48,10 @@ export function TemplatesTab() {
   const [editing, setEditing] = React.useState<Partial<Template> | null>(null);
   // Template pending deletion → drives the confirmation dialog.
   const [deleteTarget, setDeleteTarget] = React.useState<Template | null>(null);
+  // Surfaced inside the confirm dialog when a delete fails, so a rejected
+  // mutation isn't a silent unhandled rejection (#308). Cleared whenever the
+  // dialog closes or a new delete starts.
+  const [deleteError, setDeleteError] = React.useState<string | null>(null);
 
   if (editing) {
     return (
@@ -207,7 +211,10 @@ export function TemplatesTab() {
                           COMPACT_BTN,
                           'text-[color:var(--fg-2)] hover:bg-[color:var(--danger-bg)] hover:text-[color:var(--danger)]',
                         )}
-                        onClick={() => setDeleteTarget(t)}
+                        onClick={() => {
+                          setDeleteError(null);
+                          setDeleteTarget(t);
+                        }}
                         aria-label={`Delete ${t.name}`}
                       >
                         <Trash2 size={14} />
@@ -223,16 +230,46 @@ export function TemplatesTab() {
 
       <ConfirmDialog
         open={!!deleteTarget}
-        onOpenChange={(o) => !o && setDeleteTarget(null)}
+        onOpenChange={(o) => {
+          if (!o) {
+            setDeleteTarget(null);
+            setDeleteError(null);
+          }
+        }}
         title={deleteTarget ? `Delete template "${deleteTarget.name}"?` : ''}
-        description="This permanently deletes the template. Reports already generated from it are not affected."
+        description={
+          <>
+            This permanently deletes the template. Reports already generated
+            from it are not affected.
+            {deleteError && (
+              <span
+                role="alert"
+                style={{
+                  display: 'block',
+                  marginTop: 8,
+                  color: 'var(--accent-danger)',
+                }}
+              >
+                {deleteError}
+              </span>
+            )}
+          </>
+        }
         confirmLabel="Delete"
         destructive
         isPending={del.isPending}
         onConfirm={async () => {
           if (!deleteTarget) return;
-          await del.mutateAsync(deleteTarget.id);
-          setDeleteTarget(null);
+          setDeleteError(null);
+          try {
+            await del.mutateAsync(deleteTarget.id);
+            setDeleteTarget(null);
+          } catch (e) {
+            // Keep the dialog open so the user can retry; surface why.
+            setDeleteError(
+              e instanceof Error ? e.message : 'Failed to delete template.',
+            );
+          }
         }}
       />
     </section>
