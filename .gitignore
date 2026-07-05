@@ -132,10 +132,13 @@ dmypy.json
 # Pyre type checker
 .pyre/
 
-# StenoAI specific
-recordings/*.wav
-transcripts/*.txt
-output/*.json
+# StenoAI specific — dev-only scratch dirs (real user data lives in the app
+# data dir, see src.config.get_data_dirs()); ignore them entirely so meeting
+# audio/transcripts in subdirs or other formats (.m4a, .md, ...) can never be
+# staged by a broad git add
+recordings/
+transcripts/
+output/
 recorder_state*.json
 audio_buffer.npy
 
