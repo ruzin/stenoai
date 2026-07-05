@@ -881,7 +881,7 @@ class OllamaSummarizer:
                     try:
                         record = _json.loads(line)
                     except _json.JSONDecodeError:
-                        logger.warning(f"Adapter stream: malformed NDJSON line dropped: {line[:120]}")
+                        logger.warning(f"Adapter stream: malformed NDJSON line dropped ({len(line)} chars)")
                         continue
                     kind = record.get("type")
                     if kind == "chunk":
@@ -1227,8 +1227,9 @@ Return ONLY the response in this exact JSON format:
 
             logger.info(f"Received response from {self.ai_provider}")
             logger.info(f"Response length: {len(response_text)} characters")
-            logger.info(f"Response preview: {response_text[:200]}...")
-            
+            # No content preview: the response is meeting-derived and must not
+            # reach the shareable debug log. The length above is the signal.
+
             # Try to parse JSON response with repair functionality
             try:
                 # Remove any markdown formatting
@@ -1251,7 +1252,8 @@ Return ONLY the response in this exact JSON format:
             except json.JSONDecodeError as e:
                 logger.error(f"Ollama returned invalid JSON: {e}")
                 logger.error(f"JSON parse error at position: {e.pos}")
-                logger.error(f"Full Ollama response: {response_text}")
+                # Log the size, not the body: the response is meeting content.
+                logger.error(f"Ollama response unparseable ({len(response_text)} chars)")
                 logger.info("Attempting simple JSON repair for unquoted strings...")
                 
                 # Simple fix for unquoted strings in arrays (the actual issue we encountered)
@@ -1338,7 +1340,13 @@ Return ONLY the response in this exact JSON format:
             logger.error(f"Transcript length: {len(transcript)} characters")
             logger.error(f"Error type: {type(e).__name__}")
             if hasattr(e, 'response'):
-                logger.error(f"HTTP response: {e.response}")
+                # Log only the status, never the response object: its str/repr
+                # can embed the response body (model content) or headers.
+                status = getattr(e.response, 'status_code', None)
+                logger.error(
+                    f"HTTP response status: {status}" if status is not None
+                    else f"HTTP response: <{type(e.response).__name__}>"
+                )
             return None
     
     def _create_markdown_prompt(self, transcript: str, language: str = "en", notes: str = None) -> str:
@@ -1718,7 +1726,7 @@ TITLE:"""
 
             # Only return if we got something meaningful
             if title and len(title) > 2:
-                logger.info(f"Generated meeting title: {title}")
+                logger.info(f"Generated meeting title ({len(title)} chars)")
                 return title
 
             return None
@@ -1834,7 +1842,7 @@ ANSWER:"""
 
             prompt = self._build_query_prompt(transcript, question, language)
 
-            logger.info(f"Querying transcript with question: {question[:50]}...")
+            logger.info(f"Querying transcript with question ({len(question)} chars)")
 
             if self.ai_provider == "adapter":
                 response_text = self._adapter_chat(prompt, 120)

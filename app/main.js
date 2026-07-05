@@ -48,6 +48,7 @@ const {
   parseShortcutUrl,
 } = require('./shortcut-url');
 const { parseSetupCheckOutput } = require('./setup-check-parse');
+const { isDiagnosticStdoutLine, sanitizeArgsForLog } = require('./diagnostics-filter');
 
 // Wrap spawn so every backend / ollama launch defaults to windowsHide:true.
 // The PyInstaller backend (stenoai.exe) and bundled ollama.exe are console
@@ -1448,7 +1449,11 @@ function runPythonScript(script, args = [], silent = false, extraEnv = {}, logLa
     // Log the command being executed (unless silent)
     console.log('Running:', `${backendPath} ${args.join(' ')}`);
     if (!silent) {
-      sendDebugLog(`$ stenoai ${args.join(' ')}`);
+      // Sanitize the echoed argv: denylisted commands (query, save-template,
+      // set-user-name/storage-path, folder + URL setters) carry content/PII in
+      // their args. This rewrites the LOGGED string only; the spawned `args`
+      // below are untouched.
+      sendDebugLog(`$ stenoai ${sanitizeArgsForLog(args)}`);
     }
 
     const process = spawn(backendPath, args, {
@@ -1468,10 +1473,12 @@ function runPythonScript(script, args = [], silent = false, extraEnv = {}, logLa
       const output = data.toString();
       stdout += output;
       console.log('Python stdout:', output);
-      // Stream stdout to debug panel in real-time (unless silent)
+      // Stream stdout to debug panel in real-time (unless silent), but only the
+      // structural diagnostic markers — query answers and other content are
+      // dropped so they never reach the shareable buffer.
       if (!silent) {
         output.split('\n').forEach(line => {
-          if (line.trim()) sendDebugLog(line.trim());
+          forwardDiagnosticStdout(line, 'backend');
         });
       }
     });
@@ -1953,8 +1960,9 @@ ipcMain.handle('reprocess-meeting', async (event, summaryFile, regenerateTitle, 
             if (mainWindow && !mainWindow.isDestroyed()) {
               mainWindow.webContents.send('summary-complete', { success: false, sessionName, summaryFile });
             }
-          } else if (line.trim()) {
-            sendDebugLog(line.trim());
+          } else {
+            // Unclassified stdout: forward only diagnostic markers, drop content.
+            forwardDiagnosticStdout(line, 'reprocess');
           }
         }
       });
@@ -2051,12 +2059,13 @@ ipcMain.handle('generate-report-meeting', async (event, summaryFile, templateId)
         reject(new Error(`generate-report spawn error: ${err.message}`));
       });
 
+      // Buffer across chunk boundaries (matching reprocess/process-streaming),
+      // so a CHUNK:<base64 summary> line straddling two data events can't lose
+      // its prefix and fall into the diagnostic fallback below.
+      const stdoutReader = makeLineReader();
       proc.stdout.on('data', (data) => {
         watchdog.reset();
-        const text = data.toString();
-        // CRLF-tolerant: Windows stdout is \r\n; exact-match lines (STREAM_COMPLETE)
-        // would otherwise carry a trailing \r and never match.
-        text.split(/\r?\n/).forEach(line => {
+        for (const line of stdoutReader.feed(data)) {
           if (line.startsWith('CHUNK:')) {
             try {
               const encoded = line.slice(6);
@@ -2086,10 +2095,11 @@ ipcMain.handle('generate-report-meeting', async (event, summaryFile, templateId)
             }
           } else if (line.startsWith('SAVED:')) {
             sendDebugLog(`Report saved: ${line.slice(6).trim()}`);
-          } else if (line.trim()) {
-            sendDebugLog(line.trim());
+          } else {
+            // Unclassified stdout: forward only diagnostic markers, drop content.
+            forwardDiagnosticStdout(line, 'generate-report');
           }
-        });
+        }
       });
 
       proc.stderr.on('data', (data) => {
@@ -2220,7 +2230,7 @@ ipcMain.handle('regen-meeting-title', async (event, summaryFile, sessionName) =>
 
 ipcMain.handle('query-transcript', async (event, summaryFile, question) => {
   try {
-    sendDebugLog(`🤖 Querying transcript: ${question.substring(0, 50)}...`);
+    sendDebugLog(`🤖 Querying transcript (${String(question || '').length} chars)`);
 
     // Run the query command — getAiEnv supplies the right env for whichever
     // provider is active (cloud key for cloud, adapter url+token for org).
@@ -2285,7 +2295,7 @@ ipcMain.on('query-cancel', (_event, queryId) => {
 
 ipcMain.on('query-transcript-stream', (event, queryId, summaryFile, question) => {
   console.log(`[QUERY] IPC received: question="${question.substring(0, 50)}" file="${summaryFile}"`);
-  sendDebugLog(`🤖 Streaming query: ${question.substring(0, 50)}...`);
+  sendDebugLog(`🤖 Streaming query (${String(question || '').length} chars)`);
   const env = { ...process.env, ...getAiEnv() };
 
   let proc;
@@ -2379,7 +2389,7 @@ ipcMain.on('query-transcript-stream', (event, queryId, summaryFile, question) =>
 // context window (smaller for local/remote), so a local model answers over
 // fewer recent notes instead of overflowing. No retrieval (RAG) yet.
 ipcMain.on('chat-global-stream', (event, queryId, question, folderId) => {
-  sendDebugLog(`💬 Global chat query: ${String(question || '').slice(0, 80)}... (folder: ${folderId || 'all'})`);
+  sendDebugLog(`💬 Global chat query (${String(question || '').length} chars, folder: ${folderId || 'all'})`);
   const env = { ...process.env, ...getAiEnv() };
 
   const args = ['chat-global-streaming', '-q', question];
@@ -3519,8 +3529,11 @@ async function processNextInQueue() {
               lastHeartbeatLogAt = now;
               sendDebugLog(line.trim());
             }
-          } else if (line.trim()) {
-            sendDebugLog(line.trim());
+          } else {
+            // Unclassified stdout: forward only diagnostic markers (e.g.
+            // STREAM_ERROR:), drop content. HEARTBEAT is handled above with its
+            // own 30s throttle, so it never double-logs here.
+            forwardDiagnosticStdout(line, 'process-streaming');
           }
         }
       });
@@ -3767,7 +3780,7 @@ ipcMain.handle('start-recording-ui', async (_, sessionName) => {
     // process-system-audio-recording IPC. The legacy Python `record`
     // subprocess — signal-controlled and thus unworkable on Windows — is
     // retired, so there is no longer a mic-XOR-system fork here.
-    sendDebugLog(`Starting renderer-driven recording: ${actualSessionName}`);
+    sendDebugLog(`Starting renderer-driven recording (name ${String(actualSessionName || '').length} chars)`);
     currentRecordingSessionName = actualSessionName;
     startRecordingRuntimeState();
     // Flip the active flag immediately so the queue handler reports
@@ -4258,7 +4271,7 @@ async function handleMicEvent(line) {
   sendDebugLog(`[auto-detect] meeting detected: ${appName} (${evt.app_id || 'no-bundle-id'})`);
   const calEvent = await getCalendarEventForNow();
   if (calEvent) {
-    sendDebugLog(`[auto-detect] matched calendar event: ${calEvent.title}`);
+    sendDebugLog(`[auto-detect] matched a calendar event`);
   }
   showMeetingDetectedNotification(appName, evt, calEvent);
 }
@@ -4336,7 +4349,7 @@ function requestAutoRecord(appName, originatingEvt, calEvent) {
   // app-detection string (e.g. "an app — 2026-06-01 17:00") to the user
   // whenever title regeneration produced nothing.
   const sessionName = calEvent?.title || 'Note';
-  sendDebugLog(`[auto-detect] user requested record: ${sessionName}`);
+  sendDebugLog(`[auto-detect] user requested record (calendar-titled: ${calEvent?.title ? 'yes' : 'no'})`);
 
   // Track the originating app so we can pair its mic-stop with this recording
   // and offer a "Summarise" prompt when the meeting ends.
@@ -4463,6 +4476,17 @@ function logPipelineStdoutLine(line, source) {
   ) {
     processingLog.logLine(source, l);
   }
+}
+
+// Forward a backend stdout line to the shareable debug buffer ONLY if it is a
+// structural diagnostic marker (see isDiagnosticStdoutLine). Content — query
+// answers, summary CHUNK:/TITLE:, settings-command JSON replies — is dropped so
+// it never enters the buffer. This is the sendDebugLog counterpart to the
+// on-disk logPipelineStdoutLine allowlist above; `source` is accepted for
+// call-site symmetry with that function (heartbeat throttling stays at the
+// per-handler call site, not here).
+function forwardDiagnosticStdout(line, source) { // eslint-disable-line no-unused-vars
+  if (isDiagnosticStdoutLine(line)) sendDebugLog(line.trim());
 }
 
 ipcMain.handle('setup-ollama-and-model', async () => {
@@ -8525,7 +8549,9 @@ function recordOrgBackupFailure(summaryFile, errorMessage) {
   // Best-effort diagnostic logging (never throws): the persistent processing
   // log on disk for support, plus the in-app debug panel.
   try {
-    const msg = `org backup failed for ${path.basename(summaryFile)}: ${errorMessage || 'unknown error'}`;
+    // Drop the meeting-title basename (content); keep the failure + the
+    // non-content error so both the on-disk log and the debug panel stay useful.
+    const msg = `org backup failed: ${errorMessage || 'unknown error'}`;
     processingLog.logLine('org-backup', msg);
     sendDebugLog(`[org-backup] ${msg}`);
   } catch (_) { /* logging is best-effort */ }

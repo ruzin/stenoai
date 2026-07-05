@@ -832,7 +832,9 @@ class WhisperTranscriber:
                     while run_end < len(segments) and segments[run_end].text.strip() == text:
                         run_end += 1
                     if run_end - i >= 5 and text:
-                        logger.warning("Dropped %d repeated whisper segments: %r", run_end - i, text[:60])
+                        # Log the count, not the text: dropped segments are
+                        # transcript content and must not reach the debug log.
+                        logger.warning("Dropped %d repeated whisper segments (%d chars each)", run_end - i, len(text))
                     else:
                         deduped.extend(segments[i:run_end])
                     i = run_end
