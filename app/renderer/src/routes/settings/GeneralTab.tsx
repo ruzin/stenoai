@@ -107,17 +107,41 @@ export function GeneralTab() {
   }, [oauth, google.status.data?.connected, outlook.status.data?.connected]);
 
   const startConnect = async (provider: 'google' | 'outlook') => {
+    // In-flight guard: drop rapid duplicate clicks before React has flushed
+    // isPending through, so a double-click can't fire two connect mutations
+    // (each starts its own loopback OAuth server in the main process).
+    if (google.connect.isPending || outlook.connect.isPending) return;
     setOauth({ provider, state: 'pending' });
     try {
       if (provider === 'google') await google.connect.mutateAsync();
       else await outlook.connect.mutateAsync();
     } catch (err) {
-      setOauth({
-        provider,
-        state: 'error',
-        message: err instanceof Error ? err.message : String(err),
-      });
+      const message = err instanceof Error ? err.message : String(err);
+      // A user-initiated Cancel rejects the connect mutation with "Cancelled"
+      // (see useGoogleCalendarAuth/useOutlookCalendarAuth) — not an error to
+      // surface back to the user.
+      if (message === 'Cancelled') return;
+      // Only surface the error if the dialog is STILL showing this same
+      // provider as pending. A stale/late rejection (e.g. from a provider the
+      // user cancelled and then switched away from) must not resurrect a
+      // dismissed dialog or clobber a different provider's newer attempt.
+      setOauth((current) =>
+        current?.provider === provider && current.state === 'pending'
+          ? { provider, state: 'error', message }
+          : current,
+      );
     }
+  };
+
+  const cancelConnect = () => {
+    // Abort the in-flight handshake so we don't leak a loopback OAuth server
+    // that could silently complete the connection (and save tokens) after the
+    // user has already backed out of the dialog.
+    if (oauth?.state === 'pending') {
+      if (oauth.provider === 'google') google.cancel.mutate();
+      else outlook.cancel.mutate();
+    }
+    setOauth(null);
   };
 
   return (
@@ -211,7 +235,7 @@ export function GeneralTab() {
 
       <OAuthPrompt
         state={oauth}
-        onClose={() => setOauth(null)}
+        onClose={cancelConnect}
         onRetry={() => oauth && void startConnect(oauth.provider)}
       />
 
