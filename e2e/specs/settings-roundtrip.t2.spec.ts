@@ -144,3 +144,50 @@ test('set-storage-path persists the path and provisions its data subdirs', async
   // Keystone: the real user-data dir is byte-for-byte untouched.
   expect(fileSig(realUserDataDir())).toBe(realDirBefore);
 });
+
+// Drives the REAL Advanced-tab "Reset" button through the rendered UI — not the
+// settings bridge — because the #304 bug lived purely in the button's onClick
+// (it passed the default *path* to setStoragePath, which the backend records as
+// a fresh custom override, so Reset hid itself without resetting anything). The
+// bridge itself was always correct, so a `setStoragePath('')` call can't catch
+// this regression; only a real click can.
+test('Advanced-tab Reset button clears the custom storage path (#304); real dir untouched', async ({
+  launchApp,
+  userDataDir,
+}) => {
+  const realDirBefore = fileSig(realUserDataDir());
+  const { page } = await launchApp();
+
+  // Setup (not under test): seed a custom path via the bridge so the Reset
+  // button is rendered (it only shows when custom_path differs from default).
+  const custom = path.join(userDataDir, 'custom-storage-reset');
+  const res = await page.evaluate(
+    (p) => (window as StenoWindow).stenoai.settings.setStoragePath(p),
+    custom,
+  );
+  expect(res.success).toBe(true);
+  await expect.poll(() => readUserConfig(userDataDir).storage_path).toBe(custom);
+
+  // Navigate the UI to Settings > Advanced (hash-router deep link — same pattern
+  // as org-lock-lifecycle.t2). A fresh mount refetches the storage path so the
+  // Reset button reflects the seeded custom value.
+  await page.evaluate(() => {
+    window.location.hash = '#/settings?tab=advanced';
+  });
+
+  const resetButton = page.getByRole('button', { name: /^reset$/i });
+  await expect(resetButton).toBeVisible();
+
+  // The click under test: fixed handler sends '' (reset), not the default path.
+  await resetButton.click();
+
+  // Backend truth: the custom override is cleared to the empty sentinel — NOT
+  // rewritten as the default path string (the exact shape of the #304 bug).
+  await expect.poll(() => readUserConfig(userDataDir).storage_path).toBe('');
+
+  // UI truth: with no custom override left, the Reset button hides itself.
+  await expect(resetButton).toBeHidden();
+
+  // Keystone: the real user-data dir is byte-for-byte untouched.
+  expect(fileSig(realUserDataDir())).toBe(realDirBefore);
+});
