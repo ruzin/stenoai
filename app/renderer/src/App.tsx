@@ -197,7 +197,11 @@ export function App() {
 
         {/* Generate-notes CTA — floats just above the chat bar for a
             transcript-only note (auto-summarise off). Self-hides when notes
-            exist or the transcript panel is open. */}
+            exist or the transcript panel is open. Shares the bottomOffset={72}
+            band with TranscriptBar above; the two stay non-overlapping because
+            they're mutually exclusive on `transcriptOpen` (TranscriptBar shows
+            only when open, this hides when open) — keep that invariant if either
+            gate changes. */}
         {showAskBar && (
           <BottomDockSlot bottomOffset={72}>
             <GenerateNotesBar />
