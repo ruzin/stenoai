@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { ipc } from '@/lib/ipc';
+import { appendDebugLog } from '@/lib/debugLogs';
 import { isMac } from '@/lib/utils';
 import { useRecording } from './useRecording';
 import { useTranscriptionEngine } from './useModels';
@@ -448,6 +449,37 @@ export function useSystemAudioCapture() {
         // flight, and clears on failure so a subsequent sustained silent
         // stretch can retry.
         let stopAttemptInFlight = false;
+        // Observation-only state for the [auto-stop] debug logs below. These
+        // do NOT affect the stop decision - they only track transitions so we
+        // log state changes (not every 1 Hz tick, which would flood the
+        // 1000-line buffer). `idleReason` is the last guard reason we logged,
+        // `wasSilent` the last silence/activity verdict, `lastHeartbeatAtMs`
+        // paces the "still silent" heartbeat.
+        let idleReason = '';
+        let wasSilent = false;
+        let lastHeartbeatAtMs = Date.now();
+
+        // The `[auto-stop]` lines below feed the Settings > Developer debug
+        // console (the renderer ring buffer in @/lib/debugLogs) so #271-class
+        // "silence auto-stop never fired" reports are remotely diagnosable:
+        // the user copies the Developer log and it shows the detector's
+        // decisions, which are otherwise invisible (DevTools-only console).
+        const logAutoStop = (msg: string) => {
+          // Observation-only: logging must never throw into the detector tick,
+          // so a misbehaving debug-log subscriber can't abort the stop
+          // decision. The empty catch is intentional.
+          try {
+            appendDebugLog(`[auto-stop] ${msg}`);
+          } catch {
+            /* logging must not affect the detector */
+          }
+        };
+        {
+          const armedCfg = silenceConfigRef.current;
+          logAutoStop(
+            `armed: enabled=${armedCfg.enabled} minutes=${armedCfg.minutes} systemAudio=${sysAnalyser !== null}`,
+          );
+        }
 
         silenceIntervalRef.current = setInterval(() => {
           const cfg = silenceConfigRef.current;
@@ -457,19 +489,63 @@ export function useSystemAudioCapture() {
           // long pause has to re-accumulate from scratch.
           if (!cfg.enabled || isPausedRef.current || !activeRef.current) {
             lastActiveAtMs = Date.now();
+            // Log the idle transition once (not every tick) so the Developer
+            // log shows WHY the timer keeps resetting.
+            const reason = !cfg.enabled
+              ? 'disabled'
+              : isPausedRef.current
+                ? 'paused'
+                : 'inactive';
+            if (reason !== idleReason) {
+              idleReason = reason;
+              logAutoStop(`idle (${reason}) - timer reset`);
+            }
+            // Reset silence-tracking so a resume re-accumulates from scratch
+            // (mirrors the lastActiveAtMs reset above).
+            wasSilent = false;
             return;
+          }
+          if (idleReason) {
+            logAutoStop('re-armed');
+            idleReason = '';
           }
           if (stopAttemptInFlight) return;
           const micRms = computeRms(micAnalyser, micBuf);
           const sysRms = sysAnalyser && sysBuf ? computeRms(sysAnalyser, sysBuf) : 0;
-          if (micRms > SILENCE_RMS_THRESHOLD || sysRms > SILENCE_RMS_THRESHOLD) {
+          const silent = !(micRms > SILENCE_RMS_THRESHOLD || sysRms > SILENCE_RMS_THRESHOLD);
+          if (!silent) {
+            if (wasSilent) {
+              wasSilent = false;
+              logAutoStop(
+                `activity (mic=${micRms.toFixed(4)} sys=${sysRms.toFixed(4)}) - timer reset`,
+              );
+            }
             lastActiveAtMs = Date.now();
             return;
           }
+          if (!wasSilent) {
+            wasSilent = true;
+            lastHeartbeatAtMs = Date.now();
+            logAutoStop(
+              `silence started (mic=${micRms.toFixed(4)} sys=${sysRms.toFixed(4)})`,
+            );
+          }
           const silenceMs = Date.now() - lastActiveAtMs;
           const limitMs = cfg.minutes * 60 * 1000;
+          // Heartbeat while silence accumulates toward the limit - shows the
+          // detector is running and the window is growing (the missing signal
+          // in #271, where silence never seemed to add up).
+          if (Date.now() - lastHeartbeatAtMs >= 30_000) {
+            lastHeartbeatAtMs = Date.now();
+            const elapsedSec = Math.round((Date.now() - lastActiveAtMs) / 1000);
+            const limitSec = Math.round(limitMs / 1000);
+            logAutoStop(
+              `still silent ${elapsedSec}s / ${limitSec}s (mic=${micRms.toFixed(4)} sys=${sysRms.toFixed(4)})`,
+            );
+          }
           if (silenceMs < limitMs) return;
 
+          logAutoStop(`threshold reached (${Math.round(silenceMs / 1000)}s silent) - stopping`);
           stopAttemptInFlight = true;
           const minutes = cfg.minutes;
           void (async () => {
@@ -483,10 +559,16 @@ export function useSystemAudioCapture() {
               if (!stopResult.success) {
                 // eslint-disable-next-line no-console
                 console.error('[silenceAutoStop] stop failed:', stopResult.error);
+                logAutoStop('stop failed: ' + stopResult.error);
                 // Reset the silence window so the user gets a fresh
                 // duration of silence before we retry the stop — avoids
                 // hammering a failing IPC every second.
                 lastActiveAtMs = Date.now();
+                // Keep the logging-transition state in sync with the reset
+                // window so the next silent stretch logs a clean "silence
+                // started" + fresh heartbeat rather than a stale one.
+                wasSilent = false;
+                lastHeartbeatAtMs = Date.now();
                 stopAttemptInFlight = false;
                 return;
               }
@@ -495,6 +577,7 @@ export function useSystemAudioCapture() {
               // of pre-emptively before the stop call) so a failed stop
               // doesn't permanently disarm auto-stop for the session.
               teardownSilenceDetector();
+              logAutoStop('recording stopped after ' + minutes + 'min of silence');
               const notifResult = await bridge.settings.showSilenceAutoStopNotification({
                 minutes,
                 // Pre-processing name — calendar event title for
@@ -512,7 +595,12 @@ export function useSystemAudioCapture() {
             } catch (e) {
               // eslint-disable-next-line no-console
               console.error('[silenceAutoStop] failed to stop:', e);
+              logAutoStop('stop error: ' + String(e));
               lastActiveAtMs = Date.now();
+              // Keep the logging-transition state in sync with the reset
+              // window (see the !success branch above).
+              wasSilent = false;
+              lastHeartbeatAtMs = Date.now();
               stopAttemptInFlight = false;
             }
           })();
