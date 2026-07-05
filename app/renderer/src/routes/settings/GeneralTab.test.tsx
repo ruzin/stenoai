@@ -174,9 +174,8 @@ describe('GeneralTab OAuth connect/cancel race (#306)', () => {
     await act(async () => {
       clickCancel();
     });
-    // Simulate react-query settling Google's pending flag after the cancel so
-    // the in-flight guard lets Outlook start (same window Home.tsx accepts).
-    h.google.connect.isPending = false;
+    // Cancel released the in-flight lock, so a fresh provider can start even
+    // while Google's abandoned mutation is still unsettled.
 
     await act(async () => {
       clickConnect('Outlook');
@@ -193,19 +192,20 @@ describe('GeneralTab OAuth connect/cancel race (#306)', () => {
     expect(screen.queryByText("Couldn't connect to Google")).toBeNull();
   });
 
-  test('double-clicking Connect while pending does not fire a second mutation', async () => {
+  test('two synchronous Connect clicks fire only one connect mutation', async () => {
     render(<GeneralTab />);
-    await act(async () => {
-      clickConnect('Google');
-    });
-    expect(h.google.connect.mutateAsync).toHaveBeenCalledTimes(1);
+    const btn = screen.getByRole('button', { name: 'Google' });
 
-    // react-query flips the connect mutation to pending; a second click within
-    // that window must be dropped by the in-flight guard.
-    h.google.connect.isPending = true;
+    // Fire both clicks inside a SINGLE act with no await/flush between them, so
+    // React has not re-rendered with the mutation's pending=true state yet.
+    // A guard that reads react-query's isPending would see the stale false
+    // snapshot on both and let two mutate()s through; a synchronous ref lock
+    // (set before the first mutate) must drop the second.
     await act(async () => {
-      clickConnect('Google');
+      btn.click();
+      btn.click();
     });
+
     expect(h.google.connect.mutateAsync).toHaveBeenCalledTimes(1);
   });
 });

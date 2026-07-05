@@ -112,11 +112,19 @@ export function GeneralTab() {
     }
   }, [oauth, google.status.data?.connected, outlook.status.data?.connected]);
 
+  // Synchronous in-flight lock. react-query's isPending only flips true on the
+  // NEXT render, so two clicks handled in the same tick both read a stale
+  // false and slip past an isPending-based guard; a ref set before the first
+  // mutate closes that exact window. The token distinguishes attempts so a
+  // superseded attempt's settle (a cancel or a newer startConnect took over)
+  // can't release a still-active attempt's lock.
+  const connectingRef = React.useRef(false);
+  const connectTokenRef = React.useRef(0);
+
   const startConnect = async (provider: 'google' | 'outlook') => {
-    // In-flight guard: drop rapid duplicate clicks before React has flushed
-    // isPending through, so a double-click can't fire two connect mutations
-    // (each starts its own loopback OAuth server in the main process).
-    if (google.connect.isPending || outlook.connect.isPending) return;
+    if (connectingRef.current) return;
+    connectingRef.current = true;
+    const token = ++connectTokenRef.current;
     setOauth({ provider, state: 'pending' });
     try {
       if (provider === 'google') await google.connect.mutateAsync();
@@ -136,6 +144,10 @@ export function GeneralTab() {
           ? { provider, state: 'error', message }
           : current,
       );
+    } finally {
+      // Release only if this is still the active attempt — a cancel or a newer
+      // startConnect may have superseded it and now owns the lock.
+      if (connectTokenRef.current === token) connectingRef.current = false;
     }
   };
 
@@ -147,6 +159,9 @@ export function GeneralTab() {
       if (oauth.provider === 'google') google.cancel.mutate();
       else outlook.cancel.mutate();
     }
+    // Release the lock immediately so the user can retry or switch providers
+    // without waiting for the abandoned mutation to reject.
+    connectingRef.current = false;
     setOauth(null);
   };
 
