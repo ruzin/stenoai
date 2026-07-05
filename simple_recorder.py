@@ -2202,7 +2202,15 @@ def reprocess(summary_file, regenerate_title):
                 'duration_seconds': existing_data.get('session_info', {}).get('duration_seconds'),
                 'language': output_language,
                 'is_diarised': existing_data.get('is_diarised', False),
+                # Carry forward folder membership so a regenerate never silently
+                # removes the meeting from its folders (matches _parse_meeting_markdown's
+                # default-to-[] shape; patched surgically by src/folders.py).
+                'folders': existing_data.get('folders', []),
             }
+            # Preserve the live-transcript flag (#207) only when true, matching the
+            # "only set when true, never explicit false" pattern used elsewhere.
+            if existing_data.get('session_info', {}).get('is_live_transcript'):
+                md_meta['is_live_transcript'] = True
             for k, v in md_meta.items():
                 if v is None:
                     md_lines.append(f'{k}: null')
@@ -2210,6 +2218,8 @@ def reprocess(summary_file, regenerate_title):
                     md_lines.append(f'{k}: {"true" if v else "false"}')
                 elif isinstance(v, int):
                     md_lines.append(f'{k}: {v}')
+                elif isinstance(v, list):
+                    md_lines.append(f'{k}: {json.dumps(v)}')
                 else:
                     escaped = str(v).replace('\\', '\\\\').replace('"', '\\"')
                     md_lines.append(f'{k}: "{escaped}"')
