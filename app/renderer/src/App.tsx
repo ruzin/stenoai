@@ -13,6 +13,7 @@ import { useOrgSession, useSharedNotesGate } from '@/hooks/useOrg';
 import { Recording } from '@/routes/Recording';
 import { Processing, ProcessingDock } from '@/routes/Processing';
 import { AskBar, TranscriptBar } from '@/components/AskBar';
+import { GenerateNotesBar } from '@/components/GenerateNotesBar';
 import { BottomDockSlot } from '@/components/BottomDockSlot';
 import { LiveDock } from '@/components/LiveDock';
 import { LiveTranscriptBar } from '@/components/LiveTranscriptBar';
@@ -191,6 +192,15 @@ export function App() {
         {showAskBar && (
           <BottomDockSlot bottomOffset={72}>
             <TranscriptBar />
+          </BottomDockSlot>
+        )}
+
+        {/* Generate-notes CTA — floats just above the chat bar for a
+            transcript-only note (auto-summarise off). Self-hides when notes
+            exist or the transcript panel is open. */}
+        {showAskBar && (
+          <BottomDockSlot bottomOffset={72}>
+            <GenerateNotesBar />
           </BottomDockSlot>
         )}
       </AskBarProvider>

@@ -49,6 +49,27 @@ const SEED_MEETING = {
   discussion_areas: [],
 };
 
+// A transcript-only note (auto-summarise off, #276 → notes_generated:false):
+// has a transcript, no summary. Drives the GenerateNotesBar T1 (the floating
+// "Generate notes" CTA above the Ask bar). Seeded only when
+// STENOAI_E2E_SEED_PENDING_NOTE=1.
+const PENDING_MEETING = {
+  session_info: {
+    name: 'New note',
+    summary_file: 'pending_summary.md',
+    processed_at: '2026-07-05T10:00:00Z',
+    duration_seconds: 60,
+    notes_generated: false,
+  },
+  transcript: '[00:03] [You] we ship Friday.\n[00:06] [Others] I will prep the release notes.',
+  is_diarised: true,
+  summary: '',
+  key_points: [],
+  action_items: [],
+  discussion_areas: [],
+  participants: [],
+};
+
 function install({ ipcMain }) {
   // In-memory stand-in for the org session + provider config that the real
   // handlers persist to disk. Mutated by the org-login / org-logout / set-ai
@@ -94,6 +115,9 @@ function install({ ipcMain }) {
     // lives in MOCKS, which shadows DEFAULTS, so it is the single source for the
     // channel.
     'list-meetings': async () => {
+      if (process.env.STENOAI_E2E_SEED_PENDING_NOTE === '1') {
+        return { success: true, meetings: [PENDING_MEETING] };
+      }
       if (process.env.STENOAI_E2E_SEED_MEETING === '1') {
         return { success: true, meetings: [SEED_MEETING] };
       }
@@ -104,6 +128,9 @@ function install({ ipcMain }) {
     // by filtering list-meetings — answer it with the same seeded meeting so the
     // transcript-export detail route resolves and renders the transcript actions.
     'get-meeting': async (_event, summaryFile) => {
+      if (process.env.STENOAI_E2E_SEED_PENDING_NOTE === '1') {
+        return { success: true, meeting: PENDING_MEETING };
+      }
       if (process.env.STENOAI_E2E_SEED_MEETING === '1') {
         return { success: true, meeting: SEED_MEETING };
       }
