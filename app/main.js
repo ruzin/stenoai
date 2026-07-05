@@ -38,6 +38,15 @@ const { spawn: _spawnRaw } = require('child_process');
 const processingLog = require('./processing-log');
 const { isMeetingApp, allowsDeviceLevelFallback } = require('./meeting-detect');
 const { makeLineReader } = require('./backend-stream');
+// Pure deep-link (stenoai://) parsing/sanitizing lives in ./shortcut-url
+// (unit-tested). The stateful side — window creation, IPC dispatch,
+// notifications — stays here and calls parseShortcutUrl().
+const {
+  SHORTCUT_PROTOCOL,
+  extractShortcutUrlFromArgv,
+  sanitizeShortcutUrlForLogs,
+  parseShortcutUrl,
+} = require('./shortcut-url');
 
 // Wrap spawn so every backend / ollama launch defaults to windowsHide:true.
 // The PyInstaller backend (stenoai.exe) and bundled ollama.exe are console
@@ -191,39 +200,11 @@ let pendingShortcutUrls = [];
 let rendererShortcutReady = false;
 let launchedByShortcut = false;
 
-const SHORTCUT_PROTOCOL = 'stenoai';
-const SHORTCUT_HOST = 'record';
-const SHORTCUT_SESSION_NAME_MAX_LENGTH = 120;
+// SHORTCUT_PROTOCOL and the pure deep-link parsing/sanitizing helpers
+// (extractShortcutUrlFromArgv, sanitizeShortcutUrlForLogs, parseShortcutUrl,
+// and the parse-internal sanitizeShortcutSessionName) live in ./shortcut-url,
+// imported at the top of this file.
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
-
-function extractShortcutUrlFromArgv(argv = []) {
-  return argv.find(arg => typeof arg === 'string' && arg.startsWith(`${SHORTCUT_PROTOCOL}://`));
-}
-
-function sanitizeShortcutUrlForLogs(incomingUrl) {
-  try {
-    const parsed = new URL(incomingUrl);
-    return `${parsed.protocol}//${parsed.hostname}${parsed.pathname}`;
-  } catch (error) {
-    return '[invalid-shortcut-url]';
-  }
-}
-
-function sanitizeShortcutSessionName(rawValue) {
-  if (typeof rawValue !== 'string') {
-    return null;
-  }
-
-  // Keep user-visible names readable while stripping unsupported characters.
-  // Preserve Unicode letters (including diacritics) and common punctuation.
-  const sanitized = rawValue
-    .replace(/[^\p{L}\p{M}\p{N}_\s.,()@&'!+#-]/gu, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, SHORTCUT_SESSION_NAME_MAX_LENGTH);
-
-  return sanitized || null;
-}
 
 function registerShortcutProtocolClient() {
   if (process.platform !== 'darwin') {
@@ -271,36 +252,6 @@ function getMicMonitorPath() {
     return path.join(process.resourcesPath, binName);
   } else {
     return path.join(__dirname, '..', 'bin', binName);
-  }
-}
-
-function parseShortcutUrl(incomingUrl) {
-  try {
-    const parsed = new URL(incomingUrl);
-    if (parsed.protocol !== `${SHORTCUT_PROTOCOL}:`) {
-      return { type: 'invalid', reason: 'invalid-protocol' };
-    }
-
-    if (parsed.hostname !== SHORTCUT_HOST) {
-      return { type: 'invalid', reason: 'invalid-host' };
-    }
-
-    const cleanPath = (parsed.pathname || '').replace(/\/+$/, '');
-    if (cleanPath === '/start') {
-      const sessionName = sanitizeShortcutSessionName(parsed.searchParams.get('name') || '');
-      return {
-        type: 'start',
-        sessionName
-      };
-    }
-
-    if (cleanPath === '/stop') {
-      return { type: 'stop' };
-    }
-
-    return { type: 'invalid', reason: 'invalid-path' };
-  } catch (error) {
-    return { type: 'invalid', reason: 'parse-error' };
   }
 }
 

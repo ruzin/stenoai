@@ -3,8 +3,9 @@
  * `app/preload.js`. All hooks/components talk to this module; no direct
  * `ipcRenderer` usage in renderer code.
  *
- * The source of truth for the shape is `app/docs/ipc-contract.md` + the
- * preload itself. When you change one, change the other in the same commit.
+ * The source of truth for the shape is `app/preload.js`; keep this typed
+ * mirror in sync with it. The channel contract across preload, main.js, this
+ * file and the e2e mock is enforced by `app/ipc-contract.test.js`.
  */
 
 // ---------- shared result envelope ----------

@@ -83,10 +83,10 @@ def _normalize_markdown_for_parsing(md_text: str) -> str:
     return _REASONING_TAG_HEADER_PATTERN.sub(r'\1\n\2', md_text)
 
 # Shared atomic JSON writer (tempfile + os.replace + Windows PermissionError
-# retry). One implementation for recorder_state.json, the summary JSON, and
-# config.json — re-exported here so existing imports keep working. The
-# canonical copy lives in src.config because this module already imports
-# from src (the reverse import would be circular).
+# retry). One implementation for the summary JSON and config.json (recorder_state.json
+# is no longer written — see MeetingPipeline.state_file) — re-exported here so
+# existing imports keep working. The canonical copy lives in src.config because
+# this module already imports from src (the reverse import would be circular).
 from src.config import _atomic_write_json  # noqa: E402
 
 
@@ -169,7 +169,21 @@ class MeetingPipeline:
         self.transcripts_dir = dirs["transcripts"]
         self.output_dir = dirs["output"]
         
-        # State file
+        # Legacy state file. Recording state now lives in the Electron main
+        # process (capture is renderer-driven) -- see the status() docstring --
+        # so nothing writes recorder_state.json anymore; the old
+        # save_state()/load_state() pair was removed. The only remaining uses
+        # are the defensive .unlink() cleanups (here via clear_state, plus the
+        # transcription-failure paths) that remove a stale file left by a
+        # pre-migration build. Kept CWD-relative on purpose: a legacy build
+        # wrote it CWD-relative to the backend's working dir, which
+        # getBackendCwd() (app/main.js) resolves to a single, deterministic
+        # location, so the cleanup reliably finds and removes that same file.
+        # Routing this through get_user_data_dir() would point cleanup at the
+        # wrong directory. Because nothing writes it, the CWD-relative path
+        # never touches the read-only packaged bundle and cannot leak across
+        # the STENOAI_USER_DATA_DIR isolation boundary (real user data goes
+        # through get_data_dirs(), which honors that env var).
         self.state_file = Path("recorder_state.json")
 
     def _resolve_output_language(self, configured_language: str, detected_language: Optional[str] = None) -> str:
