@@ -6882,6 +6882,49 @@ ipcMain.handle('process-system-audio-recording', async (event, audioFilePath, se
   }
 });
 
+// Persist a transcript-only note (decoupled transcribe/summarise, Parakeet).
+// The renderer owns the labelled ([You]/[Others] + [MM:SS]) transcript, so it
+// formats the text and hands it here on Stop. We DO NOT enqueue — no batch
+// transcription, no auto-summary. A later "Generate notes" runs `reprocess`
+// on the returned file. The transcript goes via a temp file (not an argv arg)
+// so a long meeting can't hit ARG_MAX.
+ipcMain.handle('save-transcript-note', async (event, payload) => {
+  const { name, transcript, durationSeconds, language, isDiarised } = payload || {};
+  if (!transcript || !transcript.trim()) {
+    return { success: false, error: 'Empty transcript' };
+  }
+  let tmpFile = null;
+  try {
+    const os = require('os');
+    tmpFile = path.join(os.tmpdir(), `steno-transcript-${Date.now()}.txt`);
+    fs.writeFileSync(tmpFile, transcript, 'utf-8');
+
+    const args = [
+      'save-transcript-note',
+      '--name', name || 'New note',
+      '--transcript-file', tmpFile,
+      '--duration-seconds', String(Math.max(0, Math.floor(durationSeconds || 0))),
+      isDiarised === false ? '--no-diarised' : '--is-diarised',
+    ];
+    if (language) args.push('--language', language);
+
+    const out = await runPythonScript('simple_recorder.py', args);
+    const savedLine = out.split(/\r?\n/).find((l) => l.startsWith('SAVED:'));
+    if (!savedLine) {
+      return { success: false, error: 'Backend did not report a saved note' };
+    }
+    const summaryFile = savedLine.slice('SAVED:'.length).trim();
+    trackEvent('recording_stopped', { recording_mode: 'transcript_only' });
+    return { success: true, summaryFile };
+  } catch (error) {
+    sendDebugLog(`Error saving transcript note: ${error.message}`);
+    trackEvent('error_occurred', { error_type: 'save_transcript_note' });
+    return { success: false, error: error.message };
+  } finally {
+    if (tmpFile) { try { fs.unlinkSync(tmpFile); } catch { /* best-effort */ } }
+  }
+});
+
 // Track system audio recording state for tray icon. Also resets the elapsed
 // counter when the renderer reports inactive without a Python process —
 // covers the case where startCapture failed (permission denied) and we'd

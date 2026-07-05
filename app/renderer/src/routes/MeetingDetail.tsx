@@ -14,6 +14,7 @@ import {
   Globe,
   MoreHorizontal,
   RefreshCw,
+  Sparkles,
   Trash2,
   Users,
 } from 'lucide-react';
@@ -490,6 +491,18 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
   const discussionAreas = asDiscussionAreas(meeting.discussion_areas);
   const transcriptionFailed = Boolean(meeting.session_info.transcription_failed);
   const transcriptionError = meeting.session_info.error?.trim();
+  // A transcript-only note (decoupled transcribe/summarise): has a transcript
+  // but no AI summary yet. Show a "Generate notes" CTA instead of a blank body;
+  // it reuses the reprocess stream and regenerates the placeholder title.
+  const summaryPending = meeting.session_info.summary_status === 'pending' && !summary;
+  const generateNotes = () => {
+    setStreamText('');
+    setStreamPhase('analyzing');
+    setChunkProgress(null);
+    setReprocessFailed(false);
+    streamCache.set(summaryFile, { text: '', phase: 'analyzing' });
+    reprocess.mutate({ summaryFile, regenTitle: true, name: info.name });
+  };
 
   return (
     <article data-testid="meeting-detail" className="space-y-9">
@@ -864,6 +877,35 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
                   </p>
                 ))}
               </div>
+            </section>
+          ) : summaryPending ? (
+            <section
+              className="flex flex-col items-start gap-3 rounded-lg p-4"
+              style={{
+                background: 'var(--surface-raised)',
+                border: '1px solid var(--border-subtle, var(--surface-raised))',
+              }}
+              data-testid="summary-pending-notice"
+            >
+              <div className="text-[15px] font-medium" style={{ color: 'var(--fg-1)' }}>
+                No notes yet
+              </div>
+              <p
+                className="text-[14px] leading-[1.6]"
+                style={{ color: 'var(--fg-2)', maxWidth: '64ch' }}
+              >
+                This recording has been transcribed. Generate notes to summarise the
+                transcript into a meeting note.
+              </p>
+              <Button
+                type="button"
+                onClick={generateNotes}
+                disabled={reprocess.isPending || streamPhase !== 'idle'}
+                data-testid="generate-notes-button"
+              >
+                <Sparkles />
+                Generate notes
+              </Button>
             </section>
           ) : (
             <p className="py-2 text-sm" style={{ color: 'var(--fg-2)' }}>

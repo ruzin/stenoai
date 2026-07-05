@@ -22,6 +22,7 @@ import json
 import re
 import sys
 import time
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -1836,6 +1837,12 @@ def _parse_meeting_markdown(md_path):
     # tell the user no batch transcript exists.
     if meta.get('is_live_transcript'):
         session_info['is_live_transcript'] = True
+    # A transcript-only note (decoupled transcribe/summarise): has a transcript
+    # but no AI summary yet. The UI shows a "Generate notes" CTA; reprocess drops
+    # this marker when it writes the summary. Only threaded when present so
+    # normal meetings' session_info shape is unchanged.
+    if meta.get('summary_status'):
+        session_info['summary_status'] = meta.get('summary_status')
 
     return {
         'session_info': session_info,
@@ -2134,6 +2141,85 @@ def reprocess(summary_file, regenerate_title):
     except Exception as e:
         print(f"ERROR: Failed to reprocess summary: {e}")
         sys.exit(1)
+
+
+@cli.command(name='save-transcript-note')
+@click.option('--name', required=True, help='Placeholder note title (e.g. "New note" or the date).')
+@click.option('--transcript', default=None, help='Pre-formatted transcript text ("[MM:SS] [You]/[Others] …" lines).')
+@click.option('--transcript-file', default=None, help='Path to a file holding the transcript (preferred for long meetings; wins over --transcript).')
+@click.option('--duration-seconds', type=int, default=0, help='Total captured seconds across all recording legs.')
+@click.option('--language', default=None, help='Output language of the transcript.')
+@click.option('--is-diarised/--no-diarised', default=True, help='Whether the transcript carries [You]/[Others] speaker labels.')
+@click.option('--audio-file', default=None, help='Optional source audio path (kept for a future re-transcribe).')
+@click.option('--notes-file', default=None, help='Optional path to user notes to embed under ## User Notes.')
+def save_transcript_note(name, transcript, transcript_file, duration_seconds, language,
+                         is_diarised, audio_file, notes_file):
+    """Persist a transcript-only meeting note (no AI summary) for later summarisation.
+
+    Decouples transcription from summarisation (Parakeet live-transcript path):
+    stopping a recording writes a marked ``<stem>_summary.md`` carrying the
+    transcript under ``## Transcript`` and ``summary_status: pending`` frontmatter,
+    with NO summary section. ``reprocess`` later fills the summary in place and
+    drops the marker. The transcript is passed pre-formatted by the renderer
+    (which owns the [You]/[Others] speaker attribution); this command never
+    transcribes.
+    """
+    from src.config import get_data_dirs
+
+    # Resolve the transcript body (file wins — avoids an ARG_MAX limit on long
+    # meetings passed inline).
+    text = None
+    if transcript_file:
+        try:
+            text = Path(transcript_file).read_text(encoding='utf-8')
+        except Exception as e:
+            print(f"ERROR: Failed to read transcript file: {e}")
+            sys.exit(1)
+    elif transcript is not None:
+        text = transcript
+    if not text or not text.strip():
+        print("ERROR: No transcript provided")
+        sys.exit(1)
+
+    notes_text = None
+    if notes_file:
+        try:
+            notes_text = Path(notes_file).read_text(encoding='utf-8').strip() or None
+        except Exception:
+            notes_text = None
+
+    # Mint a unique, audio-less stem the *_summary.md glob and org sidecar keying
+    # tolerate (there is no source-audio stem on the decoupled path).
+    stem = f"note-{datetime.now().strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:6]}"
+    output_dir = get_data_dirs()["output"]
+    output_dir.mkdir(parents=True, exist_ok=True)
+    summary_path = output_dir / f"{stem}_summary.md"
+
+    md_meta = {
+        'title': name,
+        'date': datetime.now().isoformat(),
+        'duration_seconds': int(duration_seconds) if duration_seconds else None,
+        'language': language,
+        'is_diarised': bool(is_diarised),
+        'summary_status': 'pending',
+    }
+    if audio_file:
+        md_meta['audio_file'] = str(audio_file)
+    md_lines = _render_frontmatter(md_meta)
+    # No summary section: _parse_meeting_markdown keys the pending state on an
+    # absent ## Summary, so writing one here would render as a real summary.
+    md_lines.append('')
+    md_lines.append('## Transcript')
+    md_lines.append('')
+    md_lines.append(text.strip())
+    if notes_text:
+        md_lines.append('')
+        md_lines.append('## User Notes')
+        md_lines.append('')
+        md_lines.append(notes_text)
+    summary_path.write_text('\n'.join(md_lines), encoding='utf-8')
+
+    print(f"SAVED:{summary_path}", flush=True)
 
 
 @cli.command(name='set-active-report')

@@ -106,6 +106,9 @@ const stenoai = {
     closeSystemAudioFile: () => invoke('close-system-audio-file'),
     reportCaptureError: (message) => send('recording-capture-error', message),
     processSystemAudio: (filePath, name) => invoke('process-system-audio-recording', filePath, name),
+    // Persist a transcript-only note (decoupled transcribe/summarise). No enqueue,
+    // no auto-summary; "Generate notes" later runs reprocess on the returned file.
+    saveTranscriptNote: (payload) => invoke('save-transcript-note', payload),
     processFile: (filePath, name) => invoke('process-recording', filePath, name),
     pickAudioFile: () => invoke('select-audio-file'),
     // Electron 32+ removed File.path; webUtils.getPathForFile resolves the

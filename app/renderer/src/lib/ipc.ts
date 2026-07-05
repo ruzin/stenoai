@@ -26,6 +26,11 @@ export interface SessionInfo {
   transcription_failed?: boolean;
   reprocessable?: boolean;
   error?: string;
+  /** `'pending'` on a transcript-only note (decoupled transcribe/summarise):
+   *  a transcript exists but no AI summary yet. The detail view shows a
+   *  "Generate notes" CTA; `reprocess` drops this marker once it writes the
+   *  summary. Absent on normal + failed meetings. */
+  summary_status?: 'pending';
 }
 
 export interface Meeting {
@@ -706,6 +711,20 @@ export interface StenoaiBridge {
      *  notification (a failed start would otherwise be silent). Fire-and-forget. */
     reportCaptureError: SendFn<[message: string]>;
     processSystemAudio: RequestFn<[filePath: string, name: string], Result<{ message: string }>>;
+    /** Persist a transcript-only note (decoupled transcribe/summarise, Parakeet).
+     *  The renderer owns the labelled ([You]/[Others] + [MM:SS]) transcript and
+     *  passes it here on Stop. Does NOT enqueue or summarise; returns the saved
+     *  note path so "Generate notes" can later run reprocess on it. */
+    saveTranscriptNote: RequestFn<
+      [payload: {
+        name: string;
+        transcript: string;
+        durationSeconds: number;
+        language?: string;
+        isDiarised: boolean;
+      }],
+      Result<{ summaryFile: string }>
+    >;
     // Fire-and-forget: the handler copies the file into recordings/ and queues
     // it (addToProcessingQueue), then resolves immediately with no payload —
     // it does NOT wait for transcription. Progress shows as a processing row.
