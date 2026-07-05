@@ -29,6 +29,13 @@ pywhispercpp>=1.2.0
 # TypeError on it, which the streaming path would swallow into an empty summary.
 ollama>=0.5.0
 click>=8.1.0
+# Cross-process file lock guarding config.json's read-modify-write in
+# src/config.py (_save). The app spawns a fresh CLI subprocess per operation,
+# so concurrent writers would otherwise revert each other's unrelated keys
+# (lost update). Already present transitively via huggingface_hub; pinned
+# explicitly since we now import it directly. Pure Python (fcntl / msvcrt),
+# so PyInstaller picks it up via normal import analysis.
+filelock>=3.13
 pydantic>=2.5.0
 python-dateutil>=2.8.0
 openai>=1.0.0

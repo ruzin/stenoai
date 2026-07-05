@@ -11,12 +11,24 @@ settings wipe (the "org user silently reset to local llama" bug):
 """
 
 import json
+import multiprocessing
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
 from src.config import Config
+
+
+def _worker_set_key(path_str: str, key: str, value, barrier) -> None:
+    """Top-level (picklable) worker for the multiprocess stress test: load the
+    shared config, wait at the barrier so every worker has loaded the SAME
+    baseline, then write one distinct key. The barrier forces the concurrent
+    read-modify-write the race needs — without it the workers would serialize
+    and even the old whole-file save would pass."""
+    cfg = Config(config_path=Path(path_str))
+    barrier.wait(timeout=30)
+    cfg.set(key, value)
 
 
 class AtomicSaveTests(unittest.TestCase):
@@ -133,6 +145,171 @@ class MigrationStillRunsOnHealthyLoadTests(unittest.TestCase):
             self.assertEqual(config._config["cloud_models"], {"openai": "gpt-4o-mini"})
             on_disk = json.loads(path.read_text())
             self.assertEqual(on_disk["cloud_models"], {"openai": "gpt-4o-mini"})
+
+
+class LostUpdateTests(unittest.TestCase):
+    """Two writers changing DIFFERENT keys must not revert each other.
+
+    The app has no daemon — every operation is a fresh CLI subprocess doing
+    load-whole-config -> mutate one key -> write-whole-file. Without the
+    snapshot-diff merge under a file lock, the second writer's whole-file
+    write reverts the first writer's unrelated key (classic lost update).
+    """
+
+    def test_two_writers_different_keys_both_survive(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "config.json"
+            # Seed a baseline file both writers load from.
+            Config(config_path=path)
+
+            c1 = Config(config_path=path)
+            c2 = Config(config_path=path)
+            # Two live handles that both loaded the same starting config, then
+            # each change a different key (the interleaving a real double-write
+            # produces). Pre-fix, c2's save reverted c1's language back to "en".
+            self.assertTrue(c1.set_language("de"))
+            self.assertTrue(c2.set_notifications_enabled(False))
+
+            on_disk = json.loads(path.read_text())
+            self.assertEqual(on_disk["language"], "de")
+            self.assertIs(on_disk["notifications_enabled"], False)
+
+    def test_second_save_in_same_process_diffs_correctly(self):
+        # After a save adopts the merged result, a second save on the SAME
+        # handle must still overlay only its own new change, not resurrect the
+        # pre-first-save snapshot.
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "config.json"
+            Config(config_path=path)
+
+            c1 = Config(config_path=path)
+            c2 = Config(config_path=path)
+
+            self.assertTrue(c1.set_language("de"))
+            self.assertTrue(c2.set_notifications_enabled(False))
+            # c1 writes a second, unrelated key after c2 already wrote.
+            self.assertTrue(c1.set_keep_recordings(True))
+
+            on_disk = json.loads(path.read_text())
+            self.assertEqual(on_disk["language"], "de")
+            self.assertIs(on_disk["notifications_enabled"], False)
+            self.assertIs(on_disk["keep_recordings"], True)
+
+
+    def test_concurrent_edits_to_same_nested_dict_both_survive(self):
+        # Two processes editing DIFFERENT sub-keys of the SAME top-level dict
+        # (per-provider cloud_models) must not clobber each other. A top-level-
+        # only merge would overlay the whole cloud_models dict and lose the
+        # other provider's entry; the recursive merge keeps both.
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "config.json"
+            Config(config_path=path)  # baseline with cloud_models = {}
+
+            c1 = Config(config_path=path)
+            c1.set_cloud_provider("openai")
+            c2 = Config(config_path=path)
+            c2.set_cloud_provider("anthropic")
+
+            # Each writes its own provider's model into the shared cloud_models.
+            self.assertTrue(c1.set_cloud_model("gpt-4o"))
+            self.assertTrue(c2.set_cloud_model("claude-x"))
+
+            on_disk = json.loads(path.read_text())
+            self.assertEqual(on_disk["cloud_models"]["openai"], "gpt-4o")
+            self.assertEqual(on_disk["cloud_models"]["anthropic"], "claude-x")
+
+    def test_nested_deletion_still_propagates(self):
+        # The recursive merge must not resurrect a nested key this process
+        # deleted (reset_template drops a template_overrides entry — config's
+        # only nested-deletion path). Guards against the recursion silently
+        # keeping disk's stale sub-key.
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "config.json"
+            path.write_text(json.dumps({
+                "template_overrides": {"brief": {"name": "B", "prompt": "p"}},
+                "templates_seeded": True,
+            }))
+
+            config = Config(config_path=path)
+            self.assertIn("brief", config._config["template_overrides"])
+
+            self.assertTrue(config.reset_template("brief"))
+            on_disk = json.loads(path.read_text())
+            self.assertNotIn("brief", on_disk.get("template_overrides", {}))
+
+
+class MigrationVsSetterTests(unittest.TestCase):
+    def test_load_time_migration_and_concurrent_setter_both_survive(self):
+        # A pre-migration config: legacy flat cloud_model triggers the
+        # cloud_models migration (a load-time _save) in c1's __init__. A second
+        # handle changes an unrelated key; neither write may clobber the other.
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "config.json"
+            path.write_text(json.dumps({
+                "cloud_model": "gpt-4o-mini",
+                "cloud_provider": "openai",
+                "language": "en",
+            }))
+
+            # c2 loads the pre-migration file first (its snapshot has no
+            # cloud_models), then c1's construction migrates + saves.
+            c2 = Config(config_path=path)
+            c1 = Config(config_path=path)  # __init__ migrates cloud_models + saves
+
+            # c2 now writes an unrelated key on top of the migrated file.
+            self.assertTrue(c2.set_language("de"))
+
+            on_disk = json.loads(path.read_text())
+            # Migration result survives c2's later write.
+            self.assertEqual(on_disk["cloud_models"], {"openai": "gpt-4o-mini"})
+            # And c2's setter survives.
+            self.assertEqual(on_disk["language"], "de")
+            del c1  # keep linters quiet; construction was the point
+
+
+class MultiprocessStressTests(unittest.TestCase):
+    def test_concurrent_processes_each_key_survives(self):
+        # Real OS processes prove the file lock serializes cross-process, not
+        # just cross-handle in one interpreter. spawn matches the frozen app's
+        # subprocess model and is the only portable start method on macOS/Windows.
+        try:
+            ctx = multiprocessing.get_context("spawn")
+        except ValueError:  # pragma: no cover - spawn is available on mac/win/linux
+            self.skipTest("spawn start method unavailable")
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "config.json"
+            # Seed a baseline so every worker loads the same starting file.
+            Config(config_path=path)
+
+            n = 6
+            barrier = ctx.Barrier(n)
+            procs = [
+                ctx.Process(
+                    target=_worker_set_key,
+                    args=(str(path), f"stress_key_{i}", i, barrier),
+                )
+                for i in range(n)
+            ]
+            for p in procs:
+                p.start()
+            try:
+                for p in procs:
+                    p.join(timeout=60)
+            finally:
+                # Never leave live children behind (CI/Windows cleanup) if a
+                # worker hung on the barrier or the lock.
+                for p in procs:
+                    if p.is_alive():
+                        p.terminate()
+                        p.join(timeout=10)
+
+            for p in procs:
+                self.assertEqual(p.exitcode, 0)
+
+            on_disk = json.loads(path.read_text())
+            for i in range(n):
+                self.assertEqual(on_disk[f"stress_key_{i}"], i)
 
 
 if __name__ == "__main__":
