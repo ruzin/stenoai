@@ -1,37 +1,25 @@
 import { Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAskBar } from '@/lib/askBarContext';
-import { useMeeting, useReprocessMeeting } from '@/hooks/useMeetings';
-import { streamCache } from '@/lib/meetingDetailState';
+import { useReprocessBridge } from '@/hooks/reprocessBridgeStore';
 
 /**
  * Floating "Generate notes" button that sits just above the Ask bar for a
  * transcript-only note (auto-summarise off, #276 → `notes_generated: false`).
- * Mirrors the note-detail CTA (MeetingDetail `startReprocess`) so both surfaces
- * drive the same `reprocess` stream — the detail view's StreamingView picks it
- * up via the shared `streamCache`. Hidden once notes exist or while the
+ *
+ * It's a remote trigger for the note-detail's own reprocess: MeetingDetail
+ * publishes its `startReprocess` + streaming state to `reprocessBridgeStore`
+ * while showing a pending note, and this button calls that — so clicking here
+ * drives the detail's StreamingView and shares its disabled/streaming state
+ * with the in-note CTA (no double-fire, one source of truth). Hidden when the
  * transcript panel is open (it owns that band).
  */
 export function GenerateNotesBar() {
   const { activeSummaryFile, transcriptOpen } = useAskBar();
-  const meeting = useMeeting(activeSummaryFile ?? undefined);
-  const reprocess = useReprocessMeeting();
+  const { summaryFile, streaming, start } = useReprocessBridge();
 
-  const info = meeting.data?.session_info;
-  const notesNotGenerated = info?.notes_generated === false;
-  const hasTranscript = Boolean(meeting.data?.transcript);
-
-  if (!activeSummaryFile || transcriptOpen || !notesNotGenerated || !hasTranscript) {
-    return null;
-  }
-
-  const onGenerate = () => {
-    // Seed the shared stream cache so the open note view flips straight into
-    // its StreamingView, then fire the same reprocess mutation the detail CTA
-    // uses. Title stays as-is (matches #276's startReprocess).
-    streamCache.set(activeSummaryFile, { text: '', phase: 'analyzing' });
-    reprocess.mutate({ summaryFile: activeSummaryFile, regenTitle: false, name: info?.name ?? '' });
-  };
+  const active = summaryFile !== null && summaryFile === activeSummaryFile && start !== null;
+  if (!active || transcriptOpen) return null;
 
   return (
     <div
@@ -40,8 +28,8 @@ export function GenerateNotesBar() {
       onMouseDown={(e) => e.stopPropagation()}
     >
       <Button
-        onClick={onGenerate}
-        disabled={reprocess.isPending}
+        onClick={() => start?.()}
+        disabled={streaming}
         data-testid="generate-notes-dock-button"
         className="shadow-[var(--shadow-md)]"
       >

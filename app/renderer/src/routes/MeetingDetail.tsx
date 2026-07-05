@@ -81,6 +81,7 @@ import {
   streamCache,
   type StreamPhase,
 } from '@/lib/meetingDetailState';
+import { useReprocessBridge } from '@/hooks/reprocessBridgeStore';
 
 const LAST_OPENED_KEY = 'steno-last-opened-meeting';
 
@@ -520,6 +521,33 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
   // unparsable for unrelated reasons and would otherwise be misclassified as
   // transcript-only.
   const notesNotGenerated = meeting.session_info.notes_generated === false;
+
+  // Publish this note's reprocess trigger + streaming state so the floating
+  // GenerateNotesBar (mounted at App level, above the Ask bar) drives THIS
+  // detail's `startReprocess` and shares its disabled state — one source of
+  // truth, no double-fire. Only while showing a transcript-only note.
+  const publishReprocess = useReprocessBridge((s) => s.publish);
+  const clearReprocess = useReprocessBridge((s) => s.clear);
+  const summaryPending = notesNotGenerated && Boolean(meeting.transcript);
+  const reprocessStreaming = reprocess.isPending || streamPhase !== 'idle';
+  const startReprocessRef = React.useRef(startReprocess);
+  startReprocessRef.current = startReprocess;
+  const stableStartReprocess = React.useCallback(() => startReprocessRef.current(), []);
+  React.useEffect(() => {
+    if (summaryPending) {
+      publishReprocess({ summaryFile, streaming: reprocessStreaming, start: stableStartReprocess });
+    } else {
+      clearReprocess(summaryFile);
+    }
+    return () => clearReprocess(summaryFile);
+  }, [
+    summaryPending,
+    reprocessStreaming,
+    summaryFile,
+    stableStartReprocess,
+    publishReprocess,
+    clearReprocess,
+  ]);
 
   return (
     <article data-testid="meeting-detail" className="space-y-9">

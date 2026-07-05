@@ -29,11 +29,15 @@ test('shows the floating Generate notes button for a transcript-only note', asyn
   await openMeeting(page, 'pending_summary.md');
 
   // The floating dock CTA appears above the Ask bar.
-  await expect(page.getByTestId('generate-notes-dock-button')).toBeVisible();
+  const cta = page.getByTestId('generate-notes-dock-button');
+  await expect(cta).toBeVisible();
+  await expect(cta).toBeEnabled();
 
-  // Clicking it doesn't error (fires the shared reprocess mutation); the button
-  // is a real, enabled control.
-  await page.getByTestId('generate-notes-dock-button').click();
+  // Clicking drives the note-detail's OWN reprocess (shared bridge): the detail
+  // flips to its streaming view and the shared streaming state disables the
+  // floating button too — proving the two CTAs are coordinated (no double-fire).
+  await cta.click();
+  await expect(cta).toBeDisabled();
 });
 
 test('hides the floating Generate notes button for a normal (summarised) note', async ({
