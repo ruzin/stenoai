@@ -186,3 +186,6 @@ ollama.pid
 
 # Local design reference library (cloned, not vendored)
 .reference/
+
+# AI / local specs (zoro)
+.specs/
