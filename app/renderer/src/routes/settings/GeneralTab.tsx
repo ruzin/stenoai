@@ -62,11 +62,17 @@ export function GeneralTab() {
   const setUserName = useSetUserName();
   const [nameDraft, setNameDraft] = React.useState('');
   const nameSeededRef = React.useRef(false);
+  // Tracks whether the user has typed into the field. If they start editing
+  // before the query resolves, a late seed must not clobber their input — and
+  // this stays true even if they clear the field back to empty, so an
+  // intentionally-blanked field isn't re-seeded either.
+  const nameDirtyRef = React.useRef(false);
   // Wait for the real query (not the sessionStorage placeholder) before
   // seeding — otherwise we lock onto a stale empty string and ignore the
   // canonical value when it arrives from disk.
   React.useEffect(() => {
     if (nameSeededRef.current) return;
+    if (nameDirtyRef.current) return;
     if (userName.isPending || userName.isPlaceholderData) return;
     if (userName.data !== undefined) {
       setNameDraft(userName.data);
@@ -152,7 +158,10 @@ export function GeneralTab() {
       >
         <Input
           value={nameDraft}
-          onChange={(e) => setNameDraft(e.target.value)}
+          onChange={(e) => {
+            nameDirtyRef.current = true;
+            setNameDraft(e.target.value);
+          }}
           onBlur={persistName}
           onKeyDown={(e) => {
             if (e.key === 'Enter') {

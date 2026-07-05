@@ -209,3 +209,23 @@ describe('GeneralTab OAuth connect/cancel race (#306)', () => {
     expect(h.google.connect.mutateAsync).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('GeneralTab name-field seed race (#307)', () => {
+  test('typing before the userName query resolves is not overwritten by the seed', async () => {
+    h.userName = { data: undefined, isPending: true, isPlaceholderData: false };
+    const { rerender } = render(<GeneralTab />);
+
+    const input = screen.getByTestId('user-name-input') as HTMLInputElement;
+    fireEvent.change(input, { target: { value: 'Ruzin' } });
+    expect(input.value).toBe('Ruzin');
+
+    // The canonical value now arrives from disk.
+    h.userName = { data: 'Old Name', isPending: false, isPlaceholderData: false };
+    await act(async () => {
+      rerender(<GeneralTab />);
+    });
+
+    // The user's in-progress edit must survive the late seed.
+    expect((screen.getByTestId('user-name-input') as HTMLInputElement).value).toBe('Ruzin');
+  });
+});
