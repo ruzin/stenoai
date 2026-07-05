@@ -508,6 +508,50 @@ Summary output language: {config.get_language_name(output_language)}
 
         print(f"TRANSCRIPTION_COMPLETE:{len(transcript_text)}", flush=True)
 
+        # Auto-summarize gate (#258): mirror process_streaming's transcript-only
+        # path so this method stays consistent even though it has no live caller.
+        from src.config import get_config
+        gate_config = get_config()
+        if not gate_config.get_auto_summarize_enabled():
+            output_language = self._resolve_output_language(
+                gate_config.get_language(), transcript_data.get("detected_language")
+            )
+            summary_path = self.output_dir / f"{audio_path.stem}_summary.md"
+            processed_at = datetime.now().isoformat()
+            md_meta = {
+                'title': session_name,
+                'date': processed_at,
+                'duration_seconds': int(duration_seconds) if duration_seconds else None,
+                'language': output_language,
+                'is_diarised': transcript_data.get('is_diarised', False),
+                'notes_generated': False,
+            }
+            md_lines = _render_frontmatter(md_meta)
+            md_lines.append('')
+            md_lines.append('## Transcript')
+            md_lines.append('')
+            md_lines.append(diarised_text or transcript_text)
+            if notes_text:
+                md_lines.append('')
+                md_lines.append('## User Notes')
+                md_lines.append('')
+                md_lines.append(notes_text)
+            summary_path.write_text('\n'.join(md_lines), encoding='utf-8')
+            if not gate_config.get_keep_recordings():
+                try:
+                    audio_path.unlink()
+                except Exception:
+                    pass
+            print("SUMMARY_SKIPPED", flush=True)
+            print(f"SAVED:{summary_path}", flush=True)
+            return {
+                "session_info": {
+                    "name": session_name,
+                    "transcript_file": str(transcript_data.get("transcript_file", "")),
+                    "summary_file": str(summary_path),
+                }
+            }
+
         # Step 2: Streaming summary
         if self.summarizer is None:
             self.summarizer = OllamaSummarizer()
@@ -810,6 +854,53 @@ def process_streaming(audio_file, name, notes, live_transcript):
         duration_minutes = int(duration_seconds / 60) if duration_seconds else 0
 
         print(f"TRANSCRIPTION_COMPLETE:{len(transcript_text)}", flush=True)
+
+        # Auto-summarize gate (#258): when the user has turned off automatic
+        # note generation, stop at a transcript-only note. This runs BEFORE the
+        # summarizer is constructed and before any title / template-report LLM
+        # call — with the toggle off there are zero Ollama calls and Ollama need
+        # not be running at all. The user generates notes on demand later
+        # (reprocess), which regenerates the summary and drops notes_generated.
+        from src.config import get_config
+        gate_config = get_config()
+        if not gate_config.get_auto_summarize_enabled():
+            output_language = recorder._resolve_output_language(
+                gate_config.get_language(), transcript_data.get("detected_language")
+            )
+            audio_path = Path(audio_file)
+            summary_path = recorder.output_dir / f"{audio_path.stem}_summary.md"
+            processed_at = datetime.now().isoformat()
+            md_meta = {
+                'title': name,
+                'date': processed_at,
+                'duration_seconds': int(duration_seconds) if duration_seconds else None,
+                'language': output_language,
+                'is_diarised': transcript_data.get('is_diarised', False),
+                'notes_generated': False,
+            }
+            if is_live_transcript:
+                md_meta['is_live_transcript'] = True
+            md_lines = _render_frontmatter(md_meta)
+            md_lines.append('')
+            md_lines.append('## Transcript')
+            md_lines.append('')
+            md_lines.append(diarised_text or transcript_text)
+            if notes_text:
+                md_lines.append('')
+                md_lines.append('## User Notes')
+                md_lines.append('')
+                md_lines.append(notes_text)
+            summary_path.write_text('\n'.join(md_lines), encoding='utf-8')
+
+            if not is_live_transcript and not gate_config.get_keep_recordings():
+                try:
+                    audio_path.unlink()
+                except Exception:
+                    pass
+
+            print("SUMMARY_SKIPPED", flush=True)
+            print(f"SAVED:{summary_path}", flush=True)
+            return
 
         # Step 2: Stream summary
         if recorder.summarizer is None:
@@ -1200,6 +1291,26 @@ def set_keep_recordings_cmd(enabled: bool):
     config = get_config()
     if config.set_keep_recordings(enabled):
         print(json.dumps({"success": True, "keep_recordings": enabled}))
+    else:
+        print(json.dumps({"success": False, "error": "Failed to persist setting"}))
+
+
+@cli.command(name='get-auto-summarize')
+def get_auto_summarize_cmd():
+    """Get whether notes are generated automatically after transcription."""
+    from src.config import get_config
+    config = get_config()
+    print(json.dumps({"auto_summarize_enabled": config.get_auto_summarize_enabled()}))
+
+
+@cli.command(name='set-auto-summarize')
+@click.argument('enabled', type=bool)
+def set_auto_summarize_cmd(enabled: bool):
+    """Set whether notes are generated automatically after transcription."""
+    from src.config import get_config
+    config = get_config()
+    if config.set_auto_summarize_enabled(enabled):
+        print(json.dumps({"success": True, "auto_summarize_enabled": enabled}))
     else:
         print(json.dumps({"success": False, "error": "Failed to persist setting"}))
 
@@ -2112,6 +2223,11 @@ def _parse_meeting_markdown(md_path):
     # tell the user no batch transcript exists.
     if meta.get('is_live_transcript'):
         session_info['is_live_transcript'] = True
+    # A transcript-only meeting (#258): auto-summarize was off, so this note has
+    # a transcript but no summary yet. Surface the flag so the UI can offer a
+    # "Generate notes" CTA instead of a blank/"no summary" state.
+    if meta.get('notes_generated') is False:
+        session_info['notes_generated'] = False
 
     return {
         'session_info': session_info,
@@ -2352,13 +2468,25 @@ def reprocess(summary_file, regenerate_title):
         if summary_path.suffix == '.md':
             session_name = existing_data.get('session_info', {}).get('name', 'Reprocessed')
             md_lines = ['---']
+            # This rebuild intentionally omits notes_generated: reprocessing a
+            # transcript-only note (#258) generates the summary, so the rewritten
+            # frontmatter naturally flips the meeting out of the "no notes yet"
+            # state. The state-flip is intended, not an accidental key drop.
             md_meta = {
                 'title': session_name,
                 'date': existing_data.get('session_info', {}).get('processed_at', datetime.now().isoformat()),
                 'duration_seconds': existing_data.get('session_info', {}).get('duration_seconds'),
                 'language': output_language,
                 'is_diarised': existing_data.get('is_diarised', False),
+                # Carry forward folder membership so a regenerate never silently
+                # removes the meeting from its folders (matches _parse_meeting_markdown's
+                # default-to-[] shape; patched surgically by src/folders.py).
+                'folders': existing_data.get('folders', []),
             }
+            # Preserve the live-transcript flag (#207) only when true, matching the
+            # "only set when true, never explicit false" pattern used elsewhere.
+            if existing_data.get('session_info', {}).get('is_live_transcript'):
+                md_meta['is_live_transcript'] = True
             for k, v in md_meta.items():
                 if v is None:
                     md_lines.append(f'{k}: null')
@@ -2366,6 +2494,8 @@ def reprocess(summary_file, regenerate_title):
                     md_lines.append(f'{k}: {"true" if v else "false"}')
                 elif isinstance(v, int):
                     md_lines.append(f'{k}: {v}')
+                elif isinstance(v, list):
+                    md_lines.append(f'{k}: {json.dumps(v)}')
                 else:
                     escaped = str(v).replace('\\', '\\\\').replace('"', '\\"')
                     md_lines.append(f'{k}: "{escaped}"')

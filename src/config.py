@@ -488,6 +488,7 @@ class Config:
             "anonymous_id": str(uuid.uuid4()),
             "storage_path": "",
             "keep_recordings": False,
+            "auto_summarize_enabled": True,
             "whisper_model": "large-v3-turbo",
             "transcription_engine": "parakeet",
             "version": "1.0"
@@ -770,6 +771,18 @@ class Config:
     def set_keep_recordings(self, enabled: bool) -> bool:
         """Set whether audio recordings should be kept after processing."""
         self._config["keep_recordings"] = enabled
+        return self._save()
+
+    def get_auto_summarize_enabled(self) -> bool:
+        """Get whether notes (summary/title/template report) are generated
+        automatically after transcription. Default on — existing users keep
+        the transcribe→summarize behaviour. When off, recordings stop at a
+        transcript-only note and the user generates notes on demand."""
+        return self._config.get("auto_summarize_enabled", True)
+
+    def set_auto_summarize_enabled(self, enabled: bool) -> bool:
+        """Set whether notes are generated automatically after transcription."""
+        self._config["auto_summarize_enabled"] = enabled
         return self._save()
 
     def get_silence_auto_stop_enabled(self) -> bool:

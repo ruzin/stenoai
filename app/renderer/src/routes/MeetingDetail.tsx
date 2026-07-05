@@ -396,6 +396,31 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
     );
   };
 
+  const startReprocess = () => {
+    setStreamText('');
+    setStreamPhase('analyzing');
+    setChunkProgress(null);
+    setReprocessFailed(false);
+    streamCache.set(summaryFile, { text: '', phase: 'analyzing' });
+    reprocess.mutate(
+      { summaryFile, regenTitle: false, name: info.name },
+      {
+        // A rejection here means the IPC call itself failed (e.g. the backend
+        // never spawned) BEFORE any processing-complete/summary-complete event
+        // could fire to roll the UI back — without this the analyzing/streaming
+        // state would be stuck forever with no way to retry (mirrors
+        // onGenerateReport's onError below).
+        onError: () => {
+          setStreamPhase('idle');
+          setStreamText('');
+          setChunkProgress(null);
+          streamCache.delete(summaryFile);
+          setReprocessFailed(true);
+        },
+      },
+    );
+  };
+
   // Persist the choice so it survives navigation (B1 review: active_report not
   // persisted). `null` selects the structured Standard summary → 'standard'.
   const onSelectReport = (id: string | null) => {
@@ -490,6 +515,11 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
   const discussionAreas = asDiscussionAreas(meeting.discussion_areas);
   const transcriptionFailed = Boolean(meeting.session_info.transcription_failed);
   const transcriptionError = meeting.session_info.error?.trim();
+  // The real signal for "auto-summarize was off" (#258) — NOT `!summary`, which
+  // also matches an older/imported meeting whose ## Summary section is empty or
+  // unparsable for unrelated reasons and would otherwise be misclassified as
+  // transcript-only.
+  const notesNotGenerated = meeting.session_info.notes_generated === false;
 
   return (
     <article data-testid="meeting-detail" className="space-y-9">
@@ -543,14 +573,7 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
                 <TooltipTrigger asChild>
                   <ActionIconButton
                     label="Regenerate notes"
-                    onClick={() => {
-                      setStreamText('');
-                      setStreamPhase('analyzing');
-                      setChunkProgress(null);
-                      setReprocessFailed(false);
-                      streamCache.set(summaryFile, { text: '', phase: 'analyzing' });
-                      reprocess.mutate({ summaryFile, regenTitle: false, name: info.name });
-                    }}
+                    onClick={startReprocess}
                     disabled={reprocess.isPending || streamPhase !== 'idle'}
                   >
                     <RefreshCw
@@ -864,6 +887,38 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
                   </p>
                 ))}
               </div>
+            </section>
+          ) : notesNotGenerated && meeting.transcript ? (
+            <section
+              className="flex flex-col items-start gap-2 rounded-lg p-4"
+              style={{
+                background: 'var(--surface-raised)',
+                border: '1px solid var(--border-subtle, var(--surface-raised))',
+              }}
+              data-testid="no-notes-yet"
+            >
+              <div
+                className="text-[15px] font-medium"
+                style={{ color: 'var(--fg-1)' }}
+              >
+                No notes yet
+              </div>
+              <p
+                className="text-[14px] leading-[1.6]"
+                style={{ color: 'var(--fg-2)', maxWidth: '64ch' }}
+              >
+                This recording was transcribed but notes were not generated
+                automatically. Copy or save the transcript from the actions
+                above, or generate notes whenever you like.
+              </p>
+              <Button
+                className="mt-1"
+                data-testid="generate-notes-cta"
+                onClick={startReprocess}
+                disabled={reprocess.isPending || streamPhase !== 'idle'}
+              >
+                Generate notes
+              </Button>
             </section>
           ) : (
             <p className="py-2 text-sm" style={{ color: 'var(--fg-2)' }}>

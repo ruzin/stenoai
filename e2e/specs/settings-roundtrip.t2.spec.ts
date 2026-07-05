@@ -16,6 +16,7 @@ type SettingKind =
   | 'language'
   | 'userName'
   | 'keepRecordings'
+  | 'autoSummarize'
   | 'silenceEnabled'
   | 'silenceMinutes'
   | 'systemAudio'
@@ -28,6 +29,7 @@ type SettingsBridge = {
     setLanguage: (v: string) => Promise<unknown>;
     setUserName: (v: string) => Promise<unknown>;
     setKeepRecordings: (v: boolean) => Promise<unknown>;
+    setAutoSummarize: (v: boolean) => Promise<unknown>;
     setSilenceAutoStopEnabled: (v: boolean) => Promise<unknown>;
     setSilenceAutoStopMinutes: (v: number) => Promise<unknown>;
     setSystemAudio: (v: boolean) => Promise<unknown>;
@@ -48,6 +50,9 @@ const CASES: Case[] = [
   { kind: 'language', value: 'fr', configKey: 'language' },
   { kind: 'userName', value: 'E2E Tester', configKey: 'user_name' },
   { kind: 'keepRecordings', value: true, configKey: 'keep_recordings' },
+  // false flips the default (true) so the assertion has teeth — a no-op setter
+  // would leave the key unset/true and fail this case.
+  { kind: 'autoSummarize', value: false, configKey: 'auto_summarize_enabled' },
   { kind: 'silenceEnabled', value: false, configKey: 'silence_auto_stop_enabled' },
   { kind: 'silenceMinutes', value: 15, configKey: 'silence_auto_stop_minutes' },
   // false flips the macOS default (true) so this has teeth on the primary signed
@@ -73,6 +78,8 @@ function applySetting(
           return s.settings.setUserName(value as string);
         case 'keepRecordings':
           return s.settings.setKeepRecordings(value as boolean);
+        case 'autoSummarize':
+          return s.settings.setAutoSummarize(value as boolean);
         case 'silenceEnabled':
           return s.settings.setSilenceAutoStopEnabled(value as boolean);
         case 'silenceMinutes':

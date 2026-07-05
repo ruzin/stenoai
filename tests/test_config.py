@@ -253,6 +253,24 @@ class ConfigKeepRecordingsTests(unittest.TestCase):
             self.assertFalse(reloaded.get_keep_recordings())
 
 
+class ConfigAutoSummarizeTests(unittest.TestCase):
+    def test_default_auto_summarize_is_true(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config = Config(config_path=Path(tmp_dir) / "config.json")
+            self.assertTrue(config.get_auto_summarize_enabled())
+
+    def test_auto_summarize_round_trip(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "config.json"
+            config = Config(config_path=path)
+            self.assertTrue(config.set_auto_summarize_enabled(False))
+            self.assertFalse(config.get_auto_summarize_enabled())
+            reloaded = Config(config_path=path)
+            self.assertFalse(reloaded.get_auto_summarize_enabled())
+            self.assertTrue(reloaded.set_auto_summarize_enabled(True))
+            self.assertTrue(reloaded.get_auto_summarize_enabled())
+
+
 class ConfigBedrockSettingsTests(unittest.TestCase):
     def test_default_bedrock_region_is_us_east_1(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

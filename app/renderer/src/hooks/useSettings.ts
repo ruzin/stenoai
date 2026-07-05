@@ -218,6 +218,21 @@ export function useSetKeepRecordings() {
   });
 }
 
+export function useAutoSummarizeSetting() {
+  return useQuery({
+    queryKey: [...settingsKeys.all, 'autoSummarize'] as const,
+    queryFn: async () => unwrap(await ipc().settings.getAutoSummarize()).auto_summarize_enabled,
+  });
+}
+
+export function useSetAutoSummarize() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (v: boolean) => unwrap(await ipc().settings.setAutoSummarize(v)),
+    onSuccess: () => qc.invalidateQueries({ queryKey: [...settingsKeys.all, 'autoSummarize'] }),
+  });
+}
+
 /** Toggle + duration for the renderer-side silence detector. Defaults
  *  to enabled / 15 minutes (matches Granola). Returns the supported
  *  minutes list too so the Settings dropdown is driven by the same

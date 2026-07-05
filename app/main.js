@@ -1793,6 +1793,9 @@ function parseMeetingMarkdown(content, mdPath) {
     if (meta.audio_file) sessionInfo.audio_file = meta.audio_file;
     if (meta.error) sessionInfo.error = meta.error;
   }
+  if (meta.notes_generated === false) {
+    sessionInfo.notes_generated = false;
+  }
 
   return {
     session_info: sessionInfo,
@@ -5431,6 +5434,22 @@ ipcMain.handle('get-keep-recordings', async () => {
 ipcMain.handle('set-keep-recordings', async (event, enabled) => {
   try {
     const result = await runPythonScript('simple_recorder.py', ['set-keep-recordings', enabled.toString()]);
+    const jsonData = JSON.parse(result.trim());
+    return { success: true, ...jsonData };
+  } catch (e) { return { success: false, error: e.message }; }
+});
+
+ipcMain.handle('get-auto-summarize', async () => {
+  try {
+    const result = await runPythonScript('simple_recorder.py', ['get-auto-summarize'], true);
+    const jsonData = JSON.parse(result.trim());
+    return { success: true, ...jsonData };
+  } catch (e) { return { success: false, error: e.message }; }
+});
+
+ipcMain.handle('set-auto-summarize', async (event, enabled) => {
+  try {
+    const result = await runPythonScript('simple_recorder.py', ['set-auto-summarize', enabled.toString()]);
     const jsonData = JSON.parse(result.trim());
     return { success: true, ...jsonData };
   } catch (e) { return { success: false, error: e.message }; }
