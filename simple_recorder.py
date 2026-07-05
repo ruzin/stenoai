@@ -2083,6 +2083,11 @@ def reprocess(summary_file, regenerate_title):
         if summary_path.suffix == '.md':
             session_name = existing_data.get('session_info', {}).get('name', 'Reprocessed')
             md_lines = ['---']
+            # Frontmatter is rebuilt from this fixed whitelist, so non-listed
+            # markers on the source note are intentionally dropped: a
+            # `summary_status: pending` note (transcript-only) becomes a normal
+            # summarised note here, and `transcription_failed`/`is_live_transcript`
+            # likewise clear once a real summary exists.
             md_meta = {
                 'title': session_name,
                 'date': existing_data.get('session_info', {}).get('processed_at', datetime.now().isoformat()),

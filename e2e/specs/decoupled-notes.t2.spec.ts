@@ -138,3 +138,49 @@ test('save-transcript-note persists a pending note; generate-notes (reprocess) s
     await ollama.close();
   }
 });
+
+test('generate-notes with title regeneration (the shipped CTA path) replaces the placeholder title', async ({
+  launchApp,
+  userDataDir,
+}) => {
+  // The MeetingDetail "Generate notes" CTA calls reprocess with regenTitle=true,
+  // so a pending note's placeholder title ("New note") is replaced by an
+  // AI-generated one. Cover that exact path: the summary call dequeues first,
+  // the (non-streaming) title call second.
+  writeUserConfig(userDataDir, { ai_provider: 'local' });
+  const ollama = await startMockOllama({ chatReplyQueue: [FIXED_REPLY, 'Ship Friday Sync'] });
+  try {
+    const { page } = await launchApp();
+
+    const save = await page.evaluate(
+      (transcript) =>
+        (window as StenoWindow).stenoai.recording.saveTranscriptNote({
+          name: 'New note',
+          transcript,
+          durationSeconds: 8,
+          language: 'en',
+          isDiarised: true,
+        }),
+      TRANSCRIPT,
+    );
+    const summaryFile = save.summaryFile!;
+
+    const res = await page.evaluate(
+      (f) => (window as StenoWindow).stenoai.meetings.reprocess(f, true, 'New note'),
+      summaryFile,
+    );
+    expect(res.success).toBe(true);
+
+    await expect
+      .poll(() => readFileSync(summaryFile, 'utf8'), { timeout: 30_000 })
+      .toContain('The team agreed to ship on Friday within budget.');
+
+    const body = readFileSync(summaryFile, 'utf8');
+    // Placeholder title replaced by the regenerated one; pending marker dropped.
+    expect(body).toContain('title: "Ship Friday Sync"');
+    expect(body).not.toContain('title: "New note"');
+    expect(body).not.toContain('summary_status:');
+  } finally {
+    await ollama.close();
+  }
+});
