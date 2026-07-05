@@ -58,6 +58,34 @@ class BedrockConverseUrlTests(unittest.TestCase):
         url = bedrock_converse_url("ap-southeast-2", "model-x")
         self.assertIn("bedrock-runtime.ap-southeast-2.amazonaws.com", url)
 
+    def test_rejects_region_shaped_to_redirect_the_host(self):
+        # `user@host` URL syntax: an attacker- or accident-crafted region
+        # value that would silently point the request (with the real
+        # Bedrock bearer credential attached) at a different host instead
+        # of AWS. See issue #299 — set_bedrock_region() also guards this,
+        # but the sink itself must not trust its caller either.
+        with self.assertRaises(ValueError):
+            bedrock_converse_url("x@127.0.0.1:8443/", "model-x")
+
+    def test_rejects_non_aws_shaped_region(self):
+        with self.assertRaises(ValueError):
+            bedrock_converse_url("not a region", "model-x")
+
+    def test_rejects_unicode_digit_lookalikes(self):
+        # Python's \d matches non-ASCII decimal digits under re.UNICODE
+        # (the default) — e.g. Arabic-Indic ١ or fullwidth １ — which would
+        # otherwise slip a visually-similar-but-wrong region past the
+        # regex. Region codes are ASCII by definition.
+        with self.assertRaises(ValueError):
+            bedrock_converse_url("us-east-١", "model-x")  # Arabic-Indic 1
+
+    def test_rejects_trailing_newline(self):
+        # `re.match(..., "$")` allows a trailing "\n" ("$" matches just
+        # before it). fullmatch() must be used so a region smuggled with a
+        # trailing newline (e.g. from a config/env value) is rejected too.
+        with self.assertRaises(ValueError):
+            bedrock_converse_url("us-east-1\n", "model-x")
+
 
 if __name__ == "__main__":
     unittest.main()
