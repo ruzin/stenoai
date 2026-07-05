@@ -1,12 +1,16 @@
 # src/templates.py
 """Built-in report templates + pure template helpers.
 
-A template shapes how a meeting report is generated/exported. The shipped
-lineup is intentionally minimal: STANDARD is the only built-in (locked, drives
-today's structured note). One editable SAMPLE custom template is pre-seeded by
-Config on first run; everything else is user-created. Built-in definitions live
-here (source of truth, like whisper_models.py); custom templates, built-in
-overrides, the seed flag, and the default id live in config.json.
+A template shapes how a meeting report is generated/exported. STANDARD is the
+only *locked* built-in (drives today's structured note); the rest of
+BUILTIN_TEMPLATES is a curated gallery of editable/resettable prompt-driven
+templates for common meeting types (issue #297) — same override/reset
+mechanism as any editable built-in, just shipped with a useful starting
+prompt instead of an empty one. One editable SAMPLE custom template is also
+pre-seeded by Config on first run; everything else is user-created. Built-in
+definitions live here (source of truth, like whisper_models.py); custom
+templates, built-in overrides, the seed flag, and the default id live in
+config.json.
 
 This module is pure — no I/O — so it is unit-testable without a running app.
 """
@@ -20,9 +24,14 @@ MAX_PROMPT_LEN = 8000
 MAX_ICON_LEN = 64
 VALID_FORMATS = {"structured", "markdown"}
 
-# Only STANDARD is a built-in. Locked + structured: its "prompt" is empty
-# because it routes through the existing JSON-schema summary path, not a
-# free-form prompt. PR B reads `format` to pick the render/generation path.
+# STANDARD is locked + structured: its "prompt" is empty because it routes
+# through the existing JSON-schema summary path, not a free-form prompt.
+# `format` picks the render/generation path.
+#
+# The rest are the built-in gallery (issue #297): editable + resettable
+# (locked left unset/False) prompt-driven templates for common meeting
+# types, so most users get a useful default without writing their own
+# prompt — Custom-template CRUD covers anyone who wants more.
 BUILTIN_TEMPLATES = {
     "standard": {
         "id": "standard",
@@ -32,6 +41,65 @@ BUILTIN_TEMPLATES = {
         "language": "auto",
         "format": "structured",
         "locked": True,
+    },
+    "product-demo": {
+        "id": "product-demo",
+        "name": "Product Demo",
+        "icon": "presentation",
+        "prompt": (
+            "Summarise this call from the perspective of someone evaluating a "
+            "product or service being demonstrated to them. Cover: what was "
+            "demoed and the problem it's meant to solve, key features or "
+            "capabilities shown, pricing or commercial terms if mentioned, how "
+            "it fits (or doesn't fit) the stated needs, concerns or open "
+            "questions raised, and next steps. Write in the language of the "
+            "meeting."
+        ),
+        "language": "auto",
+        "format": "markdown",
+    },
+    "sales-call": {
+        "id": "sales-call",
+        "name": "Sales Call",
+        "icon": "handshake",
+        "prompt": (
+            "Summarise this call from the perspective of the person running "
+            "the sales conversation. Cover: the prospect's stated needs, pain "
+            "points, and priorities; objections or concerns raised; budget, "
+            "timeline, or decision-process details mentioned; competitors or "
+            "alternatives referenced; and agreed next steps. Write in the "
+            "language of the meeting."
+        ),
+        "language": "auto",
+        "format": "markdown",
+    },
+    "one-on-one": {
+        "id": "one-on-one",
+        "name": "1:1",
+        "icon": "user-check",
+        "prompt": (
+            "Summarise this 1:1 conversation. Cover: topics discussed and any "
+            "updates shared, feedback given in either direction, concerns or "
+            "blockers raised, decisions made, and follow-up actions with who "
+            "owns them. Keep it factual and don't add interpretation beyond "
+            "what was said. Write in the language of the meeting."
+        ),
+        "language": "auto",
+        "format": "markdown",
+    },
+    "standup": {
+        "id": "standup",
+        "name": "Standup",
+        "icon": "list-checks",
+        "prompt": (
+            "Summarise this standup/status meeting concisely. For each "
+            "participant or topic, capture what was done, what's planned "
+            "next, and any blockers raised. Keep it brief — this is a quick "
+            "status sync, not a detailed report. Write in the language of "
+            "the meeting."
+        ),
+        "language": "auto",
+        "format": "markdown",
     },
 }
 

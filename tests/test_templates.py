@@ -4,8 +4,7 @@ from src import templates as T
 
 
 class BuiltinRegistryTests(unittest.TestCase):
-    def test_standard_is_the_only_builtin_and_is_locked_structured(self):
-        self.assertEqual(list(T.BUILTIN_TEMPLATES), ["standard"])
+    def test_standard_is_locked_structured(self):
         std = T.BUILTIN_TEMPLATES["standard"]
         self.assertEqual(std["id"], T.STANDARD_TEMPLATE_ID)
         self.assertTrue(std["locked"])
@@ -103,6 +102,55 @@ class BuiltinRegistryTests(unittest.TestCase):
         self.assertFalse(custom["builtin"])
         # built-ins come first
         self.assertEqual(merged[0]["id"], "standard")
+
+
+class TemplateGalleryTests(unittest.TestCase):
+    """Issue #297 — a curated set of built-in templates beyond just Standard,
+    so users get useful defaults for common meeting types without having to
+    write their own prompt. Unlike Standard, these are editable + resettable
+    built-ins (locked=False) — same UX as OpenOats-style built-in/custom."""
+
+    GALLERY_IDS = {"product-demo", "sales-call", "one-on-one", "standup"}
+
+    def test_gallery_ids_are_registered_builtins(self):
+        self.assertTrue(self.GALLERY_IDS.issubset(set(T.BUILTIN_TEMPLATES)))
+
+    def test_gallery_templates_are_editable_markdown_prompts(self):
+        valid_langs = {"auto"}
+        for tid in self.GALLERY_IDS:
+            t = T.BUILTIN_TEMPLATES[tid]
+            with self.subTest(template=tid):
+                self.assertEqual(t["id"], tid)
+                self.assertFalse(t.get("locked"), "gallery templates must stay editable")
+                self.assertEqual(t["format"], "markdown")
+                self.assertEqual(t["language"], "auto")
+                self.assertTrue(t["prompt"].strip())
+                self.assertLessEqual(len(t["prompt"]), T.MAX_PROMPT_LEN)
+                ok, err = T.validate_template(t, valid_langs)
+                self.assertTrue(ok, err)
+
+    def test_gallery_templates_are_distinct_from_each_other(self):
+        prompts = [T.BUILTIN_TEMPLATES[tid]["prompt"] for tid in self.GALLERY_IDS]
+        names = [T.BUILTIN_TEMPLATES[tid]["name"] for tid in self.GALLERY_IDS]
+        self.assertEqual(len(prompts), len(set(prompts)))
+        self.assertEqual(len(names), len(set(names)))
+
+    def test_merge_tags_gallery_templates_as_editable_builtins(self):
+        merged = T.merge_templates(overrides={}, custom=[])
+        merged_by_id = {m["id"]: m for m in merged}
+        for tid in self.GALLERY_IDS:
+            m = merged_by_id[tid]
+            with self.subTest(template=tid):
+                self.assertTrue(m["builtin"])
+                self.assertFalse(m["locked"])
+
+    def test_gallery_templates_can_be_reset_like_any_editable_builtin(self):
+        # Not a Config test (that lives in test_config_templates.py) — just
+        # pins that these ids aren't special-cased away from the existing
+        # override/reset mechanism editable built-ins already have.
+        for tid in self.GALLERY_IDS:
+            with self.subTest(template=tid):
+                self.assertFalse(T.BUILTIN_TEMPLATES[tid].get("locked"))
 
 
 if __name__ == "__main__":
