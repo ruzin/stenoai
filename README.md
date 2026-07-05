@@ -42,10 +42,10 @@
 If you're looking for a hosted desktop recording API, consider checking out [Recall.ai](https://www.recall.ai/product/desktop-recording-sdk?utm_source=github&utm_medium=sponsorship&utm_campaign=ruzin-stenoai), an API that records Zoom, Google Meet, Microsoft Teams, in-person meetings, and more.
 
 ## 📢 What's New
-- **2026-07-02** ⏱️ Transcript timestamps — every turn of your live and saved transcripts now shows a `[MM:SS]` timestamp, so you can see (and cite) when things were said.
-- **2026-07-02** ⚡ Faster on Apple Silicon — opt into Ollama's native MLX model builds for quicker summaries (Settings → "Switch to faster build"); your model choice and settings are preserved.
-- **2026-07-02** 🌍 Pin your meeting language — Parakeet users can now pin a European language (French, German, Spanish, Dutch, Portuguese) so summaries and notes come out in it, not English.
-- **2026-07-02** 🧹 Cleaner summaries — reasoning-model "thinking" blocks are stripped before your notes render, so scratchpad text never leaks into a summary.
+- **2026-07-05** 🔓 Notes on demand — turn off "Generate notes automatically" (Settings) and a recording stops at a transcript-only note; generate the AI summary whenever you're ready.
+- **2026-07-05** 🗣️ Sharper speaker labels — the live transcript now uses true per-channel attribution, so `[You]` vs `[Others]` is far more accurate.
+- **2026-07-04** 🎨 Template gallery — pick from a curated set of built-in note templates, with a redesigned Templates settings and cloud-provider support.
+- **2026-07-04** 🔒 Privacy hardening — the shareable debug log no longer carries meeting content, and a new redacted "Save diagnostics" export keeps paths and PII out.
 
 
 ## Features
