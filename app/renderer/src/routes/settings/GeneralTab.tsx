@@ -62,10 +62,10 @@ export function GeneralTab() {
   const setUserName = useSetUserName();
   const [nameDraft, setNameDraft] = React.useState('');
   const nameSeededRef = React.useRef(false);
-  // Tracks whether the user has typed into the field. If they start editing
-  // before the query resolves, a late seed must not clobber their input — and
-  // this stays true even if they clear the field back to empty, so an
-  // intentionally-blanked field isn't re-seeded either.
+  // Tracks in-flight typing so a late initial fetch can't clobber the user's
+  // draft. Set on the first edit, and released again by persistName on blur —
+  // the danger window is only mount → first commit, so once the edit is
+  // committed the seeding effect is free to re-sync from userName.data.
   const nameDirtyRef = React.useRef(false);
   // Wait for the real query (not the sessionStorage placeholder) before
   // seeding — otherwise we lock onto a stale empty string and ignore the
@@ -81,8 +81,16 @@ export function GeneralTab() {
   }, [userName.data, userName.isPending, userName.isPlaceholderData]);
   const persistName = () => {
     const trimmed = nameDraft.trim();
-    if (trimmed === (userName.data ?? '')) return;
-    setUserName.mutate(trimmed);
+    if (trimmed !== (userName.data ?? '')) {
+      setUserName.mutate(trimmed);
+    }
+    // The editing session is over (committed on blur/Enter), so there's no more
+    // in-flight typing to protect. Release the dirty guard so the seeding effect
+    // can re-sync from any later userName.data change — the backend's canonical
+    // value, or a refetch after the mutation invalidates. Otherwise a no-op
+    // commit (draft equal to the not-yet-resolved placeholder) would leave the
+    // guard stuck and the field stranded on a stale/blank draft.
+    nameDirtyRef.current = false;
   };
 
   const calendarConnected =

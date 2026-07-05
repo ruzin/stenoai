@@ -228,4 +228,27 @@ describe('GeneralTab name-field seed race (#307)', () => {
     // The user's in-progress edit must survive the late seed.
     expect((screen.getByTestId('user-name-input') as HTMLInputElement).value).toBe('Ruzin');
   });
+
+  test('the field re-syncs from userName.data after the edit is committed on blur', async () => {
+    h.userName = { data: undefined, isPending: true, isPlaceholderData: false };
+    const { rerender } = render(<GeneralTab />);
+
+    const input = screen.getByTestId('user-name-input') as HTMLInputElement;
+    // Edit before the query resolves, then clear back to the placeholder ('').
+    fireEvent.change(input, { target: { value: 'X' } });
+    fireEvent.change(input, { target: { value: '' } });
+    // Blur commits: trimmed '' equals the (still-unresolved) placeholder '', so
+    // nothing is persisted — but the editing session is now over.
+    fireEvent.blur(input);
+    expect(h.setUserName.mutate).not.toHaveBeenCalled();
+
+    // The canonical value now arrives from disk. Since the edit was committed
+    // (and saved nothing), the field must re-sync to it rather than stay blank.
+    h.userName = { data: 'Ruzin', isPending: false, isPlaceholderData: false };
+    await act(async () => {
+      rerender(<GeneralTab />);
+    });
+
+    expect((screen.getByTestId('user-name-input') as HTMLInputElement).value).toBe('Ruzin');
+  });
 });
