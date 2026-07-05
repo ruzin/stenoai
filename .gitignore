@@ -23,8 +23,6 @@ eggs/
 lib/
 !app/renderer/src/lib/
 
-# Superpowers skill scratch — agent working notes, not project content.
-docs/
 lib64/
 parts/
 sdist/
@@ -185,6 +183,9 @@ SESSION_LOG.md
 FEATURES.md
 # Private, local-only working notes (design docs, benchmarks, review scratch) - never publish
 notes/
+# Local agent scratch (skill working notes, task specs) - never publish
+.superpowers/
+.specs/
 
 # Bundled Ollama binary (downloaded during build)
 bin/
