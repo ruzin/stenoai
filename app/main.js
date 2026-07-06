@@ -8311,24 +8311,27 @@ function createNotificationWindow(event) {
   const rendererDist = path.join(__dirname, 'renderer', 'dist', 'index.html');
   notificationWindow.loadFile(rendererDist, { hash: '/notification' });
 
+  const win = notificationWindow;
   let autoCloseTimer;
-  notificationWindow.once('ready-to-show', () => {
-    notificationWindow.showInactive();
-    notificationWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-    notificationWindow.setAlwaysOnTop(true, 'screen-saver', 1);
+  win.once('ready-to-show', () => {
+    win.showInactive();
+    win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    win.setAlwaysOnTop(true, 'screen-saver', 1);
 
     autoCloseTimer = setTimeout(() => {
-      if (notificationWindow && !notificationWindow.isDestroyed()) {
-        notificationWindow.close();
+      if (!win.isDestroyed()) {
+        win.close();
       }
     }, 15000);
 
-    notificationWindow.on('closed', () => {
+    win.on('closed', () => {
       if (autoCloseTimer) clearTimeout(autoCloseTimer);
-      notificationWindow = null;
+      if (notificationWindow === win) {
+        notificationWindow = null;
+      }
     });
 
-    notificationWindow.webContents.send('show-notification', {
+    win.webContents.send('show-notification', {
       title: event.title || 'Meeting starting',
       time: event.start ? new Date(event.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
       meeting_url: event.meeting_url,
