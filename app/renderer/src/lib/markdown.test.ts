@@ -41,7 +41,7 @@ describe('stripReasoning', () => {
     expect(stripReasoning(input)).toBe('content');
   });
 
-  test('handles nested tags (outer tag wins)', () => {
+  test('handles different nested tags (outer tag wins)', () => {
     const input = '<think>outer<thinking>inner</thinking></think>content';
     expect(stripReasoning(input)).toBe('content');
   });

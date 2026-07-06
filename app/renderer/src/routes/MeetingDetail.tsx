@@ -480,7 +480,7 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
       .filter(Boolean)
       .join(' · ');
     if (meta) lines.push(meta);
-    const summary = meeting.summary?.trim();
+    const summary = meeting.summary ? stripReasoning(meeting.summary).trim() : undefined;
     if (summary) {
       lines.push('', 'SUMMARY', summary);
     }
