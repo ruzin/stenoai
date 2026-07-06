@@ -1,0 +1,26 @@
+---
+title: "Live transcription"
+description: "On macOS, Steno shows a live transcript while you record — text appears as people speak, entirely on-device. No audio leaves your Mac."
+---
+
+Live transcription shows the transcript building in real time while you record. Words appear on screen as people speak, processed entirely on your Mac. It runs on the **Parakeet** engine (the default on macOS), so there is nothing to enable — start a recording and the live transcript appears.
+
+## How it works
+
+While recording, Steno feeds audio through voice-activity detection and the Parakeet model to produce a running transcript. When you stop, the same recording is finalized into the saved transcript that your notes are built from. The live view is a convenience during the meeting; the saved transcript is the source of record.
+
+When the model is still loading at the start of a recording, Steno shows that it is warming up while audio continues to be captured — nothing is lost.
+
+## Engine requirements
+
+Live transcription is available when the **Parakeet** engine is active (Settings → Transcription). If you switch to the **Whisper** engine, recordings transcribe **after** you stop rather than live. See [Transcription models](/models/transcription-models) for the difference between the two engines.
+
+---
+
+<Accordion title="Does the live transcript get saved?">
+When you stop recording, Steno finalizes the recording into the saved transcript under `~/Library/Application Support/stenoai/transcripts/`, and your notes are generated from it. The live view is what you see during the meeting.
+</Accordion>
+
+<Accordion title="Is any audio sent to a server for live transcription?">
+No. Live transcription runs entirely on your Mac, the same as the rest of Steno's on-device pipeline.
+</Accordion>

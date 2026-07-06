@@ -13,7 +13,7 @@ Your audio or a live audio stream is sent to the vendor's servers. Transcription
 
 **Local meeting AI** (Steno)
 
-All processing happens on your Mac using models downloaded during setup. No audio leaves your device. Transcription uses [whisper.cpp](https://github.com/ggerganov/whisper.cpp); summarization uses a small language model running via [Ollama](https://ollama.com). There are no ongoing cloud costs and no vendor relationship for your audio data.
+All processing happens on your Mac using models downloaded during setup. No audio leaves your device. Transcription uses two on-device engines -- Parakeet (the default, with a live transcript while you record) and Whisper (optional, chosen in Settings). Summarization uses a local language model running via [Ollama](https://ollama.com). There are no ongoing cloud costs and no vendor relationship for your audio data.
 
 ## Side-by-side comparison
 
@@ -22,9 +22,9 @@ All processing happens on your Mac using models downloaded during setup. No audi
 | **Audio stays on device** | Yes -- never transmitted | No -- sent to vendor servers |
 | **Works offline** | Yes | No |
 | **Account required** | No | Yes |
-| **Cost** | Free (open source) | $10-$30/month typically |
-| **Transcription accuracy** | High (Whisper) | High (varies by vendor) |
-| **Supported languages** | 99 | Varies (usually 30-60) |
+| **Cost** | Free for personal & team (open source) | $10-$30/month typically |
+| **Transcription accuracy** | High (Parakeet / Whisper) | High (varies by vendor) |
+| **Supported languages** | European on the default engine; 99 via Whisper | Varies (usually 30-60) |
 | **Speaker labels** | Yes (`[You]` / `[Others]`) | Yes (varies) |
 | **Meeting bot joins your call** | No | Often yes |
 | **Other participants notified** | No | Sometimes |
@@ -53,7 +53,7 @@ Cloud tools have real advantages in certain situations:
 
 ## Accuracy
 
-Steno uses OpenAI's Whisper model, the same underlying model used by many cloud services. Accuracy is high across common languages and recording conditions. For the best results, use `whisper-medium` for important recordings where accuracy matters most.
+Steno transcribes on-device with two engines: Parakeet (the default) and Whisper (optional, selected in **Settings → Transcription**). Accuracy is high across common recording conditions. Parakeet covers major European languages and produces a live transcript while you record; switch to Whisper when you need one of its 99 supported languages.
 
 ---
 
@@ -62,7 +62,7 @@ Yes. Steno is independent of your call platform. You can run Steno for local not
 </Accordion>
 
 <Accordion title="Is local processing slower than cloud?">
-On Apple Silicon, transcription is fast -- a 30-minute meeting processes in 3-6 minutes with `whisper-small`. Cloud tools return transcripts in roughly real-time. If speed is critical, cloud is faster today. If you have a meeting to review after the fact, local processing is fast enough for most workflows.
+On Apple Silicon, transcription is fast and runs entirely on-device, and the default Parakeet engine shows a live transcript while you record. Cloud tools also return transcripts in roughly real-time. Local processing is fast enough for most workflows, and everything stays on your Mac.
 </Accordion>
 
 <Accordion title="What about privacy policies for cloud recorders?">

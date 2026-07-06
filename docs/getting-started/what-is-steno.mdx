@@ -10,11 +10,11 @@ Steno is a macOS app that records, transcribes, and summarizes meetings using AI
 Steno runs a local pipeline on every recording:
 
 1. **Record** -- captures microphone audio, system audio (both sides of a call), or both simultaneously
-2. **Transcribe** -- runs [Whisper](https://github.com/ggerganov/whisper.cpp) locally to produce a verbatim transcript with speaker labels
+2. **Transcribe** -- runs a local speech-to-text engine to produce a verbatim transcript with speaker labels. Steno ships two engines: Parakeet (the default, which also shows a live transcript while you record) and Whisper (an optional alternate you can switch to in Settings)
 3. **Summarize** -- passes the transcript to a small language model running via [Ollama](https://ollama.com) on your Mac to produce structured notes: summary, key topics, and action items
 4. **Query** -- ask natural-language questions against any saved note from the inline ask bar
 
-Every step runs offline. Steno does not communicate with any external server unless you explicitly configure a cloud model (OpenAI, Anthropic, or a custom endpoint) as an optional alternative to the local model.
+Every step runs offline. Steno does not communicate with any external server unless you explicitly configure a cloud model (OpenAI, Anthropic, AWS Bedrock, or a custom OpenAI-compatible endpoint) as an optional alternative to the local model.
 
 ## Who it's for
 
@@ -38,7 +38,7 @@ macOS 12 (Monterey) or later. Apple Silicon and Intel both supported.
 ---
 
 <Accordion title="Does Steno require an internet connection?">
-No, in the default local configuration. After the initial download and model installation, Steno runs offline -- transcription and summarization happen on your Mac. The app still performs a lightweight update check on launch, and if you opt into a cloud summarization model (OpenAI, Anthropic, or a custom endpoint) it will reach that provider's API for summary generation only.
+No, in the default local configuration. After the initial download and model installation, Steno runs offline -- transcription and summarization happen on your Mac. The app still performs a lightweight update check on launch, and if you opt into a cloud summarization model (OpenAI, Anthropic, AWS Bedrock, or a custom OpenAI-compatible endpoint) it will reach that provider's API for summary generation only.
 </Accordion>
 
 <Accordion title="What data does Steno store and where?">

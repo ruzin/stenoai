@@ -3,19 +3,19 @@ title: "Summarization models"
 description: "Steno generates meeting summaries using local Ollama models by default, with optional cloud model support. Choose a model based on your hardware, privacy requirements, and the quality of notes you need."
 ---
 
-After transcription, Steno passes the transcript to a language model to generate structured notes: a summary paragraph, key topics, and action items. By default, this uses a local model running via [Ollama](https://ollama.com) entirely on your Mac. You can optionally configure a cloud model (OpenAI, Anthropic, or custom endpoint) — see the section below.
+After transcription, Steno passes the transcript to a language model to generate structured notes: a summary paragraph, key topics, and action items. By default, this uses a local model running via [Ollama](https://ollama.com) entirely on your Mac. You can optionally configure a cloud model (OpenAI, Anthropic, AWS Bedrock, or a custom endpoint) — see the section below.
 
 ## Available models
 
-| Model | Size | Speed | Quality | Best for |
-|-------|------|-------|---------|----------|
-| `llama3.2:3b` | ~2GB | Fast | Good | Quick meetings, daily use **(default)** |
-| `gemma3:4b` | ~2.5GB | Fast | Good | Lightweight alternative to llama |
-| `qwen3.5:9b` | ~6.6GB | Moderate | Very good | Structured output, action items |
-| `deepseek-r1:14b` | ~9GB | Slower | Excellent | Complex meetings, detailed analysis |
-| `gpt-oss:20b` | ~14GB | Slow | Excellent | Highest quality local output |
+| Model | Size | Notes |
+|-------|------|-------|
+| `gemma4:e2b-it-qat` | ~4.3GB | Default. Fast, 128K context. |
+| `gemma4:e4b-it-qat` | ~6.1GB | Higher quality, modest footprint. |
+| `qwen3.5:9b` | ~6.6GB | Strong at structured output and action items. |
+| `gemma4:12b-it-qat` | ~7.2GB | 256K context, best for long meetings. |
+| `gpt-oss:20b` | ~14GB | Highest quality, reasoning. |
 
-Larger models produce better-structured, more detailed notes. The trade-off is processing time and disk space.
+`gemma4:e2b-it-qat` (Gemma 4 E2B) is the default and handles most meetings well. It replaces the older `llama3.2:3b`. Larger models produce better-structured, more detailed notes; the trade-off is processing time and disk space.
 
 ## How to change models
 
@@ -27,31 +27,31 @@ The new model is used for all future recordings. You can re-summarize an existin
 
 ## Choosing the right model
 
-**For daily use:** `llama3.2:3b` (default) works well for most meetings. Notes are clear and concise without requiring significant processing time.
+**For daily use:** `gemma4:e2b-it-qat` (default) works well for most meetings. Notes are clear and concise without requiring significant processing time.
 
-**For important meetings:** `qwen3.5:9b` or `deepseek-r1:14b` produce more detailed notes with better-identified action items and more accurate key topics.
+**For important meetings:** `qwen3.5:9b` or `gemma4:12b-it-qat` produce more detailed notes with better-identified action items and more accurate key topics. `gemma4:12b-it-qat` offers a 256K context window, which helps with long meetings.
 
-**For hardware with limited RAM:** Stay with `llama3.2:3b` or `gemma3:4b`. The larger models require at least 16GB RAM to run comfortably without swapping.
+**For the highest quality:** `gpt-oss:20b` produces the best local output, at the cost of more disk space and slower processing.
 
 ## Using a cloud model
 
-Steno optionally supports OpenAI, Anthropic, or a custom API endpoint as an alternative to a local model. If configured, your transcript (not your audio) is sent to that API for summarization.
+Steno optionally supports OpenAI, Anthropic, AWS Bedrock, or a custom API endpoint as an alternative to a local model. If configured, your transcript (not your audio) is sent to that API for summarization.
 
 To configure a cloud model:
 1. Open **Settings → Models → Summarization**
 2. Select **Cloud model**
-3. Choose the provider and enter your API key
+3. Choose the provider and enter your credentials
 
 Cloud models are off by default. If you work with confidential recordings, use a local model.
 
 ---
 
 <Accordion title="Which model produces the best action items?">
-`qwen3.5:9b` is particularly good at identifying and formatting action items from meeting transcripts. If structured output is important, it is worth the extra size over the default `llama3.2:3b`.
+`qwen3.5:9b` is particularly good at identifying and formatting action items from meeting transcripts. If structured output is important, it is worth the extra size over the default `gemma4:e2b-it-qat`.
 </Accordion>
 
 <Accordion title="How much disk space do the models require?">
-The default setup (`whisper-small` + `llama3.2:3b`) requires approximately 2.5GB. The largest model (`gpt-oss:20b`) requires ~14GB. Models are stored in `~/.ollama/models/`.
+The default setup (Parakeet + `gemma4:e2b-it-qat`) requires approximately 7GB. The largest model (`gpt-oss:20b`) requires ~14GB. Ollama models are stored in `~/.ollama/models/`.
 </Accordion>
 
 <Accordion title="Can I delete models I no longer use?">
@@ -59,5 +59,5 @@ Yes. Run `ollama rm [model-name]` in Terminal to remove a model and free the dis
 </Accordion>
 
 <Accordion title="My Mac has 8GB RAM -- which model should I use?">
-Stick with `llama3.2:3b` (the default). It runs comfortably on 8GB. The 9B and larger models will cause swapping on 8GB, significantly slowing both summarization and your Mac.
+Stick with `gemma4:e2b-it-qat` (the default). It runs comfortably on 8GB. The larger models will cause swapping on 8GB, significantly slowing both summarization and your Mac.
 </Accordion>

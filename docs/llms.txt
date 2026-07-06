@@ -1,0 +1,51 @@
+# Steno
+
+> Steno is an open-source macOS app that records, transcribes, and summarizes meetings using AI models that run entirely on your device. It captures your Mac's system audio and microphone locally — no meeting bot joins the call — and transcribes and summarizes on-device by default, so audio and transcripts never leave your Mac. Free for personal and team use; enterprise deployment is a separate offering. macOS 12+ (Apple Silicon and Intel). MIT licensed.
+
+## Key facts
+
+- Platform: macOS only (macOS 12 Monterey or later; Apple Silicon and Intel).
+- Cost: free for personal and team use; open source (MIT license). Enterprise/organization deployment is a separate offering (details coming soon). Source at https://github.com/ruzin/stenoai
+- No meeting bot: records system audio + microphone locally; no participant is notified by Steno.
+- Transcription: two on-device engines — Parakeet (default, with a live transcript while recording; major European languages) and Whisper (optional; 99 languages). No audio is uploaded.
+- Summarization: local models via Ollama by default (default model Gemma 4 E2B), or an optional cloud model (OpenAI, Anthropic, AWS Bedrock, or a custom endpoint) that receives the transcript only.
+- Privacy: recording, transcription, and summarization are on-device by default. The app has anonymous usage analytics that can be turned off during setup or later in Settings.
+- Data location: ~/Library/Application Support/stenoai/ (recordings, transcripts, output).
+
+## Getting started
+
+- [What is Steno](https://stenoai.co/docs/getting-started/what-is-steno): overview and requirements.
+- [Installation](https://stenoai.co/docs/getting-started/installation): download, permissions, setup.
+- [Your first recording](https://stenoai.co/docs/getting-started/first-recording): the record → transcribe → summarize flow.
+
+## Features
+
+- [Recording](https://stenoai.co/docs/features/recording): microphone, system audio, or both.
+- [Transcription](https://stenoai.co/docs/features/transcription): Parakeet and Whisper engines.
+- [Live transcription](https://stenoai.co/docs/features/live-transcription): real-time transcript while recording.
+- [Summaries and notes](https://stenoai.co/docs/features/summaries): on-device summarization.
+- [Report templates](https://stenoai.co/docs/features/report-templates): editable, per-meeting note formats.
+- [Ask your meetings](https://stenoai.co/docs/features/ask-your-meetings): chat over one meeting or your whole library.
+- [Speaker labels](https://stenoai.co/docs/features/speaker-labels): [You] / [Others] via stereo-channel diarization.
+- [Apple Shortcuts](https://stenoai.co/docs/features/apple-shortcuts): stenoai:// deep links for automation.
+
+## Guides
+
+- [Record a Zoom meeting on a Mac](https://stenoai.co/docs/guides/record-zoom-on-mac)
+- [Record a Microsoft Teams meeting on a Mac](https://stenoai.co/docs/guides/record-teams-on-mac)
+- [Record a Google Meet call on a Mac](https://stenoai.co/docs/guides/record-google-meet-on-mac)
+- [Record system audio on a Mac](https://stenoai.co/docs/guides/record-system-audio-on-mac)
+- [Transcribe audio locally on a Mac](https://stenoai.co/docs/guides/transcribe-audio-locally-on-mac)
+- [In-person meeting notes on a Mac](https://stenoai.co/docs/guides/in-person-meeting-notes)
+
+## Privacy and models
+
+- [How on-device processing works](https://stenoai.co/docs/privacy/how-on-device-works)
+- [Confidential use cases](https://stenoai.co/docs/privacy/confidential-use-cases)
+- [Transcription models](https://stenoai.co/docs/models/transcription-models)
+- [Summarization models](https://stenoai.co/docs/models/summarization-models)
+- [Remote Ollama setup](https://stenoai.co/docs/models/remote-ollama)
+
+## Reference
+
+- [FAQ](https://stenoai.co/docs/faq)

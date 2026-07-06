@@ -23,8 +23,6 @@ eggs/
 lib/
 !app/renderer/src/lib/
 
-# Superpowers skill scratch — agent working notes, not project content.
-docs/
 lib64/
 parts/
 sdist/

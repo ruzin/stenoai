@@ -7,11 +7,11 @@ When Steno captures both microphone and system audio, transcripts include speake
 
 ## How it works
 
-Steno records the two audio channels separately -- your microphone and your system audio -- and processes them in parallel through Whisper. The resulting transcript interleaves both channels with their respective labels based on timing.
+Steno records the microphone and system audio as two separate channels. The default Parakeet engine uses this stereo separation to diarize the transcript -- lines from the microphone channel are labeled `[You]` and lines from the system audio channel are labeled `[Others]`.
 
 ## Requirements
 
-Speaker labels require **system audio capture** to be enabled. Microphone-only recordings produce a single-channel transcript without speaker differentiation.
+Speaker labels require **system audio capture** with the default **Parakeet** engine. Microphone-only recordings produce a single-channel transcript without speaker differentiation. Recordings transcribed with the Whisper engine are mono and do not carry speaker labels.
 
 See [Recording → System audio](/features/recording) for setup instructions.
 

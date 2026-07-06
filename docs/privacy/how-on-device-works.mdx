@@ -11,7 +11,7 @@ When you stop a recording, Steno runs this sequence entirely on your device:
 
 ```
 Audio file (local)
-  → whisper.cpp (on-device transcription)
+  → Parakeet or Whisper (on-device transcription)
   → transcript.txt (saved locally)
   → Ollama (on-device LLM)
   → summary.md (saved locally)
@@ -21,9 +21,9 @@ In the default local configuration, no step in this pipeline contacts an externa
 
 ## What runs on your Mac
 
-**Transcription -- whisper.cpp**
+**Transcription -- Parakeet or Whisper**
 
-Steno uses [whisper.cpp](https://github.com/ggerganov/whisper.cpp), a C++ port of OpenAI's Whisper model optimized for Apple Silicon. The model weights are stored in `~/Library/Application Support/stenoai/` and executed entirely in-process. There is no Whisper API call.
+Steno transcribes with one of two on-device engines. **Parakeet** (the default) runs via MLX on Apple Silicon and produces a live transcript while you record. **Whisper** (`large-v3-turbo`) is an optional alternate for the full 99-language set, selectable in **Settings → Transcription**. Both run entirely in-process -- the model weights are stored under `~/Library/Application Support/stenoai/` and there is no transcription API call.
 
 **Summarization -- Ollama**
 
@@ -33,7 +33,7 @@ Steno bundles [Ollama](https://ollama.com), which manages and runs small languag
 
 | Request | When | Why |
 |---------|------|-----|
-| Model download | First launch / setup only | Downloads Whisper and Ollama model weights |
+| Model download | First launch / setup only | Downloads transcription and Ollama model weights |
 | Update check | On app launch | Checks `github.com/ruzin/stenoai` for new releases |
 | Nothing else | Never | No telemetry, no usage tracking, no audio upload |
 
@@ -48,14 +48,14 @@ stenoai/
 ├── recordings/      # .wav audio files
 ├── transcripts/     # .txt verbatim transcripts
 ├── output/          # .md summaries and notes
-└── models/          # Whisper model weights
+└── models/          # transcription model weights
 ```
 
 Ollama model weights are stored separately in `~/.ollama/models/` (Ollama's default location).
 
 ## Using a cloud model (optional)
 
-Steno optionally supports OpenAI, Anthropic, or a custom API endpoint as an alternative to the local Ollama model. If you configure a cloud model in **Settings → Models**, your transcripts (not audio) are sent to that provider's API for summarization.
+Steno optionally supports OpenAI, Anthropic, AWS Bedrock, or a custom API endpoint as an alternative to the local Ollama model. If you configure a cloud model in **Settings → Models**, your transcripts (not audio) are sent to that provider's API for summarization.
 
 This is opt-in, off by default, and clearly indicated in the UI. If you work with confidential data, use the local model.
 

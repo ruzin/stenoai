@@ -7,7 +7,7 @@ description: "Download and install Steno on macOS. The setup takes about five mi
 
 - macOS 12 (Monterey) or later
 - 8GB RAM minimum (16GB recommended for larger models)
-- ~5GB free disk space for the default models
+- ~8GB free disk space for the default models
 
 ## Install Steno
 
@@ -34,8 +34,8 @@ description: "Download and install Steno on macOS. The setup takes about five mi
   <Step title="Download models">
     On first launch, Steno will prompt you to download the default models:
 
-    - Transcription: `whisper-small` (~480MB)
-    - Summarization: `llama3.2:3b` (~2GB)
+    - Transcription: Parakeet (~572MB)
+    - Summarization: Gemma 4 E2B (~6.5GB)
 
     Both downloads happen inside the app. This requires an internet connection and takes a few minutes depending on your connection. After this, Steno runs entirely offline.
   </Step>
@@ -49,7 +49,7 @@ description: "Download and install Steno on macOS. The setup takes about five mi
 
 Once setup is complete, go to **Settings → Setup Check** inside the app. This runs a diagnostic that confirms:
 
-- Whisper model is installed and functional
+- The transcription model is installed and functional
 - Ollama is running and the summarization model is loaded
 - Storage paths are writable
 

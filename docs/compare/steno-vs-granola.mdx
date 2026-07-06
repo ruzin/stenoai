@@ -1,0 +1,63 @@
+---
+title: "Steno vs Granola"
+description: "A direct comparison of Steno and Granola: on-device vs cloud processing, cost, privacy, and which AI meeting notetaker to choose on a Mac."
+---
+
+Granola is a popular AI meeting notepad for Mac. Like Steno, it captures your computer's audio without sending a bot into the call. The key difference is where the work happens: Steno transcribes and summarizes **on your Mac**, while Granola relies on the cloud to generate your AI notes and stores them in your Granola account.
+
+## At a glance
+
+| | Steno | Granola |
+|---|---|---|
+| **Audio processing** | On your Mac, always | Captured locally, processed in the cloud |
+| **Transcription** | On-device (Parakeet / Whisper) | On-device or cloud |
+| **AI notes / summaries** | On-device (local model) or optional cloud | Cloud (OpenAI, Anthropic) |
+| **Notes stored** | On your Mac | Granola's cloud (US) |
+| **Account required** | No | Yes |
+| **Works offline** | Yes | No |
+| **Meeting bot** | No | No |
+| **Price** | Free (personal & team) | Free tier (limited history) / $14 / $35 per user/mo |
+| **Open source** | Yes (MIT) | No |
+| **Platform** | macOS only | macOS, Windows, iOS, Android |
+| **Data used for AI training** | No | Yes, unless you opt out |
+
+*Granola details as of 2026; check granola.ai for current pricing and policies.*
+
+## The core difference: bot-free is not the same as local
+
+Granola markets itself as bot-free, and it is — no participant joins your call. But bot-free describes only how audio is captured, not where it is processed. Granola relies on cloud AI to generate your notes, and your transcripts are stored in Granola's cloud.
+
+Steno is bot-free **and** local: transcription and summarization run on your Mac, and nothing is uploaded unless you deliberately choose an optional cloud summarization model. For meetings where the audio itself cannot leave your device, that distinction matters.
+
+## Cost
+
+Granola offers a free tier with limited note history, then Business ($14/user/month) and Enterprise ($35/user/month) as of 2026. Steno is free for personal and team use and open source; the only cost is disk space for the local models (roughly 7GB for the default setup).
+
+## Where Granola is stronger
+
+- **Cross-platform and mobile** — Granola runs on Windows, iOS, and Android as well as Mac; Steno is macOS only.
+- **Team and CRM workflows** — Granola offers shared folders and paid integrations (Notion, Slack, HubSpot, and others).
+- **Cloud sync** — your notes are available across devices automatically.
+
+## When to choose Steno
+
+- You want transcription and summarization to happen entirely on your Mac
+- You prefer no account and fully offline operation
+- You want free, open-source software you can inspect
+- Your meetings are confidential and the audio cannot go to a cloud service
+
+## When to choose Granola
+
+- You need your notes on Windows or mobile as well as Mac
+- You want cloud sync across devices and team sharing
+- Cloud processing of meeting audio is acceptable for your work
+
+---
+
+<Accordion title="Is Granola on-device like Steno?">
+No. Granola captures audio without a bot, but it relies on cloud AI to generate your notes and stores them on Granola's servers. Steno runs the whole pipeline on your Mac by default.
+</Accordion>
+
+<Accordion title="Can I use Steno without an account?">
+Yes. Steno has no account and works fully offline after the one-time model download. Granola requires signing in and stores your notes in its cloud.
+</Accordion>

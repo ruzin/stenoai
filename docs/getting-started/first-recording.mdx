@@ -15,7 +15,7 @@ This guide walks through making a short test recording so you can verify the ful
   <Step title="Press Record">
     Click the **Record** button. Give the recording a name, or leave it blank -- Steno will generate a title automatically from the transcript.
 
-    Steno starts capturing audio immediately. You will see a live timer in the top bar.
+    Steno starts capturing audio immediately. You will see a live timer in the top bar, and with the default Parakeet engine a live transcript appears while you record.
   </Step>
 
   <Step title="Say something">
@@ -29,7 +29,7 @@ This guide walks through making a short test recording so you can verify the ful
 
 ## Review the output
 
-Transcription usually takes 10-30 seconds for a one-minute recording on Apple Silicon. When it finishes:
+Transcription runs on-device and is fast on Apple Silicon, so a short recording is ready in moments. When it finishes:
 
 - The **transcript** appears in the right pane with timestamped lines
 - A **summary** is generated below the transcript: a short paragraph, key topics, and any action items Steno identified
@@ -60,11 +60,11 @@ Summaries and transcripts are plain Markdown files. You can open, edit, and sync
 ---
 
 <Accordion title="Transcription is taking a long time -- is that normal?">
-Transcription speed depends on the model and your hardware. On Apple Silicon, `whisper-small` processes roughly 5-10x real-time (a 10-minute recording takes 1-2 minutes). Switch to `whisper-base` in Settings for faster results at slightly lower accuracy.
+Transcription speed depends on your hardware and which engine you use. It runs entirely on-device and is fast on Apple Silicon; the default Parakeet engine also shows a live transcript as you record. Intel Macs and the optional Whisper engine run more slowly. You can switch engines in **Settings → Transcription**.
 </Accordion>
 
 <Accordion title="The summary is not very useful -- what can I do?">
-Try a larger summarization model. In **Settings → Models**, switch from `llama3.2:3b` to `qwen3.5:9b` or `deepseek-r1:14b`. Larger models produce better-structured notes but take longer to run.
+Try a larger summarization model. In **Settings → Models**, switch from the default `gemma4:e2b-it-qat` to `qwen3.5:9b` or `gpt-oss:20b`. Larger models produce better-structured notes but take longer to run.
 </Accordion>
 
 <Accordion title="I can only see my own voice -- how do I record both sides of a call?">
