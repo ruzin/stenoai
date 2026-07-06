@@ -30,6 +30,7 @@ export function NotificationToast() {
     if (data.meeting_url) {
       ipc().shell.openExternal(data.meeting_url);
     }
+    ipc().recording.start(data.title);
     handleClose();
   };
 
