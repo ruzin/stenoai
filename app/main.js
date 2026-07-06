@@ -349,7 +349,7 @@ async function showShortcutNotification(body) {
     }
 
     new Notification({
-      title: 'StenoAI Shortcuts',
+      title: 'Steno Shortcuts',
       body
     }).show();
   } catch (error) {
@@ -861,7 +861,7 @@ function createTray() {
   const icon = nativeImage.createFromPath(getTrayIconPath(false));
   icon.setTemplateImage(true);
   tray = new Tray(icon);
-  tray.setToolTip('StenoAI');
+  tray.setToolTip('Steno');
 
   updateTrayMenu();
 }
@@ -871,7 +871,7 @@ function updateTrayIcon(recording) {
   const icon = nativeImage.createFromPath(getTrayIconPath(recording));
   icon.setTemplateImage(true);
   tray.setImage(icon);
-  tray.setToolTip(recording ? 'StenoAI - Recording' : 'StenoAI');
+  tray.setToolTip(recording ? 'Steno - Recording' : 'Steno');
   updateTrayMenu();
 }
 
@@ -890,7 +890,7 @@ function updateTrayMenu() {
 
   const contextMenu = Menu.buildFromTemplate([
     {
-      label: 'Open StenoAI',
+      label: 'Open Steno',
       click: showAndFocusWindow
     },
     {
@@ -911,14 +911,14 @@ function updateTrayMenu() {
       }
     },
     {
-      label: 'Hide StenoAI',
+      label: 'Hide Steno',
       click: () => {
         if (mainWindow) mainWindow.hide();
       }
     },
     { type: 'separator' },
     {
-      label: `StenoAI v${appVersion}`,
+      label: `Steno v${appVersion}`,
       enabled: false
     },
     {
@@ -929,7 +929,7 @@ function updateTrayMenu() {
     },
     { type: 'separator' },
     {
-      label: 'Quit StenoAI',
+      label: 'Quit Steno',
       click: () => {
         app.quit();
       }
@@ -4566,7 +4566,7 @@ ipcMain.handle('setup-ollama-and-model', async () => {
       if (darwinMajor < 23) {
         const macosVersion = darwinMajor >= 22 ? '13 (Ventura)' : darwinMajor >= 21 ? '12 (Monterey)' : `(Darwin ${darwinMajor})`;
         sendDebugLog(`macOS ${macosVersion} detected — Ollama requires macOS 14 (Sonoma) or later`);
-        return { success: false, error: 'StenoAI requires macOS 14 (Sonoma) or later for local AI summarization. Please update your macOS or use a remote Ollama server in Settings.' };
+        return { success: false, error: 'Steno requires macOS 14 (Sonoma) or later for local AI summarization. Please update your macOS or use a remote Ollama server in Settings.' };
       }
     }
 
@@ -4574,7 +4574,7 @@ ipcMain.handle('setup-ollama-and-model', async () => {
     const finalOllamaPath = await findOllamaExecutable();
     if (!finalOllamaPath) {
       sendDebugLog('Error: Bundled Ollama not found');
-      return { success: false, error: 'Bundled Ollama not found. Please reinstall StenoAI.' };
+      return { success: false, error: 'Bundled Ollama not found. Please reinstall Steno.' };
     }
     sendDebugLog(`Found bundled Ollama at: ${finalOllamaPath}`);
 
@@ -4652,7 +4652,7 @@ ipcMain.handle('setup-ollama-and-model', async () => {
     if (!ready) {
       if (ollamaExited) {
         if (ollamaDyldError) {
-          return { success: false, error: 'Ollama crashed due to incompatible macOS version. StenoAI requires macOS 14 (Sonoma) or later for local AI. Please update macOS or use a remote Ollama server in Settings.' };
+          return { success: false, error: 'Ollama crashed due to incompatible macOS version. Steno requires macOS 14 (Sonoma) or later for local AI. Please update macOS or use a remote Ollama server in Settings.' };
         }
         return { success: false, error: `Ollama failed to start (exit code: ${ollamaExitCode}). Check debug logs for details.` };
       }
@@ -4952,7 +4952,7 @@ ipcMain.handle('select-storage-folder', async () => {
   try {
     const result = await dialog.showOpenDialog(mainWindow, {
       properties: ['openDirectory', 'createDirectory'],
-      title: 'Choose storage location for StenoAI data',
+      title: 'Choose storage location for Steno data',
       buttonLabel: 'Select Folder'
     });
 
@@ -6606,7 +6606,7 @@ function showRecordingFailedNotification(body) {
   try {
     if (!Notification.isSupported()) return;
     new Notification({
-      title: 'StenoAI',
+      title: 'Steno',
       body: body || "Recording couldn't start.",
     }).show();
   } catch (error) {
@@ -6939,7 +6939,7 @@ async function checkForUpdates() {
       path: '/repos/ruzin/stenoai/releases/latest',
       method: 'GET',
       headers: {
-        'User-Agent': 'StenoAI-Updater'
+        'User-Agent': 'Steno-Updater'
       }
     };
 
@@ -7271,7 +7271,7 @@ function startGoogleAuth() {
         saveGoogleTokens(tokens);
 
         res.writeHead(200, { 'Content-Type': 'text/html' });
-        res.end('<html><body style="font-family: -apple-system, sans-serif; text-align: center; padding: 60px;"><h2>Connected to Google Calendar</h2><p>You can close this tab and return to StenoAI.</p></body></html>');
+        res.end('<html><body style="font-family: -apple-system, sans-serif; text-align: center; padding: 60px;"><h2>Connected to Google Calendar</h2><p>You can close this tab and return to Steno.</p></body></html>');
 
         server.close();
         if (timeoutId) clearTimeout(timeoutId);
@@ -7609,7 +7609,7 @@ function startOutlookAuth() {
         saveOutlookTokens(tokens);
 
         res.writeHead(200, { 'Content-Type': 'text/html' });
-        res.end('<html><body style="font-family: -apple-system, sans-serif; text-align: center; padding: 60px;"><h2>Connected to Outlook Calendar</h2><p>You can close this tab and return to StenoAI.</p></body></html>');
+        res.end('<html><body style="font-family: -apple-system, sans-serif; text-align: center; padding: 60px;"><h2>Connected to Outlook Calendar</h2><p>You can close this tab and return to Steno.</p></body></html>');
 
         server.close();
         if (timeoutId) clearTimeout(timeoutId);

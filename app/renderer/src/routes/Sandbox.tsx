@@ -140,7 +140,7 @@ export function Sandbox() {
           <Section
             id="typography"
             title="Typography"
-            hint="Charter serif for display + H1/H2. Inter for body. JetBrains Mono for code."
+            hint="Ovo serif for display + H1/H2. Inter for body. JetBrains Mono for code."
           >
             <div className="space-y-3">
               <Display>Display — welcome back.</Display>
