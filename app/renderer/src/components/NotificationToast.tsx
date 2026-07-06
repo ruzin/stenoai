@@ -35,7 +35,7 @@ export function NotificationToast() {
   };
 
   const handleFocusMain = () => {
-    ipc().notification.focusMain();
+    ipc().window.focus();
     handleClose();
   };
 

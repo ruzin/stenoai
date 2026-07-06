@@ -8311,10 +8311,22 @@ function createNotificationWindow(event) {
   const rendererDist = path.join(__dirname, 'renderer', 'dist', 'index.html');
   notificationWindow.loadFile(rendererDist, { hash: '/notification' });
 
+  let autoCloseTimer;
   notificationWindow.once('ready-to-show', () => {
     notificationWindow.showInactive();
     notificationWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
     notificationWindow.setAlwaysOnTop(true, 'screen-saver', 1);
+
+    autoCloseTimer = setTimeout(() => {
+      if (notificationWindow && !notificationWindow.isDestroyed()) {
+        notificationWindow.close();
+      }
+    }, 15000);
+
+    notificationWindow.on('closed', () => {
+      if (autoCloseTimer) clearTimeout(autoCloseTimer);
+      notificationWindow = null;
+    });
 
     notificationWindow.webContents.send('show-notification', {
       title: event.title || 'Meeting starting',
@@ -8328,13 +8340,6 @@ function createNotificationWindow(event) {
 ipcMain.handle('close-notification-window', () => {
   if (notificationWindow && !notificationWindow.isDestroyed()) {
     notificationWindow.close();
-  }
-});
-
-ipcMain.handle('focus-main-window', () => {
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    if (!mainWindow.isVisible()) mainWindow.show();
-    mainWindow.focus();
   }
 });
 

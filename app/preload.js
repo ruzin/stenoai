@@ -315,7 +315,6 @@ const stenoai = {
 
   notification: {
     close: () => invoke('close-notification-window'),
-    focusMain: () => invoke('focus-main-window'),
   },
 
   // All main-driven events. Every subscribe returns an unsubscribe fn.
