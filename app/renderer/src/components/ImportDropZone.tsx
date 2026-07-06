@@ -33,7 +33,9 @@ export function ImportDropZone() {
   const { status } = useRecording();
   const isRecording = status === 'recording' || status === 'paused';
   const isRecordingRef = React.useRef(isRecording);
-  isRecordingRef.current = isRecording;
+  React.useEffect(() => {
+    isRecordingRef.current = isRecording;
+  }, [isRecording]);
 
   React.useEffect(() => {
     if (typeof window === 'undefined' || !window.stenoai) return;

@@ -207,6 +207,12 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
   const [titleRegening, setTitleRegening] = React.useState(() =>
     pendingTitleRegens.has(summaryFile),
   );
+  const [prevSummaryFile, setPrevSummaryFile] = React.useState(summaryFile);
+  if (summaryFile !== prevSummaryFile) {
+    setPrevSummaryFile(summaryFile);
+    setTitleRegening(pendingTitleRegens.has(summaryFile));
+  }
+
   const [isEditingTitle, setIsEditingTitle] = React.useState(false);
   const [titleError, setTitleError] = React.useState<string | null>(null);
   const titleEditRef = React.useRef<HTMLSpanElement>(null);
@@ -214,7 +220,6 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
   React.useEffect(() => {
     const pending = pendingTitleRegens.get(summaryFile);
     if (!pending) return;
-    setTitleRegening(true);
     let cancelled = false;
     pending.finally(() => {
       if (!cancelled) setTitleRegening(false);
@@ -262,15 +267,14 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
   const [activeReportId, setActiveReportId] = React.useState<string | null>(
     meeting.active_report ?? null,
   );
+  const [prevMeetingReport, setPrevMeetingReport] = React.useState<string | null>(meeting.active_report ?? null);
+  if ((meeting.active_report ?? null) !== prevMeetingReport) {
+    setPrevMeetingReport(meeting.active_report ?? null);
+    setActiveReportId(meeting.active_report ?? null);
+  }
   const activeReport = activeReportId
     ? reports.find((r) => r.id === activeReportId) ?? null
     : null;
-  // meeting.active_report is the source of truth (the switch persists it). Re-sync
-  // local state whenever it changes so a reprocess (backend clears it to null)
-  // can't leave the UI showing a stale report. Idempotent for user clicks.
-  React.useEffect(() => {
-    setActiveReportId(meeting.active_report ?? null);
-  }, [meeting.active_report]);
   // When a report generation finishes, summaryComplete fires for THIS meeting
   // and we want to land on the freshly-created report. The IPC stream doesn't
   // carry the new report id, so we flag "the active stream is a report" and,
@@ -1308,6 +1312,7 @@ function StreamingView({ text, phase, chunkProgress }: { text: string; phase: St
   const isStreaming = phase === 'analyzing' || phase === 'generating';
 
   const prevBlockCountRef = React.useRef(blocks.length);
+  // eslint-disable-next-line react-hooks/refs
   const firstNewIdx = prevBlockCountRef.current;
   React.useEffect(() => {
     prevBlockCountRef.current = blocks.length;
@@ -1480,7 +1485,11 @@ function FolderPicker({ summaryFile, assignedFolderIds }: { summaryFile: string;
   const allFolders = folders.data ?? [];
   const serverFolderId = assignedFolderIds[0] ?? null;
   const [localFolderId, setLocalFolderId] = React.useState<string | null>(serverFolderId);
-  React.useEffect(() => { setLocalFolderId(serverFolderId); }, [serverFolderId]);
+  const [prevServerFolderId, setPrevServerFolderId] = React.useState<string | null>(serverFolderId);
+  if (serverFolderId !== prevServerFolderId) {
+    setPrevServerFolderId(serverFolderId);
+    setLocalFolderId(serverFolderId);
+  }
 
   const currentFolder = allFolders.find((f) => f.id === localFolderId) ?? null;
 

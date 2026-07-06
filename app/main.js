@@ -191,6 +191,7 @@ function getUserDataDir() {
 }
 
 let mainWindow;
+let notificationWindow;
 let pythonProcess;
 let tray = null;
 let isQuitting = false;
@@ -1505,7 +1506,7 @@ function runPythonScript(script, args = [], silent = false, extraEnv = {}, logLa
         reject(new Error(`Python script failed with code ${code}: ${stderr}`));
       }
     });
-    
+
     process.on('error', (error) => {
       sendDebugLog(`Command error: ${error.message}`);
       reject(error);
@@ -1623,11 +1624,11 @@ ipcMain.handle('select-audio-file', async () => {
       { name: 'Audio Files', extensions: IMPORT_AUDIO_EXTENSIONS }
     ]
   });
-  
+
   if (!result.canceled && result.filePaths.length > 0) {
     return { success: true, filePath: result.filePaths[0] };
   }
-  
+
   return { success: false, error: 'No file selected' };
 });
 
@@ -2904,10 +2905,10 @@ ipcMain.handle('delete-meeting', async (event, meetingData) => {
         error: `Blocked ${validationErrors} file deletion(s) due to security validation`
       };
     }
-    
-    return { 
-      success: true, 
-      message: `Deleted meeting and ${deletedCount} associated files` 
+
+    return {
+      success: true,
+      message: `Deleted meeting and ${deletedCount} associated files`
     };
   } catch (error) {
     console.error('Delete meeting error:', error);
@@ -3475,13 +3476,13 @@ async function processNextInQueue() {
   if (isProcessing || processingQueue.length === 0) {
     return;
   }
-  
+
   isProcessing = true;
   currentProcessingJob = processingQueue.shift();
   currentProcessingStartedAtMs = Date.now();
 
   console.log(`🔄 Processing queued job: ${currentProcessingJob.sessionName}`);
-  
+
   try {
     const queueAiEnv = getAiEnv();
     const queueEnv = Object.keys(queueAiEnv).length > 0 ? { ...require('process').env, ...queueAiEnv } : undefined;
@@ -4843,15 +4844,15 @@ ipcMain.handle('setup-test', async () => {
   try {
     sendDebugLog('Running system test...');
     sendDebugLog('$ python simple_recorder.py test');
-    
+
     // Test the complete system
     const result = await runPythonScript('simple_recorder.py', ['test']);
-    
+
     // Log the full result to debug console
     result.split('\n').forEach(line => {
       if (line.trim()) sendDebugLog(line.trim());
     });
-    
+
     if (result.includes('System check passed') || result.includes('SUCCESS')) {
       sendDebugLog('System test completed successfully');
       trackEvent('setup_completed', { step: 'system_test' });
@@ -4870,16 +4871,16 @@ ipcMain.handle('setup-test', async () => {
   }
 });
 
-// Settings window IPC handlers  
+// Settings window IPC handlers
 ipcMain.handle('trigger-setup-wizard', async () => {
   try {
     console.log('🔧 Starting setup wizard from settings...');
-    
+
     // Trigger the main window's setup flow
     if (mainWindow) {
       mainWindow.webContents.send('trigger-setup-flow');
     }
-    
+
     return { success: true, message: 'Setup wizard triggered in main window' };
   } catch (error) {
     console.error('Setup wizard failed:', error);
@@ -5051,13 +5052,13 @@ ipcMain.handle('get-ai-prompts', async () => {
   try {
     // Read the summarization prompt from the Python backend
     const summarizerPath = path.join(__dirname, '..', 'src', 'summarizer.py');
-    
+
     if (fs.existsSync(summarizerPath)) {
       const content = fs.readFileSync(summarizerPath, 'utf8');
-      
+
       // Extract the full prompt from the _create_permissive_prompt method
       const promptMatch = content.match(/def _create_permissive_prompt[\s\S]*?return f"""([\s\S]*?)"""/);
-      
+
       if (promptMatch) {
         return {
           success: true,
@@ -5065,7 +5066,7 @@ ipcMain.handle('get-ai-prompts', async () => {
         };
       }
     }
-    
+
     return {
       success: true,
       summarization: 'Prompt not found in summarizer.py'
@@ -6944,26 +6945,26 @@ async function checkForUpdates() {
 
     const req = https.request(options, (res) => {
       let data = '';
-      
+
       res.on('data', (chunk) => {
         data += chunk;
       });
-      
+
       res.on('end', () => {
         try {
           const release = JSON.parse(data);
           const latestVersion = release.tag_name.replace(/^v/, ''); // Remove 'v' prefix if present
-          
+
           // Get current version from package.json
           const packagePath = path.join(__dirname, 'package.json');
           const packageContent = JSON.parse(fs.readFileSync(packagePath, 'utf8'));
           const currentVersion = packageContent.version;
-          
+
           console.log(`Current version: ${currentVersion}, Latest version: ${latestVersion}`);
-          
+
           // Simple version comparison (works for semantic versioning)
           const isUpdateAvailable = compareVersions(currentVersion, latestVersion) < 0;
-          
+
           resolve({
             success: true,
             updateAvailable: isUpdateAvailable,
@@ -6979,17 +6980,17 @@ async function checkForUpdates() {
         }
       });
     });
-    
+
     req.on('error', (error) => {
       console.error('Error checking for updates:', error);
       resolve({ success: false, error: error.message });
     });
-    
+
     req.setTimeout(10000, () => {
       req.destroy();
       resolve({ success: false, error: 'Update check timeout' });
     });
-    
+
     req.end();
   });
 }
@@ -6997,15 +6998,15 @@ async function checkForUpdates() {
 function compareVersions(current, latest) {
   const currentParts = current.split('.').map(Number);
   const latestParts = latest.split('.').map(Number);
-  
+
   for (let i = 0; i < Math.max(currentParts.length, latestParts.length); i++) {
     const currentPart = currentParts[i] || 0;
     const latestPart = latestParts[i] || 0;
-    
+
     if (currentPart < latestPart) return -1;
     if (currentPart > latestPart) return 1;
   }
-  
+
   return 0;
 }
 
@@ -7013,22 +7014,22 @@ function getDownloadUrl(assets) {
   // Find the appropriate download URL based on platform/architecture
   const platform = process.platform;
   const arch = process.arch;
-  
+
   if (platform === 'darwin') {
     // Look for macOS DMG files
-    const armAsset = assets.find(asset => 
+    const armAsset = assets.find(asset =>
       asset.name.includes('arm64') && asset.name.includes('dmg')
     );
-    const intelAsset = assets.find(asset => 
+    const intelAsset = assets.find(asset =>
       asset.name.includes('x64') && asset.name.includes('dmg')
     );
-    
+
     // Prefer ARM64 for Apple Silicon, fallback to Intel
     if (arch === 'arm64' && armAsset) return armAsset.browser_download_url;
     if (intelAsset) return intelAsset.browser_download_url;
     if (armAsset) return armAsset.browser_download_url;
   }
-  
+
   // Fallback to first asset or releases page
   return assets.length > 0 ? assets[0].browser_download_url : null;
 }
@@ -8267,23 +8268,83 @@ async function firePreMeetingNotification(event) {
     sendDebugLog(`[premeeting] suppressed — already recording "${event.title}"`);
     return false;
   }
-  if (!Notification.isSupported()) return false;
-  const notif = new Notification({
-    title: 'Meeting starting',
-    body: `${event.title || 'Your meeting'} starts in 2 minutes`,
-  });
-  notif.on('click', () => {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      if (!mainWindow.isVisible()) mainWindow.show();
-      mainWindow.focus();
-    }
-  });
-  notif.show();
+
+  createNotificationWindow(event);
+
   // Mark fired only after we've actually shown it, so an unshowable notif
   // (no OS support) isn't permanently skipped by the scheduler's dedupe.
   premeetingFiredIds.add(event.id);
   return true;
 }
+
+function createNotificationWindow(event) {
+  if (notificationWindow && !notificationWindow.isDestroyed()) {
+    notificationWindow.close();
+  }
+
+  const { screen } = require('electron');
+  const primaryDisplay = screen.getPrimaryDisplay();
+  const { width } = primaryDisplay.workAreaSize;
+  const { x, y } = primaryDisplay.workArea;
+
+  notificationWindow = new BrowserWindow({
+    width: 400,
+    height: 70,
+    x: x + width - 425,
+    y: y + 1,
+    frame: false,
+    transparent: true,
+    alwaysOnTop: true,
+    resizable: false,
+    skipTaskbar: true,
+    focusable: false,
+    hasShadow: false,
+    backgroundColor: '#00000000',
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true,
+      preload: path.join(__dirname, 'preload.js'),
+    },
+  });
+
+  const rendererDist = path.join(__dirname, 'renderer', 'dist', 'index.html');
+  notificationWindow.loadFile(rendererDist, { hash: '/notification' });
+
+  const win = notificationWindow;
+  let autoCloseTimer;
+  win.once('ready-to-show', () => {
+    win.showInactive();
+    win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    win.setAlwaysOnTop(true, 'screen-saver', 1);
+
+    autoCloseTimer = setTimeout(() => {
+      if (!win.isDestroyed()) {
+        win.close();
+      }
+    }, 15000);
+
+    win.on('closed', () => {
+      if (autoCloseTimer) clearTimeout(autoCloseTimer);
+      if (notificationWindow === win) {
+        notificationWindow = null;
+      }
+    });
+
+    win.webContents.send('show-notification', {
+      title: event.title || 'Meeting starting',
+      time: event.start ? new Date(event.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
+      meeting_url: event.meeting_url,
+      attendees: event.attendees ? event.attendees.map(a => a.name || a.email).join(', ') : '',
+    });
+  });
+}
+
+ipcMain.handle('close-notification-window', () => {
+  if (notificationWindow && !notificationWindow.isDestroyed()) {
+    notificationWindow.close();
+  }
+});
 
 function clearPreMeetingTimers() {
   for (const t of premeetingTimers.values()) clearTimeout(t);

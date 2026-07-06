@@ -398,7 +398,9 @@ function RenamePopover({
   const inputRef = React.useRef<HTMLInputElement>(null);
   const closingRef = React.useRef(false);
   const valueRef = React.useRef(value);
-  valueRef.current = value;
+  React.useEffect(() => {
+    valueRef.current = value;
+  }, [value]);
 
   React.useEffect(() => {
     const id = requestAnimationFrame(() => setVisible(true));

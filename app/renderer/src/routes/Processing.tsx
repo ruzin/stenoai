@@ -35,11 +35,9 @@ export function Processing() {
   const [activeSession, setActiveSession] = React.useState<string | null>(
     () => recording.sessionName,
   );
-  React.useEffect(() => {
-    if (recording.sessionName && recording.sessionName !== activeSession) {
-      setActiveSession(recording.sessionName);
-    }
-  }, [recording.sessionName, activeSession]);
+  if (recording.sessionName && recording.sessionName !== activeSession) {
+    setActiveSession(recording.sessionName);
+  }
 
   const draft = useLiveDraftStore((s) =>
     activeSession ? s.drafts[activeSession] : undefined,
@@ -48,8 +46,14 @@ export function Processing() {
   // Recordings have a live draft to time from. Imported files don't — fall back
   // to the queue's processing elapsed (get-queue-status), which advances on the
   // poll, so the timer counts up instead of sticking at 0s.
+  const [now, setNow] = React.useState(() => Date.now());
+  React.useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
   const totalElapsedSeconds = startedAt
-    ? Math.max(0, Math.floor((Date.now() - startedAt.getTime()) / 1000))
+    ? Math.max(0, Math.floor((now - startedAt.getTime()) / 1000))
     : recording.elapsed;
 
   const [stage, setStage] = React.useState<ProcessingStage>('transcribing');
@@ -462,8 +466,14 @@ export function ProcessingDock() {
   // Recordings have a live draft to time from. Imported files don't — fall back
   // to the queue's processing elapsed (get-queue-status), which advances on the
   // poll, so the timer counts up instead of sticking at 0s.
+  const [now, setNow] = React.useState(() => Date.now());
+  React.useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
   const totalElapsedSeconds = startedAt
-    ? Math.max(0, Math.floor((Date.now() - startedAt.getTime()) / 1000))
+    ? Math.max(0, Math.floor((now - startedAt.getTime()) / 1000))
     : recording.elapsed;
 
   return (
