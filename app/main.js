@@ -8291,7 +8291,7 @@ function createNotificationWindow(event) {
     width: 400,
     height: 90,
     x: x + width - 420,
-    y: y + 24,
+    y: y + 12,
     frame: false,
     transparent: true,
     alwaysOnTop: true,
