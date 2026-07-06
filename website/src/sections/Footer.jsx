@@ -14,6 +14,7 @@ export function Footer() {
             <Wordmark size={16} />
           </div>
           <div className="flex gap-4 md:gap-6">
+            <a href="/docs" className="text-fg-2 text-sm no-underline hover:text-fg-1 transition-colors">Documentation</a>
             <a href={DISCORD_URL} target="_blank" rel="noopener noreferrer" className="text-fg-2 text-sm no-underline hover:text-fg-1 transition-colors">Discord</a>
             <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer" onClick={() => trackGitHub('footer')} className="text-fg-2 text-sm no-underline hover:text-fg-1 transition-colors">GitHub</a>
             <a href="/privacy.html" className="text-fg-2 text-sm no-underline hover:text-fg-1 transition-colors">Privacy</a>
