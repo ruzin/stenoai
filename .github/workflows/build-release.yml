@@ -239,31 +239,33 @@ jobs:
     - name: Create Release with Assets
       uses: softprops/action-gh-release@v1
       with:
-        name: StenoAI ${{ github.event.inputs.version || steps.package_version.outputs.version }}
+        name: Steno ${{ github.event.inputs.version || steps.package_version.outputs.version }}
         body: |
-          ## StenoAI v${{ github.event.inputs.version || steps.package_version.outputs.version }}
+          ## Steno v${{ github.event.inputs.version || steps.package_version.outputs.version }}
 
           ${{ steps.tag_body.outputs.text }}
 
           ### Downloads
 
-          - **Apple Silicon (M1-M5)**: `stenoAI-macos-arm64.dmg`
+          - **Apple Silicon (M1-M5)**: [`stenoAI-macos-arm64.dmg`](https://github.com/${{ github.repository }}/releases/download/v${{ github.event.inputs.version || steps.package_version.outputs.version }}/stenoAI-macos-arm64.dmg)
+
+          The `.zip` and `.yml` assets below are used by the in-app auto-updater - no need to download them manually.
 
           ### First Time Setup
           1. Download the DMG
-          2. Install by dragging StenoAI to Applications
+          2. Install by dragging Steno to Applications
           3. Launch app - setup wizard runs automatically
           4. Grant microphone permissions when prompted
           5. Start recording meetings!
 
           ### Requirements
-          - **Apple Silicon Mac (M1 or later)** — Intel Macs are no longer supported as of v0.4.0
+          - **Apple Silicon Mac (M1 or later)** - Intel Macs are not supported (since v0.4.0)
           - macOS 12 (Monterey) or later
           - Internet connection for initial setup
           - Microphone access permissions
 
           ### Intel Mac users
-          v0.4.0 is **Apple Silicon only**. Intel users should stay on [v0.3.8](https://github.com/ruzin/stenoai/releases/tag/v0.3.8), which is the last release supporting Intel Macs. Auto-update on existing Intel installs is gated and will not push v0.4.0 to those machines.
+          Steno is **Apple Silicon only** (since v0.4.0). Intel users should stay on [v0.3.8](https://github.com/ruzin/stenoai/releases/tag/v0.3.8), the last release supporting Intel Macs. Auto-update on existing Intel installs is gated and will not offer newer versions to those machines.
         files: |
           release/*.dmg
           release/*.zip
