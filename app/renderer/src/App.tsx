@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { NotificationToast } from '@/components/NotificationToast';
+
 import { useTheme } from '@/hooks/useTheme';
 import { Sandbox } from '@/routes/Sandbox';
 import { Settings } from '@/routes/Settings';
@@ -163,10 +163,6 @@ export function App() {
       }
     })();
   }, [recording.isLoading, recording.status, route]);
-
-  if (route === '/notification') {
-    return <NotificationToast />;
-  }
 
   const isRecordingRoute = route === '/recording';
   const isProcessingRoute = route === '/meetings/processing';

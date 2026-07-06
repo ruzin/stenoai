@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { ipc } from '@/lib/ipc';
+import { useTheme } from '@/hooks/useTheme';
 
 interface NotificationData {
   title: string;
@@ -9,6 +10,7 @@ interface NotificationData {
 }
 
 export function NotificationToast() {
+  useTheme();
   const [data, setData] = React.useState<NotificationData | null>(null);
 
   React.useLayoutEffect(() => {

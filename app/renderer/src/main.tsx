@@ -35,14 +35,26 @@ class ErrorBoundary extends React.Component<
   }
 }
 
-ReactDOM.createRoot(document.getElementById('root')!).render(
-  <React.StrictMode>
-    <ErrorBoundary>
-      <QueryClientProvider client={queryClient}>
-        <TooltipProvider delayDuration={50}>
-          <App />
-        </TooltipProvider>
-      </QueryClientProvider>
-    </ErrorBoundary>
-  </React.StrictMode>
-);
+import { NotificationToast } from './components/NotificationToast';
+
+const isNotification = window.location.hash === '#/notification';
+
+if (isNotification) {
+  ReactDOM.createRoot(document.getElementById('root')!).render(
+    <React.StrictMode>
+      <NotificationToast />
+    </React.StrictMode>
+  );
+} else {
+  ReactDOM.createRoot(document.getElementById('root')!).render(
+    <React.StrictMode>
+      <ErrorBoundary>
+        <QueryClientProvider client={queryClient}>
+          <TooltipProvider delayDuration={50}>
+            <App />
+          </TooltipProvider>
+        </QueryClientProvider>
+      </ErrorBoundary>
+    </React.StrictMode>
+  );
+}
