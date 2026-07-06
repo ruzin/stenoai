@@ -484,7 +484,7 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
       .filter(Boolean)
       .join(' · ');
     if (meta) lines.push(meta);
-    const summary = meeting.summary?.trim();
+    const summary = meeting.summary ? stripReasoning(meeting.summary).trim() : undefined;
     if (summary) {
       lines.push('', 'SUMMARY', summary);
     }
@@ -842,7 +842,7 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
           data-testid="report-content"
           style={{ color: 'var(--fg-1)', maxWidth: '72ch' }}
         >
-          <ReactMarkdown>{activeReport.content}</ReactMarkdown>
+          <ReactMarkdown>{stripReasoning(activeReport.content)}</ReactMarkdown>
         </section>
       ) : (
         <div className="flex flex-col gap-9">
@@ -1708,7 +1708,7 @@ export function pickTranscriptForShare(meeting: Meeting): string {
 export function composeShareBody(meeting: Meeting): string {
   const sections: string[] = [];
 
-  const summary = meeting.summary?.trim();
+  const summary = meeting.summary ? stripReasoning(meeting.summary).trim() : undefined;
   if (summary) {
     sections.push(`## Summary\n\n${summary}`);
   }

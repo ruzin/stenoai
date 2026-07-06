@@ -2,6 +2,7 @@ import { Folder as FolderIcon, Loader2 } from 'lucide-react';
 import type { Meeting } from '@/lib/ipc';
 import { navigate } from '@/lib/router';
 import { useMeetingsList } from '@/lib/meetingsListContext';
+import { stripReasoning } from '@/lib/markdown';
 
 interface PreviousRowProps {
   meeting: Meeting;
@@ -166,7 +167,7 @@ function formatDuration(seconds?: number): string | undefined {
 }
 
 function previewText(meeting: Meeting): string | undefined {
-  const summary = meeting.summary?.trim();
+  const summary = meeting.summary ? stripReasoning(meeting.summary).trim() : undefined;
   if (summary) return summary;
   const kp = meeting.key_points?.[0];
   if (typeof kp === 'string' && kp.trim()) return kp.trim();

@@ -76,7 +76,7 @@ _AUTO_NAMED_PATTERN = re.compile(
 # tags specifically (not any HTML-like tag) so unrelated inline markup in the
 # model's output can't be mistaken for a reasoning block and get a spurious
 # section break inserted ahead of it.
-_REASONING_TAG_HEADER_PATTERN = re.compile(r'(</(?:think|thought)>)\s*(#{1,6}\s)', re.IGNORECASE)
+_REASONING_TAG_HEADER_PATTERN = re.compile(r'(</(?:think|thought|thinking|reasoning)>)\s*(#{1,6}\s)', re.IGNORECASE)
 
 def _normalize_markdown_for_parsing(md_text: str) -> str:
     """Ensure headers immediately following a reasoning tag start on a new line."""

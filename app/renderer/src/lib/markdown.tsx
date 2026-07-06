@@ -10,7 +10,20 @@ import { cn } from '@/lib/utils';
 
 export function stripReasoning(text: string): string {
   if (!text) return text;
-  return text.replace(/<(think|thought)>[\s\S]*?(?:<\/\1>|$)/gi, '').trimStart();
+
+  const startsWithReasoning = /^\s*<(think|thought|thinking|reasoning)>/i.test(text);
+
+  // Consumes optional leading spaces on the line, the block, and one optional trailing newline.
+  let result = text.replace(
+    /(?:^[ \t]*)?<(think|thought|thinking|reasoning)>[\s\S]*?(?:<\/\1>|$(?![\s\S]))\n?/gim,
+    '',
+  );
+
+  if (startsWithReasoning) {
+    result = result.replace(/^\n+/, '');
+  }
+
+  return result;
 }
 
 export function renderMarkdown(text: string): React.ReactNode {
