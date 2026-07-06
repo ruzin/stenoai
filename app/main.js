@@ -191,6 +191,7 @@ function getUserDataDir() {
 }
 
 let mainWindow;
+let notificationWindow;
 let pythonProcess;
 let tray = null;
 let isQuitting = false;
@@ -8267,23 +8268,69 @@ async function firePreMeetingNotification(event) {
     sendDebugLog(`[premeeting] suppressed — already recording "${event.title}"`);
     return false;
   }
-  if (!Notification.isSupported()) return false;
-  const notif = new Notification({
-    title: 'Meeting starting',
-    body: `${event.title || 'Your meeting'} starts in 2 minutes`,
-  });
-  notif.on('click', () => {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      if (!mainWindow.isVisible()) mainWindow.show();
-      mainWindow.focus();
-    }
-  });
-  notif.show();
+  
+  createNotificationWindow(event);
+
   // Mark fired only after we've actually shown it, so an unshowable notif
   // (no OS support) isn't permanently skipped by the scheduler's dedupe.
   premeetingFiredIds.add(event.id);
   return true;
 }
+
+function createNotificationWindow(event) {
+  if (notificationWindow && !notificationWindow.isDestroyed()) {
+    notificationWindow.close();
+  }
+
+  const { screen } = require('electron');
+  const primaryDisplay = screen.getPrimaryDisplay();
+  const { width } = primaryDisplay.workAreaSize;
+  const { x, y } = primaryDisplay.workArea;
+
+  notificationWindow = new BrowserWindow({
+    width: 400,
+    height: 90,
+    x: x + width - 420,
+    y: y + 24,
+    frame: false,
+    transparent: true,
+    alwaysOnTop: true,
+    resizable: false,
+    skipTaskbar: true,
+    focusable: false,
+    hasShadow: false, // The React component renders its own shadow
+    backgroundColor: '#00000000',
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true,
+      preload: path.join(__dirname, 'preload.js'),
+    },
+  });
+
+  const rendererDist = path.join(__dirname, 'renderer', 'dist', 'index.html');
+  notificationWindow.loadFile(rendererDist, { hash: '/notification' });
+
+  notificationWindow.once('ready-to-show', () => {
+    notificationWindow.showInactive();
+    // Ensure the window floats across all macOS spaces/desktops and full-screen apps
+    notificationWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    notificationWindow.setAlwaysOnTop(true, 'screen-saver', 1);
+
+    notificationWindow.webContents.send('show-notification', {
+      title: event.title || 'Meeting starting',
+      time: event.start ? new Date(event.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
+      meeting_url: event.meeting_url,
+      attendees: event.attendees ? event.attendees.map(a => a.name || a.email).join(', ') : '',
+    });
+  });
+}
+
+ipcMain.handle('close-notification-window', () => {
+  if (notificationWindow && !notificationWindow.isDestroyed()) {
+    notificationWindow.close();
+  }
+});
 
 function clearPreMeetingTimers() {
   for (const t of premeetingTimers.values()) clearTimeout(t);

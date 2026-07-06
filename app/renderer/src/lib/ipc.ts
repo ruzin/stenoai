@@ -957,6 +957,7 @@ export interface StenoaiBridge {
     navigateToMeeting: Subscribe<{ summaryFile: string }>;
     trayOpenSettings: Subscribe<void>;
     showQuitDialog: Subscribe<{ type: 'recording' | 'processing'; jobCount?: number }>;
+    showNotification: Subscribe<{ title: string; time: string; meeting_url?: string; attendees?: string }>;
   };
 
   org: {
@@ -981,6 +982,10 @@ export interface StenoaiBridge {
 
   dialog: {
     respondQuit: SendFn<[confirmed: boolean]>;
+  };
+
+  notification: {
+    close: RequestFn<[], void>;
   };
 
   subscribeQueryStream: (

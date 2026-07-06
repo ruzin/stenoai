@@ -313,6 +313,10 @@ const stenoai = {
     respondQuit: (confirmed) => send('quit-dialog-response', { confirmed }),
   },
 
+  notification: {
+    close: () => invoke('close-notification-window'),
+  },
+
   // All main-driven events. Every subscribe returns an unsubscribe fn.
   on: {
     debugLog: (cb) => subscribe('debug-log', cb),
@@ -350,6 +354,7 @@ const stenoai = {
     navigateToMeeting: (cb) => subscribe('navigate-to-meeting', cb),
     trayOpenSettings: (cb) => subscribe('tray-open-settings', cb),
     showQuitDialog: (cb) => subscribe('show-quit-dialog', cb),
+    showNotification: (cb) => subscribe('show-notification', cb),
   },
 
   subscribeQueryStream,
