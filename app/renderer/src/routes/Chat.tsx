@@ -80,10 +80,10 @@ export function Chat() {
   const [recentsExpanded, setRecentsExpanded] = React.useState(false);
   const canExpand = allRecents.length > COLLAPSED_LIMIT;
   const recents = recentsExpanded ? allRecents : allRecents.slice(0, COLLAPSED_LIMIT);
+  const [now] = React.useState(() => Date.now());
   const groupedRecents = React.useMemo(() => {
     if (!recentsExpanded) return null;
     const groups = new Map<string, typeof allRecents>();
-    const now = Date.now();
     for (const s of allRecents) {
       const k = bucketKey(s.updatedAt, now);
       const arr = groups.get(k) ?? [];

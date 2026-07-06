@@ -24,15 +24,6 @@ export function QuitDialog() {
     });
   }, []);
 
-  React.useEffect(() => {
-    if (!mounted) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') handleCancel();
-    };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [mounted]);
-
   const dismiss = (confirmed: boolean) => {
     setVisible(false);
     setTimeout(() => setMounted(false), 200);
@@ -41,6 +32,15 @@ export function QuitDialog() {
 
   const handleCancel = () => dismiss(false);
   const handleConfirm = () => dismiss(true);
+
+  React.useEffect(() => {
+    if (!mounted) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') handleCancel();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [mounted]);
 
   if (!mounted) return null;
 
