@@ -1,0 +1,84 @@
+import { test, expect } from '../fixtures/electron';
+import type { Page } from '@playwright/test';
+
+/**
+ * T1 — renderer-only, mock IPC, no backend. "Copy notes" must copy whichever
+ * note is on screen: with a generated template report open it copies THAT
+ * report's markdown, not the Standard structured note (the regression: the
+ * clipboard silently disagreed with the displayed report).
+ *
+ * Seams (mirrors of the real ones, see app/e2e-mock-ipc.js):
+ *  - STENOAI_E2E_SEED_MEETING=1 + STENOAI_E2E_SEED_REPORT=1 seed one known
+ *    meeting carrying one generated report (rep_e2e_1, "Status Report").
+ *  - the clipboard is captured by replacing navigator.clipboard in-page (no OS
+ *    clipboard dependency in CI), same recorder as transcript-export.t1.
+ */
+
+const SUMMARY_FILE = 'epsilon_summary.json';
+
+async function installClipboardRecorder(page: Page) {
+  await page.evaluate(() => {
+    const w = window as unknown as { __clipboardWrites: string[] };
+    w.__clipboardWrites = [];
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        writeText: (text: string) => {
+          w.__clipboardWrites.push(text);
+          return Promise.resolve();
+        },
+      },
+    });
+  });
+}
+
+const clipboardWrites = (page: Page) =>
+  page.evaluate(() => (window as unknown as { __clipboardWrites: string[] }).__clipboardWrites);
+
+test('Copy notes copies the open report, and the Standard note when none is open', async ({
+  launchApp,
+}) => {
+  const { page } = await launchApp({
+    mockIpc: true,
+    env: { STENOAI_E2E_SEED_MEETING: '1', STENOAI_E2E_SEED_REPORT: '1' },
+  });
+  await installClipboardRecorder(page);
+
+  await page.evaluate((f) => {
+    window.location.hash = `#/meetings/${encodeURIComponent(f)}`;
+  }, SUMMARY_FILE);
+  await expect(page.getByRole('button', { name: 'Copy notes' })).toBeVisible();
+  // The seeded report shows up as a pill next to Standard.
+  const reportPill = page.getByTestId('report-switch').getByRole('button', {
+    name: /Status Report/,
+  });
+  await expect(reportPill).toBeVisible();
+
+  // Standard note open (active_report is null) → the structured-note copy.
+  await page.getByRole('button', { name: 'Copy notes' }).click();
+  let writes = await clipboardWrites(page);
+  expect(writes).toHaveLength(1);
+  expect(writes[0]).toContain('Epsilon Planning');
+  expect(writes[0]).toContain('PARTICIPANTS');
+  expect(writes[0]).toContain('Alice, Bob');
+  expect(writes[0]).not.toContain('## Status Report');
+
+  // Open the generated report, then copy again → the report's markdown.
+  await reportPill.click();
+  await expect(page.getByText('Pipeline healthy')).toBeVisible();
+  await page.getByRole('button', { name: 'Copy notes' }).click();
+  writes = await clipboardWrites(page);
+  expect(writes).toHaveLength(2);
+  expect(writes[1]).toContain('Epsilon Planning');
+  expect(writes[1]).toContain('- Pipeline healthy');
+  expect(writes[1]).toContain('- Next: open the reqs');
+  expect(writes[1]).not.toContain('PARTICIPANTS');
+
+  // Switching back to Standard restores the structured-note copy.
+  await page.getByTestId('report-switch').getByRole('button', { name: 'Standard' }).click();
+  await page.getByRole('button', { name: 'Copy notes' }).click();
+  writes = await clipboardWrites(page);
+  expect(writes).toHaveLength(3);
+  expect(writes[2]).toContain('PARTICIPANTS');
+  expect(writes[2]).not.toContain('Pipeline healthy');
+});

@@ -49,6 +49,23 @@ const SEED_MEETING = {
   discussion_areas: [],
 };
 
+// A generated template report attached to SEED_MEETING when
+// STENOAI_E2E_SEED_REPORT=1 (copy-notes-report T1). Gated separately so the
+// transcript-export T1 keeps seeing the report-less meeting it asserts on.
+const SEED_REPORT = {
+  id: 'rep_e2e_1',
+  template_id: 'tpl_e2e_status',
+  template_name: 'Status Report',
+  model: 'mock-model',
+  content: '## Status Report\n\n- Pipeline healthy\n- Next: open the reqs',
+  created_at: '2026-06-19T13:00:00Z',
+};
+
+const seededMeeting = () =>
+  process.env.STENOAI_E2E_SEED_REPORT === '1'
+    ? { ...SEED_MEETING, reports: [SEED_REPORT], active_report: null }
+    : SEED_MEETING;
+
 function install({ ipcMain }) {
   // In-memory stand-in for the org session + provider config that the real
   // handlers persist to disk. Mutated by the org-login / org-logout / set-ai
@@ -95,7 +112,7 @@ function install({ ipcMain }) {
     // channel.
     'list-meetings': async () => {
       if (process.env.STENOAI_E2E_SEED_MEETING === '1') {
-        return { success: true, meetings: [SEED_MEETING] };
+        return { success: true, meetings: [seededMeeting()] };
       }
       return { success: true, meetings: SEEDED_MEETINGS };
     },
@@ -105,7 +122,7 @@ function install({ ipcMain }) {
     // transcript-export detail route resolves and renders the transcript actions.
     'get-meeting': async (_event, summaryFile) => {
       if (process.env.STENOAI_E2E_SEED_MEETING === '1') {
-        return { success: true, meeting: SEED_MEETING };
+        return { success: true, meeting: seededMeeting() };
       }
       const m = SEEDED_MEETINGS.find(
         (x) => x.session_info && x.session_info.summary_file === summaryFile,
