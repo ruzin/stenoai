@@ -3,7 +3,7 @@ import { stripReasoning } from '@/lib/markdown';
 
 /**
  * Unit coverage for stripReasoning — the guard that removes `<think>` /
- * `<thought>` reasoning blocks emitted by some local models before the text is
+ * `<thought>` / `<thinking>` / `<reasoning>` reasoning blocks emitted by some local models before the text is
  * handed to the markdown renderer. The streaming case (an unclosed tag at the
  * end of a chunk) is the load-bearing edge: a half-streamed reasoning block
  * must not flash into the rendered summary.
@@ -16,9 +16,6 @@ describe('stripReasoning', () => {
 
   test('strips an unclosed reasoning block to the end of a streaming chunk', () => {
     const input = 'visible intro\n<think>still thinking and the chunk cut off here';
-    // The closing tag never arrives, so everything from <think> onward is dropped
-    // (only the trailing newline before the tag survives — strip trims leading,
-    // not trailing, whitespace).
     const result = stripReasoning(input);
     expect(result).toBe('visible intro\n');
     expect(result).not.toContain('still thinking');
@@ -32,5 +29,35 @@ describe('stripReasoning', () => {
   test('returns falsy/empty for empty input', () => {
     expect(stripReasoning('')).toBeFalsy();
     expect(stripReasoning('')).toBe('');
+  });
+
+  test('handles multiple blocks and nested/malformed tags', () => {
+    const input = 'A\n<think>1</think>\nB\n<thinking>2</thinking>\nC';
+    expect(stripReasoning(input)).toBe('A\nB\nC');
+  });
+
+  test('handles reasoning tags', () => {
+    const input = '<reasoning>...</reasoning>content';
+    expect(stripReasoning(input)).toBe('content');
+  });
+
+  test('handles nested tags (outer tag wins)', () => {
+    const input = '<think>outer<thinking>inner</thinking></think>content';
+    expect(stripReasoning(input)).toBe('content');
+  });
+
+  test('preserves spaces and formatting outside blocks', () => {
+    const input = '  # Hello \n\n<think>test</think>\nWorld';
+    expect(stripReasoning(input)).toBe('  # Hello \n\nWorld');
+  });
+
+  test('preserves leading formatting at document start when no reasoning block is present', () => {
+    const input = '  <think>test</think>\n  # Hello';
+    expect(stripReasoning(input)).toBe('  # Hello');
+  });
+
+  test('handles uppercase tags', () => {
+    const input = '<THINK>A</think>B';
+    expect(stripReasoning(input)).toBe('B');
   });
 });
