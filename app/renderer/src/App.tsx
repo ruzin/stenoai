@@ -49,9 +49,7 @@ export function App() {
     }
   }, []);
 
-  if (route === '/notification') {
-    return <NotificationToast />;
-  }
+
 
   React.useEffect(() => {
     if (typeof window === 'undefined' || !window.stenoai) return;
@@ -165,6 +163,10 @@ export function App() {
       }
     })();
   }, [recording.isLoading, recording.status, route]);
+
+  if (route === '/notification') {
+    return <NotificationToast />;
+  }
 
   const isRecordingRoute = route === '/recording';
   const isProcessingRoute = route === '/meetings/processing';
