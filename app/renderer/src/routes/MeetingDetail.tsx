@@ -480,7 +480,9 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
   };
 
   // Copies whichever note is on screen: the open template report when one is
-  // selected, otherwise the Standard structured note.
+  // selected, otherwise the Standard structured note. Reasoning blocks are
+  // stripped like the rendered views do, so the clipboard never carries
+  // <think> content the screen hides.
   const copyNotes = () => {
     const meta = [formatDetailDate(info), formatDuration(info.duration_seconds)]
       .filter(Boolean)
@@ -489,13 +491,13 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
       {
         name: info.name,
         meta: meta || undefined,
-        summary: meeting.summary,
+        summary: meeting.summary ? stripReasoning(meeting.summary) : undefined,
         discussionAreas: asDiscussionAreas(meeting.discussion_areas),
         keyPoints: meeting.key_points ?? [],
         actionItems: asStringArray(meeting.action_items),
         participants: asStringArray(meeting.participants),
       },
-      activeReport,
+      activeReport ? { content: stripReasoning(activeReport.content) } : null,
     );
     void navigator.clipboard.writeText(text);
     setCopied(true);

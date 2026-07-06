@@ -73,6 +73,9 @@ test('Copy notes copies the open report, and the Standard note when none is open
   expect(writes[1]).toContain('- Pipeline healthy');
   expect(writes[1]).toContain('- Next: open the reqs');
   expect(writes[1]).not.toContain('PARTICIPANTS');
+  // The seeded report starts with a <think> block; the copy must strip
+  // reasoning like the rendered view does.
+  expect(writes[1]).not.toContain('secret chain of thought');
 
   // Switching back to Standard restores the structured-note copy.
   await page.getByTestId('report-switch').getByRole('button', { name: 'Standard' }).click();
