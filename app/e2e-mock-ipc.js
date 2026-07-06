@@ -61,9 +61,13 @@ const SEED_REPORT = {
   created_at: '2026-06-19T13:00:00Z',
 };
 
+// Mutable so the stateful set-active-report mock below persists the pill
+// switch across the invalidate → get-meeting refetch, like the real sidecar.
+let seedActiveReport = null;
+
 const seededMeeting = () =>
   process.env.STENOAI_E2E_SEED_REPORT === '1'
-    ? { ...SEED_MEETING, reports: [SEED_REPORT], active_report: null }
+    ? { ...SEED_MEETING, reports: [SEED_REPORT], active_report: seedActiveReport }
     : SEED_MEETING;
 
 function install({ ipcMain }) {
@@ -115,6 +119,14 @@ function install({ ipcMain }) {
         return { success: true, meetings: [seededMeeting()] };
       }
       return { success: true, meetings: SEEDED_MEETINGS };
+    },
+
+    // Mirror the real handler just enough for the copy-notes-report T1: persist
+    // the switch so the refetch that follows the mutation doesn't reset the
+    // pill. 'standard' clears it, like src/reports.py set_active.
+    'set-active-report': async (_event, _summaryFile, reportId) => {
+      seedActiveReport = !reportId || reportId === 'standard' ? null : reportId;
+      return { success: true };
     },
 
     // The detail route loads via get-meeting (the lazy per-meeting fetch), not

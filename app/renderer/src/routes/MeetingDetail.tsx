@@ -535,9 +535,13 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
           <div className="flex items-center gap-1">
             <Tooltip>
               <TooltipTrigger asChild>
+                {/* Disabled while a summary/report stream is on screen — the
+                    clipboard would otherwise get the old note while the body
+                    shows the in-flux streamed text. */}
                 <ActionIconButton
                   label={copied ? 'Copied' : 'Copy notes'}
                   onClick={copyNotes}
+                  disabled={streamPhase !== 'idle'}
                 >
                   {copied ? <Check className="size-[13px]" /> : <Copy className="size-[13px]" />}
                 </ActionIconButton>
