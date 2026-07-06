@@ -986,6 +986,7 @@ export interface StenoaiBridge {
 
   notification: {
     close: RequestFn<[], void>;
+    focusMain: RequestFn<[], void>;
   };
 
   subscribeQueryStream: (

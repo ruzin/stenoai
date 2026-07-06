@@ -20,18 +20,24 @@ export function NotificationToast() {
 
   if (!data) return null;
 
-  const handleClose = () => {
+  const handleClose = (e?: React.MouseEvent) => {
+    e?.stopPropagation();
     ipc().notification.close();
   };
 
-  const handleJoin = () => {
+  const handleJoin = (e?: React.MouseEvent) => {
+    e?.stopPropagation();
     if (data.meeting_url) {
       ipc().shell.openExternal(data.meeting_url);
     }
     handleClose();
   };
 
-  // Generate a consistent, professional color based on the meeting title
+  const handleFocusMain = () => {
+    ipc().notification.focusMain();
+    handleClose();
+  };
+
   const getEventColor = (title: string) => {
     const colors = ['#10B981', '#3B82F6', '#8B5CF6', '#EC4899', '#F59E0B', '#EF4444', '#06B6D4'];
     let hash = 0;
@@ -52,10 +58,10 @@ export function NotificationToast() {
       `}</style>
       <div className="flex h-screen w-screen items-center justify-center bg-transparent p-3">
         <div 
-        className="group relative flex w-full items-center justify-between rounded-[20px] bg-white p-2.5 pr-3 border border-gray-200 dark:bg-[#1E1E1E] dark:border-white/10"
+        className="group relative flex w-full cursor-pointer items-center justify-between rounded-[20px] bg-white p-2.5 pr-3 border border-gray-200 dark:bg-[#1E1E1E] dark:border-white/10"
         style={{ fontFamily: 'system-ui, -apple-system, sans-serif' }}
+        onClick={handleFocusMain}
       >
-        {/* Close Button (Hidden until hover) */}
         <button
           onClick={handleClose}
           className="absolute -top-1.5 -left-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-white shadow-sm border border-gray-200 text-gray-500 opacity-0 transition-opacity hover:bg-gray-50 hover:text-gray-700 group-hover:opacity-100 dark:bg-[#2C2C2E] dark:border-white/10 dark:text-gray-400 dark:hover:bg-[#3C3C3E] dark:hover:text-gray-200"
@@ -66,7 +72,6 @@ export function NotificationToast() {
           </svg>
         </button>
 
-        {/* Left Side: Status Line + Text */}
         <div className="flex items-center">
           <div 
             className="h-8 w-1 rounded-full ml-1 shrink-0" 
@@ -82,7 +87,6 @@ export function NotificationToast() {
           </div>
         </div>
 
-        {/* Right Side: Action Button */}
         {data.meeting_url && (
           <button
             onClick={handleJoin}

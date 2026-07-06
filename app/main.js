@@ -8298,7 +8298,7 @@ function createNotificationWindow(event) {
     resizable: false,
     skipTaskbar: true,
     focusable: false,
-    hasShadow: false, // The React component renders its own shadow
+    hasShadow: false,
     backgroundColor: '#00000000',
     webPreferences: {
       nodeIntegration: false,
@@ -8313,7 +8313,6 @@ function createNotificationWindow(event) {
 
   notificationWindow.once('ready-to-show', () => {
     notificationWindow.showInactive();
-    // Ensure the window floats across all macOS spaces/desktops and full-screen apps
     notificationWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
     notificationWindow.setAlwaysOnTop(true, 'screen-saver', 1);
 
@@ -8329,6 +8328,13 @@ function createNotificationWindow(event) {
 ipcMain.handle('close-notification-window', () => {
   if (notificationWindow && !notificationWindow.isDestroyed()) {
     notificationWindow.close();
+  }
+});
+
+ipcMain.handle('focus-main-window', () => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    if (!mainWindow.isVisible()) mainWindow.show();
+    mainWindow.focus();
   }
 });
 
