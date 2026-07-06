@@ -268,7 +268,7 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
     meeting.active_report ?? null,
   );
   const [prevMeetingReport, setPrevMeetingReport] = React.useState<string | null>(meeting.active_report ?? null);
-  if (meeting.active_report !== prevMeetingReport) {
+  if ((meeting.active_report ?? null) !== prevMeetingReport) {
     setPrevMeetingReport(meeting.active_report ?? null);
     setActiveReportId(meeting.active_report ?? null);
   }
