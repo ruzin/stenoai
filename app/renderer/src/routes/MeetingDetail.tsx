@@ -1311,11 +1311,12 @@ function StreamingView({ text, phase, chunkProgress }: { text: string; phase: St
   const blocks = parseMarkdownBlocks(stripReasoning(text));
   const isStreaming = phase === 'analyzing' || phase === 'generating';
 
-  const [prevBlockCount, setPrevBlockCount] = React.useState(blocks.length);
-  const firstNewIdx = prevBlockCount;
-  if (blocks.length > prevBlockCount) {
-    setPrevBlockCount(blocks.length);
-  }
+  const prevBlockCountRef = React.useRef(blocks.length);
+  // eslint-disable-next-line react-hooks/refs
+  const firstNewIdx = prevBlockCountRef.current;
+  React.useEffect(() => {
+    prevBlockCountRef.current = blocks.length;
+  }, [blocks.length]);
 
   const blocksContainerRef = React.useRef<HTMLDivElement>(null);
   const indicatorRef = React.useRef<HTMLDivElement>(null);
