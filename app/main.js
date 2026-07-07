@@ -4206,13 +4206,21 @@ ipcMain.handle('start-recording-ui', async (_, sessionName, trigger) => {
     // that (no timeout of its own) could otherwise hang this indefinitely
     // and silently drop recording_started for the recording entirely.
     const recordingTrigger = RECORDING_TRIGGERS.has(trigger) ? trigger : 'manual';
-    withTimeout(getCalendarEventForNow(), 2500).then((calEvent) => {
-      trackEvent('recording_started', {
-        trigger: recordingTrigger,
-        matched_calendar_event: Boolean(calEvent),
-        provider: calendarMeetingProvider(calEvent?.meeting_url),
-      });
-    });
+    withTimeout(getCalendarEventForNow(), 2500)
+      .then((calEvent) => {
+        trackEvent('recording_started', {
+          trigger: recordingTrigger,
+          matched_calendar_event: Boolean(calEvent),
+          provider: calendarMeetingProvider(calEvent?.meeting_url),
+        });
+      })
+      // withTimeout itself never rejects, but the fulfillment handler above
+      // could in principle throw (e.g. a future change to it) -- and since
+      // the global unhandledRejection listener now calls process.exit(1),
+      // ANY floating promise here is a latent full-app-crash risk over
+      // nothing more than a missed telemetry event. Telemetry must never be
+      // able to take down the app.
+      .catch(() => {});
     return {
       success: true,
       sessionName: actualSessionName,
@@ -7041,7 +7049,14 @@ ipcMain.handle('process-system-audio-recording', async (event, audioFilePath, se
     // Use the existing processing queue to avoid concurrent Ollama/Whisper runs
     addToProcessingQueue(audioFilePath, actualSessionName, notesPath, liveTranscriptFile);
 
-    trackEvent('recording_stopped', { recording_mode: 'system_audio', reason: 'normal' });
+    // recording_stopped is NOT tracked here -- stop-recording-ui already
+    // fires it (with the real duration_bucket) for every stop. This handler
+    // fires moments later, once the renderer's MediaRecorder finishes
+    // flushing to disk and useSystemAudioCapture's own effect reacts to the
+    // status change and calls processSystemAudio -- for every normal
+    // recording that would double the count. `recording_mode: 'system_audio'`
+    // was also vestigial: this renderer-driven path is the only recording
+    // path today, so it no longer distinguishes anything.
     return { success: true, message: 'Added to processing queue' };
   } catch (error) {
     sendDebugLog(`Error queuing system audio: ${error.message}`);
@@ -8630,13 +8645,47 @@ async function fetchCalendarEventsForScheduler(timeoutMs = 4000) {
 // enums and provider breakdowns are ever sent; titles/attendees/URLs are
 // discarded after the enum lookup. Throttled to <=1/day per window so the
 // 10-min premeeting re-poll doesn't spam PostHog.
-let lastCalendarSnapshotAtMs = 0;
+//
+// The throttle timestamp is persisted to disk (not just an in-memory
+// variable) so restarting the app doesn't reset it -- an in-memory-only
+// throttle would re-fire on every single launch, since a fresh process
+// always starts with "never sent", defeating the <=1/day intent for anyone
+// who quits and reopens the app more than once a day.
+function getCalendarSnapshotMarkerPath() {
+  return path.join(getUserDataDir(), '.last-calendar-snapshot');
+}
+
+function readLastCalendarSnapshotAtMs() {
+  try {
+    const parsed = parseInt(fs.readFileSync(getCalendarSnapshotMarkerPath(), 'utf-8').trim(), 10);
+    return Number.isFinite(parsed) ? parsed : 0;
+  } catch (_) {
+    return 0;
+  }
+}
+
+function writeLastCalendarSnapshotAtMs(ms) {
+  try {
+    fs.writeFileSync(getCalendarSnapshotMarkerPath(), String(ms));
+  } catch (_) {
+    // Best-effort -- a failed write just means the throttle resets on next launch
+  }
+}
+
+// null = not yet loaded from disk this process. Loaded lazily on first call
+// (rather than at module load) since this only matters once the premeeting
+// scheduler actually starts ticking.
+let lastCalendarSnapshotAtMs = null;
 const CALENDAR_SNAPSHOT_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 function maybeTrackCalendarSnapshot(events, now = new Date()) {
+  if (lastCalendarSnapshotAtMs === null) {
+    lastCalendarSnapshotAtMs = readLastCalendarSnapshotAtMs();
+  }
   const nowMs = now.getTime();
   if (nowMs - lastCalendarSnapshotAtMs < CALENDAR_SNAPSHOT_INTERVAL_MS) return;
   lastCalendarSnapshotAtMs = nowMs;
+  writeLastCalendarSnapshotAtMs(nowMs);
 
   const { today, week } = summarizeCalendarSnapshot(events, now);
   trackEvent('calendar_snapshot', { window: 'today', ...today });

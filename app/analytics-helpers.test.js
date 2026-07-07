@@ -7,6 +7,7 @@ const {
   durationBucket,
   RENDERER_TRACK_EVENTS,
   RENDERER_TRACK_EVENT_PROPERTIES,
+  RENDERER_TRACK_EVENT_VALUE_ALLOWLIST,
   sanitizeTrackProperties,
   calendarMeetingProvider,
   classifyErrorReason,
@@ -48,7 +49,7 @@ test('durationBucket buckets at each boundary', () => {
 test('sanitizeTrackProperties keeps only allowlisted keys with scalar string/number/boolean values', () => {
   assert.deepStrictEqual(
     sanitizeTrackProperties('notification_shown', {
-      type: 'meeting_detected',
+      type: 'premeeting',
       count: 3,
       enabled: true,
       nested: { title: 'Q3 planning sync' },
@@ -57,8 +58,55 @@ test('sanitizeTrackProperties keeps only allowlisted keys with scalar string/num
     // Only `type` is in notification_shown's allowlist -- count/enabled are
     // scalar-valid but not an allowed key for this event, so they're dropped
     // too, not just the nested/array values.
-    { type: 'meeting_detected' },
+    { type: 'premeeting' },
   );
+});
+
+test('sanitizeTrackProperties enforces the value allowlist, not just the key allowlist (P1: a string under an approved key must still be a known enum value)', () => {
+  // `type` is an allowed key for notification_shown, but only 'premeeting' is
+  // an allowed VALUE (the only one the renderer bridge actually sends) --
+  // anything else must be dropped even though it's short and under an
+  // approved key, e.g. a future bug pasting arbitrary text into `type`.
+  assert.deepStrictEqual(
+    sanitizeTrackProperties('notification_shown', { type: 'meeting_detected' }),
+    {},
+  );
+  assert.deepStrictEqual(
+    sanitizeTrackProperties('notification_shown', { type: 'a pasted attendee name' }),
+    {},
+  );
+  assert.deepStrictEqual(
+    sanitizeTrackProperties('notification_shown', { type: 'premeeting' }),
+    { type: 'premeeting' },
+  );
+
+  // Same enforcement for ai_provider_selected / onboarding_completed's enum
+  // properties -- only their known literal values survive.
+  assert.deepStrictEqual(sanitizeTrackProperties('ai_provider_selected', { provider: 'cloud' }), { provider: 'cloud' });
+  assert.deepStrictEqual(sanitizeTrackProperties('ai_provider_selected', { provider: 'openai' }), {});
+  assert.deepStrictEqual(
+    sanitizeTrackProperties('onboarding_completed', { ai_provider: 'local', calendar_connected: true }),
+    { ai_provider: 'local', calendar_connected: true },
+  );
+  assert.deepStrictEqual(
+    sanitizeTrackProperties('onboarding_completed', { ai_provider: 'remote', calendar_connected: true }),
+    { calendar_connected: true },
+  );
+});
+
+test('RENDERER_TRACK_EVENT_VALUE_ALLOWLIST has an entry for every allowlisted string property', () => {
+  // Every string-valued property reachable through the renderer bridge
+  // should be enum-constrained -- not just key-allowlisted and length-capped.
+  const stringProps = [
+    'notification_shown.type',
+    'notification_clicked.type',
+    'notification_dismissed.type',
+    'onboarding_completed.ai_provider',
+    'ai_provider_selected.provider',
+  ];
+  for (const prop of stringProps) {
+    assert.ok(RENDERER_TRACK_EVENT_VALUE_ALLOWLIST[prop] instanceof Set, `missing value allowlist for ${prop}`);
+  }
 });
 
 test('sanitizeTrackProperties drops a short scalar value under a key outside the event allowlist (no PII-under-unexpected-key leak)', () => {
@@ -126,6 +174,18 @@ test('calendarMeetingProvider falls back to other/none appropriately', () => {
   assert.strictEqual(calendarMeetingProvider(null), 'none');
   assert.strictEqual(calendarMeetingProvider(''), 'none');
   assert.strictEqual(calendarMeetingProvider('not a url'), 'other');
+});
+
+test('calendarMeetingProvider matches the exact domain or a real subdomain, not any host containing the string (P3)', () => {
+  // Bare domain and real subdomains still match.
+  assert.strictEqual(calendarMeetingProvider('https://zoom.us/j/123'), 'zoom');
+  assert.strictEqual(calendarMeetingProvider('https://us02web.zoom.us/j/123'), 'zoom');
+  // A host that merely CONTAINS "zoom.us" as a substring, without it being
+  // the actual domain/subdomain, must NOT match -- this was the bug: a
+  // naive .includes() check would misclassify these as 'zoom'.
+  assert.strictEqual(calendarMeetingProvider('https://evilzoom.us.attacker.com/j/123'), 'other');
+  assert.strictEqual(calendarMeetingProvider('https://notzoom.us/j/123'), 'other');
+  assert.strictEqual(calendarMeetingProvider('https://myzoom.uscustomdomain.com/x'), 'other');
 });
 
 test('classifyErrorReason maps common failure classes to fixed enum values', () => {

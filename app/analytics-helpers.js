@@ -51,11 +51,28 @@ const RENDERER_TRACK_EVENT_PROPERTIES = Object.assign(Object.create(null), {
 
 const RENDERER_TRACK_EVENTS = new Set(Object.keys(RENDERER_TRACK_EVENT_PROPERTIES));
 
+// Value allowlist for specific event/property pairs, keyed as
+// "event.property". This is on top of the key allowlist above: a key being
+// approved doesn't mean any short string under it is safe -- these
+// properties are meant to be small fixed enums, so a future bug that passes
+// something else through an approved key (e.g. pasted text landing in
+// `type`) gets dropped here rather than silently forwarded because it
+// happened to be under 200 chars. Only string-valued properties need an
+// entry; booleans/numbers are already fully constrained by their type.
+const RENDERER_TRACK_EVENT_VALUE_ALLOWLIST = Object.assign(Object.create(null), {
+  'notification_shown.type': new Set(['premeeting']),
+  'notification_clicked.type': new Set(['premeeting']),
+  'notification_dismissed.type': new Set(['premeeting']),
+  'onboarding_completed.ai_provider': new Set(['local', 'cloud']),
+  'ai_provider_selected.provider': new Set(['local', 'cloud']),
+});
+
 // Value-sanitizes a renderer-supplied properties object: only keys in that
-// event's allowlist survive, and of those, only scalar string/number/boolean
-// values with strings <=200 chars. Objects/arrays are dropped entirely --
-// never forwarded to PostHog. This is the security boundary between
-// renderer-supplied data and PostHog capture.
+// event's allowlist survive; of those, string values must also match the
+// event/property's value allowlist (if one exists) and be <=200 chars, and
+// number/boolean values pass through as-is. Objects/arrays are dropped
+// entirely -- never forwarded to PostHog. This is the security boundary
+// between renderer-supplied data and PostHog capture.
 function sanitizeTrackProperties(eventName, properties) {
   const allowedKeys = typeof eventName === 'string' ? RENDERER_TRACK_EVENT_PROPERTIES[eventName] : undefined;
   const out = {};
@@ -63,14 +80,23 @@ function sanitizeTrackProperties(eventName, properties) {
   for (const [key, value] of Object.entries(properties)) {
     if (!allowedKeys.has(key)) continue;
     if (typeof value === 'string') {
+      const valueAllowlist = RENDERER_TRACK_EVENT_VALUE_ALLOWLIST[`${eventName}.${key}`];
+      if (valueAllowlist && !valueAllowlist.has(value)) continue; // not a known enum value -- drop
       if (value.length <= 200) out[key] = value;
     } else if (typeof value === 'number' || typeof value === 'boolean') {
       out[key] = value;
     }
-    // keys outside the allowlist, objects/arrays, and long strings are all
-    // dropped -- never forwarded to PostHog
+    // keys outside the allowlist, values outside the value allowlist,
+    // objects/arrays, and long strings are all dropped -- never forwarded
   }
   return out;
+}
+
+// host === domain, or host is a real subdomain of domain (ends with
+// ".domain") -- NOT a bare substring match, which would also match an
+// unrelated host like "evilzoom.us.attacker.com" or "notzoom.us".
+function hostMatchesDomain(host, domain) {
+  return host === domain || host.endsWith(`.${domain}`);
 }
 
 // Enum-only provider inference from a calendar event's meeting_url -- the
@@ -79,9 +105,9 @@ function calendarMeetingProvider(meetingUrl) {
   if (!meetingUrl || typeof meetingUrl !== 'string') return 'none';
   try {
     const host = new URL(meetingUrl).hostname.toLowerCase();
-    if (host.includes('zoom.us') || host.includes('zoom.com')) return 'zoom';
-    if (host.includes('meet.google.com')) return 'meet';
-    if (host.includes('teams.microsoft.com') || host.includes('teams.live.com')) return 'teams';
+    if (hostMatchesDomain(host, 'zoom.us') || hostMatchesDomain(host, 'zoom.com')) return 'zoom';
+    if (hostMatchesDomain(host, 'meet.google.com')) return 'meet';
+    if (hostMatchesDomain(host, 'teams.microsoft.com') || hostMatchesDomain(host, 'teams.live.com')) return 'teams';
     return 'other';
   } catch (_) {
     return 'other';
@@ -202,6 +228,7 @@ module.exports = {
   durationBucket,
   RENDERER_TRACK_EVENTS,
   RENDERER_TRACK_EVENT_PROPERTIES,
+  RENDERER_TRACK_EVENT_VALUE_ALLOWLIST,
   sanitizeTrackProperties,
   calendarMeetingProvider,
   classifyErrorReason,
