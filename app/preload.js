@@ -69,6 +69,13 @@ const stenoai = {
     openExternal: (url) => invoke('open-external', url),
   },
 
+  analytics: {
+    // Fire-and-forget: the renderer has no direct access to trackEvent
+    // (contextIsolation), so notification/chat events fire through here.
+    // Main whitelists event names and sanitizes properties before capture.
+    track: (name, props) => send('track', name, props),
+  },
+
   system: {
     getStatus: () => invoke('get-status'),
     test: () => invoke('test-system'),
@@ -89,7 +96,7 @@ const stenoai = {
   },
 
   recording: {
-    start: (name) => invoke('start-recording-ui', name),
+    start: (name, trigger) => invoke('start-recording-ui', name, trigger),
     stop: () => invoke('stop-recording-ui'),
     pause: () => invoke('pause-recording-ui'),
     resume: () => invoke('resume-recording-ui'),
@@ -212,7 +219,7 @@ const stenoai = {
     getNotifications: () => invoke('get-notifications'),
     setNotifications: (v) => invoke('set-notifications', v),
     getTelemetry: () => invoke('get-telemetry'),
-    setTelemetry: (v) => invoke('set-telemetry', v),
+    setTelemetry: (v, source) => invoke('set-telemetry', v, source),
     getDockIcon: () => invoke('get-dock-icon'),
     setDockIcon: (v) => invoke('set-dock-icon', v),
     getSystemAudio: () => invoke('get-system-audio'),

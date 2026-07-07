@@ -24,21 +24,24 @@ export function NotificationToast() {
 
   const handleClose = (e?: React.MouseEvent) => {
     e?.stopPropagation();
+    ipc().analytics.track('notification_dismissed', { type: 'premeeting' });
     ipc().notification.close();
   };
 
   const handleJoin = (e?: React.MouseEvent) => {
     e?.stopPropagation();
+    ipc().analytics.track('notification_clicked', { type: 'premeeting' });
     if (data.meeting_url) {
       ipc().shell.openExternal(data.meeting_url);
     }
-    ipc().recording.start(data.title);
-    handleClose();
+    ipc().recording.start(data.title, 'notification_click');
+    ipc().notification.close();
   };
 
   const handleFocusMain = () => {
+    ipc().analytics.track('notification_clicked', { type: 'premeeting' });
     ipc().window.focus();
-    handleClose();
+    ipc().notification.close();
   };
 
   const getEventColor = (title: string) => {
