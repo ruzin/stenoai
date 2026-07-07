@@ -554,10 +554,17 @@ export function Home({ mode }: HomeProps) {
 
           {upcomingToday.length > 0 && mode === 'home' && (() => {
             const groups: Record<string, typeof upcomingVisible> = {};
+            
+            const now = new Date(upcomingTickMs);
+            const startOfTodayMs = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+
             for (const e of upcomingVisible) {
-              const d = new Date(e.start);
-              if (Number.isNaN(d.getTime())) continue;
-              const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+              const startMs = new Date(e.start).getTime();
+              if (Number.isNaN(startMs)) continue;
+              
+              // Clamp events that started in the past (but are still ongoing) to today
+              const effectiveDate = new Date(Math.max(startMs, startOfTodayMs));
+              const key = `${effectiveDate.getFullYear()}-${effectiveDate.getMonth()}-${effectiveDate.getDate()}`;
               if (!groups[key]) groups[key] = [];
               groups[key].push(e);
             }
@@ -617,10 +624,11 @@ export function Home({ mode }: HomeProps) {
                   style={{ borderColor: 'var(--border-subtle)' }}
                 >
                   {Object.entries(groups).map(([dateKey, group]) => {
-                    const firstDate = new Date(group[0].start);
-                    const day = firstDate.getDate();
-                    const month = firstDate.toLocaleDateString(undefined, { month: 'short' });
-                    const weekday = firstDate.toLocaleDateString(undefined, { weekday: 'short' });
+                    const [y, m, d] = dateKey.split('-').map(Number);
+                    const groupDate = new Date(y, m, d);
+                    const day = groupDate.getDate();
+                    const month = groupDate.toLocaleDateString(undefined, { month: 'short' });
+                    const weekday = groupDate.toLocaleDateString(undefined, { weekday: 'short' });
                     
                     return (
                       <div 

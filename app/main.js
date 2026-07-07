@@ -7568,7 +7568,10 @@ async function fetchCalendarEvents(accessToken, maxResults = 50, signal) {
       const chunk = selectedCalendars.slice(i, i + concurrency);
       const chunkPromises = chunk.map(async (cal) => {
         const items = await fetchGoogleEventsForCalendar(accessToken, cal.id, params, signal);
-        items.forEach(item => { item.calendarBackgroundColor = cal.backgroundColor; });
+        items.forEach(item => { 
+          item.calendarBackgroundColor = cal.backgroundColor; 
+          item._sourceCalendarId = cal.id;
+        });
         return items;
       });
       const chunkResults = await Promise.all(chunkPromises);
@@ -7968,7 +7971,10 @@ async function fetchOutlookCalendarEvents(accessToken, maxResults = 50, signal) 
           default: hexColor = '#3B82F6';
         }
         
-        items.forEach(item => { item.calendarBackgroundColor = hexColor; });
+        items.forEach(item => { 
+          item.calendarBackgroundColor = hexColor; 
+          item.id = `${cal.id}_${item.id}`;
+        });
         return items;
       });
       const chunkResults = await Promise.all(chunkPromises);
@@ -8228,7 +8234,7 @@ function normalizeCalendarEvent(event) {
   }
 
   return {
-    id: event.id,
+    id: event._sourceCalendarId ? `${event._sourceCalendarId}_${event.id}` : event.id,
     title: event.summary || event.title || 'No title',
     start,
     end,
@@ -8335,12 +8341,12 @@ async function getCalendarEventForNow(timeoutMs = 1500) {
     let events = null;
     const googleToken = await getValidAccessToken();
     if (googleToken) {
-      const raw = await fetchCalendarEvents(googleToken, 7, signal);
+      const raw = await fetchCalendarEvents(googleToken, 50, signal);
       events = raw.map(normalizeCalendarEvent).filter(Boolean);
     } else {
       const outlookToken = await getValidOutlookAccessToken();
       if (outlookToken) {
-        const raw = await fetchOutlookCalendarEvents(outlookToken, 7, signal);
+        const raw = await fetchOutlookCalendarEvents(outlookToken, 50, signal);
         events = raw.map(normalizeCalendarEvent).filter(Boolean);
       }
     }
@@ -8385,12 +8391,12 @@ async function fetchCalendarEventsForScheduler(timeoutMs = 4000) {
   try {
     const googleToken = await getValidAccessToken();
     if (googleToken) {
-      const raw = await fetchCalendarEvents(googleToken, 7, controller.signal);
+      const raw = await fetchCalendarEvents(googleToken, 50, controller.signal);
       return raw.map(normalizeCalendarEvent).filter(Boolean);
     }
     const outlookToken = await getValidOutlookAccessToken();
     if (outlookToken) {
-      const raw = await fetchOutlookCalendarEvents(outlookToken, 7, controller.signal);
+      const raw = await fetchOutlookCalendarEvents(outlookToken, 50, controller.signal);
       return raw.map(normalizeCalendarEvent).filter(Boolean);
     }
     return null; // no calendar connected

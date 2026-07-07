@@ -45,8 +45,8 @@ export function PreviousRow({ meeting, folderName }: PreviousRowProps) {
 
   const title = info.name || 'Untitled note';
   const initial = title.charAt(0).toUpperCase();
-  const avatarBg = getAvatarColor(title) + '25'; // 25 hex for ~15% opacity
-  const avatarFg = getAvatarColor(title);
+  const avatarBg = getAvatarColor(title);
+  const avatarFg = '#FFFFFF';
 
   return (
     <div

@@ -315,6 +315,7 @@ export function Chat() {
                     if (e.key === 'Tab' && input === '' && ready) {
                       e.preventDefault();
                       setInput(PRESETS[suggestedIndex].prompt);
+                      setPresetsOpen(false);
                       return;
                     }
                     if (e.key === '/' && input === '' && ready) {
