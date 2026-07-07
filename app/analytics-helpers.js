@@ -145,37 +145,66 @@ const APP_ROOT = __dirname;
 // which is exactly as revealing as the username itself for a frame outside
 // APP_ROOT. Keeping the basename preserves "which file" for triage without
 // any of the directory structure around it.
-function collapseToFilename(matchedPath) {
+//
+// prefixDepth is the number of leading path segments that are ALWAYS the
+// matched pattern's own fixed text plus the username -- e.g. 2 for
+// "Users/<name>" or "home/<name>", 3 for "C:/Users/<name>" (drive letter +
+// "Users" + name) -- and must be stripped unconditionally, never treated as
+// a candidate "filename". Without this, a match with nothing after the
+// username (e.g. a stack frame reference with no real file component)
+// falls back to the LAST segment being the username itself: confirmed live,
+// `redactLocalPaths('at foo (/Users/bob:5:10)')` produced
+// "at foo (<redacted-path>/bob:5:10)" before this fix -- the exact thing
+// this function exists to prevent.
+function collapseToFilename(matchedPath, prefixDepth) {
   const segments = matchedPath.split(/[\\/]/).filter(Boolean);
-  const filename = segments[segments.length - 1];
+  const rest = segments.slice(prefixDepth);
+  const filename = rest[rest.length - 1];
   return filename ? `<redacted-path>/${filename}` : '<redacted-path>';
 }
 
-// Stack frames only reveal a fixed, non-personal path (e.g.
-// /Applications/Steno.app/Contents/Resources/app.asar/...) on the signed
-// production build. Anywhere else -- a dev checkout, a portable install, a
-// path under the user's home directory -- the SAME frame instead embeds the
-// OS username AND whatever workspace/client/project folder it lives under
-// (e.g. /Users/alice/Downloads/... or this repo's own dev checkout path).
-// Two layers: replace every reference to our own install root with a
-// neutral anchor (catches first-party code AND bundled node_modules, since
-// both live under it), then a regex fallback catches anything NOT under
-// that root (Electron/Node internals, an unexpected library path) by
-// collapsing the ENTIRE home-relative path -- every directory segment, not
-// just the username -- down to a filename, on macOS/Linux/Windows.
+// V8 stack frames end with ":<line>:<col>" and optionally a closing paren --
+// e.g. "(/path/to/file.js:123:45)" or "/path/to/file.js:123:45" (no
+// parens). Stripped off FIRST, before any path redaction runs, so the path
+// match below can safely consume to end-of-line instead of having to guess
+// where the path "ends" using `:` / `)` as delimiters -- both are valid
+// characters in a real folder name ("Client (Secret)", "Project:Next"), so
+// stopping at the first occurrence of either previously left everything
+// after it -- the actual workspace/client name -- completely unredacted.
+// Confirmed live before this fix: a frame referencing
+// ".../Client (Secret)/main.js:10:2)" only got redacted up to
+// "Client (Secret", leaking ")/main.js:10:2)" (i.e. the real folder name,
+// intact) straight through.
+const TRAILING_LOCATION_RE = /:\d+:\d+\)?\s*$/;
+
+// This function is only ever called on ONE stack-frame line at a time (see
+// sanitizeErrorForCrashReport's `lines.slice(1).map(redactLocalPaths)`), so
+// anchoring path matches to `$` (end of that line) is safe -- a real V8
+// frame never has more than one path per line.
 function redactLocalPaths(text) {
   let redacted = text.split(APP_ROOT).join('<app>');
-  // Match through spaces -- a real path component, not just a delimiter
-  // (macOS "Application Support", "iCloud Drive", any workspace folder with
-  // a space in its name). Only `:` (before line:col), `)` (closing the
-  // frame), and newlines actually end a stack-frame path reference; a
-  // `\s`-excluding class stopped at the FIRST space and left everything
-  // after it -- e.g. "Support/stenoai/main.js" from ".../Application
-  // Support/..." -- completely unredacted.
-  redacted = redacted.replace(/\/Users\/[^:)\n]+/g, collapseToFilename);
-  redacted = redacted.replace(/\/home\/[^:)\n]+/g, collapseToFilename);
-  redacted = redacted.replace(/[A-Za-z]:\\Users\\[^:)\n]+/g, collapseToFilename);
-  return redacted;
+
+  const locationMatch = redacted.match(TRAILING_LOCATION_RE);
+  const suffix = locationMatch ? locationMatch[0] : '';
+  const body = suffix ? redacted.slice(0, redacted.length - suffix.length) : redacted;
+
+  // prefixDepth per pattern: "Users"/<name> and "home"/<name> are each 2
+  // fixed segments before any real path content; "C:"/"Users"/<name> is 3
+  // (drive letter + "Users" + name); "root" alone is 1 (no separate
+  // username segment).
+  let redactedBody = body;
+  redactedBody = redactedBody.replace(/\/Users\/[^\n]+$/, (m) => collapseToFilename(m, 2));
+  redactedBody = redactedBody.replace(/\/home\/[^\n]+$/, (m) => collapseToFilename(m, 2));
+  redactedBody = redactedBody.replace(/[A-Za-z]:\\Users\\[^\n]+$/, (m) => collapseToFilename(m, 3));
+  // /root/ is not personally identifying on its own (there's only one
+  // root), but a workspace/project folder immediately under it could still
+  // be -- e.g. "/root/acme-corp-project/...". Not an officially shipped
+  // platform today, but src/config.py already has a Linux data-dir
+  // fallback, so this is cheap defense-in-depth rather than a live,
+  // exercised path.
+  redactedBody = redactedBody.replace(/\/root\/[^\n]+$/, (m) => collapseToFilename(m, 1));
+
+  return redactedBody + suffix;
 }
 
 // Coarse, PII-free error for crash reporting ($exception capture). An
@@ -193,12 +222,26 @@ function redactLocalPaths(text) {
 function sanitizeErrorForCrashReport(err) {
   const reason = classifyErrorReason(err);
   const name = (err && err.name) || 'Error';
+  // `new Error(reason)` auto-captures its OWN stack at this exact line, which
+  // points into this file -- itself under APP_ROOT, so a dev checkout's real
+  // local path. That's fine when we immediately overwrite it with the
+  // redacted original stack below, but if the original error has no real
+  // stack (a non-Error `throw`, which uncaughtException receives directly
+  // and unwrapped -- unlike unhandledRejection, which we always wrap in a
+  // real Error first), this auto-captured stack would otherwise survive
+  // untouched and leak that path in full. Confirmed live: `throw "x"` /
+  // `sanitizeErrorForCrashReport("x")` produced this file's real dev
+  // checkout path verbatim before this branch existed.
   const safe = new Error(reason);
   safe.name = name;
   if (err && typeof err.stack === 'string') {
     const lines = err.stack.split('\n');
     const frames = lines.slice(1).map(redactLocalPaths);
     safe.stack = [`${name}: ${reason}`, ...frames].join('\n');
+  } else {
+    // No real stack to redact -- a message-only "stack" is the honest
+    // answer (there's no frame data to report), not V8's auto-captured one.
+    safe.stack = `${name}: ${reason}`;
   }
   return safe;
 }

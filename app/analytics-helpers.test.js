@@ -321,6 +321,70 @@ test('sanitizeErrorForCrashReport preserves the error name (generic, not PII) an
   assert.strictEqual(safeNoStack.message, 'disk_full');
 });
 
+test('sanitizeErrorForCrashReport does not leak the real dev-checkout path when the original value has no stack (adversarial regression)', () => {
+  // Confirmed live before this fix: `new Error(reason)`'s own auto-captured
+  // stack points INTO this file (analytics-helpers.js), so for any thrown
+  // value without a real .stack -- a plain object, or a bare `throw "x"`,
+  // which uncaughtException receives directly and unwrapped, unlike
+  // unhandledRejection which we always wrap in a real Error first -- the
+  // untouched auto-generated stack leaked this machine's actual checkout
+  // path in full (e.g. "/Users/<real-name>/.../analytics-helpers.js:NNN").
+  const path = require('path');
+  const appDir = __dirname;
+
+  const objNoStack = { message: 'ENOSPC: no space left', name: 'Error' };
+  const safe1 = sanitizeErrorForCrashReport(objNoStack);
+  assert.ok(!safe1.stack.includes(appDir));
+  assert.ok(!safe1.stack.includes(path.sep + 'Users' + path.sep));
+  assert.strictEqual(safe1.stack, 'Error: disk_full');
+
+  const safe2 = sanitizeErrorForCrashReport('a bare string, not an Error');
+  assert.ok(!safe2.stack.includes(appDir));
+  assert.strictEqual(safe2.stack, 'Error: unknown');
+});
+
+test('redactLocalPaths never exposes the username itself when nothing follows it in the match (adversarial regression)', () => {
+  // Confirmed live before this fix: a match with nothing after the username
+  // fell back to treating the username as the "filename" --
+  // redactLocalPaths('at foo (/Users/bob:5:10)') produced
+  // "at foo (<redacted-path>/bob:5:10)", leaking "bob" outright.
+  assert.strictEqual(redactLocalPaths('at foo (/Users/bob:5:10)'), 'at foo (<redacted-path>:5:10)');
+  assert.strictEqual(redactLocalPaths('at foo (/home/bob:5:10)'), 'at foo (<redacted-path>:5:10)');
+  assert.strictEqual(
+    redactLocalPaths('at foo (C:\\Users\\bob:5:10)'),
+    'at foo (<redacted-path>:5:10)',
+  );
+  const result = redactLocalPaths('at foo (/Users/bob:5:10)');
+  assert.ok(!result.includes('bob'));
+});
+
+test('redactLocalPaths collapses a /root/ workspace path (defense in depth, not an officially shipped platform)', () => {
+  assert.strictEqual(
+    redactLocalPaths('at foo (/root/acme-corp-project/main.js:5:10)'),
+    'at foo (<redacted-path>/main.js:5:10)',
+  );
+  assert.ok(!redactLocalPaths('at foo (/root/acme-corp-project/main.js:5:10)').includes('acme-corp'));
+});
+
+test('redactLocalPaths does not stop early on a `)` or `:` that is part of a legitimate folder name (adversarial regression)', () => {
+  // Confirmed live before this fix: a folder literally named "Client
+  // (Secret)" or "Project:Next" broke the old character-class approach,
+  // which stopped at the FIRST `)` or `:` anywhere -- including one inside
+  // the folder name itself -- leaving everything after it (the real
+  // workspace/client name) completely unredacted:
+  //   redactLocalPaths('at foo (/Users/alice/Client (Secret)/main.js:10:2)')
+  //   => 'at foo (<redacted-path>/Client (Secret)/main.js:10:2)'  -- BUG
+  const withParens = redactLocalPaths('at foo (/Users/alice/Client (Secret)/main.js:10:2)');
+  assert.strictEqual(withParens, 'at foo (<redacted-path>/main.js:10:2)');
+  assert.ok(!withParens.includes('Client'));
+  assert.ok(!withParens.includes('Secret'));
+
+  const withColon = redactLocalPaths('at foo (/Users/alice/Project:Next/main.js:10:2)');
+  assert.strictEqual(withColon, 'at foo (<redacted-path>/main.js:10:2)');
+  assert.ok(!withColon.includes('Project'));
+  assert.ok(!withColon.includes('Next'));
+});
+
 test('summarizeCalendarWindow counts meetings and buckets provider breakdown, content-free', () => {
   const events = [
     { title: 'Standup', meeting_url: 'https://zoom.us/j/1' },
