@@ -32,6 +32,8 @@ export const PRESETS: ChatPreset[] = [
   },
 ];
 
+export const PRESET_COLORS = ['#3B82F6', '#10B981', '#F97316', '#A855F7', '#EAB308'];
+
 /** Slash glyph used as the leading icon on every preset chip + popover
  *  row. Reinforces the "/" keyboard shortcut. Plain grey using the
  *  existing ink tokens so it sits quietly in the warm paper palette

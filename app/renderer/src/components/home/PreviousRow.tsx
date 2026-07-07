@@ -33,6 +33,7 @@ export function PreviousRow({ meeting, folderName }: PreviousRowProps) {
   const isLive = meeting.is_recording;
   const isProcessing = meeting.is_processing;
   const isSynthetic = isLive || isProcessing;
+  const showPreview = preview && !isSynthetic;
 
   // Synthetic rows route to the live or processing screen instead of trying
   // to open the sentinel summary_file (which doesn't exist on disk yet).
@@ -72,6 +73,7 @@ export function PreviousRow({ meeting, folderName }: PreviousRowProps) {
     >
       <div className="flex min-w-0 flex-1 items-center gap-3.5">
         <div 
+          aria-hidden="true"
           className="flex size-9 flex-shrink-0 items-center justify-center rounded-lg font-medium text-[15px]"
           style={{ backgroundColor: avatarBg, color: avatarFg }}
         >
@@ -90,7 +92,7 @@ export function PreviousRow({ meeting, folderName }: PreviousRowProps) {
             {isProcessing && <ProcessingBadge />}
           </div>
           
-          {(folderName || participants > 0 || preview) && (
+          {(folderName || participants > 0 || showPreview) && (
             <div
               className="flex items-center gap-1.5 truncate text-[12px] font-medium"
               style={{ color: 'var(--fg-muted)' }}
@@ -101,7 +103,7 @@ export function PreviousRow({ meeting, folderName }: PreviousRowProps) {
                     <FolderIcon className="size-3" />
                     {folderName}
                   </span>
-                  {(participants > 0 || preview) && <span className="opacity-40">·</span>}
+                  {(participants > 0 || showPreview) && <span className="opacity-40">·</span>}
                 </>
               )}
               {participants > 0 && (
@@ -109,10 +111,10 @@ export function PreviousRow({ meeting, folderName }: PreviousRowProps) {
                   <span>
                     {participants} {participants === 1 ? 'person' : 'people'}
                   </span>
-                  {preview && !isSynthetic && <span className="opacity-40">·</span>}
+                  {showPreview && <span className="opacity-40">·</span>}
                 </>
               )}
-              {preview && !isSynthetic && (
+              {showPreview && (
                 <span className="truncate">{preview}</span>
               )}
             </div>

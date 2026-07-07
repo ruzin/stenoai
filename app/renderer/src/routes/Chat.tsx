@@ -22,13 +22,22 @@ import { useUserName } from '@/hooks/useSettings';
 import { useOrgSession } from '@/hooks/useOrg';
 import { navigate } from '@/lib/router';
 import { GLOBAL_SCOPE, bucketKey, deriveSessionName, toBucketLabel, formatActiveModel, chatProviderReady } from '@/lib/chat';
-import { PRESETS, PresetGlyph } from '@/lib/chatPresets';
+import { PRESETS, PresetGlyph, PRESET_COLORS } from '@/lib/chatPresets';
 
 function TypewriterPlaceholder({ index, setIndex }: { index: number, setIndex: React.Dispatch<React.SetStateAction<number>> }) {
   const [text, setText] = React.useState('');
   const [isDeleting, setIsDeleting] = React.useState(false);
+  const prefersReducedMotion = React.useSyncExternalStore(
+    (callback) => {
+      const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+      mq.addEventListener('change', callback);
+      return () => mq.removeEventListener('change', callback);
+    },
+    () => window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  );
 
   React.useEffect(() => {
+    if (prefersReducedMotion) return;
     let timeout: ReturnType<typeof setTimeout>;
     const currentFullText = PRESETS[index].label;
 
@@ -56,31 +65,34 @@ function TypewriterPlaceholder({ index, setIndex }: { index: number, setIndex: R
     }
 
     return () => clearTimeout(timeout);
-  }, [text, isDeleting, index]);
+  }, [text, isDeleting, index, prefersReducedMotion]);
 
-  const presetColors = ['#3B82F6', '#10B981', '#F97316', '#A855F7', '#EAB308'];
-  const presetColor = presetColors[index % presetColors.length];
+  const presetColor = PRESET_COLORS[index % PRESET_COLORS.length];
 
   return (
     <div className="pointer-events-none absolute left-3 top-[10px] flex items-center gap-2">
       <PresetGlyph color={presetColor} size={22} />
       <span style={{ color: 'var(--fg-muted)', fontSize: 16 }}>
-        {text}
-        <style>{`
-          @keyframes cursor-blink {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0; }
-          }
-        `}</style>
-        <span
-          className="font-medium ml-[1px]"
-          style={{
-            color: 'var(--fg-1)',
-            animation: 'cursor-blink 1s step-end infinite'
-          }}
-        >
-          |
-        </span>
+        {prefersReducedMotion ? PRESETS[index].label : text}
+        {!prefersReducedMotion && (
+          <>
+            <style>{`
+              @keyframes cursor-blink {
+                0%, 100% { opacity: 1; }
+                50% { opacity: 0; }
+              }
+            `}</style>
+            <span
+              className="font-medium ml-[1px]"
+              style={{
+                color: 'var(--fg-1)',
+                animation: 'cursor-blink 1s step-end infinite'
+              }}
+            >
+              |
+            </span>
+          </>
+        )}
       </span>
     </div>
   );
@@ -278,7 +290,10 @@ export function Chat() {
                   value={input}
                   onFocus={() => setIsFocused(true)}
                   onBlur={() => setIsFocused(false)}
-                  onChange={(e) => setInput(e.target.value)}
+                  onChange={(e) => {
+                    setInput(e.target.value);
+                    if (e.target.value !== '') setPresetsOpen(false);
+                  }}
                   onKeyDown={(e) => {
                     if (presetsOpen) {
                       if (e.key === 'ArrowDown') {
@@ -291,7 +306,7 @@ export function Chat() {
                         setSelectedPresetIndex((prev) => (prev - 1 + PRESETS.length) % PRESETS.length);
                         return;
                       }
-                      if (e.key === 'Enter') {
+                      if (e.key === 'Enter' && input === '') {
                         e.preventDefault();
                         onPickPreset(PRESETS[selectedPresetIndex].prompt);
                         return;
@@ -371,8 +386,7 @@ export function Chat() {
             </div>
             <div className="flex flex-col">
               {PRESETS.map((p, idx) => {
-                const colors = ['#F97316', '#3B82F6', '#10B981', '#A855F7', '#EC4899', '#EAB308'];
-                const presetColor = colors[idx % colors.length];
+                const presetColor = PRESET_COLORS[idx % PRESET_COLORS.length];
                 return (
                 <button
                   key={p.label}

@@ -97,7 +97,7 @@ export function UpcomingCard({ event }: UpcomingCardProps) {
       </div>
 
       {/* CTA */}
-      <div className="flex flex-shrink-0 items-center gap-2 pl-4 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+      <div className="flex flex-shrink-0 items-center gap-2 pl-4 opacity-0 transition-opacity pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto focus-within:opacity-100 focus-within:pointer-events-auto">
         {meetingUrl ? (
           urgent ? (
             <button
