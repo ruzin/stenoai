@@ -8,6 +8,18 @@ interface PreviousRowProps {
   folderName?: string;
 }
 
+const AVATAR_COLORS = [
+  '#A855F7', '#EAB308', '#3B82F6', '#F43F5E', '#10B981',
+];
+
+function getAvatarColor(str: string) {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = str.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
+}
+
 export function PreviousRow({ meeting, folderName }: PreviousRowProps) {
   const info = meeting.session_info;
   const when = formatTime(info.processed_at ?? info.updated_at);
@@ -29,9 +41,14 @@ export function PreviousRow({ meeting, folderName }: PreviousRowProps) {
       ? '/meetings/processing'
       : `/meetings/${encodeURIComponent(info.summary_file)}`;
 
+  const title = info.name || 'Untitled note';
+  const initial = title.charAt(0).toUpperCase();
+  const avatarBg = getAvatarColor(title) + '25'; // 25 hex for ~15% opacity
+  const avatarFg = getAvatarColor(title);
+
   return (
     <div
-      className="previous-row"
+      className="group relative flex cursor-pointer items-center justify-between py-[10px] -mx-3 px-3 rounded-lg transition-colors hover:bg-[color:var(--surface-hover)]"
       data-testid="previous-row"
       data-recording={isLive ? 'true' : undefined}
       data-processing={isProcessing ? 'true' : undefined}
@@ -52,61 +69,62 @@ export function PreviousRow({ meeting, folderName }: PreviousRowProps) {
         }
       }}
     >
-      <div
-        className="pt-0.5 text-[12.5px] tabular-nums"
-        style={{ color: 'var(--fg-2)' }}
-      >
-        {isSynthetic ? 'Now' : (when ?? '')}
-      </div>
-      <div className="flex min-w-0 flex-col gap-1">
-        <div className="flex items-center gap-2">
-          <div
-            className="truncate text-sm font-medium tracking-[-0.005em]"
-            style={{ color: 'var(--fg-1)' }}
-          >
-            {info.name || 'Untitled note'}
-          </div>
-          {isLive && <LiveBadge />}
-          {isProcessing && <ProcessingBadge />}
+      <div className="flex min-w-0 flex-1 items-center gap-3.5">
+        <div 
+          className="flex size-9 flex-shrink-0 items-center justify-center rounded-lg font-medium text-[15px]"
+          style={{ backgroundColor: avatarBg, color: avatarFg }}
+        >
+          {initial}
         </div>
-        {preview && !isSynthetic && (
-          <div
-            className="line-clamp-1 text-[13px] leading-[1.5]"
-            style={{ color: 'var(--fg-2)' }}
-          >
-            {preview}
+        
+        <div className="flex min-w-0 flex-col gap-1">
+          <div className="flex items-center gap-2">
+            <div
+              className="truncate text-[13.5px] font-medium tracking-[-0.005em]"
+              style={{ color: 'var(--fg-1)' }}
+            >
+              {title}
+            </div>
+            {isLive && <LiveBadge />}
+            {isProcessing && <ProcessingBadge />}
           </div>
-        )}
-        {(folderName || participants > 0) && (
-          <div
-            className="mt-0.5 flex items-center gap-2.5 text-xs"
-            style={{ color: 'var(--fg-muted)' }}
-          >
-            {folderName && (
-              <span
-                className="inline-flex items-center gap-1.5 rounded px-1.5 py-0.5 text-[11.5px]"
-                style={{ background: 'var(--surface-hover)', color: 'var(--fg-2)' }}
-              >
-                <FolderIcon className="size-[11px]" />
-                {folderName}
-              </span>
-            )}
-            {participants > 0 && (
-              <>
-                {folderName && <span className="opacity-50">·</span>}
-                <span>
-                  {participants} {participants === 1 ? 'person' : 'people'}
-                </span>
-              </>
-            )}
-          </div>
-        )}
+          
+          {(folderName || participants > 0 || preview) && (
+            <div
+              className="flex items-center gap-1.5 truncate text-[12px] font-medium"
+              style={{ color: 'var(--fg-muted)' }}
+            >
+              {folderName && (
+                <>
+                  <span className="flex items-center gap-1">
+                    <FolderIcon className="size-3" />
+                    {folderName}
+                  </span>
+                  {(participants > 0 || preview) && <span className="opacity-40">·</span>}
+                </>
+              )}
+              {participants > 0 && (
+                <>
+                  <span>
+                    {participants} {participants === 1 ? 'person' : 'people'}
+                  </span>
+                  {preview && !isSynthetic && <span className="opacity-40">·</span>}
+                </>
+              )}
+              {preview && !isSynthetic && (
+                <span className="truncate">{preview}</span>
+              )}
+            </div>
+          )}
+        </div>
       </div>
+      
       <div
-        className="flex flex-col items-end gap-1.5 pt-0.5 text-xs tabular-nums"
+        className="flex flex-col items-end gap-1.5 pl-4 text-[12.5px] tabular-nums"
         style={{ color: 'var(--fg-2)' }}
       >
-        {duration && <span>{duration}</span>}
+        <span>{isSynthetic ? 'Now' : (when ?? '')}</span>
+        {duration && <span className="text-[11.5px] opacity-70">{duration}</span>}
       </div>
     </div>
   );
