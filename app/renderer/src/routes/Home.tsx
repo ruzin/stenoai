@@ -617,7 +617,7 @@ export function Home({ mode }: HomeProps) {
                   className="rounded-[16px] bg-[color:var(--surface-raised)] border shadow-sm mt-3"
                   style={{ borderColor: 'var(--border-subtle)' }}
                 >
-                  {groupedArray.map((group, i) => {
+                  {Object.entries(groups).map(([dateKey, group]) => {
                     const firstDate = new Date(group[0].start);
                     const day = firstDate.getDate();
                     const month = firstDate.toLocaleDateString(undefined, { month: 'short' });
@@ -625,7 +625,7 @@ export function Home({ mode }: HomeProps) {
                     
                     return (
                       <div 
-                        key={i} 
+                        key={dateKey} 
                         className="flex p-5 pb-4 border-b border-dashed last:border-b-0"
                         style={{ borderColor: 'var(--border-subtle)' }}
                       >

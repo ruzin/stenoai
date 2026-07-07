@@ -31,16 +31,17 @@ function TypewriterPlaceholder({ index, setIndex }: { index: number, setIndex: R
   React.useEffect(() => {
     let timeout: ReturnType<typeof setTimeout>;
     const currentFullText = PRESETS[index].label;
-    
+
     if (isDeleting) {
       if (text === '') {
-        setIsDeleting(false);
-        setIndex((i) => (i + 1) % PRESETS.length);
-        timeout = setTimeout(() => {}, 400); // short pause before typing next
+        timeout = setTimeout(() => {
+          setIsDeleting(false);
+          setIndex((i) => (i + 1) % PRESETS.length);
+        }, 400);
       } else {
         timeout = setTimeout(() => {
           setText(currentFullText.substring(0, text.length - 1));
-        }, 30); // fast backspace
+        }, 30);
       }
     } else {
       if (text === currentFullText) {
@@ -53,7 +54,7 @@ function TypewriterPlaceholder({ index, setIndex }: { index: number, setIndex: R
         }, 80); // natural typing speed
       }
     }
-    
+
     return () => clearTimeout(timeout);
   }, [text, isDeleting, index]);
 
@@ -71,11 +72,11 @@ function TypewriterPlaceholder({ index, setIndex }: { index: number, setIndex: R
             50% { opacity: 0; }
           }
         `}</style>
-        <span 
-          className="font-medium ml-[1px]" 
-          style={{ 
-            color: 'var(--fg-1)', 
-            animation: 'cursor-blink 1s step-end infinite' 
+        <span
+          className="font-medium ml-[1px]"
+          style={{
+            color: 'var(--fg-1)',
+            animation: 'cursor-blink 1s step-end infinite'
           }}
         >
           |
@@ -224,7 +225,7 @@ export function Chat() {
     <MeetingsShell activeSummaryFile={null}>
       <div className="mx-auto flex w-full max-w-[640px] flex-col min-h-[calc(100vh-64px)] px-2">
         <div className="h-[22vh] min-h-[120px] flex-shrink-0" />
-        
+
         <div className="w-full">
           <h1
           className="mb-8 text-center"
@@ -420,9 +421,9 @@ export function Chat() {
               }}
             >
               <div className="mb-3 flex justify-center">
-                <Sparkles 
-                  className="size-6" 
-                  style={{ color: '#A855F7', opacity: 0.8 }} 
+                <Sparkles
+                  className="size-6"
+                  style={{ color: '#A855F7', opacity: 0.8 }}
                 />
               </div>
               Your past chats will show up here.
@@ -537,4 +538,3 @@ function SectionHead({
     </div>
   );
 }
-

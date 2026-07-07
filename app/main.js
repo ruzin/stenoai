@@ -7534,6 +7534,7 @@ function fetchGoogleEventsForCalendar(accessToken, calendarId, params, signal) {
           }
           resolve(parsed.items || []);
         } catch (err) {
+          console.warn(`Failed to parse Google events for calendar ${calendarId}:`, err);
           resolve([]);
         }
       });
@@ -7914,6 +7915,7 @@ function fetchOutlookEventsForCalendar(accessToken, calendarId, params, signal) 
           const events = (parsed.value || []).map(normalizeOutlookEvent);
           resolve(events);
         } catch (err) {
+          console.warn(`Failed to parse Outlook events for calendar ${calendarId}:`, err);
           resolve([]);
         }
       });
