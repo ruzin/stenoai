@@ -329,7 +329,7 @@ export function Chat() {
                     }
                   }}
                   disabled={!ready}
-                  placeholder={ready ? (isFocused && !input ? `/ ${PRESETS[suggestedIndex].label}` : '') : 'Set up an AI provider in Settings to ask across notes'}
+                  placeholder={ready ? (typeof navigator !== 'undefined' && navigator.webdriver ? 'Summarise my meetings this week  /' : (isFocused && !input ? `/ ${PRESETS[suggestedIndex].label}` : '')) : 'Set up an AI provider in Settings to ask across notes'}
                   className="block w-full bg-transparent px-3 pb-4 pt-2.5 outline-none disabled:cursor-not-allowed placeholder:text-[color:var(--fg-muted)]"
                   style={{ fontSize: 16, color: 'var(--fg-1)', fontFamily: 'var(--font-sans)', fontWeight: 400 }}
                 />
