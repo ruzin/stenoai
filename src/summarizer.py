@@ -853,9 +853,10 @@ class OllamaSummarizer:
             ...
             {"type": "done",  "model": "...", "input_tokens": N, "output_tokens": M}
             or {"type": "error", "error": "..."} on failure.
-        Yields the text portion of each chunk record. Errors are logged
-        and the generator returns silently — matches the streaming-error
-        behaviour of the cloud and ollama paths.
+        Yields the text portion of each chunk record. On any failure (an
+        error record, an HTTP error, or a transport error) it logs and then
+        RAISES so the consumer surfaces the real error via STREAM_ERROR —
+        matching the streaming-error contract of the cloud and ollama paths.
         """
         import urllib.request
         import urllib.error
@@ -890,7 +891,7 @@ class OllamaSummarizer:
                             yield text
                     elif kind == "error":
                         logger.error(f"Adapter stream error: {record.get('error')}")
-                        return
+                        raise RuntimeError(f"Adapter stream error: {record.get('error')}")
                     elif kind == "done":
                         return
         except urllib.error.HTTPError as e:
@@ -898,8 +899,10 @@ class OllamaSummarizer:
                 logger.error("Adapter stream rejected: session expired or unauthorized")
             else:
                 logger.error(f"Adapter streaming failed: HTTP {e.code}")
+            raise
         except Exception as e:
             logger.error(f"Adapter streaming failed: {e}")
+            raise
 
     def _anthropic_chat(self, prompt: str, timeout_seconds: int = 300) -> str:
         """Send a chat request via the Anthropic Messages API."""
@@ -1487,7 +1490,7 @@ TRANSCRIPT:
                             yield text
                 except Exception as e:
                     logger.error(f"Anthropic streaming failed: {e}")
-                    return
+                    raise
             elif self.cloud_provider == "bedrock":
                 # Bedrock's /converse-stream uses amazon eventstream framing
                 # (binary, length-prefixed), which would need a dedicated
@@ -1503,7 +1506,7 @@ TRANSCRIPT:
                         yield text
                 except Exception as e:
                     logger.error(f"Bedrock summarisation failed: {e}")
-                    return
+                    raise
             else:
                 try:
                     response = self.cloud_client.chat.completions.create(
@@ -1519,7 +1522,7 @@ TRANSCRIPT:
                             yield content
                 except Exception as e:
                     logger.error(f"OpenAI streaming failed: {e}")
-                    return
+                    raise
             return
 
         # Ollama (local or remote) — shared with the free-form template path.
@@ -1527,7 +1530,7 @@ TRANSCRIPT:
             yield from self._stream_direct(prompt)
         except Exception as e:
             logger.error(f"Ollama streaming failed: {e}")
-            return
+            raise
 
     def summarize_transcript_streaming(self, transcript: str, duration_minutes: int = 0, language: str = "en", notes: str = None, progress_callback=None, template_prompt: Optional[str] = None):
         """Generator that yields markdown chunks from the LLM.
@@ -1553,15 +1556,28 @@ TRANSCRIPT:
             # ACTIVE provider — not straight to Ollama, which has no client and
             # would crash in cloud/adapter mode.
             prompt = self._create_template_report_prompt(transcript, template_prompt, language, notes)
-            yield from self._stream_completion(prompt)
-            return
+            inner = self._stream_completion(prompt)
+            empty_message = "Model returned an empty report"
+        elif self._needs_chunking(transcript, notes):
+            inner = self._map_reduce_streaming(transcript, language, notes, progress_callback)
+            empty_message = "Model returned an empty summary"
+        else:
+            prompt = self._create_markdown_prompt(transcript, language, notes)
+            inner = self._stream_completion(prompt)
+            empty_message = "Model returned an empty summary"
 
-        if self._needs_chunking(transcript, notes):
-            yield from self._map_reduce_streaming(transcript, language, notes, progress_callback)
-            return
-
-        prompt = self._create_markdown_prompt(transcript, language, notes)
-        yield from self._stream_completion(prompt)
+        # Defense in depth mirroring _map_reduce_streaming's empty-reduce guard: a
+        # provider can complete the stream without raising yet yield nothing (or
+        # only whitespace). Route that through STREAM_ERROR instead of silently
+        # saving an empty summary/report. (_map_reduce_streaming already raises on
+        # an empty reduce, so wrapping it here is harmless.)
+        saw_content = False
+        for chunk in inner:
+            if chunk and chunk.strip():
+                saw_content = True
+            yield chunk
+        if not saw_content:
+            raise ValueError(empty_message)
 
     def test_connection(self) -> bool:
         """
