@@ -7,6 +7,7 @@ import { test, expect } from '../fixtures/electron';
  * Wire shapes stubbed in app/e2e-mock-ipc.js; readiness logic in routes/Chat.tsx.
  */
 
+const READY_PLACEHOLDER = 'Summarise my meetings this week  /';
 const NOT_READY_PLACEHOLDER = 'Set up an AI provider in Settings to ask across notes';
 const hint = '[data-testid="chat-local-scope-hint"]';
 
@@ -18,8 +19,8 @@ test('local provider enables chat and discloses the recent-notes scope', async (
     window.location.hash = '#/chat';
   });
 
-  // Input is enabled (ready)
-  await expect(page.getByRole('textbox')).toBeEnabled();
+  // Input is enabled (ready) — the composer shows the active-state placeholder.
+  await expect(page.getByPlaceholder(READY_PLACEHOLDER)).toBeVisible();
   // And the local-scope disclosure is shown.
   await expect(page.locator(hint).first()).toBeVisible();
 });
