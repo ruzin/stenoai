@@ -561,7 +561,6 @@ export function Home({ mode }: HomeProps) {
               if (!groups[key]) groups[key] = [];
               groups[key].push(e);
             }
-            const groupedArray = Object.values(groups);
 
             return (
               <section className="mb-10">
