@@ -1,4 +1,5 @@
 import type { Meeting } from '@/lib/ipc';
+import { stripReasoning } from '@/lib/markdown';
 
 /**
  * Single source of truth for note search. Case-insensitive substring match
@@ -15,7 +16,7 @@ export function searchNotes(meetings: Meeting[], query: string): Meeting[] {
   if (!needle) return [];
   return meetings.filter((m) => {
     const name = m.session_info.name?.toLowerCase() ?? '';
-    const summary = m.summary?.toLowerCase() ?? '';
+    const summary = m.summary ? stripReasoning(m.summary).toLowerCase() : '';
     return name.includes(needle) || summary.includes(needle);
   });
 }
@@ -30,7 +31,7 @@ export function snippet(
   query: string,
   radius = 40,
 ): string {
-  const text = (summary ?? '').replace(/\s+/g, ' ').trim();
+  const text = summary ? stripReasoning(summary).replace(/\s+/g, ' ').trim() : '';
   if (!text) return '';
   const needle = query.trim().toLowerCase();
   const idx = needle ? text.toLowerCase().indexOf(needle) : -1;

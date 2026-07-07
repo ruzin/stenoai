@@ -44,6 +44,7 @@ export function Processing() {
   );
   const startedAt = draft ? new Date(draft.startedAtMs) : null;
 
+
   const [stage, setStage] = React.useState<ProcessingStage>('transcribing');
   const [chunkProgress, setChunkProgress] = React.useState<string | null>(null);
   const [streamText, setStreamText] = React.useState('');
@@ -451,6 +452,7 @@ export function ProcessingDock() {
     sessionName ? s.drafts[sessionName] : undefined,
   );
   const startedAt = draft ? new Date(draft.startedAtMs) : null;
+
 
   return (
     <div className="flex justify-center pointer-events-none">
