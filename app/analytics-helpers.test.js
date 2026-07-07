@@ -11,6 +11,7 @@ const {
   sanitizeTrackProperties,
   calendarMeetingProvider,
   classifyErrorReason,
+  redactLocalPaths,
   sanitizeErrorForCrashReport,
   summarizeCalendarWindow,
   summarizeCalendarSnapshot,
@@ -236,6 +237,51 @@ test('sanitizeErrorForCrashReport strips the risky first stack line but keeps th
   // Frame lines (file:line locations in our own source) are preserved verbatim.
   assert.strictEqual(stackLines[1], '    at Object.openSync (node:fs:592:3)');
   assert.ok(stackLines[2].includes('processNextInQueue (/Applications/Steno.app'));
+});
+
+test('sanitizeErrorForCrashReport redacts a username/workspace path in a stack FRAME (P2: dev/unpacked installs are not guaranteed path-free)', () => {
+  // A signed production build's frames point into /Applications/Steno.app,
+  // which is safe (no username). A dev checkout or portable install's
+  // frames instead point somewhere like /Users/alice/Downloads/stenoai/...,
+  // which embeds the OS username and local folder name -- this must not
+  // survive into the crash report.
+  const err = new TypeError('Cannot read properties of undefined');
+  err.stack =
+    'TypeError: Cannot read properties of undefined\n' +
+    '    at processNextInQueue (/Users/alice/Downloads/stenoai-dev/app/main.js:3820:15)\n' +
+    '    at Object.<anonymous> (/Users/alice/Downloads/stenoai-dev/app/node_modules/posthog-node/lib/index.js:100:5)';
+  const safe = sanitizeErrorForCrashReport(err);
+  assert.ok(!safe.stack.includes('alice'));
+  assert.ok(!safe.stack.includes('/Users/alice'));
+  // Function name + relative structure still present for triage.
+  assert.ok(safe.stack.includes('processNextInQueue'));
+  assert.ok(safe.stack.includes('main.js:3820:15'));
+});
+
+test('redactLocalPaths strips the app install root and falls back to redacting bare home-directory paths', () => {
+  const path = require('path');
+  const appRoot = __dirname; // analytics-helpers.js's own dir == main.js's dir
+  const underAppRoot = `${appRoot}${path.sep}main.js:10:1`;
+  const result1 = redactLocalPaths(underAppRoot);
+  assert.ok(!result1.includes(appRoot));
+  assert.ok(result1.includes('<app>'));
+
+  // Not under the app root at all (e.g. an Electron internal frame or an
+  // unexpected library path) -- the regex fallback still redacts it.
+  assert.strictEqual(
+    redactLocalPaths('at foo (/Users/bob/somewhere/else.js:1:1)'),
+    'at foo (/Users/<redacted>/somewhere/else.js:1:1)',
+  );
+  assert.strictEqual(
+    redactLocalPaths('at foo (/home/bob/somewhere/else.js:1:1)'),
+    'at foo (/home/<redacted>/somewhere/else.js:1:1)',
+  );
+  assert.strictEqual(
+    redactLocalPaths('at foo (C:\\Users\\bob\\somewhere\\else.js:1:1)'),
+    'at foo (C:\\Users\\<redacted>\\somewhere\\else.js:1:1)',
+  );
+  // A path with no user-specific segment at all is left alone.
+  assert.strictEqual(redactLocalPaths('at node:internal/process/task_queues:95:5'), 'at node:internal/process/task_queues:95:5');
 });
 
 test('sanitizeErrorForCrashReport preserves the error name (generic, not PII) and handles a missing/non-Error stack', () => {

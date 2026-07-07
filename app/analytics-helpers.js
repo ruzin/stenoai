@@ -131,17 +131,44 @@ function classifyErrorReason(error) {
   return 'unknown';
 }
 
+// This module lives in the app/ directory alongside main.js and is always
+// required from there via a relative path, so __dirname here is identical to
+// main.js's own -- the app's install root, whether that's an asar-packaged
+// production build or a dev checkout. Used to anchor-strip the machine-local
+// portion of a stack frame's path in redactLocalPaths below.
+const APP_ROOT = __dirname;
+
+// Stack frames only reveal a fixed, non-personal path (e.g.
+// /Applications/Steno.app/Contents/Resources/app.asar/...) on the signed
+// production build. Anywhere else -- a dev checkout, a portable install, a
+// path under the user's home directory -- the SAME frame instead embeds the
+// OS username or workspace folder name (e.g. /Users/alice/Downloads/... or
+// this repo's own dev checkout path). Two layers: replace every reference to
+// our own install root with a neutral anchor (catches first-party code AND
+// bundled node_modules, since both live under it), then a regex fallback
+// catches anything NOT under that root (Electron/Node internals, an
+// unexpected library path) by redacting home-directory-style segments
+// outright, on macOS/Linux/Windows.
+function redactLocalPaths(text) {
+  let redacted = text.split(APP_ROOT).join('<app>');
+  redacted = redacted.replace(/\/Users\/[^/\s)]+/g, '/Users/<redacted>');
+  redacted = redacted.replace(/\/home\/[^/\s)]+/g, '/home/<redacted>');
+  redacted = redacted.replace(/[A-Za-z]:\\Users\\[^\\\s)]+/g, 'C:\\Users\\<redacted>');
+  return redacted;
+}
+
 // Coarse, PII-free error for crash reporting ($exception capture). An
 // uncaught fs/child_process error's raw .message can embed a local path, a
 // session/note name, or -- for a calendar-titled recording -- a meeting
 // title or attendee name, so it must never ride along verbatim like
 // posthogClient.captureException(err, ...) would send it by default.
 // Reuses classifyErrorReason so the message is always one of that function's
-// fixed enum values. Stack FRAMES are preserved (they're file:line locations
-// in our own source -- the same for every user, no PII) since that's the
-// actual triage value of a crash report; only the first line, which
-// normally repeats "name: message" and would carry the risky text, is
-// replaced with the sanitized reason.
+// fixed enum values. Stack FRAMES are kept (they're the actual triage value
+// of a crash report -- which function, which line) but path-redacted via
+// redactLocalPaths, since an unpacked/dev install's frames are NOT
+// guaranteed to be the same for every user the way a signed build's are.
+// The first line, which normally repeats "name: message" and would carry
+// the risky raw text, is replaced with the sanitized reason outright.
 function sanitizeErrorForCrashReport(err) {
   const reason = classifyErrorReason(err);
   const name = (err && err.name) || 'Error';
@@ -149,7 +176,8 @@ function sanitizeErrorForCrashReport(err) {
   safe.name = name;
   if (err && typeof err.stack === 'string') {
     const lines = err.stack.split('\n');
-    safe.stack = [`${name}: ${reason}`, ...lines.slice(1)].join('\n');
+    const frames = lines.slice(1).map(redactLocalPaths);
+    safe.stack = [`${name}: ${reason}`, ...frames].join('\n');
   }
   return safe;
 }
@@ -232,6 +260,7 @@ module.exports = {
   sanitizeTrackProperties,
   calendarMeetingProvider,
   classifyErrorReason,
+  redactLocalPaths,
   sanitizeErrorForCrashReport,
   summarizeCalendarWindow,
   summarizeCalendarSnapshot,

@@ -664,12 +664,29 @@ async function shutdownTelemetry() {
 // accepted best-effort gap on the alpha platform -- the file-based crash log
 // remains authoritative there. macOS has no competing exit(1) handler, so
 // capture is reliable on the primary, signed build.
+//
+// posthog-node's instance captureException() is fire-and-forget: internally
+// it does `await propertiesFromUnknownInput(...)` (async stack parsing) and
+// only calls its own client.capture() -- the thing that actually enqueues
+// the event -- AFTER that resolves, but the public method doesn't expose or
+// await that promise. So flushing immediately after calling captureException
+// can run against a still-empty queue, sending nothing. This short delay
+// gives that internal parsing a chance to finish and enqueue the event
+// before we attempt to flush -- best-effort (there's no public API to know
+// for certain it's done), not a guarantee, but without it the flush below is
+// close to a no-op.
+const CAPTURE_EXCEPTION_ENQUEUE_DELAY_MS = 50;
+
+async function captureExceptionAndFlush(err) {
+  if (!telemetryEnabled || !posthogClient || !anonymousId) return;
+  posthogClient.captureException(sanitizeErrorForCrashReport(err), anonymousId);
+  await new Promise((resolve) => setTimeout(resolve, CAPTURE_EXCEPTION_ENQUEUE_DELAY_MS));
+  await withTimeout(posthogClient.flush(), 1000);
+}
+
 process.on('uncaughtException', async (err) => {
   try {
-    if (telemetryEnabled && posthogClient && anonymousId) {
-      posthogClient.captureException(sanitizeErrorForCrashReport(err), anonymousId);
-      await withTimeout(posthogClient.flush(), 1000);
-    }
+    await captureExceptionAndFlush(err);
   } catch (_) {
     // Silent fail -- telemetry must never mask the original crash
   } finally {
@@ -679,11 +696,8 @@ process.on('uncaughtException', async (err) => {
 
 process.on('unhandledRejection', async (reason) => {
   try {
-    if (telemetryEnabled && posthogClient && anonymousId) {
-      const err = reason instanceof Error ? reason : new Error(String(reason));
-      posthogClient.captureException(sanitizeErrorForCrashReport(err), anonymousId);
-      await withTimeout(posthogClient.flush(), 1000);
-    }
+    const err = reason instanceof Error ? reason : new Error(String(reason));
+    await captureExceptionAndFlush(err);
   } catch (_) {
     // Silent fail
   } finally {
@@ -8679,6 +8693,12 @@ let lastCalendarSnapshotAtMs = null;
 const CALENDAR_SNAPSHOT_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 function maybeTrackCalendarSnapshot(events, now = new Date()) {
+  // Skip entirely -- including the marker read/write -- when telemetry is
+  // off. trackEvent() would no-op below regardless, but writing the marker
+  // anyway would advance the <=1/day throttle for a snapshot that was never
+  // actually sent, silently suppressing the first REAL snapshot for up to
+  // 24h after the user later re-enables telemetry.
+  if (!telemetryEnabled || !posthogClient || !anonymousId) return;
   if (lastCalendarSnapshotAtMs === null) {
     lastCalendarSnapshotAtMs = readLastCalendarSnapshotAtMs();
   }
