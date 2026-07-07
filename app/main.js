@@ -7562,13 +7562,18 @@ async function fetchCalendarEvents(accessToken, maxResults = 50, signal) {
     const selectedCalendars = calendars.filter(c => c.selected);
     if (selectedCalendars.length === 0) return [];
 
-    const eventPromises = selectedCalendars.map(async (cal) => {
-      const items = await fetchGoogleEventsForCalendar(accessToken, cal.id, params, signal);
-      items.forEach(item => { item.calendarBackgroundColor = cal.backgroundColor; });
-      return items;
-    });
-
-    const results = await Promise.all(eventPromises);
+    const results = [];
+    const concurrency = 3;
+    for (let i = 0; i < selectedCalendars.length; i += concurrency) {
+      const chunk = selectedCalendars.slice(i, i + concurrency);
+      const chunkPromises = chunk.map(async (cal) => {
+        const items = await fetchGoogleEventsForCalendar(accessToken, cal.id, params, signal);
+        items.forEach(item => { item.calendarBackgroundColor = cal.backgroundColor; });
+        return items;
+      });
+      const chunkResults = await Promise.all(chunkPromises);
+      results.push(...chunkResults);
+    }
     let allEvents = results.flat();
     
     allEvents.sort((a, b) => {
@@ -7942,28 +7947,33 @@ async function fetchOutlookCalendarEvents(accessToken, maxResults = 50, signal) 
     const calendars = await fetchOutlookCalendarList(accessToken, signal);
     if (calendars.length === 0) return [];
 
-    const eventPromises = calendars.map(async (cal) => {
-      const items = await fetchOutlookEventsForCalendar(accessToken, cal.id, params, signal);
-      
-      let hexColor = undefined;
-      switch (cal.color) {
-        case 'lightBlue': hexColor = '#3B82F6'; break;
-        case 'lightGreen': hexColor = '#10B981'; break;
-        case 'lightOrange': hexColor = '#F97316'; break;
-        case 'lightGray': hexColor = '#6B7280'; break;
-        case 'lightYellow': hexColor = '#EAB308'; break;
-        case 'lightTeal': hexColor = '#14B8A6'; break;
-        case 'lightPink': hexColor = '#EC4899'; break;
-        case 'lightBrown': hexColor = '#92400E'; break;
-        case 'lightRed': hexColor = '#EF4444'; break;
-        default: hexColor = '#3B82F6';
-      }
-      
-      items.forEach(item => { item.calendarBackgroundColor = hexColor; });
-      return items;
-    });
-
-    const results = await Promise.all(eventPromises);
+    const results = [];
+    const concurrency = 3;
+    for (let i = 0; i < calendars.length; i += concurrency) {
+      const chunk = calendars.slice(i, i + concurrency);
+      const chunkPromises = chunk.map(async (cal) => {
+        const items = await fetchOutlookEventsForCalendar(accessToken, cal.id, params, signal);
+        
+        let hexColor = undefined;
+        switch (cal.color) {
+          case 'lightBlue': hexColor = '#3B82F6'; break;
+          case 'lightGreen': hexColor = '#10B981'; break;
+          case 'lightOrange': hexColor = '#F97316'; break;
+          case 'lightGray': hexColor = '#6B7280'; break;
+          case 'lightYellow': hexColor = '#EAB308'; break;
+          case 'lightTeal': hexColor = '#14B8A6'; break;
+          case 'lightPink': hexColor = '#EC4899'; break;
+          case 'lightBrown': hexColor = '#92400E'; break;
+          case 'lightRed': hexColor = '#EF4444'; break;
+          default: hexColor = '#3B82F6';
+        }
+        
+        items.forEach(item => { item.calendarBackgroundColor = hexColor; });
+        return items;
+      });
+      const chunkResults = await Promise.all(chunkPromises);
+      results.push(...chunkResults);
+    }
     let allEvents = results.flat();
     
     allEvents.sort((a, b) => {

@@ -29,7 +29,7 @@ export function NotificationToast() {
 
   const handleJoin = (e?: React.MouseEvent) => {
     e?.stopPropagation();
-    if (data.meeting_url) {
+    if (data.meeting_url && /^https?:\/\//i.test(data.meeting_url)) {
       ipc().shell.openExternal(data.meeting_url);
     }
     ipc().recording.start(data.title);
