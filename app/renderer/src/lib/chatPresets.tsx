@@ -36,14 +36,17 @@ export const PRESETS: ChatPreset[] = [
  *  row. Reinforces the "/" keyboard shortcut. Plain grey using the
  *  existing ink tokens so it sits quietly in the warm paper palette
  *  without claiming a colored accent. */
-export function PresetGlyph() {
+export function PresetGlyph({ color = 'var(--fg-2)', size = 18 }: { color?: string; size?: number }) {
   return (
     <span
       aria-hidden
-      className="inline-flex size-[18px] flex-shrink-0 items-center justify-center rounded-md font-mono text-[13px] font-semibold leading-none"
+      className="inline-flex flex-shrink-0 items-center justify-center rounded-md font-mono font-semibold leading-none"
       style={{
-        color: 'var(--fg-2)',
-        background: 'var(--surface-active)',
+        width: size,
+        height: size,
+        fontSize: Math.round(size * 0.7),
+        color,
+        background: `color-mix(in srgb, ${color} 15%, transparent)`,
       }}
     >
       /
