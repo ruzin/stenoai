@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Granola -> StenoAI migration generator.
+Granola -> Steno migration generator.
 
 Reads one folder per meeting from an input dir:
   <in>/<id>/meta.txt        # lines "key<TAB>value": title, date, participants
@@ -12,14 +12,14 @@ meta.txt:
   date<TAB>Jun 26, 2026 2:30 PM GMT+2
   participants<TAB>Name A <a@x>; Name B from Co <b@y>
 
-Writes StenoAI's file-based store into:
+Writes Steno's file-based store into:
   <target>/output/<stem>_summary.md      (ONLY this is globbed for listing)
   <target>/transcripts/<stem>_transcript.txt
 
 Usage:
   python3 steno_gen.py <input_dir> <target_dir> [--language LANG]
 
-NOTE: never write *_summary.json -- StenoAI's list_meetings scans json before md,
+NOTE: never write *_summary.json -- Steno's list_meetings scans json before md,
 dedupes by stem, and the json branch omits session_info.summary_file, which breaks
 the detail view ("Note not found"). The .md carries everything the parser needs.
 """
@@ -89,7 +89,7 @@ def name_only(p):
 
 
 def clean_summary(summary):
-    """StenoAI renders the Summary field as PLAIN TEXT (no markdown) and
+    """Steno renders the Summary field as PLAIN TEXT (no markdown) and
     collapses single newlines. So convert Granola markdown into clean text:
     de-escape, '### Heading' -> UPPERCASE line, '- bullet' -> '* bullet',
     and put a blank line between every block so nothing collapses."""
@@ -129,7 +129,7 @@ def yaml_scalar(v):
     if isinstance(v, int):
         return f": {v}"
     # A literal newline in a scalar would inject a bogus extra "key" line into
-    # the frontmatter block once StenoAI's line-by-line parser reads it back,
+    # the frontmatter block once Steno's line-by-line parser reads it back,
     # so collapse embedded newlines before quoting rather than trying to
     # round-trip them (the app's frontmatter has no multi-line scalar syntax).
     s = str(v).replace("\r\n", " ").replace("\r", " ").replace("\n", " ")
@@ -157,7 +157,7 @@ def build(meeting, language="en"):
         "language": language,
         "is_diarised": is_diar,
         "transcription_failed": False,
-        # Unknown frontmatter keys are ignored by StenoAI's parser. This one
+        # Unknown frontmatter keys are ignored by Steno's parser. This one
         # lets a later run tell "re-syncing the same Granola meeting" apart
         # from "a different meeting collided on the same computed stem".
         "granola_id": meeting.get("id"),
@@ -215,7 +215,7 @@ def load_meeting(folder: Path):
 
 
 def _stem_owner(md_path: Path):
-    """Return the granola_id recorded in an existing StenoAI file's frontmatter,
+    """Return the granola_id recorded in an existing Steno file's frontmatter,
     or None if the file has no such marker (pre-upgrade file, or unrelated
     content). Used to distinguish a re-sync of the same meeting from a
     same-stem collision with something else."""
@@ -278,7 +278,7 @@ def resolve_stem(out_dir: Path, stem: str, source_id: str, seen: set) -> str:
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Render StenoAI files from staged Granola meetings.")
+    ap = argparse.ArgumentParser(description="Render Steno files from staged Granola meetings.")
     ap.add_argument("input_dir")
     ap.add_argument("target_dir")
     ap.add_argument("--language", default="en",
