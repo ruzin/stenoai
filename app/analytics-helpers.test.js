@@ -292,6 +292,24 @@ test('redactLocalPaths strips the app install root and falls back to redacting b
   assert.strictEqual(redactLocalPaths('at node:internal/process/task_queues:95:5'), 'at node:internal/process/task_queues:95:5');
 });
 
+test('redactLocalPaths matches through spaces in a path component (P2 regression: macOS "Application Support", a client folder like "Client Project")', () => {
+  // The exclusion class used to stop at the FIRST whitespace character, so
+  // only the text before the space was redacted -- everything after it
+  // (e.g. "Support/stenoai/main.js", or "Project/main.js" from a client
+  // workspace literally named "Client Project") leaked through unredacted.
+  const macPath = 'at foo (/Users/alice/Library/Application Support/stenoai/main.js:10:1)';
+  const result = redactLocalPaths(macPath);
+  assert.strictEqual(result, 'at foo (<redacted-path>/main.js:10:1)');
+  assert.ok(!result.includes('Support'));
+  assert.ok(!result.includes('Library'));
+
+  const clientWorkspace = 'at foo (/Users/alice/Client Project/steno-fork/lib/file.js:1:1)';
+  const resultClient = redactLocalPaths(clientWorkspace);
+  assert.strictEqual(resultClient, 'at foo (<redacted-path>/file.js:1:1)');
+  assert.ok(!resultClient.includes('Client'));
+  assert.ok(!resultClient.includes('Project'));
+});
+
 test('sanitizeErrorForCrashReport preserves the error name (generic, not PII) and handles a missing/non-Error stack', () => {
   const typeErr = new TypeError('Cannot read properties of undefined');
   const safe = sanitizeErrorForCrashReport(typeErr);

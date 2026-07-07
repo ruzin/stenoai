@@ -165,9 +165,16 @@ function collapseToFilename(matchedPath) {
 // just the username -- down to a filename, on macOS/Linux/Windows.
 function redactLocalPaths(text) {
   let redacted = text.split(APP_ROOT).join('<app>');
-  redacted = redacted.replace(/\/Users\/[^:)\s]+/g, collapseToFilename);
-  redacted = redacted.replace(/\/home\/[^:)\s]+/g, collapseToFilename);
-  redacted = redacted.replace(/[A-Za-z]:\\Users\\[^:)\s]+/g, collapseToFilename);
+  // Match through spaces -- a real path component, not just a delimiter
+  // (macOS "Application Support", "iCloud Drive", any workspace folder with
+  // a space in its name). Only `:` (before line:col), `)` (closing the
+  // frame), and newlines actually end a stack-frame path reference; a
+  // `\s`-excluding class stopped at the FIRST space and left everything
+  // after it -- e.g. "Support/stenoai/main.js" from ".../Application
+  // Support/..." -- completely unredacted.
+  redacted = redacted.replace(/\/Users\/[^:)\n]+/g, collapseToFilename);
+  redacted = redacted.replace(/\/home\/[^:)\n]+/g, collapseToFilename);
+  redacted = redacted.replace(/[A-Za-z]:\\Users\\[^:)\n]+/g, collapseToFilename);
   return redacted;
 }
 
