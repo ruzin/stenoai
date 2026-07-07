@@ -138,22 +138,36 @@ function classifyErrorReason(error) {
 // portion of a stack frame's path in redactLocalPaths below.
 const APP_ROOT = __dirname;
 
+// Collapses a matched absolute path down to just its filename -- not merely
+// its username segment. Redacting only "/Users/<name>" would still leave
+// every directory AFTER it intact (e.g. "/Users/<redacted>/acme-corp-
+// confidential/steno-fork/lib/file.js" still names the client/workspace),
+// which is exactly as revealing as the username itself for a frame outside
+// APP_ROOT. Keeping the basename preserves "which file" for triage without
+// any of the directory structure around it.
+function collapseToFilename(matchedPath) {
+  const segments = matchedPath.split(/[\\/]/).filter(Boolean);
+  const filename = segments[segments.length - 1];
+  return filename ? `<redacted-path>/${filename}` : '<redacted-path>';
+}
+
 // Stack frames only reveal a fixed, non-personal path (e.g.
 // /Applications/Steno.app/Contents/Resources/app.asar/...) on the signed
 // production build. Anywhere else -- a dev checkout, a portable install, a
 // path under the user's home directory -- the SAME frame instead embeds the
-// OS username or workspace folder name (e.g. /Users/alice/Downloads/... or
-// this repo's own dev checkout path). Two layers: replace every reference to
-// our own install root with a neutral anchor (catches first-party code AND
-// bundled node_modules, since both live under it), then a regex fallback
-// catches anything NOT under that root (Electron/Node internals, an
-// unexpected library path) by redacting home-directory-style segments
-// outright, on macOS/Linux/Windows.
+// OS username AND whatever workspace/client/project folder it lives under
+// (e.g. /Users/alice/Downloads/... or this repo's own dev checkout path).
+// Two layers: replace every reference to our own install root with a
+// neutral anchor (catches first-party code AND bundled node_modules, since
+// both live under it), then a regex fallback catches anything NOT under
+// that root (Electron/Node internals, an unexpected library path) by
+// collapsing the ENTIRE home-relative path -- every directory segment, not
+// just the username -- down to a filename, on macOS/Linux/Windows.
 function redactLocalPaths(text) {
   let redacted = text.split(APP_ROOT).join('<app>');
-  redacted = redacted.replace(/\/Users\/[^/\s)]+/g, '/Users/<redacted>');
-  redacted = redacted.replace(/\/home\/[^/\s)]+/g, '/home/<redacted>');
-  redacted = redacted.replace(/[A-Za-z]:\\Users\\[^\\\s)]+/g, 'C:\\Users\\<redacted>');
+  redacted = redacted.replace(/\/Users\/[^:)\s]+/g, collapseToFilename);
+  redacted = redacted.replace(/\/home\/[^:)\s]+/g, collapseToFilename);
+  redacted = redacted.replace(/[A-Za-z]:\\Users\\[^:)\s]+/g, collapseToFilename);
   return redacted;
 }
 

@@ -267,18 +267,26 @@ test('redactLocalPaths strips the app install root and falls back to redacting b
   assert.ok(result1.includes('<app>'));
 
   // Not under the app root at all (e.g. an Electron internal frame or an
-  // unexpected library path) -- the regex fallback still redacts it.
+  // unexpected library path) -- the regex fallback collapses the WHOLE
+  // home-relative path (every directory segment, not just the username) to
+  // a filename, so a workspace/client/project folder name after the
+  // username can't survive either.
   assert.strictEqual(
     redactLocalPaths('at foo (/Users/bob/somewhere/else.js:1:1)'),
-    'at foo (/Users/<redacted>/somewhere/else.js:1:1)',
+    'at foo (<redacted-path>/else.js:1:1)',
   );
   assert.strictEqual(
+    redactLocalPaths('at foo (/Users/bob/acme-corp-confidential/steno-fork/lib/else.js:1:1)'),
+    'at foo (<redacted-path>/else.js:1:1)',
+  );
+  assert.ok(!redactLocalPaths('/Users/bob/acme-corp-confidential/else.js').includes('acme-corp'));
+  assert.strictEqual(
     redactLocalPaths('at foo (/home/bob/somewhere/else.js:1:1)'),
-    'at foo (/home/<redacted>/somewhere/else.js:1:1)',
+    'at foo (<redacted-path>/else.js:1:1)',
   );
   assert.strictEqual(
     redactLocalPaths('at foo (C:\\Users\\bob\\somewhere\\else.js:1:1)'),
-    'at foo (C:\\Users\\<redacted>\\somewhere\\else.js:1:1)',
+    'at foo (<redacted-path>/else.js:1:1)',
   );
   // A path with no user-specific segment at all is left alone.
   assert.strictEqual(redactLocalPaths('at node:internal/process/task_queues:95:5'), 'at node:internal/process/task_queues:95:5');
