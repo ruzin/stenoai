@@ -75,7 +75,7 @@ export function UpcomingCard({ event }: UpcomingCardProps) {
           >
             {event.title || 'Untitled meeting'}
           </div>
-          {urgent && (
+          {(isLive && !!meetingUrl) && (
             <span 
               className="inline-block size-1.5 rounded-full" 
               style={{ background: 'var(--recording)', animation: 'record-pulse 1.6s ease-out infinite' }} 
