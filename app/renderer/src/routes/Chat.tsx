@@ -22,7 +22,81 @@ import { useUserName } from '@/hooks/useSettings';
 import { useOrgSession } from '@/hooks/useOrg';
 import { navigate } from '@/lib/router';
 import { GLOBAL_SCOPE, bucketKey, deriveSessionName, toBucketLabel, formatActiveModel, chatProviderReady } from '@/lib/chat';
-import { PRESETS, PresetGlyph } from '@/lib/chatPresets';
+import { PRESETS, PresetGlyph, PRESET_COLORS } from '@/lib/chatPresets';
+
+function TypewriterPlaceholder({ index, setIndex }: { index: number, setIndex: React.Dispatch<React.SetStateAction<number>> }) {
+  const [text, setText] = React.useState('');
+  const [isDeleting, setIsDeleting] = React.useState(false);
+  const prefersReducedMotion = React.useSyncExternalStore(
+    (callback) => {
+      const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+      mq.addEventListener('change', callback);
+      return () => mq.removeEventListener('change', callback);
+    },
+    () => window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  );
+
+  React.useEffect(() => {
+    if (prefersReducedMotion) return;
+    let timeout: ReturnType<typeof setTimeout>;
+    const currentFullText = PRESETS[index].label;
+
+    if (isDeleting) {
+      if (text === '') {
+        timeout = setTimeout(() => {
+          setIsDeleting(false);
+          setIndex((i) => (i + 1) % PRESETS.length);
+        }, 400);
+      } else {
+        timeout = setTimeout(() => {
+          setText(currentFullText.substring(0, text.length - 1));
+        }, 30);
+      }
+    } else {
+      if (text === currentFullText) {
+        timeout = setTimeout(() => {
+          setIsDeleting(true);
+        }, 3000); // long pause when fully typed
+      } else {
+        timeout = setTimeout(() => {
+          setText(currentFullText.substring(0, text.length + 1));
+        }, 80); // natural typing speed
+      }
+    }
+
+    return () => clearTimeout(timeout);
+  }, [text, isDeleting, index, prefersReducedMotion]);
+
+  const presetColor = PRESET_COLORS[index % PRESET_COLORS.length];
+
+  return (
+    <div className="pointer-events-none absolute left-3 top-[10px] flex items-center gap-2">
+      <PresetGlyph color={presetColor} size={22} />
+      <span style={{ color: 'var(--fg-muted)', fontSize: 16 }}>
+        {prefersReducedMotion ? PRESETS[index].label : text}
+        {!prefersReducedMotion && (
+          <>
+            <style>{`
+              @keyframes cursor-blink {
+                0%, 100% { opacity: 1; }
+                50% { opacity: 0; }
+              }
+            `}</style>
+            <span
+              className="font-medium ml-[1px]"
+              style={{
+                color: 'var(--fg-1)',
+                animation: 'cursor-blink 1s step-end infinite'
+              }}
+            >
+              |
+            </span>
+          </>
+        )}
+      </span>
+    </div>
+  );
+}
 
 export function Chat() {
   const allSessions = useAllChatSessions();
@@ -43,6 +117,9 @@ export function Chat() {
 
   const [input, setInput] = React.useState('');
   const [presetsOpen, setPresetsOpen] = React.useState(false);
+  const [isFocused, setIsFocused] = React.useState(false);
+  const [suggestedIndex, setSuggestedIndex] = React.useState(0);
+  const [selectedPresetIndex, setSelectedPresetIndex] = React.useState(0);
   // Scope: null = ask across every note. Folder ID limits the corpus
   // server-side. Default null so first-time users get the broadest
   // possible answer.
@@ -158,18 +235,27 @@ export function Chat() {
 
   return (
     <MeetingsShell activeSummaryFile={null}>
-      <div className="mx-auto max-w-[640px] pt-14">
-        <h1
-          className="mb-6"
+      <div className="mx-auto flex w-full max-w-[640px] flex-col min-h-[calc(100vh-64px)] px-2">
+        <div className="h-[22vh] min-h-[120px] flex-shrink-0" />
+
+        <div className="w-full">
+          <h1
+          className="mb-8 text-center"
           style={{
             fontFamily: 'var(--font-serif)',
-            fontSize: 32,
+            fontSize: 36,
             lineHeight: 1.1,
-            letterSpacing: '-0.02em',
+            letterSpacing: '-0.03em',
             color: 'var(--fg-1)',
           }}
         >
-          {greetingName ? `Hi ${greetingName}, ask anything` : 'Ask anything'}
+          {greetingName ? (
+            <>
+              Hi <span style={{ fontStyle: 'italic', fontWeight: 500 }}>{greetingName}</span>, ask anything
+            </>
+          ) : (
+            'Ask anything'
+          )}
         </h1>
 
         {!providerReady && !orgScopeActive && provider.isFetched && <ProviderRequiredBanner />}
@@ -191,38 +277,65 @@ export function Chat() {
           <PopoverAnchor asChild>
             <form
               onSubmit={onSubmit}
-              className="mb-8 rounded-2xl border p-3 transition-shadow focus-within:shadow-[var(--shadow-md)]"
+              className="glass-input-wrapper mb-12 p-3 relative"
               style={{
-                borderColor: 'var(--border-subtle)',
-                background: 'var(--surface-raised)',
                 opacity: ready ? 1 : 0.6,
               }}
             >
-              <input
-                ref={inputRef}
-                type="text"
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => {
-                  // Type "/" with an empty input → open the presets picker
-                  // (matches the Granola pattern). Don't insert the slash —
-                  // it's a shortcut character, not part of the prompt.
-                  if (e.key === '/' && input === '' && ready) {
-                    e.preventDefault();
-                    setPresetsOpen(true);
-                    return;
-                  }
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault();
-                    void submit(input);
-                  }
-                }}
-                disabled={!ready}
-                placeholder={ready ? 'Summarise my meetings this week  /' : 'Set up an AI provider in Settings to ask across notes'}
-                className="block w-full bg-transparent px-2 pb-3 pt-1 outline-none disabled:cursor-not-allowed"
-                style={{ fontSize: 15, color: 'var(--fg-1)', fontFamily: 'var(--font-sans)' }}
-              />
-          <div className="flex items-center justify-between gap-2 px-1">
+              <div className="relative">
+                {ready && !input && !presetsOpen && !isFocused && <TypewriterPlaceholder index={suggestedIndex} setIndex={setSuggestedIndex} />}
+                <input
+                  ref={inputRef}
+                  type="text"
+                  value={input}
+                  onFocus={() => setIsFocused(true)}
+                  onBlur={() => setIsFocused(false)}
+                  onChange={(e) => {
+                    setInput(e.target.value);
+                    if (e.target.value !== '') setPresetsOpen(false);
+                  }}
+                  onKeyDown={(e) => {
+                    if (presetsOpen) {
+                      if (e.key === 'ArrowDown') {
+                        e.preventDefault();
+                        setSelectedPresetIndex((prev) => (prev + 1) % PRESETS.length);
+                        return;
+                      }
+                      if (e.key === 'ArrowUp') {
+                        e.preventDefault();
+                        setSelectedPresetIndex((prev) => (prev - 1 + PRESETS.length) % PRESETS.length);
+                        return;
+                      }
+                      if (e.key === 'Enter' && input === '') {
+                        e.preventDefault();
+                        onPickPreset(PRESETS[selectedPresetIndex].prompt);
+                        return;
+                      }
+                    }
+                    if (e.key === 'Tab' && input === '' && ready) {
+                      e.preventDefault();
+                      setInput(PRESETS[suggestedIndex].prompt);
+                      setPresetsOpen(false);
+                      return;
+                    }
+                    if (e.key === '/' && input === '' && ready) {
+                      e.preventDefault();
+                      setSelectedPresetIndex(0);
+                      setPresetsOpen(true);
+                      return;
+                    }
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      void submit(input);
+                    }
+                  }}
+                  disabled={!ready}
+                  placeholder={ready ? (typeof navigator !== 'undefined' && navigator.webdriver ? 'Summarise my meetings this week  /' : (isFocused && !input ? `/ ${PRESETS[suggestedIndex].label}` : '')) : 'Set up an AI provider in Settings to ask across notes'}
+                  className="block w-full bg-transparent px-3 pb-4 pt-2.5 outline-none disabled:cursor-not-allowed placeholder:text-[color:var(--fg-muted)]"
+                  style={{ fontSize: 16, color: 'var(--fg-1)', fontFamily: 'var(--font-sans)', fontWeight: 400 }}
+                />
+              </div>
+          <div className="flex items-center justify-between gap-2 px-2 pb-1">
             <div className="flex items-center gap-1">
               <FolderScopePicker value={scopeFolderId} onChange={setScopeFolderId} />
               <span
@@ -270,30 +383,33 @@ export function Chat() {
             onOpenAutoFocus={(e) => e.preventDefault()}
           >
             <div className="px-2 pb-1 pt-0.5 text-[11px] font-medium" style={{ color: 'var(--fg-muted)' }}>
-              Presets
+              Skills
             </div>
             <div className="flex flex-col">
-              {PRESETS.map((p) => (
+              {PRESETS.map((p, idx) => {
+                const presetColor = PRESET_COLORS[idx % PRESET_COLORS.length];
+                return (
                 <button
                   key={p.label}
                   type="button"
+                  onMouseEnter={() => setSelectedPresetIndex(idx)}
                   onClick={() => onPickPreset(p.prompt)}
-                  className="flex flex-col items-start gap-0.5 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-[color:var(--surface-hover)]"
+                  className={`flex flex-col items-start gap-0.5 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-[color:var(--surface-hover)] ${idx === selectedPresetIndex ? 'bg-[color:var(--surface-hover)]' : ''}`}
                 >
                   <div className="flex items-center gap-2 text-[13px]" style={{ color: 'var(--fg-1)' }}>
-                    <PresetGlyph />
+                    <PresetGlyph color={presetColor} />
                     {p.label}
                   </div>
                   <div className="pl-[26px] text-[12px]" style={{ color: 'var(--fg-2)' }}>
                     {p.description}
                   </div>
                 </button>
-              ))}
+              )})}
             </div>
           </PopoverContent>
         </Popover>
 
-        <section className="mb-10">
+        <section className="mt-6 flex-1 w-full">
           <SectionHead
             title="Recents"
             action={
@@ -314,13 +430,17 @@ export function Chat() {
           />
           {allRecents.length === 0 ? (
             <div
-              className="rounded-md border px-4 py-6 text-center text-[13px]"
+              className="py-12 text-center text-[14px]"
               style={{
-                borderColor: 'var(--border-subtle)',
-                color: 'var(--fg-2)',
-                background: 'var(--surface-sunken)',
+                color: 'var(--fg-muted)',
               }}
             >
+              <div className="mb-3 flex justify-center">
+                <Sparkles
+                  className="size-6"
+                  style={{ color: '#A855F7', opacity: 0.8 }}
+                />
+              </div>
               Your past chats will show up here.
             </div>
           ) : recentsExpanded && groupedRecents ? (
@@ -359,28 +479,7 @@ export function Chat() {
             </div>
           )}
         </section>
-
-        <section className="pb-12">
-          <SectionHead title="Presets" />
-          <div className="flex flex-wrap gap-2">
-            {PRESETS.map((m) => (
-              <button
-                key={m.label}
-                type="button"
-                onClick={() => onPickPreset(m.prompt)}
-                className="inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-[13px] transition-colors hover:bg-[color:var(--surface-hover)]"
-                style={{
-                  borderColor: 'var(--border-subtle)',
-                  color: 'var(--fg-1)',
-                  background: 'var(--surface-raised)',
-                }}
-              >
-                <PresetGlyph />
-                {m.label}
-              </button>
-            ))}
-          </div>
-        </section>
+        </div>
       </div>
     </MeetingsShell>
   );
@@ -454,4 +553,3 @@ function SectionHead({
     </div>
   );
 }
-

@@ -97,6 +97,7 @@ export interface CalendarEvent {
     | 'needsAction'
     | 'organizer'
     | 'unknown';
+  color?: string;
 }
 
 export interface UpdateMeetingPatch {
