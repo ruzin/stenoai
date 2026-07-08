@@ -281,6 +281,101 @@ class TranscribeDiarisedMultiSpeakerTests(unittest.TestCase):
         )
 
 
+class TranscribeDiarisedMonoTests(unittest.TestCase):
+    """Mono audio has no mic/system channel split to lean on, but a single
+    track can still contain multiple speakers (e.g. an imported in-person
+    recording). transcribe_diarised must run acoustic diarization directly
+    against the whole file in that case, instead of unconditionally skipping
+    diarization the way the pre-diarization mono fallback did."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        d = Path(self._tmp.name)
+        self.audio_path = d / "mono.wav"
+        self.audio_path.write_bytes(b"stub")
+        self.transcriber = WhisperTranscriber.__new__(WhisperTranscriber)
+        self.transcriber.backend = "parakeet"
+        self.transcriber._split_stereo_to_channels = Mock(return_value=(None, None, None))
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_two_speakers_in_mono_file_become_you_and_speaker_two(self):
+        diar_segments = [
+            {"start": 0.0, "end": 2.0, "speaker": "SPEAKER_0"},
+            {"start": 2.5, "end": 4.5, "speaker": "SPEAKER_1"},
+            {"start": 5.0, "end": 8.0, "speaker": "SPEAKER_0"},
+        ]
+        with patch("src.transcriber._run_steno_diarize", return_value=diar_segments):
+            self.transcriber.transcribe_audio = Mock(return_value={
+                "text": "Hi there. Not bad. Great.",
+                "segments": [
+                    {"text": "Hi there.", "start": 0.5, "end": 1.5},
+                    {"text": "Not bad.", "start": 3.0, "end": 3.8},
+                    {"text": "Great.", "start": 6.0, "end": 6.8},
+                ],
+                "duration_seconds": 8.0,
+            })
+            result = self.transcriber.transcribe_diarised(self.audio_path)
+        self.assertTrue(result["is_diarised"])
+        self.assertIn("[You] Hi there.", result["diarised_text"])
+        self.assertIn("[Speaker 2] Not bad.", result["diarised_text"])
+        self.assertIn("[You] Great.", result["diarised_text"])
+        # The plain text field is untouched by diarisation.
+        self.assertEqual(result["text"], "Hi there. Not bad. Great.")
+
+    def test_single_speaker_mono_is_not_diarised(self):
+        # Byte-identical-to-legacy fast path: one real cluster means nothing
+        # to disambiguate, matching the pre-diarization mono behaviour.
+        diar_segments = [{"start": 0.0, "end": 5.0, "speaker": "SPEAKER_0"}]
+        with patch("src.transcriber._run_steno_diarize", return_value=diar_segments):
+            self.transcriber.transcribe_audio = Mock(return_value={
+                "text": "Just me talking.",
+                "segments": [{"text": "Just me talking.", "start": 0.5, "end": 1.5}],
+                "duration_seconds": 5.0,
+            })
+            result = self.transcriber.transcribe_diarised(self.audio_path)
+        self.assertFalse(result["is_diarised"])
+        self.assertIsNone(result["diarised_text"])
+
+    def test_sidecar_failure_falls_back_without_diarisation(self):
+        with patch("src.transcriber._run_steno_diarize", return_value=None):
+            self.transcriber.transcribe_audio = Mock(return_value={
+                "text": "Hello world.",
+                "segments": [{"text": "Hello world.", "start": 0.5, "end": 1.5}],
+                "duration_seconds": 2.0,
+            })
+            result = self.transcriber.transcribe_diarised(self.audio_path)
+        self.assertFalse(result["is_diarised"])
+        self.assertIsNone(result["diarised_text"])
+        self.assertEqual(result["text"], "Hello world.")
+
+    def test_transcription_failure_propagates_without_diarizing(self):
+        with patch("src.transcriber._run_steno_diarize") as mock_diarize:
+            self.transcriber.transcribe_audio = Mock(return_value={
+                "text": None,
+                "segments": [],
+                "transcription_failed": True,
+                "error": "boom",
+            })
+            result = self.transcriber.transcribe_diarised(self.audio_path)
+        mock_diarize.assert_not_called()
+        self.assertTrue(result["transcription_failed"])
+        self.assertFalse(result["is_diarised"])
+        self.assertIsNone(result["diarised_text"])
+
+    def test_empty_transcription_does_not_attempt_diarization(self):
+        with patch("src.transcriber._run_steno_diarize") as mock_diarize:
+            self.transcriber.transcribe_audio = Mock(return_value={
+                "text": "No speech detected in audio",
+                "segments": [],
+                "transcription_empty": True,
+            })
+            result = self.transcriber.transcribe_diarised(self.audio_path)
+        mock_diarize.assert_not_called()
+        self.assertFalse(result["is_diarised"])
+
+
 class TokenJaccardTests(unittest.TestCase):
     def test_identical_strings_score_one(self):
         self.assertEqual(_token_jaccard("hello world", "hello world"), 1.0)

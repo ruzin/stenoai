@@ -1422,18 +1422,16 @@ class WhisperTranscriber:
         """Transcribe with stereo channel diarisation.
 
         If the audio is stereo (left=mic, right=system), each channel is
-        transcribed separately and labelled as [You] and [Others]. Falls
-        back to normal transcription for mono audio.
+        transcribed separately and labelled as [You] and [Others]. Mono
+        audio (e.g. many imported recordings) has no channel split to lean
+        on, but can still contain multiple speakers — acoustic diarization
+        runs directly against the whole file instead; see
+        _transcribe_diarised_mono.
         """
         mic_path, system_path, duration = self._split_stereo_to_channels(audio_filepath)
 
         if mic_path is None:
-            # Mono audio — use standard transcription
-            result = self.transcribe_audio(audio_filepath, language)
-            if result:
-                result['is_diarised'] = False
-                result['diarised_text'] = None
-            return result
+            return self._transcribe_diarised_mono(audio_filepath, language)
 
         try:
             mic_has_audio = self._check_rms_energy(mic_path)
@@ -1650,6 +1648,52 @@ class WhisperTranscriber:
                         p.unlink()
                     except Exception:
                         pass
+
+    def _transcribe_diarised_mono(self, audio_filepath: Path, language: str) -> Optional[dict]:
+        """Diarise a mono recording (no channel split to lean on).
+
+        Runs standard transcription, then acoustic diarization directly
+        against the whole file via the same _tag_channel_segments helper the
+        stereo path uses per-channel — steno-diarize decodes any input
+        format itself (via ffmpeg), so no split/preprocessing is needed
+        first. The single track is treated as the "You" channel, matching
+        the pre-diarization convention of attributing an unlabelled mono
+        recording to the user; a second acoustic cluster becomes "Speaker 2"
+        exactly as a second cluster on the mic channel would in the stereo
+        path. Any diarization failure or a single-cluster result leaves
+        is_diarised False, matching the historical mono behaviour exactly.
+        """
+        result = self.transcribe_audio(audio_filepath, language)
+        if not result:
+            return result
+        result['is_diarised'] = False
+        result['diarised_text'] = None
+        if result.get("transcription_failed") or result.get("transcription_empty"):
+            return result
+
+        asr_segments = result.get("segments") or []
+        duration = result.get("duration_seconds")
+        tagged = _tag_channel_segments(asr_segments, audio_filepath, duration, "You")
+        tagged.sort(key=lambda t: t[0])
+        tagged = _resolve_speaker_placeholders(tagged)
+
+        turns: list[tuple[float, str, list[str]]] = []
+        for start, speaker, text in tagged:
+            if turns and turns[-1][1] == speaker:
+                turns[-1][2].append(text)
+            else:
+                turns.append((start, speaker, [text]))
+
+        distinct_labels = {speaker for _start, speaker, _parts in turns}
+        if len(distinct_labels) > 1:
+            labelled_parts = [
+                f"[{_format_timestamp(start)}] [{speaker}] {' '.join(parts)}"
+                for start, speaker, parts in turns
+            ]
+            result['diarised_text'] = "\n\n".join(labelled_parts)
+            result['is_diarised'] = True
+
+        return result
 
     def transcribe_with_timestamps(self, audio_filepath: Path) -> Optional[dict]:
         """Batch transcribe and return segment-level timing.
