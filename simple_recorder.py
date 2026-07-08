@@ -3148,7 +3148,7 @@ def setup_check(as_json):
     import os
 
     if not as_json:
-        print("🔧 StenoAI Setup Check")
+        print("🔧 Steno Setup Check")
         print("=" * 25)
 
     checks = []

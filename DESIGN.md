@@ -1,14 +1,14 @@
 ---
 version: 1.0
-name: StenoAI-design-system
+name: Steno-design-system
 description: >-
-  Paper + ink. A calm, editorial desktop interface for StenoAI — a local meeting
+  Paper + ink. A calm, editorial desktop interface for Steno — a local meeting
   recorder/transcriber. The system anchors on a warm cream "paper" canvas with
   deep "ink" text and, deliberately, NO chromatic brand accent: focus rings,
   active states, toggles and links all use the foreground ink itself, so the
   whole UI reads as one neutral paper+ink palette. The only non-neutral colors
   are reserved status hues (danger red, success green, recording red). Type is a
-  humanist sans (Inter) for UI, a transitional serif (Charter) for the two
+  humanist sans (Inter) for UI, a calligraphic serif (Ovo) for the two
   largest display headings only, and JetBrains Mono for transcripts/code. Depth
   comes from soft shadows and surface tints, not borders (borders are rare —
   whitespace is preferred). Full light + dark parity is mandatory. macOS-only
@@ -80,15 +80,15 @@ colors-dark:
   recording: "#D17563"
 
 typography:
-  # Display (serif — Charter — used ONLY for h1/h2)
+  # Display (serif — Ovo — used ONLY for h1/h2)
   display-xl:
-    fontFamily: "Charter, 'Bitstream Charter', 'Sitka Text', Georgia, serif"
+    fontFamily: "Ovo, Georgia, serif"
     fontSize: 44px
     fontWeight: 400
     lineHeight: 1.1
     letterSpacing: -0.02em
   display-lg:
-    fontFamily: "Charter, 'Bitstream Charter', 'Sitka Text', Georgia, serif"
+    fontFamily: "Ovo, Georgia, serif"
     fontSize: 30px
     fontWeight: 400
     lineHeight: 1.25
@@ -242,7 +242,7 @@ components:
 
 ## Overview
 
-StenoAI is a desktop meeting-notes app (Electron shell + Python backend). Its
+Steno is a desktop meeting-notes app (Electron shell + Python backend). Its
 interface is **paper + ink**: a warm cream canvas (`{colors.paper-0}` — #FAF9F5)
 carrying warm near-black ink text (`{colors.ink-900}` — #1B1B19). The defining
 brand decision is a **deliberate absence of any chromatic accent**. Where most
@@ -266,7 +266,7 @@ view needs all three.
 - **No chromatic brand accent.** The accent is the foreground ink
   (`{colors.accent}` == `{colors.ink-900}` light / `#EDEAE0` dark).
 - Status colors only: `{colors.danger}`, `{colors.success}`, `{colors.recording}`.
-- Humanist sans (Inter) for everything UI; transitional serif (Charter) for the
+- Humanist sans (Inter) for everything UI; calligraphic serif (Ovo) for the
   two largest headings only (h1/h2); JetBrains Mono for transcripts + code.
 - **Depth via soft shadows + surface tints, not borders.** Borders are rare and
   faint (`{colors.border-subtle}`); whitespace does the separating.
@@ -318,18 +318,18 @@ Status colors are never used for navigation, emphasis, or decoration.
 - **Inter** (`{typography.body}`) — all UI: body, labels, buttons, nav, inputs.
   Weights in use: 400 / 450 / 500 / 600. Body runs `font-feature-settings:
   'ss01','cv11'`.
-- **Charter** (`{typography.display-xl}` / `display-lg`) — serif, used **only**
-  for `h1` and `h2` (and the `.serif` class). Weight 400, negative tracking
-  (-0.02em / -0.01em). This restrained serif is the editorial signature; do not
-  extend it to body or buttons.
+- **Ovo** (`{typography.display-xl}` / `display-lg`) — serif, used **only**
+  for `h1` and `h2` (and the `.serif` class). Weight 400 (Ovo ships one weight —
+  never fake-bold it), negative tracking (-0.02em / -0.01em). This restrained
+  serif is the editorial signature; do not extend it to body or buttons.
 - **JetBrains Mono** (`{typography.mono}`) — transcripts, code, anything
   monospaced (`code`, `pre`, `.mono`).
 
 ### Scale
 | Token | Size | Weight | Line | Use |
 |---|---|---|---|---|
-| `{typography.display-xl}` | 44px | 400 | 1.1 | `h1` — page hero title (Charter serif) |
-| `{typography.display-lg}` | 30px | 400 | 1.25 | `h2` — section heading (Charter serif) |
+| `{typography.display-xl}` | 44px | 400 | 1.1 | `h1` — page hero title (Ovo serif) |
+| `{typography.display-lg}` | 30px | 400 | 1.25 | `h2` — section heading (Ovo serif) |
 | `{typography.title}` | 22px | 500 | 1.3 | `h3`, card/panel titles (Inter) |
 | `{typography.body-lg}` | 17px | 400 | 1.55 | lead paragraphs |
 | `{typography.body}` | 15px | 400 | 1.55 | default running text |
@@ -471,7 +471,7 @@ Every view that waits on the backend must define all three:
   the accent.
 - Don't use pure white or pure black — both are warmed in this system.
 - Don't color links; Steno links are ink with underline-on-hover.
-- Don't set the display serif (Charter) on body, buttons, or anything past h2,
+- Don't set the display serif (Ovo) on body, buttons, or anything past h2,
   and don't bold it.
 - Don't set transcripts in the sans face; transcripts are JetBrains Mono.
 - Don't lean on borders to separate content when space will do.

@@ -85,7 +85,7 @@ export function Hero() {
             margin: "0 auto",
           }}
         >
-          AI for your confidential workflows.
+          AI for your private conversations.
         </Motion.h1>
 
         <Motion.p

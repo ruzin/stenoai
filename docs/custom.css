@@ -1,12 +1,28 @@
 /* Steno design system — Mintlify overrides
-   Ink-on-paper palette. No brand accent. Charter serif for headings. */
+   Ink-on-paper palette. No brand accent. Ovo serif for headings. */
 
 @import url('https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,450;14..32,500;14..32,600&family=JetBrains+Mono:wght@400;500&display=swap');
+
+/* Ovo (brand wordmark/serif), self-hosted — avoids a Google Fonts dependency. */
+@font-face {
+  font-family: 'Ovo';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/ovo-regular.woff2') format('woff2');
+}
+
+/* Nav logo — Mintlify's default .nav-logo is fixed at 28px tall (Tailwind h-7),
+   which shrinks our icon+wordmark SVG (viewBox 168x48) down to a barely-legible
+   size. Bump it up; width is auto so it scales proportionally. */
+.nav-logo {
+  height: 38px !important;
+}
 
 /* ── Tokens ────────────────────────────────────────────────────────────────── */
 
 :root {
-  --steno-serif: 'Charter', 'Bitstream Charter', 'Sitka Text', 'Iowan Old Style', Cambria, Georgia, serif;
+  --steno-serif: 'Ovo', Georgia, serif;
   --steno-sans:  'Inter', -apple-system, 'Segoe UI', sans-serif;
   --steno-mono:  'JetBrains Mono', 'SF Mono', 'Menlo', monospace;
 
@@ -38,12 +54,21 @@ body, .mintlify-root {
 
 /* ── Typography ─────────────────────────────────────────────────────────────── */
 
-/* Charter serif for H1 and H2 only */
+/* Ovo serif for H1 and H2 only. #page-title needs its own higher-specificity
+   rule: Mintlify hard-codes a `font-bold` (700) utility class on it, which
+   beats a plain `h1` element selector on specificity — and since Ovo only
+   ships weight 400, a 700 request gets browser-synthesized fake-bold instead
+   of just failing closed, which is what made headings look inconsistent. */
 h1, h2,
 .prose h1, .prose h2 {
   font-family: var(--steno-serif);
   font-weight: 400;
   letter-spacing: -0.02em;
+}
+
+#page-title {
+  font-family: var(--steno-serif);
+  font-weight: 400 !important;
 }
 
 h3, h4, h5, h6,

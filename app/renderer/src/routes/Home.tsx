@@ -213,7 +213,7 @@ export function Home({ mode }: HomeProps) {
   }, [mode, previous, search]);
   const groups = React.useMemo(() => groupPrevious(filtered), [filtered]);
 
-  // Calendar-connect nudge: most new users don't realise StenoAI can
+  // Calendar-connect nudge: most new users don't realise Steno can
   // surface their meetings until something tells them. Show a small
   // dismissible line on Home when calendar is unconnected; persist the
   // dismissal in localStorage so we don't nag the same person twice.
