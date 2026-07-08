@@ -49,6 +49,20 @@ const {
 } = require('./shortcut-url');
 const { parseSetupCheckOutput } = require('./setup-check-parse');
 const { isDiagnosticStdoutLine, sanitizeArgsForLog } = require('./diagnostics-filter');
+// Pure analytics bucketing/classification/sanitization lives in
+// ./analytics-helpers (unit-tested). trackEvent() itself and every IPC
+// handler that calls it stay here, alongside the PostHog client.
+const {
+  textLengthBucket,
+  durationBucket,
+  RENDERER_TRACK_EVENTS,
+  sanitizeTrackProperties,
+  calendarMeetingProvider,
+  classifyErrorReason,
+  sanitizeErrorForCrashReport,
+  summarizeCalendarSnapshot,
+  withTimeout,
+} = require('./analytics-helpers');
 
 // Wrap spawn so every backend / ollama launch defaults to windowsHide:true.
 // The PyInstaller backend (stenoai.exe) and bundled ollama.exe are console
@@ -348,10 +362,12 @@ async function showShortcutNotification(body) {
       return;
     }
 
-    new Notification({
+    const notif = new Notification({
       title: 'Steno Shortcuts',
       body
-    }).show();
+    });
+    trackNotificationLifecycle(notif, 'shortcut');
+    notif.show();
   } catch (error) {
     console.error('Failed to show shortcut notification:', error.message);
   }
@@ -459,20 +475,48 @@ const OUTLOOK_AUTH_URL = 'https://login.microsoftonline.com/common/oauth2/v2.0/a
 const OUTLOOK_TOKEN_URL = 'https://login.microsoftonline.com/common/oauth2/v2.0/token';
 
 /**
- * Return a privacy-safe duration bucket string.
- */
-function durationBucket(seconds) {
-  if (seconds < 60) return '<1m';
-  if (seconds < 300) return '1-5m';
-  if (seconds < 900) return '5-15m';
-  if (seconds < 1800) return '15-30m';
-  if (seconds < 3600) return '30-60m';
-  return '60m+';
-}
-
-/**
  * Initialize PostHog telemetry by reading config from Python backend.
  */
+// One config.json read (no extra subprocess) + a token-file existence check
+// for the identify() super-properties below. `launch_on_login` is always
+// false -- no login-item feature exists yet (STE-65's build, not this
+// instrumentation workstream); wired here so it starts reporting the moment
+// that feature ships without another identify-call-site hunt.
+function loadIdentitySuperProperties() {
+  let cfg = {};
+  try {
+    const cfgPath = path.join(getUserDataDir(), 'config.json');
+    if (fs.existsSync(cfgPath)) cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf-8'));
+  } catch (_) {}
+  let calendarConnected = false;
+  try {
+    calendarConnected = Boolean(loadGoogleTokens()) || Boolean(loadOutlookTokens());
+  } catch (_) {}
+  return {
+    ai_provider: cfg.ai_provider || 'local',
+    notifications_enabled: cfg.notifications_enabled !== false,
+    calendar_connected: calendarConnected,
+    launch_on_login: false,
+  };
+}
+
+// Re-identify so segmentation reflects the LATEST calendar/provider/
+// notifications state, not just what was true at app launch. Called from the
+// handlers that change any of these (calendar connect/disconnect, AI
+// provider, notifications toggle) in addition to the initial identify() in
+// initTelemetry.
+function refreshIdentitySuperProperties() {
+  if (!telemetryEnabled || !posthogClient || !anonymousId) return;
+  try {
+    posthogClient.identify({
+      distinctId: anonymousId,
+      properties: loadIdentitySuperProperties(),
+    });
+  } catch (_) {
+    // Silent fail -- telemetry must never break the app
+  }
+}
+
 async function initTelemetry() {
   if (IS_E2E) {
     telemetryEnabled = false;
@@ -503,7 +547,8 @@ async function initTelemetry() {
         distinctId: anonymousId,
         properties: {
           platform: process.platform,
-          arch: process.arch
+          arch: process.arch,
+          ...loadIdentitySuperProperties(),
         }
       });
       console.log('Telemetry initialized (anonymous analytics enabled)');
@@ -551,6 +596,34 @@ function trackEvent(eventName, properties = {}) {
   }
 }
 
+// Renderer-originated analytics. contextIsolation means the renderer can't
+// call trackEvent directly, so it fire-and-forgets through this bridge.
+// RENDERER_TRACK_EVENTS/sanitizeTrackProperties (./analytics-helpers) are the
+// name whitelist + PER-EVENT property-key allowlist so a buggy/compromised
+// renderer can't smuggle an arbitrary event name, or PII (a meeting title,
+// attendee name, transcript snippet) under an unexpected key, into PostHog.
+ipcMain.on('track', (_event, eventName, properties) => {
+  if (typeof eventName !== 'string' || !RENDERER_TRACK_EVENTS.has(eventName)) return;
+  trackEvent(eventName, sanitizeTrackProperties(eventName, properties));
+});
+
+// Fires notification_shown/_clicked/_dismissed for a native Notification
+// instance, added as EXTRA listeners alongside each notification's own
+// click/action handler (Electron's EventEmitter supports multiple listeners
+// per event) so this never changes existing behavior. `close` fires whenever
+// the notification goes away by any means; `clicked` distinguishes an actual
+// click/action from an unclicked auto-dismiss/timeout.
+function trackNotificationLifecycle(notif, type, extraProps = {}) {
+  let clicked = false;
+  const props = { type, ...extraProps };
+  trackEvent('notification_shown', props);
+  notif.on('click', () => { clicked = true; trackEvent('notification_clicked', props); });
+  notif.on('action', () => { clicked = true; trackEvent('notification_clicked', props); });
+  notif.on('close', () => {
+    if (!clicked) trackEvent('notification_dismissed', props);
+  });
+}
+
 /**
  * Flush and shut down the PostHog client.
  */
@@ -565,6 +638,72 @@ async function shutdownTelemetry() {
     // Silent fail
   }
 }
+
+// Minimal crash capture -- gated on the same telemetryEnabled/posthogClient
+// state as trackEvent. Captured via sanitizeErrorForCrashReport, never the
+// raw error: an uncaught fs/child_process error's .message can embed a local
+// path or a calendar-titled session name, so it must never ride along
+// verbatim -- only classifyErrorReason's fixed enum + the (PII-free) stack
+// frames survive.
+//
+// A registered 'uncaughtException'/'unhandledRejection' listener suppresses
+// Node's default fatal-exception behavior (print + exit) ENTIRELY. Before
+// this handler existed, macOS registered no listener for either (see
+// _logStartupCrash above, non-darwin only), so Node's default applied:
+// print and terminate. Without an explicit exit here, a fatal main-process
+// exception would instead leave Electron running in an undefined state --
+// continuing after an uncaught exception is unsafe regardless of whether
+// telemetry succeeded, so the process MUST still exit either way. The
+// bounded flush is a best-effort attempt to let the capture above actually
+// reach PostHog before that exit, not a guarantee.
+//
+// Caveat: on Windows/Linux, `_logStartupCrash` (top of file) is a SEPARATE,
+// pre-existing uncaughtException listener that calls process.exit(1) first
+// (registered before this module even requires `path`), so a fatal crash
+// there can still exit before this handler's flush completes. That's an
+// accepted best-effort gap on the alpha platform -- the file-based crash log
+// remains authoritative there. macOS has no competing exit(1) handler, so
+// capture is reliable on the primary, signed build.
+//
+// posthog-node's instance captureException() is fire-and-forget: internally
+// it does `await propertiesFromUnknownInput(...)` (async stack parsing) and
+// only calls its own client.capture() -- the thing that actually enqueues
+// the event -- AFTER that resolves, but the public method doesn't expose or
+// await that promise. So flushing immediately after calling captureException
+// can run against a still-empty queue, sending nothing. This short delay
+// gives that internal parsing a chance to finish and enqueue the event
+// before we attempt to flush -- best-effort (there's no public API to know
+// for certain it's done), not a guarantee, but without it the flush below is
+// close to a no-op.
+const CAPTURE_EXCEPTION_ENQUEUE_DELAY_MS = 50;
+
+async function captureExceptionAndFlush(err) {
+  if (!telemetryEnabled || !posthogClient || !anonymousId) return;
+  posthogClient.captureException(sanitizeErrorForCrashReport(err), anonymousId);
+  await new Promise((resolve) => setTimeout(resolve, CAPTURE_EXCEPTION_ENQUEUE_DELAY_MS));
+  await withTimeout(posthogClient.flush(), 1000);
+}
+
+process.on('uncaughtException', async (err) => {
+  try {
+    await captureExceptionAndFlush(err);
+  } catch (_) {
+    // Silent fail -- telemetry must never mask the original crash
+  } finally {
+    process.exit(1);
+  }
+});
+
+process.on('unhandledRejection', async (reason) => {
+  try {
+    const err = reason instanceof Error ? reason : new Error(String(reason));
+    await captureExceptionAndFlush(err);
+  } catch (_) {
+    // Silent fail
+  } finally {
+    process.exit(1);
+  }
+});
 
 /**
  * Get the list of allowed base directories, including any custom storage path.
@@ -1264,6 +1403,7 @@ if (!gotSingleInstanceLock) {
     // Initialize telemetry and track app open
     await initTelemetry();
     trackEvent('app_opened');
+    checkForOrphanedRecording();
 
     // Load custom storage path for file validation. Skipped under E2E (spawns
     // the backend; the test tiers keep startup backend-free).
@@ -1367,6 +1507,32 @@ if (!gotSingleInstanceLock) {
       launchedByShortcut = false;
       createWindow();
     }
+  });
+
+  // Renderer/child-process crashes aren't caught by the main-process
+  // uncaughtException handler above -- Electron surfaces them here instead.
+  // Same telemetry gate, same "code not content" reasoning; see the
+  // uncaughtException handler's comment for the capture-reliability caveat.
+  app.on('render-process-gone', (_event, _webContents, details) => {
+    try {
+      if (telemetryEnabled && posthogClient && anonymousId) {
+        posthogClient.captureException(
+          new Error(`render-process-gone: ${details?.reason || 'unknown'}`),
+          anonymousId
+        );
+      }
+    } catch (_) {}
+  });
+
+  app.on('child-process-gone', (_event, details) => {
+    try {
+      if (telemetryEnabled && posthogClient && anonymousId) {
+        posthogClient.captureException(
+          new Error(`child-process-gone: ${details?.type || 'unknown'} (${details?.reason || 'unknown'})`),
+          anonymousId
+        );
+      }
+    } catch (_) {}
   });
 }
 
@@ -1593,7 +1759,7 @@ ipcMain.handle('process-recording', async (event, audioFile, sessionName) => {
     addToProcessingQueue(queuedFile, sessionName, null);
     return { success: true };
   } catch (error) {
-    trackEvent('error_occurred', { error_type: 'process_recording' });
+    trackEvent('error_occurred', { error_type: 'process_recording', reason: classifyErrorReason(error) });
     return { success: false, error: error.message };
   }
 });
@@ -2243,11 +2409,15 @@ ipcMain.handle('query-transcript', async (event, summaryFile, question) => {
       const jsonResponse = JSON.parse(result.trim());
       if (jsonResponse.success) {
         sendDebugLog('✅ Query answered successfully');
-        trackEvent('ai_query_used', { success: true });
+        trackEvent('ai_query_used', {
+          success: true,
+          query_length: textLengthBucket(question),
+          has_response: Boolean(jsonResponse.answer),
+        });
         return { success: true, answer: jsonResponse.answer };
       } else {
         sendDebugLog(`❌ Query failed: ${jsonResponse.error}`);
-        trackEvent('ai_query_used', { success: false });
+        trackEvent('ai_query_used', { success: false, query_length: textLengthBucket(question), has_response: false });
         return { success: false, error: jsonResponse.error };
       }
     } catch (parseError) {
@@ -2256,20 +2426,24 @@ ipcMain.handle('query-transcript', async (event, summaryFile, question) => {
       if (jsonMatch) {
         const jsonResponse = JSON.parse(jsonMatch[0]);
         if (jsonResponse.success) {
-          trackEvent('ai_query_used', { success: true });
+          trackEvent('ai_query_used', {
+            success: true,
+            query_length: textLengthBucket(question),
+            has_response: Boolean(jsonResponse.answer),
+          });
           return { success: true, answer: jsonResponse.answer };
         } else {
-          trackEvent('ai_query_used', { success: false });
+          trackEvent('ai_query_used', { success: false, query_length: textLengthBucket(question), has_response: false });
           return { success: false, error: jsonResponse.error };
         }
       }
       sendDebugLog(`❌ Failed to parse query response: ${parseError.message}`);
-      trackEvent('ai_query_used', { success: false });
+      trackEvent('ai_query_used', { success: false, query_length: textLengthBucket(question), has_response: false });
       return { success: false, error: 'Failed to parse AI response' };
     }
   } catch (error) {
     sendDebugLog(`❌ Query failed: ${error.message}`);
-    trackEvent('error_occurred', { error_type: 'query_transcript' });
+    trackEvent('error_occurred', { error_type: 'query_transcript', reason: classifyErrorReason(error) });
     return { success: false, error: error.message };
   }
 });
@@ -2299,6 +2473,25 @@ ipcMain.on('query-transcript-stream', (event, queryId, summaryFile, question) =>
   sendDebugLog(`🤖 Streaming query (${String(question || '').length} chars)`);
   const env = { ...process.env, ...getAiEnv() };
 
+  // chat_message_sent restores visibility into single-meeting chat (dormant
+  // since the old bare-ping ai_query_used stopped being reachable once chat
+  // moved to this streaming IPC). Guarded by `tracked` because this handler
+  // has multiple exit paths (line-based STREAM_COMPLETE/ERROR, the close
+  // handler's buf-remainder fallback, and non-zero exit code) that can each
+  // fire for the same logical query -- fire the analytics event exactly once.
+  let tracked = false;
+  let chunkCount = 0;
+  const trackChatOnce = (success) => {
+    if (tracked) return;
+    tracked = true;
+    trackEvent('chat_message_sent', {
+      success,
+      scope: 'single_meeting',
+      query_length: textLengthBucket(question),
+      has_response: chunkCount > 0,
+    });
+  };
+
   let proc;
   try {
     const backendPath = getBackendPath();
@@ -2309,6 +2502,7 @@ ipcMain.on('query-transcript-stream', (event, queryId, summaryFile, question) =>
     });
   } catch (err) {
     event.sender.send('query-done', { queryId, success: false, error: err.message });
+    trackChatOnce(false);
     return;
   }
 
@@ -2324,7 +2518,6 @@ ipcMain.on('query-transcript-stream', (event, queryId, summaryFile, question) =>
   };
   event.sender.once('destroyed', onSenderDestroyed);
   let buf = '';
-  let chunkCount = 0;
   proc.stdout.on('data', (data) => {
     buf += data.toString();
     // Split on CRLF or LF: the backend's stdout is \r\n on Windows, and an exact
@@ -2349,10 +2542,12 @@ ipcMain.on('query-transcript-stream', (event, queryId, summaryFile, question) =>
         console.log(`[QUERY] STREAM_COMPLETE received, ${chunkCount} chunks sent`);
         if (!event.sender.isDestroyed()) event.sender.send('query-done', { queryId, success: true });
         else console.log(`[QUERY] Sender destroyed at STREAM_COMPLETE`);
+        trackChatOnce(true);
       } else if (line.startsWith('CHAT_STREAM_ERROR:') || line.startsWith('STREAM_ERROR:')) {
         const errMsg = line.startsWith('CHAT_STREAM_ERROR:') ? line.slice(18) : line.slice(13);
         console.log(`[QUERY] STREAM_ERROR: ${errMsg}`);
         if (!event.sender.isDestroyed()) event.sender.send('query-done', { queryId, success: false, error: errMsg });
+        trackChatOnce(false);
       }
     }
   });
@@ -2371,15 +2566,18 @@ ipcMain.on('query-transcript-stream', (event, queryId, summaryFile, question) =>
     if (buf.trim() === 'CHAT_STREAM_COMPLETE' || buf.trim() === 'STREAM_COMPLETE') {
       console.log(`[QUERY] STREAM_COMPLETE was in buf remainder — sending done now`);
       if (!event.sender.isDestroyed()) event.sender.send('query-done', { queryId, success: true });
+      trackChatOnce(true);
     } else if (code !== 0 && code !== null && !event.sender.isDestroyed()) {
       // code === null means killed (cancelled) — renderer already handles that case
       event.sender.send('query-done', { queryId, success: false, error: `Process exited with code ${code}` });
+      trackChatOnce(false);
     }
   });
 
   proc.on('error', (err) => {
     activeQueryProcs.delete(queryId);
     if (!event.sender.isDestroyed()) event.sender.send('query-done', { queryId, success: false, error: err.message });
+    trackChatOnce(false);
   });
 });
 
@@ -2398,6 +2596,22 @@ ipcMain.on('chat-global-stream', (event, queryId, question, folderId) => {
     args.push('-f', folderId);
   }
 
+  // See query-transcript-stream's trackChatOnce comment -- same multi-exit-
+  // path guard, scope: 'global' distinguishes cross-note chat from a
+  // single-meeting query.
+  let tracked = false;
+  let chunkCount = 0;
+  const trackChatOnce = (success) => {
+    if (tracked) return;
+    tracked = true;
+    trackEvent('chat_message_sent', {
+      success,
+      scope: 'global',
+      query_length: textLengthBucket(question),
+      has_response: chunkCount > 0,
+    });
+  };
+
   let proc;
   try {
     proc = require('child_process').spawn(
@@ -2407,6 +2621,7 @@ ipcMain.on('chat-global-stream', (event, queryId, question, folderId) => {
     );
   } catch (err) {
     event.sender.send('query-done', { queryId, success: false, error: err.message });
+    trackChatOnce(false);
     return;
   }
 
@@ -2420,7 +2635,6 @@ ipcMain.on('chat-global-stream', (event, queryId, question, folderId) => {
   event.sender.once('destroyed', onSenderDestroyed);
 
   let buf = '';
-  let chunkCount = 0;
   proc.stdout.on('data', (data) => {
     buf += data.toString();
     const rawLines = buf.split('\n');
@@ -2445,11 +2659,13 @@ ipcMain.on('chat-global-stream', (event, queryId, question, folderId) => {
         if (!event.sender.isDestroyed()) {
           event.sender.send('query-done', { queryId, success: true });
         }
+        trackChatOnce(true);
       } else if (line.startsWith('CHAT_STREAM_ERROR:')) {
         const errMsg = line.slice(18);
         if (!event.sender.isDestroyed()) {
           event.sender.send('query-done', { queryId, success: false, error: errMsg });
         }
+        trackChatOnce(false);
       }
     }
   });
@@ -2466,8 +2682,10 @@ ipcMain.on('chat-global-stream', (event, queryId, question, folderId) => {
     }
     if (buf.trim() === 'CHAT_STREAM_COMPLETE') {
       if (!event.sender.isDestroyed()) event.sender.send('query-done', { queryId, success: true });
+      trackChatOnce(true);
     } else if (code !== 0 && code !== null && !event.sender.isDestroyed()) {
       event.sender.send('query-done', { queryId, success: false, error: `Process exited with code ${code}` });
+      trackChatOnce(false);
     }
   });
 
@@ -2476,6 +2694,7 @@ ipcMain.on('chat-global-stream', (event, queryId, question, folderId) => {
     if (!event.sender.isDestroyed()) {
       event.sender.send('query-done', { queryId, success: false, error: err.message });
     }
+    trackChatOnce(false);
   });
 });
 
@@ -3249,6 +3468,49 @@ function loadTranscriptionEngine() {
   }
 }
 
+// Sync read of the transcription engine + model + language for
+// transcription_completed's analytics properties. One config.json read
+// (mirrors loadTranscriptionEngine's no-subprocess approach) rather than
+// three separate ones on this hot path.
+function loadTranscriptionContext() {
+  try {
+    const cfgPath = path.join(getUserDataDir(), 'config.json');
+    if (!fs.existsSync(cfgPath)) {
+      return { engine: 'parakeet', model: 'parakeet', language: 'auto' };
+    }
+    const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf-8'));
+    const engine = cfg.transcription_engine === 'whisper' ? 'whisper' : 'parakeet';
+    return {
+      engine,
+      // Parakeet has no separate user-selectable model today (single bundled
+      // default) -- report the engine name rather than guess a variant id.
+      model: engine === 'whisper' ? (cfg.whisper_model || 'unknown') : 'parakeet',
+      language: cfg.language || 'auto',
+    };
+  } catch (_) {
+    return { engine: 'parakeet', model: 'parakeet', language: 'auto' };
+  }
+}
+
+// Sync read of the summarization provider + model for
+// summarization_completed's analytics properties.
+function loadSummarizationContext() {
+  try {
+    const cfgPath = path.join(getUserDataDir(), 'config.json');
+    if (!fs.existsSync(cfgPath)) {
+      return { provider: 'local', model: 'unknown' };
+    }
+    const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf-8'));
+    const provider = cfg.ai_provider || 'local';
+    return {
+      provider,
+      model: provider === 'cloud' ? (cfg.cloud_model || 'unknown') : (cfg.model || 'unknown'),
+    };
+  } catch (_) {
+    return { provider: 'local', model: 'unknown' };
+  }
+}
+
 // Sync read of the auto-detect-meetings setting; default ON. Reads the JSON
 // directly to avoid spawning Python during startup just to read a boolean. Wire any new defaults through the Python config so
 // the truth lives in one place.
@@ -3335,6 +3597,46 @@ let ollamaProcess = null;  // Track spawned Ollama process for cleanup on quit
 let ollamaPid = null;      // Store PID separately since unref() disconnects the process
 let ollamaStartedByUs = false;
 
+// Content-free crash/force-quit detection (report Appendix: ~8% of macOS
+// recordings never fire recording_stopped at all -- a silent gap in the
+// activation funnel). Written when a recording starts, deleted on a clean
+// stop; if it's still there at the NEXT launch, the previous run never
+// reached stop-recording-ui's cleanup.
+function getRecordingActiveMarkerPath() {
+  return path.join(getUserDataDir(), '.recording-active');
+}
+
+function markRecordingActiveOnDisk() {
+  try {
+    fs.writeFileSync(getRecordingActiveMarkerPath(), String(Date.now()));
+  } catch (_) {
+    // Best-effort -- a failed write just means this diagnostic is unavailable
+  }
+}
+
+function clearRecordingActiveMarker() {
+  try {
+    fs.unlinkSync(getRecordingActiveMarkerPath());
+  } catch (_) {
+    // Already gone / never written -- fine
+  }
+}
+
+// Called once at startup, after initTelemetry. Emits a synthetic
+// recording_stopped for the previous run's recording if it never cleanly
+// stopped, then clears the marker so it can't re-fire on a later launch.
+function checkForOrphanedRecording() {
+  try {
+    if (fs.existsSync(getRecordingActiveMarkerPath())) {
+      trackEvent('recording_stopped', { reason: 'unclean_shutdown' });
+    }
+  } catch (_) {
+    // Silent fail
+  } finally {
+    clearRecordingActiveMarker();
+  }
+}
+
 function resetRecordingRuntimeState() {
   recordingRuntimeState = {
     startedAtMs: null,
@@ -3342,6 +3644,10 @@ function resetRecordingRuntimeState() {
     pausedTotalMs: 0,
     isPaused: false
   };
+  // Folded in here (rather than at each of this function's call sites) so
+  // every teardown path -- clean stop, a failed start, or the quit-time
+  // cleanup -- consistently clears the crash/force-quit marker.
+  clearRecordingActiveMarker();
 }
 
 function startRecordingRuntimeState() {
@@ -3351,6 +3657,7 @@ function startRecordingRuntimeState() {
     pausedTotalMs: 0,
     isPaused: false
   };
+  markRecordingActiveOnDisk();
 }
 
 function markRecordingPaused() {
@@ -3483,6 +3790,22 @@ async function processNextInQueue() {
 
   console.log(`🔄 Processing queued job: ${currentProcessingJob.sessionName}`);
 
+  // Coarse pipeline-stage tracker for error_occurred's `stage` property
+  // (processing_queue is ~96% of all logged errors with no detail today —
+  // this is the cheapest signal to distinguish a transcription crash from a
+  // summarization crash without parsing stderr). Declared in the outer scope
+  // so the catch block below can still read it after the inner Promise
+  // executor's scope has closed.
+  let processingStage = 'transcription';
+  // Read once per job (not per marker) -- engine/model/language/provider
+  // don't change mid-job, and this avoids a repeated config.json read on
+  // every stdout line.
+  const transcriptionCtx = loadTranscriptionContext();
+  const summarizationCtx = loadSummarizationContext();
+  // Set when TRANSCRIPTION_COMPLETE arrives, so summarization_completed's
+  // processing_bucket measures summarization time alone, not the whole job.
+  let transcriptionEndedAtMs = null;
+
   try {
     const queueAiEnv = getAiEnv();
     const queueEnv = Object.keys(queueAiEnv).length > 0 ? { ...require('process').env, ...queueAiEnv } : undefined;
@@ -3547,21 +3870,40 @@ async function processNextInQueue() {
             } catch (e) { console.log('CHUNK decode error:', e.message); }
           } else if (line.startsWith('TRANSCRIPTION_COMPLETE:')) {
             sendDebugLog(`Transcription complete (${line.split(':')[1]} chars)`);
-            trackEvent('transcription_completed', { success: true });
+            processingStage = 'summarization';
+            transcriptionEndedAtMs = Date.now();
+            trackEvent('transcription_completed', {
+              success: true,
+              engine: transcriptionCtx.engine,
+              model: transcriptionCtx.model,
+              language: transcriptionCtx.language,
+              processing_bucket: durationBucket((transcriptionEndedAtMs - currentProcessingStartedAtMs) / 1000),
+            });
           } else if (line.startsWith('TITLE:')) {
             const title = line.slice(6);
             if (mainWindow && !mainWindow.isDestroyed()) {
               mainWindow.webContents.send('summary-title', { title, sessionName: currentProcessingJob.sessionName });
             }
           } else if (line === 'STREAM_COMPLETE') {
-            trackEvent('summarization_completed', { success: true });
+            const summarizationStartMs = transcriptionEndedAtMs || currentProcessingStartedAtMs;
+            trackEvent('summarization_completed', {
+              success: true,
+              model: summarizationCtx.model,
+              provider: summarizationCtx.provider,
+              processing_bucket: durationBucket((Date.now() - summarizationStartMs) / 1000),
+            });
           } else if (line.startsWith('SAVED:')) {
             savedSummaryFile = line.slice(6).trim();
             sendDebugLog(`Summary saved: ${savedSummaryFile}`);
           } else if (line.startsWith('TRANSCRIPTION_FAILED:')) {
             transcriptionFailedMsg = line.slice('TRANSCRIPTION_FAILED:'.length).trim();
             sendDebugLog(`Transcription failed (audio preserved): ${transcriptionFailedMsg}`);
-            trackEvent('transcription_completed', { success: false });
+            trackEvent('transcription_completed', {
+              success: false,
+              engine: transcriptionCtx.engine,
+              model: transcriptionCtx.model,
+              language: transcriptionCtx.language,
+            });
           } else if (line.startsWith('PROGRESS:')) {
             if (mainWindow && !mainWindow.isDestroyed()) {
               // No summaryFile yet in the record->summarise flow (it's assigned
@@ -3670,7 +4012,11 @@ async function processNextInQueue() {
 
   } catch (error) {
     console.error(`❌ Processing failed for ${currentProcessingJob.sessionName}:`, error);
-    trackEvent('error_occurred', { error_type: 'processing_queue' });
+    trackEvent('error_occurred', {
+      error_type: 'processing_queue',
+      stage: processingStage,
+      reason: classifyErrorReason(error),
+    });
 
     // A processing crash (e.g. a metal::malloc OOM that SIGABRTs the
     // subprocess with a non-zero exit before Python can mark the failure)
@@ -3809,7 +4155,11 @@ function addToProcessingQueue(audioFile, sessionName, notesFile, liveTranscriptF
   processNextInQueue();
 }
 
-ipcMain.handle('start-recording-ui', async (_, sessionName) => {
+// Valid recording_started `trigger` values. Whitelisted so a stale/forged
+// renderer arg can't smuggle an arbitrary string into PostHog.
+const RECORDING_TRIGGERS = new Set(['manual', 'notification_click', 'hotkey', 'tray', 'url_scheme']);
+
+ipcMain.handle('start-recording-ui', async (_, sessionName, trigger) => {
   try {
     if (currentRecordingProcess) {
       return { success: false, error: 'Recording already in progress' };
@@ -3860,7 +4210,31 @@ ipcMain.handle('start-recording-ui', async (_, sessionName) => {
       sendDebugLog(`Live transcription off — engine=${engine}`);
     }
     updateTrayIcon(true);
-    trackEvent('recording_started');
+    // Fire-and-forget: the calendar lookup (network call) must never delay
+    // the actual recording start or the response below. Once it resolves we
+    // fire the single recording_started event with full context -- PostHog
+    // events are immutable, so this is one deferred call rather than an
+    // initial fire + a later "patch". Wrapped in withTimeout because
+    // getCalendarEventForNow's own 1.5s AbortController only bounds the
+    // calendar event fetch -- a stuck OAuth token-refresh request upstream of
+    // that (no timeout of its own) could otherwise hang this indefinitely
+    // and silently drop recording_started for the recording entirely.
+    const recordingTrigger = RECORDING_TRIGGERS.has(trigger) ? trigger : 'manual';
+    withTimeout(getCalendarEventForNow(), 2500)
+      .then((calEvent) => {
+        trackEvent('recording_started', {
+          trigger: recordingTrigger,
+          matched_calendar_event: Boolean(calEvent),
+          provider: calendarMeetingProvider(calEvent?.meeting_url),
+        });
+      })
+      // withTimeout itself never rejects, but the fulfillment handler above
+      // could in principle throw (e.g. a future change to it) -- and since
+      // the global unhandledRejection listener now calls process.exit(1),
+      // ANY floating promise here is a latent full-app-crash risk over
+      // nothing more than a missed telemetry event. Telemetry must never be
+      // able to take down the app.
+      .catch(() => {});
     return {
       success: true,
       sessionName: actualSessionName,
@@ -3872,7 +4246,7 @@ ipcMain.handle('start-recording-ui', async (_, sessionName) => {
     currentRecordingSessionName = null;
     resetRecordingRuntimeState();
     updateTrayIcon(false);
-    trackEvent('error_occurred', { error_type: 'start_recording_ui' });
+    trackEvent('error_occurred', { error_type: 'start_recording_ui', reason: classifyErrorReason(error) });
     return { success: false, error: error.message };
   }
 });
@@ -3948,6 +4322,7 @@ function showSleepPausedNotification() {
   };
   notif.on('action', (_evt, _index) => resume());
   notif.on('click', resume);
+  trackNotificationLifecycle(notif, 'sleep_paused');
   notif.show();
   sleepPausedNotif = notif;
 }
@@ -4004,9 +4379,11 @@ ipcMain.handle('stop-recording-ui', async () => {
     systemAudioRecordingActive = false;
     stopLiveTranscribe();
     currentRecordingSessionName = null;
+    // Captured before resetRecordingRuntimeState() clears startedAtMs.
+    const recordingDurationBucket = durationBucket(getRecordingElapsedSeconds());
     resetRecordingRuntimeState();
     updateTrayIcon(false);
-    trackEvent('recording_stopped');
+    trackEvent('recording_stopped', { duration_bucket: recordingDurationBucket, reason: 'normal' });
     return { success: true, message: 'Recording stopped' };
   } catch (error) {
     console.error('Stop recording UI error:', error.message);
@@ -4014,7 +4391,7 @@ ipcMain.handle('stop-recording-ui', async () => {
     currentRecordingSessionName = null;
     resetRecordingRuntimeState();
     updateTrayIcon(false);
-    trackEvent('error_occurred', { error_type: 'stop_recording_ui' });
+    trackEvent('error_occurred', { error_type: 'stop_recording_ui', reason: classifyErrorReason(error) });
     return { success: false, error: error.message };
   }
 });
@@ -4367,6 +4744,7 @@ function showMeetingDetectedNotification(appName, originatingEvt, calEvent) {
   const trigger = () => requestAutoRecord(appName, originatingEvt, calEvent);
   notif.on('action', (_evt, _index) => trigger()); // shown when banner style = Alerts
   notif.on('click', trigger);                       // body tap (always available)
+  trackNotificationLifecycle(notif, 'meeting_detected');
   notif.show();
 }
 
@@ -4388,6 +4766,7 @@ function showMeetingEndedNotification(appName) {
       mainWindow.focus();
     }
   });
+  trackNotificationLifecycle(notif, 'meeting_ended');
   notif.show();
   return notif;
 }
@@ -5198,11 +5577,11 @@ ipcMain.handle('set-model', async (event, modelName) => {
     const jsonMatch = result.match(/\{.*\}/s);
     if (jsonMatch) {
       const jsonData = JSON.parse(jsonMatch[0]);
-      trackEvent('model_changed', { model: modelName });
+      trackEvent('model_changed', { model: modelName, kind: 'summarization' });
       return jsonData;
     }
 
-    trackEvent('model_changed', { model: modelName });
+    trackEvent('model_changed', { model: modelName, kind: 'summarization' });
     return { success: true, model: modelName };
   } catch (error) {
     sendDebugLog(`Error setting model: ${error.message}`);
@@ -5297,6 +5676,7 @@ ipcMain.handle('set-transcription-engine', async (event, engine) => {
   try {
     const result = await runPythonScript('simple_recorder.py', ['set-transcription-engine', engine]);
     const jsonData = JSON.parse(result.trim());
+    trackEvent('model_changed', { model: engine, kind: 'transcription_engine' });
     return { success: true, ...jsonData };
   } catch (e) { return { success: false, error: e.message }; }
 });
@@ -5329,6 +5709,7 @@ ipcMain.handle('set-whisper-model', async (event, modelSize) => {
   try {
     const result = await runPythonScript('simple_recorder.py', ['set-whisper-model', modelSize]);
     const jsonData = JSON.parse(result.trim());
+    trackEvent('model_changed', { model: modelSize, kind: 'transcription' });
     return { success: true, ...jsonData };
   } catch (e) { return { success: false, error: e.message }; }
 });
@@ -5633,6 +6014,7 @@ ipcMain.handle('show-silence-auto-stop-notification', async (_event, payload) =>
         mainWindow.focus();
       }
     });
+    trackNotificationLifecycle(notif, 'silence_auto_stop');
     notif.show();
     return { success: true, shown: true };
   } catch (e) {
@@ -5682,6 +6064,8 @@ ipcMain.handle('show-note-ready-notification', async (_event, payload) => {
         if (summaryFile) mainWindow.webContents.send('navigate-to-meeting', { summaryFile });
       }
     });
+    const outcome = hardFailure ? 'hard_failure' : failed ? 'failed' : 'success';
+    trackNotificationLifecycle(notif, 'note_ready', { outcome });
     notif.show();
     return { success: true, shown: true };
   } catch (e) {
@@ -5701,9 +6085,11 @@ ipcMain.handle('set-notifications', async (event, enabled) => {
     const jsonMatch = result.match(/\{.*\}/s);
     if (jsonMatch) {
       const jsonData = JSON.parse(jsonMatch[0]);
+      refreshIdentitySuperProperties();
       return jsonData;
     }
 
+    refreshIdentitySuperProperties();
     return { success: true, notifications_enabled: enabled };
   } catch (error) {
     sendDebugLog(`Error setting notifications: ${error.message}`);
@@ -5726,20 +6112,41 @@ ipcMain.handle('get-telemetry', async () => {
   }
 });
 
-ipcMain.handle('set-telemetry', async (event, enabled) => {
+// Where the telemetry toggle was flipped -- 'setup' names the Setup.tsx
+// SCREEN, not a lifecycle stage: it's also reachable later via "run setup
+// wizard" from Settings (see trigger-setup-wizard), so this deliberately
+// does NOT claim to mean "first run". Whitelisted so a stale/forged
+// renderer arg can't smuggle an arbitrary string into PostHog.
+const TELEMETRY_TOGGLE_SOURCES = new Set(['setup', 'settings']);
+
+ipcMain.handle('set-telemetry', async (event, enabled, source) => {
   try {
     sendDebugLog(`Setting telemetry to: ${enabled}`);
+    const toggleSource = TELEMETRY_TOGGLE_SOURCES.has(source) ? source : 'settings';
     const result = await runPythonScript('simple_recorder.py', ['set-telemetry', enabled ? 'True' : 'False']);
 
-    // Update in-memory state
-    telemetryEnabled = enabled;
-
+    // telemetry_toggled is the one event that MUST fire around the opposite
+    // side of its own gate -- otherwise disabling telemetry makes the
+    // disable itself invisible (trackEvent no-ops once telemetryEnabled is
+    // false and posthogClient is torn down), and re-enabling would identify
+    // stale/absent super-properties until the next app launch.
     if (enabled && !posthogClient) {
+      // Bring the client up and identify FIRST so both the super-properties
+      // and this event land fresh, rather than waiting for next launch.
       posthogClient = new PostHog(POSTHOG_API_KEY, { host: POSTHOG_HOST });
+      telemetryEnabled = true;
+      refreshIdentitySuperProperties();
+      trackEvent('telemetry_toggled', { enabled: true, source: toggleSource });
       console.log('Telemetry re-enabled');
     } else if (!enabled && posthogClient) {
-      await shutdownTelemetry();
+      // Capture the opt-out BEFORE closing the gate -- flipping the flag or
+      // shutting down first would make this trackEvent call a silent no-op.
+      trackEvent('telemetry_toggled', { enabled: false, source: toggleSource });
+      telemetryEnabled = false;
+      await shutdownTelemetry(); // flushes the event above, then closes
       console.log('Telemetry disabled');
+    } else {
+      telemetryEnabled = enabled;
     }
 
     // Extract JSON from output
@@ -6284,7 +6691,7 @@ ipcMain.handle('set-ai-provider', async (event, provider) => {
     // reconcile or sign-out restore (last-writer-wins races on the same
     // config value); the org-lock gate is evaluated inside the op so it
     // sees post-queue session state.
-    return await enqueueProviderStateOp(async () => {
+    const result = await enqueueProviderStateOp(async () => {
       if (provider !== 'adapter') {
         // Hard lock: while a valid org session exists the provider is
         // managed by the organisation. The Settings picker is disabled
@@ -6329,6 +6736,8 @@ ipcMain.handle('set-ai-provider', async (event, provider) => {
       if (jsonMatch) return JSON.parse(jsonMatch[0]);
       return { success: true, ai_provider: provider };
     });
+    if (result && result.success !== false) refreshIdentitySuperProperties();
+    return result;
   } catch (error) {
     sendDebugLog(`Error setting AI provider: ${error.message}`);
     return { success: false, error: error.message };
@@ -6360,6 +6769,9 @@ ipcMain.handle('set-cloud-api-url', async (event, url) => {
 ipcMain.handle('set-cloud-api-key', async (event, key) => {
   try {
     const saved = saveCloudApiKey(key);
+    if (saved) {
+      trackEvent(key ? 'ai_key_added' : 'ai_key_removed');
+    }
     return { success: saved, cloud_api_key_set: saved };
   } catch (error) {
     return { success: false, error: error.message };
@@ -6651,11 +7063,18 @@ ipcMain.handle('process-system-audio-recording', async (event, audioFilePath, se
     // Use the existing processing queue to avoid concurrent Ollama/Whisper runs
     addToProcessingQueue(audioFilePath, actualSessionName, notesPath, liveTranscriptFile);
 
-    trackEvent('recording_stopped', { recording_mode: 'system_audio' });
+    // recording_stopped is NOT tracked here -- stop-recording-ui already
+    // fires it (with the real duration_bucket) for every stop. This handler
+    // fires moments later, once the renderer's MediaRecorder finishes
+    // flushing to disk and useSystemAudioCapture's own effect reacts to the
+    // status change and calls processSystemAudio -- for every normal
+    // recording that would double the count. `recording_mode: 'system_audio'`
+    // was also vestigial: this renderer-driven path is the only recording
+    // path today, so it no longer distinguishes anything.
     return { success: true, message: 'Added to processing queue' };
   } catch (error) {
     sendDebugLog(`Error queuing system audio: ${error.message}`);
-    trackEvent('error_occurred', { error_type: 'process_system_audio' });
+    trackEvent('error_occurred', { error_type: 'process_system_audio', reason: classifyErrorReason(error) });
     return { success: false, error: error.message };
   }
 });
@@ -8069,6 +8488,8 @@ ipcMain.handle('google-auth-start', async () => {
     await startGoogleAuth();
     // Only disconnect Outlook after Google auth succeeds
     deleteOutlookTokens();
+    trackEvent('calendar_connected', { provider: 'google' });
+    refreshIdentitySuperProperties();
     return { success: true };
   } catch (error) {
     console.error('Google auth failed:', error.message);
@@ -8118,6 +8539,8 @@ ipcMain.handle('google-auth-disconnect', async () => {
       mainWindow.webContents.send('google-auth-changed');
     }
 
+    trackEvent('calendar_disconnected', { provider: 'google' });
+    refreshIdentitySuperProperties();
     return { success: true };
   } catch (error) {
     return { success: false, error: error.message };
@@ -8408,6 +8831,65 @@ async function fetchCalendarEventsForScheduler(timeoutMs = 4000) {
   }
 }
 
+// Content-free periodic snapshot of the connected calendar -- the usage
+// denominator for "% of calendar meetings recorded" (joined against
+// recording_started's matched_calendar_event/provider). Only counts,
+// enums and provider breakdowns are ever sent; titles/attendees/URLs are
+// discarded after the enum lookup. Throttled to <=1/day per window so the
+// 10-min premeeting re-poll doesn't spam PostHog.
+//
+// The throttle timestamp is persisted to disk (not just an in-memory
+// variable) so restarting the app doesn't reset it -- an in-memory-only
+// throttle would re-fire on every single launch, since a fresh process
+// always starts with "never sent", defeating the <=1/day intent for anyone
+// who quits and reopens the app more than once a day.
+function getCalendarSnapshotMarkerPath() {
+  return path.join(getUserDataDir(), '.last-calendar-snapshot');
+}
+
+function readLastCalendarSnapshotAtMs() {
+  try {
+    const parsed = parseInt(fs.readFileSync(getCalendarSnapshotMarkerPath(), 'utf-8').trim(), 10);
+    return Number.isFinite(parsed) ? parsed : 0;
+  } catch (_) {
+    return 0;
+  }
+}
+
+function writeLastCalendarSnapshotAtMs(ms) {
+  try {
+    fs.writeFileSync(getCalendarSnapshotMarkerPath(), String(ms));
+  } catch (_) {
+    // Best-effort -- a failed write just means the throttle resets on next launch
+  }
+}
+
+// null = not yet loaded from disk this process. Loaded lazily on first call
+// (rather than at module load) since this only matters once the premeeting
+// scheduler actually starts ticking.
+let lastCalendarSnapshotAtMs = null;
+const CALENDAR_SNAPSHOT_INTERVAL_MS = 24 * 60 * 60 * 1000;
+
+function maybeTrackCalendarSnapshot(events, now = new Date()) {
+  // Skip entirely -- including the marker read/write -- when telemetry is
+  // off. trackEvent() would no-op below regardless, but writing the marker
+  // anyway would advance the <=1/day throttle for a snapshot that was never
+  // actually sent, silently suppressing the first REAL snapshot for up to
+  // 24h after the user later re-enables telemetry.
+  if (!telemetryEnabled || !posthogClient || !anonymousId) return;
+  if (lastCalendarSnapshotAtMs === null) {
+    lastCalendarSnapshotAtMs = readLastCalendarSnapshotAtMs();
+  }
+  const nowMs = now.getTime();
+  if (nowMs - lastCalendarSnapshotAtMs < CALENDAR_SNAPSHOT_INTERVAL_MS) return;
+  lastCalendarSnapshotAtMs = nowMs;
+  writeLastCalendarSnapshotAtMs(nowMs);
+
+  const { today, week } = summarizeCalendarSnapshot(events, now);
+  trackEvent('calendar_snapshot', { window: 'today', ...today });
+  trackEvent('calendar_snapshot', { window: 'week', ...week });
+}
+
 // Mirrors the per-event predicates of Home.tsx's `upcomingToday` (timed/
 // not-all-day, not declined, start in the future) — but deliberately WITHOUT
 // Home's start-of-tomorrow upper bound: a 2-min-before reminder should arm for
@@ -8448,6 +8930,7 @@ async function firePreMeetingNotification(event) {
   }
 
   createNotificationWindow(event);
+  trackEvent('notification_shown', { type: 'premeeting' });
 
   // Mark fired only after we've actually shown it, so an unshowable notif
   // (no OS support) isn't permanently skipped by the scheduler's dedupe.
@@ -8490,6 +8973,16 @@ function createNotificationWindow(event) {
   notificationWindow.loadFile(rendererDist, { hash: '/notification' });
 
   const win = notificationWindow;
+  // Set true by close-notification-window (the renderer's Join/Focus/Close
+  // handlers all route through it, and each already tracks its own
+  // notification_clicked/_dismissed via the analytics bridge before calling
+  // it). Scoped to this window instance -- not a module-level flag -- so a
+  // new notification superseding an unactioned old one can't leak state
+  // across windows. Stays false only when the window closes via the 15s
+  // auto-close timer with no interaction at all, which is the passive-
+  // dismiss path the native Notification lifecycle already tracks but this
+  // custom BrowserWindow-based notification previously didn't.
+  win._analyticsInteracted = false;
   let autoCloseTimer;
   win.once('ready-to-show', () => {
     win.showInactive();
@@ -8504,6 +8997,9 @@ function createNotificationWindow(event) {
 
     win.on('closed', () => {
       if (autoCloseTimer) clearTimeout(autoCloseTimer);
+      if (!win._analyticsInteracted) {
+        trackEvent('notification_dismissed', { type: 'premeeting' });
+      }
       if (notificationWindow === win) {
         notificationWindow = null;
       }
@@ -8520,6 +9016,7 @@ function createNotificationWindow(event) {
 
 ipcMain.handle('close-notification-window', () => {
   if (notificationWindow && !notificationWindow.isDestroyed()) {
+    notificationWindow._analyticsInteracted = true;
     notificationWindow.close();
   }
 });
@@ -8535,11 +9032,21 @@ function clearPreMeetingTimers() {
 // (don't backfire). Gated on the master notifications toggle + a connected
 // calendar: a disconnect clears armed timers; a transient fetch blip keeps them.
 async function schedulePreMeetingNotifications() {
+  // Fetched once, shared by the calendar_snapshot metric (below) and the
+  // premeeting-arming logic (further down) -- avoids a second calendar API
+  // call every 10-min re-poll. The snapshot is intentionally NOT gated on
+  // the notifications toggle -- it's a usage metric, not a notification, and
+  // gating it would bias the "% of meetings recorded" metric toward users
+  // who have notifications on.
+  const events = await fetchCalendarEventsForScheduler();
+  if (events && events !== SCHEDULER_FETCH_FAILED) {
+    maybeTrackCalendarSnapshot(events);
+  }
+
   if (!(await notificationsEnabled())) {
     clearPreMeetingTimers();
     return;
   }
-  const events = await fetchCalendarEventsForScheduler();
   if (events === SCHEDULER_FETCH_FAILED) return; // transient blip — keep existing timers
   if (!events) {
     // No calendar connected — drop any reminders armed while it was. (A transient
@@ -8604,6 +9111,8 @@ ipcMain.handle('outlook-auth-start', async () => {
     await startOutlookAuth();
     // Only disconnect Google after Outlook auth succeeds
     deleteGoogleTokens();
+    trackEvent('calendar_connected', { provider: 'outlook' });
+    refreshIdentitySuperProperties();
     return { success: true };
   } catch (error) {
     console.error('Outlook auth failed:', error.message);
@@ -8633,6 +9142,8 @@ ipcMain.handle('outlook-auth-disconnect', async () => {
       mainWindow.webContents.send('outlook-auth-changed');
     }
 
+    trackEvent('calendar_disconnected', { provider: 'outlook' });
+    refreshIdentitySuperProperties();
     return { success: true };
   } catch (error) {
     return { success: false, error: error.message };

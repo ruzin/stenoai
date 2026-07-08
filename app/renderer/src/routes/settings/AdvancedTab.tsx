@@ -164,7 +164,7 @@ export function AdvancedTab() {
       >
         <Switch
           checked={telemetry.data?.telemetry_enabled ?? false}
-          onCheckedChange={(v) => setTelemetry.mutate(v)}
+          onCheckedChange={(v) => setTelemetry.mutate({ enabled: v, source: 'settings' })}
           disabled={telemetry.data === undefined}
         />
       </SettingRow>

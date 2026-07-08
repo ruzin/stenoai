@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ipc } from '@/lib/ipc';
+import { ipc, type TelemetryToggleSource } from '@/lib/ipc';
 import { unwrap } from '@/lib/result';
 
 export const settingsKeys = {
@@ -42,7 +42,8 @@ export function useTelemetrySetting() {
 export function useSetTelemetry() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (v: boolean) => unwrap(await ipc().settings.setTelemetry(v)),
+    mutationFn: async ({ enabled, source }: { enabled: boolean; source: TelemetryToggleSource }) =>
+      unwrap(await ipc().settings.setTelemetry(enabled, source)),
     onSuccess: () => qc.invalidateQueries({ queryKey: settingsKeys.telemetry() }),
   });
 }
