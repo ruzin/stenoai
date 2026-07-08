@@ -11,7 +11,9 @@ const {
   sanitizeTrackProperties,
   calendarMeetingProvider,
   classifyErrorReason,
+  captureSanitizedException,
   redactLocalPaths,
+  sanitizeModelForAnalytics,
   sanitizeErrorForCrashReport,
   summarizeCalendarWindow,
   summarizeCalendarSnapshot,
@@ -341,6 +343,39 @@ test('sanitizeErrorForCrashReport does not leak the real dev-checkout path when 
   const safe2 = sanitizeErrorForCrashReport('a bare string, not an Error');
   assert.ok(!safe2.stack.includes(appDir));
   assert.strictEqual(safe2.stack, 'Error: unknown');
+});
+
+test('captureSanitizedException sends only the sanitized crash object to PostHog', () => {
+  let captured = null;
+  const fakePosthog = {
+    captureException(err, distinctId) {
+      captured = { err, distinctId };
+    },
+  };
+  const err = new Error("ENOENT: open '/Users/alice/Secret Client/meeting.wav'");
+  err.stack =
+    "Error: ENOENT: open '/Users/alice/Secret Client/meeting.wav'\n" +
+    '    at fail (/Users/alice/Secret Client/steno/app/main.js:10:2)';
+
+  captureSanitizedException(fakePosthog, err, 'anon-123');
+
+  assert.strictEqual(captured.distinctId, 'anon-123');
+  assert.strictEqual(captured.err.message, 'not_found');
+  assert.ok(!captured.err.stack.includes('alice'));
+  assert.ok(!captured.err.stack.includes('Secret Client'));
+  assert.ok(captured.err.stack.includes('<redacted-path>/main.js:10:2'));
+});
+
+test('sanitizeModelForAnalytics keeps known public model ids but collapses custom/free-form names', () => {
+  assert.strictEqual(sanitizeModelForAnalytics('gemma4:e2b-it-qat'), 'gemma4:e2b-it-qat');
+  assert.strictEqual(sanitizeModelForAnalytics('gpt-4o-mini'), 'gpt-4o-mini');
+  assert.strictEqual(sanitizeModelForAnalytics('claude-3-5-haiku-latest'), 'claude-3-5-haiku-latest');
+
+  assert.strictEqual(sanitizeModelForAnalytics('/Users/alice/Secret Client/model.gguf'), 'custom');
+  assert.strictEqual(sanitizeModelForAnalytics('acme-board-meeting-private-model'), 'custom');
+  assert.strictEqual(sanitizeModelForAnalytics('ft:gpt-4o-mini:acme-corp:board:abc123'), 'custom');
+  assert.strictEqual(sanitizeModelForAnalytics(''), 'unknown');
+  assert.strictEqual(sanitizeModelForAnalytics(null), 'unknown');
 });
 
 test('redactLocalPaths never exposes the username itself when nothing follows it in the match (adversarial regression)', () => {
