@@ -257,6 +257,15 @@ if os.path.exists(ollama_bin_dir):
             if base in ('ffmpeg', 'ffmpeg.exe'):
                 # Put ffmpeg at the root of the bundle for easy PATH access
                 binaries.append((filepath, '.'))
+            elif base == 'steno-diarize' and _IS_DARWIN:
+                # macOS-only Swift/CoreML diarization sidecar (built by
+                # scripts/build-diarize-sidecar.sh). Root-level like ffmpeg
+                # since src/transcriber.py resolves it the same way. Gated
+                # on _IS_DARWIN + os.path.exists above so a checkout that
+                # hasn't run the Swift build (or a non-macOS platform) just
+                # skips it — src/transcriber.py falls back to legacy
+                # channel-only labeling when the binary is missing.
+                binaries.append((filepath, '.'))
             elif _IS_DARWIN:
                 # COLLECT DATA TOC 3-tuple: (dest_path_including_filename,
                 # abs_src_path, 'DATA'). Everything lives under ollama/,
