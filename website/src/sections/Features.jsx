@@ -5,26 +5,15 @@ import {
   Calendar as CalendarIcon, Clock, PencilLine, ArrowUp,
 } from "lucide-react";
 
-// ─── Shared: Steno mic icon path group ─────────────────────────
+// ─── Shared: Steno mark path group ──────────────────────────────
 // Callers wrap this in their own <g transform=... stroke=... strokeWidth=...>
-// to position/scale it — only the path data is shared here.
+// to position/scale it — only the path data is shared here. Coordinates are
+// pre-scaled from brand/mark.svg's 0-450 box down to this component's native
+// 0-64 box so callers' existing scale()/strokeWidth calibration still applies.
 function StenoMicIcon() {
   return (
     <g transform="translate(-32,-32)">
-      <path d="M28 7 Q29 9.5 30 12.5" />
-      <path d="M36 7 Q35 9.5 34 12.5" />
-      <circle cx="32" cy="15" r="3.8" />
-      <circle cx="30.5" cy="15" r="0.7" fill="var(--fg-1)" stroke="none" />
-      <circle cx="33.5" cy="15" r="0.7" fill="var(--fg-1)" stroke="none" />
-      <path d="M30 19 Q28 19 28 21 L28 50 L32 60 L36 50 L36 21 Q36 19 34 19 Z" />
-      <line x1="28" y1="32" x2="36" y2="32" />
-      <line x1="28" y1="38" x2="36" y2="38" />
-      <line x1="28" y1="44" x2="36" y2="44" />
-      <line x1="28" y1="50" x2="36" y2="50" />
-      <path d="M28 22 C18 15 8 17 4 22 C10 28 20 28 28 27 Z" />
-      <path d="M36 22 C46 15 56 17 60 22 C50 28 44 28 36 27 Z" />
-      <path d="M28 28 C18 30 10 35 6 40 C14 39 22 36 28 33 Z" />
-      <path d="M36 28 C46 30 54 35 58 40 C50 39 42 36 36 33 Z" />
+      <path d="M29.788 23.729C30.814 25.425 31.067 27.586 31.206 30.298C31.207 30.312 31.206 30.325 31.205 30.339C30.548 37.522 29.323 44.691 30.279 48.245C30.799 50.173 31.326 51.934 31.68 53.5C31.758 53.841 32.283 53.83 32.356 53.488C32.752 51.638 33.447 49.84 33.939 48.245C34.742 45.64 33.392 37.357 32.945 30.319C33.087 27.98 32.91 25.961 34.293 23.729M28.298 21.32C24.005 16.354 20.139 12.746 13.257 12.853C6.374 12.959 8.102 16.478 10.525 18.769C12.948 21.06 20.143 22.66 26.194 22.531C23.509 22.669 28.667 22.458 18.649 22.737C8.641 23.016 8.522 31.872 18.159 29.829C18.177 29.825 18.197 29.819 18.214 29.811C23.966 27.325 26.771 25.234 31.101 20.434M32.945 17.848C39.613 10.248 24.373 9.394 30.923 17.706C34.248 22.005 32.375 20.775 40.537 27.201C48.7 33.627 64.944 25.04 38.657 22.595C41.311 22.657 42.975 22.908 45.184 22.418C61.786 18.235 57.405 6.749 40.182 17.281C38.157 18.67 37.258 19.586 35.89 21.355" />
     </g>
   );
 }

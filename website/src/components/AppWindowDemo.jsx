@@ -90,25 +90,12 @@ function AppSidebar({ activeScreen }) {
 
       <div className="flex items-center gap-[9px] px-4 pb-2.5 pt-2">
         <span style={{ display: "inline-flex", width: 22, height: 22, alignItems: "center", justifyContent: "center", color: "var(--fg-1)", flexShrink: 0 }}>
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M28 7 Q29 9.5 30 12.5" />
-            <path d="M36 7 Q35 9.5 34 12.5" />
-            <circle cx="32" cy="15" r="3.8" />
-            <circle cx="30.5" cy="15" r="0.7" fill="currentColor" stroke="none" />
-            <circle cx="33.5" cy="15" r="0.7" fill="currentColor" stroke="none" />
-            <path d="M30 19 Q28 19 28 21 L28 50 L32 60 L36 50 L36 21 Q36 19 34 19 Z" />
-            <line x1="28" y1="32" x2="36" y2="32" />
-            <line x1="28" y1="38" x2="36" y2="38" />
-            <line x1="28" y1="44" x2="36" y2="44" />
-            <line x1="28" y1="50" x2="36" y2="50" />
-            <path d="M28 22 C18 15 8 17 4 22 C10 28 20 28 28 27 Z" />
-            <path d="M36 22 C46 15 56 17 60 22 C50 28 44 28 36 27 Z" />
-            <path d="M28 28 C18 30 10 35 6 40 C14 39 22 36 28 33 Z" />
-            <path d="M36 28 C46 30 54 35 58 40 C50 39 42 36 36 33 Z" />
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 450 450" fill="none" stroke="currentColor" strokeWidth="12">
+            <path d="M209.447 166.845C216.663 178.772 218.44 193.966 219.417 213.035C219.422 213.129 219.42 213.225 219.412 213.319C214.789 263.829 206.174 314.234 212.902 339.223C216.552 352.776 220.264 365.163 222.752 376.169C223.295 378.571 226.99 378.494 227.504 376.086C230.284 363.077 235.173 350.435 238.631 339.223C244.283 320.903 234.784 262.669 231.647 213.178C232.645 196.737 231.398 182.538 241.126 166.845M198.971 149.906C168.786 114.986 141.601 89.6233 93.21 90.3707C44.8194 91.1182 56.9695 115.86 74.0034 131.971C91.0372 148.081 141.627 159.331 184.18 158.423C165.298 159.389 201.563 157.91 131.124 159.87C60.7551 161.828 59.9172 224.098 127.681 209.733C127.81 209.705 127.945 209.663 128.065 209.611C168.511 192.126 188.231 177.43 218.676 143.678M231.647 125.494C278.527 72.0571 171.372 66.055 217.429 124.498C240.809 154.72 227.634 146.076 285.026 191.257C342.419 236.437 456.639 176.062 271.806 158.873C290.471 159.304 302.167 161.07 317.703 157.628C434.433 128.215 403.63 47.4569 282.532 121.508C268.291 131.274 261.97 137.712 252.35 150.155" />
           </svg>
         </span>
         <span style={{ fontFamily: "var(--font-serif)", fontWeight: 400, fontSize: 18, letterSpacing: "-0.02em", color: "var(--fg-1)", lineHeight: 1 }}>
-          Steno<span style={{ color: "var(--fg-muted)" }}>.</span>
+          Steno
         </span>
       </div>
 

@@ -363,7 +363,7 @@ async function showShortcutNotification(body) {
     }
 
     const notif = new Notification({
-      title: 'StenoAI Shortcuts',
+      title: 'Steno Shortcuts',
       body
     });
     trackNotificationLifecycle(notif, 'shortcut');
@@ -1000,7 +1000,7 @@ function createTray() {
   const icon = nativeImage.createFromPath(getTrayIconPath(false));
   icon.setTemplateImage(true);
   tray = new Tray(icon);
-  tray.setToolTip('StenoAI');
+  tray.setToolTip('Steno');
 
   updateTrayMenu();
 }
@@ -1010,7 +1010,7 @@ function updateTrayIcon(recording) {
   const icon = nativeImage.createFromPath(getTrayIconPath(recording));
   icon.setTemplateImage(true);
   tray.setImage(icon);
-  tray.setToolTip(recording ? 'StenoAI - Recording' : 'StenoAI');
+  tray.setToolTip(recording ? 'Steno - Recording' : 'Steno');
   updateTrayMenu();
 }
 
@@ -1029,7 +1029,7 @@ function updateTrayMenu() {
 
   const contextMenu = Menu.buildFromTemplate([
     {
-      label: 'Open StenoAI',
+      label: 'Open Steno',
       click: showAndFocusWindow
     },
     {
@@ -1050,14 +1050,14 @@ function updateTrayMenu() {
       }
     },
     {
-      label: 'Hide StenoAI',
+      label: 'Hide Steno',
       click: () => {
         if (mainWindow) mainWindow.hide();
       }
     },
     { type: 'separator' },
     {
-      label: `StenoAI v${appVersion}`,
+      label: `Steno v${appVersion}`,
       enabled: false
     },
     {
@@ -1068,7 +1068,7 @@ function updateTrayMenu() {
     },
     { type: 'separator' },
     {
-      label: 'Quit StenoAI',
+      label: 'Quit Steno',
       click: () => {
         app.quit();
       }
@@ -4945,7 +4945,7 @@ ipcMain.handle('setup-ollama-and-model', async () => {
       if (darwinMajor < 23) {
         const macosVersion = darwinMajor >= 22 ? '13 (Ventura)' : darwinMajor >= 21 ? '12 (Monterey)' : `(Darwin ${darwinMajor})`;
         sendDebugLog(`macOS ${macosVersion} detected — Ollama requires macOS 14 (Sonoma) or later`);
-        return { success: false, error: 'StenoAI requires macOS 14 (Sonoma) or later for local AI summarization. Please update your macOS or use a remote Ollama server in Settings.' };
+        return { success: false, error: 'Steno requires macOS 14 (Sonoma) or later for local AI summarization. Please update your macOS or use a remote Ollama server in Settings.' };
       }
     }
 
@@ -4953,7 +4953,7 @@ ipcMain.handle('setup-ollama-and-model', async () => {
     const finalOllamaPath = await findOllamaExecutable();
     if (!finalOllamaPath) {
       sendDebugLog('Error: Bundled Ollama not found');
-      return { success: false, error: 'Bundled Ollama not found. Please reinstall StenoAI.' };
+      return { success: false, error: 'Bundled Ollama not found. Please reinstall Steno.' };
     }
     sendDebugLog(`Found bundled Ollama at: ${finalOllamaPath}`);
 
@@ -5031,7 +5031,7 @@ ipcMain.handle('setup-ollama-and-model', async () => {
     if (!ready) {
       if (ollamaExited) {
         if (ollamaDyldError) {
-          return { success: false, error: 'Ollama crashed due to incompatible macOS version. StenoAI requires macOS 14 (Sonoma) or later for local AI. Please update macOS or use a remote Ollama server in Settings.' };
+          return { success: false, error: 'Ollama crashed due to incompatible macOS version. Steno requires macOS 14 (Sonoma) or later for local AI. Please update macOS or use a remote Ollama server in Settings.' };
         }
         return { success: false, error: `Ollama failed to start (exit code: ${ollamaExitCode}). Check debug logs for details.` };
       }
@@ -5331,7 +5331,7 @@ ipcMain.handle('select-storage-folder', async () => {
   try {
     const result = await dialog.showOpenDialog(mainWindow, {
       properties: ['openDirectory', 'createDirectory'],
-      title: 'Choose storage location for StenoAI data',
+      title: 'Choose storage location for Steno data',
       buttonLabel: 'Select Folder'
     });
 
@@ -7018,7 +7018,7 @@ function showRecordingFailedNotification(body) {
   try {
     if (!Notification.isSupported()) return;
     new Notification({
-      title: 'StenoAI',
+      title: 'Steno',
       body: body || "Recording couldn't start.",
     }).show();
   } catch (error) {
@@ -7358,7 +7358,7 @@ async function checkForUpdates() {
       path: '/repos/ruzin/stenoai/releases/latest',
       method: 'GET',
       headers: {
-        'User-Agent': 'StenoAI-Updater'
+        'User-Agent': 'Steno-Updater'
       }
     };
 
@@ -7690,7 +7690,7 @@ function startGoogleAuth() {
         saveGoogleTokens(tokens);
 
         res.writeHead(200, { 'Content-Type': 'text/html' });
-        res.end('<html><body style="font-family: -apple-system, sans-serif; text-align: center; padding: 60px;"><h2>Connected to Google Calendar</h2><p>You can close this tab and return to StenoAI.</p></body></html>');
+        res.end('<html><body style="font-family: -apple-system, sans-serif; text-align: center; padding: 60px;"><h2>Connected to Google Calendar</h2><p>You can close this tab and return to Steno.</p></body></html>');
 
         server.close();
         if (timeoutId) clearTimeout(timeoutId);
@@ -7902,30 +7902,15 @@ function refreshAccessToken(refreshToken) {
 // noon, hiding everything past lunch. Renderer-side pagination + the "today
 // only" filter handle the visual slicing; the fetch just needs to return
 // enough raw events to draw from.
-function fetchCalendarEvents(accessToken, maxResults = 50, signal) {
+async function fetchGoogleCalendarList(accessToken, signal) {
   return new Promise((resolve, reject) => {
-    const now = new Date();
-    const weekAhead = new Date(now);
-    weekAhead.setDate(weekAhead.getDate() + 7);
-    const params = new URLSearchParams({
-      timeMin: now.toISOString(),
-      timeMax: weekAhead.toISOString(),
-      maxResults: String(maxResults),
-      singleEvents: 'true',
-      orderBy: 'startTime',
-      fields: 'items(id,status,summary,description,start,end,attendees,htmlLink,conferenceData)'
-    });
-
     const options = {
       hostname: 'www.googleapis.com',
-      path: `/calendar/v3/calendars/primary/events?${params.toString()}`,
+      path: '/calendar/v3/users/me/calendarList',
       method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${accessToken}`
-      }
+      headers: { 'Authorization': `Bearer ${accessToken}` }
     };
     if (signal) options.signal = signal;
-
     const req = https.request(options, (res) => {
       let data = '';
       res.on('data', (chunk) => { data += chunk; });
@@ -7938,14 +7923,91 @@ function fetchCalendarEvents(accessToken, maxResults = 50, signal) {
           }
           resolve(parsed.items || []);
         } catch (err) {
-          reject(new Error('Failed to parse calendar response'));
+          reject(new Error('Failed to parse calendar list response'));
         }
       });
     });
-
     req.on('error', reject);
     req.end();
   });
+}
+
+function fetchGoogleEventsForCalendar(accessToken, calendarId, params, signal) {
+  return new Promise((resolve, reject) => {
+    const options = {
+      hostname: 'www.googleapis.com',
+      path: `/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events?${params.toString()}`,
+      method: 'GET',
+      headers: { 'Authorization': `Bearer ${accessToken}` }
+    };
+    if (signal) options.signal = signal;
+    const req = https.request(options, (res) => {
+      let data = '';
+      res.on('data', (chunk) => { data += chunk; });
+      res.on('end', () => {
+        try {
+          const parsed = JSON.parse(data);
+          if (parsed.error) {
+            resolve([]);
+            return;
+          }
+          resolve(parsed.items || []);
+        } catch (err) {
+          console.warn(`Failed to parse Google events for calendar ${calendarId}:`, err);
+          resolve([]);
+        }
+      });
+    });
+    req.on('error', () => resolve([]));
+    req.end();
+  });
+}
+
+async function fetchCalendarEvents(accessToken, maxResults = 50, signal) {
+  const now = new Date();
+  const weekAhead = new Date(now);
+  weekAhead.setDate(weekAhead.getDate() + 7);
+  const params = new URLSearchParams({
+    timeMin: now.toISOString(),
+    timeMax: weekAhead.toISOString(),
+    maxResults: String(maxResults),
+    singleEvents: 'true',
+    orderBy: 'startTime',
+    fields: 'items(id,status,summary,description,start,end,attendees,htmlLink,conferenceData,colorId)'
+  });
+
+  try {
+    const calendars = await fetchGoogleCalendarList(accessToken, signal);
+    const selectedCalendars = calendars.filter(c => c.selected);
+    if (selectedCalendars.length === 0) return [];
+
+    const results = [];
+    const concurrency = 3;
+    for (let i = 0; i < selectedCalendars.length; i += concurrency) {
+      const chunk = selectedCalendars.slice(i, i + concurrency);
+      const chunkPromises = chunk.map(async (cal) => {
+        const items = await fetchGoogleEventsForCalendar(accessToken, cal.id, params, signal);
+        items.forEach(item => { 
+          item.calendarBackgroundColor = cal.backgroundColor; 
+          item._sourceCalendarId = cal.id;
+        });
+        return items;
+      });
+      const chunkResults = await Promise.all(chunkPromises);
+      results.push(...chunkResults);
+    }
+    let allEvents = results.flat();
+    
+    allEvents.sort((a, b) => {
+      const startA = new Date(a.start?.dateTime || a.start?.date || 0);
+      const startB = new Date(b.start?.dateTime || b.start?.date || 0);
+      return startA.getTime() - startB.getTime();
+    });
+
+    return allEvents.slice(0, maxResults);
+  } catch (err) {
+    throw err;
+  }
 }
 
 // ── Outlook Calendar: OAuth2 Flow with PKCE ─────────────────────────────
@@ -8028,7 +8090,7 @@ function startOutlookAuth() {
         saveOutlookTokens(tokens);
 
         res.writeHead(200, { 'Content-Type': 'text/html' });
-        res.end('<html><body style="font-family: -apple-system, sans-serif; text-align: center; padding: 60px;"><h2>Connected to Outlook Calendar</h2><p>You can close this tab and return to StenoAI.</p></body></html>');
+        res.end('<html><body style="font-family: -apple-system, sans-serif; text-align: center; padding: 60px;"><h2>Connected to Outlook Calendar</h2><p>You can close this tab and return to Steno.</p></body></html>');
 
         server.close();
         if (timeoutId) clearTimeout(timeoutId);
@@ -8225,33 +8287,15 @@ function refreshOutlookAccessToken(refreshToken) {
 
 // ── Outlook Calendar: Fetch Events ──────────────────────────────────────
 
-// Mirrors fetchCalendarEvents — 50 events to comfortably cover a week without
-// clipping mid-day. See that function's comment for rationale.
-function fetchOutlookCalendarEvents(accessToken, maxResults = 50, signal) {
+async function fetchOutlookCalendarList(accessToken, signal) {
   return new Promise((resolve, reject) => {
-    const now = new Date();
-    const weekAhead = new Date(now);
-    weekAhead.setDate(weekAhead.getDate() + 7);
-
-    const params = new URLSearchParams({
-      startDateTime: now.toISOString(),
-      endDateTime: weekAhead.toISOString(),
-      $top: String(maxResults),
-      $orderby: 'start/dateTime',
-      $select: 'id,subject,body,start,end,attendees,webLink,onlineMeeting,isOnlineMeeting,isAllDay,isCancelled,responseStatus'
-    });
-
     const options = {
       hostname: 'graph.microsoft.com',
-      path: `/v1.0/me/calendarView?${params.toString()}`,
+      path: '/v1.0/me/calendars',
       method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${accessToken}`,
-        'Prefer': 'outlook.timezone="UTC"'
-      }
+      headers: { 'Authorization': `Bearer ${accessToken}` }
     };
     if (signal) options.signal = signal;
-
     const req = https.request(options, (res) => {
       let data = '';
       res.on('data', (chunk) => { data += chunk; });
@@ -8259,20 +8303,114 @@ function fetchOutlookCalendarEvents(accessToken, maxResults = 50, signal) {
         try {
           const parsed = JSON.parse(data);
           if (parsed.error) {
-            reject(new Error(`Outlook Calendar API error: ${parsed.error.message || parsed.error}`));
+            reject(new Error(`Outlook API error: ${parsed.error.message || parsed.error}`));
+            return;
+          }
+          resolve(parsed.value || []);
+        } catch (err) {
+          reject(new Error('Failed to parse Outlook calendar list response'));
+        }
+      });
+    });
+    req.on('error', reject);
+    req.end();
+  });
+}
+
+function fetchOutlookEventsForCalendar(accessToken, calendarId, params, signal) {
+  return new Promise((resolve, reject) => {
+    const options = {
+      hostname: 'graph.microsoft.com',
+      path: `/v1.0/me/calendars/${encodeURIComponent(calendarId)}/calendarView?${params.toString()}`,
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Prefer': 'outlook.timezone="UTC"'
+      }
+    };
+    if (signal) options.signal = signal;
+    const req = https.request(options, (res) => {
+      let data = '';
+      res.on('data', (chunk) => { data += chunk; });
+      res.on('end', () => {
+        try {
+          const parsed = JSON.parse(data);
+          if (parsed.error) {
+            resolve([]);
             return;
           }
           const events = (parsed.value || []).map(normalizeOutlookEvent);
           resolve(events);
         } catch (err) {
-          reject(new Error('Failed to parse Outlook calendar response'));
+          console.warn(`Failed to parse Outlook events for calendar ${calendarId}:`, err);
+          resolve([]);
         }
       });
     });
-
-    req.on('error', reject);
+    req.on('error', () => resolve([]));
     req.end();
   });
+}
+
+async function fetchOutlookCalendarEvents(accessToken, maxResults = 50, signal) {
+  const now = new Date();
+  const weekAhead = new Date(now);
+  weekAhead.setDate(weekAhead.getDate() + 7);
+
+  const params = new URLSearchParams({
+    startDateTime: now.toISOString(),
+    endDateTime: weekAhead.toISOString(),
+    $top: String(maxResults),
+    $orderby: 'start/dateTime',
+    $select: 'id,subject,body,start,end,attendees,webLink,onlineMeeting,isOnlineMeeting,isAllDay,isCancelled,responseStatus,categories'
+  });
+
+  try {
+    const calendars = await fetchOutlookCalendarList(accessToken, signal);
+    if (calendars.length === 0) return [];
+
+    const results = [];
+    const concurrency = 3;
+    for (let i = 0; i < calendars.length; i += concurrency) {
+      const chunk = calendars.slice(i, i + concurrency);
+      const chunkPromises = chunk.map(async (cal) => {
+        const items = await fetchOutlookEventsForCalendar(accessToken, cal.id, params, signal);
+        
+        let hexColor = undefined;
+        switch (cal.color) {
+          case 'lightBlue': hexColor = '#3B82F6'; break;
+          case 'lightGreen': hexColor = '#10B981'; break;
+          case 'lightOrange': hexColor = '#F97316'; break;
+          case 'lightGray': hexColor = '#6B7280'; break;
+          case 'lightYellow': hexColor = '#EAB308'; break;
+          case 'lightTeal': hexColor = '#14B8A6'; break;
+          case 'lightPink': hexColor = '#EC4899'; break;
+          case 'lightBrown': hexColor = '#92400E'; break;
+          case 'lightRed': hexColor = '#EF4444'; break;
+          default: hexColor = '#3B82F6';
+        }
+        
+        items.forEach(item => { 
+          item.calendarBackgroundColor = hexColor; 
+          item.id = `${cal.id}_${item.id}`;
+        });
+        return items;
+      });
+      const chunkResults = await Promise.all(chunkPromises);
+      results.push(...chunkResults);
+    }
+    let allEvents = results.flat();
+    
+    allEvents.sort((a, b) => {
+      const startA = new Date(a.start?.dateTime || a.start?.date || 0);
+      const startB = new Date(b.start?.dateTime || b.start?.date || 0);
+      return startA.getTime() - startB.getTime();
+    });
+
+    return allEvents.slice(0, maxResults);
+  } catch (err) {
+    throw err;
+  }
 }
 
 function normalizeOutlookEvent(event) {
@@ -8479,8 +8617,47 @@ function normalizeCalendarEvent(event) {
   // Drop events the user explicitly declined — see function header comment.
   if (responseStatus === 'declined') return null;
 
+  const GOOGLE_COLORS = {
+    '1': '#7986cb', // Lavender
+    '2': '#33b679', // Sage
+    '3': '#8e24aa', // Grape
+    '4': '#e67c73', // Flamingo
+    '5': '#f6bf26', // Banana
+    '6': '#f4511e', // Tangerine
+    '7': '#039be5', // Peacock
+    '8': '#616161', // Graphite
+    '9': '#3f51b5', // Blueberry
+    '10': '#0b8043', // Basil
+    '11': '#d50000'  // Tomato
+  };
+
+  let eventColor = undefined;
+  if (event.colorId && GOOGLE_COLORS[event.colorId]) {
+    eventColor = GOOGLE_COLORS[event.colorId];
+  } else if (Array.isArray(event.categories)) {
+    const OUTLOOK_CATEGORY_COLORS = {
+      'red category': '#F43F5E',
+      'orange category': '#F97316',
+      'yellow category': '#EAB308',
+      'green category': '#10B981',
+      'blue category': '#3B82F6',
+      'purple category': '#A855F7',
+    };
+    for (const cat of event.categories) {
+       const lowerCat = cat.toLowerCase();
+       if (OUTLOOK_CATEGORY_COLORS[lowerCat]) {
+         eventColor = OUTLOOK_CATEGORY_COLORS[lowerCat];
+         break;
+       }
+    }
+  }
+
+  if (!eventColor && event.calendarBackgroundColor) {
+    eventColor = event.calendarBackgroundColor;
+  }
+
   return {
-    id: event.id,
+    id: event._sourceCalendarId ? `${event._sourceCalendarId}_${event.id}` : event.id,
     title: event.summary || event.title || 'No title',
     start,
     end,
@@ -8491,6 +8668,7 @@ function normalizeCalendarEvent(event) {
       undefined,
     is_all_day: isAllDay,
     response_status: responseStatus,
+    color: eventColor,
   };
 }
 
@@ -8586,12 +8764,12 @@ async function getCalendarEventForNow(timeoutMs = 1500) {
     let events = null;
     const googleToken = await getValidAccessToken();
     if (googleToken) {
-      const raw = await fetchCalendarEvents(googleToken, 7, signal);
+      const raw = await fetchCalendarEvents(googleToken, 50, signal);
       events = raw.map(normalizeCalendarEvent).filter(Boolean);
     } else {
       const outlookToken = await getValidOutlookAccessToken();
       if (outlookToken) {
-        const raw = await fetchOutlookCalendarEvents(outlookToken, 7, signal);
+        const raw = await fetchOutlookCalendarEvents(outlookToken, 50, signal);
         events = raw.map(normalizeCalendarEvent).filter(Boolean);
       }
     }
@@ -8636,12 +8814,12 @@ async function fetchCalendarEventsForScheduler(timeoutMs = 4000) {
   try {
     const googleToken = await getValidAccessToken();
     if (googleToken) {
-      const raw = await fetchCalendarEvents(googleToken, 7, controller.signal);
+      const raw = await fetchCalendarEvents(googleToken, 50, controller.signal);
       return raw.map(normalizeCalendarEvent).filter(Boolean);
     }
     const outlookToken = await getValidOutlookAccessToken();
     if (outlookToken) {
-      const raw = await fetchOutlookCalendarEvents(outlookToken, 7, controller.signal);
+      const raw = await fetchOutlookCalendarEvents(outlookToken, 50, controller.signal);
       return raw.map(normalizeCalendarEvent).filter(Boolean);
     }
     return null; // no calendar connected

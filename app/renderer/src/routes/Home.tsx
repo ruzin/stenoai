@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { Calendar, ChevronLeft, ChevronRight, PencilLine, RefreshCw, Search, Square, X } from 'lucide-react';
-import { isMac } from '@/lib/utils';
+import { cn, isMac } from '@/lib/utils';
 import { MeetingsShell } from '@/components/MeetingsShell';
 import { UpcomingCard } from '@/components/home/UpcomingCard';
 import { PreviousRow } from '@/components/home/PreviousRow';
@@ -213,7 +213,7 @@ export function Home({ mode }: HomeProps) {
   }, [mode, previous, search]);
   const groups = React.useMemo(() => groupPrevious(filtered), [filtered]);
 
-  // Calendar-connect nudge: most new users don't realise StenoAI can
+  // Calendar-connect nudge: most new users don't realise Steno can
   // surface their meetings until something tells them. Show a small
   // dismissible line on Home when calendar is unconnected; persist the
   // dismissal in localStorage so we don't nag the same person twice.
@@ -552,65 +552,117 @@ export function Home({ mode }: HomeProps) {
             <div className="mb-8 w-fit">{homeCalendarNudge}</div>
           )}
 
-          {upcomingToday.length > 0 && mode === 'home' && (
-            <section className="mb-10">
-              <SectionHead
-                title="Upcoming"
-                count={upcomingToday.length}
-                action={
-                  // Outer gap separates the page-nav cluster from the
-                  // refresh button so they read as two distinct groups.
-                  // Inner cluster keeps < and > tight against each other.
-                  <div className="flex items-center gap-1.5">
-                    {upcomingPageCount > 1 && (
-                      <div className="flex items-center gap-0.5">
-                        <button
-                          type="button"
-                          className="inline-flex items-center rounded p-1 transition-colors hover:bg-[color:var(--surface-hover)] disabled:opacity-30 disabled:hover:bg-transparent"
-                          title="Previous"
-                          onClick={() => setUpcomingPage((p) => Math.max(0, p - 1))}
-                          disabled={!canPagePrev}
-                          style={{ color: 'var(--fg-2)' }}
-                        >
-                          <ChevronLeft className="size-[14px]" />
-                        </button>
-                        <button
-                          type="button"
-                          className="inline-flex items-center rounded p-1 transition-colors hover:bg-[color:var(--surface-hover)] disabled:opacity-30 disabled:hover:bg-transparent"
-                          title="Next"
-                          onClick={() => setUpcomingPage((p) => Math.min(upcomingPageCount - 1, p + 1))}
-                          disabled={!canPageNext}
-                          style={{ color: 'var(--fg-2)' }}
-                        >
-                          <ChevronRight className="size-[14px]" />
-                        </button>
+          {upcomingToday.length > 0 && mode === 'home' && (() => {
+            const groups: Record<string, typeof upcomingVisible> = {};
+            
+            const now = new Date(upcomingTickMs);
+            const startOfTodayMs = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+
+            for (const e of upcomingVisible) {
+              const startMs = new Date(e.start).getTime();
+              if (Number.isNaN(startMs)) continue;
+              
+              // Clamp events that started in the past (but are still ongoing) to today
+              const effectiveDate = new Date(Math.max(startMs, startOfTodayMs));
+              const key = `${effectiveDate.getFullYear()}-${effectiveDate.getMonth()}-${effectiveDate.getDate()}`;
+              if (!groups[key]) groups[key] = [];
+              groups[key].push(e);
+            }
+
+            return (
+              <section className="mb-10">
+                <SectionHead
+                  title="Coming up"
+                  isSerif
+                  count={upcomingToday.length}
+                  action={
+                    <div className="flex items-center gap-1.5">
+                      {upcomingPageCount > 1 && (
+                        <div className="flex items-center gap-0.5">
+                          <button
+                            type="button"
+                            className="inline-flex items-center rounded p-1 transition-colors hover:bg-[color:var(--surface-hover)] disabled:opacity-30 disabled:hover:bg-transparent"
+                            title="Previous"
+                            onClick={() => setUpcomingPage((p) => Math.max(0, p - 1))}
+                            disabled={!canPagePrev}
+                            style={{ color: 'var(--fg-2)' }}
+                          >
+                            <ChevronLeft className="size-[14px]" />
+                          </button>
+                          <button
+                            type="button"
+                            className="inline-flex items-center rounded p-1 transition-colors hover:bg-[color:var(--surface-hover)] disabled:opacity-30 disabled:hover:bg-transparent"
+                            title="Next"
+                            onClick={() => setUpcomingPage((p) => Math.min(upcomingPageCount - 1, p + 1))}
+                            disabled={!canPageNext}
+                            style={{ color: 'var(--fg-2)' }}
+                          >
+                            <ChevronRight className="size-[14px]" />
+                          </button>
+                        </div>
+                      )}
+                      <button
+                        type="button"
+                        className="inline-flex items-center rounded p-1 transition-colors hover:bg-[color:var(--surface-hover)] disabled:opacity-50"
+                        title="Check for new calendar events"
+                        onClick={() => calendar.refetch()}
+                        disabled={calendar.isFetching}
+                        style={{ color: 'var(--fg-2)' }}
+                      >
+                        <RefreshCw className={`size-[14px] ${calendar.isFetching ? 'animate-spin' : ''}`} />
+                      </button>
+                    </div>
+                  }
+                />
+                <AllDayInline
+                  events={allDayToday}
+                  expanded={allDayExpanded}
+                  onToggle={() => setAllDayExpanded((v) => !v)}
+                />
+                <div 
+                  className="rounded-[16px] bg-[color:var(--surface-raised)] border shadow-sm mt-3"
+                  style={{ borderColor: 'var(--border-subtle)' }}
+                >
+                  {Object.entries(groups).map(([dateKey, group]) => {
+                    const [y, m, d] = dateKey.split('-').map(Number);
+                    const groupDate = new Date(y, m, d);
+                    const day = groupDate.getDate();
+                    const month = groupDate.toLocaleDateString(undefined, { month: 'short' });
+                    const weekday = groupDate.toLocaleDateString(undefined, { weekday: 'short' });
+                    
+                    return (
+                      <div 
+                        key={dateKey} 
+                        className="flex p-5 pb-4 border-b border-dashed last:border-b-0"
+                        style={{ borderColor: 'var(--border-subtle)' }}
+                      >
+                        {/* Date Column */}
+                        <div className="w-[80px] flex-shrink-0 flex flex-col items-start pr-4 text-[color:var(--fg-2)] mt-0.5">
+                          <div className="flex items-baseline gap-1.5 leading-none">
+                             <span 
+                               className="text-[26px] font-medium"
+                               style={{ color: 'var(--fg-1)', fontFamily: 'var(--font-serif)', letterSpacing: '-0.02em' }}
+                             >
+                               {day}
+                             </span>
+                             <span className="text-[11px] font-semibold">{month}</span>
+                          </div>
+                          <span className="text-[11px] font-medium mt-1">{weekday}</span>
+                        </div>
+                        
+                        {/* Events Column */}
+                        <div className="flex-1 flex flex-col gap-1">
+                          {group.map((event) => (
+                            <UpcomingCard key={event.id} event={event} />
+                          ))}
+                        </div>
                       </div>
-                    )}
-                    <button
-                      type="button"
-                      className="inline-flex items-center rounded p-1 transition-colors hover:bg-[color:var(--surface-hover)] disabled:opacity-50"
-                      title="Check for new calendar events"
-                      onClick={() => calendar.refetch()}
-                      disabled={calendar.isFetching}
-                      style={{ color: 'var(--fg-2)' }}
-                    >
-                      <RefreshCw className={`size-[14px] ${calendar.isFetching ? 'animate-spin' : ''}`} />
-                    </button>
-                  </div>
-                }
-              />
-              <AllDayInline
-                events={allDayToday}
-                expanded={allDayExpanded}
-                onToggle={() => setAllDayExpanded((v) => !v)}
-              />
-              <div className="flex flex-col gap-2">
-                {upcomingVisible.map((event) => (
-                  <UpcomingCard key={event.id} event={event} />
-                ))}
-              </div>
-            </section>
-          )}
+                    );
+                  })}
+                </div>
+              </section>
+            );
+          })()}
 
           {upcomingToday.length === 0 && tomorrowPreview && mode === 'home' && (
             <section className="mb-10">
@@ -620,7 +672,10 @@ export function Home({ mode }: HomeProps) {
                 expanded={allDayExpanded}
                 onToggle={() => setAllDayExpanded((v) => !v)}
               />
-              <div className="flex flex-col gap-2">
+              <div 
+                className="rounded-[16px] bg-[color:var(--surface-raised)] border shadow-sm p-2"
+                style={{ borderColor: 'var(--border-subtle)' }}
+              >
                 <UpcomingCard event={tomorrowPreview} />
               </div>
             </section>
@@ -719,9 +774,10 @@ interface SectionHeadProps {
   title: string;
   count: number;
   action?: React.ReactNode;
+  isSerif?: boolean;
 }
 
-function SectionHead({ title, count, action }: SectionHeadProps) {
+function SectionHead({ title, count, action, isSerif }: SectionHeadProps) {
   return (
     <div
       className="mb-3.5 flex items-baseline justify-between pb-2.5"
@@ -729,8 +785,10 @@ function SectionHead({ title, count, action }: SectionHeadProps) {
     >
       <div className="flex items-baseline gap-2.5">
         <h2
-          className="text-sm font-medium tracking-[-0.005em]"
-          style={{ color: 'var(--fg-1)', fontFamily: 'var(--font-sans)' }}
+          className={cn(
+            isSerif ? "text-[22px]" : "text-sm font-medium tracking-[-0.005em]"
+          )}
+          style={{ color: 'var(--fg-1)', fontFamily: isSerif ? 'var(--font-serif)' : 'var(--font-sans)' }}
         >
           {title}
         </h2>
@@ -768,10 +826,11 @@ function AllDayInline({ events, expanded, onToggle }: AllDayInlineProps) {
       </button>
       {expanded && (
         // Render as full UpcomingCards so all-day events match the visual
-        // language of the timed carousel below. UpcomingCard short-circuits
-        // its time labelling for is_all_day events — see component for the
-        // 'All day' / 'Today' branch.
-        <div className="flex flex-col gap-2">
+        // language of the timed carousel below.
+        <div 
+          className="flex flex-col gap-1 rounded-[16px] bg-[color:var(--surface-raised)] border shadow-sm p-3 mt-1"
+          style={{ borderColor: 'var(--border-subtle)' }}
+        >
           {events.map((e) => (
             <UpcomingCard key={e.id} event={e} />
           ))}

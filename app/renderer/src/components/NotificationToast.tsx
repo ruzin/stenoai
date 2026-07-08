@@ -28,11 +28,13 @@ export function NotificationToast() {
     ipc().notification.close();
   };
 
+  const hasValidUrl = !!(data.meeting_url && /^https?:\/\//i.test(data.meeting_url));
+
   const handleJoin = (e?: React.MouseEvent) => {
     e?.stopPropagation();
     ipc().analytics.track('notification_clicked', { type: 'premeeting' });
-    if (data.meeting_url) {
-      ipc().shell.openExternal(data.meeting_url);
+    if (hasValidUrl) {
+      ipc().shell.openExternal(data.meeting_url!);
     }
     ipc().recording.start(data.title, 'notification_click');
     ipc().notification.close();
@@ -93,7 +95,7 @@ export function NotificationToast() {
           </div>
         </div>
 
-        {data.meeting_url && (
+        {hasValidUrl && (
           <button
             onClick={handleJoin}
             className="flex items-center gap-2 rounded-[10px] border border-gray-200 bg-white px-3 py-1.5 text-[13px] font-medium text-gray-900 transition-all hover:bg-gray-50 hover:shadow-sm active:bg-gray-100 active:scale-[0.98] shrink-0 dark:border-white/10 dark:bg-[#2C2C2E] dark:text-gray-100 dark:hover:bg-[#3C3C3E] dark:active:bg-[#1C1C1E]"

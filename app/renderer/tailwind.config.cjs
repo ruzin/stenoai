@@ -17,7 +17,7 @@ module.exports = {
     extend: {
       fontFamily: {
         sans: ['Inter', '-apple-system', 'Segoe UI', 'sans-serif'],
-        serif: ['Charter', 'Bitstream Charter', 'Sitka Text', 'Iowan Old Style', 'Cambria', 'Georgia', 'serif'],
+        serif: ['Ovo', 'Georgia', 'serif'],
         mono: ['JetBrains Mono', 'SF Mono', 'Menlo', 'monospace'],
       },
       colors: {

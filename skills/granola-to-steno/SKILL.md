@@ -1,20 +1,20 @@
 ---
 name: granola-to-steno
 description: >
-  Sync Granola meeting notes into StenoAI's file-based store. Reads recent
+  Sync Granola meeting notes into Steno's file-based store. Reads recent
   meetings from the Granola MCP (titles, dates, participants, AI summaries,
-  verbatim transcripts) and regenerates StenoAI's `output/*_summary.md` and
+  verbatim transcripts) and regenerates Steno's `output/*_summary.md` and
   `transcripts/*_transcript.txt` files in a target folder (e.g. an iCloud Drive
   directory). The operation is idempotent: filenames derive from date + title,
   so re-running rewrites existing meetings in place and only adds new ones. Use
   when the user says "sync Granola to Steno", "import my Granola meetings into
-  StenoAI", "resync Steno", "refresh Steno from Granola", or runs this on a
+  Steno", "resync Steno", "refresh Steno from Granola", or runs this on a
   schedule. Requires a connected Granola MCP and Python 3.
 ---
 
-# Granola -> StenoAI sync
+# Granola -> Steno sync
 
-This skill rebuilds StenoAI's local meeting files from Granola. StenoAI stores
+This skill rebuilds Steno's local meeting files from Granola. Steno stores
 each meeting as two files in a folder it watches:
 
 ```
@@ -27,7 +27,7 @@ the meeting's date and title, **rewriting an existing meeting is a no-op and new
 meetings are simply added** - the whole flow is safe to run repeatedly and on a
 schedule.
 
-The bundled generator (`scripts/steno_gen.py`) does the StenoAI-specific
+The bundled generator (`scripts/steno_gen.py`) does the Steno-specific
 formatting (cleans Granola markdown into the plain-text shape Steno renders,
 diarises the transcript, writes both files). This skill's job is to gather the
 raw Granola data into a simple staging folder and hand it to the generator.
@@ -40,7 +40,7 @@ raw Granola data into a simple staging folder and hand it to the generator.
   `get_meeting_transcript`. The MCP server id is environment-specific, so load
   the tools by name with ToolSearch rather than assuming a fixed prefix.
 - **Python 3** available in the shell.
-- A **target StenoAI directory** containing (or able to contain) `output/` and
+- A **target Steno directory** containing (or able to contain) `output/` and
   `transcripts/` subfolders. This is often inside iCloud Drive - see Step 3.
 
 ---
@@ -52,7 +52,7 @@ defaults):
 
 - **Time range** - default: union of `this_week` and `last_week`. For a one-off
   backfill use `last_30_days` or a `custom` range.
-- **Target StenoAI directory** (`STENO_DIR`) - see Step 3.
+- **Target Steno directory** (`STENO_DIR`) - see Step 3.
 - **Language** - the language your meetings are in, as a short code (`en`, `fr`,
   `de`, ...). Defaults to `en`. Passed to the generator via `--language` in
   Step 6.
@@ -74,17 +74,17 @@ Call `list_meetings(time_range="this_week")` and
 of meeting ids** and de-duplicate. If there are none, report "Nothing to sync"
 and stop.
 
-## Step 3 - Locate the target StenoAI directory
+## Step 3 - Locate the target Steno directory
 
 Resolve `STENO_DIR` in this order:
 
 1. An explicit path the user gave you.
 2. A `STENO_DIR` environment variable, if set.
-3. Auto-detect a StenoAI folder under the user's connected folders. In a shell
+3. Auto-detect a Steno folder under the user's connected folders. In a shell
    with iCloud mounted this is typically:
    ```bash
    BASE=$(ls -d /sessions/*/mnt/*CloudDocs* 2>/dev/null | head -1)
-   STENO_DIR="$BASE/StenoAI"
+   STENO_DIR="$BASE/Steno"
    ```
    (Adjust the mount glob to the actual workspace layout.)
 
@@ -124,7 +124,7 @@ write a `_summary.json`):
 - `summary.txt` - the raw Granola summary verbatim (empty file if none).
 - `transcript.txt` - the raw verbatim transcript (empty file if null).
 
-## Step 6 - Generate and copy into StenoAI
+## Step 6 - Generate and copy into Steno
 
 Snapshot the existing summaries first so you can report what's new, then run the
 bundled generator and copy the results into `STENO_DIR` with retries (iCloud may
@@ -149,7 +149,7 @@ for f in /tmp/steno_out/transcripts/*; do [ -e "$f" ] || continue; cp_retry "$f"
 Verify by comparing file **sizes** between `/tmp/steno_out/...` and
 `STENO_DIR/...` — use `stat -f %z "$f"` on macOS (or `stat -c %s "$f"` on
 Linux), which reports the byte size without triggering the iCloud read lock
-that `cmp`/`diff` can. StenoAI + iCloud Drive run on macOS, so `stat -f %z` is
+that `cmp`/`diff` can. Steno + iCloud Drive run on macOS, so `stat -f %z` is
 the one you'll normally need. If any file failed to copy because of an iCloud
 *"Resource deadlock avoided"* lock, write that one file through the **host file
 tools** instead: read the generated file's content and Write it directly to the
@@ -169,23 +169,23 @@ titles - those whose `*_summary.md` was not present in
 
 ---
 
-## Notes for implementers (StenoAI team)
+## Notes for implementers (Steno team)
 
-- The generator intentionally **never writes `*_summary.json`**. StenoAI's
+- The generator intentionally **never writes `*_summary.json`**. Steno's
   `list_meetings` scans JSON before Markdown and de-dupes by stem; the JSON
   branch omits `session_info.summary_file`, which breaks the detail view
   ("Note not found"). The `.md` carries everything the parser needs.
-- StenoAI renders the **Summary** field as plain text and collapses single
+- Steno renders the **Summary** field as plain text and collapses single
   newlines, so the generator converts Granola markdown into clean text:
   de-escapes `\~ \* \_` etc., turns `### Heading` into an UPPERCASE line and
   `- bullet` into `• bullet`, and inserts a blank line between blocks so nothing
-  collapses. Change this only if StenoAI's renderer changes.
+  collapses. Change this only if Steno's renderer changes.
 - The output **language** is a CLI flag: `--language <code>` (default `en`). It
   is written to the frontmatter `language` field and to the transcript header's
   `Language setting:` / `Detected language:` / `Summary output language:` lines.
   Granola does not expose a per-meeting language, so this is a single value for
   the whole sync run.
-- `duration_seconds` is written as `null` (unknown), matching what StenoAI's own
+- `duration_seconds` is written as `null` (unknown), matching what Steno's own
   writer emits when it has no duration. Granola does not expose a meeting
   duration.
 - An **unparseable date** falls back to a *deterministic* placeholder derived

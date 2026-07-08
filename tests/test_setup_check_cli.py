@@ -75,7 +75,7 @@ class SetupCheckJsonTests(unittest.TestCase):
         """No flag → the human banner is still printed and no JSON object appears."""
         res = CliRunner().invoke(simple_recorder.setup_check, [])
         self.assertEqual(res.exit_code, 0, res.output)
-        self.assertIn("StenoAI Setup Check", res.output)
+        self.assertIn("Steno Setup Check", res.output)
         # The human path must not emit a machine-readable JSON object line.
         self.assertFalse(
             any(line.strip().startswith("{") for line in res.output.splitlines()),
