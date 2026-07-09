@@ -367,21 +367,37 @@ test('captureSanitizedException sends only the sanitized crash object to PostHog
 });
 
 test('sanitizeModelForAnalytics keeps known public model ids but collapses custom/free-form names', () => {
-  assert.strictEqual(sanitizeModelForAnalytics('gemma4:e2b-it-qat'), 'gemma4:e2b-it-qat');
-  assert.strictEqual(sanitizeModelForAnalytics('gpt-4o-mini'), 'gpt-4o-mini');
-  assert.strictEqual(sanitizeModelForAnalytics('claude-3-5-haiku-latest'), 'claude-3-5-haiku-latest');
-  // Every curated built-in must pass through un-collapsed: the full Bedrock
-  // dropdown and the non-Gemma local registry entries are fixed public ids.
-  assert.strictEqual(
-    sanitizeModelForAnalytics('anthropic.claude-sonnet-4-5-20250929-v2:0'),
-    'anthropic.claude-sonnet-4-5-20250929-v2:0'
-  );
-  assert.strictEqual(
-    sanitizeModelForAnalytics('anthropic.claude-3-5-haiku-20241022-v1:0'),
-    'anthropic.claude-3-5-haiku-20241022-v1:0'
-  );
-  assert.strictEqual(sanitizeModelForAnalytics('qwen3.5:9b'), 'qwen3.5:9b');
-  assert.strictEqual(sanitizeModelForAnalytics('gpt-oss:20b'), 'gpt-oss:20b');
+  // Every curated built-in must pass through un-collapsed. This list is a
+  // deliberate literal duplicate of ANALYTICS_MODEL_ALLOWLIST so that an
+  // accidental removal or typo in the allowlist fails here.
+  const curatedPublicIds = [
+    'gemma4:e2b-it-qat',
+    'gemma4:e4b-it-qat',
+    'gemma4:12b-it-qat',
+    'gemma4:e2b-nvfp4',
+    'gemma4:e4b-nvfp4',
+    'gemma4:12b-nvfp4',
+    'llama3.2:3b',
+    'qwen3.5:9b',
+    'gpt-oss:20b',
+    'parakeet',
+    'large-v3-turbo',
+    'gpt-4o-mini',
+    'gpt-4o',
+    'gpt-4.1-mini',
+    'claude-3-5-haiku-latest',
+    'claude-3-5-sonnet-latest',
+    'claude-3-7-sonnet-latest',
+    'claude-haiku-4-5-20251001',
+    'anthropic.claude-sonnet-4-5-20250929-v2:0',
+    'anthropic.claude-haiku-4-5-20251001-v1:0',
+    'anthropic.claude-opus-4-1-20250805-v1:0',
+    'anthropic.claude-3-5-sonnet-20241022-v2:0',
+    'anthropic.claude-3-5-haiku-20241022-v1:0',
+  ];
+  for (const id of curatedPublicIds) {
+    assert.strictEqual(sanitizeModelForAnalytics(id), id);
+  }
 
   assert.strictEqual(sanitizeModelForAnalytics('/Users/alice/Secret Client/model.gguf'), 'custom');
   assert.strictEqual(sanitizeModelForAnalytics('acme-board-meeting-private-model'), 'custom');
