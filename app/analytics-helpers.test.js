@@ -370,6 +370,18 @@ test('sanitizeModelForAnalytics keeps known public model ids but collapses custo
   assert.strictEqual(sanitizeModelForAnalytics('gemma4:e2b-it-qat'), 'gemma4:e2b-it-qat');
   assert.strictEqual(sanitizeModelForAnalytics('gpt-4o-mini'), 'gpt-4o-mini');
   assert.strictEqual(sanitizeModelForAnalytics('claude-3-5-haiku-latest'), 'claude-3-5-haiku-latest');
+  // Every curated built-in must pass through un-collapsed: the full Bedrock
+  // dropdown and the non-Gemma local registry entries are fixed public ids.
+  assert.strictEqual(
+    sanitizeModelForAnalytics('anthropic.claude-sonnet-4-5-20250929-v2:0'),
+    'anthropic.claude-sonnet-4-5-20250929-v2:0'
+  );
+  assert.strictEqual(
+    sanitizeModelForAnalytics('anthropic.claude-3-5-haiku-20241022-v1:0'),
+    'anthropic.claude-3-5-haiku-20241022-v1:0'
+  );
+  assert.strictEqual(sanitizeModelForAnalytics('qwen3.5:9b'), 'qwen3.5:9b');
+  assert.strictEqual(sanitizeModelForAnalytics('gpt-oss:20b'), 'gpt-oss:20b');
 
   assert.strictEqual(sanitizeModelForAnalytics('/Users/alice/Secret Client/model.gguf'), 'custom');
   assert.strictEqual(sanitizeModelForAnalytics('acme-board-meeting-private-model'), 'custom');
