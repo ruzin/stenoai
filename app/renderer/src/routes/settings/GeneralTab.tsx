@@ -23,9 +23,11 @@ import { useTheme } from '@/hooks/useTheme';
 import {
   useAutoDetectMeetingsSetting,
   useDockIconSetting,
+  useLaunchOnLoginSetting,
   useNotificationsSetting,
   useSetAutoDetectMeetings,
   useSetDockIcon,
+  useSetLaunchOnLogin,
   useSetNotifications,
   useSetSilenceAutoStopEnabled,
   useSetSilenceAutoStopMinutes,
@@ -51,6 +53,8 @@ export function GeneralTab() {
   const systemAudioSupport = useSystemAudioSupport();
   const autoDetect = useAutoDetectMeetingsSetting();
   const setAutoDetect = useSetAutoDetectMeetings();
+  const launchOnLogin = useLaunchOnLoginSetting();
+  const setLaunchOnLogin = useSetLaunchOnLogin();
   const silenceAutoStop = useSilenceAutoStopSetting();
   const setSilenceAutoStopEnabled = useSetSilenceAutoStopEnabled();
   const setSilenceAutoStopMinutes = useSetSilenceAutoStopMinutes();
@@ -312,6 +316,17 @@ export function GeneralTab() {
           checked={autoDetect.data ?? true}
           onCheckedChange={(v) => setAutoDetect.mutate(v)}
           disabled={autoDetect.data === undefined}
+        />
+      </SettingRow>
+
+      <SettingRow
+        label="Launch on login"
+        description="Start Steno automatically when you log in, hidden in the menu bar. Turn off to launch it manually."
+      >
+        <Switch
+          checked={launchOnLogin.data ?? true}
+          onCheckedChange={(v) => setLaunchOnLogin.mutate(v)}
+          disabled={launchOnLogin.data === undefined}
         />
       </SettingRow>
 

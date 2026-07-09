@@ -216,6 +216,11 @@ let shortcutQueue = [];
 let pendingShortcutUrls = [];
 let rendererShortcutReady = false;
 let launchedByShortcut = false;
+// true when this launch was triggered by the OS login item (auto-launch).
+// Set once at startup (before the app_opened event). On a login launch we
+// suppress the first window show so Steno starts hidden in the tray/menu bar,
+// and we tag telemetry so background opens don't inflate DAU/funnels.
+let launchedHidden = false;
 
 // SHORTCUT_PROTOCOL and the pure deep-link parsing/sanitizing helpers
 // (extractShortcutUrlFromArgv, sanitizeShortcutUrlForLogs, parseShortcutUrl,
@@ -475,13 +480,39 @@ const OUTLOOK_AUTH_URL = 'https://login.microsoftonline.com/common/oauth2/v2.0/a
 const OUTLOOK_TOKEN_URL = 'https://login.microsoftonline.com/common/oauth2/v2.0/token';
 
 /**
+ * Register or remove the OS "launch on login" item.
+ *
+ * Cross-platform: Electron's setLoginItemSettings covers macOS and Windows
+ * (Windows writes HKCU\...\Run under the hood). Hidden launch differs per OS:
+ * on Windows we register with `--hidden` and detect it via argv at startup; on
+ * macOS the deprecated openAsHidden no longer works (macOS 13+), so the window
+ * suppression is driven by getLoginItemSettings().wasOpenedAtLogin instead —
+ * openAsHidden is passed only as a legacy best-effort, never relied on.
+ *
+ * No-op under E2E and in dev (unpackaged), so tests and `npm start` never
+ * register a login item on the developer's machine. Silent-fail — a login-item
+ * error must never break app startup.
+ */
+function applyLoginItemSetting(enabled) {
+  if (IS_E2E || !app.isPackaged) return;
+  try {
+    app.setLoginItemSettings({
+      openAtLogin: enabled,
+      openAsHidden: enabled, // macOS legacy best-effort; not relied on for correctness
+      args: process.platform === 'win32' && enabled ? ['--hidden'] : [],
+    });
+  } catch (e) {
+    console.warn('setLoginItemSettings failed (non-fatal):', e?.message);
+  }
+}
+
+/**
  * Initialize PostHog telemetry by reading config from Python backend.
  */
 // One config.json read (no extra subprocess) + a token-file existence check
-// for the identify() super-properties below. `launch_on_login` is always
-// false -- no login-item feature exists yet (STE-65's build, not this
-// instrumentation workstream); wired here so it starts reporting the moment
-// that feature ships without another identify-call-site hunt.
+// for the identify() super-properties below. `launch_on_login` defaults ON
+// (feature ships enabled-for-everyone; users opt out in Settings), so a legacy
+// config missing the key reports true.
 function loadIdentitySuperProperties() {
   let cfg = {};
   try {
@@ -496,7 +527,7 @@ function loadIdentitySuperProperties() {
     ai_provider: cfg.ai_provider || 'local',
     notifications_enabled: cfg.notifications_enabled !== false,
     calendar_connected: calendarConnected,
-    launch_on_login: false,
+    launch_on_login: cfg.launch_on_login !== false,
   };
 }
 
@@ -938,7 +969,15 @@ function createWindow(options = {}) {
   windowReadyToShow = false;
 
   const showWhenReady = () => {
+    // Always mark readiness so activate/focus handlers (which gate on
+    // windowReadyToShow) can reveal the window later — even on a login launch
+    // where we skip the initial show. Only the show() itself is suppressed when
+    // launched hidden, so Steno starts in the tray/menu bar; a tray/Dock click
+    // then brings it up normally.
     windowReadyToShow = true;
+    if (launchedHidden) {
+      return;
+    }
     if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isVisible()) {
       mainWindow.show();
     }
@@ -1226,6 +1265,30 @@ if (!gotSingleInstanceLock) {
   });
 
   app.whenReady().then(async () => {
+    // Resolve whether this launch was an OS login-item auto-launch BEFORE the
+    // app_opened event and the first window show below. macOS reports it via
+    // wasOpenedAtLogin (the deprecated openAsHidden no longer works on 13+);
+    // Windows carries the `--hidden` arg we registered the login item with.
+    // Only treat it as hidden if the setting isn't explicitly off, so a stale
+    // OS login item (setting since disabled) doesn't wrongly hide the window.
+    try {
+      let launchOnLoginEnabled = true;
+      try {
+        const cfgPath = path.join(getUserDataDir(), 'config.json');
+        if (fs.existsSync(cfgPath)) {
+          const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf-8'));
+          launchOnLoginEnabled = cfg.launch_on_login !== false;
+        }
+      } catch (_) {}
+      const openedAtLogin =
+        process.platform === 'darwin'
+          ? Boolean(app.getLoginItemSettings().wasOpenedAtLogin)
+          : process.argv.includes('--hidden');
+      launchedHidden = openedAtLogin && launchOnLoginEnabled;
+    } catch (e) {
+      console.warn('Failed to resolve login-launch state (non-fatal):', e?.message);
+    }
+
     // Follow the OS system proxy for all main-process HTTP (net.fetch uses the
     // default session). net.fetch alone honours the *session* proxy, but the
     // default session does NOT auto-adopt the Windows system proxy — without
@@ -1400,9 +1463,33 @@ if (!gotSingleInstanceLock) {
       }
     }
 
-    // Initialize telemetry and track app open
+    // Re-apply the OS "launch on login" item on every startup from the
+    // persisted preference (config.json read directly — no subprocess). This is
+    // what makes the feature default-ON for everyone: new installs default true
+    // and existing configs missing the key fall back to true (registering the
+    // login item on this launch), while a user who turned it off persists false
+    // and stays unregistered. Idempotent; no-op under E2E / dev (see helper).
+    try {
+      let launchOnLoginEnabled = true;
+      const cfgPath = path.join(getUserDataDir(), 'config.json');
+      if (fs.existsSync(cfgPath)) {
+        const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf-8'));
+        launchOnLoginEnabled = cfg.launch_on_login !== false;
+      }
+      applyLoginItemSetting(launchOnLoginEnabled);
+    } catch (e) {
+      console.warn('Failed to apply launch-on-login setting at startup:', e?.message);
+    }
+
+    // Initialize telemetry and track app open. Tag the launch context so
+    // hidden background auto-launches (which fire on every login/reboot) are
+    // filterable and don't inflate DAU/funnels — filter hidden=false (or
+    // launch_source='user') for a true "engaged open" metric.
     await initTelemetry();
-    trackEvent('app_opened');
+    trackEvent('app_opened', {
+      launch_source: launchedHidden ? 'login-item' : 'user',
+      hidden: launchedHidden,
+    });
     checkForOrphanedRecording();
 
     // Load custom storage path for file validation. Skipped under E2E (spawns
@@ -6272,6 +6359,36 @@ ipcMain.handle('set-auto-detect-meetings', async (_event, enabled) => {
     return parsed;
   } catch (error) {
     sendDebugLog(`Error setting auto-detect: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('get-launch-on-login', async () => {
+  try {
+    const result = await runPythonScript('simple_recorder.py', ['get-launch-on-login'], true);
+    const jsonData = JSON.parse(result);
+    return { success: true, ...jsonData };
+  } catch (error) {
+    sendDebugLog(`Error getting launch-on-login setting: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('set-launch-on-login', async (_event, enabled) => {
+  try {
+    sendDebugLog(`Setting launch-on-login to: ${enabled}`);
+    const result = await runPythonScript('simple_recorder.py', ['set-launch-on-login', enabled ? 'True' : 'False']);
+    const jsonMatch = result.match(/\{.*\}/s);
+    const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : { success: true, launch_on_login: enabled };
+    if (parsed.success) {
+      // Apply the OS login item live so the user doesn't need to restart, and
+      // re-identify so the launch_on_login super-property reflects the change.
+      applyLoginItemSetting(enabled);
+      refreshIdentitySuperProperties();
+    }
+    return parsed;
+  } catch (error) {
+    sendDebugLog(`Error setting launch-on-login: ${error.message}`);
     return { success: false, error: error.message };
   }
 });

@@ -64,6 +64,8 @@ vi.mock('@/hooks/useSettings', () => {
     useSystemAudioSupport: () => q({ supported: true, osVersion: '14.4' }),
     useAutoDetectMeetingsSetting: () => q(true),
     useSetAutoDetectMeetings: m,
+    useLaunchOnLoginSetting: () => q(true),
+    useSetLaunchOnLogin: m,
     useSilenceAutoStopSetting: () =>
       q({ enabled: true, minutes: 15, supportedMinutes: [2, 5, 10, 15, 30] }),
     useSetSilenceAutoStopEnabled: m,
