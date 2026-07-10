@@ -90,6 +90,81 @@ test('injected now/minAgeMs controls the age boundary deterministically', () => 
   assert.deepStrictEqual(insideGuard.kept, [file]);
 });
 
+test('matches a real 13-digit-timestamp snapshot name', () => {
+  const dir = makeTmpDir();
+  // The exact shape the writer emits today: 13-digit epoch-ms + <=6 base36.
+  const real = writeSnapshot(dir, 'stenoai-live-1700000000000-a1b2c3.txt');
+
+  const result = sweepOrphanedLiveSnapshots({ tmpDir: dir });
+
+  assert.deepStrictEqual(result.deleted, [real]);
+});
+
+test('ignores a too-short timestamp (single digit)', () => {
+  const dir = makeTmpDir();
+  // Below the 10-digit floor — a hand-crafted name, not a real snapshot.
+  writeSnapshot(dir, 'stenoai-live-1-a.txt');
+
+  const result = sweepOrphanedLiveSnapshots({ tmpDir: dir });
+
+  assert.deepStrictEqual(result.deleted, []);
+  assert.deepStrictEqual(result.kept, []);
+  assert.strictEqual(
+    fs.existsSync(path.join(dir, 'stenoai-live-1-a.txt')),
+    true,
+  );
+});
+
+test('ignores an overly long random suffix', () => {
+  const dir = makeTmpDir();
+  // 9-char suffix exceeds the 1-8 bound — never produced by slice(2, 8).
+  writeSnapshot(dir, 'stenoai-live-1700000000000-abcdefghi.txt');
+
+  const result = sweepOrphanedLiveSnapshots({ tmpDir: dir });
+
+  assert.deepStrictEqual(result.deleted, []);
+  assert.deepStrictEqual(result.kept, []);
+  assert.strictEqual(
+    fs.existsSync(path.join(dir, 'stenoai-live-1700000000000-abcdefghi.txt')),
+    true,
+  );
+});
+
+test('case-sensitive keep-set (default off Windows) misses a differently-cased path', () => {
+  const dir = makeTmpDir();
+  const wanted = writeSnapshot(dir, 'stenoai-live-1700000000011-abc123.txt');
+
+  // Keep-set references the file with an upper-cased basename. With
+  // case-sensitive comparison (caseInsensitive:false) this does NOT match, so
+  // the file, being old, is deleted — the pre-fix behavior on macOS/Linux.
+  const upper = path.join(dir, 'STENOAI-LIVE-1700000000011-ABC123.TXT');
+  const result = sweepOrphanedLiveSnapshots({
+    tmpDir: dir,
+    keepPaths: new Set([upper]),
+    caseInsensitive: false,
+  });
+
+  assert.deepStrictEqual(result.deleted, [wanted]);
+});
+
+test('case-insensitive keep-set (Windows) keeps a differently-cased path', () => {
+  const dir = makeTmpDir();
+  const wanted = writeSnapshot(dir, 'stenoai-live-1700000000012-abc123.txt');
+
+  // Same differently-cased reference, but with caseInsensitive:true (the
+  // Windows default) it now matches and the still-needed snapshot is kept.
+  const upper = path.join(dir, 'STENOAI-LIVE-1700000000012-ABC123.TXT');
+  const result = sweepOrphanedLiveSnapshots({
+    tmpDir: dir,
+    keepPaths: new Set([upper]),
+    caseInsensitive: true,
+  });
+
+  assert.deepStrictEqual(result.deleted, []);
+  assert.deepStrictEqual(result.kept, [wanted]);
+  assert.strictEqual(fs.existsSync(wanted), true);
+});
+
 test('ignores non-matching names and directories', () => {
   const dir = makeTmpDir();
   // No digit block.

@@ -21,9 +21,15 @@ const path = require('path');
 
 // Exactly the shape snapshotLiveTranscriptForFallback writes:
 // `stenoai-live-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.txt`.
-// The random suffix is base-36 (lowercase letters + digits). Anchored so a
-// hand-crafted name like `stenoai-live-foo.txt` (no digit block) is ignored.
-const LIVE_SNAPSHOT_NAME = /^stenoai-live-\d+-[a-z0-9]+\.txt$/;
+// - The timestamp is Date.now() (epoch ms): 13 digits today. Bound it 10-17
+//   digits — 10+ rejects a bare `stenoai-live-1-a.txt`, while the upper bound
+//   stays tolerant of clock growth (17 digits covers epoch ms well past the
+//   year 5000) without matching an unbounded run of digits.
+// - The random suffix is base-36 (lowercase letters + digits), up to 6 chars
+//   from slice(2, 8) but SHORTER when Math.random() yields a small value; 1-8
+//   tolerates that low end and a little headroom without matching junk.
+// Anchored so a hand-crafted name like `stenoai-live-foo.txt` is ignored.
+const LIVE_SNAPSHOT_NAME = /^stenoai-live-\d{10,17}-[a-z0-9]{1,8}\.txt$/;
 
 // Snapshots younger than this are kept even when not in the keep-set: they may
 // belong to a job that startup is still wiring up. One minute is far longer than
@@ -40,6 +46,11 @@ const DEFAULT_MIN_AGE_MS = 60_000;
 // minAgeMs: files newer than this (by mtime) are kept (age guard).
 // now: injectable clock for deterministic tests.
 // fs: injectable fs module for deterministic failure tests.
+// caseInsensitive: compare keep-set paths case-insensitively. Defaults to true
+//   on Windows, whose filesystem is case-insensitive — the same snapshot can be
+//   referenced with different casing (e.g. C:\Temp vs c:\temp), and a
+//   case-sensitive compare would miss the match and delete a still-needed file
+//   once past the age guard. macOS/Linux default to case-sensitive.
 //
 // Returns { deleted: string[], kept: string[] } of absolute paths acted on.
 function sweepOrphanedLiveSnapshots({
@@ -48,16 +59,23 @@ function sweepOrphanedLiveSnapshots({
   minAgeMs = DEFAULT_MIN_AGE_MS,
   now = Date.now(),
   fs = fsDefault,
+  caseInsensitive = process.platform === 'win32',
 } = {}) {
   const deleted = [];
   const kept = [];
 
-  // Normalise the keep-set to resolved absolute paths so a caller-supplied
-  // path and our path.join produce a comparable key regardless of form.
+  // Resolve to an absolute path, then lowercase on a case-insensitive FS so a
+  // caller-supplied path and our path.join produce the same comparable key
+  // regardless of form or casing. Used for BOTH keep-set insertion and lookup.
+  const keyFor = (p) => {
+    const resolved = path.resolve(p);
+    return caseInsensitive ? resolved.toLowerCase() : resolved;
+  };
+
   const keep = new Set();
   for (const p of keepPaths) {
     if (typeof p === 'string' && p) {
-      keep.add(path.resolve(p));
+      keep.add(keyFor(p));
     }
   }
 
@@ -90,7 +108,7 @@ function sweepOrphanedLiveSnapshots({
       continue;
     }
 
-    if (keep.has(path.resolve(filePath))) {
+    if (keep.has(keyFor(filePath))) {
       kept.push(filePath);
       continue;
     }
