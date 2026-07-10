@@ -1,3 +1,6 @@
+# Local specs (zoro) — planning artifacts, not source
+.specs/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
