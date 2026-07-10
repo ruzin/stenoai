@@ -13,7 +13,9 @@ export interface StopHandoffDeps {
 
 export async function flushNotesThenProcess(deps: StopHandoffDeps): Promise<void> {
   const notes = deps.getDraftNotes(deps.name);
-  if (notes) {
+  // `''` means the user cleared notes: write it to overwrite a stale sidecar.
+  // `undefined` means no draft exists, so there is nothing to flush.
+  if (notes !== undefined) {
     // Best-effort: a failed flush must not block processing.
     try {
       await deps.saveNotes(deps.name, notes);

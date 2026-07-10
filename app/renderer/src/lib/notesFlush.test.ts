@@ -24,22 +24,36 @@ describe('flushNotesThenProcess', () => {
     expect(calls).toEqual(['save', 'process']); // write must land before the read
   });
 
-  test('skips the write when there are no notes, but still processes', async () => {
+  test('skips the write when no draft exists (undefined), but still processes', async () => {
     const saveNotes = vi.fn(async () => {});
     const processRecording = vi.fn(async () => {});
 
-    for (const notes of [undefined, '']) {
-      await flushNotesThenProcess({
-        name: 'Note',
-        filePath: '/tmp/rec.webm',
-        getDraftNotes: () => notes,
-        saveNotes,
-        processRecording,
-      });
-    }
+    await flushNotesThenProcess({
+      name: 'Note',
+      filePath: '/tmp/rec.webm',
+      getDraftNotes: () => undefined,
+      saveNotes,
+      processRecording,
+    });
 
     expect(saveNotes).not.toHaveBeenCalled();
-    expect(processRecording).toHaveBeenCalledTimes(2);
+    expect(processRecording).toHaveBeenCalledTimes(1);
+  });
+
+  test('writes an empty string (cleared notes) to overwrite a stale sidecar', async () => {
+    const saveNotes = vi.fn(async () => {});
+    const processRecording = vi.fn(async () => {});
+
+    await flushNotesThenProcess({
+      name: 'Note',
+      filePath: '/tmp/rec.webm',
+      getDraftNotes: () => '',
+      saveNotes,
+      processRecording,
+    });
+
+    expect(saveNotes).toHaveBeenCalledWith('Note', '');
+    expect(processRecording).toHaveBeenCalledTimes(1);
   });
 
   test('a failed flush does not block processing (best-effort)', async () => {

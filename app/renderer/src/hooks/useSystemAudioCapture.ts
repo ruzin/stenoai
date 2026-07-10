@@ -3,6 +3,7 @@ import { ipc } from '@/lib/ipc';
 import { appendDebugLog } from '@/lib/debugLogs';
 import { isMac } from '@/lib/utils';
 import { flushNotesThenProcess } from '@/lib/notesFlush';
+import { unwrap } from '@/lib/result';
 import { getLiveDraft } from './liveDraftStore';
 import { useRecording } from './useRecording';
 import { useTranscriptionEngine } from './useModels';
@@ -671,7 +672,8 @@ export function useSystemAudioCapture() {
                 name,
                 filePath: closed.filePath,
                 getDraftNotes: (n) => getLiveDraft(n)?.notes,
-                saveNotes: (n, notes) => bridge.meetings.saveNotes(n, notes),
+                // unwrap turns a { success:false } Result into a throw so onFlushError sees it.
+                saveNotes: async (n, notes) => unwrap(await bridge.meetings.saveNotes(n, notes)),
                 processRecording: (fp, n) => bridge.recording.processSystemAudio(fp, n),
                 // eslint-disable-next-line no-console
                 onFlushError: (err) => console.error('[systemAudioCapture] notes flush failed', err),
