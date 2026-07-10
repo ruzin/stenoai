@@ -142,13 +142,26 @@ export function MeetingDetail({ summaryFile }: MeetingDetailProps) {
           </button>
         </div>
       ) : (
-        <DetailContent key={summaryFile} meeting={meeting.data} />
+        <DetailContent key={summaryFile} meeting={meeting.data} routeSummaryFile={summaryFile} />
       )}
     </MeetingsShell>
   );
 }
 
-function DetailContent({ meeting }: { meeting: Meeting }) {
+function DetailContent({
+  meeting,
+  routeSummaryFile,
+}: {
+  meeting: Meeting;
+  /** The summaryFile as it appears in the route — the same identity
+   *  useActiveMeeting registers as activeSummaryFile. Can differ from
+   *  info.summary_file when the storage path crosses a symlink (macOS
+   *  /var → /private/var, custom storage dirs): the backend realpaths,
+   *  the route doesn't. Anything compared against activeSummaryFile
+   *  (the reprocess bridge) must use THIS identity; anything talking to
+   *  the backend keeps info.summary_file. */
+  routeSummaryFile: string;
+}) {
   const info = meeting.session_info;
   const summaryFile = info.summary_file;
   const date = formatDetailDate(info);
@@ -555,16 +568,24 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
   startReprocessRef.current = startReprocess;
   const stableStartReprocess = React.useCallback(() => startReprocessRef.current(), []);
   React.useEffect(() => {
+    // Publish under the ROUTE identity (routeSummaryFile): the bar compares
+    // against activeSummaryFile, which useActiveMeeting registered from the
+    // route. info.summary_file can be a realpath'd variant of the same file
+    // (symlinked storage path) and would never match.
     if (summaryPending) {
-      publishReprocess({ summaryFile, streaming: reprocessStreaming, start: stableStartReprocess });
+      publishReprocess({
+        summaryFile: routeSummaryFile,
+        streaming: reprocessStreaming,
+        start: stableStartReprocess,
+      });
     } else {
-      clearReprocess(summaryFile);
+      clearReprocess(routeSummaryFile);
     }
-    return () => clearReprocess(summaryFile);
+    return () => clearReprocess(routeSummaryFile);
   }, [
     summaryPending,
     reprocessStreaming,
-    summaryFile,
+    routeSummaryFile,
     stableStartReprocess,
     publishReprocess,
     clearReprocess,
