@@ -43,7 +43,11 @@ const SEED_MEETING = {
   // exercises the same key buildTranscriptBundle reads for saved meetings.
   user_notes: 'Remember to send the deck.',
   participants: ['Alice', 'Bob'],
-  summary: '',
+  // Non-empty so this seed is a genuinely *summarised* note — the
+  // generate-notes-bar T1's "hides for a normal note" case must take the
+  // has-summary render path, not the "no summary available" fallback
+  // (#313 review).
+  summary: 'The team agreed to ship on Friday; Bob owns the release notes.',
   key_points: [],
   action_items: [],
   discussion_areas: [],

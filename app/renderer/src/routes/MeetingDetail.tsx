@@ -398,6 +398,22 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
   };
 
   const startReprocess = () => {
+    // Synchronous re-entrancy guard (#313 review): the floating dock button's
+    // disabled state arrives one commit late (published via effect to the
+    // reprocess bridge), so a fast double-click there could fire two
+    // overlapping `reprocess` jobs for the same file — main.js deliberately
+    // allows concurrent jobs across files and has no same-file dedupe.
+    // streamCache is a module-level Map written synchronously below, so it
+    // can't lag the way state/props can.
+    const cached = streamCache.get(summaryFile);
+    if (
+      reprocess.isPending ||
+      streamPhase !== 'idle' ||
+      cached?.phase === 'analyzing' ||
+      cached?.phase === 'generating'
+    ) {
+      return;
+    }
     setStreamText('');
     setStreamPhase('analyzing');
     setChunkProgress(null);
@@ -528,7 +544,12 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
   // truth, no double-fire. Only while showing a transcript-only note.
   const publishReprocess = useReprocessBridge((s) => s.publish);
   const clearReprocess = useReprocessBridge((s) => s.clear);
-  const summaryPending = notesNotGenerated && Boolean(meeting.transcript);
+  // Mirrors the render ternary below: a transcription-failed note shows its
+  // failure notice and hides its own reprocess controls, so the floating
+  // trigger must not offer "Generate notes" for it either (#313 review —
+  // reprocess on a failed note exits non-zero and strands the UI).
+  const summaryPending =
+    notesNotGenerated && !transcriptionFailed && Boolean(meeting.transcript);
   const reprocessStreaming = reprocess.isPending || streamPhase !== 'idle';
   const startReprocessRef = React.useRef(startReprocess);
   startReprocessRef.current = startReprocess;
