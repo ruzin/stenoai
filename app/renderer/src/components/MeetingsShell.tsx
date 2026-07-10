@@ -105,10 +105,10 @@ export function MeetingsShell({
 
   const isRecording = recording.status === 'recording' || recording.status === 'paused';
   // Toolbar button behaviour: idle or processing → start a new recording
-  // (auto-navigates to /recording, previous note keeps processing in the
-  // background queue); recording or paused → navigate back to /recording
-  // instead of stopping. Stop is intentionally only available from the
-  // LiveDock on the /recording route.
+  // (no navigation — the transcription pill docks next to the Ask bar on the
+  // current route; the previous note keeps processing in the background
+  // queue); recording or paused → open the live-note editor at /recording.
+  // Stop is intentionally only available from the pill / expanded panel.
   const onToggleRecording = () => {
     if (isRecording) {
       navigate('/recording');

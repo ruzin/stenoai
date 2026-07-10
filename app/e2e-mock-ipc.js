@@ -84,10 +84,75 @@ function install({ ipcMain }) {
     remoteUrl: '', // remote Ollama URL (empty = not configured)
   };
 
+  // In-memory recording state machine for the pill-dock T1: start/pause/
+  // resume/stop mutate it and get-queue-status reflects it, so the renderer's
+  // queue poll drives the same status transitions the real backend would.
+  // Idle shape matches the old static default, so specs that never record
+  // see no difference.
+  const rec = {
+    active: false,
+    paused: false,
+    processing: false,
+    sessionName: null,
+    startedAt: 0,
+  };
+
   // Channels with behaviour a test depends on. Each is (event, ...args) like a
   // real ipcMain.handle callback. Mirror the real handlers' return shapes from
   // app/main.js (get-ai-provider ~5950, org-* ~7990).
   const MOCKS = {
+    'start-recording-ui': async (_event, name) => {
+      rec.active = true;
+      rec.paused = false;
+      rec.processing = false;
+      rec.sessionName = name && String(name).trim() ? String(name).trim() : 'Note';
+      rec.startedAt = Date.now();
+      return { success: true, sessionName: rec.sessionName };
+    },
+    'stop-recording-ui': async () => {
+      rec.active = false;
+      rec.paused = false;
+      // Park in "processing" — T1 has no backend to complete it; the spec only
+      // asserts the renderer's optimistic transition to the processing dock.
+      rec.processing = true;
+      return { success: true };
+    },
+    'pause-recording-ui': async () => {
+      if (rec.active) rec.paused = true;
+      return { success: true };
+    },
+    'resume-recording-ui': async () => {
+      if (rec.active) rec.paused = false;
+      return { success: true };
+    },
+    'get-queue-status': async () => ({
+      success: true,
+      isProcessing: rec.processing,
+      queueSize: 0,
+      currentJob: rec.processing ? rec.sessionName : null,
+      currentReprocesses: [],
+      hasRecording: rec.active,
+      isPaused: rec.paused,
+      elapsedSeconds: rec.active ? Math.floor((Date.now() - rec.startedAt) / 1000) : 0,
+      sessionName: rec.active || rec.processing ? rec.sessionName : null,
+    }),
+
+    // Engine is static per launch; STENOAI_E2E_MOCK_ENGINE lets the pill-dock
+    // T1 drive the Whisper variant (no live transcript, inline pause/resume).
+    'get-transcription-engine': async () => ({
+      success: true,
+      engine: process.env.STENOAI_E2E_MOCK_ENGINE || 'parakeet',
+    }),
+
+    // Default not-installed keeps most T1 specs on their routes; the pill-dock
+    // T1 sets STENOAI_E2E_MOCK_PARAKEET_INSTALLED=1 so App.tsx's first-run
+    // setup gate doesn't redirect it to /setup before it can hit Record.
+    'parakeet-status': async () => ({
+      success: true,
+      model: '',
+      installed: process.env.STENOAI_E2E_MOCK_PARAKEET_INSTALLED === '1',
+    }),
+
     'get-ai-provider': async () => ({
       success: true,
       ai_provider: state.provider,
@@ -257,11 +322,10 @@ function install({ ipcMain }) {
     },
     'list-folders': { success: true, folders: [] },
     'get-calendar-events': { success: true, events: [] },
-    'parakeet-status': { success: true, model: '', installed: false },
-    // Transcribe tab reads these on first paint. Default to Parakeet (the new
-    // default engine) + auto so the language picker renders enabled and shows
-    // the Parakeet language set (parakeet-language-picker.t1).
-    'get-transcription-engine': { success: true, engine: 'parakeet' },
+    // parakeet-status lives in MOCKS (env-gated installed flag).
+    // Transcribe tab reads this on first paint. (The engine itself moved to
+    // MOCKS so STENOAI_E2E_MOCK_ENGINE can override it; default parakeet keeps
+    // the language picker enabled — parakeet-language-picker.t1.)
     'get-language': { success: true, language: 'auto' },
     'list-whisper-models': {
       success: true,
@@ -269,17 +333,8 @@ function install({ ipcMain }) {
       current_model: '',
       provider: 'whisper',
     },
-    'get-queue-status': {
-      success: true,
-      isProcessing: false,
-      queueSize: 0,
-      currentJob: null,
-      currentReprocesses: [],
-      hasRecording: false,
-      isPaused: false,
-      elapsedSeconds: 0,
-      sessionName: null,
-    },
+    // get-queue-status lives in MOCKS (stateful recording machine) — its idle
+    // shape is identical to the static default that used to sit here.
   };
 
   const originalHandle = ipcMain.handle.bind(ipcMain);

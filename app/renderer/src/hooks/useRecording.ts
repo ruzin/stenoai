@@ -155,21 +155,22 @@ export function useRecording() {
         elapsedSeconds: 0,
         sessionName: optimisticName,
       });
-      navigate('/recording');
+      // No navigation: recording coexists with the app. PrimaryDock keys off
+      // the optimistic status flip above and docks the transcription pill on
+      // whatever route the user is on; /recording stays reachable as an
+      // optional live-note editor but is never forced.
       try {
         const data = unwrap(await ipc().recording.start(name));
         qc.invalidateQueries({ queryKey: queueKey });
         return data;
       } catch (err) {
-        // Roll back optimistic state and leave the dead /recording page.
-        // Restore the prior draft too — the recording never started so the
-        // previous session (probably still mid-processing) shouldn't lose
-        // its in-memory title / notes.
+        // Roll back optimistic state. Restore the prior draft too — the
+        // recording never started so the previous session (probably still
+        // mid-processing) shouldn't lose its in-memory title / notes.
         if (priorDraft) {
           useLiveDraftStore.getState().restore(optimisticName, priorDraft);
         }
         qc.invalidateQueries({ queryKey: queueKey });
-        navigate('/');
         throw err;
       }
     },
@@ -177,8 +178,9 @@ export function useRecording() {
   );
 
   const stopRecording = React.useCallback(async () => {
-    // Optimistic: flip the queue cache to processing so the UI can navigate
-    // away from /recording instantly, before the backend SIGTERM round-trip.
+    // Optimistic: flip the queue cache to processing so the UI can swap the
+    // pill for the processing dock instantly, before the backend SIGTERM
+    // round-trip.
     qc.setQueryData(queueKey, (prev: QueueStatus | undefined) => ({
       success: true as const,
       isProcessing: true,

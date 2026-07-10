@@ -115,7 +115,7 @@ export function LiveTranscriptBar() {
   if (!open) return null;
 
   return (
-    <div className="pointer-events-auto">
+    <div className="pointer-events-auto" data-testid="live-transcript-panel">
       <div
         className="mv-transcript open"
         onMouseDown={(e) => e.stopPropagation()}

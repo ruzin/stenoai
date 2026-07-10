@@ -106,7 +106,14 @@ export function TranscriptBar() {
   );
 }
 
-export function AskBar() {
+/**
+ * The floating chat composer. `disabled` renders it visible-but-inert while a
+ * recording is active (chat needs the processed note, so the input carries a
+ * "Chat available after recording" hint instead of a dead field) — and unlike
+ * the idle state it renders even with no active meeting, so the recording
+ * pill always has the bar beside it.
+ */
+export function AskBar({ disabled = false }: { disabled?: boolean }) {
   const {
     activeSummaryFile,
     activeMeetingName,
@@ -138,7 +145,7 @@ export function AskBar() {
   const session = chat.activeSession;
   const hasMessages = (session?.messages.length ?? 0) > 0;
   const hidden = !activeSummaryFile && !activeOrgMeeting;
-  const canSend = input.trim().length > 0 && !isStreaming;
+  const canSend = input.trim().length > 0 && !isStreaming && !disabled;
 
   const cancelStreamRef = React.useRef(streaming.cancelStream);
   cancelStreamRef.current = streaming.cancelStream;
@@ -208,7 +215,7 @@ export function AskBar() {
 
   const submitPrompt = async (raw: string) => {
     const q = raw.trim();
-    if (!q || isStreaming) return;
+    if (!q || isStreaming || disabled) return;
     if (!activeSummaryFile && !activeOrgMeeting) return;
     if (submittingRef.current) return;
     submittingRef.current = true;
@@ -291,9 +298,13 @@ export function AskBar() {
     setSessionMenuOpen(false);
   };
 
-  if (hidden) return null;
+  // Idle with no meeting in context: nothing to chat about, render nothing.
+  // Disabled (recording active) is the exception — the bar stays visible as
+  // an inert shell so the transcription pill has the composer beside it and
+  // the user can see chat will return after processing.
+  if (hidden && !disabled) return null;
 
-  const showChatPanel = expanded && (hasMessages || isStreaming);
+  const showChatPanel = !disabled && expanded && (hasMessages || isStreaming);
 
   return (
     <div ref={containerRef} data-ask-bar className="flex w-full flex-col gap-2.5" style={{ pointerEvents: 'auto' }}>
@@ -328,7 +339,7 @@ export function AskBar() {
       )}
 
       {/* Suggestion chips — appear when ask bar is focused with empty conversation */}
-      {expanded && !hasMessages && !isStreaming && (
+      {!disabled && expanded && !hasMessages && !isStreaming && (
         <div
           className="mv-chat flex flex-wrap items-center gap-2"
           style={{ padding: '10px 14px' }}
@@ -396,6 +407,7 @@ export function AskBar() {
           ref={inputRef}
           className="mv-chat-input"
           value={input}
+          disabled={disabled}
           onChange={(e) => setInput(e.target.value)}
           onFocus={handleInputFocus}
           onKeyDown={(e) => {
@@ -409,7 +421,13 @@ export function AskBar() {
               (e.target as HTMLElement).blur();
             }
           }}
-          placeholder={hasMessages ? 'Continue chat…' : 'Ask anything about this meeting…'}
+          placeholder={
+            disabled
+              ? 'Chat available after recording'
+              : hasMessages
+                ? 'Continue chat…'
+                : 'Ask anything about this meeting…'
+          }
           aria-label="Ask about this meeting"
         />
 

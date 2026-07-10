@@ -8,9 +8,17 @@ import { useTranscriptionEngine } from '@/hooks/useModels';
 import { formatElapsed } from '@/lib/utils';
 
 /**
- * Recording-state dock for the /recording route. Mounted at App level inside
- * BottomDockSlot so it shares the same screen slot as AskBar + ProcessingDock
- * — when the user stops, the visual frame stays put while the contents swap.
+ * Compact transcription pill shown whenever a recording is active (the app is
+ * no longer taken over by a /recording route — recording coexists with
+ * whatever the user is viewing). Rendered by PrimaryDock either adjacent to
+ * the Ask bar (left of it, same row) or alone on routes without one; layout
+ * is owned by the parent, so this renders just the pill itself.
+ *
+ * Controls by engine:
+ * - Parakeet: status + expand (live transcript) + Stop. Pause/Resume lives in
+ *   the expanded LiveTranscriptBar footer.
+ * - Whisper: status + Pause/Resume + Stop. No live transcript, so no expand —
+ *   and no expanded footer to relocate Pause/Resume into.
  */
 export function LiveDock() {
   const recording = useRecording();
@@ -64,15 +72,15 @@ export function LiveDock() {
   };
 
   return (
-    <div className="flex justify-center pointer-events-none">
-      <div
-        className="pointer-events-auto flex items-center gap-3 rounded-full px-3 py-2"
-        style={{
-          background: 'var(--surface-raised)',
-          border: '1px solid var(--border-subtle)',
-          boxShadow: 'var(--shadow-md)',
-        }}
-      >
+    <div
+      data-testid="transcription-pill"
+      className="pointer-events-auto flex items-center gap-3 whitespace-nowrap rounded-full px-3 py-2"
+      style={{
+        background: 'var(--surface-raised)',
+        border: '1px solid var(--border-subtle)',
+        boxShadow: 'var(--shadow-md)',
+      }}
+    >
         <RecordingPill
           paused={paused}
           stopped={stopped}
@@ -115,6 +123,11 @@ export function LiveDock() {
             </span>
           </button>
         )}
+      {/* Pause/Resume — Whisper only. On Parakeet the pill stays minimal
+          (status + expand + Stop) and Pause/Resume lives in the expanded
+          LiveTranscriptBar footer; Whisper has no expanded panel, so the
+          control must stay inline or it would be unreachable. */}
+      {!liveAvailable && (
         <button
           type="button"
           onClick={onPauseToggle}
@@ -126,19 +139,19 @@ export function LiveDock() {
         >
           {paused ? <Play size={14} /> : <Pause size={14} />}
         </button>
-        <button
-          type="button"
-          onClick={onStop}
-          disabled={stopped}
-          aria-label="Stop recording"
-          title="Stop recording"
-          className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-full border-0 px-3 text-[13px] font-medium transition-opacity disabled:cursor-not-allowed disabled:opacity-50"
-          style={{ background: 'var(--recording)', color: '#FFFFFF' }}
-        >
-          <Square size={12} fill="currentColor" stroke="currentColor" />
-          Stop
-        </button>
-      </div>
+      )}
+      <button
+        type="button"
+        onClick={onStop}
+        disabled={stopped}
+        aria-label="Stop recording"
+        title="Stop recording"
+        className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-full border-0 px-3 text-[13px] font-medium transition-opacity disabled:cursor-not-allowed disabled:opacity-50"
+        style={{ background: 'var(--recording)', color: '#FFFFFF' }}
+      >
+        <Square size={12} fill="currentColor" stroke="currentColor" />
+        Stop
+      </button>
     </div>
   );
 }
