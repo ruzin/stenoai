@@ -920,16 +920,16 @@ class Config:
     SUPPORTED_SILENCE_AUTO_STOP_MINUTES = (2, 5, 10, 15, 30)
 
     def get_silence_auto_stop_minutes(self) -> int:
-        """Minutes of bilateral silence before auto-stop fires. Default 15
-        to match the Granola convention; constrained to the supported set
-        so the Settings dropdown stays in sync with persisted values."""
-        value = self._config.get("silence_auto_stop_minutes", 15)
+        """Minutes of bilateral silence before auto-stop fires. Default 2 so a
+        forgotten recording is reclaimed quickly; constrained to the supported
+        set so the Settings dropdown stays in sync with persisted values."""
+        value = self._config.get("silence_auto_stop_minutes", 2)
         if value in self.SUPPORTED_SILENCE_AUTO_STOP_MINUTES:
             return value
         logger.warning(
-            f"Invalid silence_auto_stop_minutes in config: {value}; falling back to 15"
+            f"Invalid silence_auto_stop_minutes in config: {value}; falling back to 2"
         )
-        return 15
+        return 2
 
     def set_silence_auto_stop_minutes(self, minutes: int) -> bool:
         if minutes not in self.SUPPORTED_SILENCE_AUTO_STOP_MINUTES:
