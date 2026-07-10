@@ -8,7 +8,14 @@ test('safeSessionStem replaces every disallowed char with underscore', () => {
   // Must mirror Python: re.sub(r'[^a-zA-Z0-9_-]', '_', name)
   assert.strictEqual(safeSessionStem('Weekly Sync'), 'Weekly_Sync');
   assert.strictEqual(safeSessionStem('Q3 review: budget/plan'), 'Q3_review__budget_plan');
+  // BMP non-ASCII (é, ☕ = U+2615) are each a single code unit → one underscore.
   assert.strictEqual(safeSessionStem('café ☕ chat'), 'caf____chat');
+});
+
+test('safeSessionStem collapses an astral char (emoji) to a SINGLE underscore', () => {
+  // 😀 is one code point but two UTF-16 units; the `u` flag matches Python's one '_'.
+  assert.strictEqual(safeSessionStem('a😀b'), 'a_b');
+  assert.strictEqual(safeSessionStem('Standup 🚀'), 'Standup__');
 });
 
 test('safeSessionStem preserves the already-safe alphabet (letters, digits, _ and -)', () => {
@@ -32,10 +39,7 @@ test('userNotesFilePath joins the output dir with the <stem>_notes.txt sidecar',
 });
 
 test('regression: writer and reader resolve to the SAME path for the same dir + name', () => {
-  // The bug was two call sites computing the notes path independently — the
-  // writer used the user-data output dir, the reader used the read-only bundle
-  // dir — so the file written was never the file read. Routing both through
-  // userNotesFilePath makes divergence impossible: same inputs => same path.
+  // The bug: two sites computed the path independently and drifted. One helper => can't.
   const outputDir = '/Users/x/Library/Application Support/stenoai/output';
   const sessionName = 'Note';
   const writerPath = userNotesFilePath(outputDir, sessionName); // save-meeting-notes
@@ -45,8 +49,7 @@ test('regression: writer and reader resolve to the SAME path for the same dir + 
 });
 
 test('userNotesFilePath does NOT resolve into the app bundle', () => {
-  // Guards against a regression back to getBackendCwd()/_internal/output, which
-  // is read-only for packaged users and where notes are never written.
+  // Guards against regressing to the read-only bundle dir (_internal/output).
   const p = userNotesFilePath('/data/output', 'Note');
   assert.ok(!p.includes('_internal'), `notes path leaked into the bundle: ${p}`);
 });

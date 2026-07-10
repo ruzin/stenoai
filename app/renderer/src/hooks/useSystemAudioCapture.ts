@@ -2,6 +2,8 @@ import * as React from 'react';
 import { ipc } from '@/lib/ipc';
 import { appendDebugLog } from '@/lib/debugLogs';
 import { isMac } from '@/lib/utils';
+import { flushNotesThenProcess } from '@/lib/notesFlush';
+import { getLiveDraft } from './liveDraftStore';
 import { useRecording } from './useRecording';
 import { useTranscriptionEngine } from './useModels';
 import {
@@ -664,7 +666,16 @@ export function useSystemAudioCapture() {
               // eslint-disable-next-line no-console
               console.error('[systemAudioCapture] close failed', closed.error);
             } else if (closed.filePath) {
-              await bridge.recording.processSystemAudio(closed.filePath, name);
+              // Flush last-second notes before handoff — main reads the sidecar.
+              await flushNotesThenProcess({
+                name,
+                filePath: closed.filePath,
+                getDraftNotes: (n) => getLiveDraft(n)?.notes,
+                saveNotes: (n, notes) => bridge.meetings.saveNotes(n, notes),
+                processRecording: (fp, n) => bridge.recording.processSystemAudio(fp, n),
+                // eslint-disable-next-line no-console
+                onFlushError: (err) => console.error('[systemAudioCapture] notes flush failed', err),
+              });
             }
           } catch (err) {
             // eslint-disable-next-line no-console

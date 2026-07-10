@@ -206,9 +206,7 @@ function getUserDataDir() {
   return path.join(base, 'stenoai');
 }
 
-// The output dir the Python pipeline reads/writes (custom storage if set, else
-// the user-data dir). Single source of truth so the notes writer and reader
-// can't drift apart — see notes-file.js.
+// Output dir the Python pipeline reads/writes (custom storage, else user-data).
 function getOutputDir() {
   return path.join(_cachedCustomStoragePath || getUserDataDir(), 'output');
 }
@@ -7067,11 +7065,7 @@ ipcMain.handle('process-system-audio-recording', async (event, audioFilePath, se
 
     const actualSessionName = sessionName || 'Note';
 
-    // Check for user notes file. Resolve it from the SAME output dir that
-    // 'save-meeting-notes' wrote it to (getOutputDir / userNotesFilePath) — not
-    // the read-only bundle dir. The old getBackendCwd()/_internal/output path
-    // never existed for packaged users, so the lookup always missed, --notes was
-    // never passed, and in-meeting notes were silently dropped from the summary.
+    // Same dir 'save-meeting-notes' writes to — not the read-only bundle dir.
     const notesFile = userNotesFilePath(getOutputDir(), actualSessionName);
     const notesPath = fs.existsSync(notesFile) ? notesFile : undefined;
 
