@@ -11,6 +11,7 @@ const NAV_LINKS = [
   { href: "#how", label: "How it works" },
   { href: "#features", label: "Features" },
   { href: "#industries", label: "Enterprise" },
+  { href: "/vs/", label: "Compare" },
   { href: "#faq", label: "FAQ" },
 ];
 
@@ -87,9 +88,19 @@ export function Nav({ subpage = false }) {
         </a>
 
         <div className="hidden md:flex gap-7 items-center">
-          {NAV_LINKS.map(({ href, label }) => (
-            <a key={href} href={subpage ? `/${href}` : href} onClick={subpage ? undefined : (e) => scrollToHash(e, href)} className="text-fg-2 text-sm no-underline hover:text-fg-1 transition-colors">{label}</a>
-          ))}
+          {NAV_LINKS.map(({ href, label }) => {
+            const isHash = href.startsWith("#");
+            return (
+              <a
+                key={href}
+                href={isHash && subpage ? `/${href}` : href}
+                onClick={isHash && !subpage ? (e) => scrollToHash(e, href) : undefined}
+                className="text-fg-2 text-sm no-underline hover:text-fg-1 transition-colors"
+              >
+                {label}
+              </a>
+            );
+          })}
         </div>
 
         <div className="flex gap-1 items-center">
@@ -138,17 +149,20 @@ export function Nav({ subpage = false }) {
             style={{ borderTop: "1px solid var(--border-subtle)" }}
           >
             <div className="container-site flex flex-col py-3">
-              {NAV_LINKS.map(({ href, label }) => (
-                <a
-                  key={href}
-                  href={subpage ? `/${href}` : href}
-                  onClick={(e) => { if (!subpage) scrollToHash(e, href); setMenuOpen(false); }}
-                  className="text-fg-2 text-sm no-underline hover:text-fg-1 transition-colors"
-                  style={{ padding: "10px 0" }}
-                >
-                  {label}
-                </a>
-              ))}
+              {NAV_LINKS.map(({ href, label }) => {
+                const isHash = href.startsWith("#");
+                return (
+                  <a
+                    key={href}
+                    href={isHash && subpage ? `/${href}` : href}
+                    onClick={(e) => { if (isHash && !subpage) scrollToHash(e, href); setMenuOpen(false); }}
+                    className="text-fg-2 text-sm no-underline hover:text-fg-1 transition-colors"
+                    style={{ padding: "10px 0" }}
+                  >
+                    {label}
+                  </a>
+                );
+              })}
               <a
                 href={GITHUB_URL}
                 target="_blank"
