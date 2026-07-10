@@ -1494,6 +1494,12 @@ if (!gotSingleInstanceLock) {
   });
 
   app.on('activate', () => {
+    // macOS can deliver 'activate' before Electron's own 'ready' event fires
+    // (e.g. cold launch via Dock). The whenReady().then() path below already
+    // creates the initial window once ready, so just no-op here until then -
+    // mirrors the same guard already used in the second-instance/open-url
+    // handlers above.
+    if (!app.isReady()) return;
     rewarmParakeet('activate');
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore();
