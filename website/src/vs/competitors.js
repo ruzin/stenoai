@@ -31,7 +31,7 @@ export const granola = {
   metaDescription:
     "Granola processes your meeting audio in the cloud and costs from $14/user/month. Steno does the same job — no bot, AI meeting notes — entirely on your device, free and open source.",
   eyebrow: "Steno vs Granola",
-  h1: "Like Granola, but nothing leaves your Mac.",
+  h1: "Like Granola, but data never leaves your premises.",
   intro:
     "Granola popularised the bot-free meeting notetaker — it captures system audio instead of sending a bot into your call. Steno works the same way, with one structural difference: Granola transcribes and summarizes your audio on cloud servers, while Steno runs the entire pipeline on your own device. No audio upload, no account, no subscription.",
   rows: [
