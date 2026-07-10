@@ -99,6 +99,40 @@ def resolve_output_language(
     return "en"
 
 
+def resolve_persisted_output_language(
+    session_info: dict,
+    transcript_text: Optional[str],
+    fallback_configured: str,
+) -> str:
+    """Resolve output language for a note that already has a persisted value.
+
+    Recovery paths (reprocess / generate-report / regen-title) reopen a saved
+    note whose ``session_info`` carries an ``output_language`` from when it was
+    first processed. That persisted value is only trustworthy when we can prove
+    its *provenance*: it was written from a real user pin
+    (``configured_language != "auto"``) or from an engine detection
+    (``detected_language``, i.e. Whisper). Old Parakeet auto-mode notes instead
+    persisted ``"en"`` purely from the buggy fallback (#283) with no pin and no
+    engine language behind it - trusting that value would re-pin every such note
+    to English forever, defeating this fix.
+
+    So: honour the persisted value only when pin- or engine-backed; otherwise
+    fall through to ``resolve_output_language`` (which re-detects from the
+    transcript, then lands on "en" if inconclusive). Re-detecting a
+    previously text-detected note is idempotent, so this is safe to re-run.
+
+    ``fallback_configured`` is the caller's current configured language, used
+    when the note never stored its own ``configured_language`` (e.g. markdown
+    notes, whose front matter only persists the resolved output language).
+    """
+    configured = session_info.get("configured_language") or fallback_configured
+    detected = session_info.get("detected_language")
+    persisted = session_info.get("output_language")
+    if persisted and ((configured and configured != "auto") or detected):
+        return persisted
+    return resolve_output_language(configured, detected, transcript_text)
+
+
 # Session names that should trigger AI title regeneration after summarization.
 # Covers manual placeholders (Meeting / Note / Meeting-ABC123 / Note-ABC123) and
 # the auto-detect-meetings shape "<AppName> — YYYY-MM-DD HH:MM" produced by
@@ -2443,19 +2477,14 @@ def reprocess(summary_file, regenerate_title):
         if notes_text:
             print(f"User notes: {len(notes_text)} characters")
 
-        # Resolve output language
+        # Resolve output language. A persisted value is only trusted when it was
+        # pin- or engine-backed; a stale Parakeet auto-mode "en" (buggy fallback,
+        # #283) is re-detected from the transcript instead of re-pinning English.
+        from src.config import get_config
         existing_session_info = existing_data.get("session_info", {})
-        output_language = existing_session_info.get("output_language")
-        if not output_language:
-            configured_language = existing_session_info.get("configured_language")
-            if not configured_language:
-                from src.config import get_config
-                configured_language = get_config().get_language()
-            output_language = recorder._resolve_output_language(
-                configured_language,
-                existing_session_info.get("detected_language"),
-                transcript_text=transcript,
-            )
+        output_language = resolve_persisted_output_language(
+            existing_session_info, transcript, get_config().get_language()
+        )
 
         # Use streaming summarization (same as new recordings)
         if recorder.summarizer is None:
@@ -2689,11 +2718,18 @@ def generate_report(summary_file, template_id):
     if tmpl.get("language") and tmpl["language"] != "auto":
         output_language = tmpl["language"]
     else:
-        output_language = meeting["language"]
-        if not output_language:
-            output_language = recorder._resolve_output_language(
-                config.get_language(), None, transcript_text=transcript
-            )
+        # Trust the meeting's persisted language only when pin-/engine-backed;
+        # otherwise re-detect from the transcript so a stale Parakeet auto-mode
+        # "en" (#283) doesn't force English reports. read_meeting surfaces the
+        # provenance fields (None for markdown, which never stored them).
+        persisted_info = {
+            "output_language": meeting["language"],
+            "configured_language": meeting.get("configured_language"),
+            "detected_language": meeting.get("detected_language"),
+        }
+        output_language = resolve_persisted_output_language(
+            persisted_info, transcript, config.get_language()
+        )
 
     if recorder.summarizer is None:
         from src.summarizer import OllamaSummarizer
@@ -2768,11 +2804,19 @@ def regen_title(summary_file):
         transcript = existing_data.get('transcript', '')
         summary = existing_data.get('summary', '')
         session_info = existing_data.get('session_info', {})
-        output_language = session_info.get('output_language') or session_info.get('configured_language') or 'en'
 
         if not transcript and not summary:
             print("ERROR: No transcript or summary found in file")
             sys.exit(1)
+
+        # Trust the persisted language only when pin-/engine-backed; otherwise
+        # re-detect so a stale Parakeet auto-mode "en" (#283) doesn't force an
+        # English title. Fall back to the summary text when there's no
+        # transcript (summary is already in the note's language).
+        from src.config import get_config
+        output_language = resolve_persisted_output_language(
+            session_info, transcript or summary, get_config().get_language()
+        )
 
         if recorder.summarizer is None:
             from src.summarizer import OllamaSummarizer

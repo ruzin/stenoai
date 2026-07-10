@@ -9,7 +9,11 @@ stopword classifier over the Parakeet-supported languages, and
 
 import unittest
 
-from simple_recorder import MeetingPipeline, resolve_output_language
+from simple_recorder import (
+    MeetingPipeline,
+    resolve_output_language,
+    resolve_persisted_output_language,
+)
 from src.language_detect import detect_transcript_language
 
 # Realistic meeting-style paragraphs (>=80 words each). Function-word rich so
@@ -170,6 +174,67 @@ class ResolveOutputLanguagePriorityTests(unittest.TestCase):
             "fr",
         )
         self.assertEqual(recorder._resolve_output_language("de"), "de")
+
+
+class ResolvePersistedOutputLanguageTests(unittest.TestCase):
+    """Provenance rule for the reprocess / generate-report / regen-title paths.
+
+    A persisted output_language is trusted only when pin- or engine-backed;
+    a bare fallback "en" from the old Parakeet auto-mode bug (#283) is
+    re-detected from the transcript instead of being re-pinned to English.
+    """
+
+    def test_stale_en_auto_mode_no_engine_is_redetected(self):
+        # The #283 case: a markdown note persisted "en" with no configured/
+        # detected provenance, user still on auto → re-detect from the German
+        # transcript rather than trusting the stale "en".
+        session_info = {"output_language": "en"}
+        self.assertEqual(
+            resolve_persisted_output_language(session_info, DE_TEXT, "auto"),
+            "de",
+        )
+
+    def test_persisted_pin_respected_even_with_foreign_transcript(self):
+        # A pin-backed note keeps its language even if the transcript text looks
+        # like another language.
+        session_info = {"output_language": "en", "configured_language": "en"}
+        self.assertEqual(
+            resolve_persisted_output_language(session_info, DE_TEXT, "auto"),
+            "en",
+        )
+
+    def test_persisted_with_engine_detection_respected(self):
+        # Engine (Whisper) detection is trustworthy provenance: keep the
+        # persisted value even though the current config is auto and the text
+        # reads as German.
+        session_info = {"output_language": "fr", "detected_language": "fr"}
+        self.assertEqual(
+            resolve_persisted_output_language(session_info, DE_TEXT, "auto"),
+            "fr",
+        )
+
+    def test_empty_session_info_auto_config_redetects(self):
+        # No persisted value at all → detection from the transcript.
+        self.assertEqual(
+            resolve_persisted_output_language({}, DE_TEXT, "auto"),
+            "de",
+        )
+
+    def test_empty_session_info_auto_config_inconclusive_is_en(self):
+        # No persisted value and nothing to detect → "en" fallback.
+        self.assertEqual(
+            resolve_persisted_output_language({}, "Yes. No.", "auto"),
+            "en",
+        )
+
+    def test_fallback_configured_pin_trusts_persisted(self):
+        # A markdown note stores no configured_language of its own; the caller's
+        # current pin supplies the provenance, so the persisted value is kept.
+        session_info = {"output_language": "de"}
+        self.assertEqual(
+            resolve_persisted_output_language(session_info, EN_TEXT, "de"),
+            "de",
+        )
 
 
 if __name__ == "__main__":

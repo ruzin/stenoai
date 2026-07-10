@@ -107,6 +107,12 @@ def read_meeting(meeting_path) -> dict:
             "transcript": d.get("transcript", "") or d.get("diarised_text", "") or "",
             "notes": d.get("user_notes"),
             "language": si.get("output_language") or si.get("language"),
+            # Provenance of the persisted language, for the recovery paths to
+            # decide whether it was pin-/engine-backed (trustworthy) or a bare
+            # fallback (#283). Markdown front matter never stored these, so they
+            # are None there - which is the correct "unprovable" signal.
+            "configured_language": si.get("configured_language"),
+            "detected_language": si.get("detected_language"),
             "duration_minutes": si.get("duration_minutes") or (int(ds / 60) if ds else None),
             "summary_markdown": summary_md,
         }
@@ -117,6 +123,8 @@ def read_meeting(meeting_path) -> dict:
         "transcript": transcript,
         "notes": notes,
         "language": fm.get("language"),
+        "configured_language": fm.get("configured_language"),
+        "detected_language": fm.get("detected_language"),
         "duration_minutes": (int(ds) // 60) if (ds and str(ds).isdigit()) else None,
         "summary_markdown": summary_md,
     }
