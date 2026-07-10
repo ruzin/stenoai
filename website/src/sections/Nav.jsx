@@ -40,7 +40,10 @@ function scrollToHash(e, href) {
   tryScroll();
 }
 
-export function Nav() {
+// `subpage` renders the nav for pages other than the homepage (/vs/*):
+// section links become absolute (/#how) so they navigate home, and the
+// lazy-chunk scroll polyfill is skipped — it only applies to same-page ids.
+export function Nav({ subpage = false }) {
   const [scrolled, setScrolled] = useState(false);
   const [stars, setStars] = useState(null);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -78,14 +81,14 @@ export function Nav() {
       }}
     >
       <div className="container-site flex items-center justify-between py-[18px]">
-        <a href="#" className="flex items-center gap-[10px] text-fg-1 no-underline hover:no-underline">
+        <a href={subpage ? "/" : "#"} className="flex items-center gap-[10px] text-fg-1 no-underline hover:no-underline">
           <StenoMark size={26} />
           <Wordmark size={21} />
         </a>
 
         <div className="hidden md:flex gap-7 items-center">
           {NAV_LINKS.map(({ href, label }) => (
-            <a key={href} href={href} onClick={(e) => scrollToHash(e, href)} className="text-fg-2 text-sm no-underline hover:text-fg-1 transition-colors">{label}</a>
+            <a key={href} href={subpage ? `/${href}` : href} onClick={subpage ? undefined : (e) => scrollToHash(e, href)} className="text-fg-2 text-sm no-underline hover:text-fg-1 transition-colors">{label}</a>
           ))}
         </div>
 
@@ -138,8 +141,8 @@ export function Nav() {
               {NAV_LINKS.map(({ href, label }) => (
                 <a
                   key={href}
-                  href={href}
-                  onClick={(e) => { scrollToHash(e, href); setMenuOpen(false); }}
+                  href={subpage ? `/${href}` : href}
+                  onClick={(e) => { if (!subpage) scrollToHash(e, href); setMenuOpen(false); }}
                   className="text-fg-2 text-sm no-underline hover:text-fg-1 transition-colors"
                   style={{ padding: "10px 0" }}
                 >

@@ -21,9 +21,23 @@ export function Footer() {
           </div>
           <div className="text-fg-2 text-[13px]">© 2026 Steno</div>
         </div>
-        <p className="mt-14 text-fg-muted text-[13px] leading-[1.55]" style={{ maxWidth: "70ch" }}>
+        <div className="mt-10 flex gap-x-4 gap-y-2 flex-wrap items-center">
+          <span className="text-fg-muted text-[13px]">Compare:</span>
+          {[
+            { slug: "granola", name: "Granola" },
+            { slug: "otter", name: "Otter.ai" },
+            { slug: "fireflies", name: "Fireflies" },
+            { slug: "meetily", name: "Meetily" },
+          ].map(({ slug, name }) => (
+            <a key={slug} href={`/vs/${slug}/`} className="text-fg-muted text-[13px] no-underline hover:text-fg-1 transition-colors">
+              Steno vs {name}
+            </a>
+          ))}
+        </div>
+        <p className="mt-8 text-fg-muted text-[13px] leading-[1.55]" style={{ maxWidth: "70ch" }}>
           Independent open-source project for private meeting notes. Not affiliated with any similarly named company.
-          Product names (Whisper, Llama, Gemma, Qwen, DeepSeek) are trademarks of their respective owners.
+          Product names (Whisper, Llama, Gemma, Qwen, DeepSeek, Granola, Otter, Fireflies, Meetily) are trademarks
+          of their respective owners; comparisons are independent editorial content.
         </p>
       </div>
     </footer>

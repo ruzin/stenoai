@@ -369,3 +369,65 @@
   from { transform: translateX(0); }
   to   { transform: translateX(-50%); }
 }
+
+/* ═══════════════════════════════════════════════════
+   /vs/ comparison pages — ledger-style table
+   ═══════════════════════════════════════════════════ */
+.vs-table-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.vs-table {
+  width: 100%;
+  min-width: 640px;
+  border-collapse: collapse;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.vs-table thead th {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--fg-2);
+  text-align: left;
+  padding: 0 16px 12px;
+  border-bottom: 2px solid var(--fg-1);
+}
+
+.vs-table tbody th {
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--fg-2);
+  text-align: left;
+  vertical-align: top;
+  padding: 14px 16px 14px 0;
+  width: 22%;
+}
+
+.vs-table tbody td {
+  color: var(--fg-1);
+  vertical-align: top;
+  padding: 14px 16px;
+  width: 39%;
+}
+
+.vs-table tbody tr {
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+/* Steno's column reads as the highlighted ledger entry */
+.vs-table .vs-col-steno {
+  background: var(--surface-sunken);
+}
+.vs-table thead .vs-col-steno {
+  color: var(--fg-1);
+}
+
+/* /vs/ index rows */
+.vs-index-row { display: block; }
+.vs-index-row:hover span:first-child { text-decoration: none; }
