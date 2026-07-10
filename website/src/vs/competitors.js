@@ -253,9 +253,9 @@ export const meetily = {
   metaDescription:
     "Steno and Meetily are both open-source, local-first meeting notetakers. The difference: Meetily moves accuracy, exports, and auto-detect behind a $120/year-per-device Pro license — Steno ships everything free, with models bundled in.",
   eyebrow: "Steno vs Meetily",
-  h1: "Same privacy philosophy. Nothing held back.",
+  h1: "Same privacy philosophy. But Steno offers a whole lot more.",
   intro:
-    "Meetily deserves credit: like Steno, it's open source and transcribes meetings on your own machine. The comparison here isn't about privacy — both projects take it seriously. It's about what's actually included. Meetily's Community edition is a base tier under a $120/year-per-device Pro product; Steno has one tier, it's free, and the local AI models are bundled so there's nothing to set up.",
+    "Meetily deserves credit: like Steno, it's open source and transcribes meetings on your own machine. The comparison here isn't about privacy — both projects take it seriously. It's about what's actually in the box. Steno ships features Meetily either doesn't have or holds behind its $120/year-per-device Pro tier: chat with your meetings, speaker attribution, meeting auto-detect, and local AI models bundled in so there's nothing to set up. Steno has one tier, and it's free.",
   rows: [
     ROW("Price", STENO.price, {
       text: "Community edition free; Pro $120/year, licensed per device; Enterprise custom",
@@ -289,6 +289,13 @@ export const meetily = {
       text: "Pro feature; calendar integration “coming soon”",
       tone: "bad",
     }),
+    ROW("Chat with your meetings", {
+      text: "Included free — ask questions across any note or recording",
+      tone: "good",
+    }, {
+      text: "“Coming soon”, planned as a Pro feature",
+      tone: "bad",
+    }),
     ROW("Usage limits", STENO.limits, { text: "None", tone: "good" }),
     ROW("Platforms", STENO.platforms, {
       text: "macOS, Windows; Linux build-from-source",
@@ -296,10 +303,10 @@ export const meetily = {
     }),
   ],
   verdict:
-    "If you're choosing between the two open-source local notetakers, the question is simple: Steno ships the whole product free — bundled models, speaker attribution, meeting auto-detect — while Meetily reserves its enhanced accuracy, exports, and auto-detect for a $120/year Pro license tied to one device, with several Pro features still marked coming soon.",
+    "If you're choosing between the two open-source local notetakers, the question is simple: Steno ships the whole product free — bundled models, speaker attribution, meeting auto-detect, chat with your meetings — while Meetily reserves its enhanced accuracy, exports, auto-detect, and chat for a $120/year Pro license tied to one device, with several of those still marked coming soon.",
   chooseSteno: [
     "You want local summaries working out of the box — Steno bundles Ollama and downloads models in-app, no separate install",
-    "You want speaker attribution and meeting auto-detect today, free",
+    "You want speaker attribution, meeting auto-detect, and chat with your meetings today, free",
     "You'd rather not manage per-device licenses",
     "You want one codebase you can read end to end — no separate Pro fork",
   ],
@@ -310,7 +317,7 @@ export const meetily = {
   faqs: [
     {
       q: "Aren't Steno and Meetily basically the same app?",
-      a: "They share a philosophy — open source, on-device transcription, no meeting bot — and even similar engines (Whisper, Parakeet). They differ in what's free: Steno's single free tier includes everything, while Meetily's Community edition sits under a paid Pro product that holds back enhanced accuracy models, advanced exports, custom templates, and meeting auto-detect.",
+      a: "They share a philosophy — open source, on-device transcription, no meeting bot — and even similar engines (Whisper, Parakeet). They differ in what's free: Steno's single free tier includes everything, while Meetily's Community edition sits under a paid Pro product that holds back enhanced accuracy models, advanced exports, custom templates, meeting auto-detect, and chat with your meetings.",
     },
     {
       q: "Do I need to install Ollama to get local AI summaries?",
