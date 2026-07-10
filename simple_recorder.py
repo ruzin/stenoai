@@ -57,9 +57,47 @@ try:
 except ImportError:
     OllamaSummarizer = None
 
+from src.language_detect import detect_transcript_language
+
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+def resolve_output_language(
+    configured_language: str,
+    detected_language: Optional[str] = None,
+    transcript_text: Optional[str] = None,
+) -> str:
+    """Resolve the summary/title/query output language, in strict priority order.
+
+    1. an explicit user pin (``configured_language != "auto"``) always wins;
+    2. an engine-detected language — whisper.cpp reports one; Parakeet never
+       does (#283);
+    3. a text-based detection over the transcript body, filling Parakeet's gap
+       so an auto-mode German/French/… meeting isn't summarised in English;
+    4. ``"en"`` as the final fallback when nothing above is conclusive.
+
+    Kept module-level (the ``MeetingPipeline`` method delegates here) so the
+    resolution logic is unit-testable without constructing the pipeline.
+    """
+    if configured_language and configured_language != "auto":
+        return configured_language
+
+    if detected_language:
+        return detected_language
+
+    if transcript_text:
+        detected = detect_transcript_language(transcript_text)
+        if detected:
+            # Privacy: log the code only, never the transcript content.
+            logger.info(
+                "Detected transcript language: %s (auto mode, engine gave none)",
+                detected,
+            )
+            return detected
+
+    return "en"
+
 
 # Session names that should trigger AI title regeneration after summarization.
 # Covers manual placeholders (Meeting / Note / Meeting-ABC123 / Note-ABC123) and
@@ -186,17 +224,21 @@ class MeetingPipeline:
         # through get_data_dirs(), which honors that env var).
         self.state_file = Path("recorder_state.json")
 
-    def _resolve_output_language(self, configured_language: str, detected_language: Optional[str] = None) -> str:
-        """Resolve which language should be used for summary/title/query output."""
-        from src.config import get_config
+    def _resolve_output_language(
+        self,
+        configured_language: str,
+        detected_language: Optional[str] = None,
+        transcript_text: Optional[str] = None,
+    ) -> str:
+        """Resolve which language should be used for summary/title/query output.
 
-        if configured_language != "auto":
-            return configured_language
-
-        if detected_language:
-            return detected_language
-
-        return "en"
+        Thin delegate to the module-level ``resolve_output_language`` so the
+        priority (pin > engine-detected > text-detected > "en") lives in one
+        unit-testable place.
+        """
+        return resolve_output_language(
+            configured_language, detected_language, transcript_text
+        )
 
     def _transcript_file_path(self, audio_path: Path) -> Path:
         """Canonical on-disk path for a meeting's transcript text file.
@@ -224,7 +266,9 @@ class MeetingPipeline:
         config = get_config()
 
         if output_language is None:
-            output_language = self._resolve_output_language(configured_language, detected_language)
+            output_language = self._resolve_output_language(
+                configured_language, detected_language, transcript_text=transcript_body
+            )
         detected_language_name = (
             config.get_language_name(detected_language) if detected_language else "Unknown"
         )
@@ -374,7 +418,9 @@ Summary output language: {config.get_language_name(output_language)}
             is_diarised = transcript_result.get("is_diarised", False)
             diarised_text = transcript_result.get("diarised_text")
 
-        output_language = self._resolve_output_language(configured_language, detected_language)
+        output_language = self._resolve_output_language(
+            configured_language, detected_language, transcript_text=diarised_text or transcript_text
+        )
 
         # Save transcript (use diarised text if available for the saved file)
         saved_transcript = diarised_text if diarised_text else transcript_text
@@ -528,7 +574,9 @@ Summary output language: {config.get_language_name(output_language)}
         gate_config = get_config()
         if not gate_config.get_auto_summarize_enabled():
             output_language = self._resolve_output_language(
-                gate_config.get_language(), transcript_data.get("detected_language")
+                gate_config.get_language(),
+                transcript_data.get("detected_language"),
+                transcript_text=text_for_summary,
             )
             summary_path = self.output_dir / f"{audio_path.stem}_summary.md"
             processed_at = datetime.now().isoformat()
@@ -574,7 +622,9 @@ Summary output language: {config.get_language_name(output_language)}
         config = get_config()
         configured_language = config.get_language()
         output_language = self._resolve_output_language(
-            configured_language, transcript_data.get("detected_language")
+            configured_language,
+            transcript_data.get("detected_language"),
+            transcript_text=text_for_summary,
         )
 
         print("🧠 Generating summary...", flush=True)
@@ -879,7 +929,9 @@ def process_streaming(audio_file, name, notes, live_transcript):
         gate_config = get_config()
         if not gate_config.get_auto_summarize_enabled():
             output_language = recorder._resolve_output_language(
-                gate_config.get_language(), transcript_data.get("detected_language")
+                gate_config.get_language(),
+                transcript_data.get("detected_language"),
+                transcript_text=text_for_summary,
             )
             audio_path = Path(audio_file)
             summary_path = recorder.output_dir / f"{audio_path.stem}_summary.md"
@@ -924,7 +976,9 @@ def process_streaming(audio_file, name, notes, live_transcript):
         config = get_config()
         configured_language = config.get_language()
         output_language = recorder._resolve_output_language(
-            configured_language, transcript_data.get("detected_language")
+            configured_language,
+            transcript_data.get("detected_language"),
+            transcript_text=text_for_summary,
         )
 
         import base64
@@ -2399,7 +2453,8 @@ def reprocess(summary_file, regenerate_title):
                 configured_language = get_config().get_language()
             output_language = recorder._resolve_output_language(
                 configured_language,
-                existing_session_info.get("detected_language")
+                existing_session_info.get("detected_language"),
+                transcript_text=transcript,
             )
 
         # Use streaming summarization (same as new recordings)
@@ -2637,7 +2692,7 @@ def generate_report(summary_file, template_id):
         output_language = meeting["language"]
         if not output_language:
             output_language = recorder._resolve_output_language(
-                config.get_language(), None
+                config.get_language(), None, transcript_text=transcript
             )
 
     if recorder.summarizer is None:
@@ -2827,8 +2882,10 @@ def query(transcript_file, question):
         config = get_config()
         if not language:
             language = config.get_language()
-        if language == "auto":
-            language = "en"
+        # Same priority as summaries: a stored/pinned language wins; otherwise
+        # detect from the transcript so an auto-mode Parakeet meeting is chatted
+        # in its own language instead of defaulting to English (#283).
+        language = resolve_output_language(language, transcript_text=transcript_text)
         summarizer = OllamaSummarizer()
         answer = summarizer.query_transcript(transcript_text, question, language=language)
 
@@ -2904,8 +2961,9 @@ def query_streaming(transcript_file, question):
     if not language:
         from src.config import get_config
         language = get_config().get_language()
-    if language == "auto":
-        language = "en"
+    # Detect from the transcript when unpinned so auto-mode Parakeet meetings
+    # are chatted in their own language, not English (#283).
+    language = resolve_output_language(language, transcript_text=transcript_text)
 
     try:
         summarizer = OllamaSummarizer()
