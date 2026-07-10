@@ -37,6 +37,7 @@ const path = require('path');
 const { spawn: _spawnRaw } = require('child_process');
 const processingLog = require('./processing-log');
 const { isMeetingApp, allowsDeviceLevelFallback } = require('./meeting-detect');
+const { userNotesFilePath } = require('./notes-file');
 const { makeLineReader } = require('./backend-stream');
 // Pure deep-link (stenoai://) parsing/sanitizing lives in ./shortcut-url
 // (unit-tested). The stateful side — window creation, IPC dispatch,
@@ -203,6 +204,13 @@ function getUserDataDir() {
   }
   const base = process.env.XDG_DATA_HOME || path.join(os.homedir(), '.local', 'share');
   return path.join(base, 'stenoai');
+}
+
+// The output dir the Python pipeline reads/writes (custom storage if set, else
+// the user-data dir). Single source of truth so the notes writer and reader
+// can't drift apart — see notes-file.js.
+function getOutputDir() {
+  return path.join(_cachedCustomStoragePath || getUserDataDir(), 'output');
 }
 
 let mainWindow;
@@ -2780,10 +2788,9 @@ ipcMain.handle('save-meeting-notes', async (event, sessionName, notes) => {
     // INSIDE the app bundle: read-only in a packaged/signed app (so saving notes
     // failed for real users on macOS + Windows), and a dir the Python pipeline
     // never reads notes from, so reprocess's _load_user_notes couldn't find them.
-    const outputDir = path.join(_cachedCustomStoragePath || getUserDataDir(), 'output');
+    const outputDir = getOutputDir();
     if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
-    const safeName = sessionName.replace(/[^a-zA-Z0-9_-]/g, '_');
-    const notesFile = path.join(outputDir, `${safeName}_notes.txt`);
+    const notesFile = userNotesFilePath(outputDir, sessionName);
     fs.writeFileSync(notesFile, notes, 'utf-8');
     return { success: true, path: notesFile };
   } catch (error) {
@@ -7060,9 +7067,12 @@ ipcMain.handle('process-system-audio-recording', async (event, audioFilePath, se
 
     const actualSessionName = sessionName || 'Note';
 
-    // Check for user notes file
-    const safeName = actualSessionName.replace(/[^a-zA-Z0-9_-]/g, '_');
-    const notesFile = path.join(getBackendCwd(), '_internal', 'output', `${safeName}_notes.txt`);
+    // Check for user notes file. Resolve it from the SAME output dir that
+    // 'save-meeting-notes' wrote it to (getOutputDir / userNotesFilePath) — not
+    // the read-only bundle dir. The old getBackendCwd()/_internal/output path
+    // never existed for packaged users, so the lookup always missed, --notes was
+    // never passed, and in-meeting notes were silently dropped from the summary.
+    const notesFile = userNotesFilePath(getOutputDir(), actualSessionName);
     const notesPath = fs.existsSync(notesFile) ? notesFile : undefined;
 
     // Snapshot the live transcript captured during this recording (#207) so the
