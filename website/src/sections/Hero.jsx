@@ -97,6 +97,7 @@ export function Hero() {
         >
           Steno is the privacy-first AI notepad for all your confidential conversations.
           No cloud, no usage limits and your private data never leaves your premises.
+          Perfect for government, healthcare, defence, legal and CXO professionals.
         </Motion.p>
 
         <Motion.div
