@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Pause, Play, Square } from 'lucide-react';
+import { ChevronUp, Play, Square } from 'lucide-react';
 import { AudioWave } from '@/components/AudioWave';
 import { useRecording } from '@/hooks/useRecording';
 import { useLiveTranscript } from '@/hooks/useLiveTranscript';
@@ -8,24 +8,23 @@ import { useLiveTranscriptAvailable } from '@/hooks/useModels';
 import { formatElapsed } from '@/lib/utils';
 
 /**
- * Compact transcription pill shown whenever a recording is active (the app is
- * no longer taken over by a /recording route — recording coexists with
- * whatever the user is viewing). Rendered by PrimaryDock either adjacent to
- * the Ask bar (left of it, same row) or alone on routes without one; layout
- * is owned by the parent, so this renders just the pill itself.
+ * Compact (Granola-style) transcription pill shown whenever a recording is
+ * active — recording coexists with whatever the user is viewing; PrimaryDock
+ * places this either adjacent to the Ask bar or alone. Icon-only: wave +
+ * elapsed + expand chevron (Parakeet) + stop glyph. Layout is owned by the
+ * parent; this renders just the pill.
  *
- * Controls by engine:
- * - Parakeet: status + expand (live transcript) + Stop. Pause/Resume lives in
- *   the expanded LiveTranscriptBar footer.
- * - Whisper: status + Pause/Resume + Stop. No live transcript, so no expand —
- *   and no expanded footer to relocate Pause/Resume into.
+ * There is deliberately NO pause control: stop ends the segment, and a note
+ * can be continued later (continue-recording appends to it), so "stop is the
+ * new pause". The one exception is a Resume affordance that appears only
+ * when the SYSTEM auto-paused the recording (laptop sleep, meeting-app mic
+ * drop) — without it an auto-paused recording would be stranded.
  */
 export function LiveDock() {
   const recording = useRecording();
   const liveAvailable = useLiveTranscriptAvailable();
   const transcriptOpen = useLiveTranscriptOpen((s) => s.open);
   const toggleTranscript = useLiveTranscriptOpen((s) => s.toggle);
-  const [transcriptHover, setTranscriptHover] = React.useState(false);
   const paused = recording.status === 'paused';
   const isRecording = recording.status === 'recording';
   // Belt-and-braces: PrimaryDock unmounts the pill before status leaves
@@ -40,11 +39,9 @@ export function LiveDock() {
   // while actively recording.
   const live = useLiveTranscript(liveAvailable ? recording.sessionName : null);
   const loadingModel = isRecording && live.status === 'loading';
-  // Delay the pill label by ~500ms so a warm-cache load (the common case
-  // after the offline-loading fix) goes straight to "Recording" with no
-  // "Preparing…" flash. Labels stay short and glanceable — the full
-  // reassurance sentence lives in the transcript panel — so swapping the
-  // label doesn't resize/reflow the centered dock.
+  // Delay the label by ~500ms so a warm-cache load (the common case after
+  // the offline-loading fix) goes straight to the timer with no
+  // "Preparing…" flash.
   const [showPreparing, setShowPreparing] = React.useState(false);
   React.useEffect(() => {
     if (!loadingModel) return;
@@ -60,9 +57,8 @@ export function LiveDock() {
       : 'Preparing…'
     : null;
 
-  const onPauseToggle = () => {
+  const onResume = () => {
     if (paused) void recording.resumeRecording();
-    else if (isRecording) void recording.pauseRecording();
   };
 
   const onStop = () => {
@@ -72,70 +68,70 @@ export function LiveDock() {
   return (
     <div
       data-testid="transcription-pill"
-      className="pointer-events-auto flex items-center gap-3 whitespace-nowrap rounded-full px-3 py-2"
+      className="pointer-events-auto flex items-center gap-1 whitespace-nowrap rounded-full py-1.5 pl-3 pr-1.5"
       style={{
         background: 'var(--surface-raised)',
         border: '1px solid var(--border-subtle)',
         boxShadow: 'var(--shadow-md)',
       }}
     >
-        <RecordingPill
+      <span
+        style={{ color: 'var(--recording)' }}
+        title={paused ? 'Paused' : 'Recording'}
+        aria-hidden="true"
+      >
+        <AudioWave
+          active={!stopped}
           paused={paused}
-          stopped={stopped}
-          elapsedSeconds={recording.elapsed}
-          prepareLabel={prepareLabel}
+          bars={5}
+          height={13}
+          barWidth={2}
+          gap={2}
         />
-        {/* Transcript toggle — Parakeet only. Whisper recordings have no
-            live drawer (post-stop pipeline produces the final transcript
-            on the meeting detail page after summary). Hiding the button
-            entirely rather than disabling avoids the dead-control. */}
-        {liveAvailable && (
-          <button
-            type="button"
-            onClick={toggleTranscript}
-            onMouseEnter={() => setTranscriptHover(true)}
-            onMouseLeave={() => setTranscriptHover(false)}
-            disabled={stopped}
-            aria-label={transcriptOpen ? 'Hide transcript' : 'Show transcript'}
-            aria-pressed={transcriptOpen}
-            title={transcriptOpen ? 'Hide transcript' : 'Show transcript'}
-            className="inline-flex size-9 cursor-pointer items-center justify-center rounded-full border-0 transition-colors hover:bg-[color:var(--surface-hover)] disabled:cursor-not-allowed disabled:opacity-50"
-            style={{
-              background: transcriptOpen ? 'var(--surface-hover)' : 'transparent',
-              color: 'var(--fg-1)',
-            }}
-          >
-            {/* Static when idle, animated on hover — the wave bars "wake up"
-                to telegraph what the button does without competing with the
-                recording wave at rest. */}
-            <span
-              className={
-                transcriptHover
-                  ? 'mv-transcript-wave'
-                  : 'mv-transcript-wave mv-transcript-wave-static'
-              }
-              aria-hidden="true"
-              style={{ width: 20, height: 16 }}
-            >
-              <span /><span /><span /><span /><span /><span /><span />
-            </span>
-          </button>
-        )}
-      {/* Pause/Resume — Whisper only. On Parakeet the pill stays minimal
-          (status + expand + Stop) and Pause/Resume lives in the expanded
-          LiveTranscriptBar footer; Whisper has no expanded panel, so the
-          control must stay inline or it would be unreachable. */}
-      {!liveAvailable && (
+      </span>
+      {/* Compact elapsed timer; swaps to the warm-up hint while the live
+          model loads (the recording itself is already capturing). */}
+      <span
+        className="tabular-nums px-1.5"
+        style={{
+          fontFamily: prepareLabel ? 'var(--font-sans)' : 'var(--font-mono)',
+          fontSize: 12.5,
+          color: 'var(--fg-2)',
+        }}
+      >
+        {prepareLabel ?? formatElapsed(recording.elapsed)}
+      </span>
+      {/* Resume — only when the system auto-paused (sleep / meeting-app mic
+          drop). There is no manual pause: stop ends the segment and the note
+          can be continued later. */}
+      {paused && (
         <button
           type="button"
-          onClick={onPauseToggle}
-          disabled={stopped}
-          aria-label={paused ? 'Resume recording' : 'Pause recording'}
-          title={paused ? 'Resume recording' : 'Pause recording'}
-          className="inline-flex size-8 cursor-pointer items-center justify-center rounded-full border-0 transition-colors hover:bg-[color:var(--surface-hover)] disabled:cursor-not-allowed disabled:opacity-50"
+          onClick={onResume}
+          aria-label="Resume recording"
+          title="Resume recording"
+          className="inline-flex size-7 cursor-pointer items-center justify-center rounded-full border-0 transition-colors hover:bg-[color:var(--surface-hover)]"
           style={{ background: 'transparent', color: 'var(--fg-1)' }}
         >
-          {paused ? <Play size={14} /> : <Pause size={14} />}
+          <Play size={13} />
+        </button>
+      )}
+      {/* Expand — Parakeet only. Whisper recordings have no live drawer
+          (post-stop pipeline produces the final transcript on the meeting
+          detail page). Hiding the button entirely rather than disabling
+          avoids the dead-control. */}
+      {liveAvailable && (
+        <button
+          type="button"
+          onClick={toggleTranscript}
+          disabled={stopped}
+          aria-label={transcriptOpen ? 'Hide transcript' : 'Show transcript'}
+          aria-pressed={transcriptOpen}
+          title={transcriptOpen ? 'Hide transcript' : 'Show transcript'}
+          className="inline-flex size-7 cursor-pointer items-center justify-center rounded-full border-0 transition-colors hover:bg-[color:var(--surface-hover)] disabled:cursor-not-allowed disabled:opacity-50"
+          style={{ background: 'transparent', color: 'var(--fg-1)' }}
+        >
+          <ChevronUp size={14} />
         </button>
       )}
       <button
@@ -144,61 +140,11 @@ export function LiveDock() {
         disabled={stopped}
         aria-label="Stop recording"
         title="Stop recording"
-        className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-full border-0 px-3 text-[13px] font-medium transition-opacity disabled:cursor-not-allowed disabled:opacity-50"
-        style={{ background: 'var(--recording)', color: '#FFFFFF' }}
+        className="inline-flex size-7 cursor-pointer items-center justify-center rounded-full border-0 transition-colors hover:bg-[color:var(--surface-hover)] disabled:cursor-not-allowed disabled:opacity-50"
+        style={{ background: 'transparent', color: 'var(--recording)' }}
       >
         <Square size={12} fill="currentColor" stroke="currentColor" />
-        Stop
       </button>
     </div>
   );
 }
-
-function RecordingPill({
-  paused,
-  stopped,
-  elapsedSeconds,
-  prepareLabel,
-}: {
-  paused: boolean;
-  stopped: boolean;
-  elapsedSeconds: number;
-  prepareLabel?: string | null;
-}) {
-  // While the model warms, the recording is already capturing audio — keep
-  // the wave + elapsed timer and only swap the label so the user sees we're
-  // recording but transcription isn't live yet.
-  const label = prepareLabel
-    ? prepareLabel
-    : stopped
-      ? 'Processing'
-      : paused
-        ? 'Paused'
-        : 'Recording';
-  const active = !stopped;
-  return (
-    <span
-      className="inline-flex items-center gap-2 px-2 text-[13px]"
-      style={{ color: 'var(--fg-1)' }}
-    >
-      <span style={{ color: 'var(--recording)' }}>
-        <AudioWave
-          active={active}
-          paused={paused}
-          bars={7}
-          height={14}
-          barWidth={2}
-          gap={2}
-        />
-      </span>
-      <span style={{ color: 'var(--fg-2)' }}>{label}</span>
-      <span
-        className="tabular-nums"
-        style={{ fontFamily: 'var(--font-mono)', fontSize: 13, color: 'var(--fg-1)' }}
-      >
-        {formatElapsed(elapsedSeconds)}
-      </span>
-    </span>
-  );
-}
-

@@ -12,13 +12,21 @@ import { create } from 'zustand';
  * publishes here while showing a transcript-only note and clears on unmount.
  */
 interface ReprocessBridge {
-  /** summaryFile of the pending note currently offering "Generate notes". */
+  /** summaryFile of the note currently offering the floating CTA. */
   summaryFile: string | null;
   /** True while that note's reprocess is analyzing/streaming (disables triggers). */
   streaming: boolean;
+  /** Button label: "Generate notes" (transcript-only note) or
+   *  "Regenerate notes" (a continued note marked notes_stale). */
+  label: string;
   /** The detail's `startReprocess` for that note (stable wrapper). */
   start: (() => void) | null;
-  publish: (b: { summaryFile: string; streaming: boolean; start: () => void }) => void;
+  publish: (b: {
+    summaryFile: string;
+    streaming: boolean;
+    label: string;
+    start: () => void;
+  }) => void;
   /** Clear, but only if `summaryFile` still owns the bridge (avoids a late
    *  unmount wiping a newer detail's publish). */
   clear: (summaryFile: string) => void;
@@ -27,11 +35,13 @@ interface ReprocessBridge {
 export const useReprocessBridge = create<ReprocessBridge>((set, get) => ({
   summaryFile: null,
   streaming: false,
+  label: 'Generate notes',
   start: null,
-  publish: ({ summaryFile, streaming, start }) => set({ summaryFile, streaming, start }),
+  publish: ({ summaryFile, streaming, label, start }) =>
+    set({ summaryFile, streaming, label, start }),
   clear: (summaryFile) => {
     if (get().summaryFile === summaryFile) {
-      set({ summaryFile: null, streaming: false, start: null });
+      set({ summaryFile: null, streaming: false, label: 'Generate notes', start: null });
     }
   },
 }));

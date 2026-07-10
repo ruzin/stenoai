@@ -563,6 +563,13 @@ function DetailContent({
   // reprocess on a failed note exits non-zero and strands the UI).
   const summaryPending =
     notesNotGenerated && !transcriptionFailed && Boolean(meeting.transcript);
+  // A continued note (continue-recording appended a segment after notes were
+  // generated): the summary no longer covers the transcript — offer the same
+  // floating CTA as "Regenerate notes". reprocess clears the flag on rewrite.
+  const summaryStale =
+    meeting.session_info.notes_stale === true &&
+    !transcriptionFailed &&
+    Boolean(meeting.transcript);
   const reprocessStreaming = reprocess.isPending || streamPhase !== 'idle';
   const startReprocessRef = React.useRef(startReprocess);
   startReprocessRef.current = startReprocess;
@@ -572,10 +579,11 @@ function DetailContent({
     // against activeSummaryFile, which useActiveMeeting registered from the
     // route. info.summary_file can be a realpath'd variant of the same file
     // (symlinked storage path) and would never match.
-    if (summaryPending) {
+    if (summaryPending || summaryStale) {
       publishReprocess({
         summaryFile: routeSummaryFile,
         streaming: reprocessStreaming,
+        label: summaryPending ? 'Generate notes' : 'Regenerate notes',
         start: stableStartReprocess,
       });
     } else {
@@ -584,6 +592,7 @@ function DetailContent({
     return () => clearReprocess(routeSummaryFile);
   }, [
     summaryPending,
+    summaryStale,
     reprocessStreaming,
     routeSummaryFile,
     stableStartReprocess,

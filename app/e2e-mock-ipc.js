@@ -74,6 +74,28 @@ const PENDING_MEETING = {
   participants: [],
 };
 
+// A continued note (continue-recording appended a segment after notes were
+// generated → notes_stale:true): has a summary AND a stale marker. Drives the
+// "Regenerate notes" variant of the floating CTA. Seeded only when
+// STENOAI_E2E_SEED_STALE_NOTE=1.
+const STALE_MEETING = {
+  session_info: {
+    name: 'Continued note',
+    summary_file: 'stale_summary.md',
+    processed_at: '2026-07-10T10:00:00Z',
+    duration_seconds: 300,
+    notes_stale: true,
+  },
+  transcript:
+    '[00:03] [You] first segment.\n\n--- Resumed 10:20 ---\n\n[00:02] [You] second segment.',
+  is_diarised: true,
+  summary: 'Covers only the first segment.',
+  key_points: [],
+  action_items: [],
+  discussion_areas: [],
+  participants: [],
+};
+
 function install({ ipcMain }) {
   // In-memory stand-in for the org session + provider config that the real
   // handlers persist to disk. Mutated by the org-login / org-logout / set-ai
@@ -199,6 +221,9 @@ function install({ ipcMain }) {
       if (process.env.STENOAI_E2E_SEED_PENDING_NOTE === '1') {
         return { success: true, meetings: [PENDING_MEETING] };
       }
+      if (process.env.STENOAI_E2E_SEED_STALE_NOTE === '1') {
+        return { success: true, meetings: [STALE_MEETING] };
+      }
       if (process.env.STENOAI_E2E_SEED_MEETING === '1') {
         return { success: true, meetings: [SEED_MEETING] };
       }
@@ -211,6 +236,9 @@ function install({ ipcMain }) {
     'get-meeting': async (_event, summaryFile) => {
       if (process.env.STENOAI_E2E_SEED_PENDING_NOTE === '1') {
         return { success: true, meeting: PENDING_MEETING };
+      }
+      if (process.env.STENOAI_E2E_SEED_STALE_NOTE === '1') {
+        return { success: true, meeting: STALE_MEETING };
       }
       if (process.env.STENOAI_E2E_SEED_MEETING === '1') {
         return { success: true, meeting: SEED_MEETING };

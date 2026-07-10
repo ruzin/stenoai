@@ -727,6 +727,74 @@ except ImportError:
     _SILENCE_SENTINEL = "No speech detected in audio"
 
 
+def _append_segment_to_note(target: Path, new_text: str, duration_seconds):
+    """Fold a continue-recording segment into an existing note.
+
+    Appends `new_text` (with a resumed-at separator) to the note's Transcript
+    section, marks the note `notes_stale: true` (the UI's cue to offer
+    "Regenerate notes"), and extends duration_seconds. Supports both note
+    formats: .md (frontmatter surgery, summary body untouched) and legacy
+    .json. `reprocess` clears the stale flag when it rewrites the note.
+    """
+    if not target.exists():
+        raise FileNotFoundError(f"append target not found: {target}")
+    if not new_text or not new_text.strip():
+        raise ValueError("continuation produced no transcript text")
+
+    separator = f"--- Resumed {datetime.now().strftime('%H:%M')} ---"
+    segment = f"\n\n{separator}\n\n{new_text.strip()}"
+    added_seconds = int(duration_seconds) if duration_seconds else 0
+
+    if target.suffix == '.md':
+        content = target.read_text(encoding='utf-8')
+
+        # 1. Frontmatter surgery: upsert notes_stale + extend duration.
+        #    String-level on purpose — a parse→rebuild would lose the summary
+        #    body's original LLM formatting.
+        if content.startswith('---'):
+            head, mid, rest = content.split('---', 2)
+            fm_lines = [
+                ln for ln in mid.strip().split('\n')
+                if not ln.startswith('notes_stale:')
+            ]
+            for i, ln in enumerate(fm_lines):
+                if ln.startswith('duration_seconds:'):
+                    try:
+                        prev = int(ln.partition(':')[2].strip())
+                        fm_lines[i] = f'duration_seconds: {prev + added_seconds}'
+                    except ValueError:
+                        pass
+                    break
+            fm_lines.append('notes_stale: true')
+            content = f"---\n{chr(10).join(fm_lines)}\n---{rest}"
+        # (A .md note without frontmatter shouldn't exist; append-only below.)
+
+        # 2. Append to the Transcript section: insert before a trailing
+        #    "## User Notes" section if one follows the transcript, else at
+        #    the end of the file.
+        t_idx = content.find('\n## Transcript')
+        notes_idx = content.find('\n## User Notes')
+        if t_idx != -1 and notes_idx > t_idx:
+            content = content[:notes_idx] + segment + '\n' + content[notes_idx:]
+        else:
+            content = content.rstrip('\n') + segment + '\n'
+        target.write_text(content, encoding='utf-8')
+    else:
+        with open(target, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        data['transcript'] = (data.get('transcript') or '').rstrip('\n') + segment
+        si = data.setdefault('session_info', {})
+        si['notes_stale'] = True
+        if added_seconds and isinstance(si.get('duration_seconds'), int):
+            si['duration_seconds'] += added_seconds
+        _atomic_write_json(target, data)
+
+    logger.info(
+        "Appended %d chars (+%ds) to %s and marked notes_stale",
+        len(new_text), added_seconds, target,
+    )
+
+
 @cli.command(name='process-streaming')
 @click.argument('audio_file', default='')
 @click.option('--name', '-n', default='Recording', help='Session name')
@@ -734,7 +802,12 @@ except ImportError:
 @click.option('--live-transcript', 'live_transcript', default=None,
               help='Path to the live transcript captured during recording, '
                    'used as a fallback if batch transcription returns empty (#207)')
-def process_streaming(audio_file, name, notes, live_transcript):
+@click.option('--append-to', 'append_to', default=None,
+              help='Path to an existing note to append this transcription to '
+                   '(continue-recording): the new transcript is appended to the '
+                   "note's Transcript section, the note is marked notes_stale, "
+                   'and no summary/title generation runs.')
+def process_streaming(audio_file, name, notes, live_transcript, append_to):
     """Process audio with streaming summary output.
 
     Transcribes audio, then streams the summary as CHUNK: prefixed lines
@@ -857,6 +930,17 @@ def process_streaming(audio_file, name, notes, live_transcript):
         # reprocessable meeting instead of summarising a fake-empty one.
         # (Only when there's no live transcript to fall back on.)
         if transcript_data.get("transcription_failed"):
+            if append_to:
+                # A failed CONTINUATION must never touch the existing note —
+                # no failed-note write (that would clobber the target), no
+                # stale flag. Exit non-zero so the renderer surfaces the
+                # hard-failure notification; the audio is preserved on disk.
+                print(
+                    "Transcription failed (audio preserved): continuation "
+                    f"not appended to {append_to}",
+                    flush=True,
+                )
+                sys.exit(1)
             recorder._handle_transcription_failure(Path(audio_file), name, transcript_data, notes_text)
             return
 
@@ -868,6 +952,41 @@ def process_streaming(audio_file, name, notes, live_transcript):
         duration_minutes = int(duration_seconds / 60) if duration_seconds else 0
 
         print(f"TRANSCRIPTION_COMPLETE:{len(transcript_text)}", flush=True)
+
+        # Continue-recording (append) path: fold this segment's transcript
+        # into the target note, mark it stale, and stop — no summary, no
+        # title, no new note. The user regenerates notes on demand (the
+        # floating "Regenerate notes" CTA drives `reprocess`, which reads the
+        # combined Transcript section and clears the stale flag on rewrite).
+        if append_to:
+            from src.config import get_config as _get_config
+            segment_text = diarised_text or transcript_text
+            # A silent continuation is not a crash (transcription_failed is
+            # handled above) but it must not pollute the note with the
+            # silence sentinel or mark it stale for nothing. Exit non-zero so
+            # the renderer surfaces the failure notification; the target note
+            # is untouched.
+            if not segment_text.strip() or segment_text.strip() == _SILENCE_SENTINEL:
+                print(
+                    "No speech detected in continuation; nothing appended "
+                    f"to {append_to}",
+                    flush=True,
+                )
+                sys.exit(1)
+            _append_segment_to_note(
+                Path(append_to),
+                segment_text,
+                duration_seconds,
+            )
+            audio_path = Path(audio_file)
+            if not is_live_transcript and not _get_config().get_keep_recordings():
+                try:
+                    audio_path.unlink()
+                except Exception:
+                    pass
+            print("SUMMARY_SKIPPED", flush=True)
+            print(f"SAVED:{append_to}", flush=True)
+            return
 
         # Auto-summarize gate (#258): when the user has turned off automatic
         # note generation, stop at a transcript-only note. This runs BEFORE the
@@ -2242,6 +2361,12 @@ def _parse_meeting_markdown(md_path):
     # "Generate notes" CTA instead of a blank/"no summary" state.
     if meta.get('notes_generated') is False:
         session_info['notes_generated'] = False
+    # A continued meeting whose transcript grew after its notes were generated
+    # (continue-recording append): the summary no longer reflects the full
+    # transcript. Surface the flag so the UI offers "Regenerate notes";
+    # reprocess clears it when it rewrites the note.
+    if meta.get('notes_stale'):
+        session_info['notes_stale'] = True
 
     return {
         'session_info': session_info,
@@ -2537,6 +2662,11 @@ def reprocess(summary_file, regenerate_title):
                 "key_points": parsed.get("key_points", []) or [],
                 "action_items": parsed.get("action_items", []) or [],
             })
+            # The regenerated summary now covers the full (possibly appended)
+            # transcript — clear the continue-recording stale marker. The .md
+            # branch clears it implicitly by omitting it from the rebuilt
+            # frontmatter (see the intentional-omission note above).
+            existing_data.get("session_info", {}).pop("notes_stale", None)
             with open(summary_path, 'w') as f:
                 json.dump(existing_data, f, indent=2)
 

@@ -3494,6 +3494,13 @@ async function processNextInQueue() {
     if (currentProcessingJob.liveTranscriptFile && fs.existsSync(currentProcessingJob.liveTranscriptFile)) {
       processArgs.push('--live-transcript', currentProcessingJob.liveTranscriptFile);
     }
+    // Continue-recording: fold this segment into an existing note instead of
+    // creating a new one. The backend appends the transcript, marks the note
+    // notes_stale, and emits SAVED:<target> so the completion event points at
+    // the continued note.
+    if (currentProcessingJob.appendTo && fs.existsSync(currentProcessingJob.appendTo)) {
+      processArgs.push('--append-to', currentProcessingJob.appendTo);
+    }
 
     await new Promise((resolve, reject) => {
       const proc = spawn(getBackendPath(), processArgs, {
@@ -3802,19 +3809,39 @@ async function snapshotLiveTranscriptForFallback(sessionName) {
   }
 }
 
-function addToProcessingQueue(audioFile, sessionName, notesFile, liveTranscriptFile) {
-  processingQueue.push({ audioFile, sessionName, notesFile, liveTranscriptFile });
+function addToProcessingQueue(audioFile, sessionName, notesFile, liveTranscriptFile, appendTo) {
+  processingQueue.push({ audioFile, sessionName, notesFile, liveTranscriptFile, appendTo });
   console.log(`📋 Added to processing queue: ${sessionName} (Queue size: ${processingQueue.length})`);
   processNextInQueue();
 }
 
-ipcMain.handle('start-recording-ui', async (_, sessionName) => {
+// Continue-recording (append) target: set at start-recording-ui when the
+// renderer asked to record INTO an existing note, consumed (and cleared) when
+// the finished WebM is queued — the pipeline then runs with --append-to so
+// the segment's transcript is folded into that note instead of creating a
+// new one.
+let currentRecordingAppendTarget = null;
+
+ipcMain.handle('start-recording-ui', async (_, sessionName, appendTo) => {
   try {
     if (currentRecordingProcess) {
       return { success: false, error: 'Recording already in progress' };
     }
     if (systemAudioRecordingActive) {
       return { success: false, error: 'Recording already in progress' };
+    }
+
+    // Validate the append target up front: it must be an existing note file
+    // inside an allowed dir. A bad target degrades to a normal new-note
+    // recording rather than failing the start.
+    currentRecordingAppendTarget = null;
+    if (appendTo && typeof appendTo === 'string') {
+      const allowed = getAllowedBaseDirs();
+      if (validateSafeFilePath(appendTo, allowed) && fs.existsSync(appendTo)) {
+        currentRecordingAppendTarget = appendTo;
+      } else {
+        sendDebugLog('[append] invalid or missing append target; recording as a new note');
+      }
     }
 
     const actualSessionName = sessionName || 'Note';
@@ -3869,6 +3896,7 @@ ipcMain.handle('start-recording-ui', async (_, sessionName) => {
     console.error('Start recording UI error:', error.message);
     systemAudioRecordingActive = false;
     currentRecordingSessionName = null;
+    currentRecordingAppendTarget = null;
     resetRecordingRuntimeState();
     updateTrayIcon(false);
     trackEvent('error_occurred', { error_type: 'start_recording_ui' });
@@ -6647,8 +6675,14 @@ ipcMain.handle('process-system-audio-recording', async (event, audioFilePath, se
     // recording.
     const liveTranscriptFile = await snapshotLiveTranscriptForFallback(actualSessionName);
 
+    // Consume the continue-recording target (set at start-recording-ui) so
+    // this segment is appended to its note; cleared so the next recording
+    // starts clean.
+    const appendTo = currentRecordingAppendTarget;
+    currentRecordingAppendTarget = null;
+
     // Use the existing processing queue to avoid concurrent Ollama/Whisper runs
-    addToProcessingQueue(audioFilePath, actualSessionName, notesPath, liveTranscriptFile);
+    addToProcessingQueue(audioFilePath, actualSessionName, notesPath, liveTranscriptFile, appendTo);
 
     trackEvent('recording_stopped', { recording_mode: 'system_audio' });
     return { success: true, message: 'Added to processing queue' };

@@ -31,6 +31,10 @@ export interface SessionInfo {
    *  generated automatically (auto-summarize off, #258). The detail view
    *  offers a "Generate notes" CTA instead of a blank/"no summary" state. */
   notes_generated?: boolean;
+  /** Set when a continue-recording segment was appended to this note after
+   *  its notes were generated: the summary no longer covers the full
+   *  transcript. The UI offers "Regenerate notes"; reprocess clears it. */
+  notes_stale?: boolean;
 }
 
 export interface Meeting {
@@ -696,7 +700,10 @@ export interface StenoaiBridge {
   };
 
   recording: {
-    start: RequestFn<[name?: string], StartRecordingResponse>;
+    /** Optional appendTo: path of an existing note to append this
+     *  recording's transcript to (continue-recording) instead of creating a
+     *  new note. */
+    start: RequestFn<[name?: string, appendTo?: string], StartRecordingResponse>;
     stop: RequestFn<[], StopRecordingResponse>;
     pause: RequestFn<[], PauseRecordingResponse>;
     resume: RequestFn<[], ResumeRecordingResponse>;

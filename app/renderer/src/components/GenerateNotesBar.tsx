@@ -16,7 +16,7 @@ import { useReprocessBridge } from '@/hooks/reprocessBridgeStore';
  */
 export function GenerateNotesBar() {
   const { activeSummaryFile, transcriptOpen } = useAskBar();
-  const { summaryFile, streaming, start } = useReprocessBridge();
+  const { summaryFile, streaming, label, start } = useReprocessBridge();
 
   const active = summaryFile !== null && summaryFile === activeSummaryFile && start !== null;
   if (!active || transcriptOpen) return null;
@@ -34,7 +34,7 @@ export function GenerateNotesBar() {
         className="shadow-[var(--shadow-md)]"
       >
         <Sparkles />
-        Generate notes
+        {label}
       </Button>
     </div>
   );

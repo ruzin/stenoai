@@ -115,7 +115,7 @@ export function useRecording() {
   // duplicate cache invalidations and N navigations per recording.
 
   const startRecording = React.useCallback(
-    async (name?: string) => {
+    async (name?: string, appendTo?: string) => {
       // Optimistic cache write so the UI flips to status='recording'
       // instantly. The backend's start-recording-ui has a 2s warm-up and
       // the next queue poll (1s) will reconcile sessionName + elapsed.
@@ -168,7 +168,7 @@ export function useRecording() {
       // whatever route the user is on; /recording stays reachable as an
       // optional live-note editor but is never forced.
       try {
-        const data = unwrap(await ipc().recording.start(name));
+        const data = unwrap(await ipc().recording.start(name, appendTo));
         qc.invalidateQueries({ queryKey: queueKey });
         return data;
       } catch (err) {
