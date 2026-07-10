@@ -16,7 +16,7 @@
   <a href="#sponsors"><img src="https://img.shields.io/badge/Sponsors-%E2%9D%A4-EA4AAA?style=for-the-badge" alt="Sponsors"></a>
 </p>
 
-<p align="center">Steno is the privacy first AI notepad for all your confidential conversations. No cloud, no usage limits and full control of your private data. Record, transcribe, summarize, and query your meetings using local AI models. Perfect for government, defence, legal and C-suite professionals with confidential data needs.</p>
+<p align="center">Steno is the privacy-first AI notepad for all your confidential conversations. No cloud, no usage limits and full control of your private data. Record, transcribe, summarize, and query your meetings using local AI models. Perfect for government, defence, legal and C-suite professionals with confidential data needs.</p>
 
 <p align="center"><sub>Trusted by users at <b>AWS</b>, <b>Deliveroo</b>, <b>Tesco</b>, <b>Hashicorp</b>, <b>Rutgers</b> & <b>European Union</b>.</sub></p>
 
