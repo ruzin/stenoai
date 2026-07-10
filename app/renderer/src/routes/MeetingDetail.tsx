@@ -936,17 +936,10 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
                 style={{ color: 'var(--fg-2)', maxWidth: '64ch' }}
               >
                 This recording was transcribed but notes were not generated
-                automatically. Copy or save the transcript from the actions
-                above, or generate notes whenever you like.
+                automatically. Use the <strong>Generate notes</strong> button
+                below to create them, or copy or save the transcript from the
+                actions above.
               </p>
-              <Button
-                className="mt-1"
-                data-testid="generate-notes-cta"
-                onClick={startReprocess}
-                disabled={reprocess.isPending || streamPhase !== 'idle'}
-              >
-                Generate notes
-              </Button>
             </section>
           ) : (
             <p className="py-2 text-sm" style={{ color: 'var(--fg-2)' }}>
