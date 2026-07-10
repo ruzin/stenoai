@@ -246,6 +246,50 @@ function sanitizeErrorForCrashReport(err) {
   return safe;
 }
 
+function captureSanitizedException(posthogClient, err, distinctId) {
+  if (!posthogClient || !distinctId) return;
+  posthogClient.captureException(sanitizeErrorForCrashReport(err), distinctId);
+}
+
+// Only fixed, public model identifiers are safe to send as analytics values.
+// User-entered model names, fine-tuned ids, local paths, and self-pulled tags
+// can carry customer/project names, so they collapse to the fixed "custom".
+const ANALYTICS_MODEL_ALLOWLIST = new Set([
+  // Curated local registry (SUPPORTED_MODELS in src/config.py) + MLX tags
+  'gemma4:e2b-it-qat',
+  'gemma4:e4b-it-qat',
+  'gemma4:12b-it-qat',
+  'gemma4:e2b-nvfp4',
+  'gemma4:e4b-nvfp4',
+  'gemma4:12b-nvfp4',
+  'llama3.2:3b',
+  'qwen3.5:9b',
+  'gpt-oss:20b',
+  // Transcription engines (SUPPORTED_WHISPER_MODELS + the parakeet path)
+  'parakeet',
+  'large-v3-turbo',
+  // Common public cloud ids (cloud model fields are free-form per provider)
+  'gpt-4o-mini',
+  'gpt-4o',
+  'gpt-4.1-mini',
+  'claude-3-5-haiku-latest',
+  'claude-3-5-sonnet-latest',
+  'claude-3-7-sonnet-latest',
+  'claude-haiku-4-5-20251001',
+  // Bedrock dropdown (SUPPORTED_BEDROCK_MODELS in src/config.py)
+  'anthropic.claude-sonnet-4-5-20250929-v2:0',
+  'anthropic.claude-haiku-4-5-20251001-v1:0',
+  'anthropic.claude-opus-4-1-20250805-v1:0',
+  'anthropic.claude-3-5-sonnet-20241022-v2:0',
+  'anthropic.claude-3-5-haiku-20241022-v1:0',
+]);
+
+function sanitizeModelForAnalytics(model) {
+  if (typeof model !== 'string' || model.trim() === '') return 'unknown';
+  const trimmed = model.trim();
+  return ANALYTICS_MODEL_ALLOWLIST.has(trimmed) ? trimmed : 'custom';
+}
+
 // Content-free per-window summary for calendar_snapshot: counts + a
 // provider breakdown, never titles/attendees/URLs.
 function summarizeCalendarWindow(windowEvents) {
@@ -324,7 +368,9 @@ module.exports = {
   sanitizeTrackProperties,
   calendarMeetingProvider,
   classifyErrorReason,
+  captureSanitizedException,
   redactLocalPaths,
+  sanitizeModelForAnalytics,
   sanitizeErrorForCrashReport,
   summarizeCalendarWindow,
   summarizeCalendarSnapshot,

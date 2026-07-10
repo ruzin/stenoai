@@ -59,7 +59,8 @@ const {
   sanitizeTrackProperties,
   calendarMeetingProvider,
   classifyErrorReason,
-  sanitizeErrorForCrashReport,
+  captureSanitizedException,
+  sanitizeModelForAnalytics,
   summarizeCalendarSnapshot,
   withTimeout,
 } = require('./analytics-helpers');
@@ -679,7 +680,7 @@ const CAPTURE_EXCEPTION_ENQUEUE_DELAY_MS = 50;
 
 async function captureExceptionAndFlush(err) {
   if (!telemetryEnabled || !posthogClient || !anonymousId) return;
-  posthogClient.captureException(sanitizeErrorForCrashReport(err), anonymousId);
+  captureSanitizedException(posthogClient, err, anonymousId);
   await new Promise((resolve) => setTimeout(resolve, CAPTURE_EXCEPTION_ENQUEUE_DELAY_MS));
   await withTimeout(posthogClient.flush(), 1000);
 }
@@ -1516,7 +1517,8 @@ if (!gotSingleInstanceLock) {
   app.on('render-process-gone', (_event, _webContents, details) => {
     try {
       if (telemetryEnabled && posthogClient && anonymousId) {
-        posthogClient.captureException(
+        captureSanitizedException(
+          posthogClient,
           new Error(`render-process-gone: ${details?.reason || 'unknown'}`),
           anonymousId
         );
@@ -1527,7 +1529,8 @@ if (!gotSingleInstanceLock) {
   app.on('child-process-gone', (_event, details) => {
     try {
       if (telemetryEnabled && posthogClient && anonymousId) {
-        posthogClient.captureException(
+        captureSanitizedException(
+          posthogClient,
           new Error(`child-process-gone: ${details?.type || 'unknown'} (${details?.reason || 'unknown'})`),
           anonymousId
         );
@@ -3484,7 +3487,7 @@ function loadTranscriptionContext() {
       engine,
       // Parakeet has no separate user-selectable model today (single bundled
       // default) -- report the engine name rather than guess a variant id.
-      model: engine === 'whisper' ? (cfg.whisper_model || 'unknown') : 'parakeet',
+      model: engine === 'whisper' ? sanitizeModelForAnalytics(cfg.whisper_model) : 'parakeet',
       language: cfg.language || 'auto',
     };
   } catch (_) {
@@ -3504,7 +3507,9 @@ function loadSummarizationContext() {
     const provider = cfg.ai_provider || 'local';
     return {
       provider,
-      model: provider === 'cloud' ? (cfg.cloud_model || 'unknown') : (cfg.model || 'unknown'),
+      model: provider === 'cloud'
+        ? sanitizeModelForAnalytics(cfg.cloud_model)
+        : sanitizeModelForAnalytics(cfg.model),
     };
   } catch (_) {
     return { provider: 'local', model: 'unknown' };
@@ -5577,11 +5582,11 @@ ipcMain.handle('set-model', async (event, modelName) => {
     const jsonMatch = result.match(/\{.*\}/s);
     if (jsonMatch) {
       const jsonData = JSON.parse(jsonMatch[0]);
-      trackEvent('model_changed', { model: modelName, kind: 'summarization' });
+      trackEvent('model_changed', { model: sanitizeModelForAnalytics(modelName), kind: 'summarization' });
       return jsonData;
     }
 
-    trackEvent('model_changed', { model: modelName, kind: 'summarization' });
+    trackEvent('model_changed', { model: sanitizeModelForAnalytics(modelName), kind: 'summarization' });
     return { success: true, model: modelName };
   } catch (error) {
     sendDebugLog(`Error setting model: ${error.message}`);
@@ -5709,7 +5714,7 @@ ipcMain.handle('set-whisper-model', async (event, modelSize) => {
   try {
     const result = await runPythonScript('simple_recorder.py', ['set-whisper-model', modelSize]);
     const jsonData = JSON.parse(result.trim());
-    trackEvent('model_changed', { model: modelSize, kind: 'transcription' });
+    trackEvent('model_changed', { model: sanitizeModelForAnalytics(modelSize), kind: 'transcription' });
     return { success: true, ...jsonData };
   } catch (e) { return { success: false, error: e.message }; }
 });

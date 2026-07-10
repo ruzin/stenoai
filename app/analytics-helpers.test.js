@@ -11,7 +11,9 @@ const {
   sanitizeTrackProperties,
   calendarMeetingProvider,
   classifyErrorReason,
+  captureSanitizedException,
   redactLocalPaths,
+  sanitizeModelForAnalytics,
   sanitizeErrorForCrashReport,
   summarizeCalendarWindow,
   summarizeCalendarSnapshot,
@@ -341,6 +343,67 @@ test('sanitizeErrorForCrashReport does not leak the real dev-checkout path when 
   const safe2 = sanitizeErrorForCrashReport('a bare string, not an Error');
   assert.ok(!safe2.stack.includes(appDir));
   assert.strictEqual(safe2.stack, 'Error: unknown');
+});
+
+test('captureSanitizedException sends only the sanitized crash object to PostHog', () => {
+  let captured = null;
+  const fakePosthog = {
+    captureException(err, distinctId) {
+      captured = { err, distinctId };
+    },
+  };
+  const err = new Error("ENOENT: open '/Users/alice/Secret Client/meeting.wav'");
+  err.stack =
+    "Error: ENOENT: open '/Users/alice/Secret Client/meeting.wav'\n" +
+    '    at fail (/Users/alice/Secret Client/steno/app/main.js:10:2)';
+
+  captureSanitizedException(fakePosthog, err, 'anon-123');
+
+  assert.strictEqual(captured.distinctId, 'anon-123');
+  assert.strictEqual(captured.err.message, 'not_found');
+  assert.ok(!captured.err.stack.includes('alice'));
+  assert.ok(!captured.err.stack.includes('Secret Client'));
+  assert.ok(captured.err.stack.includes('<redacted-path>/main.js:10:2'));
+});
+
+test('sanitizeModelForAnalytics keeps known public model ids but collapses custom/free-form names', () => {
+  // Every curated built-in must pass through un-collapsed. This list is a
+  // deliberate literal duplicate of ANALYTICS_MODEL_ALLOWLIST so that an
+  // accidental removal or typo in the allowlist fails here.
+  const curatedPublicIds = [
+    'gemma4:e2b-it-qat',
+    'gemma4:e4b-it-qat',
+    'gemma4:12b-it-qat',
+    'gemma4:e2b-nvfp4',
+    'gemma4:e4b-nvfp4',
+    'gemma4:12b-nvfp4',
+    'llama3.2:3b',
+    'qwen3.5:9b',
+    'gpt-oss:20b',
+    'parakeet',
+    'large-v3-turbo',
+    'gpt-4o-mini',
+    'gpt-4o',
+    'gpt-4.1-mini',
+    'claude-3-5-haiku-latest',
+    'claude-3-5-sonnet-latest',
+    'claude-3-7-sonnet-latest',
+    'claude-haiku-4-5-20251001',
+    'anthropic.claude-sonnet-4-5-20250929-v2:0',
+    'anthropic.claude-haiku-4-5-20251001-v1:0',
+    'anthropic.claude-opus-4-1-20250805-v1:0',
+    'anthropic.claude-3-5-sonnet-20241022-v2:0',
+    'anthropic.claude-3-5-haiku-20241022-v1:0',
+  ];
+  for (const id of curatedPublicIds) {
+    assert.strictEqual(sanitizeModelForAnalytics(id), id);
+  }
+
+  assert.strictEqual(sanitizeModelForAnalytics('/Users/alice/Secret Client/model.gguf'), 'custom');
+  assert.strictEqual(sanitizeModelForAnalytics('acme-board-meeting-private-model'), 'custom');
+  assert.strictEqual(sanitizeModelForAnalytics('ft:gpt-4o-mini:acme-corp:board:abc123'), 'custom');
+  assert.strictEqual(sanitizeModelForAnalytics(''), 'unknown');
+  assert.strictEqual(sanitizeModelForAnalytics(null), 'unknown');
 });
 
 test('redactLocalPaths never exposes the username itself when nothing follows it in the match (adversarial regression)', () => {
