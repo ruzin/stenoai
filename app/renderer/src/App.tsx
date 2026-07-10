@@ -163,7 +163,20 @@ export function App() {
   // Note: no /recording exclusion — recording coexists with the app, and
   // during it PrimaryDock renders the Ask bar disabled next to the pill.
   const isChatRoute = route === '/chat' || route.startsWith('/chat/');
-  const showAskBar = !isProcessingRoute && !isChatRoute;
+  // App-chrome routes where a chat composer never belongs. When idle the
+  // AskBar self-hides there anyway (no active meeting), but the disabled
+  // recording shell renders even without one — without this exclusion it
+  // would float over Settings/Setup and block clicks in that band; the
+  // pill docks alone there instead.
+  const isChromeRoute =
+    route === '/settings' ||
+    route.startsWith('/settings?') ||
+    route === '/setup' ||
+    route === '/dev' ||
+    route.startsWith('/dev/');
+  const showAskBar = !isProcessingRoute && !isChatRoute && !isChromeRoute;
+  const recordingActive =
+    recording.status === 'recording' || recording.status === 'paused';
 
   return (
     <CommandPaletteProvider>
@@ -178,10 +191,16 @@ export function App() {
             Recording is status-driven, not route-driven: PrimaryDock docks the
             transcription pill next to a disabled Ask bar while a recording is
             active (or swaps in the expanded LiveTranscriptBar), and falls back
-            to the plain Ask bar when idle. Processing still owns the slot on
-            its route. One occupant at a time. */}
+            to the plain Ask bar when idle. Processing owns the slot on its
+            route — UNLESS a new recording is active (back-to-back notes: note
+            A processing while note B records); the recording's pill + Stop
+            must stay reachable everywhere, so recording wins the slot. */}
         <BottomDockSlot>
-          {isProcessingRoute ? <ProcessingDock /> : <PrimaryDock showAskBar={showAskBar} />}
+          {isProcessingRoute && !recordingActive ? (
+            <ProcessingDock />
+          ) : (
+            <PrimaryDock showAskBar={showAskBar} />
+          )}
         </BottomDockSlot>
 
         {/* Transcript — floats above the chat bar (only on real meeting routes).

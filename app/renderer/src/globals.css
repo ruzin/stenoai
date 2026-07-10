@@ -643,6 +643,10 @@
     outline: none;
   }
   .mv-chat-input::placeholder { color: var(--fg-2); font-weight: 500; }
+  /* Recording-inert state: the composer stays visible with a hint placeholder
+     ("Chat available after recording") — the reduced opacity + cursor make it
+     read as deliberately disabled rather than broken. */
+  .mv-chat-input:disabled { opacity: 0.6; cursor: not-allowed; }
 
   .mv-chat-tool {
     width: 30px; height: 30px;

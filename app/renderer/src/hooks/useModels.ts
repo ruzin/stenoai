@@ -543,6 +543,21 @@ export function useTranscriptionEngine() {
   });
 }
 
+/**
+ * Whether live (during-recording) transcription is available: Parakeet only —
+ * Whisper never spawns the transcribe-stream sidecar, so it has no live
+ * drawer, no partials, and its recording pill keeps Pause/Resume inline.
+ * Defaults to parakeet while the query hydrates so the first paint doesn't
+ * briefly hide live-only controls. Single-sourced here because the
+ * pause-reachability invariant spans PrimaryDock (panel gate), LiveDock
+ * (inline controls), and LiveTranscriptBar (footer controls) — they must all
+ * agree.
+ */
+export function useLiveTranscriptAvailable(): boolean {
+  const engineQuery = useTranscriptionEngine();
+  return (engineQuery.data ?? 'parakeet') === 'parakeet';
+}
+
 // Activating Parakeet must drop a pin Parakeet can't honour as an output
 // language (a Whisper-only 'hi'/'ja'/…) back to 'auto' — otherwise the config
 // and live-recording metadata keep a language outside PARAKEET_LANGUAGE_CODES.

@@ -53,6 +53,26 @@ test('recording coexists: pill docks next to a disabled Ask bar, expands, stops 
   await expect(page.getByTestId('generate-notes-dock-button')).toHaveCount(0);
   await expect(page.locator('[data-transcript-bar]')).toHaveCount(0);
 
+  // Chrome routes (settings): the pill docks ALONE — no disabled composer
+  // floating over the Settings page.
+  await page.evaluate(() => {
+    window.location.hash = '#/settings';
+  });
+  await expect(page.getByTestId('transcription-pill')).toBeVisible();
+  await expect(page.getByPlaceholder('Chat available after recording')).toHaveCount(0);
+
+  // Processing route: recording wins the slot (back-to-back notes) — the
+  // pill + Stop stay reachable instead of being displaced by ProcessingDock.
+  await page.evaluate(() => {
+    window.location.hash = '#/meetings/processing';
+  });
+  await expect(page.getByTestId('transcription-pill')).toBeVisible();
+
+  await page.evaluate(() => {
+    window.location.hash = '#/';
+  });
+  await expect(page.getByTestId('transcription-pill')).toBeVisible();
+
   // Expand: the live transcript panel replaces the row; its footer owns
   // Pause/Resume + Stop. Collapse returns to the pill.
   await pill.getByRole('button', { name: 'Show transcript' }).click();

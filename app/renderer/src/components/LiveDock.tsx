@@ -4,7 +4,7 @@ import { AudioWave } from '@/components/AudioWave';
 import { useRecording } from '@/hooks/useRecording';
 import { useLiveTranscript } from '@/hooks/useLiveTranscript';
 import { useLiveTranscriptOpen } from '@/hooks/liveTranscriptOpenStore';
-import { useTranscriptionEngine } from '@/hooks/useModels';
+import { useLiveTranscriptAvailable } from '@/hooks/useModels';
 import { formatElapsed } from '@/lib/utils';
 
 /**
@@ -22,17 +22,15 @@ import { formatElapsed } from '@/lib/utils';
  */
 export function LiveDock() {
   const recording = useRecording();
-  const engineQuery = useTranscriptionEngine();
-  // Whisper recordings have no live drawer — the sidecar isn't spawned and
-  // the renderer never receives LIVE_SEG events. Hiding the toggle keeps
-  // the dock honest. Default to parakeet while the query hydrates so the
-  // first paint doesn't briefly hide the button under SSR-like conditions.
-  const liveAvailable = (engineQuery.data ?? 'parakeet') === 'parakeet';
+  const liveAvailable = useLiveTranscriptAvailable();
   const transcriptOpen = useLiveTranscriptOpen((s) => s.open);
   const toggleTranscript = useLiveTranscriptOpen((s) => s.toggle);
   const [transcriptHover, setTranscriptHover] = React.useState(false);
   const paused = recording.status === 'paused';
   const isRecording = recording.status === 'recording';
+  // Belt-and-braces: PrimaryDock unmounts the pill before status leaves
+  // recording/paused, so this branch is normally unreachable — it only
+  // covers a same-render race between the queue poll and the unmount.
   const stopped = !paused && !isRecording;
 
   // Surface model warm-up on the pill itself, since the transcript panel

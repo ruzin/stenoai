@@ -95,6 +95,7 @@ function install({ ipcMain }) {
     processing: false,
     sessionName: null,
     startedAt: 0,
+    pausedAt: 0,
   };
 
   // Channels with behaviour a test depends on. Each is (event, ...args) like a
@@ -118,11 +119,20 @@ function install({ ipcMain }) {
       return { success: true };
     },
     'pause-recording-ui': async () => {
-      if (rec.active) rec.paused = true;
+      if (rec.active && !rec.paused) {
+        rec.paused = true;
+        rec.pausedAt = Date.now();
+      }
       return { success: true };
     },
     'resume-recording-ui': async () => {
-      if (rec.active) rec.paused = false;
+      if (rec.active && rec.paused) {
+        rec.paused = false;
+        // Freeze elapsed across the pause, like the real backend: shift the
+        // start forward by the paused span so elapsed doesn't tick while
+        // paused.
+        rec.startedAt += Date.now() - rec.pausedAt;
+      }
       return { success: true };
     },
     'get-queue-status': async () => ({
@@ -133,7 +143,9 @@ function install({ ipcMain }) {
       currentReprocesses: [],
       hasRecording: rec.active,
       isPaused: rec.paused,
-      elapsedSeconds: rec.active ? Math.floor((Date.now() - rec.startedAt) / 1000) : 0,
+      elapsedSeconds: rec.active
+        ? Math.floor(((rec.paused ? rec.pausedAt : Date.now()) - rec.startedAt) / 1000)
+        : 0,
       sessionName: rec.active || rec.processing ? rec.sessionName : null,
     }),
 

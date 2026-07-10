@@ -1,16 +1,18 @@
 import { create } from 'zustand';
 
 /**
- * UI state for the inline live transcript panel on the Recording route.
+ * UI state for the expanded live-transcript panel during a recording.
  *
- * Lives outside the React tree so both LiveDock (mounted at App level) and
- * LiveTranscriptBar (mounted inside the Recording route) can coordinate
- * without a context provider — LiveDock's Transcript toggle and the bar's
- * header chevron both call the same ``toggle()``.
+ * Both occupants of the primary dock slot (PrimaryDock swaps the compact
+ * LiveDock pill for the expanded LiveTranscriptBar on this flag) live outside
+ * any shared React subtree, so this sits in a zustand store rather than a
+ * context — LiveDock's expand toggle and the panel's minimize chevron both
+ * call the same ``toggle()``.
  *
- * Defaults to closed: the user clicks the LiveDock transcript toggle to
- * reveal the panel. Granola behaves the same way — the panel is opt-in
- * rather than always-on so the page stays calm on session start.
+ * Defaults to closed: the user clicks the pill's expand toggle to reveal the
+ * panel. Granola behaves the same way — the panel is opt-in rather than
+ * always-on so the page stays calm on session start. App.tsx resets it to
+ * closed on every new recording session.
  */
 interface LiveTranscriptOpenStore {
   open: boolean;

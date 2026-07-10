@@ -163,6 +163,14 @@ export function AskBar({ disabled = false }: { disabled?: boolean }) {
     });
   }, [activeSummaryFile, activeOrgMeeting?.id, setTranscriptOpen]);
 
+  // Recording started: close a saved-meeting transcript panel that was
+  // already open. The whole bar goes inert (the toggle below is hidden while
+  // disabled), and leaving the 72-band panel up would let it overlap the
+  // expanded LiveTranscriptBar — the one stacking the dock can't resolve.
+  React.useEffect(() => {
+    if (disabled) setTranscriptOpen(false);
+  }, [disabled, setTranscriptOpen]);
+
   React.useEffect(() => {
     if (!expanded && !transcriptOpen) return;
     const handler = (e: MouseEvent) => {
@@ -367,8 +375,10 @@ export function AskBar({ disabled = false }: { disabled?: boolean }) {
             transcript. For local meetings that's always true; for shared
             (org) notes it depends on whether the original share included
             a transcript artifact. Older shared notes have no transcript
-            and the toggle stays hidden. */}
-        {(activeSummaryFile || (activeOrgMeeting?.transcript ?? '').trim()) && (
+            and the toggle stays hidden. Hidden while disabled (recording):
+            the bar is fully inert then, and an open saved-transcript panel
+            would overlap the expanded live-transcript panel. */}
+        {!disabled && (activeSummaryFile || (activeOrgMeeting?.transcript ?? '').trim()) && (
         <button
           type="button"
           className={cn('mv-chat-tool', transcriptOpen && 'active')}

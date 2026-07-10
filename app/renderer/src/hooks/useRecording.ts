@@ -145,6 +145,14 @@ export function useRecording() {
       // the previous session's in-memory state.
       const priorDraft = useLiveDraftStore.getState().drafts[optimisticName];
       useLiveDraftStore.getState().clear(optimisticName);
+      // Cancel any in-flight queue poll before the optimistic write — a fetch
+      // already in the air resolves with hasRecording:false and would clobber
+      // the write, unmounting the pill for up to a poll interval. Snapshot
+      // the previous cache so a start failure can restore it synchronously
+      // (the standard onMutate pattern) instead of showing a phantom
+      // "recording" pill until an invalidate round-trips.
+      await qc.cancelQueries({ queryKey: queueKey });
+      const priorQueue = qc.getQueryData<QueueStatus>(queueKey);
       qc.setQueryData(queueKey, {
         success: true,
         isProcessing: false,
@@ -170,7 +178,15 @@ export function useRecording() {
         if (priorDraft) {
           useLiveDraftStore.getState().restore(optimisticName, priorDraft);
         }
+        qc.setQueryData(queueKey, priorQueue);
         qc.invalidateQueries({ queryKey: queueKey });
+        // Every caller is fire-and-forget (`void startRecording()`), so an
+        // IPC-level failure would otherwise be a silent no-op: the pill
+        // flashes out with no explanation. Route it through the same native
+        // notification the renderer-capture failure path uses.
+        ipc().recording.reportCaptureError(
+          err instanceof Error ? err.message : 'Recording could not start',
+        );
         throw err;
       }
     },
