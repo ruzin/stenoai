@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { Github, Download, Menu, X } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import { Github, Download, Menu, X, ChevronDown } from "lucide-react";
 import { m as Motion, AnimatePresence } from "framer-motion";
 import { StenoMark, Wordmark } from "../components/Brand";
 import { ThemeToggle } from "../components/ThemeToggle";
@@ -11,8 +11,16 @@ const NAV_LINKS = [
   { href: "#how", label: "How it works" },
   { href: "#features", label: "Features" },
   { href: "#industries", label: "Enterprise" },
-  { href: "/vs/", label: "Compare" },
   { href: "#faq", label: "FAQ" },
+];
+
+// Kept as a small local list (mirrors src/vs/competitors.js) so the nav
+// doesn't pull the full comparison copy into the homepage bundle.
+const COMPARE_LINKS = [
+  { href: "/vs/granola/", label: "Steno vs Granola" },
+  { href: "/vs/otter/", label: "Steno vs Otter.ai" },
+  { href: "/vs/fireflies/", label: "Steno vs Fireflies" },
+  { href: "/vs/meetily/", label: "Steno vs Meetily" },
 ];
 
 function formatStars(n) {
@@ -39,6 +47,104 @@ function scrollToHash(e, href) {
     if (Date.now() < deadline) requestAnimationFrame(tryScroll);
   };
   tryScroll();
+}
+
+// Desktop-only Compare dropdown: opens on hover or click, closes on leave,
+// outside click, or Escape. The trigger itself navigates to /vs/ so the
+// hub page stays reachable even without interacting with the menu.
+function CompareMenu() {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef(null);
+  const closeTimer = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (e) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false);
+    };
+    const onKeyDown = (e) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
+
+  const scheduleClose = () => {
+    closeTimer.current = setTimeout(() => setOpen(false), 120);
+  };
+  const cancelClose = () => {
+    if (closeTimer.current) clearTimeout(closeTimer.current);
+  };
+
+  return (
+    <div
+      ref={wrapRef}
+      className="relative"
+      onMouseEnter={() => { cancelClose(); setOpen(true); }}
+      onMouseLeave={scheduleClose}
+    >
+      <a
+        href="/vs/"
+        aria-expanded={open}
+        aria-haspopup="menu"
+        onFocus={() => setOpen(true)}
+        className="inline-flex items-center gap-1 text-fg-2 text-sm no-underline hover:text-fg-1 transition-colors"
+      >
+        Compare
+        <ChevronDown
+          size={12}
+          aria-hidden="true"
+          style={{ transform: open ? "rotate(180deg)" : "none", transition: "transform var(--dur-fast) var(--ease)" }}
+        />
+      </a>
+
+      <AnimatePresence>
+        {open && (
+          <Motion.div
+            role="menu"
+            initial={{ opacity: 0, y: 4, x: "-50%" }}
+            animate={{ opacity: 1, y: 0, x: "-50%" }}
+            exit={{ opacity: 0, y: 4, x: "-50%" }}
+            transition={{ duration: 0.15, ease: [0.33, 1, 0.68, 1] }}
+            className="absolute left-1/2 top-full pt-3"
+          >
+            <div
+              className="flex flex-col py-2 min-w-[200px]"
+              style={{
+                background: "var(--surface-raised)",
+                border: "1px solid var(--border-subtle)",
+                borderRadius: "var(--radius)",
+                boxShadow: "var(--shadow-md)",
+              }}
+            >
+              {COMPARE_LINKS.map(({ href, label }) => (
+                <a
+                  key={href}
+                  href={href}
+                  role="menuitem"
+                  className="px-4 py-2 text-fg-2 text-sm no-underline hover:text-fg-1 hover:bg-surface-hover transition-colors whitespace-nowrap"
+                >
+                  {label}
+                </a>
+              ))}
+              <div className="my-2" style={{ borderTop: "1px solid var(--border-subtle)" }} />
+              <a
+                href="/vs/"
+                role="menuitem"
+                className="px-4 py-2 text-fg-2 text-sm no-underline hover:text-fg-1 hover:bg-surface-hover transition-colors whitespace-nowrap"
+              >
+                All comparisons
+              </a>
+            </div>
+          </Motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
 }
 
 // `subpage` renders the nav for pages other than the homepage (/vs/*):
@@ -88,19 +194,27 @@ export function Nav({ subpage = false }) {
         </a>
 
         <div className="hidden md:flex gap-7 items-center">
-          {NAV_LINKS.map(({ href, label }) => {
-            const isHash = href.startsWith("#");
-            return (
-              <a
-                key={href}
-                href={isHash && subpage ? `/${href}` : href}
-                onClick={isHash && !subpage ? (e) => scrollToHash(e, href) : undefined}
-                className="text-fg-2 text-sm no-underline hover:text-fg-1 transition-colors"
-              >
-                {label}
-              </a>
-            );
-          })}
+          {NAV_LINKS.slice(0, 3).map(({ href, label }) => (
+            <a
+              key={href}
+              href={subpage ? `/${href}` : href}
+              onClick={subpage ? undefined : (e) => scrollToHash(e, href)}
+              className="text-fg-2 text-sm no-underline hover:text-fg-1 transition-colors"
+            >
+              {label}
+            </a>
+          ))}
+          <CompareMenu />
+          {NAV_LINKS.slice(3).map(({ href, label }) => (
+            <a
+              key={href}
+              href={subpage ? `/${href}` : href}
+              onClick={subpage ? undefined : (e) => scrollToHash(e, href)}
+              className="text-fg-2 text-sm no-underline hover:text-fg-1 transition-colors"
+            >
+              {label}
+            </a>
+          ))}
         </div>
 
         <div className="flex gap-1 items-center">
@@ -149,20 +263,33 @@ export function Nav({ subpage = false }) {
             style={{ borderTop: "1px solid var(--border-subtle)" }}
           >
             <div className="container-site flex flex-col py-3">
-              {NAV_LINKS.map(({ href, label }) => {
-                const isHash = href.startsWith("#");
-                return (
+              {NAV_LINKS.map(({ href, label }) => (
+                <a
+                  key={href}
+                  href={subpage ? `/${href}` : href}
+                  onClick={(e) => { if (!subpage) scrollToHash(e, href); setMenuOpen(false); }}
+                  className="text-fg-2 text-sm no-underline hover:text-fg-1 transition-colors"
+                  style={{ padding: "10px 0" }}
+                >
+                  {label}
+                </a>
+              ))}
+              <div className="mt-2 pt-2" style={{ borderTop: "1px solid var(--border-subtle)" }}>
+                <span className="block text-fg-muted text-[12px] py-2" style={{ fontFamily: "var(--font-mono)", textTransform: "uppercase", letterSpacing: "0.12em" }}>
+                  Compare
+                </span>
+                {COMPARE_LINKS.map(({ href, label }) => (
                   <a
                     key={href}
-                    href={isHash && subpage ? `/${href}` : href}
-                    onClick={(e) => { if (isHash && !subpage) scrollToHash(e, href); setMenuOpen(false); }}
-                    className="text-fg-2 text-sm no-underline hover:text-fg-1 transition-colors"
+                    href={href}
+                    onClick={() => setMenuOpen(false)}
+                    className="block text-fg-2 text-sm no-underline hover:text-fg-1 transition-colors"
                     style={{ padding: "10px 0" }}
                   >
                     {label}
                   </a>
-                );
-              })}
+                ))}
+              </div>
               <a
                 href={GITHUB_URL}
                 target="_blank"
