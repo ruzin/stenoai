@@ -57,7 +57,18 @@ def _split_frontmatter(text: str):
             for line in block.splitlines():
                 if ":" in line:
                     k, _, v = line.partition(":")
-                    fm[k.strip()] = v.strip().strip('"')
+                    v = v.strip()
+                    # Coerce the serialised-None forms to real None (in ONE
+                    # place, for every consumer): the writer emits missing values
+                    # as unquoted `null`, and an empty value reads back as "".
+                    # Leaving them as the truthy strings "null"/"" would make a
+                    # provenance key like detected_language look engine-backed and
+                    # wrongly pin an auto/Parakeet note's language (#283). Mirrors
+                    # _parse_meeting_markdown's null handling.
+                    if v == "null" or v == "":
+                        fm[k.strip()] = None
+                    else:
+                        fm[k.strip()] = v.strip('"')
     return fm, body
 
 
