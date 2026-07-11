@@ -121,16 +121,25 @@ def resolve_persisted_output_language(
     transcript, then lands on "en" if inconclusive). Re-detecting a
     previously text-detected note is idempotent, so this is safe to re-run.
 
-    ``fallback_configured`` is the caller's current configured language, used
-    when the note never stored its own ``configured_language`` (e.g. markdown
-    notes, whose front matter only persists the resolved output language).
+    Only STORED provenance may authenticate the persisted value: the caller's
+    current pin must NOT retroactively legitimise a stale value it never
+    produced. So a legacy note {output_language: "en"} with no stored provenance
+    does not become trustworthy just because config is now pinned to "fr" - the
+    current "fr" pin wins instead. ``fallback_configured`` (the caller's current
+    configured language) therefore feeds ONLY the untrusted-path resolve, never
+    the trust check.
     """
-    configured = session_info.get("configured_language") or fallback_configured
+    stored_configured = session_info.get("configured_language")
     detected = session_info.get("detected_language")
     persisted = session_info.get("output_language")
-    if persisted and ((configured and configured != "auto") or detected):
+    if persisted and ((stored_configured and stored_configured != "auto") or detected):
         return persisted
-    return resolve_output_language(configured, detected, transcript_text)
+    # Untrusted persisted value: resolve fresh. Prefer a real stored pin (which
+    # only reaches here when no output_language was persisted), then the
+    # caller's current pin, then engine/text detection.
+    return resolve_output_language(
+        stored_configured or fallback_configured, detected, transcript_text
+    )
 
 
 # Session names that should trigger AI title regeneration after summarization.
@@ -2882,6 +2891,12 @@ def query(transcript_file, question):
     # the note's persisted output_language against its provenance (#283). Plain
     # .txt transcripts leave this empty -> pure text-detection / config fallback.
     session_info = {}
+    # Language detection must run over the RAW transcript only, not the combined
+    # summary+topics+transcript context below: detection samples the first ~8000
+    # chars, so a legacy English summary would flip a German meeting to "en"
+    # before the transcript is ever reached. Falls back to transcript_text when a
+    # note has no separate transcript body.
+    detect_text = None
 
     # Handle summary JSON files (extract transcript from them)
     if transcript_file.endswith('.json'):
@@ -2922,6 +2937,7 @@ def query(transcript_file, question):
             if raw_transcript:
                 parts.append(f"TRANSCRIPT:\n{raw_transcript}")
             transcript_text = '\n\n'.join(parts)
+            detect_text = raw_transcript
             session_info = meeting_data.get("session_info", {})
         except Exception as e:
             print(json.dumps({"success": False, "error": f"Failed to read summary file: {e}"}))
@@ -2950,10 +2966,10 @@ def query(transcript_file, question):
         # The note's saved output_language is only a real pin when provenance-
         # backed (a user pin or a Whisper detection). A stale Parakeet auto-mode
         # "en" fallback (#283) must not lock chat to English, so re-detect from
-        # the transcript in that case. CLI contract is unchanged: the caller
+        # the RAW transcript in that case. CLI contract is unchanged: the caller
         # still passes only <file> -q <question>; provenance comes from the note.
         language = resolve_persisted_output_language(
-            session_info, transcript_text, config.get_language()
+            session_info, detect_text or transcript_text, config.get_language()
         )
         summarizer = OllamaSummarizer()
         answer = summarizer.query_transcript(transcript_text, question, language=language)
@@ -2980,6 +2996,10 @@ def query_streaming(transcript_file, question):
     # the note's persisted output_language against its provenance (#283). Plain
     # .txt transcripts leave this empty -> pure text-detection / config fallback.
     session_info = {}
+    # Detect language over the RAW transcript only (not the combined context
+    # below), so a legacy English summary in the first ~8000 chars can't flip a
+    # German meeting to "en". Falls back to transcript_text when absent.
+    detect_text = None
 
     if transcript_file.endswith('.json'):
         if not transcript_path.exists():
@@ -3014,6 +3034,7 @@ def query_streaming(transcript_file, question):
             if meeting_data.get('transcript'):
                 parts.append(f"TRANSCRIPT:\n{meeting_data['transcript']}")
             transcript_text = '\n\n'.join(parts)
+            detect_text = meeting_data.get('transcript', '')
             session_info = meeting_data.get("session_info", {})
         except Exception as e:
             print(f"STREAM_ERROR:Failed to read file: {e}", flush=True)
@@ -3030,10 +3051,11 @@ def query_streaming(transcript_file, question):
 
     from src.config import get_config
     # Provenance-aware: honour the note's saved language only when it was a real
-    # pin or a Whisper detection, else re-detect so a stale Parakeet "en" (#283)
-    # doesn't lock chat to English. CLI contract unchanged (<file> -q <question>).
+    # pin or a Whisper detection, else re-detect (over the RAW transcript) so a
+    # stale Parakeet "en" (#283) doesn't lock chat to English. CLI contract
+    # unchanged (<file> -q <question>).
     language = resolve_persisted_output_language(
-        session_info, transcript_text, get_config().get_language()
+        session_info, detect_text or transcript_text, get_config().get_language()
     )
 
     try:

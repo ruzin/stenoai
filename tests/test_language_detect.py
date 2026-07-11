@@ -10,13 +10,18 @@ stopword classifier over the Parakeet-supported languages, and
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
+from click.testing import CliRunner
+
+import simple_recorder
 from simple_recorder import (
     MeetingPipeline,
     _parse_meeting_markdown,
     resolve_output_language,
     resolve_persisted_output_language,
 )
+from src.config import Config
 from src.language_detect import detect_transcript_language
 
 # Realistic meeting-style paragraphs (>=80 words each). Function-word rich so
@@ -230,12 +235,41 @@ class ResolvePersistedOutputLanguageTests(unittest.TestCase):
             "en",
         )
 
-    def test_fallback_configured_pin_trusts_persisted(self):
-        # A markdown note stores no configured_language of its own; the caller's
-        # current pin supplies the provenance, so the persisted value is kept.
-        session_info = {"output_language": "de"}
+    def test_legacy_note_honors_current_pin_not_stale_persisted(self):
+        # HIGH fix: a legacy note persisted "en" with NO stored provenance must
+        # NOT be authenticated by the caller's CURRENT pin. With config pinned to
+        # "fr", the current "fr" pin wins over the stale "en" (and over the
+        # German transcript, because a pin beats detection).
+        session_info = {"output_language": "en"}
         self.assertEqual(
-            resolve_persisted_output_language(session_info, EN_TEXT, "de"),
+            resolve_persisted_output_language(session_info, DE_TEXT, "fr"),
+            "fr",
+        )
+
+    def test_legacy_note_current_auto_redetects_from_transcript(self):
+        # Same legacy note, but the caller is on auto now -> re-detect the German
+        # transcript instead of trusting the stale "en".
+        session_info = {"output_language": "en"}
+        self.assertEqual(
+            resolve_persisted_output_language(session_info, DE_TEXT, "auto"),
+            "de",
+        )
+
+    def test_stored_pin_honored_regardless_of_current_config(self):
+        # A note with a STORED pin keeps it even when current config differs.
+        session_info = {"output_language": "en", "configured_language": "en"}
+        self.assertEqual(
+            resolve_persisted_output_language(session_info, DE_TEXT, "fr"),
+            "en",
+        )
+
+    def test_stored_pin_without_persisted_output_language_is_honored(self):
+        # A real stored pin with no persisted output_language must still win over
+        # the caller's current config (it reaches the untrusted branch because
+        # output_language is empty, but the stored pin is preferred there).
+        session_info = {"configured_language": "de"}
+        self.assertEqual(
+            resolve_persisted_output_language(session_info, EN_TEXT, "fr"),
             "de",
         )
 
@@ -306,6 +340,41 @@ class MarkdownProvenanceTests(unittest.TestCase):
                 resolve_persisted_output_language(session_info, EN_TEXT, "auto"),
                 "de",
             )
+
+
+class QueryPathLanguageTests(unittest.TestCase):
+    """The chat/query paths must detect over the RAW transcript, not the combined
+    summary+topics+transcript context (#283).
+
+    Detection samples only the first ~8000 chars, so a legacy English summary at
+    the front of the combined text could otherwise flip a German meeting to "en".
+    """
+
+    def _run_query(self, tmp: str, md_body: str) -> str:
+        md = Path(tmp) / "meeting_summary.md"
+        md.write_text(md_body, encoding="utf-8")
+        cfg = Config(config_path=Path(tmp) / "config.json")  # defaults to "auto"
+        fake = mock.MagicMock()
+        fake.query_transcript.return_value = "antwort"
+        with mock.patch("src.config.get_config", return_value=cfg), \
+             mock.patch.object(simple_recorder, "OllamaSummarizer", return_value=fake):
+            res = CliRunner().invoke(
+                simple_recorder.query, [str(md), "-q", "Worum ging es?"]
+            )
+        self.assertEqual(res.exit_code, 0, res.output)
+        fake.query_transcript.assert_called_once()
+        return fake.query_transcript.call_args.kwargs["language"]
+
+    def test_english_summary_german_transcript_resolves_to_de(self):
+        # Legacy note labelled English (no provenance) with an English summary but
+        # a German transcript: chat must answer in German, driven by the RAW
+        # transcript. Under the old combined-context detection this flipped to en.
+        md_body = (
+            f"---\ntitle: Sync\nlanguage: en\n---\n\n"
+            f"## Summary\n\n{EN_TEXT}\n\n## Transcript\n\n{DE_TEXT}\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(self._run_query(tmp, md_body), "de")
 
 
 if __name__ == "__main__":
