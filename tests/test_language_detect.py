@@ -7,10 +7,13 @@ stopword classifier over the Parakeet-supported languages, and
 (pin > engine-detected > text-detected > "en").
 """
 
+import tempfile
 import unittest
+from pathlib import Path
 
 from simple_recorder import (
     MeetingPipeline,
+    _parse_meeting_markdown,
     resolve_output_language,
     resolve_persisted_output_language,
 )
@@ -235,6 +238,74 @@ class ResolvePersistedOutputLanguageTests(unittest.TestCase):
             resolve_persisted_output_language(session_info, EN_TEXT, "de"),
             "de",
         )
+
+
+def _write_md(tmp: str, frontmatter: str) -> Path:
+    p = Path(tmp) / "meeting_summary.md"
+    p.write_text(
+        f"---\n{frontmatter}---\n\n## Summary\n\nEin kurzer Ueberblick.\n\n"
+        "## Transcript\n\n[You] Hallo zusammen. [Others] Guten Morgen.\n",
+        encoding="utf-8",
+    )
+    return p
+
+
+class MarkdownProvenanceTests(unittest.TestCase):
+    """Markdown notes must persist + restore language provenance (#283).
+
+    Without it, reprocessing / chatting a Whisper .md note loses the engine
+    detection (re-detection could discard a valid 'de'), and a stale Parakeet
+    'en' can't be told apart from a real pin.
+    """
+
+    def test_provenance_keys_round_trip_through_parser(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            md = _write_md(
+                tmp,
+                "title: Standup\nlanguage: de\nconfigured_language: auto\n"
+                "detected_language: de\nduration_seconds: 120\n",
+            )
+            session_info = _parse_meeting_markdown(md)["session_info"]
+            self.assertEqual(session_info["output_language"], "de")
+            self.assertEqual(session_info["configured_language"], "auto")
+            self.assertEqual(session_info["detected_language"], "de")
+
+    def test_old_markdown_without_keys_parses_with_none_provenance(self):
+        # A .md written before these keys existed must still parse; missing keys
+        # read as None (no provenance -> re-detect, prior behaviour preserved).
+        with tempfile.TemporaryDirectory() as tmp:
+            md = _write_md(tmp, "title: Legacy\nlanguage: en\nduration_seconds: 60\n")
+            session_info = _parse_meeting_markdown(md)["session_info"]
+            self.assertEqual(session_info["output_language"], "en")
+            self.assertIsNone(session_info["configured_language"])
+            self.assertIsNone(session_info["detected_language"])
+
+    def test_query_decision_stale_en_note_redetects_from_transcript(self):
+        # The chat/query seam (Python-side): a legacy Parakeet auto-mode note
+        # persisted "en" with no provenance. Parsing it then running the
+        # resolver over a German transcript must recover German, not stay English.
+        with tempfile.TemporaryDirectory() as tmp:
+            md = _write_md(tmp, "title: Legacy\nlanguage: en\nduration_seconds: 60\n")
+            session_info = _parse_meeting_markdown(md)["session_info"]
+            self.assertEqual(
+                resolve_persisted_output_language(session_info, DE_TEXT, "auto"),
+                "de",
+            )
+
+    def test_query_decision_whisper_note_keeps_engine_language(self):
+        # A Whisper note carries detected_language provenance, so its persisted
+        # language is kept even when the (foreign) transcript text disagrees.
+        with tempfile.TemporaryDirectory() as tmp:
+            md = _write_md(
+                tmp,
+                "title: Whisper\nlanguage: de\ndetected_language: de\n"
+                "duration_seconds: 60\n",
+            )
+            session_info = _parse_meeting_markdown(md)["session_info"]
+            self.assertEqual(
+                resolve_persisted_output_language(session_info, EN_TEXT, "auto"),
+                "de",
+            )
 
 
 if __name__ == "__main__":

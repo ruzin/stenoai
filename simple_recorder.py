@@ -516,6 +516,8 @@ Summary output language: {config.get_language_name(output_language)}
             'date': processed_at,
             'duration_seconds': int(duration_seconds) if duration_seconds else None,
             'language': transcript_data.get("configured_language"),
+            'configured_language': transcript_data.get("configured_language"),
+            'detected_language': transcript_data.get("detected_language"),
             'is_diarised': False,
             'transcription_failed': True,
             'reprocessable': True,
@@ -619,6 +621,8 @@ Summary output language: {config.get_language_name(output_language)}
                 'date': processed_at,
                 'duration_seconds': int(duration_seconds) if duration_seconds else None,
                 'language': output_language,
+                'configured_language': gate_config.get_language(),
+                'detected_language': transcript_data.get('detected_language'),
                 'is_diarised': transcript_data.get('is_diarised', False),
                 'notes_generated': False,
             }
@@ -709,6 +713,8 @@ Summary output language: {config.get_language_name(output_language)}
             'date': processed_at,
             'duration_seconds': int(duration_seconds) if duration_seconds else None,
             'language': output_language,
+            'configured_language': configured_language,
+            'detected_language': transcript_data.get('detected_language'),
             'is_diarised': transcript_data.get('is_diarised', False),
         }
         md_lines = _render_frontmatter(md_meta)
@@ -975,6 +981,8 @@ def process_streaming(audio_file, name, notes, live_transcript):
                 'date': processed_at,
                 'duration_seconds': int(duration_seconds) if duration_seconds else None,
                 'language': output_language,
+                'configured_language': gate_config.get_language(),
+                'detected_language': transcript_data.get('detected_language'),
                 'is_diarised': transcript_data.get('is_diarised', False),
                 'notes_generated': False,
             }
@@ -1079,6 +1087,8 @@ def process_streaming(audio_file, name, notes, live_transcript):
             'date': processed_at,
             'duration_seconds': int(duration_seconds) if duration_seconds else None,
             'language': output_language,
+            'configured_language': configured_language,
+            'detected_language': transcript_data.get('detected_language'),
             'is_diarised': transcript_data.get('is_diarised', False),
         }
         # Mark live-sourced meetings (#207) so the UI and future code know this
@@ -2308,6 +2318,13 @@ def _parse_meeting_markdown(md_path):
         'duration_seconds': meta.get('duration_seconds'),
         'summary_file': str(md_path),
         'output_language': meta.get('language'),
+        # Provenance of the output language, so recovery paths (reprocess /
+        # generate-report / regen-title / chat) can tell a real user pin or
+        # Whisper engine detection from a bare Parakeet fallback (#283). Old .md
+        # files predating these keys read as None -> treated as no provenance
+        # (re-detect), preserving prior behaviour.
+        'configured_language': meta.get('configured_language'),
+        'detected_language': meta.get('detected_language'),
     }
     # A meeting whose transcription crashed carries these markers so the UI
     # can render an honest failure state (and a future retry) rather than a
@@ -2575,6 +2592,11 @@ def reprocess(summary_file, regenerate_title):
                 'date': existing_data.get('session_info', {}).get('processed_at', datetime.now().isoformat()),
                 'duration_seconds': existing_data.get('session_info', {}).get('duration_seconds'),
                 'language': output_language,
+                # Carry the ORIGINAL provenance forward, not the re-resolved
+                # output_language: a text-detected value must not masquerade as a
+                # pin/engine detection (it stays re-detectable, idempotently).
+                'configured_language': existing_session_info.get('configured_language'),
+                'detected_language': existing_session_info.get('detected_language'),
                 'is_diarised': existing_data.get('is_diarised', False),
                 # Carry forward folder membership so a regenerate never silently
                 # removes the meeting from its folders (matches _parse_meeting_markdown's
@@ -2856,7 +2878,10 @@ def query(transcript_file, question):
     from pathlib import Path
 
     transcript_path = Path(transcript_file)
-    language = None
+    # Collected from the meeting file (if any) so the language resolver can weigh
+    # the note's persisted output_language against its provenance (#283). Plain
+    # .txt transcripts leave this empty -> pure text-detection / config fallback.
+    session_info = {}
 
     # Handle summary JSON files (extract transcript from them)
     if transcript_file.endswith('.json'):
@@ -2872,7 +2897,6 @@ def query(transcript_file, question):
                     print(json.dumps({"success": False, "error": "No transcript found in summary file"}))
                     return
                 session_info = data.get("session_info", {})
-                language = session_info.get("output_language")
         except Exception as e:
             print(json.dumps({"success": False, "error": f"Failed to read summary file: {e}"}))
             return
@@ -2899,7 +2923,6 @@ def query(transcript_file, question):
                 parts.append(f"TRANSCRIPT:\n{raw_transcript}")
             transcript_text = '\n\n'.join(parts)
             session_info = meeting_data.get("session_info", {})
-            language = session_info.get("output_language")
         except Exception as e:
             print(json.dumps({"success": False, "error": f"Failed to read summary file: {e}"}))
             return
@@ -2924,12 +2947,14 @@ def query(transcript_file, question):
     try:
         from src.config import get_config
         config = get_config()
-        if not language:
-            language = config.get_language()
-        # Same priority as summaries: a stored/pinned language wins; otherwise
-        # detect from the transcript so an auto-mode Parakeet meeting is chatted
-        # in its own language instead of defaulting to English (#283).
-        language = resolve_output_language(language, transcript_text=transcript_text)
+        # The note's saved output_language is only a real pin when provenance-
+        # backed (a user pin or a Whisper detection). A stale Parakeet auto-mode
+        # "en" fallback (#283) must not lock chat to English, so re-detect from
+        # the transcript in that case. CLI contract is unchanged: the caller
+        # still passes only <file> -q <question>; provenance comes from the note.
+        language = resolve_persisted_output_language(
+            session_info, transcript_text, config.get_language()
+        )
         summarizer = OllamaSummarizer()
         answer = summarizer.query_transcript(transcript_text, question, language=language)
 
@@ -2951,7 +2976,10 @@ def query_streaming(transcript_file, question):
     from pathlib import Path
 
     transcript_path = Path(transcript_file)
-    language = None
+    # Collected from the meeting file (if any) so the language resolver can weigh
+    # the note's persisted output_language against its provenance (#283). Plain
+    # .txt transcripts leave this empty -> pure text-detection / config fallback.
+    session_info = {}
 
     if transcript_file.endswith('.json'):
         if not transcript_path.exists():
@@ -2965,7 +2993,6 @@ def query_streaming(transcript_file, question):
                     print("STREAM_ERROR:No transcript found in summary file", flush=True)
                     return
                 session_info = data.get("session_info", {})
-                language = session_info.get("output_language")
         except Exception as e:
             print(f"STREAM_ERROR:Failed to read file: {e}", flush=True)
             return
@@ -2988,7 +3015,6 @@ def query_streaming(transcript_file, question):
                 parts.append(f"TRANSCRIPT:\n{meeting_data['transcript']}")
             transcript_text = '\n\n'.join(parts)
             session_info = meeting_data.get("session_info", {})
-            language = session_info.get("output_language")
         except Exception as e:
             print(f"STREAM_ERROR:Failed to read file: {e}", flush=True)
             return
@@ -3002,12 +3028,13 @@ def query_streaming(transcript_file, question):
             print(f"STREAM_ERROR:Failed to read file: {e}", flush=True)
             return
 
-    if not language:
-        from src.config import get_config
-        language = get_config().get_language()
-    # Detect from the transcript when unpinned so auto-mode Parakeet meetings
-    # are chatted in their own language, not English (#283).
-    language = resolve_output_language(language, transcript_text=transcript_text)
+    from src.config import get_config
+    # Provenance-aware: honour the note's saved language only when it was a real
+    # pin or a Whisper detection, else re-detect so a stale Parakeet "en" (#283)
+    # doesn't lock chat to English. CLI contract unchanged (<file> -q <question>).
+    language = resolve_persisted_output_language(
+        session_info, transcript_text, get_config().get_language()
+    )
 
     try:
         summarizer = OllamaSummarizer()

@@ -96,6 +96,40 @@ class ReprocessFrontmatterTests(unittest.TestCase):
             # is_live_transcript must NOT be injected when it was never set.
             self.assertNotIn("is_live_transcript", reparsed["session_info"])
 
+    def test_language_provenance_preserved_across_reprocess(self):
+        """reprocess must carry forward configured/detected language provenance.
+
+        Without it, a re-detection on the next reprocess/chat could discard a
+        valid Whisper engine detection (#283).
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            summary = _write_summary(
+                tmp,
+                extra_frontmatter="configured_language: de\ndetected_language: de\n",
+            )
+            res = _run_reprocess(tmp, summary)
+            self.assertEqual(res.exit_code, 0, res.output)
+
+            reparsed = simple_recorder._parse_meeting_markdown(summary)
+            self.assertEqual(reparsed["session_info"]["configured_language"], "de")
+            self.assertEqual(reparsed["session_info"]["detected_language"], "de")
+
+    def test_missing_provenance_reprocesses_to_null_provenance(self):
+        """A legacy note without provenance stays provenance-less (null), so the
+        recovery paths keep re-detecting rather than trusting a stale value."""
+        with tempfile.TemporaryDirectory() as tmp:
+            summary = _write_summary(tmp)  # no configured/detected keys
+            res = _run_reprocess(tmp, summary)
+            self.assertEqual(res.exit_code, 0, res.output)
+
+            frontmatter = summary.read_text().split('---')[1]
+            self.assertIn('configured_language: null', frontmatter)
+            self.assertIn('detected_language: null', frontmatter)
+
+            reparsed = simple_recorder._parse_meeting_markdown(summary)
+            self.assertIsNone(reparsed["session_info"]["configured_language"])
+            self.assertIsNone(reparsed["session_info"]["detected_language"])
+
 
 if __name__ == "__main__":
     unittest.main()
