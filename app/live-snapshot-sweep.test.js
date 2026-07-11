@@ -1,4 +1,4 @@
-const { test } = require('node:test');
+const { test, after } = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
 const os = require('os');
@@ -9,10 +9,22 @@ const {
   DEFAULT_MIN_AGE_MS,
 } = require('./live-snapshot-sweep');
 
+// Track every temp dir we create so a single after-hook can remove them all —
+// otherwise repeated runs accumulate live-sweep-test-* dirs in the system temp.
+const createdTmpDirs = [];
+
 // Fresh temp dir per test so runs never see each other's files.
 function makeTmpDir() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'live-sweep-test-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'live-sweep-test-'));
+  createdTmpDirs.push(dir);
+  return dir;
 }
+
+after(() => {
+  for (const dir of createdTmpDirs) {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 // Write a snapshot-shaped file and backdate its mtime by ageMs so the age guard
 // sees it as old. Returns the absolute path.
@@ -50,12 +62,17 @@ test('keeps a file listed in keepPaths regardless of age', () => {
 
 test('keeps a too-young file (age guard) via injected now', () => {
   const dir = makeTmpDir();
-  // Aged only 1s — younger than the default 60s guard.
-  const young = writeSnapshot(dir, 'stenoai-live-1700000000002-fresh1.txt', {
-    ageMs: 1000,
-  });
+  const young = path.join(dir, 'stenoai-live-1700000000002-fresh1.txt');
+  fs.writeFileSync(young, 'transcript', 'utf-8');
+  const mtimeSec = 1_000_000; // fixed mtime in seconds
+  fs.utimesSync(young, mtimeSec, mtimeSec);
 
-  const result = sweepOrphanedLiveSnapshots({ tmpDir: dir });
+  // Inject `now` 1s past the mtime — younger than the default 60s guard, so the
+  // file is kept. Fully deterministic: no reliance on the wall clock.
+  const result = sweepOrphanedLiveSnapshots({
+    tmpDir: dir,
+    now: mtimeSec * 1000 + 1000,
+  });
 
   assert.deepStrictEqual(result.deleted, []);
   assert.deepStrictEqual(result.kept, [young]);
@@ -98,6 +115,18 @@ test('matches a real 13-digit-timestamp snapshot name', () => {
   const result = sweepOrphanedLiveSnapshots({ tmpDir: dir });
 
   assert.deepStrictEqual(result.deleted, [real]);
+});
+
+test('sweeps a degenerate empty-suffix snapshot', () => {
+  const dir = makeTmpDir();
+  // Math.random() === 0 -> "0", whose slice(2, 8) is "" — the writer can emit
+  // `stenoai-live-<ts>-.txt`. It must still be swept, not leaked forever.
+  const empty = writeSnapshot(dir, 'stenoai-live-1700000000000-.txt');
+
+  const result = sweepOrphanedLiveSnapshots({ tmpDir: dir });
+
+  assert.deepStrictEqual(result.deleted, [empty]);
+  assert.strictEqual(fs.existsSync(empty), false);
 });
 
 test('ignores a too-short timestamp (single digit)', () => {

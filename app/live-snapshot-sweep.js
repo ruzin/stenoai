@@ -26,10 +26,13 @@ const path = require('path');
 //   stays tolerant of clock growth (17 digits covers epoch ms well past the
 //   year 5000) without matching an unbounded run of digits.
 // - The random suffix is base-36 (lowercase letters + digits), up to 6 chars
-//   from slice(2, 8) but SHORTER when Math.random() yields a small value; 1-8
-//   tolerates that low end and a little headroom without matching junk.
-// Anchored so a hand-crafted name like `stenoai-live-foo.txt` is ignored.
-const LIVE_SNAPSHOT_NAME = /^stenoai-live-\d{10,17}-[a-z0-9]{1,8}\.txt$/;
+//   from slice(2, 8) but SHORTER when Math.random() yields a small value — and
+//   EMPTY in the degenerate case (e.g. Math.random() === 0 -> "0", whose
+//   slice(2, 8) is ""), producing `stenoai-live-<ts>-.txt`. So the suffix bound
+//   is {0,8}: 0 sweeps that empty-suffix leak, 8 gives a little headroom. The
+//   anchored 10-17 digit block + literal `-` + `.txt` still prevent
+//   over-matching a hand-crafted name like `stenoai-live-foo.txt`.
+const LIVE_SNAPSHOT_NAME = /^stenoai-live-\d{10,17}-[a-z0-9]{0,8}\.txt$/;
 
 // Snapshots younger than this are kept even when not in the keep-set: they may
 // belong to a job that startup is still wiring up. One minute is far longer than
