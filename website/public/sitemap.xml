@@ -31,6 +31,41 @@
     <priority>0.7</priority>
   </url>
   <url>
+    <loc>https://stenoai.co/enterprise/</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://stenoai.co/enterprise/government/</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://stenoai.co/enterprise/defense/</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://stenoai.co/enterprise/legal/</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://stenoai.co/enterprise/healthcare/</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://stenoai.co/enterprise/finance/</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://stenoai.co/enterprise/executive/</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
     <loc>https://stenoai.co/privacy.html</loc>
     <changefreq>yearly</changefreq>
     <priority>0.3</priority>

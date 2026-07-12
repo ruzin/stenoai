@@ -2,23 +2,28 @@ import { dirname, resolve } from 'path'
 import { fileURLToPath } from 'url'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
-import { ALL } from './src/vs/competitors.js'
+import { ALL as COMPETITORS } from './src/vs/competitors.js'
+import { ALL as INDUSTRIES } from './src/enterprise/industries.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
-const COMPETITOR_BY_SLUG = Object.fromEntries(ALL.map((c) => [c.slug, c]))
+// Map each SEO page's URL path -> the object holding its `faqs`, so the plugin
+// below can emit FAQ structured data for both /vs/ and /enterprise/ pages.
+const FAQ_BY_PATH = Object.fromEntries([
+  ...COMPETITORS.map((c) => [`/vs/${c.slug}/index.html`, c]),
+  ...INDUSTRIES.map((c) => [`/enterprise/${c.slug}/index.html`, c]),
+])
 
-// Emit each /vs/<slug>/ page's FAQ structured data into its STATIC HTML at
-// build time, sourced from competitors.js (single source of truth). This is
-// what non-JS crawlers read — the pages are SEO surfaces, so the JSON-LD must
-// exist without executing React. ComparisonPage no longer injects it client-side.
+// Emit each subpage's FAQ structured data into its STATIC HTML at build time,
+// sourced from the same data module the React page renders from (single source
+// of truth). These are SEO surfaces, so the JSON-LD must exist for non-JS
+// crawlers without executing React; the pages don't inject it client-side.
 function faqJsonLdPlugin() {
   return {
-    name: 'inject-vs-faq-jsonld',
+    name: 'inject-faq-jsonld',
     transformIndexHtml(html, ctx) {
-      const match = (ctx.path || '').match(/\/vs\/([^/]+)\/index\.html$/)
-      const data = match && COMPETITOR_BY_SLUG[match[1]]
-      if (!data) return html
+      const data = FAQ_BY_PATH[ctx.path || '']
+      if (!data || !data.faqs) return html
       const jsonLd = {
         '@context': 'https://schema.org',
         '@type': 'FAQPage',
@@ -42,8 +47,8 @@ export default defineConfig({
     outDir: 'dist',
     assetsDir: 'assets',
     rollupOptions: {
-      // Multi-page build: each /vs/ page is its own HTML entry so it ships
-      // with static per-page meta tags (title/canonical/OG) for SEO.
+      // Multi-page build: each /vs/ and /enterprise/ page is its own HTML entry
+      // so it ships with static per-page meta tags (title/canonical/OG) for SEO.
       input: {
         main: resolve(__dirname, 'index.html'),
         vs: resolve(__dirname, 'vs/index.html'),
@@ -51,6 +56,13 @@ export default defineConfig({
         vsOtter: resolve(__dirname, 'vs/otter/index.html'),
         vsFireflies: resolve(__dirname, 'vs/fireflies/index.html'),
         vsMeetily: resolve(__dirname, 'vs/meetily/index.html'),
+        enterprise: resolve(__dirname, 'enterprise/index.html'),
+        entGovernment: resolve(__dirname, 'enterprise/government/index.html'),
+        entDefense: resolve(__dirname, 'enterprise/defense/index.html'),
+        entLegal: resolve(__dirname, 'enterprise/legal/index.html'),
+        entHealthcare: resolve(__dirname, 'enterprise/healthcare/index.html'),
+        entFinance: resolve(__dirname, 'enterprise/finance/index.html'),
+        entExecutive: resolve(__dirname, 'enterprise/executive/index.html'),
       },
     },
   },
