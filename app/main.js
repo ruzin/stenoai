@@ -518,9 +518,8 @@ function applyLoginItemSetting(enabled) {
  * Initialize PostHog telemetry by reading config from Python backend.
  */
 // One config.json read (no extra subprocess) + a token-file existence check
-// for the identify() super-properties below. `launch_on_login` defaults ON
-// (feature ships enabled-for-everyone; users opt out in Settings), so a legacy
-// config missing the key reports true.
+// for the identify() super-properties below. `launch_on_login` is opt-in, so a
+// legacy config missing the key reports false.
 function loadIdentitySuperProperties() {
   let cfg = {};
   try {
@@ -535,7 +534,7 @@ function loadIdentitySuperProperties() {
     ai_provider: cfg.ai_provider || 'local',
     notifications_enabled: cfg.notifications_enabled !== false,
     calendar_connected: calendarConnected,
-    launch_on_login: cfg.launch_on_login !== false,
+    launch_on_login: cfg.launch_on_login === true,
   };
 }
 
@@ -1306,15 +1305,15 @@ if (!gotSingleInstanceLock) {
     // app_opened event and the first window show below. macOS reports it via
     // wasOpenedAtLogin (the deprecated openAsHidden no longer works on 13+);
     // Windows carries the `--hidden` arg we registered the login item with.
-    // Only treat it as hidden if the setting isn't explicitly off, so a stale
-    // OS login item (setting since disabled) doesn't wrongly hide the window.
+    // Only treat it as hidden when the user explicitly enabled the setting, so
+    // a stale OS login item doesn't wrongly hide the window.
     try {
-      let launchOnLoginEnabled = true;
+      let launchOnLoginEnabled = false;
       try {
         const cfgPath = path.join(getUserDataDir(), 'config.json');
         if (fs.existsSync(cfgPath)) {
           const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf-8'));
-          launchOnLoginEnabled = cfg.launch_on_login !== false;
+          launchOnLoginEnabled = cfg.launch_on_login === true;
         }
       } catch (_) {}
       const openedAtLogin =
@@ -1501,17 +1500,16 @@ if (!gotSingleInstanceLock) {
     }
 
     // Re-apply the OS "launch on login" item on every startup from the
-    // persisted preference (config.json read directly — no subprocess). This is
-    // what makes the feature default-ON for everyone: new installs default true
-    // and existing configs missing the key fall back to true (registering the
-    // login item on this launch), while a user who turned it off persists false
-    // and stays unregistered. Idempotent; no-op under E2E / dev (see helper).
+    // persisted preference (config.json read directly — no subprocess). New
+    // installs and existing configs without the key remain off; only an
+    // explicit true registers the login item. Idempotent; no-op under E2E / dev
+    // (see helper).
     try {
-      let launchOnLoginEnabled = true;
+      let launchOnLoginEnabled = false;
       const cfgPath = path.join(getUserDataDir(), 'config.json');
       if (fs.existsSync(cfgPath)) {
         const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf-8'));
-        launchOnLoginEnabled = cfg.launch_on_login !== false;
+        launchOnLoginEnabled = cfg.launch_on_login === true;
       }
       applyLoginItemSetting(launchOnLoginEnabled);
     } catch (e) {

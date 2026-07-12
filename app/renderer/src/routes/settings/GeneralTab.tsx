@@ -324,7 +324,7 @@ export function GeneralTab() {
         description="Start Steno automatically when you log in, hidden in the menu bar. Turn off to launch it manually."
       >
         <Switch
-          checked={launchOnLogin.data ?? true}
+          checked={launchOnLogin.data ?? false}
           onCheckedChange={(v) => setLaunchOnLogin.mutate(v)}
           disabled={launchOnLogin.data === undefined}
         />

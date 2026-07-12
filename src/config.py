@@ -597,11 +597,10 @@ class Config:
             # any non-Steno app starts capturing the mic. Helper is gated
             # to macOS 14+ in main.js; users can flip off in Settings.
             "auto_detect_meetings_enabled": True,
-            # Default ON — Steno auto-starts (hidden, in the tray/menu bar)
-            # when the user logs in. main.js registers/removes the OS login
-            # item and suppresses the first window show on a login launch.
-            # Users opt out in Settings.
-            "launch_on_login": True,
+            # Default OFF — Steno only registers itself as an OS login item
+            # after the user explicitly enables the setting. When enabled, it
+            # starts hidden in the tray/menu bar.
+            "launch_on_login": False,
             # "auto" so _resolve_output_language() picks the transcript's
             # detected language instead of silently defaulting every
             # unconfigured install to English summaries (#281).
@@ -1009,10 +1008,9 @@ class Config:
 
     def get_launch_on_login(self) -> bool:
         """Get whether Steno launches automatically on login."""
-        # Fall back to True so existing installs whose config predates this
-        # key default ON (the feature ships enabled-for-everyone; users opt out
-        # in Settings). main.js re-applies the OS login item on every startup.
-        return self._config.get("launch_on_login", True)
+        # Missing keys belong to installs that never opted in. Keep them off;
+        # main.js re-applies only the resulting persisted preference.
+        return self._config.get("launch_on_login", False)
 
     def set_launch_on_login(self, enabled: bool) -> bool:
         """Set whether Steno launches automatically on login."""

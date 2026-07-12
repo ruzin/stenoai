@@ -63,9 +63,9 @@ const CASES: Case[] = [
   { kind: 'telemetry', value: false, configKey: 'telemetry_enabled' },
   { kind: 'transcriptionEngine', value: 'whisper', configKey: 'transcription_engine' },
   { kind: 'dockIcon', value: true, configKey: 'hide_dock_icon' },
-  // false flips the default (true) so the assertion has teeth — a no-op setter
-  // would leave the key unset/true and fail this case.
-  { kind: 'launchOnLogin', value: false, configKey: 'launch_on_login' },
+  // true flips the default (false) so the assertion has teeth — a no-op setter
+  // would leave the key unset/false and fail this case.
+  { kind: 'launchOnLogin', value: true, configKey: 'launch_on_login' },
 ];
 
 function applySetting(
