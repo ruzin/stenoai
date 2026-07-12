@@ -98,6 +98,10 @@ function NavDropdown({ label, hubHref, hubLabel, ariaLabel, links }) {
       className="relative"
       onMouseEnter={() => { cancelClose(); setOpen(true); }}
       onMouseLeave={scheduleClose}
+      // Close when focus leaves the wrapper (e.g. Tab out to the other
+      // dropdown's trigger) so two panels can't be open at once with stale
+      // aria-expanded. relatedTarget is the element receiving focus.
+      onBlur={(e) => { if (!wrapRef.current?.contains(e.relatedTarget)) setOpen(false); }}
     >
       <a
         href={hubHref}

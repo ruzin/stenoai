@@ -11,7 +11,7 @@
 // Shared compliance paragraph — one source of truth so the pages can't drift
 // into overclaiming. Rendered on every industry page's "Compliance" block.
 export const COMPLIANCE_BODY =
-  "Steno runs entirely on your device. Recordings, transcripts, and summaries never reach our servers — there is no third-party processor in your data path, which is what regimes like HIPAA, GDPR, and data-residency rules are fundamentally concerned with. Steno itself isn't a certified cloud service, because there is no cloud service to certify — and that's the point: the vendor-breach risk that frameworks such as SOC 2 exist to assure against simply isn't present.";
+  "Steno runs entirely on your device. Your meeting recordings, transcripts, and summaries never reach our servers — there is no third-party processor handling your meeting data, which addresses a meaningful part of HIPAA, GDPR, and data-residency exposure. (Those frameworks also cover safeguards, agreements, and processes that remain your responsibility — no tool hands you compliance.) Steno itself isn't a certified cloud service, because there is no cloud service handling your meetings to certify — and that's the point: the vendor-breach risk that frameworks such as SOC 2 exist to assure against isn't in that path.";
 
 // Short, honest compliance chips shown on industry pages. "-aligned" / "by
 // design" / "-friendly" are load-bearing hedges — do not upgrade them to
@@ -19,7 +19,7 @@ export const COMPLIANCE_BODY =
 const CHIPS = {
   hipaa: "HIPAA-friendly by design",
   gdpr: "GDPR-aligned",
-  dataResidency: "Data stays in your jurisdiction",
+  dataResidency: "Nothing leaves the device",
   airGapped: "Runs air-gapped / offline",
   secFinra: "SEC & FINRA-aligned",
   privilege: "Privilege preserved by architecture",
@@ -42,7 +42,7 @@ export const government = {
     "Retention and access to recordings sit under a vendor's terms, not your records policy.",
   ],
   points: [
-    { h: "Data sovereignty", b: "Everything is processed and stored on the device. Nothing transits an external server, so residency and sovereignty requirements are met by architecture, not a vendor promise." },
+    { h: "Data sovereignty", b: "Everything is processed and stored on the device. Nothing transits an external server, so residency and sovereignty obligations are supported by architecture, not a vendor promise." },
     { h: "Works air-gapped", b: "After first-run setup, Steno needs no network. It runs on isolated and offline networks where cloud tools simply can't operate." },
     { h: "No bot in the room", b: "Steno captures system and microphone audio directly — nothing joins the meeting as a participant." },
     { h: "Auditable by design", b: "It's open source. Your security team can read exactly what touches the audio and confirm the no-network claim themselves." },
@@ -60,7 +60,7 @@ export const defense = {
   eyebrow: "Steno for Defense",
   h1: "Built for the discussions that can't touch a cloud.",
   intro:
-    "Operational planning and classified discussions run on hardware you control, on networks you control. Steno does the entire pipeline — capture, transcription, summary — on the device, offline, with nothing transiting an external server. This is the use case cloud notetakers structurally can't serve.",
+    "Operational planning and sensitive discussions run on hardware you control, on networks you control. Steno does the entire pipeline — capture, transcription, summary — on the device, offline, with nothing transiting an external server. It's designed for air-gapped, local-only deployments — the environment cloud notetakers structurally can't serve. (Accreditation for any specific classified environment is a function of your own deployment and authorization process, not the app alone.)",
   chips: [CHIPS.airGapped, CHIPS.dataResidency],
   pains: [
     "Cloud transcription is a non-starter when the audio can't leave the enclave.",

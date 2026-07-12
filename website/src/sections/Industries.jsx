@@ -38,8 +38,9 @@ export function Industries() {
             Steno is built for people who understand this.
           </p>
           <p className="text-fg-2 text-[15px] leading-[1.55] mt-4">
-            Because nothing leaves the device, there's no third-party processor in your data path —
-            supporting HIPAA and GDPR obligations and keeping data in your jurisdiction by design.
+            Because your meeting recordings, transcripts, and summaries never leave the device,
+            there's no third-party processor handling them — supporting HIPAA and GDPR obligations
+            by design.
           </p>
           <div className="flex flex-wrap items-center gap-x-5 gap-y-3 mt-7">
             <a
