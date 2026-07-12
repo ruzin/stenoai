@@ -207,7 +207,7 @@ function NotesScreen() {
           <div
             style={{ fontFamily: "var(--font-serif)", fontWeight: 400, fontSize: 34, lineHeight: 1.15, letterSpacing: "-0.02em", color: "var(--fg-1)", marginBottom: 10 }}
           >
-            Q1 Budget Planning
+            Defence Budget Planning
           </div>
 
           <div className="flex flex-wrap items-center gap-1.5 mb-6">
@@ -364,7 +364,7 @@ function GeneratingScreen() {
           </button>
 
           <div style={{ fontFamily: "var(--font-serif)", fontWeight: 400, fontSize: 34, lineHeight: 1.15, letterSpacing: "-0.02em", color: "var(--fg-1)", margin: "0 0 10px" }}>
-            Q1 Budget Planning
+            Defence Budget Planning
           </div>
 
           <div className="flex flex-wrap items-center gap-1.5 mb-6">
@@ -424,7 +424,7 @@ function SummaryScreen() {
           </button>
 
           <div style={{ fontFamily: "var(--font-serif)", fontWeight: 400, fontSize: 36, lineHeight: 1.1, letterSpacing: "-0.025em", color: "var(--fg-1)", margin: "0 0 10px" }}>
-            Q1 Budget Planning
+            Defence Budget Planning
           </div>
 
           <div className="flex flex-wrap items-center gap-1.5 pb-5 mb-5" style={{ borderBottom: "1px solid var(--border-subtle)" }}>
@@ -555,7 +555,7 @@ function ChatScreen() {
           <ChevronLeft size={13} /> Work
         </div>
         <div style={{ fontFamily: "var(--font-serif)", fontSize: 30, fontWeight: 400, letterSpacing: "-0.02em", color: "var(--fg-1)", marginBottom: 10 }}>
-          Q1 Budget Planning
+          Defence Budget Planning
         </div>
         <div style={{ display: "flex", gap: 6, marginBottom: 16 }}>
           <span style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "3px 10px", background: "var(--surface-hover)", borderRadius: 20, fontSize: 12, color: "var(--fg-2)" }}>
@@ -591,7 +591,7 @@ function ChatScreen() {
             <div style={{ background: "color-mix(in srgb, var(--surface-raised) 92%, transparent)", backdropFilter: "saturate(160%) blur(10px)", WebkitBackdropFilter: "saturate(160%) blur(10px)", border: "1px solid var(--border-subtle)", borderRadius: 14, boxShadow: "var(--shadow-md)", overflow: "hidden" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", borderBottom: "1px solid var(--border-subtle)" }}>
                 <span style={{ fontSize: 13, fontWeight: 600, color: "var(--fg-1)", flex: 1 }}>
-                  Q1 Budget Planning
+                  Defence Budget Planning
                   <ChevronDown size={11} style={{ display: "inline", marginLeft: 3, color: "var(--fg-2)", verticalAlign: "middle" }} />
                 </span>
                 <button style={{ border: "1px solid var(--border-subtle)", borderRadius: 6, padding: "2px 8px", fontSize: 12, color: "var(--fg-2)", background: "transparent", cursor: "default" }}>

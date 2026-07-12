@@ -95,8 +95,8 @@ export function Hero() {
           className="text-fg-2 text-lg leading-[1.55] mt-6 mb-8 mx-auto"
           style={{ maxWidth: "64ch" }}
         >
-          Steno is the AI powered intelligence layer for all your confidential workflows.
-          No cloud, no usage limits and full control of your data.
+          Steno is the privacy-first AI notepad for all your confidential conversations.
+          No cloud, no usage limits and your private data never leaves your premises.
         </Motion.p>
 
         <Motion.div

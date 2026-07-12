@@ -133,7 +133,7 @@ function NotesPane() {
             lineHeight: 1.15, letterSpacing: "-0.02em", color: "var(--fg-1)", marginBottom: 10,
           }}
         >
-          Q1 Budget Planning
+          Defence Budget Planning
         </div>
         <div className="flex flex-wrap items-center gap-1.5 mb-6">
           {[
@@ -272,7 +272,7 @@ function ChatWithNotesImage() {
           <ChevronLeft size={9} /> Work
         </div>
         <div style={{ fontFamily: "var(--font-serif)", fontSize: 18, color: "var(--fg-1)", marginBottom: 8, letterSpacing: "-0.02em" }}>
-          Q1 Budget Planning
+          Defence Budget Planning
         </div>
         <div style={{ display: "flex", gap: 4 }}>
           {[
@@ -324,7 +324,7 @@ function ChatWithNotesImage() {
           >
             <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 12px", borderBottom: "1px solid var(--border-subtle)", flexShrink: 0 }}>
               <span style={{ fontSize: 12, fontWeight: 600, color: "var(--fg-1)", flex: 1 }}>
-                Q1 Budget Planning
+                Defence Budget Planning
                 <ChevronDown size={10} style={{ display: "inline", marginLeft: 2, color: "var(--fg-2)", verticalAlign: "middle" }} />
               </span>
               <button style={{ border: "1px solid var(--border-subtle)", borderRadius: 5, padding: "1px 7px", fontSize: 10, color: "var(--fg-2)", background: "transparent", cursor: "default" }}>
