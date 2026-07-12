@@ -109,6 +109,10 @@ export interface UpdateMeetingPatch {
   participants?: unknown[];
   key_points?: string[];
   action_items?: unknown[];
+  /** The user's own notes (My notes tab). Upserts the `## User Notes` body
+   *  section of the .md (or the `user_notes` field of a legacy .json); an
+   *  empty string removes the section. */
+  user_notes?: string;
 }
 
 export interface ChatSessionsBlob {

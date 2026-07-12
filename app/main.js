@@ -2675,6 +2675,23 @@ ipcMain.handle('save-diagnostics', async (event, defaultFilename, content) => {
   }
 });
 
+// Replace (or remove, when empty) the "## User Notes" section at the tail of a
+// meeting markdown body. Kept a pure string transform so it's unit-testable and
+// never touches the summary/transcript sections above it. `body` is everything
+// after the closing frontmatter `---`.
+function upsertUserNotesSection(body, notes) {
+  const idx = body.indexOf('\n## User Notes');
+  // Trim trailing whitespace from the kept head so re-appends don't accrete
+  // blank lines across repeated autosaves.
+  const head = (idx === -1 ? body : body.slice(0, idx)).replace(/\s+$/, '');
+  const trimmed = String(notes ?? '').replace(/\s+$/, '');
+  if (!trimmed) {
+    // Notes cleared → drop the section entirely.
+    return head + '\n';
+  }
+  return `${head}\n\n## User Notes\n\n${trimmed}\n`;
+}
+
 ipcMain.handle('update-meeting', async (event, summaryFilePath, updates) => {
   try {
     const projectRoot = path.join(__dirname, '..');
@@ -2772,6 +2789,13 @@ ipcMain.handle('update-meeting', async (event, summaryFilePath, updates) => {
             const insertIdx = newLines[newLines.length - 1] === '' ? newLines.length - 1 : newLines.length;
             newLines.splice(insertIdx, 0, `updated_at: ${yamlQuote(updatedAt)}`);
           }
+          // Upsert the "## User Notes" body section (My notes tab). It is
+          // always the LAST section (summary → ## Transcript → ## User Notes,
+          // matching simple_recorder.py's write order), so replacing from the
+          // header to EOF preserves the summary + transcript verbatim.
+          if (updates.user_notes !== undefined) {
+            body = upsertUserNotesSection(body, updates.user_notes);
+          }
           updatedRaw = `---${newLines.join('\n')}---${body}`;
         }
       }
@@ -2802,6 +2826,9 @@ ipcMain.handle('update-meeting', async (event, summaryFilePath, updates) => {
       }
       if (updates.action_items !== undefined) {
         data.action_items = updates.action_items;
+      }
+      if (updates.user_notes !== undefined) {
+        data.user_notes = updates.user_notes;
       }
 
       data.session_info.updated_at = new Date().toISOString();

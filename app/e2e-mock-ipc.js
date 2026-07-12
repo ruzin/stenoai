@@ -124,6 +124,16 @@ function install({ ipcMain }) {
     pausedAt: 0,
   };
 
+  // In-memory overlay so update-meeting → get-meeting round-trips the My notes
+  // tab in T1 (summaryFile → { user_notes }). The real handler persists to the
+  // note file; the T1 seeds are consts, so we overlay here instead.
+  const meetingOverlay = {};
+  const applyOverlay = (m) => {
+    if (!m || !m.session_info) return m;
+    const o = meetingOverlay[m.session_info.summary_file];
+    return o ? { ...m, ...o } : m;
+  };
+
   // Channels with behaviour a test depends on. Each is (event, ...args) like a
   // real ipcMain.handle callback. Mirror the real handlers' return shapes from
   // app/main.js (get-ai-provider ~5950, org-* ~7990).
@@ -235,18 +245,32 @@ function install({ ipcMain }) {
     // transcript-export detail route resolves and renders the transcript actions.
     'get-meeting': async (_event, summaryFile) => {
       if (process.env.STENOAI_E2E_SEED_PENDING_NOTE === '1') {
-        return { success: true, meeting: PENDING_MEETING };
+        return { success: true, meeting: applyOverlay(PENDING_MEETING) };
       }
       if (process.env.STENOAI_E2E_SEED_STALE_NOTE === '1') {
-        return { success: true, meeting: STALE_MEETING };
+        return { success: true, meeting: applyOverlay(STALE_MEETING) };
       }
       if (process.env.STENOAI_E2E_SEED_MEETING === '1') {
-        return { success: true, meeting: SEED_MEETING };
+        return { success: true, meeting: applyOverlay(SEED_MEETING) };
       }
       const m = SEEDED_MEETINGS.find(
         (x) => x.session_info && x.session_info.summary_file === summaryFile,
       );
-      return m ? { success: true, meeting: m } : { success: false, error: 'meeting not found' };
+      return m
+        ? { success: true, meeting: applyOverlay(m) }
+        : { success: false, error: 'meeting not found' };
+    },
+
+    // My notes autosave: persist the overlay so a follow-up get-meeting sees
+    // the edit (mirrors the real update-meeting body-section upsert).
+    'update-meeting': async (_event, summaryFile, patch) => {
+      if (patch && typeof patch.user_notes === 'string') {
+        meetingOverlay[summaryFile] = {
+          ...(meetingOverlay[summaryFile] || {}),
+          user_notes: patch.user_notes,
+        };
+      }
+      return { success: true, message: 'ok' };
     },
 
     // Mirror the real export-transcript handler's seam: with STENOAI_E2E_EXPORT_PATH

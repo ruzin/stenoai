@@ -38,6 +38,7 @@ import {
   useGenerateReport,
   useSetActiveReport,
   useDeleteReport,
+  useUpdateUserNotes,
   meetingsKeys,
 } from '@/hooks/useMeetings';
 import { useTemplates } from '@/hooks/useTemplates';
@@ -600,6 +601,12 @@ function DetailContent({
     clearReprocess,
   ]);
 
+  // My notes tab: an always-available editable notes layer, independent of
+  // the summary. Persists to the `## User Notes` section (autosave). Local
+  // state resets per meeting because DetailContent is keyed by summaryFile.
+  const [tab, setTab] = React.useState<'summary' | 'notes'>('summary');
+  const hasUserNotes = Boolean((meeting.user_notes ?? '').trim());
+
   return (
     <article data-testid="meeting-detail" className="space-y-9">
       <header
@@ -885,6 +892,10 @@ function DetailContent({
         )}
       </header>
 
+      <DetailTabs tab={tab} onTab={setTab} hasNotes={hasUserNotes} />
+
+      {tab === 'summary' && (
+      <>
       {streamPhase === 'idle' && (reports.length > 0 || reportTemplates.length > 0) && (
         <ReportSwitch
           reports={reports}
@@ -1047,6 +1058,15 @@ function DetailContent({
 
         </div>
       )}
+      </>
+      )}
+
+      {tab === 'notes' && (
+        <MyNotesEditor
+          summaryFile={routeSummaryFile}
+          initialNotes={meeting.user_notes ?? ''}
+        />
+      )}
 
       <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <DialogContent className="max-w-sm">
@@ -1111,6 +1131,130 @@ function DetailContent({
 // ---------------------------------------------------------------------------
 // Subcomponents
 // ---------------------------------------------------------------------------
+
+/**
+ * Summary / My notes tab switcher. My notes is always present (the note's own
+ * notes layer survives regardless of summary state); a dot marks when notes
+ * exist so the tab reads as non-empty without opening it.
+ */
+function DetailTabs({
+  tab,
+  onTab,
+  hasNotes,
+}: {
+  tab: 'summary' | 'notes';
+  onTab: (t: 'summary' | 'notes') => void;
+  hasNotes: boolean;
+}) {
+  const base =
+    'relative rounded-full px-3 py-1 text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--focus-ring)]';
+  return (
+    <div
+      role="tablist"
+      aria-label="Note view"
+      data-testid="detail-tabs"
+      className="flex items-center gap-1"
+    >
+      <button
+        type="button"
+        role="tab"
+        aria-selected={tab === 'summary'}
+        data-testid="tab-summary"
+        onClick={() => onTab('summary')}
+        className={base}
+        style={{
+          background: tab === 'summary' ? 'var(--surface-active)' : 'transparent',
+          color: tab === 'summary' ? 'var(--fg-1)' : 'var(--fg-2)',
+        }}
+      >
+        Summary
+      </button>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={tab === 'notes'}
+        data-testid="tab-notes"
+        onClick={() => onTab('notes')}
+        className={cn(base, 'inline-flex items-center gap-1.5')}
+        style={{
+          background: tab === 'notes' ? 'var(--surface-active)' : 'transparent',
+          color: tab === 'notes' ? 'var(--fg-1)' : 'var(--fg-2)',
+        }}
+      >
+        My notes
+        {hasNotes && (
+          <span
+            aria-hidden="true"
+            className="size-1.5 rounded-full"
+            style={{ background: 'var(--accent-primary)' }}
+          />
+        )}
+      </button>
+    </div>
+  );
+}
+
+/**
+ * My notes editor — an always-editable notes layer for the meeting, decoupled
+ * from the AI summary (borrowed from meetily's separate meeting_notes store).
+ * Autosaves the `## User Notes` section: debounced while typing and flushed on
+ * blur/unmount. The textarea is the source of truth while focused, so a
+ * background summary regenerate doesn't clobber in-progress typing.
+ */
+function MyNotesEditor({
+  summaryFile,
+  initialNotes,
+}: {
+  summaryFile: string;
+  initialNotes: string;
+}) {
+  const [value, setValue] = React.useState(initialNotes);
+  const save = useUpdateUserNotes();
+  const timerRef = React.useRef<number | null>(null);
+  const savedRef = React.useRef(initialNotes);
+  const valueRef = React.useRef(value);
+  valueRef.current = value;
+
+  const flush = React.useCallback(() => {
+    if (timerRef.current !== null) {
+      window.clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+    if (valueRef.current === savedRef.current) return;
+    savedRef.current = valueRef.current;
+    save.mutate({ summaryFile, userNotes: valueRef.current });
+  }, [save, summaryFile]);
+
+  // Flush any pending edit on unmount (tab switch / navigation).
+  React.useEffect(() => flush, [flush]);
+
+  const onChange = (next: string) => {
+    setValue(next);
+    if (timerRef.current !== null) window.clearTimeout(timerRef.current);
+    timerRef.current = window.setTimeout(flush, 800);
+  };
+
+  return (
+    <section className="flex flex-col gap-2" data-testid="my-notes">
+      <textarea
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onBlur={flush}
+        placeholder="Write notes…"
+        spellCheck
+        data-testid="my-notes-input"
+        className="block w-full resize-none border-0 bg-transparent text-[15.5px] outline-none"
+        style={{
+          color: 'var(--fg-1)',
+          fontFamily: 'var(--font-sans)',
+          lineHeight: 1.65,
+          minHeight: 360,
+          maxWidth: '64ch',
+        }}
+      />
+    </section>
+  );
+}
 
 function SectionTitle({ children }: { children: React.ReactNode }) {
   return (
