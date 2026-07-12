@@ -2,9 +2,9 @@ import { test, expect } from '../fixtures/electron';
 import type { Page } from '@playwright/test';
 
 /**
- * T1 — renderer-only, mock IPC. The coexisting transcription pill dock:
- * starting a recording no longer navigates to a takeover /recording route —
- * the compact Granola-style pill (components/LiveDock.tsx: wave + elapsed +
+ * T1 — renderer-only, mock IPC. The coexisting transcription pill dock: a
+ * BACKGROUND start (hotkey/tray/auto) does not navigate — it docks the compact
+ * Granola-style pill (components/LiveDock.tsx: wave + elapsed +
  * expand chevron + stop glyph) docks LEFT of the Ask bar in the primary
  * bottom-dock row (components/PrimaryDock.tsx), the Ask bar renders
  * visible-but-disabled, and (Parakeet) the pill expands into the
@@ -23,8 +23,15 @@ import type { Page } from '@playwright/test';
 
 const PILL_ENV = { STENOAI_E2E_MOCK_PARAKEET_INSTALLED: '1' };
 
-async function startFromToolbar(page: Page) {
-  await page.locator('.record-btn').click();
+/**
+ * Start a recording in the BACKGROUND (the IPC directly, as a hotkey/tray/
+ * auto-detect trigger does) so the spec tests dock coexistence without the
+ * New-note navigation — a background start must stay on the current route and
+ * dock the pill there. (The explicit toolbar New-note button navigates to the
+ * live-note editor; that's covered separately below.)
+ */
+async function startInBackground(page: Page) {
+  await page.evaluate(() => window.stenoai.recording.start('Test note'));
   const pill = page.getByTestId('transcription-pill');
   await expect(pill).toBeVisible();
   return pill;
@@ -35,11 +42,9 @@ test('recording coexists: pill docks next to a disabled Ask bar, expands, stops 
 }) => {
   const { page } = await launchApp({ mockIpc: true, env: PILL_ENV });
 
-  // Start from the real toolbar button so the spec exercises
-  // useRecording.startRecording — the code path that used to navigate.
-  const pill = await startFromToolbar(page);
+  const pill = await startInBackground(page);
 
-  // The pill appears (optimistic status flip) without any navigation.
+  // A background start does NOT navigate — the pill docks on the current route.
   const hash = await page.evaluate(() => window.location.hash);
   expect(hash).not.toContain('/recording');
   expect(hash).not.toContain('/meetings/processing');
@@ -104,11 +109,26 @@ test('recording coexists: pill docks next to a disabled Ask bar, expands, stops 
     .toContain('/meetings/processing');
 });
 
+test('New note: the toolbar button starts recording AND opens the live-note editor', async ({
+  launchApp,
+}) => {
+  const { page } = await launchApp({ mockIpc: true, env: PILL_ENV });
+
+  // Coexistence means the pill FOLLOWS you, not that you start nowhere: the
+  // explicit New-note action lands the user on the live-note editor so they
+  // have somewhere to write notes while it records.
+  await page.locator('.record-btn').click();
+  await expect(page.getByTestId('transcription-pill')).toBeVisible();
+  await expect
+    .poll(() => page.evaluate(() => window.location.hash), { timeout: 10_000 })
+    .toContain('/recording');
+});
+
 test('auto-pause rescue: Resume appears only when the system paused the recording', async ({
   launchApp,
 }) => {
   const { page } = await launchApp({ mockIpc: true, env: PILL_ENV });
-  const pill = await startFromToolbar(page);
+  const pill = await startInBackground(page);
 
   // No resume while recording normally.
   await expect(pill.getByRole('button', { name: 'Resume recording' })).toHaveCount(0);
@@ -129,7 +149,7 @@ test('whisper variant: compact pill has no expand and no pause', async ({ launch
     mockIpc: true,
     env: { ...PILL_ENV, STENOAI_E2E_MOCK_ENGINE: 'whisper' },
   });
-  const pill = await startFromToolbar(page);
+  const pill = await startInBackground(page);
 
   // No live transcript on Whisper: no expand affordance; and no pause —
   // stop-only, like Parakeet.
