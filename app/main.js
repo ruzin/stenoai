@@ -37,6 +37,7 @@ const path = require('path');
 const { spawn: _spawnRaw } = require('child_process');
 const processingLog = require('./processing-log');
 const { isMeetingApp, allowsDeviceLevelFallback } = require('./meeting-detect');
+const { sweepOrphanedLiveSnapshots } = require('./live-snapshot-sweep');
 const { userNotesFilePath } = require('./notes-file');
 const { makeLineReader } = require('./backend-stream');
 // Pure deep-link (stenoai://) parsing/sanitizing lives in ./shortcut-url
@@ -1527,6 +1528,34 @@ if (!gotSingleInstanceLock) {
       hidden: launchedHidden,
     });
     checkForOrphanedRecording();
+
+    // Sweep orphaned live-transcript snapshot temp files (#259). The primary
+    // cleanup is the finally-unlink in processNextInQueue, but a quit/crash
+    // while a job is still QUEUED never runs it, leaking stenoai-live-*.txt in
+    // the temp dir. The processing queue is purely in-memory (`processingQueue`
+    // / `currentProcessingJob` are `let` state, and the on-disk
+    // `.recording-active` marker holds only a timestamp), so at startup NO job
+    // can reference a snapshot — the keep-set is built defensively from live
+    // queue state (empty here) to stay correct if requeue-on-restart is ever
+    // added. The age guard is what prevents racing a snapshot a concurrent
+    // startup path is still enqueuing. Best-effort: never blocks launch.
+    try {
+      const keepPaths = new Set(
+        processingQueue
+          .map((job) => job && job.liveTranscriptFile)
+          .concat(currentProcessingJob && currentProcessingJob.liveTranscriptFile)
+          .filter(Boolean),
+      );
+      const { deleted } = sweepOrphanedLiveSnapshots({
+        tmpDir: os.tmpdir(),
+        keepPaths,
+      });
+      if (deleted.length > 0) {
+        sendDebugLog(`Swept ${deleted.length} orphaned live-transcript snapshot(s)`);
+      }
+    } catch (e) {
+      console.warn('Live-snapshot sweep failed (non-fatal):', e?.message);
+    }
 
     // Load custom storage path for file validation. Skipped under E2E (spawns
     // the backend; the test tiers keep startup backend-free).
