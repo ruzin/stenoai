@@ -22,6 +22,21 @@ export function Footer() {
           <div className="text-fg-2 text-[13px]">© 2026 Steno</div>
         </div>
         <div className="mt-10 flex gap-x-4 gap-y-2 flex-wrap items-center">
+          <span className="text-fg-muted text-[13px]">Enterprise:</span>
+          {[
+            { slug: "government", name: "Government" },
+            { slug: "defense", name: "Defense" },
+            { slug: "legal", name: "Legal" },
+            { slug: "healthcare", name: "Healthcare" },
+            { slug: "finance", name: "Finance" },
+            { slug: "executive", name: "Executive" },
+          ].map(({ slug, name }) => (
+            <a key={slug} href={`/enterprise/${slug}/`} className="text-fg-muted text-[13px] no-underline hover:text-fg-1 transition-colors">
+              {name}
+            </a>
+          ))}
+        </div>
+        <div className="mt-3 flex gap-x-4 gap-y-2 flex-wrap items-center">
           <span className="text-fg-muted text-[13px]">Compare:</span>
           {[
             { slug: "granola", name: "Granola" },

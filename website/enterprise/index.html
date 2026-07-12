@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/stenoai-logo.svg" />
+    <link rel="icon" type="image/png" href="/favicon-64.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Steno records, transcribes, and summarizes meetings entirely on your device — no cloud, no bot, no vendor in your data path. Built for government, defense, legal, healthcare, finance, and executive teams." />
+    <title>Steno for Enterprise — Private, On-Device AI Meeting Notes for Regulated Teams</title>
+    <link rel="canonical" href="https://stenoai.co/enterprise/" />
+
+    <!-- Open Graph -->
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://stenoai.co/enterprise/" />
+    <meta property="og:title" content="Steno for Enterprise — Private, On-Device AI Meeting Notes for Regulated Teams" />
+    <meta property="og:description" content="Steno records, transcribes, and summarizes meetings entirely on your device — no cloud, no bot, no vendor in your data path. Built for government, defense, legal, healthcare, finance, and executive teams." />
+    <meta property="og:image" content="https://stenoai.co/og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+
+    <!-- Twitter -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Steno for Enterprise — Private, On-Device AI Meeting Notes for Regulated Teams" />
+    <meta name="twitter:description" content="Steno records, transcribes, and summarizes meetings entirely on your device — no cloud, no bot, no vendor in your data path. Built for government, defense, legal, healthcare, finance, and executive teams." />
+    <meta name="twitter:image" content="https://stenoai.co/og-image.png" />
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="preconnect" href="https://us.i.posthog.com" />
+    <link rel="preconnect" href="https://us-assets.i.posthog.com" />
+    <!-- Non-blocking font load: fetch in parallel, apply once ready, no render-blocking round trip -->
+    <link
+      rel="preload"
+      as="style"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;600&family=JetBrains+Mono:wght@400;500&display=swap"
+    />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;600&family=JetBrains+Mono:wght@400;500&display=swap"
+      media="print"
+      onload="this.media='all'"
+    />
+    <noscript>
+      <link
+        rel="stylesheet"
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;600&family=JetBrains+Mono:wght@400;500&display=swap"
+      />
+    </noscript>
+    <!-- No-flash dark mode: apply class before React renders -->
+    <script>
+      (function() {
+        var stored = localStorage.getItem('theme');
+        var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        if (stored === 'dark' || (!stored && prefersDark)) {
+          document.documentElement.classList.add('dark');
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/enterprise/entries/index.jsx"></script>
+  </body>
+</html>

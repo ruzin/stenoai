@@ -7,20 +7,31 @@ import { trackDownload, trackGitHub } from "../analytics";
 
 const GITHUB_URL = "https://github.com/ruzin/stenoai";
 
+// Plain in-page hash links. Enterprise + Compare are dropdowns (below), so
+// they aren't in this list.
 const NAV_LINKS = [
   { href: "#how", label: "How it works" },
   { href: "#features", label: "Features" },
-  { href: "#industries", label: "Enterprise" },
   { href: "#faq", label: "FAQ" },
 ];
 
-// Kept as a small local list (mirrors src/vs/competitors.js) so the nav
-// doesn't pull the full comparison copy into the homepage bundle.
+// Dropdown link lists. Kept as small local arrays (mirroring the /vs/ and
+// /enterprise/ data modules) so the nav doesn't pull the full page copy into
+// the homepage bundle.
 const COMPARE_LINKS = [
   { href: "/vs/granola/", label: "Steno vs Granola" },
   { href: "/vs/otter/", label: "Steno vs Otter.ai" },
   { href: "/vs/fireflies/", label: "Steno vs Fireflies" },
   { href: "/vs/meetily/", label: "Steno vs Meetily" },
+];
+
+const ENTERPRISE_LINKS = [
+  { href: "/enterprise/government/", label: "Government" },
+  { href: "/enterprise/defense/", label: "Defense" },
+  { href: "/enterprise/legal/", label: "Legal" },
+  { href: "/enterprise/healthcare/", label: "Healthcare" },
+  { href: "/enterprise/finance/", label: "Finance" },
+  { href: "/enterprise/executive/", label: "Executive" },
 ];
 
 function formatStars(n) {
@@ -49,10 +60,11 @@ function scrollToHash(e, href) {
   tryScroll();
 }
 
-// Desktop-only Compare dropdown: opens on hover or click, closes on leave,
-// outside click, or Escape. The trigger itself navigates to /vs/ so the
-// hub page stays reachable even without interacting with the menu.
-function CompareMenu() {
+// Desktop-only nav dropdown: opens on hover or keyboard focus, closes on leave,
+// outside click, or Escape. The trigger itself navigates to `hubHref` so the
+// hub page stays reachable even without interacting with the menu. Used for
+// both Compare (/vs/) and Enterprise (/enterprise/).
+function NavDropdown({ label, hubHref, hubLabel, ariaLabel, links }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef(null);
   const closeTimer = useRef(null);
@@ -86,14 +98,18 @@ function CompareMenu() {
       className="relative"
       onMouseEnter={() => { cancelClose(); setOpen(true); }}
       onMouseLeave={scheduleClose}
+      // Close when focus leaves the wrapper (e.g. Tab out to the other
+      // dropdown's trigger) so two panels can't be open at once with stale
+      // aria-expanded. relatedTarget is the element receiving focus.
+      onBlur={(e) => { if (!wrapRef.current?.contains(e.relatedTarget)) setOpen(false); }}
     >
       <a
-        href="/vs/"
+        href={hubHref}
         aria-expanded={open}
         onFocus={() => setOpen(true)}
         className="inline-flex items-center gap-1 text-fg-2 text-sm no-underline hover:text-fg-1 transition-colors"
       >
-        Compare
+        {label}
         <ChevronDown
           size={12}
           aria-hidden="true"
@@ -108,7 +124,7 @@ function CompareMenu() {
           // keys, roving focus). Tab/Shift-Tab through the links + Escape is the
           // correct, expected interaction here.
           <Motion.div
-            aria-label="Compare Steno with other tools"
+            aria-label={ariaLabel}
             initial={{ opacity: 0, y: 4, x: "-50%" }}
             animate={{ opacity: 1, y: 0, x: "-50%" }}
             exit={{ opacity: 0, y: 4, x: "-50%" }}
@@ -124,21 +140,21 @@ function CompareMenu() {
                 boxShadow: "var(--shadow-md)",
               }}
             >
-              {COMPARE_LINKS.map(({ href, label }) => (
+              {links.map(({ href, label: itemLabel }) => (
                 <a
                   key={href}
                   href={href}
                   className="px-4 py-2 text-fg-2 text-sm no-underline hover:text-fg-1 hover:bg-surface-hover transition-colors whitespace-nowrap"
                 >
-                  {label}
+                  {itemLabel}
                 </a>
               ))}
               <div className="my-2" style={{ borderTop: "1px solid var(--border-subtle)" }} />
               <a
-                href="/vs/"
+                href={hubHref}
                 className="px-4 py-2 text-fg-2 text-sm no-underline hover:text-fg-1 hover:bg-surface-hover transition-colors whitespace-nowrap"
               >
-                All comparisons
+                {hubLabel}
               </a>
             </div>
           </Motion.div>
@@ -195,7 +211,7 @@ export function Nav({ subpage = false }) {
         </a>
 
         <div className="hidden md:flex gap-7 items-center">
-          {NAV_LINKS.slice(0, 3).map(({ href, label }) => (
+          {NAV_LINKS.slice(0, 2).map(({ href, label }) => (
             <a
               key={href}
               href={subpage ? `/${href}` : href}
@@ -205,8 +221,21 @@ export function Nav({ subpage = false }) {
               {label}
             </a>
           ))}
-          <CompareMenu />
-          {NAV_LINKS.slice(3).map(({ href, label }) => (
+          <NavDropdown
+            label="Enterprise"
+            hubHref="/enterprise/"
+            hubLabel="All industries"
+            ariaLabel="Steno for specific industries"
+            links={ENTERPRISE_LINKS}
+          />
+          <NavDropdown
+            label="Compare"
+            hubHref="/vs/"
+            hubLabel="All comparisons"
+            ariaLabel="Compare Steno with other tools"
+            links={COMPARE_LINKS}
+          />
+          {NAV_LINKS.slice(2).map(({ href, label }) => (
             <a
               key={href}
               href={subpage ? `/${href}` : href}
@@ -275,6 +304,27 @@ export function Nav({ subpage = false }) {
                   {label}
                 </a>
               ))}
+              <div className="mt-2 pt-2" style={{ borderTop: "1px solid var(--border-subtle)" }}>
+                <a
+                  href="/enterprise/"
+                  onClick={() => setMenuOpen(false)}
+                  className="block text-fg-muted text-[12px] py-2 no-underline hover:text-fg-1 transition-colors"
+                  style={{ fontFamily: "var(--font-mono)", textTransform: "uppercase", letterSpacing: "0.12em" }}
+                >
+                  Enterprise
+                </a>
+                {ENTERPRISE_LINKS.map(({ href, label }) => (
+                  <a
+                    key={href}
+                    href={href}
+                    onClick={() => setMenuOpen(false)}
+                    className="block text-fg-2 text-sm no-underline hover:text-fg-1 transition-colors"
+                    style={{ padding: "10px 0" }}
+                  >
+                    {label}
+                  </a>
+                ))}
+              </div>
               <div className="mt-2 pt-2" style={{ borderTop: "1px solid var(--border-subtle)" }}>
                 <a
                   href="/vs/"
