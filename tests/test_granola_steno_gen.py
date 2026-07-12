@@ -35,6 +35,12 @@ class LanguageFlagTests(unittest.TestCase):
         _stem, summary_md, transcript_txt = steno_gen.build(meeting, language="de")
 
         self.assertIn('language: "de"', summary_md)
+        # The import language is a deliberate choice, so it's recorded as a real
+        # pin (configured_language) with no engine detection, giving the note
+        # provenance so Steno's recovery/chat paths keep it instead of
+        # re-detecting (#283).
+        self.assertIn('configured_language: "de"', summary_md)
+        self.assertIn('detected_language: null', summary_md)
         self.assertIn("Language setting: de", transcript_txt)
         self.assertIn("Detected language: de", transcript_txt)
         self.assertIn("Summary output language: de", transcript_txt)
@@ -141,7 +147,7 @@ class FrontmatterEscapingTests(unittest.TestCase):
         fm_lines = [line for line in fm_block.strip().splitlines() if line.strip()]
         # One line per frontmatter key -- an unescaped newline in a scalar
         # would inject a bogus extra "key" line here and corrupt the block.
-        self.assertEqual(len(fm_lines), 7)
+        self.assertEqual(len(fm_lines), 9)
         self.assertIn('title: "Line one Line two"', summary_md)
 
 

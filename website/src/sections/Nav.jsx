@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { Github, Download, Menu, X } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import { Github, Download, Menu, X, ChevronDown } from "lucide-react";
 import { m as Motion, AnimatePresence } from "framer-motion";
 import { StenoMark, Wordmark } from "../components/Brand";
 import { ThemeToggle } from "../components/ThemeToggle";
@@ -12,6 +12,15 @@ const NAV_LINKS = [
   { href: "#features", label: "Features" },
   { href: "#industries", label: "Enterprise" },
   { href: "#faq", label: "FAQ" },
+];
+
+// Kept as a small local list (mirrors src/vs/competitors.js) so the nav
+// doesn't pull the full comparison copy into the homepage bundle.
+const COMPARE_LINKS = [
+  { href: "/vs/granola/", label: "Steno vs Granola" },
+  { href: "/vs/otter/", label: "Steno vs Otter.ai" },
+  { href: "/vs/fireflies/", label: "Steno vs Fireflies" },
+  { href: "/vs/meetily/", label: "Steno vs Meetily" },
 ];
 
 function formatStars(n) {
@@ -40,7 +49,109 @@ function scrollToHash(e, href) {
   tryScroll();
 }
 
-export function Nav() {
+// Desktop-only Compare dropdown: opens on hover or click, closes on leave,
+// outside click, or Escape. The trigger itself navigates to /vs/ so the
+// hub page stays reachable even without interacting with the menu.
+function CompareMenu() {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef(null);
+  const closeTimer = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (e) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false);
+    };
+    const onKeyDown = (e) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
+
+  const scheduleClose = () => {
+    closeTimer.current = setTimeout(() => setOpen(false), 120);
+  };
+  const cancelClose = () => {
+    if (closeTimer.current) clearTimeout(closeTimer.current);
+  };
+
+  return (
+    <div
+      ref={wrapRef}
+      className="relative"
+      onMouseEnter={() => { cancelClose(); setOpen(true); }}
+      onMouseLeave={scheduleClose}
+    >
+      <a
+        href="/vs/"
+        aria-expanded={open}
+        onFocus={() => setOpen(true)}
+        className="inline-flex items-center gap-1 text-fg-2 text-sm no-underline hover:text-fg-1 transition-colors"
+      >
+        Compare
+        <ChevronDown
+          size={12}
+          aria-hidden="true"
+          style={{ transform: open ? "rotate(180deg)" : "none", transition: "transform var(--dur-fast) var(--ease)" }}
+        />
+      </a>
+
+      <AnimatePresence>
+        {open && (
+          // Plain links in a labelled group, not role="menu": a nav dropdown of
+          // page links doesn't need the application-menu keyboard model (arrow
+          // keys, roving focus). Tab/Shift-Tab through the links + Escape is the
+          // correct, expected interaction here.
+          <Motion.div
+            aria-label="Compare Steno with other tools"
+            initial={{ opacity: 0, y: 4, x: "-50%" }}
+            animate={{ opacity: 1, y: 0, x: "-50%" }}
+            exit={{ opacity: 0, y: 4, x: "-50%" }}
+            transition={{ duration: 0.15, ease: [0.33, 1, 0.68, 1] }}
+            className="absolute left-1/2 top-full pt-3"
+          >
+            <div
+              className="flex flex-col py-2 min-w-[200px]"
+              style={{
+                background: "var(--surface-raised)",
+                border: "1px solid var(--border-subtle)",
+                borderRadius: "var(--radius)",
+                boxShadow: "var(--shadow-md)",
+              }}
+            >
+              {COMPARE_LINKS.map(({ href, label }) => (
+                <a
+                  key={href}
+                  href={href}
+                  className="px-4 py-2 text-fg-2 text-sm no-underline hover:text-fg-1 hover:bg-surface-hover transition-colors whitespace-nowrap"
+                >
+                  {label}
+                </a>
+              ))}
+              <div className="my-2" style={{ borderTop: "1px solid var(--border-subtle)" }} />
+              <a
+                href="/vs/"
+                className="px-4 py-2 text-fg-2 text-sm no-underline hover:text-fg-1 hover:bg-surface-hover transition-colors whitespace-nowrap"
+              >
+                All comparisons
+              </a>
+            </div>
+          </Motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+// `subpage` renders the nav for pages other than the homepage (/vs/*):
+// section links become absolute (/#how) so they navigate home, and the
+// lazy-chunk scroll polyfill is skipped — it only applies to same-page ids.
+export function Nav({ subpage = false }) {
   const [scrolled, setScrolled] = useState(false);
   const [stars, setStars] = useState(null);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -78,14 +189,32 @@ export function Nav() {
       }}
     >
       <div className="container-site flex items-center justify-between py-[18px]">
-        <a href="#" className="flex items-center gap-[10px] text-fg-1 no-underline hover:no-underline">
+        <a href={subpage ? "/" : "#"} className="flex items-center gap-[10px] text-fg-1 no-underline hover:no-underline">
           <StenoMark size={26} />
           <Wordmark size={21} />
         </a>
 
         <div className="hidden md:flex gap-7 items-center">
-          {NAV_LINKS.map(({ href, label }) => (
-            <a key={href} href={href} onClick={(e) => scrollToHash(e, href)} className="text-fg-2 text-sm no-underline hover:text-fg-1 transition-colors">{label}</a>
+          {NAV_LINKS.slice(0, 3).map(({ href, label }) => (
+            <a
+              key={href}
+              href={subpage ? `/${href}` : href}
+              onClick={subpage ? undefined : (e) => scrollToHash(e, href)}
+              className="text-fg-2 text-sm no-underline hover:text-fg-1 transition-colors"
+            >
+              {label}
+            </a>
+          ))}
+          <CompareMenu />
+          {NAV_LINKS.slice(3).map(({ href, label }) => (
+            <a
+              key={href}
+              href={subpage ? `/${href}` : href}
+              onClick={subpage ? undefined : (e) => scrollToHash(e, href)}
+              className="text-fg-2 text-sm no-underline hover:text-fg-1 transition-colors"
+            >
+              {label}
+            </a>
           ))}
         </div>
 
@@ -138,14 +267,35 @@ export function Nav() {
               {NAV_LINKS.map(({ href, label }) => (
                 <a
                   key={href}
-                  href={href}
-                  onClick={(e) => { scrollToHash(e, href); setMenuOpen(false); }}
+                  href={subpage ? `/${href}` : href}
+                  onClick={(e) => { if (!subpage) scrollToHash(e, href); setMenuOpen(false); }}
                   className="text-fg-2 text-sm no-underline hover:text-fg-1 transition-colors"
                   style={{ padding: "10px 0" }}
                 >
                   {label}
                 </a>
               ))}
+              <div className="mt-2 pt-2" style={{ borderTop: "1px solid var(--border-subtle)" }}>
+                <a
+                  href="/vs/"
+                  onClick={() => setMenuOpen(false)}
+                  className="block text-fg-muted text-[12px] py-2 no-underline hover:text-fg-1 transition-colors"
+                  style={{ fontFamily: "var(--font-mono)", textTransform: "uppercase", letterSpacing: "0.12em" }}
+                >
+                  Compare
+                </a>
+                {COMPARE_LINKS.map(({ href, label }) => (
+                  <a
+                    key={href}
+                    href={href}
+                    onClick={() => setMenuOpen(false)}
+                    className="block text-fg-2 text-sm no-underline hover:text-fg-1 transition-colors"
+                    style={{ padding: "10px 0" }}
+                  >
+                    {label}
+                  </a>
+                ))}
+              </div>
               <a
                 href={GITHUB_URL}
                 target="_blank"

@@ -5,30 +5,29 @@
     <link rel="icon" type="image/svg+xml" href="/stenoai-logo.svg" />
     <link rel="icon" type="image/png" href="/favicon-64.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="Steno is the privacy-first AI notepad and meeting assistant. It records, transcribes, and summarizes meetings entirely on your device — a free, open-source AI notetaker with no cloud, no bots joining calls, and no usage limits." />
-    <title>Steno — Privacy-First AI Notepad & Meeting Notetaker (Free, No Cloud)</title>
-    <link rel="canonical" href="https://stenoai.co/" />
+    <meta name="description" content="Steno and Meetily are both open-source, local-first meeting notetakers. The difference: Meetily moves accuracy, exports, and auto-detect behind a $120/year-per-device Pro license — Steno ships everything free, with models bundled in." />
+    <title>Steno vs Meetily — What Meetily Pro Charges For, Free</title>
+    <link rel="canonical" href="https://stenoai.co/vs/meetily/" />
 
     <!-- Open Graph -->
     <meta property="og:type" content="website" />
-    <meta property="og:url" content="https://stenoai.co/" />
-    <meta property="og:title" content="Steno — Privacy-First AI Notepad & Meeting Notetaker (Free, No Cloud)" />
-    <meta property="og:description" content="Steno is the privacy-first AI notepad and meeting assistant. It records, transcribes, and summarizes meetings entirely on your device — a free, open-source AI notetaker with no cloud, no bots joining calls, and no usage limits." />
+    <meta property="og:url" content="https://stenoai.co/vs/meetily/" />
+    <meta property="og:title" content="Steno vs Meetily — What Meetily Pro Charges For, Free" />
+    <meta property="og:description" content="Steno and Meetily are both open-source, local-first meeting notetakers. The difference: Meetily moves accuracy, exports, and auto-detect behind a $120/year-per-device Pro license — Steno ships everything free, with models bundled in." />
     <meta property="og:image" content="https://stenoai.co/og-image.png" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
 
     <!-- Twitter -->
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="Steno — Privacy-First AI Notepad & Meeting Notetaker (Free, No Cloud)" />
-    <meta name="twitter:description" content="Steno is the privacy-first AI notepad and meeting assistant. It records, transcribes, and summarizes meetings entirely on your device — a free, open-source AI notetaker with no cloud, no bots joining calls, and no usage limits." />
+    <meta name="twitter:title" content="Steno vs Meetily — What Meetily Pro Charges For, Free" />
+    <meta name="twitter:description" content="Both are open-source, local-first meeting notetakers. Meetily moves key features behind a $120/year-per-device Pro license — Steno ships everything free, with models bundled in." />
     <meta name="twitter:image" content="https://stenoai.co/og-image.png" />
 
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link rel="preconnect" href="https://us.i.posthog.com" />
     <link rel="preconnect" href="https://us-assets.i.posthog.com" />
-    <link rel="preconnect" href="https://www.googletagmanager.com" />
     <!-- Non-blocking font load: fetch in parallel, apply once ready, no render-blocking round trip -->
     <link
       rel="preload"
@@ -47,22 +46,6 @@
         href="https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;600&family=JetBrains+Mono:wght@400;500&display=swap"
       />
     </noscript>
-    <script type="application/ld+json">
-      {
-        "@context": "https://schema.org",
-        "@type": "SoftwareApplication",
-        "name": "Steno",
-        "url": "https://stenoai.co/",
-        "description": "Steno is the privacy-first AI notepad and meeting assistant. It records, transcribes, and summarizes meetings entirely on your device — a free, open-source AI notetaker with no cloud, no bots joining calls, and no usage limits.",
-        "applicationCategory": "BusinessApplication",
-        "operatingSystem": "macOS, Windows",
-        "offers": {
-          "@type": "Offer",
-          "price": "0",
-          "priceCurrency": "USD"
-        }
-      }
-    </script>
     <!-- No-flash dark mode: apply class before React renders -->
     <script>
       (function() {
@@ -76,6 +59,6 @@
   </head>
   <body>
     <div id="root"></div>
-    <script type="module" src="/src/main.jsx"></script>
+    <script type="module" src="/src/vs/entries/meetily.jsx"></script>
   </body>
 </html>

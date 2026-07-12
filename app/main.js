@@ -38,6 +38,7 @@ const { spawn: _spawnRaw } = require('child_process');
 const processingLog = require('./processing-log');
 const { isMeetingApp, allowsDeviceLevelFallback } = require('./meeting-detect');
 const { sweepOrphanedLiveSnapshots } = require('./live-snapshot-sweep');
+const { userNotesFilePath } = require('./notes-file');
 const { makeLineReader } = require('./backend-stream');
 // Pure deep-link (stenoai://) parsing/sanitizing lives in ./shortcut-url
 // (unit-tested). The stateful side — window creation, IPC dispatch,
@@ -206,6 +207,11 @@ function getUserDataDir() {
   return path.join(base, 'stenoai');
 }
 
+// Output dir the Python pipeline reads/writes (custom storage, else user-data).
+function getOutputDir() {
+  return path.join(_cachedCustomStoragePath || getUserDataDir(), 'output');
+}
+
 let mainWindow;
 let notificationWindow;
 let pythonProcess;
@@ -218,6 +224,11 @@ let shortcutQueue = [];
 let pendingShortcutUrls = [];
 let rendererShortcutReady = false;
 let launchedByShortcut = false;
+// true when this launch was triggered by the OS login item (auto-launch).
+// Set once at startup (before the app_opened event). On a login launch we
+// suppress the first window show so Steno starts hidden in the tray/menu bar,
+// and we tag telemetry so background opens don't inflate DAU/funnels.
+let launchedHidden = false;
 
 // SHORTCUT_PROTOCOL and the pure deep-link parsing/sanitizing helpers
 // (extractShortcutUrlFromArgv, sanitizeShortcutUrlForLogs, parseShortcutUrl,
@@ -477,13 +488,39 @@ const OUTLOOK_AUTH_URL = 'https://login.microsoftonline.com/common/oauth2/v2.0/a
 const OUTLOOK_TOKEN_URL = 'https://login.microsoftonline.com/common/oauth2/v2.0/token';
 
 /**
+ * Register or remove the OS "launch on login" item.
+ *
+ * Cross-platform: Electron's setLoginItemSettings covers macOS and Windows
+ * (Windows writes HKCU\...\Run under the hood). Hidden launch differs per OS:
+ * on Windows we register with `--hidden` and detect it via argv at startup; on
+ * macOS the deprecated openAsHidden no longer works (macOS 13+), so the window
+ * suppression is driven by getLoginItemSettings().wasOpenedAtLogin instead —
+ * openAsHidden is passed only as a legacy best-effort, never relied on.
+ *
+ * No-op under E2E and in dev (unpackaged), so tests and `npm start` never
+ * register a login item on the developer's machine. Silent-fail — a login-item
+ * error must never break app startup.
+ */
+function applyLoginItemSetting(enabled) {
+  if (IS_E2E || !app.isPackaged) return;
+  try {
+    app.setLoginItemSettings({
+      openAtLogin: enabled,
+      openAsHidden: enabled, // macOS legacy best-effort; not relied on for correctness
+      args: process.platform === 'win32' && enabled ? ['--hidden'] : [],
+    });
+  } catch (e) {
+    console.warn('setLoginItemSettings failed (non-fatal):', e?.message);
+  }
+}
+
+/**
  * Initialize PostHog telemetry by reading config from Python backend.
  */
 // One config.json read (no extra subprocess) + a token-file existence check
-// for the identify() super-properties below. `launch_on_login` is always
-// false -- no login-item feature exists yet (STE-65's build, not this
-// instrumentation workstream); wired here so it starts reporting the moment
-// that feature ships without another identify-call-site hunt.
+// for the identify() super-properties below. `launch_on_login` defaults ON
+// (feature ships enabled-for-everyone; users opt out in Settings), so a legacy
+// config missing the key reports true.
 function loadIdentitySuperProperties() {
   let cfg = {};
   try {
@@ -498,7 +535,7 @@ function loadIdentitySuperProperties() {
     ai_provider: cfg.ai_provider || 'local',
     notifications_enabled: cfg.notifications_enabled !== false,
     calendar_connected: calendarConnected,
-    launch_on_login: false,
+    launch_on_login: cfg.launch_on_login !== false,
   };
 }
 
@@ -868,10 +905,39 @@ function validateSafeFilePath(filepath, allowedBaseDirs) {
     // Resolve to absolute path and normalize
     const resolvedPath = path.resolve(filepath);
 
+    // The renderer is untrusted, so a lexical prefix check alone is
+    // symlink-vulnerable: a symlink placed inside an allowed dir but pointing
+    // outside it would slip through. Canonicalize BOTH the target and each base
+    // dir with realpath before the containment check, so an escaping symlink
+    // resolves to its real (out-of-bounds) target and is rejected. realpath also
+    // normalizes platform quirks that must match on both sides — on macOS
+    // /tmp -> /private/tmp, which the e2e temp data dir relies on — which is
+    // exactly why we canonicalize both sides.
+    //
+    // realpath throws if the path doesn't exist yet (e.g. a file being created),
+    // so fall back to canonicalizing the parent directory and re-appending the
+    // basename; if even the parent can't be resolved, use the lexical path so we
+    // don't break create-new-file flows.
+    let canonicalPath;
+    try {
+      canonicalPath = fs.realpathSync(resolvedPath);
+    } catch (_) {
+      try {
+        canonicalPath = path.join(fs.realpathSync(path.dirname(resolvedPath)), path.basename(resolvedPath));
+      } catch (_) {
+        canonicalPath = resolvedPath;
+      }
+    }
+
     // Ensure it's within one of the allowed base directories
     for (const baseDir of allowedBaseDirs) {
-      const resolvedBase = path.resolve(baseDir);
-      if (resolvedPath.startsWith(resolvedBase + path.sep) || resolvedPath === resolvedBase) {
+      let resolvedBase;
+      try {
+        resolvedBase = fs.realpathSync(path.resolve(baseDir));
+      } catch (_) {
+        resolvedBase = path.resolve(baseDir);
+      }
+      if (canonicalPath.startsWith(resolvedBase + path.sep) || canonicalPath === resolvedBase) {
         return true;
       }
     }
@@ -940,7 +1006,15 @@ function createWindow(options = {}) {
   windowReadyToShow = false;
 
   const showWhenReady = () => {
+    // Always mark readiness so activate/focus handlers (which gate on
+    // windowReadyToShow) can reveal the window later — even on a login launch
+    // where we skip the initial show. Only the show() itself is suppressed when
+    // launched hidden, so Steno starts in the tray/menu bar; a tray/Dock click
+    // then brings it up normally.
     windowReadyToShow = true;
+    if (launchedHidden) {
+      return;
+    }
     if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isVisible()) {
       mainWindow.show();
     }
@@ -1228,6 +1302,30 @@ if (!gotSingleInstanceLock) {
   });
 
   app.whenReady().then(async () => {
+    // Resolve whether this launch was an OS login-item auto-launch BEFORE the
+    // app_opened event and the first window show below. macOS reports it via
+    // wasOpenedAtLogin (the deprecated openAsHidden no longer works on 13+);
+    // Windows carries the `--hidden` arg we registered the login item with.
+    // Only treat it as hidden if the setting isn't explicitly off, so a stale
+    // OS login item (setting since disabled) doesn't wrongly hide the window.
+    try {
+      let launchOnLoginEnabled = true;
+      try {
+        const cfgPath = path.join(getUserDataDir(), 'config.json');
+        if (fs.existsSync(cfgPath)) {
+          const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf-8'));
+          launchOnLoginEnabled = cfg.launch_on_login !== false;
+        }
+      } catch (_) {}
+      const openedAtLogin =
+        process.platform === 'darwin'
+          ? Boolean(app.getLoginItemSettings().wasOpenedAtLogin)
+          : process.argv.includes('--hidden');
+      launchedHidden = openedAtLogin && launchOnLoginEnabled;
+    } catch (e) {
+      console.warn('Failed to resolve login-launch state (non-fatal):', e?.message);
+    }
+
     // Follow the OS system proxy for all main-process HTTP (net.fetch uses the
     // default session). net.fetch alone honours the *session* proxy, but the
     // default session does NOT auto-adopt the Windows system proxy — without
@@ -1402,9 +1500,33 @@ if (!gotSingleInstanceLock) {
       }
     }
 
-    // Initialize telemetry and track app open
+    // Re-apply the OS "launch on login" item on every startup from the
+    // persisted preference (config.json read directly — no subprocess). This is
+    // what makes the feature default-ON for everyone: new installs default true
+    // and existing configs missing the key fall back to true (registering the
+    // login item on this launch), while a user who turned it off persists false
+    // and stays unregistered. Idempotent; no-op under E2E / dev (see helper).
+    try {
+      let launchOnLoginEnabled = true;
+      const cfgPath = path.join(getUserDataDir(), 'config.json');
+      if (fs.existsSync(cfgPath)) {
+        const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf-8'));
+        launchOnLoginEnabled = cfg.launch_on_login !== false;
+      }
+      applyLoginItemSetting(launchOnLoginEnabled);
+    } catch (e) {
+      console.warn('Failed to apply launch-on-login setting at startup:', e?.message);
+    }
+
+    // Initialize telemetry and track app open. Tag the launch context so
+    // hidden background auto-launches (which fire on every login/reboot) are
+    // filterable and don't inflate DAU/funnels — filter hidden=false (or
+    // launch_source='user') for a true "engaged open" metric.
     await initTelemetry();
-    trackEvent('app_opened');
+    trackEvent('app_opened', {
+      launch_source: launchedHidden ? 'login-item' : 'user',
+      hidden: launchedHidden,
+    });
     checkForOrphanedRecording();
 
     // Sweep orphaned live-transcript snapshot temp files (#259). The primary
@@ -2026,7 +2148,12 @@ function parseMeetingMarkdown(content, mdPath) {
  * used. realpath needs the path to exist; a missing target -> denied.
  */
 async function validateMeetingFilePath(summaryFile) {
-  if (!summaryFile || (!summaryFile.endsWith('.json') && !summaryFile.endsWith('.md'))) {
+  // Reject non-strings up front: the renderer is untrusted and could pass an
+  // object/number, on which `.endsWith` would THROW a TypeError — turning this
+  // async function into a rejected promise that an un-try-wrapped `await` (e.g.
+  // the query-transcript-stream listener) would surface as an unhandled
+  // rejection. Fail closed with the same error shape as any other bad path.
+  if (typeof summaryFile !== 'string' || (!summaryFile.endsWith('.json') && !summaryFile.endsWith('.md'))) {
     return { error: 'Invalid file path' };
   }
   let realPath;
@@ -2437,10 +2564,18 @@ ipcMain.handle('query-transcript', async (event, summaryFile, question) => {
   try {
     sendDebugLog(`🤖 Querying transcript (${String(question || '').length} chars)`);
 
+    // Security: the renderer is untrusted, so containment-check the summary path
+    // (symlink-safe, output/ only) before it reaches the backend, and pass the
+    // canonical realPath — not the original string — as the file arg.
+    const validated = await validateMeetingFilePath(summaryFile);
+    if (validated.error) {
+      return { success: false, error: validated.error };
+    }
+
     // Run the query command — getAiEnv supplies the right env for whichever
     // provider is active (cloud key for cloud, adapter url+token for org).
     const env = getAiEnv();
-    const result = await runPythonScript('simple_recorder.py', ['query', summaryFile, '-q', question], false, env);
+    const result = await runPythonScript('simple_recorder.py', ['query', validated.realPath, '-q', question], false, env);
 
     // Parse the JSON response
     try {
@@ -2488,12 +2623,30 @@ ipcMain.handle('query-transcript', async (event, summaryFile, question) => {
 
 const activeQueryProcs = new Map();
 
+// Cancellation intent for streaming queries that are still in their pre-spawn
+// async window. query-transcript-stream now `await`s validateMeetingFilePath
+// BEFORE it registers a killable proc in activeQueryProcs, so a query-cancel
+// (or sender-destroy) arriving during that await would otherwise be LOST — the
+// cancel finds nothing to kill, then the backend spawns uncancellable. Each
+// in-flight validation registers a setter here keyed by queryId; query-cancel
+// invokes it to flip the handler's `cancelled` flag, and the handler checks
+// that flag on every exit path so it never spawns-then-orphans a proc.
+const pendingQueryCancels = new Map();
+
 ipcMain.on('query-cancel', (_event, queryId) => {
   const proc = activeQueryProcs.get(queryId);
   if (proc) {
     console.log(`[QUERY] Cancelling queryId=${queryId}`);
     proc.kill();
     activeQueryProcs.delete(queryId);
+  }
+  // Cancel a stream that's still validating (pre-spawn): flip its flag so the
+  // handler bails out instead of spawning after the await resolves.
+  const pending = pendingQueryCancels.get(queryId);
+  if (pending) {
+    console.log(`[QUERY] Cancelling pre-spawn queryId=${queryId}`);
+    pending();
+    pendingQueryCancels.delete(queryId);
   }
   // Org-chat streams use AbortController instead of a child process; share
   // the same query-cancel channel so the renderer doesn't have to know which
@@ -2506,7 +2659,7 @@ ipcMain.on('query-cancel', (_event, queryId) => {
   }
 });
 
-ipcMain.on('query-transcript-stream', (event, queryId, summaryFile, question) => {
+ipcMain.on('query-transcript-stream', async (event, queryId, summaryFile, question) => {
   console.log(`[QUERY] IPC received: question="${question.substring(0, 50)}" file="${summaryFile}"`);
   sendDebugLog(`🤖 Streaming query (${String(question || '').length} chars)`);
   const env = { ...process.env, ...getAiEnv() };
@@ -2530,21 +2683,92 @@ ipcMain.on('query-transcript-stream', (event, queryId, summaryFile, question) =>
     });
   };
 
+  // Security: the renderer is untrusted, so containment-check the summary path
+  // (symlink-safe, output/ only) BEFORE spawning the backend, and spawn with the
+  // canonical realPath. The handler is async only to await this check — the spawn
+  // still happens synchronously afterwards. The console.log/debug lines above may
+  // keep logging the original string (a label); the spawn arg must be the realPath.
+  //
+  // Cancel-race guard: because we now `await` BEFORE registering a killable proc
+  // in activeQueryProcs, a query-cancel during the await would be lost. Register
+  // cancellation intent via pendingQueryCancels (see the query-cancel handler)
+  // and honour the flag on every exit path so a cancel that lands mid-validation
+  // aborts the query instead of spawning an uncancellable backend.
+  let cancelled = false;
+  pendingQueryCancels.set(queryId, () => { cancelled = true; });
+
+  // Send query-done only if the renderer is still alive — event.sender.send
+  // throws "Object has been destroyed" once the sender is gone. The try/catch is
+  // belt-and-suspenders: isDestroyed() + send() run in the same synchronous tick
+  // (no yield between them), but send can still throw for other reasons (e.g. the
+  // frame went away), and a failure to notify must never crash the main process.
+  const sendDone = (payload) => {
+    try {
+      if (!event.sender.isDestroyed()) event.sender.send('query-done', { queryId, ...payload });
+    } catch (_) { /* renderer gone — nothing to notify */ }
+  };
+  // The renderer can also be destroyed DURING the pre-spawn await (window closed
+  // or navigated away). The `destroyed` listener below is only wired up AFTER
+  // spawn, and `.once('destroyed')` never fires for an event that already
+  // happened — so a destroy mid-validation would spawn an orphaned, unobserved
+  // backend. Treat "sender gone while validating" the same as a cancel: bail on
+  // every pre-spawn exit path, and re-check immediately after spawn.
+  const aborted = () => cancelled || event.sender.isDestroyed();
+
+  let validated;
+  try {
+    validated = await validateMeetingFilePath(summaryFile);
+  } catch (err) {
+    // Defense-in-depth: validateMeetingFilePath is fail-closed and shouldn't
+    // throw, but if it ever does (e.g. a future refactor), don't let it become
+    // an unhandled rejection that can take down the main process.
+    pendingQueryCancels.delete(queryId);
+    sendDone({ success: false, error: 'Invalid file path' });
+    trackChatOnce(false);
+    return;
+  }
+  pendingQueryCancels.delete(queryId);
+
+  if (validated.error) {
+    sendDone({ success: false, error: validated.error });
+    trackChatOnce(false);
+    return;
+  }
+  if (aborted()) {
+    // A cancel landed, or the renderer went away, while we were validating —
+    // bail out before spawning an uncancellable / orphaned backend. A cancelled
+    // query is not a completed "message sent", so (like the killed-proc close
+    // path, code === null) it is deliberately left untracked.
+    sendDone({ success: false, error: 'Cancelled' });
+    return;
+  }
+
   let proc;
   try {
     const backendPath = getBackendPath();
-    proc = require('child_process').spawn(backendPath, ['query-streaming', summaryFile, '-q', question], {
+    proc = require('child_process').spawn(backendPath, ['query-streaming', validated.realPath, '-q', question], {
       env,
       cwd: getBackendCwd(),
       windowsHide: true,
     });
   } catch (err) {
-    event.sender.send('query-done', { queryId, success: false, error: err.message });
+    sendDone({ success: false, error: err.message });
     trackChatOnce(false);
     return;
   }
 
   activeQueryProcs.set(queryId, proc);
+  // Belt-and-suspenders: a cancel or a sender-destroy could have flipped the
+  // abort condition between the pre-spawn check and here. If the query is no
+  // longer wanted, kill the freshly-spawned proc immediately so it can't be
+  // orphaned (the pendingQueryCancels entry is already gone, and a destroy that
+  // already fired won't reach the `destroyed` listener wired up below).
+  if (aborted()) {
+    proc.kill();
+    activeQueryProcs.delete(queryId);
+    sendDone({ success: false, error: 'Cancelled' });
+    return;
+  }
   // Kill the spawned proc if the renderer sender goes away before the query
   // finishes. Keep a reference so we can remove the listener on normal close
   // (otherwise repeated queries on a long-lived sender leak one-time listeners).
@@ -2809,10 +3033,9 @@ ipcMain.handle('save-meeting-notes', async (event, sessionName, notes) => {
     // INSIDE the app bundle: read-only in a packaged/signed app (so saving notes
     // failed for real users on macOS + Windows), and a dir the Python pipeline
     // never reads notes from, so reprocess's _load_user_notes couldn't find them.
-    const outputDir = path.join(_cachedCustomStoragePath || getUserDataDir(), 'output');
+    const outputDir = getOutputDir();
     if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
-    const safeName = sessionName.replace(/[^a-zA-Z0-9_-]/g, '_');
-    const notesFile = path.join(outputDir, `${safeName}_notes.txt`);
+    const notesFile = userNotesFilePath(outputDir, sessionName);
     fs.writeFileSync(notesFile, notes, 'utf-8');
     return { success: true, path: notesFile };
   } catch (error) {
@@ -2935,38 +3158,28 @@ ipcMain.handle('save-diagnostics', async (event, defaultFilename, content) => {
 
 ipcMain.handle('update-meeting', async (event, summaryFilePath, updates) => {
   try {
-    const projectRoot = path.join(__dirname, '..');
-
-    // Define allowed base directories for file operations (includes custom storage)
-    const allowedBaseDirs = getAllowedBaseDirs();
-
-    // Convert to absolute path if needed
-    const absolutePath = path.isAbsolute(summaryFilePath)
-      ? summaryFilePath
-      : path.join(projectRoot, summaryFilePath);
-
-    // Security: Validate file path is within allowed directories
-    if (!validateSafeFilePath(absolutePath, allowedBaseDirs)) {
-      console.error(`Security: Blocked attempt to update file outside allowed directories: ${absolutePath}`);
-      return {
-        success: false,
-        error: 'Invalid file path'
-      };
+    // Security: the renderer is untrusted, so containment-check the summary path
+    // (symlink-safe, output/ only) and operate exclusively on the canonical
+    // realPath for every read/write below — never the original renderer string.
+    const validated = await validateMeetingFilePath(summaryFilePath);
+    if (validated.error) {
+      return { success: false, error: validated.error };
     }
+    const { realPath } = validated;
 
     // Read existing data
-    if (!fs.existsSync(absolutePath)) {
+    if (!fs.existsSync(realPath)) {
       return {
         success: false,
         error: 'Meeting file not found'
       };
     }
 
-    const isMarkdown = absolutePath.endsWith('.md');
+    const isMarkdown = realPath.endsWith('.md');
     let data;
 
     if (isMarkdown) {
-      const raw = fs.readFileSync(absolutePath, 'utf8');
+      const raw = fs.readFileSync(realPath, 'utf8');
       // Escape a string for a YAML double-quoted scalar. Backslash MUST be
       // escaped before the quote, and embedded newlines must become literal
       // \n so they don't end the scalar mid-line.
@@ -3034,17 +3247,17 @@ ipcMain.handle('update-meeting', async (event, summaryFilePath, updates) => {
         }
       }
 
-      fs.writeFileSync(absolutePath, updatedRaw, 'utf8');
+      fs.writeFileSync(realPath, updatedRaw, 'utf8');
 
       data = {
         session_info: {
           name: updates.name !== undefined ? updates.name : title,
-          summary_file: absolutePath,
+          summary_file: realPath,
           updated_at: updatedAt,
         },
       };
     } else {
-      data = JSON.parse(fs.readFileSync(absolutePath, 'utf8'));
+      data = JSON.parse(fs.readFileSync(realPath, 'utf8'));
 
       if (updates.name !== undefined) {
         data.session_info.name = updates.name;
@@ -3063,10 +3276,10 @@ ipcMain.handle('update-meeting', async (event, summaryFilePath, updates) => {
       }
 
       data.session_info.updated_at = new Date().toISOString();
-      fs.writeFileSync(absolutePath, JSON.stringify(data, null, 2), 'utf8');
+      fs.writeFileSync(realPath, JSON.stringify(data, null, 2), 'utf8');
     }
 
-    console.log(`Updated meeting: ${absolutePath}`);
+    console.log(`Updated meeting: ${realPath}`);
 
     return {
       success: true,
@@ -5449,7 +5662,13 @@ ipcMain.handle('reorder-folders', async (event, folderIds) => {
 
 ipcMain.handle('add-meeting-to-folder', async (event, summaryFile, folderId) => {
   try {
-    const result = await runPythonScript('simple_recorder.py', ['add-meeting-to-folder', summaryFile, folderId]);
+    // Security: the renderer is untrusted, so containment-check the summary path
+    // (symlink-safe, output/ only) and pass the canonical realPath to the backend.
+    const validated = await validateMeetingFilePath(summaryFile);
+    if (validated.error) {
+      return { success: false, error: validated.error };
+    }
+    const result = await runPythonScript('simple_recorder.py', ['add-meeting-to-folder', validated.realPath, folderId]);
     const jsonMatch = result.match(/\{.*\}/s);
     return jsonMatch ? JSON.parse(jsonMatch[0]) : { success: true };
   } catch (error) {
@@ -5459,7 +5678,13 @@ ipcMain.handle('add-meeting-to-folder', async (event, summaryFile, folderId) => 
 
 ipcMain.handle('remove-meeting-from-folder', async (event, summaryFile, folderId) => {
   try {
-    const result = await runPythonScript('simple_recorder.py', ['remove-meeting-from-folder', summaryFile, folderId]);
+    // Security: the renderer is untrusted, so containment-check the summary path
+    // (symlink-safe, output/ only) and pass the canonical realPath to the backend.
+    const validated = await validateMeetingFilePath(summaryFile);
+    if (validated.error) {
+      return { success: false, error: validated.error };
+    }
+    const result = await runPythonScript('simple_recorder.py', ['remove-meeting-from-folder', validated.realPath, folderId]);
     const jsonMatch = result.match(/\{.*\}/s);
     return jsonMatch ? JSON.parse(jsonMatch[0]) : { success: true };
   } catch (error) {
@@ -6316,6 +6541,36 @@ ipcMain.handle('set-auto-detect-meetings', async (_event, enabled) => {
   }
 });
 
+ipcMain.handle('get-launch-on-login', async () => {
+  try {
+    const result = await runPythonScript('simple_recorder.py', ['get-launch-on-login'], true);
+    const jsonData = JSON.parse(result);
+    return { success: true, ...jsonData };
+  } catch (error) {
+    sendDebugLog(`Error getting launch-on-login setting: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('set-launch-on-login', async (_event, enabled) => {
+  try {
+    sendDebugLog(`Setting launch-on-login to: ${enabled}`);
+    const result = await runPythonScript('simple_recorder.py', ['set-launch-on-login', enabled ? 'True' : 'False']);
+    const jsonMatch = result.match(/\{.*\}/s);
+    const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : { success: true, launch_on_login: enabled };
+    if (parsed.success) {
+      // Apply the OS login item live so the user doesn't need to restart, and
+      // re-identify so the launch_on_login super-property reflects the change.
+      applyLoginItemSetting(enabled);
+      refreshIdentitySuperProperties();
+    }
+    return parsed;
+  } catch (error) {
+    sendDebugLog(`Error setting launch-on-login: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+});
+
 // Language IPC handlers
 ipcMain.handle('get-language', async () => {
   try {
@@ -7089,9 +7344,8 @@ ipcMain.handle('process-system-audio-recording', async (event, audioFilePath, se
 
     const actualSessionName = sessionName || 'Note';
 
-    // Check for user notes file
-    const safeName = actualSessionName.replace(/[^a-zA-Z0-9_-]/g, '_');
-    const notesFile = path.join(getBackendCwd(), '_internal', 'output', `${safeName}_notes.txt`);
+    // Same dir 'save-meeting-notes' writes to — not the read-only bundle dir.
+    const notesFile = userNotesFilePath(getOutputDir(), actualSessionName);
     const notesPath = fs.existsSync(notesFile) ? notesFile : undefined;
 
     // Snapshot the live transcript captured during this recording (#207) so the

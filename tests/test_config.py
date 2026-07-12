@@ -228,6 +228,32 @@ class ConfigAutoDetectMeetingsTests(unittest.TestCase):
             self.assertTrue(reloaded.get_auto_detect_meetings_enabled())
 
 
+class ConfigLaunchOnLoginTests(unittest.TestCase):
+    def test_default_launch_on_login_is_true(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config = Config(config_path=Path(tmp_dir) / "config.json")
+            self.assertTrue(config.get_launch_on_login())
+
+    def test_legacy_config_without_key_defaults_true(self):
+        # Existing installs whose config predates this key must default ON.
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "config.json"
+            path.write_text(json.dumps({"model": "gemma3:4b"}))
+            config = Config(config_path=path)
+            self.assertTrue(config.get_launch_on_login())
+
+    def test_launch_on_login_round_trip(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "config.json"
+            config = Config(config_path=path)
+            self.assertTrue(config.set_launch_on_login(False))
+            self.assertFalse(config.get_launch_on_login())
+            reloaded = Config(config_path=path)
+            self.assertFalse(reloaded.get_launch_on_login())
+            self.assertTrue(reloaded.set_launch_on_login(True))
+            self.assertTrue(reloaded.get_launch_on_login())
+
+
 class ConfigOrgAutoBackupTests(unittest.TestCase):
     def test_default_auto_backup_is_true(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
