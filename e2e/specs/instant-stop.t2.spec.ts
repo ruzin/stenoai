@@ -131,7 +131,9 @@ test('placeholder processing flag parses; the rewrite preserves the edited My no
     );
     expect(res.code, `stderr:\n${res.stderr}`).toBe(0);
 
-    const md = readFileSync(summaryPath, 'utf8');
+    // Normalise CRLF: Python's write_text emits \r\n on Windows note files, so
+    // a multi-line ('\n') substring assertion would spuriously miss there.
+    const md = readFileSync(summaryPath, 'utf8').replace(/\r\n/g, '\n');
     // The whole edit survived (incl. the '## Follow-ups' heading + its lines —
     // not truncated at the heading); the older draft did not.
     expect(md).toContain(EDITED_NOTES);
