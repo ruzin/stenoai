@@ -33,6 +33,7 @@ const ROW = (label, steno, them) => ({ label, steno, them });
 export const granola = {
   slug: "granola",
   name: "Granola",
+  oneLiner: "The cloud notetaker without a bot — Steno does the same job without the cloud either.",
   metaTitle: "Steno vs Granola — Free, Fully Local Alternative to Granola",
   metaDescription:
     "Granola processes your meeting audio in the cloud and costs from $14/user/month. Steno does the same job — no bot, AI meeting notes — entirely on your device, free and open source.",
@@ -108,6 +109,7 @@ export const granola = {
 export const otter = {
   slug: "otter",
   name: "Otter.ai",
+  oneLiner: "The incumbent: a bot in your calls, recordings on their servers, minute caps below Business.",
   metaTitle: "Steno vs Otter.ai — Private, Unlimited Alternative to Otter",
   metaDescription:
     "Otter sends a bot into your meetings, stores recordings in the cloud, and caps free transcription at 300 minutes a month. Steno transcribes unlimited meetings entirely on your device — free, no bot, no account.",
@@ -182,6 +184,7 @@ export const otter = {
 export const fireflies = {
   slug: "fireflies",
   name: "Fireflies.ai",
+  oneLiner: "Team conversation intelligence in the cloud, metered by storage and AI credits.",
   metaTitle: "Steno vs Fireflies.ai — No-Bot, On-Device Alternative to Fireflies",
   metaDescription:
     "Fireflies sends its Fred bot into your calls and stores everything in its cloud, with AI-credit caps per tier. Steno keeps meetings on your device: unlimited local transcription and AI notes, free and open source.",
@@ -255,6 +258,7 @@ export const fireflies = {
 export const meetily = {
   slug: "meetily",
   name: "Meetily",
+  oneLiner: "The other open-source local notetaker — with a $120/year Pro tier for what Steno ships free.",
   metaTitle: "Steno vs Meetily — What Meetily Pro Charges For, Free",
   metaDescription:
     "Steno and Meetily are both open-source, local-first meeting notetakers. The difference: Meetily moves accuracy, exports, and auto-detect behind a $120/year-per-device Pro license — Steno ships everything free, with models bundled in.",

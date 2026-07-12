@@ -69,15 +69,9 @@ export function ComparisonPage({ data }) {
   const [openFaq, setOpenFaq] = useState(null);
   const others = ALL.filter((c) => c.slug !== data.slug);
 
-  const faqJsonLd = {
-    "@context": "https://schema.org",
-    "@type": "FAQPage",
-    mainEntity: data.faqs.map((f) => ({
-      "@type": "Question",
-      name: f.q,
-      acceptedAnswer: { "@type": "Answer", text: f.a },
-    })),
-  };
+  // The FAQ JSON-LD is emitted into each page's static HTML at build time
+  // (see faqJsonLdPlugin in vite.config.js) so crawlers see it without JS —
+  // not injected here, to avoid duplicate FAQPage structured data.
 
   return (
     <>
@@ -230,12 +224,8 @@ export function ComparisonPage({ data }) {
           </div>
         </section>
 
-        {/* FAQ */}
+        {/* FAQ (FAQPage JSON-LD is injected into the static HTML at build) */}
         <section className="sect" style={{ paddingBottom: 48 }}>
-          <script
-            type="application/ld+json"
-            dangerouslySetInnerHTML={{ __html: JSON.stringify(faqJsonLd).replace(/</g, "\\u003c") }}
-          />
           <div className="container-site" style={{ maxWidth: 820 }}>
             <h2 className="mb-10" style={H2_STYLE}>Questions</h2>
             <div className="flex flex-col">

@@ -5,13 +5,6 @@ import { Footer } from "../sections/Footer";
 import { CTAFooter } from "../sections/CTAFooter";
 import { ALL, VERIFIED } from "./competitors";
 
-const ONE_LINERS = {
-  granola: "The cloud notetaker without a bot — Steno does the same job without the cloud either.",
-  otter: "The incumbent: a bot in your calls, recordings on their servers, minute caps below Business.",
-  fireflies: "Team conversation intelligence in the cloud, metered by storage and AI credits.",
-  meetily: "The other open-source local notetaker — with a $120/year Pro tier for what Steno ships free.",
-};
-
 export function VsIndex() {
   return (
     <>
@@ -87,7 +80,7 @@ export function VsIndex() {
                         Steno vs {c.name}
                       </span>
                       <span className="block text-fg-2 text-[15px] leading-[1.6] mt-2" style={{ maxWidth: "58ch" }}>
-                        {ONE_LINERS[c.slug]}
+                        {c.oneLiner}
                       </span>
                     </div>
                     <ArrowRight
