@@ -79,6 +79,25 @@ class ReadMeetingTests(unittest.TestCase):
             self.assertEqual(m["language"], "de")
             self.assertEqual(m["duration_minutes"], 2)
 
+    def test_md_null_provenance_reads_as_none_not_string(self):
+        # A markdown note written for an auto/Parakeet meeting serialises its
+        # provenance as unquoted `null`. read_meeting must surface real None, not
+        # the truthy string "null" - otherwise resolve_persisted_output_language
+        # would treat the note as engine-backed and wrongly pin its language in
+        # the report path (#283).
+        md = (
+            '---\ntitle: "Note"\nduration_seconds: 60\nlanguage: "en"\n'
+            'configured_language: null\ndetected_language: null\n---\n\n'
+            '## Summary\nAn overview.\n\n## Transcript\n\nSpeaker A: hello.\n'
+        )
+        with tempfile.TemporaryDirectory() as t:
+            mp = Path(t) / "m_summary.md"
+            mp.write_text(md, encoding="utf-8")
+            m = S.read_meeting(mp)
+            self.assertIsNone(m["configured_language"])
+            self.assertIsNone(m["detected_language"])
+            self.assertEqual(m["language"], "en")
+
     def test_reads_json_meeting(self):
         with tempfile.TemporaryDirectory() as t:
             mp = Path(t) / "m_summary.json"

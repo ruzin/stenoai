@@ -155,6 +155,12 @@ def build(meeting, language="en"):
         "date": date_iso,
         "duration_seconds": None,
         "language": language,
+        # The import language is a deliberate choice, so record it as a real pin
+        # (configured_language) with no engine detection. This gives the note
+        # provenance so Steno's recovery/chat paths keep the chosen output
+        # language instead of re-detecting it from the transcript (#283).
+        "configured_language": language,
+        "detected_language": None,
         "is_diarised": is_diar,
         "transcription_failed": False,
         # Unknown frontmatter keys are ignored by Steno's parser. This one
