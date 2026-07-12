@@ -3761,6 +3761,32 @@ def set_auto_detect_meetings(enabled):
 
 
 @cli.command()
+def get_launch_on_login():
+    """Get the current launch-on-login preference"""
+    from src.config import get_config
+
+    config = get_config()
+    enabled = config.get_launch_on_login()
+
+    print(json.dumps({"launch_on_login": enabled}))
+
+
+@cli.command()
+@click.argument('enabled', callback=lambda ctx, param, v: v.lower() == 'true')
+def set_launch_on_login(enabled):
+    """Set launch-on-login preference (True/False)"""
+    from src.config import get_config
+
+    config = get_config()
+    success = config.set_launch_on_login(enabled)
+
+    if success:
+        print(json.dumps({"success": True, "launch_on_login": enabled}))
+    else:
+        print(json.dumps({"success": False, "error": "Failed to save config"}))
+
+
+@cli.command()
 def get_language():
     """Get the current language setting"""
     from src.config import get_config

@@ -10,6 +10,7 @@ export const settingsKeys = {
   systemAudio: () => [...settingsKeys.all, 'systemAudio'] as const,
   systemAudioSupport: () => [...settingsKeys.all, 'systemAudioSupport'] as const,
   autoDetectMeetings: () => [...settingsKeys.all, 'autoDetectMeetings'] as const,
+  launchOnLogin: () => [...settingsKeys.all, 'launchOnLogin'] as const,
   silenceAutoStop: () => [...settingsKeys.all, 'silenceAutoStop'] as const,
   language: () => [...settingsKeys.all, 'language'] as const,
   storagePath: () => [...settingsKeys.all, 'storagePath'] as const,
@@ -98,6 +99,21 @@ export function useSetAutoDetectMeetings() {
   return useMutation({
     mutationFn: async (v: boolean) => unwrap(await ipc().settings.setAutoDetectMeetings(v)),
     onSuccess: () => qc.invalidateQueries({ queryKey: settingsKeys.autoDetectMeetings() }),
+  });
+}
+
+export function useLaunchOnLoginSetting() {
+  return useQuery({
+    queryKey: settingsKeys.launchOnLogin(),
+    queryFn: async () => unwrap(await ipc().settings.getLaunchOnLogin()).launch_on_login,
+  });
+}
+
+export function useSetLaunchOnLogin() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (v: boolean) => unwrap(await ipc().settings.setLaunchOnLogin(v)),
+    onSuccess: () => qc.invalidateQueries({ queryKey: settingsKeys.launchOnLogin() }),
   });
 }
 

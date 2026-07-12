@@ -22,7 +22,8 @@ type SettingKind =
   | 'systemAudio'
   | 'telemetry'
   | 'transcriptionEngine'
-  | 'dockIcon';
+  | 'dockIcon'
+  | 'launchOnLogin';
 
 type SettingsBridge = {
   settings: {
@@ -35,6 +36,7 @@ type SettingsBridge = {
     setSystemAudio: (v: boolean) => Promise<unknown>;
     setTelemetry: (v: boolean) => Promise<unknown>;
     setDockIcon: (v: boolean) => Promise<unknown>;
+    setLaunchOnLogin: (v: boolean) => Promise<unknown>;
     setStoragePath: (p: string) => Promise<{ success?: boolean; error?: string }>;
   };
   transcriptionEngine: { set: (v: string) => Promise<unknown> };
@@ -61,6 +63,9 @@ const CASES: Case[] = [
   { kind: 'telemetry', value: false, configKey: 'telemetry_enabled' },
   { kind: 'transcriptionEngine', value: 'whisper', configKey: 'transcription_engine' },
   { kind: 'dockIcon', value: true, configKey: 'hide_dock_icon' },
+  // false flips the default (true) so the assertion has teeth — a no-op setter
+  // would leave the key unset/true and fail this case.
+  { kind: 'launchOnLogin', value: false, configKey: 'launch_on_login' },
 ];
 
 function applySetting(
@@ -90,6 +95,8 @@ function applySetting(
           return s.settings.setTelemetry(value as boolean);
         case 'dockIcon':
           return s.settings.setDockIcon(value as boolean);
+        case 'launchOnLogin':
+          return s.settings.setLaunchOnLogin(value as boolean);
         case 'transcriptionEngine':
           return s.transcriptionEngine.set(value as string);
         default:
