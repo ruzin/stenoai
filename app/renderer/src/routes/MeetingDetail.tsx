@@ -547,6 +547,11 @@ function DetailContent({
   // unparsable for unrelated reasons and would otherwise be misclassified as
   // transcript-only.
   const notesNotGenerated = meeting.session_info.notes_generated === false;
+  // Instant-stop placeholder: written from the live transcript at stop while
+  // the batch transcribe/summarise upgrades it in the background. Show a quiet
+  // "finishing up" affordance and suppress the Generate-notes CTA until the
+  // pipeline completes (or clears the flag on failure).
+  const isProcessing = meeting.session_info.processing === true;
 
   // Publish this note's reprocess trigger + streaming state so the floating
   // GenerateNotesBar (mounted at App level, above the Ask bar) drives THIS
@@ -559,7 +564,7 @@ function DetailContent({
   // trigger must not offer "Generate notes" for it either (#313 review —
   // reprocess on a failed note exits non-zero and strands the UI).
   const summaryPending =
-    notesNotGenerated && !transcriptionFailed && Boolean(meeting.transcript);
+    notesNotGenerated && !transcriptionFailed && !isProcessing && Boolean(meeting.transcript);
   // A continued note (continue-recording appended a segment after notes were
   // generated): the summary no longer covers the transcript — offer the same
   // floating CTA as "Regenerate notes". reprocess clears the flag on rewrite.
@@ -962,6 +967,32 @@ function DetailContent({
                   Details: {transcriptionError}
                 </p>
               )}
+            </section>
+          ) : isProcessing ? (
+            <section
+              className="flex flex-col gap-2 rounded-lg p-4"
+              style={{
+                background: 'var(--surface-raised)',
+                border: '1px solid var(--border-subtle, var(--surface-raised))',
+              }}
+              data-testid="note-processing"
+            >
+              <div
+                className="flex items-center gap-1.5 text-[15px] font-medium"
+                style={{ color: 'var(--fg-1)' }}
+              >
+                Finishing up
+                <span className="thinking-dot" />
+                <span className="thinking-dot" />
+                <span className="thinking-dot" />
+              </div>
+              <p
+                className="text-[14px] leading-[1.6]"
+                style={{ color: 'var(--fg-2)', maxWidth: '64ch' }}
+              >
+                Your transcript is captured — refining it and generating notes in
+                the background. You can read and edit <strong>My notes</strong> now.
+              </p>
             </section>
           ) : summary ? (
             <section className="flex flex-col gap-3">

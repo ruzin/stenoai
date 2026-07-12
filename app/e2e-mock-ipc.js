@@ -96,6 +96,29 @@ const STALE_MEETING = {
   participants: [],
 };
 
+// An instant-stop placeholder (processing:true): written from the live
+// transcript at stop, still upgrading in the background. Drives the
+// "Finishing up…" affordance + the stop-navigates-to-note behaviour. Seeded
+// only when STENOAI_E2E_SEED_PROCESSING_NOTE=1.
+const PROCESSING_NOTE_FILE = 'processing_summary.md';
+const PROCESSING_MEETING = {
+  session_info: {
+    name: 'Instant Note',
+    summary_file: PROCESSING_NOTE_FILE,
+    processed_at: '2026-07-12T10:00:00Z',
+    duration_seconds: 60,
+    notes_generated: false,
+    processing: true,
+  },
+  transcript: '[00:03] we ship Friday.',
+  is_diarised: false,
+  summary: '',
+  key_points: [],
+  action_items: [],
+  discussion_areas: [],
+  participants: [],
+};
+
 // A generated template report attached to SEED_MEETING when
 // STENOAI_E2E_SEED_REPORT=1 (copy-notes-report T1). Gated separately so the
 // transcript-export T1 keeps seeing the report-less meeting it asserts on.
@@ -176,6 +199,11 @@ function install({ ipcMain }) {
       // Park in "processing" — T1 has no backend to complete it; the spec only
       // asserts the renderer's optimistic transition to the processing dock.
       rec.processing = true;
+      // Instant stop: with the processing-note seed, return the placeholder's
+      // path so useRecording.stopRecording navigates to the note (not the dock).
+      if (process.env.STENOAI_E2E_SEED_PROCESSING_NOTE === '1') {
+        return { success: true, summaryFile: PROCESSING_NOTE_FILE };
+      }
       return { success: true };
     },
     'pause-recording-ui': async () => {
@@ -258,6 +286,9 @@ function install({ ipcMain }) {
       if (process.env.STENOAI_E2E_SEED_STALE_NOTE === '1') {
         return { success: true, meetings: [STALE_MEETING] };
       }
+      if (process.env.STENOAI_E2E_SEED_PROCESSING_NOTE === '1') {
+        return { success: true, meetings: [PROCESSING_MEETING] };
+      }
       if (process.env.STENOAI_E2E_SEED_MEETING === '1') {
         return { success: true, meetings: [seededMeeting()] };
       }
@@ -281,6 +312,9 @@ function install({ ipcMain }) {
       }
       if (process.env.STENOAI_E2E_SEED_STALE_NOTE === '1') {
         return { success: true, meeting: applyOverlay(STALE_MEETING) };
+      }
+      if (process.env.STENOAI_E2E_SEED_PROCESSING_NOTE === '1') {
+        return { success: true, meeting: applyOverlay(PROCESSING_MEETING) };
       }
       if (process.env.STENOAI_E2E_SEED_MEETING === '1') {
         // seededMeeting() carries main's optional template-report; applyOverlay

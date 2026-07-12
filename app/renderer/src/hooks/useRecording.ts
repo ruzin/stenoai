@@ -207,12 +207,23 @@ export function useRecording() {
       elapsedSeconds: 0,
       sessionName: prev?.sessionName ?? null,
     }));
-    navigate('/meetings/processing');
     try {
       const data = unwrap(await ipc().recording.stop());
+      // Instant stop: main wrote the note from the live transcript (or it's a
+      // continued note) and returns its path — land the user ON it, with the
+      // batch transcribe/summarise upgrading it in the background. Whisper/
+      // import return no summaryFile → the processing dock as before.
+      if (data.summaryFile) {
+        navigate(`/meetings/${encodeURIComponent(data.summaryFile)}`);
+      } else {
+        navigate('/meetings/processing');
+      }
       qc.invalidateQueries({ queryKey: queueKey });
       return data;
     } catch (err) {
+      // Stop failed before we learned the note path — fall back to the dock so
+      // the user isn't stranded on the recording view.
+      navigate('/meetings/processing');
       qc.invalidateQueries({ queryKey: queueKey });
       throw err;
     }

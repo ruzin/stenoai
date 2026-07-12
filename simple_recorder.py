@@ -795,6 +795,34 @@ def _append_segment_to_note(target: Path, new_text: str, duration_seconds):
     )
 
 
+def _read_existing_user_notes(summary_path: Path):
+    """Return the text of a note's '## User Notes' section, or None if the file
+    or section is absent.
+
+    Instant-stop writes a placeholder note (from the live transcript) at stop;
+    the user may edit My notes on it while the batch pass runs. When
+    process-streaming rewrites the note it must prefer that on-disk edit over
+    the (older) --notes draft — this reads it back so the rewrite can preserve
+    it. '## User Notes' is normally the tail section, but we stop at the next
+    heading defensively.
+    """
+    try:
+        if not summary_path.exists():
+            return None
+        content = summary_path.read_text(encoding='utf-8')
+    except Exception:
+        return None
+    idx = content.find('\n## User Notes')
+    if idx == -1:
+        return None
+    section = content[idx + len('\n## User Notes'):].lstrip('\n')
+    next_heading = section.find('\n## ')
+    if next_heading != -1:
+        section = section[:next_heading]
+    text = section.strip()
+    return text or None
+
+
 @cli.command(name='process-streaming')
 @click.argument('audio_file', default='')
 @click.option('--name', '-n', default='Recording', help='Session name')
@@ -827,6 +855,23 @@ def process_streaming(audio_file, name, notes, live_transcript, append_to):
                     logger.info(f"Loaded user notes ({len(notes_text)} chars)")
             except Exception as e:
                 logger.warning(f"Failed to read notes file: {e}")
+
+        # Instant-stop: if a placeholder note already exists at the target path
+        # (main wrote it from the live transcript at stop), prefer ITS
+        # '## User Notes' over the --notes draft — the user may have edited My
+        # notes on the placeholder while this batch pass ran, and the final
+        # rewrite below must not clobber that edit. Append runs a different path
+        # (it never rewrites the note wholesale), so this only affects the
+        # new-recording rewrite.
+        if not append_to:
+            try:
+                placeholder = recorder.output_dir / f"{Path(audio_file).stem}_summary.md"
+                edited = _read_existing_user_notes(placeholder)
+                if edited is not None:
+                    notes_text = edited
+                    logger.info(f"Preserved edited My notes from placeholder ({len(edited)} chars)")
+            except Exception as e:
+                logger.debug(f"No placeholder notes to preserve: {e}")
 
         # Read the live transcript fallback (#207). The renderer accumulates
         # live segments during recording; Electron writes them to this file so
@@ -2367,6 +2412,11 @@ def _parse_meeting_markdown(md_path):
     # reprocess clears it when it rewrites the note.
     if meta.get('notes_stale'):
         session_info['notes_stale'] = True
+    # An instant-stop placeholder: written from the live transcript at stop
+    # while batch transcribe/summarise upgrades it in the background. Surface
+    # the flag so the detail view shows a quiet "finishing up" affordance.
+    if meta.get('processing'):
+        session_info['processing'] = True
 
     return {
         'session_info': session_info,

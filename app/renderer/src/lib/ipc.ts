@@ -35,6 +35,12 @@ export interface SessionInfo {
    *  its notes were generated: the summary no longer covers the full
    *  transcript. The UI offers "Regenerate notes"; reprocess clears it. */
   notes_stale?: boolean;
+  /** Instant-stop placeholder: the note was written from the live transcript
+   *  at stop and the batch transcribe/summarise is still upgrading it in the
+   *  background. The detail view shows a quiet "finishing up" affordance; the
+   *  pipeline clears it (on success by rewriting fresh; on failure/startup via
+   *  a sweep). */
+  processing?: boolean;
 }
 
 export interface Meeting {
@@ -331,7 +337,14 @@ export type RecordingTrigger = 'manual' | 'notification_click' | 'hotkey' | 'tra
 export type TelemetryToggleSource = 'setup' | 'settings';
 
 export type StartRecordingResponse = Result<{ message: string; sessionName?: string }>;
-export type StopRecordingResponse = Result<{ message: string; sessionName?: string }>;
+export type StopRecordingResponse = Result<{
+  message: string;
+  sessionName?: string;
+  /** Instant stop: the note written from the live transcript at stop (or the
+   *  continued note). The renderer navigates straight to it; absent for
+   *  Whisper/import, which use the processing dock. */
+  summaryFile?: string | null;
+}>;
 export type PauseRecordingResponse = Result<{ message: string }>;
 export type ResumeRecordingResponse = Result<{ message: string }>;
 
