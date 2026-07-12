@@ -580,7 +580,10 @@ async function initTelemetry() {
     anonymousId = config.anonymous_id;
 
     if (telemetryEnabled) {
-      posthogClient = new PostHog(POSTHOG_API_KEY, { host: POSTHOG_HOST });
+      // disableGeoip is already the posthog-node default; explicit here as
+      // drift protection so an SDK upgrade can't silently re-enable IP
+      // geolocation for opted-in users.
+      posthogClient = new PostHog(POSTHOG_API_KEY, { host: POSTHOG_HOST, disableGeoip: true });
       // Identify user for DAU tracking
       posthogClient.identify({
         distinctId: anonymousId,
@@ -6398,7 +6401,7 @@ ipcMain.handle('set-telemetry', async (event, enabled, source) => {
     if (enabled && !posthogClient) {
       // Bring the client up and identify FIRST so both the super-properties
       // and this event land fresh, rather than waiting for next launch.
-      posthogClient = new PostHog(POSTHOG_API_KEY, { host: POSTHOG_HOST });
+      posthogClient = new PostHog(POSTHOG_API_KEY, { host: POSTHOG_HOST, disableGeoip: true });
       telemetryEnabled = true;
       refreshIdentitySuperProperties();
       trackEvent('telemetry_toggled', { enabled: true, source: toggleSource });

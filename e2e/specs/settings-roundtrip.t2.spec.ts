@@ -60,7 +60,9 @@ const CASES: Case[] = [
   // false flips the macOS default (true) so this has teeth on the primary signed
   // platform — asserting `true` there would pass even if the setter no-oped.
   { kind: 'systemAudio', value: false, configKey: 'system_audio_enabled' },
-  { kind: 'telemetry', value: false, configKey: 'telemetry_enabled' },
+  // true flips the default (false) so the assertion has teeth - a no-op
+  // setter would leave the key unset/false and fail this case.
+  { kind: 'telemetry', value: true, configKey: 'telemetry_enabled' },
   { kind: 'transcriptionEngine', value: 'whisper', configKey: 'transcription_engine' },
   { kind: 'dockIcon', value: true, configKey: 'hide_dock_icon' },
   // false flips the default (true) so the assertion has teeth — a no-op setter

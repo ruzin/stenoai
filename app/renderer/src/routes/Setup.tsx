@@ -130,7 +130,7 @@ export function Setup() {
   // immediately via the same backend used by the Settings page.
   const telemetry = useTelemetrySetting();
   const setTelemetry = useSetTelemetry();
-  const telemetryEnabled = telemetry.data?.telemetry_enabled ?? true;
+  const telemetryEnabled = telemetry.data?.telemetry_enabled ?? false;
 
   // First name powers the in-app greeting ("Hi <name>, ask anything"). Stored
   // locally only — never sent anywhere. Persisted on blur to avoid a write
