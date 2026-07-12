@@ -4242,6 +4242,19 @@ async function processNextInQueue() {
         }
       } catch (_) { /* best-effort cleanup */ }
     }
+    // Remove the per-job notes snapshot temp (only temps under tmpdir reach the
+    // job now; the shared draft was already deleted at queue time).
+    if (
+      currentProcessingJob &&
+      currentProcessingJob.notesFile &&
+      currentProcessingJob.notesFile.startsWith(os.tmpdir())
+    ) {
+      try {
+        if (fs.existsSync(currentProcessingJob.notesFile)) {
+          fs.unlinkSync(currentProcessingJob.notesFile);
+        }
+      } catch (_) { /* best-effort cleanup */ }
+    }
     isProcessing = false;
     currentProcessingJob = null;
     currentProcessingStartedAtMs = null;
@@ -4515,6 +4528,17 @@ ipcMain.handle('start-recording-ui', async (_, sessionName, trigger, appendTo) =
     }
 
     const actualSessionName = sessionName || 'Note';
+    // Clear any stale name-keyed draft notes before this recording starts, so a
+    // PREVIOUS recording that was abandoned (never processed → never
+    // consumed-and-cleared) can't leak its notes into this same-named one. The
+    // normal path clears it at processing; this covers the abandoned case. Not
+    // an append (which records into an existing note; its notes stay put).
+    if (!appendTo) {
+      try {
+        const staleDraft = userNotesFilePath(getOutputDir(), actualSessionName);
+        if (fs.existsSync(staleDraft)) fs.unlinkSync(staleDraft);
+      } catch (_) { /* best-effort */ }
+    }
     // Whisper recordings use the post-stop pipeline (no live drawer, no
     // sidecar). Parakeet recordings spawn the VAD-gated live consumer
     // so the renderer can show real-time text. Cached read — avoids a
@@ -7454,9 +7478,31 @@ ipcMain.handle('process-system-audio-recording', async (event, audioFilePath, se
 
     const actualSessionName = sessionName || 'Note';
 
-    // Same dir 'save-meeting-notes' writes to — not the read-only bundle dir.
+    // Draft notes are keyed by session NAME (`{name}_notes.txt`), so back-to-
+    // back recordings with the default name 'Note' all share one file. If it
+    // isn't consumed-and-cleared, the NEXT same-named recording (that typed no
+    // notes) inherits the previous meeting's notes — a real, persisted leak
+    // (surfaced by the My notes tab). Snapshot it to a per-job temp (mirrors
+    // the live-transcript snapshot) and DELETE the shared draft, so each job
+    // owns its notes and the draft can't leak forward. The temp is cleaned up
+    // in the queue's finally.
     const notesFile = userNotesFilePath(getOutputDir(), actualSessionName);
-    const notesPath = fs.existsSync(notesFile) ? notesFile : undefined;
+    let notesPath;
+    if (fs.existsSync(notesFile)) {
+      try {
+        const draft = fs.readFileSync(notesFile, 'utf-8');
+        fs.unlinkSync(notesFile);
+        if (draft.trim()) {
+          notesPath = path.join(
+            os.tmpdir(),
+            `stenoai-notes-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.txt`,
+          );
+          fs.writeFileSync(notesPath, draft, 'utf-8');
+        }
+      } catch (e) {
+        sendDebugLog(`[notes] failed to snapshot draft notes: ${e.message}`);
+      }
+    }
 
     // Snapshot the live transcript captured during this recording (#207) so the
     // backend can fall back to it if the batch transcription comes back empty.
