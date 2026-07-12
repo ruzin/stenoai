@@ -803,8 +803,10 @@ def _read_existing_user_notes(summary_path: Path):
     the user may edit My notes on it while the batch pass runs. When
     process-streaming rewrites the note it must prefer that on-disk edit over
     the (older) --notes draft — this reads it back so the rewrite can preserve
-    it. '## User Notes' is normally the tail section, but we stop at the next
-    heading defensively.
+    it. '## User Notes' is the LAST section written by every writer (main's
+    placeholder and process-streaming alike), so it runs to end-of-file — do
+    NOT stop at the next heading, or a user who types a '## ' line inside their
+    own notes would lose everything after it.
     """
     try:
         if not summary_path.exists():
@@ -816,9 +818,6 @@ def _read_existing_user_notes(summary_path: Path):
     if idx == -1:
         return None
     section = content[idx + len('\n## User Notes'):].lstrip('\n')
-    next_heading = section.find('\n## ')
-    if next_heading != -1:
-        section = section[:next_heading]
     text = section.strip()
     return text or None
 

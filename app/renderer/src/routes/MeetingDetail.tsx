@@ -305,7 +305,13 @@ function DetailContent({
     const sessionName = info.name;
     const offChunk = ipc().on.summaryChunk((e) => {
       if (e.summaryFile !== summaryFile) return;
-      setStreamPhase((prev) => (prev === 'analyzing' ? 'generating' : prev));
+      // Promote from idle too (not just analyzing): an instant-stop note's
+      // first-ever summary streams in with no prior reprocess to seed
+      // 'analyzing', so without idle→generating the StreamingView (gated on
+      // phase !== 'idle') would never render and the summary would silently
+      // pop in only at completion. Chunks are summaryFile-filtered, so this
+      // can't fire for the wrong note; auto-off sends no chunks, so it no-ops.
+      setStreamPhase((prev) => (prev === 'analyzing' || prev === 'idle' ? 'generating' : prev));
       setStreamText((prev) => prev + e.chunk);
     });
     const offComplete = ipc().on.summaryComplete((e) => {

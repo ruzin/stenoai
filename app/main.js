@@ -1281,8 +1281,9 @@ if (!gotSingleInstanceLock) {
     // Instant-stop recovery: clear any `processing: true` left on a note by an
     // app quit mid-pipeline (the child died with it). No queue is active at
     // startup, so any such flag is stale — leaving it would strand the note
-    // "finishing up" forever.
-    sweepStuckProcessingFlags();
+    // "finishing up" forever. Deferred off the critical startup path so the
+    // per-note frontmatter scan never delays first paint.
+    setImmediate(sweepStuckProcessingFlags);
 
     // Persistent diagnostic log under <userData>/logs (honors
     // STENOAI_USER_DATA_DIR via getUserDataDir, so e2e/tests stay isolated).
@@ -3814,6 +3815,11 @@ function resetRecordingRuntimeState() {
     pausedTotalMs: 0,
     isPaused: false
   };
+  // Instant stop: drop the recording's predicted summary path on teardown so it
+  // can't be read for a later session (open sets a fresh one). Not nulled in
+  // close-system-audio-file, which races stop-recording-ui — this runs at the
+  // end of stop, after the placeholder is written.
+  activeSysAudioSummaryFile = null;
   // Folded in here (rather than at each of this function's call sites) so
   // every teardown path -- clean stop, a failed start, or the quit-time
   // cleanup -- consistently clears the crash/force-quit marker.
@@ -4399,12 +4405,18 @@ function clearNoteProcessingFlag(summaryFile) {
     if (!summaryFile || !summaryFile.endsWith('.md') || !fs.existsSync(summaryFile)) return;
     const raw = fs.readFileSync(summaryFile, 'utf8');
     if (!raw.startsWith('---')) return;
-    const parts = raw.split('---', 3);
+    // Split with NO limit and rejoin the tail: split('---', 3) would DISCARD
+    // any '---' in the body (markdown thematic breaks in summaries, resumed-
+    // segment separators), silently truncating the note. Mirrors
+    // parseMeetingMarkdown's split/slice(2).join('---') for the same reason.
+    const parts = raw.split('---');
     if (parts.length < 3) return;
+    const frontmatter = parts[1];
+    const body = parts.slice(2).join('---');
     let removed = false;
     let sawNotesGenerated = false;
     const kept = [];
-    for (const line of parts[1].split('\n')) {
+    for (const line of frontmatter.split('\n')) {
       const key = line.slice(0, line.indexOf(':')).trim();
       if (key === 'processing') { removed = true; continue; }
       if (key === 'notes_generated') sawNotesGenerated = true;
@@ -4415,7 +4427,7 @@ function clearNoteProcessingFlag(summaryFile) {
       const at = kept[kept.length - 1] === '' ? kept.length - 1 : kept.length;
       kept.splice(at, 0, 'notes_generated: false');
     }
-    const out = `---${kept.join('\n')}---${parts[2]}`;
+    const out = `---${kept.join('\n')}---${body}`;
     const tmp = `${summaryFile}.tmp-${Date.now()}`;
     fs.writeFileSync(tmp, out, 'utf8');
     fs.renameSync(tmp, summaryFile);
@@ -4427,14 +4439,36 @@ function clearNoteProcessingFlag(summaryFile) {
 
 // Startup sweep: clear `processing: true` on any note left mid-process by an
 // app quit (its pipeline child died with it). Runs once at startup — there is
-// no active queue then, so any such flag is stale.
+// no active queue then, so any such flag is stale. Reads only the frontmatter
+// head (not whole transcripts) to decide, so a large library isn't fully
+// re-read on every launch — only notes that actually carry the flag are opened
+// in full by clearNoteProcessingFlag.
+function noteFrontmatterHasProcessing(filePath) {
+  let fd;
+  try {
+    fd = fs.openSync(filePath, 'r');
+    const buf = Buffer.alloc(2048);
+    const n = fs.readSync(fd, buf, 0, 2048, 0);
+    const head = buf.toString('utf8', 0, n);
+    if (!head.startsWith('---')) return false;
+    const end = head.indexOf('\n---', 3);
+    const frontmatter = end === -1 ? head : head.slice(0, end);
+    return /(^|\n)processing:\s*true\s*(\n|$)/.test(frontmatter);
+  } catch {
+    return false;
+  } finally {
+    if (fd !== undefined) { try { fs.closeSync(fd); } catch { /* */ } }
+  }
+}
+
 function sweepStuckProcessingFlags() {
   try {
     const dir = getOutputDir();
     if (!fs.existsSync(dir)) return;
     for (const f of fs.readdirSync(dir)) {
       if (!f.endsWith('_summary.md')) continue;
-      clearNoteProcessingFlag(path.join(dir, f));
+      const p = path.join(dir, f);
+      if (noteFrontmatterHasProcessing(p)) clearNoteProcessingFlag(p);
     }
   } catch (e) {
     sendDebugLog(`[instant-stop] startup sweep failed: ${e.message}`);

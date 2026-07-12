@@ -37,7 +37,9 @@ const BACKEND = path.resolve(
 const LIVE_TRANSCRIPT =
   'Welcome to the sync. We shipped onboarding on Tuesday and cut the release Friday.';
 
-const EDITED_NOTES = 'EDITED: remember to ping Dana about the migration.';
+// Includes a '## ' heading the user typed inside their own notes — the notes
+// preserve must run to end-of-file, NOT truncate at that heading.
+const EDITED_NOTES = 'EDITED: ping Dana about the migration.\n\n## Follow-ups\n- confirm the soak';
 const OLD_DRAFT_NOTES = 'OLD DRAFT: this should be overwritten by the edit.';
 
 const FIXED_REPLY = ['## Summary', 'Onboarding shipped; release cut Friday.', '', '## Key Points', '- shipped', ''].join('\n');
@@ -130,8 +132,11 @@ test('placeholder processing flag parses; the rewrite preserves the edited My no
     expect(res.code, `stderr:\n${res.stderr}`).toBe(0);
 
     const md = readFileSync(summaryPath, 'utf8');
-    // The edit survived; the older draft did not.
+    // The whole edit survived (incl. the '## Follow-ups' heading + its lines —
+    // not truncated at the heading); the older draft did not.
     expect(md).toContain(EDITED_NOTES);
+    expect(md).toContain('## Follow-ups');
+    expect(md).toContain('- confirm the soak');
     expect(md).not.toContain(OLD_DRAFT_NOTES);
     // Summary landed, transcript upgraded to the batch/live text.
     expect(md).toContain('## Summary');

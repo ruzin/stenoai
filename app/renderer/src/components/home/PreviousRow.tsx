@@ -1,4 +1,4 @@
-import { Folder as FolderIcon, Loader2 } from 'lucide-react';
+import { FileText, Folder as FolderIcon, Loader2 } from 'lucide-react';
 import type { Meeting } from '@/lib/ipc';
 import { navigate } from '@/lib/router';
 import { useMeetingsList } from '@/lib/meetingsListContext';
@@ -7,18 +7,6 @@ import { stripReasoning } from '@/lib/markdown';
 interface PreviousRowProps {
   meeting: Meeting;
   folderName?: string;
-}
-
-const AVATAR_COLORS = [
-  '#A855F7', '#EAB308', '#3B82F6', '#F43F5E', '#10B981',
-];
-
-function getAvatarColor(str: string) {
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    hash = str.charCodeAt(i) + ((hash << 5) - hash);
-  }
-  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
 }
 
 export function PreviousRow({ meeting, folderName }: PreviousRowProps) {
@@ -44,9 +32,6 @@ export function PreviousRow({ meeting, folderName }: PreviousRowProps) {
       : `/meetings/${encodeURIComponent(info.summary_file)}`;
 
   const title = info.name || 'Untitled note';
-  const initial = title.charAt(0).toUpperCase();
-  const avatarBg = getAvatarColor(title);
-  const avatarFg = '#FFFFFF';
 
   return (
     <div
@@ -72,12 +57,15 @@ export function PreviousRow({ meeting, folderName }: PreviousRowProps) {
       }}
     >
       <div className="flex min-w-0 flex-1 items-center gap-3.5">
-        <div 
+        {/* Neutral note glyph — paper+ink, no per-note colour. Notes are told
+            apart by title + preview, not an arbitrary hash colour (which read
+            as meaningful and collided with the reserved status hues). */}
+        <div
           aria-hidden="true"
-          className="flex size-9 flex-shrink-0 items-center justify-center rounded-lg font-medium text-[15px]"
-          style={{ backgroundColor: avatarBg, color: avatarFg }}
+          className="flex size-9 flex-shrink-0 items-center justify-center rounded-lg"
+          style={{ background: 'var(--surface-sunken)', color: 'var(--fg-2)' }}
         >
-          {initial}
+          <FileText className="size-[17px]" />
         </div>
         
         <div className="flex min-w-0 flex-col gap-1">
