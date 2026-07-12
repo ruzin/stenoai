@@ -297,6 +297,7 @@ class Config:
         self._migrate_whisper_model()
         self._migrate_summary_model()
         self._migrate_transcription_engine()
+        self._migrate_telemetry_opt_in()
         self._normalize_templates()
         self._seed_sample_template()
 
@@ -317,6 +318,68 @@ class Config:
             "whisper" if self._existed_at_load else "parakeet"
         )
         self._save()
+
+    def _migrate_telemetry_opt_in(self) -> None:
+        """One-time consent reset for telemetry (strict opt-in).
+
+        v0.5.8 shipped telemetry default-ON and _merge_for_save() lays down
+        the full default dict on first write, so existing installs carry
+        telemetry_enabled: true that was never an affirmative choice. Until
+        the marker is set, force the persisted value to False — also when the
+        key is merely missing, so a rollback to a build that treats
+        missing-as-true stays off. set_telemetry_enabled() also writes the
+        marker, so any real toggle ends the migration window.
+        """
+        if self._load_failed:
+            return  # never persist defaults over a corrupt-but-recoverable file
+        if self._config.get("telemetry_opt_in_migrated") is True:
+            return
+        self._config["telemetry_enabled"] = False
+        self._config["telemetry_opt_in_migrated"] = True
+        self._persist_telemetry_migration()
+
+    def _persist_telemetry_migration(self) -> None:
+        """Locked compare-and-set write for the telemetry consent reset.
+
+        Re-reads config.json after acquiring the lock and aborts if the
+        marker already landed on disk (another process migrated, or the user
+        affirmatively toggled), so a racing opt-in is never clobbered.
+        All failure modes fail closed: this process already sees False in
+        memory, and the next process retries the persist.
+        """
+        lock_path = str(self.config_path) + ".lock"
+        try:
+            with filelock.FileLock(lock_path, timeout=self._SAVE_LOCK_TIMEOUT):
+                base = self._read_disk_for_merge()
+                if base is None:
+                    # Missing or unreadable on disk: nothing trustworthy to
+                    # reset. A later _save() lays down the defaults, which
+                    # are already off.
+                    return
+                if base.get("telemetry_opt_in_migrated") is True:
+                    # Lost the race — adopt the disk state (bool by
+                    # construction: only the migration or the setter write
+                    # it) instead of overwriting an affirmative opt-in.
+                    adopted = base.get("telemetry_enabled") is True
+                    self._config["telemetry_enabled"] = adopted
+                    self._config["telemetry_opt_in_migrated"] = True
+                    self._snapshot["telemetry_enabled"] = adopted
+                    self._snapshot["telemetry_opt_in_migrated"] = True
+                    return
+                base["telemetry_enabled"] = False
+                base["telemetry_opt_in_migrated"] = True
+                _atomic_write_json(self.config_path, base)
+                # Sync the snapshot so a later _save() from this instance
+                # doesn't re-diff these keys against the pre-migration load.
+                self._snapshot["telemetry_enabled"] = False
+                self._snapshot["telemetry_opt_in_migrated"] = True
+        except filelock.Timeout:
+            logger.warning(
+                "Timed out acquiring config lock for telemetry consent "
+                "migration; will retry on next load"
+            )
+        except Exception as e:
+            logger.error(f"Error persisting telemetry consent migration: {e}")
 
     def _migrate_whisper_model(self) -> None:
         """Map any out-of-current-list whisper model to the supported one.
@@ -584,7 +647,11 @@ class Config:
         return {
             "model": self.DEFAULT_MODEL,
             "notifications_enabled": True,
-            "telemetry_enabled": True,
+            # Strict opt-in — telemetry runs only after the user explicitly
+            # enables it (Setup or Settings → Advanced). Fresh installs carry
+            # the migration marker so the one-time consent reset never runs.
+            "telemetry_enabled": False,
+            "telemetry_opt_in_migrated": True,
             # Default ON on macOS — CoreAudio Process Tap captures system
             # audio alongside the mic on macOS 14.4+. Older macOS auto-falls
             # back to mic-only via main.js's loadSystemAudioEnabled() OS gate.
@@ -835,7 +902,9 @@ class Config:
 
     def get_telemetry_enabled(self) -> bool:
         """Get whether anonymous usage analytics are enabled."""
-        return self._config.get("telemetry_enabled", True)
+        # Strict consent: only JSON boolean true counts. Malformed persisted
+        # values ("true", 1, null) must never enable telemetry.
+        return self._config.get("telemetry_enabled") is True
 
     def set_telemetry_enabled(self, enabled: bool) -> bool:
         """
@@ -848,6 +917,9 @@ class Config:
             True if saved successfully, False otherwise
         """
         self._config["telemetry_enabled"] = enabled
+        # Any real toggle is affirmative — it also ends the one-time
+        # consent-reset migration window.
+        self._config["telemetry_opt_in_migrated"] = True
         return self._save()
 
     def get_hide_dock_icon(self) -> bool:

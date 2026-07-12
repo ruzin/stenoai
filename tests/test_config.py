@@ -254,6 +254,105 @@ class ConfigLaunchOnLoginTests(unittest.TestCase):
             self.assertTrue(reloaded.get_launch_on_login())
 
 
+class ConfigTelemetryOptInTests(unittest.TestCase):
+    def test_fresh_config_defaults_off_with_marker(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config = Config(config_path=Path(tmp_dir) / "config.json")
+            self.assertFalse(config.get_telemetry_enabled())
+            self.assertIs(config._config.get("telemetry_opt_in_migrated"), True)
+
+    def test_legacy_persisted_true_is_reset_and_persisted(self):
+        # v0.5.8 auto-persisted telemetry_enabled: true without consent; the
+        # one-time migration must reset it on disk, not only in memory.
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "config.json"
+            path.write_text(json.dumps({"telemetry_enabled": True}))
+            config = Config(config_path=path)
+            self.assertFalse(config.get_telemetry_enabled())
+            on_disk = json.loads(path.read_text())
+            self.assertIs(on_disk["telemetry_enabled"], False)
+            self.assertIs(on_disk["telemetry_opt_in_migrated"], True)
+
+    def test_legacy_missing_key_is_persisted_false(self):
+        # Rollback protection: v0.5.8 treats a missing key as enabled, so the
+        # migration must write an explicit false even when the key is absent.
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "config.json"
+            path.write_text(json.dumps({"model": "gemma3:4b"}))
+            config = Config(config_path=path)
+            self.assertFalse(config.get_telemetry_enabled())
+            on_disk = json.loads(path.read_text())
+            self.assertIs(on_disk["telemetry_enabled"], False)
+            self.assertIs(on_disk["telemetry_opt_in_migrated"], True)
+
+    def test_malformed_values_never_enable(self):
+        for malformed in ("true", "false", 1, 0, None, []):
+            with self.subTest(value=malformed):
+                with tempfile.TemporaryDirectory() as tmp_dir:
+                    path = Path(tmp_dir) / "config.json"
+                    path.write_text(json.dumps({
+                        "telemetry_enabled": malformed,
+                        "telemetry_opt_in_migrated": True,
+                    }))
+                    config = Config(config_path=path)
+                    self.assertFalse(config.get_telemetry_enabled())
+
+    def test_marker_prevents_re_migration(self):
+        # An affirmative post-migration true must survive later loads.
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "config.json"
+            path.write_text(json.dumps({
+                "telemetry_enabled": True,
+                "telemetry_opt_in_migrated": True,
+            }))
+            config = Config(config_path=path)
+            self.assertTrue(config.get_telemetry_enabled())
+            on_disk = json.loads(path.read_text())
+            self.assertIs(on_disk["telemetry_enabled"], True)
+
+    def test_round_trip_writes_marker(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "config.json"
+            config = Config(config_path=path)
+            self.assertTrue(config.set_telemetry_enabled(True))
+            self.assertTrue(config.get_telemetry_enabled())
+            reloaded = Config(config_path=path)
+            self.assertTrue(reloaded.get_telemetry_enabled())
+            on_disk = json.loads(path.read_text())
+            self.assertIs(on_disk["telemetry_opt_in_migrated"], True)
+            self.assertTrue(reloaded.set_telemetry_enabled(False))
+            self.assertFalse(reloaded.get_telemetry_enabled())
+
+    def test_corrupt_config_never_persisted(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "config.json"
+            path.write_text("{not json")
+            config = Config(config_path=path)
+            self.assertFalse(config.get_telemetry_enabled())
+            # The corrupt original must stay recoverable on disk.
+            self.assertEqual(path.read_text(), "{not json")
+
+    def test_migration_cas_aborts_when_marker_lands_first(self):
+        # Deterministic race simulation: another process migrated AND the
+        # user affirmatively opted in before this (stale) instance persisted
+        # its migration. The locked compare-and-set must adopt the disk state
+        # instead of clobbering the opt-in.
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "config.json"
+            path.write_text(json.dumps({
+                "telemetry_enabled": True,
+                "telemetry_opt_in_migrated": True,
+            }))
+            config = Config(config_path=path)
+            # Rewind this instance to a pre-migration view of the world.
+            config._config["telemetry_enabled"] = False
+            config._config["telemetry_opt_in_migrated"] = False
+            config._persist_telemetry_migration()
+            on_disk = json.loads(path.read_text())
+            self.assertIs(on_disk["telemetry_enabled"], True)
+            self.assertTrue(config.get_telemetry_enabled())
+
+
 class ConfigOrgAutoBackupTests(unittest.TestCase):
     def test_default_auto_backup_is_true(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
