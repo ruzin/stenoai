@@ -90,7 +90,6 @@ function CompareMenu() {
       <a
         href="/vs/"
         aria-expanded={open}
-        aria-haspopup="menu"
         onFocus={() => setOpen(true)}
         className="inline-flex items-center gap-1 text-fg-2 text-sm no-underline hover:text-fg-1 transition-colors"
       >
@@ -104,8 +103,12 @@ function CompareMenu() {
 
       <AnimatePresence>
         {open && (
+          // Plain links in a labelled group, not role="menu": a nav dropdown of
+          // page links doesn't need the application-menu keyboard model (arrow
+          // keys, roving focus). Tab/Shift-Tab through the links + Escape is the
+          // correct, expected interaction here.
           <Motion.div
-            role="menu"
+            aria-label="Compare Steno with other tools"
             initial={{ opacity: 0, y: 4, x: "-50%" }}
             animate={{ opacity: 1, y: 0, x: "-50%" }}
             exit={{ opacity: 0, y: 4, x: "-50%" }}
@@ -125,7 +128,6 @@ function CompareMenu() {
                 <a
                   key={href}
                   href={href}
-                  role="menuitem"
                   className="px-4 py-2 text-fg-2 text-sm no-underline hover:text-fg-1 hover:bg-surface-hover transition-colors whitespace-nowrap"
                 >
                   {label}
@@ -134,7 +136,6 @@ function CompareMenu() {
               <div className="my-2" style={{ borderTop: "1px solid var(--border-subtle)" }} />
               <a
                 href="/vs/"
-                role="menuitem"
                 className="px-4 py-2 text-fg-2 text-sm no-underline hover:text-fg-1 hover:bg-surface-hover transition-colors whitespace-nowrap"
               >
                 All comparisons
@@ -275,9 +276,14 @@ export function Nav({ subpage = false }) {
                 </a>
               ))}
               <div className="mt-2 pt-2" style={{ borderTop: "1px solid var(--border-subtle)" }}>
-                <span className="block text-fg-muted text-[12px] py-2" style={{ fontFamily: "var(--font-mono)", textTransform: "uppercase", letterSpacing: "0.12em" }}>
+                <a
+                  href="/vs/"
+                  onClick={() => setMenuOpen(false)}
+                  className="block text-fg-muted text-[12px] py-2 no-underline hover:text-fg-1 transition-colors"
+                  style={{ fontFamily: "var(--font-mono)", textTransform: "uppercase", letterSpacing: "0.12em" }}
+                >
                   Compare
-                </span>
+                </a>
                 {COMPARE_LINKS.map(({ href, label }) => (
                   <a
                     key={href}

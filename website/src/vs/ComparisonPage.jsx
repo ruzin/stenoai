@@ -39,6 +39,7 @@ function FaqItem({ faq, open, onToggle, last }) {
     <div style={{ borderTop: "1px solid var(--border-subtle)", borderBottom: last ? "1px solid var(--border-subtle)" : "none" }}>
       <button
         onClick={onToggle}
+        aria-expanded={open}
         className="w-full bg-transparent border-0 py-6 flex justify-between items-center gap-5 cursor-pointer text-left text-fg-1 text-base md:text-[17px]"
         style={{ fontFamily: "var(--font-sans)", fontWeight: 500 }}
       >

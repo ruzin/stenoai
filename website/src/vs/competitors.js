@@ -4,6 +4,12 @@
 // website or repo. When pricing or features change, update the copy AND
 // the `verified` date. Keep the tone factual — the honest "choose them if"
 // section is deliberate: it's what makes the rest credible.
+//
+// NOTE: `metaTitle`/`metaDescription` below are NOT read at runtime — each
+// page's <title>/<meta> live in its static HTML entry under website/vs/*,
+// which is the source of truth for SEO heads. The fields are kept here only
+// as human-readable documentation of the intended per-page copy; if you edit
+// them, edit the matching website/vs/<slug>/index.html too (or they drift).
 
 export const VERIFIED = "July 2026";
 
@@ -78,7 +84,7 @@ export const granola = {
   faqs: [
     {
       q: "Is Granola private?",
-      a: "Granola avoids the meeting bot, which is a real privacy improvement over Otter-style tools. But your audio is still streamed to cloud servers for transcription, and cloud LLMs process your transcripts. Steno removes that layer entirely: after install it makes no network requests, and audio never leaves the device.",
+      a: "Granola avoids the meeting bot, which is a real privacy improvement over Otter-style tools. But your audio is still streamed to cloud servers for transcription, and cloud LLMs process your transcripts. Steno removes that layer entirely: transcription and summarization run locally, and your recordings, transcripts, and notes never leave your device. (Steno makes no network calls with your meeting content; anonymous usage telemetry is on by default and can be switched off in Settings.)",
     },
     {
       q: "Does Steno work the same way as Granola — no bot in the call?",
@@ -94,7 +100,7 @@ export const granola = {
     },
     {
       q: "Are Steno's local summaries as good as Granola's cloud ones?",
-      a: "Steno ships five open-weight models (up to GPT-OSS 20B) that run on your machine, and you can optionally plug in your own cloud API key if you want a frontier model. For meeting summaries and action items, well-prompted local models are strong — and you can verify the results because you keep the full transcript.",
+      a: "Steno ships a lineup of open-weight models (up to GPT-OSS 20B) that run on your machine, and you can optionally plug in your own cloud API key if you want a frontier model. For meeting summaries and action items, well-prompted local models are strong — and you can verify the results because you keep the full transcript.",
     },
   ],
 };
@@ -111,7 +117,7 @@ export const otter = {
     "Otter is the incumbent cloud transcription service: an OtterPilot bot joins your call as a participant, recordings live on Otter's servers, and every plan below Business has minute caps. Steno takes the opposite approach — it captures system audio on your own machine, transcribes and summarizes locally, and never uploads anything.",
   rows: [
     ROW("Price", STENO.price, {
-      text: "Free: 300 min/month (30 min per conversation); Pro from $8.49/user/month; Business from $19.99",
+      text: "Free: 300 min/month (30 min per conversation); Pro from $8.33/user/month billed annually; Business from $19.99",
       tone: "bad",
     }),
     ROW("Open source", STENO.openSource, { text: "No — proprietary", tone: "bad" }),
@@ -160,7 +166,7 @@ export const otter = {
     },
     {
       q: "Where do my recordings go?",
-      a: "With Otter, recordings and transcripts are stored in Otter's cloud, under Otter's terms. With Steno, they're ordinary files in local app storage on your device. Steno makes no network requests after install.",
+      a: "With Otter, recordings and transcripts are stored in Otter's cloud, under Otter's terms. With Steno, they're ordinary files in local app storage on your device — your meeting content is never uploaded. (Steno does make some network calls unrelated to your content: update checks, first-run model downloads, and anonymous usage telemetry that's on by default and can be switched off in Settings.)",
     },
     {
       q: "Is Steno's accuracy comparable to Otter's?",
@@ -168,7 +174,7 @@ export const otter = {
     },
     {
       q: "What's the catch — why is Steno free?",
-      a: "There's no hosted infrastructure to pay for: your machine does the work. Steno is an open-source project (MIT), so you can read the code, build it yourself, and verify the no-network claim.",
+      a: "There's no hosted infrastructure to pay for: your machine does the work. Steno is an open-source project (MIT), so you can read the code, build it yourself, and verify exactly what it does and doesn't send.",
     },
   ],
 };
@@ -255,10 +261,10 @@ export const meetily = {
   eyebrow: "Steno vs Meetily",
   h1: "Same privacy philosophy. But Steno offers a whole lot more.",
   intro:
-    "Meetily deserves credit: like Steno, it's open source and transcribes meetings on your own machine. The comparison here isn't about privacy — both projects take it seriously. It's about what's actually in the box. Steno ships features Meetily either doesn't have or holds behind its $120/year-per-device Pro tier: chat with your meetings, speaker attribution, meeting auto-detect, and local AI models bundled in so there's nothing to set up. Steno has one tier, and it's free.",
+    "Meetily deserves credit: like Steno, it's open source and transcribes meetings on your own machine. The comparison here isn't about privacy — both projects take it seriously. It's about what's actually in the box. Steno ships features free that Meetily reserves for its $120/year Pro tier: chat with your meetings, speaker attribution, meeting auto-detect, and local AI models bundled in so there's nothing to set up. Steno has one tier, and it's free.",
   rows: [
     ROW("Price", STENO.price, {
-      text: "Community edition free; Pro $120/year, licensed per device; Enterprise custom",
+      text: "Community edition free; Pro $10/user/month billed annually ($120/year); Enterprise custom",
       tone: "bad",
     }),
     ROW("Open source", STENO.openSource, {
@@ -279,21 +285,21 @@ export const meetily = {
       text: "Live [You] / [Others] labels — included free",
       tone: "good",
     }, {
-      text: "“Coming soon”, planned as a Pro feature",
+      text: "Paid Pro feature (diarization)",
       tone: "bad",
     }),
     ROW("Meeting auto-detect", {
       text: "Included free (calendar integration)",
       tone: "good",
     }, {
-      text: "Pro feature; calendar integration “coming soon”",
+      text: "Paid Pro feature",
       tone: "bad",
     }),
     ROW("Chat with your meetings", {
       text: "Included free — ask questions across any note or recording",
       tone: "good",
     }, {
-      text: "“Coming soon”, planned as a Pro feature",
+      text: "Paid Pro feature",
       tone: "bad",
     }),
     ROW("Usage limits", STENO.limits, { text: "None", tone: "good" }),
@@ -303,7 +309,7 @@ export const meetily = {
     }),
   ],
   verdict:
-    "If you're choosing between the two open-source local notetakers, the question is simple: Steno ships the whole product free — bundled models, speaker attribution, meeting auto-detect, chat with your meetings — while Meetily reserves its enhanced accuracy, exports, auto-detect, and chat for a $120/year Pro license tied to one device, with several of those still marked coming soon.",
+    "If you're choosing between the two open-source local notetakers, the question is simple: Steno ships the whole product free — bundled models, speaker attribution, meeting auto-detect, chat with your meetings — while Meetily reserves its enhanced accuracy, exports, auto-detect, and chat for a $120/year Pro tier.",
   chooseSteno: [
     "You want local summaries working out of the box — Steno bundles Ollama and downloads models in-app, no separate install",
     "You want speaker attribution, meeting auto-detect, and chat with your meetings today, free",
@@ -325,7 +331,7 @@ export const meetily = {
     },
     {
       q: "What does Meetily Pro cost, and what's the Steno equivalent?",
-      a: "Meetily Pro is $120/year, and each license is valid for one device. The Steno equivalent is the free download: there is no Pro tier, and features like speaker attribution and meeting auto-detect — paid or “coming soon” in Meetily — are included.",
+      a: "Meetily Pro is $10/user/month billed annually ($120/year); per their FAQ, each license is valid for one device. The Steno equivalent is the free download: there is no Pro tier, and features Meetily charges Pro for — speaker attribution, meeting auto-detect, chat — are included.",
     },
     {
       q: "Which is more accurate?",
