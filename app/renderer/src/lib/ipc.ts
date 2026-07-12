@@ -101,6 +101,7 @@ export interface CalendarEvent {
     | 'needsAction'
     | 'organizer'
     | 'unknown';
+  color?: string;
 }
 
 export interface UpdateMeetingPatch {
@@ -317,6 +318,17 @@ export type SetupCheckResponse = Result<{
 
 export type MicPermissionResponse = Result<{ status: MicPermissionStatus }>;
 export type MicPermissionGrantResponse = Result<{ granted: boolean }>;
+
+/** Mirrors RECORDING_TRIGGERS in main.js -- what UI action started the
+ *  recording, so PostHog can tell whether the meeting-detected nudge
+ *  actually moves the needle. */
+export type RecordingTrigger = 'manual' | 'notification_click' | 'hotkey' | 'tray' | 'url_scheme';
+
+/** Mirrors TELEMETRY_TOGGLE_SOURCES in main.js -- which SCREEN the telemetry
+ *  toggle was flipped from. 'setup' names the Setup.tsx screen, not a
+ *  lifecycle stage: it's also reachable later via "run setup wizard" from
+ *  Settings, so this does not mean "first run". */
+export type TelemetryToggleSource = 'setup' | 'settings';
 
 export type StartRecordingResponse = Result<{ message: string; sessionName?: string }>;
 export type StopRecordingResponse = Result<{ message: string; sessionName?: string }>;
@@ -684,6 +696,12 @@ export interface StenoaiBridge {
     openExternal: RequestFn<[string], Result<Record<string, never>>>;
   };
 
+  analytics: {
+    /** Fire-and-forget. Main whitelists event names and sanitizes properties;
+     *  see RENDERER_TRACK_EVENTS in main.js. */
+    track: SendFn<[name: string, props?: Record<string, string | number | boolean>]>;
+  };
+
   system: {
     getStatus: RequestFn<[], StatusResponse>;
     test: RequestFn<[], Result<Record<string, never>>>;
@@ -704,10 +722,13 @@ export interface StenoaiBridge {
   };
 
   recording: {
-    /** Optional appendTo: path of an existing note to append this
-     *  recording's transcript to (continue-recording) instead of creating a
-     *  new note. */
-    start: RequestFn<[name?: string, appendTo?: string], StartRecordingResponse>;
+    /** trigger: analytics source (manual/hotkey/tray/…). appendTo: path of an
+     *  existing note to append this recording's transcript to
+     *  (continue-recording) instead of creating a new note. */
+    start: RequestFn<
+      [name?: string, trigger?: RecordingTrigger, appendTo?: string],
+      StartRecordingResponse
+    >;
     stop: RequestFn<[], StopRecordingResponse>;
     pause: RequestFn<[], PauseRecordingResponse>;
     resume: RequestFn<[], ResumeRecordingResponse>;
@@ -844,7 +865,7 @@ export interface StenoaiBridge {
     getNotifications: RequestFn<[], GetNotificationsResponse>;
     setNotifications: RequestFn<[v: boolean], Result<Record<string, never>>>;
     getTelemetry: RequestFn<[], GetTelemetryResponse>;
-    setTelemetry: RequestFn<[v: boolean], Result<Record<string, never>>>;
+    setTelemetry: RequestFn<[v: boolean, source: TelemetryToggleSource], Result<Record<string, never>>>;
     getDockIcon: RequestFn<[], GetDockIconResponse>;
     setDockIcon: RequestFn<[v: boolean], Result<Record<string, never>>>;
     getSystemAudio: RequestFn<[], GetSystemAudioResponse>;
@@ -968,6 +989,7 @@ export interface StenoaiBridge {
     navigateToMeeting: Subscribe<{ summaryFile: string }>;
     trayOpenSettings: Subscribe<void>;
     showQuitDialog: Subscribe<{ type: 'recording' | 'processing'; jobCount?: number }>;
+    showNotification: Subscribe<{ title: string; time: string; meeting_url?: string; attendees?: string }>;
   };
 
   org: {
@@ -992,6 +1014,10 @@ export interface StenoaiBridge {
 
   dialog: {
     respondQuit: SendFn<[confirmed: boolean]>;
+  };
+
+  notification: {
+    close: RequestFn<[], void>;
   };
 
   subscribeQueryStream: (

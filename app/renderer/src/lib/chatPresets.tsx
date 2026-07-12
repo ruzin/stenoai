@@ -32,18 +32,22 @@ export const PRESETS: ChatPreset[] = [
   },
 ];
 
+export const PRESET_COLORS = ['#3B82F6', '#10B981', '#F97316', '#A855F7', '#EAB308'];
+
 /** Slash glyph used as the leading icon on every preset chip + popover
- *  row. Reinforces the "/" keyboard shortcut. Plain grey using the
- *  existing ink tokens so it sits quietly in the warm paper palette
- *  without claiming a colored accent. */
-export function PresetGlyph() {
+ *  row. Reinforces the "/" keyboard shortcut. Defaults to plain grey but 
+ *  accepts a color prop to render a tinted background for visual variety. */
+export function PresetGlyph({ color = 'var(--fg-2)', size = 18 }: { color?: string; size?: number }) {
   return (
     <span
       aria-hidden
-      className="inline-flex size-[18px] flex-shrink-0 items-center justify-center rounded-md font-mono text-[13px] font-semibold leading-none"
+      className="inline-flex flex-shrink-0 items-center justify-center rounded-md font-mono font-semibold leading-none"
       style={{
-        color: 'var(--fg-2)',
-        background: 'var(--surface-active)',
+        width: size,
+        height: size,
+        fontSize: Math.round(size * 0.7),
+        color,
+        background: `color-mix(in srgb, ${color} 15%, transparent)`,
       }}
     >
       /

@@ -35,22 +35,15 @@ export function Processing() {
   const [activeSession, setActiveSession] = React.useState<string | null>(
     () => recording.sessionName,
   );
-  React.useEffect(() => {
-    if (recording.sessionName && recording.sessionName !== activeSession) {
-      setActiveSession(recording.sessionName);
-    }
-  }, [recording.sessionName, activeSession]);
+  if (recording.sessionName && recording.sessionName !== activeSession) {
+    setActiveSession(recording.sessionName);
+  }
 
   const draft = useLiveDraftStore((s) =>
     activeSession ? s.drafts[activeSession] : undefined,
   );
   const startedAt = draft ? new Date(draft.startedAtMs) : null;
-  // Recordings have a live draft to time from. Imported files don't — fall back
-  // to the queue's processing elapsed (get-queue-status), which advances on the
-  // poll, so the timer counts up instead of sticking at 0s.
-  const totalElapsedSeconds = startedAt
-    ? Math.max(0, Math.floor((Date.now() - startedAt.getTime()) / 1000))
-    : recording.elapsed;
+
 
   const [stage, setStage] = React.useState<ProcessingStage>('transcribing');
   const [chunkProgress, setChunkProgress] = React.useState<string | null>(null);
@@ -208,7 +201,7 @@ export function Processing() {
               </Chip>
             )}
             <Chip icon={<Clock size={11} />}>
-              {formatDurationEnglish(totalElapsedSeconds)}
+              <ElapsedTimer startedAt={startedAt} fallbackElapsed={recording.elapsed} />
             </Chip>
             <ProcessingChip />
           </div>
@@ -459,12 +452,7 @@ export function ProcessingDock() {
     sessionName ? s.drafts[sessionName] : undefined,
   );
   const startedAt = draft ? new Date(draft.startedAtMs) : null;
-  // Recordings have a live draft to time from. Imported files don't — fall back
-  // to the queue's processing elapsed (get-queue-status), which advances on the
-  // poll, so the timer counts up instead of sticking at 0s.
-  const totalElapsedSeconds = startedAt
-    ? Math.max(0, Math.floor((Date.now() - startedAt.getTime()) / 1000))
-    : recording.elapsed;
+
 
   return (
     <div className="flex justify-center pointer-events-none">
@@ -494,7 +482,7 @@ export function ProcessingDock() {
               fontSize: 13,
             }}
           >
-            {formatDurationEnglish(totalElapsedSeconds)}
+            <ElapsedTimer startedAt={startedAt} fallbackElapsed={recording.elapsed} />
           </span>
         </span>
       </div>
@@ -505,6 +493,20 @@ export function ProcessingDock() {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+function ElapsedTimer({ startedAt, fallbackElapsed }: { startedAt: Date | null, fallbackElapsed: number }) {
+  const [now, setNow] = React.useState(() => Date.now());
+  React.useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const totalElapsedSeconds = startedAt
+    ? Math.max(0, Math.floor((now - startedAt.getTime()) / 1000))
+    : fallbackElapsed;
+
+  return <>{formatDurationEnglish(totalElapsedSeconds)}</>;
+}
 
 function formatDate(d: Date): string {
   return d.toLocaleDateString(undefined, {

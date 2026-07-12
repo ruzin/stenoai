@@ -23,6 +23,9 @@ const OLLAMA_PORT = 11434;
  * @param {object} [opts]
  * @param {string} [opts.chatReply='ok'] assistant content returned by /api/chat.
  * @param {string[]} [opts.chatReplyQueue=[]] queue of replies to dequeue per call; falls back to chatReply when exhausted.
+ * @param {{status:number, message:string}} [opts.chatError] when set, /api/chat responds with this HTTP
+ *   status and JSON body `{"error": message}` (the real Ollama 404 shape) instead of a reply. Off by
+ *   default so existing specs are unaffected. chatCalls still increments so callers can assert it was hit.
  * @param {string[]} [opts.installedModels=['gemma4:e2b-it-qat','llama3.2:3b']] models /api/tags reports as installed.
  * @param {number} [opts.pullDelayMs=0] hold the /api/pull response open this long before completing it -- gives a
  *   cancel-mid-download test a real window to call cancel-pull before the mock would otherwise finish first.
@@ -31,6 +34,7 @@ const OLLAMA_PORT = 11434;
 function startMockOllama(opts = {}) {
   const chatReply = opts.chatReply ?? 'ok';
   const chatReplyQueue = Array.isArray(opts.chatReplyQueue) ? [...opts.chatReplyQueue] : [];
+  const chatError = opts.chatError ?? null;
   const installedModels = Array.isArray(opts.installedModels)
     ? opts.installedModels
     : ['gemma4:e2b-it-qat', 'llama3.2:3b'];
@@ -110,6 +114,15 @@ function startMockOllama(opts = {}) {
           } catch { /* ignore */ }
           const msgs = Array.isArray(body.messages) ? body.messages : [];
           lastChatPrompt = msgs.length ? String(msgs[msgs.length - 1].content || '') : '';
+
+          // Opt-in failure mode: reply with the configured HTTP error (the real
+          // Ollama 404 "model not found" shape) so the summarizer's stream fails
+          // and must surface it rather than saving an empty summary.
+          if (chatError) {
+            res.writeHead(chatError.status, { 'content-type': 'application/json' });
+            res.end(JSON.stringify({ error: chatError.message }));
+            return;
+          }
 
           // Dequeue reply or fall back to default
           const reply = chatReplyQueue.length > 0 ? chatReplyQueue.shift() : chatReply;

@@ -69,6 +69,13 @@ const stenoai = {
     openExternal: (url) => invoke('open-external', url),
   },
 
+  analytics: {
+    // Fire-and-forget: the renderer has no direct access to trackEvent
+    // (contextIsolation), so notification/chat events fire through here.
+    // Main whitelists event names and sanitizes properties before capture.
+    track: (name, props) => send('track', name, props),
+  },
+
   system: {
     getStatus: () => invoke('get-status'),
     test: () => invoke('test-system'),
@@ -89,7 +96,8 @@ const stenoai = {
   },
 
   recording: {
-    start: (name, appendTo) => invoke('start-recording-ui', name, appendTo),
+    start: (name, trigger, appendTo) =>
+      invoke('start-recording-ui', name, trigger, appendTo),
     stop: () => invoke('stop-recording-ui'),
     pause: () => invoke('pause-recording-ui'),
     resume: () => invoke('resume-recording-ui'),
@@ -212,7 +220,7 @@ const stenoai = {
     getNotifications: () => invoke('get-notifications'),
     setNotifications: (v) => invoke('set-notifications', v),
     getTelemetry: () => invoke('get-telemetry'),
-    setTelemetry: (v) => invoke('set-telemetry', v),
+    setTelemetry: (v, source) => invoke('set-telemetry', v, source),
     getDockIcon: () => invoke('get-dock-icon'),
     setDockIcon: (v) => invoke('set-dock-icon', v),
     getSystemAudio: () => invoke('get-system-audio'),
@@ -313,6 +321,10 @@ const stenoai = {
     respondQuit: (confirmed) => send('quit-dialog-response', { confirmed }),
   },
 
+  notification: {
+    close: () => invoke('close-notification-window'),
+  },
+
   // All main-driven events. Every subscribe returns an unsubscribe fn.
   on: {
     debugLog: (cb) => subscribe('debug-log', cb),
@@ -350,6 +362,7 @@ const stenoai = {
     navigateToMeeting: (cb) => subscribe('navigate-to-meeting', cb),
     trayOpenSettings: (cb) => subscribe('tray-open-settings', cb),
     showQuitDialog: (cb) => subscribe('show-quit-dialog', cb),
+    showNotification: (cb) => subscribe('show-notification', cb),
   },
 
   subscribeQueryStream,

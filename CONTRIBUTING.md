@@ -1,6 +1,6 @@
-# Contributing to StenoAI
+# Contributing to Steno
 
-Thank you for your interest in contributing to StenoAI! This guide will help you get started.
+Thank you for your interest in contributing to Steno! This guide will help you get started.
 
 ## Getting Started
 
@@ -180,7 +180,7 @@ stenoai/
 
 ## Contributor License Agreement
 
-By contributing to StenoAI, you agree to our [Contributor License Agreement (CLA)](CLA.md).
+By contributing to Steno, you agree to our [Contributor License Agreement (CLA)](CLA.md).
 
 **What this means:**
 - You retain ownership of your contributions
@@ -196,4 +196,4 @@ The project is licensed under the MIT License. See [LICENSE](LICENSE) for detail
 
 ## Recognition
 
-Contributors will be recognized in our releases and README. Thank you for helping make StenoAI better!
+Contributors will be recognized in our releases and README. Thank you for helping make Steno better!

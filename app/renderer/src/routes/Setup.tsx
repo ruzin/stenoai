@@ -257,6 +257,7 @@ export function Setup() {
         // Persist provider preference + key, then verify with a small ping
         // call so the user gets immediate feedback if the key is bad.
         await setAiProvider.mutateAsync('cloud');
+        ipc().analytics.track('ai_provider_selected', { provider: 'cloud' });
         await setCloudProviderMut.mutateAsync(cloudProvider);
         if (cloudProvider === 'bedrock') {
           if (bedrockRegion) await setBedrockRegion.mutateAsync(bedrockRegion.trim());
@@ -274,10 +275,29 @@ export function Setup() {
         // Make sure provider is local in case the user previously had cloud
         // configured and is re-running the wizard to switch back.
         await setAiProvider.mutateAsync('local');
+        ipc().analytics.track('ai_provider_selected', { provider: 'local' });
         setStatus('ollama', 'running', 'Downloading model (~2 GB)...');
         await ollamaStep.mutateAsync();
         setStatus('ollama', 'done', 'Model installed');
       }
+
+      // Fire unconditionally regardless of which path was taken above -- this
+      // is the fix for the multi-month blind spot where the old setup
+      // tracking only covered one of several wizard steps (see the July
+      // product-analytics review, ACT·4). Calendar connection isn't part of
+      // this wizard, but the status reads are cheap local file checks, so we
+      // fold it in here rather than firing a separate event later.
+      const [googleStatus, outlookStatus] = await Promise.all([
+        ipc().calendar.google.status(),
+        ipc().calendar.outlook.status(),
+      ]);
+      const calendarConnected =
+        (googleStatus.success && googleStatus.connected) ||
+        (outlookStatus.success && outlookStatus.connected);
+      ipc().analytics.track('onboarding_completed', {
+        ai_provider: summaryMode,
+        calendar_connected: Boolean(calendarConnected),
+      });
 
       setDone(true);
     } catch (err) {
@@ -548,7 +568,7 @@ export function Setup() {
           </div>
           <Switch
             checked={telemetryEnabled}
-            onCheckedChange={(v) => setTelemetry.mutate(v)}
+            onCheckedChange={(v) => setTelemetry.mutate({ enabled: v, source: 'setup' })}
             disabled={telemetry.data === undefined}
             aria-label="Anonymous usage analytics"
           />

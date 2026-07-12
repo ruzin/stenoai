@@ -8,7 +8,7 @@ import { useLiveDraftStore } from './liveDraftStore';
 import { navigate, routeFromHash } from '@/lib/router';
 import { composeShareBody, pickTranscriptForShare } from '@/routes/MeetingDetail';
 import { streamCache } from '@/lib/meetingDetailState';
-import type { Meeting, QueueStatus } from '@/lib/ipc';
+import type { Meeting, QueueStatus, RecordingTrigger } from '@/lib/ipc';
 
 export type RecordingStatus = 'idle' | 'recording' | 'paused' | 'processing';
 
@@ -115,7 +115,7 @@ export function useRecording() {
   // duplicate cache invalidations and N navigations per recording.
 
   const startRecording = React.useCallback(
-    async (name?: string, appendTo?: string) => {
+    async (name?: string, trigger: RecordingTrigger = 'manual', appendTo?: string) => {
       // Optimistic cache write so the UI flips to status='recording'
       // instantly. The backend's start-recording-ui has a 2s warm-up and
       // the next queue poll (1s) will reconcile sessionName + elapsed.
@@ -168,7 +168,7 @@ export function useRecording() {
       // whatever route the user is on; /recording stays reachable as an
       // optional live-note editor but is never forced.
       try {
-        const data = unwrap(await ipc().recording.start(name, appendTo));
+        const data = unwrap(await ipc().recording.start(name, trigger, appendTo));
         qc.invalidateQueries({ queryKey: queueKey });
         return data;
       } catch (err) {
@@ -273,18 +273,18 @@ export function useRecordingEvents() {
       // Home empty-state CTA + UpcomingCard click behaviour so the hotkey
       // doesn't silently no-op when a user is doing back-to-back notes.
       if (status === 'recording' || status === 'paused') void stopRecording();
-      else void startRecording();
+      else void startRecording(undefined, 'hotkey');
     };
     const offs = [
       bridge.on.toggleRecordingHotkey(toggle),
       bridge.on.trayStartRecording(() => {
-        void startRecording();
+        void startRecording(undefined, 'tray');
       }),
       bridge.on.trayStopRecording(() => {
         void stopRecording();
       }),
       bridge.on.shortcutStartRecording(({ sessionName }) => {
-        void startRecording(sessionName ?? undefined);
+        void startRecording(sessionName ?? undefined, 'url_scheme');
       }),
       bridge.on.shortcutStopRecording(() => {
         void stopRecording();
@@ -297,7 +297,7 @@ export function useRecordingEvents() {
         // an active recording (recording/paused) is already in progress —
         // user already manually started or is mid-meeting.
         if (status === 'recording' || status === 'paused') return;
-        void startRecording(sessionName ?? undefined);
+        void startRecording(sessionName ?? undefined, 'notification_click');
       }),
       bridge.on.autoPauseRequested(() => {
         // Mic stopped on the meeting app — pause so we don't keep recording

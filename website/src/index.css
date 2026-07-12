@@ -3,6 +3,15 @@
 /* ── Dark mode variant (class-based) ── */
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* Ovo (brand wordmark/serif), self-hosted — avoids a Google Fonts dependency. */
+@font-face {
+  font-family: 'Ovo';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/ovo-regular.woff2') format('woff2');
+}
+
 /* ═══════════════════════════════════════════════════
    Raw tokens - light mode (warm paper + ink)
    ═══════════════════════════════════════════════════ */
@@ -51,7 +60,7 @@
   --shadow-lg: 0 24px 48px -16px rgba(27, 27, 25, 0.22), 0 4px 8px -4px rgba(27, 27, 25, 0.08);
   --shadow-demo: 0 0 0 1px rgba(27, 27, 25, 0.06), 0 0 40px rgba(27, 27, 25, 0.12), 0 16px 40px -8px rgba(27, 27, 25, 0.16);
 
-  --font-serif: 'Charter', 'Bitstream Charter', 'Sitka Text', 'Iowan Old Style', Cambria, Georgia, serif;
+  --font-serif: 'Ovo', Georgia, serif;
   --font-sans:  'Inter', -apple-system, 'Segoe UI', 'Helvetica Neue', sans-serif;
   --font-mono:  'JetBrains Mono', 'SF Mono', 'Menlo', 'Consolas', monospace;
 

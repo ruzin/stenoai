@@ -79,8 +79,8 @@ export function Nav() {
     >
       <div className="container-site flex items-center justify-between py-[18px]">
         <a href="#" className="flex items-center gap-[10px] text-fg-1 no-underline hover:no-underline">
-          <StenoMark size={22} />
-          <Wordmark size={18} />
+          <StenoMark size={26} />
+          <Wordmark size={21} />
         </a>
 
         <div className="hidden md:flex gap-7 items-center">

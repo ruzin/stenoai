@@ -26,8 +26,6 @@ eggs/
 lib/
 !app/renderer/src/lib/
 
-# Superpowers skill scratch — agent working notes, not project content.
-docs/
 lib64/
 parts/
 sdist/
@@ -135,10 +133,13 @@ dmypy.json
 # Pyre type checker
 .pyre/
 
-# StenoAI specific
-recordings/*.wav
-transcripts/*.txt
-output/*.json
+# StenoAI specific — dev-only scratch dirs (real user data lives in the app
+# data dir, see src.config.get_data_dirs()); ignore them entirely so meeting
+# audio/transcripts in subdirs or other formats (.m4a, .md, ...) can never be
+# staged by a broad git add
+recordings/
+transcripts/
+output/
 recorder_state*.json
 audio_buffer.npy
 
@@ -185,6 +186,9 @@ SESSION_LOG.md
 FEATURES.md
 # Private, local-only working notes (design docs, benchmarks, review scratch) - never publish
 notes/
+# Local agent scratch (skill working notes, task specs) - never publish
+.superpowers/
+.specs/
 
 # Bundled Ollama binary (downloaded during build)
 bin/

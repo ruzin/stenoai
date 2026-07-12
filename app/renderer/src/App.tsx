@@ -1,4 +1,6 @@
 import * as React from 'react';
+
+import { useTheme } from '@/hooks/useTheme';
 import { Sandbox } from '@/routes/Sandbox';
 import { Settings } from '@/routes/Settings';
 import { Setup } from '@/routes/Setup';
@@ -33,6 +35,7 @@ import { ipc } from '@/lib/ipc';
 import { primeDebugLogs } from '@/lib/debugLogs';
 
 export function App() {
+  useTheme();
   const route = useRoute();
 
   React.useLayoutEffect(() => {
@@ -44,6 +47,8 @@ export function App() {
       document.documentElement.dataset.appReady = '1';
     }
   }, []);
+
+
 
   React.useEffect(() => {
     if (typeof window === 'undefined' || !window.stenoai) return;

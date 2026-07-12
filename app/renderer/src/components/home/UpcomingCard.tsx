@@ -10,10 +10,6 @@ interface UpcomingCardProps {
 }
 
 export function UpcomingCard({ event }: UpcomingCardProps) {
-  // All-day events (OOO, conference day) don't have a meaningful "in 22 hrs"
-  // / "started 108 min ago" because the start is 00:00 in some timezone and
-  // the end is 23:59. Short-circuit to a flat "All day" label so the card
-  // still slots into the Upcoming list visually but doesn't lie about timing.
   const isAllDay = event.is_all_day === true;
   const relative = isAllDay
     ? ({ prefix: null, value: 'All day', urgent: false, state: 'later' } as const)
@@ -26,47 +22,37 @@ export function UpcomingCard({ event }: UpcomingCardProps) {
   const isLive = relative.state === 'now';
   const urgent = relative.urgent || isLive;
 
-  // Click the card → start a new recording titled after this event. The
-  // event title becomes the note's session name (instead of the auto
-  // 'Note' placeholder), so the AI rename step skips it and the user
-  // gets the meeting they expected. Doesn't open the join URL — the
-  // Join / Start now buttons on the right own that action.
-  //
-  // Block only when a recording is *actively* in progress (recording /
-  // paused); 'processing' is fine — the previous note keeps summarising
-  // in the background queue while a new recording starts. Matches the
-  // Home empty-state CTA's gating so the two entry points behave the
-  // same way back-to-back.
   const onStart = () => {
     if (recording.status === 'recording' || recording.status === 'paused') return;
     void recording.startRecording(event.title);
   };
 
-  // Open the meeting URL externally. Used by the inner Join button only.
   const onJoin = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (!meetingUrl) return;
     void ipc().shell.openExternal(meetingUrl);
   };
 
-  // Start recording AND open the URL — used by the urgent "Start now"
-  // button when the meeting is imminent.
   const onStartAndJoin = (e: React.MouseEvent) => {
     e.stopPropagation();
     onStart();
     if (meetingUrl) void ipc().shell.openExternal(meetingUrl);
   };
 
+  // Use the explicit calendar color if provided by the backend, otherwise default to a pleasant blue
+  const color = event.color || '#3B82F6';
+
   return (
     <div
-      className={cn('upcoming-card', urgent && 'upcoming-card-live')}
+      className={cn(
+        'group relative flex min-h-[44px] cursor-pointer items-center justify-between py-2 transition-colors hover:bg-[color:var(--surface-hover)] -mx-3 px-3 rounded-lg',
+        urgent && 'opacity-100',
+        !urgent && 'opacity-90 hover:opacity-100'
+      )}
       role="button"
       tabIndex={0}
       onClick={onStart}
       onKeyDown={(e) => {
-        // Only handle Enter/Space when the card itself has focus — inner
-        // buttons (Join, Start now) own their own keyboard activation, and
-        // we don't want to double-fire them.
         if (e.target !== e.currentTarget) return;
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
@@ -74,88 +60,69 @@ export function UpcomingCard({ event }: UpcomingCardProps) {
         }
       }}
     >
-      {/* Relative time block */}
-      <div
-        className={cn(
-          'flex flex-col items-start gap-0 border-r pr-4',
-          urgent && 'text-[color:var(--fg-1)]',
-        )}
-        style={{ borderRightColor: 'var(--border-subtle)' }}
-      >
-        {relative.prefix && (
-          <span
-            className="text-[11px] font-medium tracking-[0.01em] lowercase"
-            style={{ color: urgent ? 'var(--fg-1)' : 'var(--fg-2)', opacity: urgent ? 0.7 : 1 }}
-          >
-            {relative.prefix}
-          </span>
-        )}
-        <span
-          className="whitespace-nowrap text-sm font-semibold leading-[1.2] tracking-[-0.01em]"
-          style={{ color: 'var(--fg-1)' }}
-        >
-          {relative.value}
-        </span>
-      </div>
+      {/* Left indicator bar */}
+      <div 
+        className="absolute left-0 top-2 bottom-2 w-0.5 rounded-full" 
+        style={{ backgroundColor: color }} 
+      />
 
-      {/* Title first (most prominent), then meta below — title is what
-          the user is scanning for; date/time is supporting context. */}
-      <div className="flex min-w-0 flex-col gap-[3px]">
-        <div
-          className="truncate text-sm font-semibold tracking-[-0.005em]"
-          style={{ color: 'var(--fg-1)' }}
-        >
-          {event.title}
+      {/* Main content */}
+      <div className="flex min-w-0 flex-1 flex-col pl-3">
+        <div className="flex items-center gap-2">
+          <div
+            className="truncate text-[13.5px] font-medium tracking-[-0.005em]"
+            style={{ color: 'var(--fg-1)' }}
+          >
+            {event.title || 'Untitled meeting'}
+          </div>
+          {(isLive && !!meetingUrl) && (
+            <span 
+              className="inline-block size-1.5 rounded-full" 
+              style={{ background: 'var(--recording)', animation: 'record-pulse 1.6s ease-out infinite' }} 
+            />
+          )}
         </div>
         <div
-          className="flex items-center gap-1.5 text-xs"
-          style={{ color: 'var(--fg-2)' }}
+          className="flex items-center gap-1.5 text-[11.5px] font-medium"
+          style={{ color: 'var(--fg-muted)' }}
         >
-          <span className="font-medium">{meta.primary}</span>
-          {meta.timeRange && (
-            <>
-              <span className="opacity-40">·</span>
-              <span className="tabular-nums">{meta.timeRange}</span>
-            </>
+          {meta.timeRange || meta.primary}
+          {relative.urgent && (
+             <>
+               <span className="opacity-40">·</span>
+               <span style={{ color: 'var(--recording)' }}>{relative.value}</span>
+             </>
           )}
         </div>
       </div>
 
       {/* CTA */}
-      <div className="flex flex-shrink-0 flex-col items-end gap-2">
+      <div className="flex flex-shrink-0 items-center gap-2 pl-4 opacity-0 transition-opacity pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto focus-within:opacity-100 focus-within:pointer-events-auto">
         {meetingUrl ? (
           urgent ? (
             <button
               type="button"
               onClick={onStartAndJoin}
-              className="inline-flex h-7 items-center gap-[7px] rounded-full px-3 text-xs font-medium"
+              className="inline-flex h-6 items-center rounded-full px-2.5 text-[11px] font-medium transition-transform hover:scale-105 active:scale-95"
               style={{
                 background: 'var(--fg-1)',
                 color: 'var(--primary-fg)',
-                fontFamily: 'var(--font-sans)',
               }}
             >
-              <span
-                className="size-[7px] rounded-full"
-                style={{
-                  background: 'var(--recording)',
-                  animation: 'record-pulse 1.6s ease-out infinite',
-                }}
-              />
               Start now
             </button>
           ) : (
             <button
               type="button"
               onClick={onJoin}
-              className="inline-flex h-7 items-center gap-1.5 rounded-full px-3 text-xs font-medium transition-colors"
+              className="inline-flex h-6 items-center gap-1.5 rounded-full px-2.5 text-[11px] font-medium transition-colors hover:scale-105 active:scale-95"
               style={{
                 background: 'var(--surface-hover)',
+                border: '1px solid var(--border-subtle)',
                 color: 'var(--fg-1)',
-                fontFamily: 'var(--font-sans)',
               }}
             >
-              <Video className="size-[13px]" />
+              <Video className="size-3" />
               Join
             </button>
           )

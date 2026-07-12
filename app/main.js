@@ -37,6 +37,7 @@ const path = require('path');
 const { spawn: _spawnRaw } = require('child_process');
 const processingLog = require('./processing-log');
 const { isMeetingApp, allowsDeviceLevelFallback } = require('./meeting-detect');
+const { userNotesFilePath } = require('./notes-file');
 const { makeLineReader } = require('./backend-stream');
 // Pure deep-link (stenoai://) parsing/sanitizing lives in ./shortcut-url
 // (unit-tested). The stateful side — window creation, IPC dispatch,
@@ -49,6 +50,21 @@ const {
 } = require('./shortcut-url');
 const { parseSetupCheckOutput } = require('./setup-check-parse');
 const { isDiagnosticStdoutLine, sanitizeArgsForLog } = require('./diagnostics-filter');
+// Pure analytics bucketing/classification/sanitization lives in
+// ./analytics-helpers (unit-tested). trackEvent() itself and every IPC
+// handler that calls it stay here, alongside the PostHog client.
+const {
+  textLengthBucket,
+  durationBucket,
+  RENDERER_TRACK_EVENTS,
+  sanitizeTrackProperties,
+  calendarMeetingProvider,
+  classifyErrorReason,
+  captureSanitizedException,
+  sanitizeModelForAnalytics,
+  summarizeCalendarSnapshot,
+  withTimeout,
+} = require('./analytics-helpers');
 
 // Wrap spawn so every backend / ollama launch defaults to windowsHide:true.
 // The PyInstaller backend (stenoai.exe) and bundled ollama.exe are console
@@ -190,7 +206,13 @@ function getUserDataDir() {
   return path.join(base, 'stenoai');
 }
 
+// Output dir the Python pipeline reads/writes (custom storage, else user-data).
+function getOutputDir() {
+  return path.join(_cachedCustomStoragePath || getUserDataDir(), 'output');
+}
+
 let mainWindow;
+let notificationWindow;
 let pythonProcess;
 let tray = null;
 let isQuitting = false;
@@ -347,10 +369,12 @@ async function showShortcutNotification(body) {
       return;
     }
 
-    new Notification({
-      title: 'StenoAI Shortcuts',
+    const notif = new Notification({
+      title: 'Steno Shortcuts',
       body
-    }).show();
+    });
+    trackNotificationLifecycle(notif, 'shortcut');
+    notif.show();
   } catch (error) {
     console.error('Failed to show shortcut notification:', error.message);
   }
@@ -458,20 +482,48 @@ const OUTLOOK_AUTH_URL = 'https://login.microsoftonline.com/common/oauth2/v2.0/a
 const OUTLOOK_TOKEN_URL = 'https://login.microsoftonline.com/common/oauth2/v2.0/token';
 
 /**
- * Return a privacy-safe duration bucket string.
- */
-function durationBucket(seconds) {
-  if (seconds < 60) return '<1m';
-  if (seconds < 300) return '1-5m';
-  if (seconds < 900) return '5-15m';
-  if (seconds < 1800) return '15-30m';
-  if (seconds < 3600) return '30-60m';
-  return '60m+';
-}
-
-/**
  * Initialize PostHog telemetry by reading config from Python backend.
  */
+// One config.json read (no extra subprocess) + a token-file existence check
+// for the identify() super-properties below. `launch_on_login` is always
+// false -- no login-item feature exists yet (STE-65's build, not this
+// instrumentation workstream); wired here so it starts reporting the moment
+// that feature ships without another identify-call-site hunt.
+function loadIdentitySuperProperties() {
+  let cfg = {};
+  try {
+    const cfgPath = path.join(getUserDataDir(), 'config.json');
+    if (fs.existsSync(cfgPath)) cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf-8'));
+  } catch (_) {}
+  let calendarConnected = false;
+  try {
+    calendarConnected = Boolean(loadGoogleTokens()) || Boolean(loadOutlookTokens());
+  } catch (_) {}
+  return {
+    ai_provider: cfg.ai_provider || 'local',
+    notifications_enabled: cfg.notifications_enabled !== false,
+    calendar_connected: calendarConnected,
+    launch_on_login: false,
+  };
+}
+
+// Re-identify so segmentation reflects the LATEST calendar/provider/
+// notifications state, not just what was true at app launch. Called from the
+// handlers that change any of these (calendar connect/disconnect, AI
+// provider, notifications toggle) in addition to the initial identify() in
+// initTelemetry.
+function refreshIdentitySuperProperties() {
+  if (!telemetryEnabled || !posthogClient || !anonymousId) return;
+  try {
+    posthogClient.identify({
+      distinctId: anonymousId,
+      properties: loadIdentitySuperProperties(),
+    });
+  } catch (_) {
+    // Silent fail -- telemetry must never break the app
+  }
+}
+
 async function initTelemetry() {
   if (IS_E2E) {
     telemetryEnabled = false;
@@ -502,7 +554,8 @@ async function initTelemetry() {
         distinctId: anonymousId,
         properties: {
           platform: process.platform,
-          arch: process.arch
+          arch: process.arch,
+          ...loadIdentitySuperProperties(),
         }
       });
       console.log('Telemetry initialized (anonymous analytics enabled)');
@@ -550,6 +603,34 @@ function trackEvent(eventName, properties = {}) {
   }
 }
 
+// Renderer-originated analytics. contextIsolation means the renderer can't
+// call trackEvent directly, so it fire-and-forgets through this bridge.
+// RENDERER_TRACK_EVENTS/sanitizeTrackProperties (./analytics-helpers) are the
+// name whitelist + PER-EVENT property-key allowlist so a buggy/compromised
+// renderer can't smuggle an arbitrary event name, or PII (a meeting title,
+// attendee name, transcript snippet) under an unexpected key, into PostHog.
+ipcMain.on('track', (_event, eventName, properties) => {
+  if (typeof eventName !== 'string' || !RENDERER_TRACK_EVENTS.has(eventName)) return;
+  trackEvent(eventName, sanitizeTrackProperties(eventName, properties));
+});
+
+// Fires notification_shown/_clicked/_dismissed for a native Notification
+// instance, added as EXTRA listeners alongside each notification's own
+// click/action handler (Electron's EventEmitter supports multiple listeners
+// per event) so this never changes existing behavior. `close` fires whenever
+// the notification goes away by any means; `clicked` distinguishes an actual
+// click/action from an unclicked auto-dismiss/timeout.
+function trackNotificationLifecycle(notif, type, extraProps = {}) {
+  let clicked = false;
+  const props = { type, ...extraProps };
+  trackEvent('notification_shown', props);
+  notif.on('click', () => { clicked = true; trackEvent('notification_clicked', props); });
+  notif.on('action', () => { clicked = true; trackEvent('notification_clicked', props); });
+  notif.on('close', () => {
+    if (!clicked) trackEvent('notification_dismissed', props);
+  });
+}
+
 /**
  * Flush and shut down the PostHog client.
  */
@@ -564,6 +645,72 @@ async function shutdownTelemetry() {
     // Silent fail
   }
 }
+
+// Minimal crash capture -- gated on the same telemetryEnabled/posthogClient
+// state as trackEvent. Captured via sanitizeErrorForCrashReport, never the
+// raw error: an uncaught fs/child_process error's .message can embed a local
+// path or a calendar-titled session name, so it must never ride along
+// verbatim -- only classifyErrorReason's fixed enum + the (PII-free) stack
+// frames survive.
+//
+// A registered 'uncaughtException'/'unhandledRejection' listener suppresses
+// Node's default fatal-exception behavior (print + exit) ENTIRELY. Before
+// this handler existed, macOS registered no listener for either (see
+// _logStartupCrash above, non-darwin only), so Node's default applied:
+// print and terminate. Without an explicit exit here, a fatal main-process
+// exception would instead leave Electron running in an undefined state --
+// continuing after an uncaught exception is unsafe regardless of whether
+// telemetry succeeded, so the process MUST still exit either way. The
+// bounded flush is a best-effort attempt to let the capture above actually
+// reach PostHog before that exit, not a guarantee.
+//
+// Caveat: on Windows/Linux, `_logStartupCrash` (top of file) is a SEPARATE,
+// pre-existing uncaughtException listener that calls process.exit(1) first
+// (registered before this module even requires `path`), so a fatal crash
+// there can still exit before this handler's flush completes. That's an
+// accepted best-effort gap on the alpha platform -- the file-based crash log
+// remains authoritative there. macOS has no competing exit(1) handler, so
+// capture is reliable on the primary, signed build.
+//
+// posthog-node's instance captureException() is fire-and-forget: internally
+// it does `await propertiesFromUnknownInput(...)` (async stack parsing) and
+// only calls its own client.capture() -- the thing that actually enqueues
+// the event -- AFTER that resolves, but the public method doesn't expose or
+// await that promise. So flushing immediately after calling captureException
+// can run against a still-empty queue, sending nothing. This short delay
+// gives that internal parsing a chance to finish and enqueue the event
+// before we attempt to flush -- best-effort (there's no public API to know
+// for certain it's done), not a guarantee, but without it the flush below is
+// close to a no-op.
+const CAPTURE_EXCEPTION_ENQUEUE_DELAY_MS = 50;
+
+async function captureExceptionAndFlush(err) {
+  if (!telemetryEnabled || !posthogClient || !anonymousId) return;
+  captureSanitizedException(posthogClient, err, anonymousId);
+  await new Promise((resolve) => setTimeout(resolve, CAPTURE_EXCEPTION_ENQUEUE_DELAY_MS));
+  await withTimeout(posthogClient.flush(), 1000);
+}
+
+process.on('uncaughtException', async (err) => {
+  try {
+    await captureExceptionAndFlush(err);
+  } catch (_) {
+    // Silent fail -- telemetry must never mask the original crash
+  } finally {
+    process.exit(1);
+  }
+});
+
+process.on('unhandledRejection', async (reason) => {
+  try {
+    const err = reason instanceof Error ? reason : new Error(String(reason));
+    await captureExceptionAndFlush(err);
+  } catch (_) {
+    // Silent fail
+  } finally {
+    process.exit(1);
+  }
+});
 
 /**
  * Get the list of allowed base directories, including any custom storage path.
@@ -726,10 +873,39 @@ function validateSafeFilePath(filepath, allowedBaseDirs) {
     // Resolve to absolute path and normalize
     const resolvedPath = path.resolve(filepath);
 
+    // The renderer is untrusted, so a lexical prefix check alone is
+    // symlink-vulnerable: a symlink placed inside an allowed dir but pointing
+    // outside it would slip through. Canonicalize BOTH the target and each base
+    // dir with realpath before the containment check, so an escaping symlink
+    // resolves to its real (out-of-bounds) target and is rejected. realpath also
+    // normalizes platform quirks that must match on both sides — on macOS
+    // /tmp -> /private/tmp, which the e2e temp data dir relies on — which is
+    // exactly why we canonicalize both sides.
+    //
+    // realpath throws if the path doesn't exist yet (e.g. a file being created),
+    // so fall back to canonicalizing the parent directory and re-appending the
+    // basename; if even the parent can't be resolved, use the lexical path so we
+    // don't break create-new-file flows.
+    let canonicalPath;
+    try {
+      canonicalPath = fs.realpathSync(resolvedPath);
+    } catch (_) {
+      try {
+        canonicalPath = path.join(fs.realpathSync(path.dirname(resolvedPath)), path.basename(resolvedPath));
+      } catch (_) {
+        canonicalPath = resolvedPath;
+      }
+    }
+
     // Ensure it's within one of the allowed base directories
     for (const baseDir of allowedBaseDirs) {
-      const resolvedBase = path.resolve(baseDir);
-      if (resolvedPath.startsWith(resolvedBase + path.sep) || resolvedPath === resolvedBase) {
+      let resolvedBase;
+      try {
+        resolvedBase = fs.realpathSync(path.resolve(baseDir));
+      } catch (_) {
+        resolvedBase = path.resolve(baseDir);
+      }
+      if (canonicalPath.startsWith(resolvedBase + path.sep) || canonicalPath === resolvedBase) {
         return true;
       }
     }
@@ -860,7 +1036,7 @@ function createTray() {
   const icon = nativeImage.createFromPath(getTrayIconPath(false));
   icon.setTemplateImage(true);
   tray = new Tray(icon);
-  tray.setToolTip('StenoAI');
+  tray.setToolTip('Steno');
 
   updateTrayMenu();
 }
@@ -870,7 +1046,7 @@ function updateTrayIcon(recording) {
   const icon = nativeImage.createFromPath(getTrayIconPath(recording));
   icon.setTemplateImage(true);
   tray.setImage(icon);
-  tray.setToolTip(recording ? 'StenoAI - Recording' : 'StenoAI');
+  tray.setToolTip(recording ? 'Steno - Recording' : 'Steno');
   updateTrayMenu();
 }
 
@@ -889,7 +1065,7 @@ function updateTrayMenu() {
 
   const contextMenu = Menu.buildFromTemplate([
     {
-      label: 'Open StenoAI',
+      label: 'Open Steno',
       click: showAndFocusWindow
     },
     {
@@ -910,14 +1086,14 @@ function updateTrayMenu() {
       }
     },
     {
-      label: 'Hide StenoAI',
+      label: 'Hide Steno',
       click: () => {
         if (mainWindow) mainWindow.hide();
       }
     },
     { type: 'separator' },
     {
-      label: `StenoAI v${appVersion}`,
+      label: `Steno v${appVersion}`,
       enabled: false
     },
     {
@@ -928,7 +1104,7 @@ function updateTrayMenu() {
     },
     { type: 'separator' },
     {
-      label: 'Quit StenoAI',
+      label: 'Quit Steno',
       click: () => {
         app.quit();
       }
@@ -1263,6 +1439,7 @@ if (!gotSingleInstanceLock) {
     // Initialize telemetry and track app open
     await initTelemetry();
     trackEvent('app_opened');
+    checkForOrphanedRecording();
 
     // Load custom storage path for file validation. Skipped under E2E (spawns
     // the backend; the test tiers keep startup backend-free).
@@ -1352,6 +1529,12 @@ if (!gotSingleInstanceLock) {
   });
 
   app.on('activate', () => {
+    // macOS can deliver 'activate' before Electron's own 'ready' event fires
+    // (e.g. cold launch via Dock). The whenReady().then() path below already
+    // creates the initial window once ready, so just no-op here until then -
+    // mirrors the same guard already used in the second-instance/open-url
+    // handlers above.
+    if (!app.isReady()) return;
     rewarmParakeet('activate');
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore();
@@ -1366,6 +1549,34 @@ if (!gotSingleInstanceLock) {
       launchedByShortcut = false;
       createWindow();
     }
+  });
+
+  // Renderer/child-process crashes aren't caught by the main-process
+  // uncaughtException handler above -- Electron surfaces them here instead.
+  // Same telemetry gate, same "code not content" reasoning; see the
+  // uncaughtException handler's comment for the capture-reliability caveat.
+  app.on('render-process-gone', (_event, _webContents, details) => {
+    try {
+      if (telemetryEnabled && posthogClient && anonymousId) {
+        captureSanitizedException(
+          posthogClient,
+          new Error(`render-process-gone: ${details?.reason || 'unknown'}`),
+          anonymousId
+        );
+      }
+    } catch (_) {}
+  });
+
+  app.on('child-process-gone', (_event, details) => {
+    try {
+      if (telemetryEnabled && posthogClient && anonymousId) {
+        captureSanitizedException(
+          posthogClient,
+          new Error(`child-process-gone: ${details?.type || 'unknown'} (${details?.reason || 'unknown'})`),
+          anonymousId
+        );
+      }
+    } catch (_) {}
   });
 }
 
@@ -1505,7 +1716,7 @@ function runPythonScript(script, args = [], silent = false, extraEnv = {}, logLa
         reject(new Error(`Python script failed with code ${code}: ${stderr}`));
       }
     });
-    
+
     process.on('error', (error) => {
       sendDebugLog(`Command error: ${error.message}`);
       reject(error);
@@ -1592,7 +1803,7 @@ ipcMain.handle('process-recording', async (event, audioFile, sessionName) => {
     addToProcessingQueue(queuedFile, sessionName, null);
     return { success: true };
   } catch (error) {
-    trackEvent('error_occurred', { error_type: 'process_recording' });
+    trackEvent('error_occurred', { error_type: 'process_recording', reason: classifyErrorReason(error) });
     return { success: false, error: error.message };
   }
 });
@@ -1623,11 +1834,11 @@ ipcMain.handle('select-audio-file', async () => {
       { name: 'Audio Files', extensions: IMPORT_AUDIO_EXTENSIONS }
     ]
   });
-  
+
   if (!result.canceled && result.filePaths.length > 0) {
     return { success: true, filePath: result.filePaths[0] };
   }
-  
+
   return { success: false, error: 'No file selected' };
 });
 
@@ -1821,7 +2032,12 @@ function parseMeetingMarkdown(content, mdPath) {
  * used. realpath needs the path to exist; a missing target -> denied.
  */
 async function validateMeetingFilePath(summaryFile) {
-  if (!summaryFile || (!summaryFile.endsWith('.json') && !summaryFile.endsWith('.md'))) {
+  // Reject non-strings up front: the renderer is untrusted and could pass an
+  // object/number, on which `.endsWith` would THROW a TypeError — turning this
+  // async function into a rejected promise that an un-try-wrapped `await` (e.g.
+  // the query-transcript-stream listener) would surface as an unhandled
+  // rejection. Fail closed with the same error shape as any other bad path.
+  if (typeof summaryFile !== 'string' || (!summaryFile.endsWith('.json') && !summaryFile.endsWith('.md'))) {
     return { error: 'Invalid file path' };
   }
   let realPath;
@@ -2232,21 +2448,33 @@ ipcMain.handle('query-transcript', async (event, summaryFile, question) => {
   try {
     sendDebugLog(`🤖 Querying transcript (${String(question || '').length} chars)`);
 
+    // Security: the renderer is untrusted, so containment-check the summary path
+    // (symlink-safe, output/ only) before it reaches the backend, and pass the
+    // canonical realPath — not the original string — as the file arg.
+    const validated = await validateMeetingFilePath(summaryFile);
+    if (validated.error) {
+      return { success: false, error: validated.error };
+    }
+
     // Run the query command — getAiEnv supplies the right env for whichever
     // provider is active (cloud key for cloud, adapter url+token for org).
     const env = getAiEnv();
-    const result = await runPythonScript('simple_recorder.py', ['query', summaryFile, '-q', question], false, env);
+    const result = await runPythonScript('simple_recorder.py', ['query', validated.realPath, '-q', question], false, env);
 
     // Parse the JSON response
     try {
       const jsonResponse = JSON.parse(result.trim());
       if (jsonResponse.success) {
         sendDebugLog('✅ Query answered successfully');
-        trackEvent('ai_query_used', { success: true });
+        trackEvent('ai_query_used', {
+          success: true,
+          query_length: textLengthBucket(question),
+          has_response: Boolean(jsonResponse.answer),
+        });
         return { success: true, answer: jsonResponse.answer };
       } else {
         sendDebugLog(`❌ Query failed: ${jsonResponse.error}`);
-        trackEvent('ai_query_used', { success: false });
+        trackEvent('ai_query_used', { success: false, query_length: textLengthBucket(question), has_response: false });
         return { success: false, error: jsonResponse.error };
       }
     } catch (parseError) {
@@ -2255,25 +2483,39 @@ ipcMain.handle('query-transcript', async (event, summaryFile, question) => {
       if (jsonMatch) {
         const jsonResponse = JSON.parse(jsonMatch[0]);
         if (jsonResponse.success) {
-          trackEvent('ai_query_used', { success: true });
+          trackEvent('ai_query_used', {
+            success: true,
+            query_length: textLengthBucket(question),
+            has_response: Boolean(jsonResponse.answer),
+          });
           return { success: true, answer: jsonResponse.answer };
         } else {
-          trackEvent('ai_query_used', { success: false });
+          trackEvent('ai_query_used', { success: false, query_length: textLengthBucket(question), has_response: false });
           return { success: false, error: jsonResponse.error };
         }
       }
       sendDebugLog(`❌ Failed to parse query response: ${parseError.message}`);
-      trackEvent('ai_query_used', { success: false });
+      trackEvent('ai_query_used', { success: false, query_length: textLengthBucket(question), has_response: false });
       return { success: false, error: 'Failed to parse AI response' };
     }
   } catch (error) {
     sendDebugLog(`❌ Query failed: ${error.message}`);
-    trackEvent('error_occurred', { error_type: 'query_transcript' });
+    trackEvent('error_occurred', { error_type: 'query_transcript', reason: classifyErrorReason(error) });
     return { success: false, error: error.message };
   }
 });
 
 const activeQueryProcs = new Map();
+
+// Cancellation intent for streaming queries that are still in their pre-spawn
+// async window. query-transcript-stream now `await`s validateMeetingFilePath
+// BEFORE it registers a killable proc in activeQueryProcs, so a query-cancel
+// (or sender-destroy) arriving during that await would otherwise be LOST — the
+// cancel finds nothing to kill, then the backend spawns uncancellable. Each
+// in-flight validation registers a setter here keyed by queryId; query-cancel
+// invokes it to flip the handler's `cancelled` flag, and the handler checks
+// that flag on every exit path so it never spawns-then-orphans a proc.
+const pendingQueryCancels = new Map();
 
 ipcMain.on('query-cancel', (_event, queryId) => {
   const proc = activeQueryProcs.get(queryId);
@@ -2281,6 +2523,14 @@ ipcMain.on('query-cancel', (_event, queryId) => {
     console.log(`[QUERY] Cancelling queryId=${queryId}`);
     proc.kill();
     activeQueryProcs.delete(queryId);
+  }
+  // Cancel a stream that's still validating (pre-spawn): flip its flag so the
+  // handler bails out instead of spawning after the await resolves.
+  const pending = pendingQueryCancels.get(queryId);
+  if (pending) {
+    console.log(`[QUERY] Cancelling pre-spawn queryId=${queryId}`);
+    pending();
+    pendingQueryCancels.delete(queryId);
   }
   // Org-chat streams use AbortController instead of a child process; share
   // the same query-cancel channel so the renderer doesn't have to know which
@@ -2293,25 +2543,116 @@ ipcMain.on('query-cancel', (_event, queryId) => {
   }
 });
 
-ipcMain.on('query-transcript-stream', (event, queryId, summaryFile, question) => {
+ipcMain.on('query-transcript-stream', async (event, queryId, summaryFile, question) => {
   console.log(`[QUERY] IPC received: question="${question.substring(0, 50)}" file="${summaryFile}"`);
   sendDebugLog(`🤖 Streaming query (${String(question || '').length} chars)`);
   const env = { ...process.env, ...getAiEnv() };
 
+  // chat_message_sent restores visibility into single-meeting chat (dormant
+  // since the old bare-ping ai_query_used stopped being reachable once chat
+  // moved to this streaming IPC). Guarded by `tracked` because this handler
+  // has multiple exit paths (line-based STREAM_COMPLETE/ERROR, the close
+  // handler's buf-remainder fallback, and non-zero exit code) that can each
+  // fire for the same logical query -- fire the analytics event exactly once.
+  let tracked = false;
+  let chunkCount = 0;
+  const trackChatOnce = (success) => {
+    if (tracked) return;
+    tracked = true;
+    trackEvent('chat_message_sent', {
+      success,
+      scope: 'single_meeting',
+      query_length: textLengthBucket(question),
+      has_response: chunkCount > 0,
+    });
+  };
+
+  // Security: the renderer is untrusted, so containment-check the summary path
+  // (symlink-safe, output/ only) BEFORE spawning the backend, and spawn with the
+  // canonical realPath. The handler is async only to await this check — the spawn
+  // still happens synchronously afterwards. The console.log/debug lines above may
+  // keep logging the original string (a label); the spawn arg must be the realPath.
+  //
+  // Cancel-race guard: because we now `await` BEFORE registering a killable proc
+  // in activeQueryProcs, a query-cancel during the await would be lost. Register
+  // cancellation intent via pendingQueryCancels (see the query-cancel handler)
+  // and honour the flag on every exit path so a cancel that lands mid-validation
+  // aborts the query instead of spawning an uncancellable backend.
+  let cancelled = false;
+  pendingQueryCancels.set(queryId, () => { cancelled = true; });
+
+  // Send query-done only if the renderer is still alive — event.sender.send
+  // throws "Object has been destroyed" once the sender is gone. The try/catch is
+  // belt-and-suspenders: isDestroyed() + send() run in the same synchronous tick
+  // (no yield between them), but send can still throw for other reasons (e.g. the
+  // frame went away), and a failure to notify must never crash the main process.
+  const sendDone = (payload) => {
+    try {
+      if (!event.sender.isDestroyed()) event.sender.send('query-done', { queryId, ...payload });
+    } catch (_) { /* renderer gone — nothing to notify */ }
+  };
+  // The renderer can also be destroyed DURING the pre-spawn await (window closed
+  // or navigated away). The `destroyed` listener below is only wired up AFTER
+  // spawn, and `.once('destroyed')` never fires for an event that already
+  // happened — so a destroy mid-validation would spawn an orphaned, unobserved
+  // backend. Treat "sender gone while validating" the same as a cancel: bail on
+  // every pre-spawn exit path, and re-check immediately after spawn.
+  const aborted = () => cancelled || event.sender.isDestroyed();
+
+  let validated;
+  try {
+    validated = await validateMeetingFilePath(summaryFile);
+  } catch (err) {
+    // Defense-in-depth: validateMeetingFilePath is fail-closed and shouldn't
+    // throw, but if it ever does (e.g. a future refactor), don't let it become
+    // an unhandled rejection that can take down the main process.
+    pendingQueryCancels.delete(queryId);
+    sendDone({ success: false, error: 'Invalid file path' });
+    trackChatOnce(false);
+    return;
+  }
+  pendingQueryCancels.delete(queryId);
+
+  if (validated.error) {
+    sendDone({ success: false, error: validated.error });
+    trackChatOnce(false);
+    return;
+  }
+  if (aborted()) {
+    // A cancel landed, or the renderer went away, while we were validating —
+    // bail out before spawning an uncancellable / orphaned backend. A cancelled
+    // query is not a completed "message sent", so (like the killed-proc close
+    // path, code === null) it is deliberately left untracked.
+    sendDone({ success: false, error: 'Cancelled' });
+    return;
+  }
+
   let proc;
   try {
     const backendPath = getBackendPath();
-    proc = require('child_process').spawn(backendPath, ['query-streaming', summaryFile, '-q', question], {
+    proc = require('child_process').spawn(backendPath, ['query-streaming', validated.realPath, '-q', question], {
       env,
       cwd: getBackendCwd(),
       windowsHide: true,
     });
   } catch (err) {
-    event.sender.send('query-done', { queryId, success: false, error: err.message });
+    sendDone({ success: false, error: err.message });
+    trackChatOnce(false);
     return;
   }
 
   activeQueryProcs.set(queryId, proc);
+  // Belt-and-suspenders: a cancel or a sender-destroy could have flipped the
+  // abort condition between the pre-spawn check and here. If the query is no
+  // longer wanted, kill the freshly-spawned proc immediately so it can't be
+  // orphaned (the pendingQueryCancels entry is already gone, and a destroy that
+  // already fired won't reach the `destroyed` listener wired up below).
+  if (aborted()) {
+    proc.kill();
+    activeQueryProcs.delete(queryId);
+    sendDone({ success: false, error: 'Cancelled' });
+    return;
+  }
   // Kill the spawned proc if the renderer sender goes away before the query
   // finishes. Keep a reference so we can remove the listener on normal close
   // (otherwise repeated queries on a long-lived sender leak one-time listeners).
@@ -2323,7 +2664,6 @@ ipcMain.on('query-transcript-stream', (event, queryId, summaryFile, question) =>
   };
   event.sender.once('destroyed', onSenderDestroyed);
   let buf = '';
-  let chunkCount = 0;
   proc.stdout.on('data', (data) => {
     buf += data.toString();
     // Split on CRLF or LF: the backend's stdout is \r\n on Windows, and an exact
@@ -2348,10 +2688,12 @@ ipcMain.on('query-transcript-stream', (event, queryId, summaryFile, question) =>
         console.log(`[QUERY] STREAM_COMPLETE received, ${chunkCount} chunks sent`);
         if (!event.sender.isDestroyed()) event.sender.send('query-done', { queryId, success: true });
         else console.log(`[QUERY] Sender destroyed at STREAM_COMPLETE`);
+        trackChatOnce(true);
       } else if (line.startsWith('CHAT_STREAM_ERROR:') || line.startsWith('STREAM_ERROR:')) {
         const errMsg = line.startsWith('CHAT_STREAM_ERROR:') ? line.slice(18) : line.slice(13);
         console.log(`[QUERY] STREAM_ERROR: ${errMsg}`);
         if (!event.sender.isDestroyed()) event.sender.send('query-done', { queryId, success: false, error: errMsg });
+        trackChatOnce(false);
       }
     }
   });
@@ -2370,15 +2712,18 @@ ipcMain.on('query-transcript-stream', (event, queryId, summaryFile, question) =>
     if (buf.trim() === 'CHAT_STREAM_COMPLETE' || buf.trim() === 'STREAM_COMPLETE') {
       console.log(`[QUERY] STREAM_COMPLETE was in buf remainder — sending done now`);
       if (!event.sender.isDestroyed()) event.sender.send('query-done', { queryId, success: true });
+      trackChatOnce(true);
     } else if (code !== 0 && code !== null && !event.sender.isDestroyed()) {
       // code === null means killed (cancelled) — renderer already handles that case
       event.sender.send('query-done', { queryId, success: false, error: `Process exited with code ${code}` });
+      trackChatOnce(false);
     }
   });
 
   proc.on('error', (err) => {
     activeQueryProcs.delete(queryId);
     if (!event.sender.isDestroyed()) event.sender.send('query-done', { queryId, success: false, error: err.message });
+    trackChatOnce(false);
   });
 });
 
@@ -2397,6 +2742,22 @@ ipcMain.on('chat-global-stream', (event, queryId, question, folderId) => {
     args.push('-f', folderId);
   }
 
+  // See query-transcript-stream's trackChatOnce comment -- same multi-exit-
+  // path guard, scope: 'global' distinguishes cross-note chat from a
+  // single-meeting query.
+  let tracked = false;
+  let chunkCount = 0;
+  const trackChatOnce = (success) => {
+    if (tracked) return;
+    tracked = true;
+    trackEvent('chat_message_sent', {
+      success,
+      scope: 'global',
+      query_length: textLengthBucket(question),
+      has_response: chunkCount > 0,
+    });
+  };
+
   let proc;
   try {
     proc = require('child_process').spawn(
@@ -2406,6 +2767,7 @@ ipcMain.on('chat-global-stream', (event, queryId, question, folderId) => {
     );
   } catch (err) {
     event.sender.send('query-done', { queryId, success: false, error: err.message });
+    trackChatOnce(false);
     return;
   }
 
@@ -2419,7 +2781,6 @@ ipcMain.on('chat-global-stream', (event, queryId, question, folderId) => {
   event.sender.once('destroyed', onSenderDestroyed);
 
   let buf = '';
-  let chunkCount = 0;
   proc.stdout.on('data', (data) => {
     buf += data.toString();
     const rawLines = buf.split('\n');
@@ -2444,11 +2805,13 @@ ipcMain.on('chat-global-stream', (event, queryId, question, folderId) => {
         if (!event.sender.isDestroyed()) {
           event.sender.send('query-done', { queryId, success: true });
         }
+        trackChatOnce(true);
       } else if (line.startsWith('CHAT_STREAM_ERROR:')) {
         const errMsg = line.slice(18);
         if (!event.sender.isDestroyed()) {
           event.sender.send('query-done', { queryId, success: false, error: errMsg });
         }
+        trackChatOnce(false);
       }
     }
   });
@@ -2465,8 +2828,10 @@ ipcMain.on('chat-global-stream', (event, queryId, question, folderId) => {
     }
     if (buf.trim() === 'CHAT_STREAM_COMPLETE') {
       if (!event.sender.isDestroyed()) event.sender.send('query-done', { queryId, success: true });
+      trackChatOnce(true);
     } else if (code !== 0 && code !== null && !event.sender.isDestroyed()) {
       event.sender.send('query-done', { queryId, success: false, error: `Process exited with code ${code}` });
+      trackChatOnce(false);
     }
   });
 
@@ -2475,6 +2840,7 @@ ipcMain.on('chat-global-stream', (event, queryId, question, folderId) => {
     if (!event.sender.isDestroyed()) {
       event.sender.send('query-done', { queryId, success: false, error: err.message });
     }
+    trackChatOnce(false);
   });
 });
 
@@ -2551,10 +2917,9 @@ ipcMain.handle('save-meeting-notes', async (event, sessionName, notes) => {
     // INSIDE the app bundle: read-only in a packaged/signed app (so saving notes
     // failed for real users on macOS + Windows), and a dir the Python pipeline
     // never reads notes from, so reprocess's _load_user_notes couldn't find them.
-    const outputDir = path.join(_cachedCustomStoragePath || getUserDataDir(), 'output');
+    const outputDir = getOutputDir();
     if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
-    const safeName = sessionName.replace(/[^a-zA-Z0-9_-]/g, '_');
-    const notesFile = path.join(outputDir, `${safeName}_notes.txt`);
+    const notesFile = userNotesFilePath(outputDir, sessionName);
     fs.writeFileSync(notesFile, notes, 'utf-8');
     return { success: true, path: notesFile };
   } catch (error) {
@@ -2694,38 +3059,28 @@ function upsertUserNotesSection(body, notes) {
 
 ipcMain.handle('update-meeting', async (event, summaryFilePath, updates) => {
   try {
-    const projectRoot = path.join(__dirname, '..');
-
-    // Define allowed base directories for file operations (includes custom storage)
-    const allowedBaseDirs = getAllowedBaseDirs();
-
-    // Convert to absolute path if needed
-    const absolutePath = path.isAbsolute(summaryFilePath)
-      ? summaryFilePath
-      : path.join(projectRoot, summaryFilePath);
-
-    // Security: Validate file path is within allowed directories
-    if (!validateSafeFilePath(absolutePath, allowedBaseDirs)) {
-      console.error(`Security: Blocked attempt to update file outside allowed directories: ${absolutePath}`);
-      return {
-        success: false,
-        error: 'Invalid file path'
-      };
+    // Security: the renderer is untrusted, so containment-check the summary path
+    // (symlink-safe, output/ only) and operate exclusively on the canonical
+    // realPath for every read/write below — never the original renderer string.
+    const validated = await validateMeetingFilePath(summaryFilePath);
+    if (validated.error) {
+      return { success: false, error: validated.error };
     }
+    const { realPath } = validated;
 
     // Read existing data
-    if (!fs.existsSync(absolutePath)) {
+    if (!fs.existsSync(realPath)) {
       return {
         success: false,
         error: 'Meeting file not found'
       };
     }
 
-    const isMarkdown = absolutePath.endsWith('.md');
+    const isMarkdown = realPath.endsWith('.md');
     let data;
 
     if (isMarkdown) {
-      const raw = fs.readFileSync(absolutePath, 'utf8');
+      const raw = fs.readFileSync(realPath, 'utf8');
       // Escape a string for a YAML double-quoted scalar. Backslash MUST be
       // escaped before the quote, and embedded newlines must become literal
       // \n so they don't end the scalar mid-line.
@@ -2800,17 +3155,17 @@ ipcMain.handle('update-meeting', async (event, summaryFilePath, updates) => {
         }
       }
 
-      fs.writeFileSync(absolutePath, updatedRaw, 'utf8');
+      fs.writeFileSync(realPath, updatedRaw, 'utf8');
 
       data = {
         session_info: {
           name: updates.name !== undefined ? updates.name : title,
-          summary_file: absolutePath,
+          summary_file: realPath,
           updated_at: updatedAt,
         },
       };
     } else {
-      data = JSON.parse(fs.readFileSync(absolutePath, 'utf8'));
+      data = JSON.parse(fs.readFileSync(realPath, 'utf8'));
 
       if (updates.name !== undefined) {
         data.session_info.name = updates.name;
@@ -2832,10 +3187,10 @@ ipcMain.handle('update-meeting', async (event, summaryFilePath, updates) => {
       }
 
       data.session_info.updated_at = new Date().toISOString();
-      fs.writeFileSync(absolutePath, JSON.stringify(data, null, 2), 'utf8');
+      fs.writeFileSync(realPath, JSON.stringify(data, null, 2), 'utf8');
     }
 
-    console.log(`Updated meeting: ${absolutePath}`);
+    console.log(`Updated meeting: ${realPath}`);
 
     return {
       success: true,
@@ -2931,10 +3286,10 @@ ipcMain.handle('delete-meeting', async (event, meetingData) => {
         error: `Blocked ${validationErrors} file deletion(s) due to security validation`
       };
     }
-    
-    return { 
-      success: true, 
-      message: `Deleted meeting and ${deletedCount} associated files` 
+
+    return {
+      success: true,
+      message: `Deleted meeting and ${deletedCount} associated files`
     };
   } catch (error) {
     console.error('Delete meeting error:', error);
@@ -3275,6 +3630,51 @@ function loadTranscriptionEngine() {
   }
 }
 
+// Sync read of the transcription engine + model + language for
+// transcription_completed's analytics properties. One config.json read
+// (mirrors loadTranscriptionEngine's no-subprocess approach) rather than
+// three separate ones on this hot path.
+function loadTranscriptionContext() {
+  try {
+    const cfgPath = path.join(getUserDataDir(), 'config.json');
+    if (!fs.existsSync(cfgPath)) {
+      return { engine: 'parakeet', model: 'parakeet', language: 'auto' };
+    }
+    const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf-8'));
+    const engine = cfg.transcription_engine === 'whisper' ? 'whisper' : 'parakeet';
+    return {
+      engine,
+      // Parakeet has no separate user-selectable model today (single bundled
+      // default) -- report the engine name rather than guess a variant id.
+      model: engine === 'whisper' ? sanitizeModelForAnalytics(cfg.whisper_model) : 'parakeet',
+      language: cfg.language || 'auto',
+    };
+  } catch (_) {
+    return { engine: 'parakeet', model: 'parakeet', language: 'auto' };
+  }
+}
+
+// Sync read of the summarization provider + model for
+// summarization_completed's analytics properties.
+function loadSummarizationContext() {
+  try {
+    const cfgPath = path.join(getUserDataDir(), 'config.json');
+    if (!fs.existsSync(cfgPath)) {
+      return { provider: 'local', model: 'unknown' };
+    }
+    const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf-8'));
+    const provider = cfg.ai_provider || 'local';
+    return {
+      provider,
+      model: provider === 'cloud'
+        ? sanitizeModelForAnalytics(cfg.cloud_model)
+        : sanitizeModelForAnalytics(cfg.model),
+    };
+  } catch (_) {
+    return { provider: 'local', model: 'unknown' };
+  }
+}
+
 // Sync read of the auto-detect-meetings setting; default ON. Reads the JSON
 // directly to avoid spawning Python during startup just to read a boolean. Wire any new defaults through the Python config so
 // the truth lives in one place.
@@ -3361,6 +3761,46 @@ let ollamaProcess = null;  // Track spawned Ollama process for cleanup on quit
 let ollamaPid = null;      // Store PID separately since unref() disconnects the process
 let ollamaStartedByUs = false;
 
+// Content-free crash/force-quit detection (report Appendix: ~8% of macOS
+// recordings never fire recording_stopped at all -- a silent gap in the
+// activation funnel). Written when a recording starts, deleted on a clean
+// stop; if it's still there at the NEXT launch, the previous run never
+// reached stop-recording-ui's cleanup.
+function getRecordingActiveMarkerPath() {
+  return path.join(getUserDataDir(), '.recording-active');
+}
+
+function markRecordingActiveOnDisk() {
+  try {
+    fs.writeFileSync(getRecordingActiveMarkerPath(), String(Date.now()));
+  } catch (_) {
+    // Best-effort -- a failed write just means this diagnostic is unavailable
+  }
+}
+
+function clearRecordingActiveMarker() {
+  try {
+    fs.unlinkSync(getRecordingActiveMarkerPath());
+  } catch (_) {
+    // Already gone / never written -- fine
+  }
+}
+
+// Called once at startup, after initTelemetry. Emits a synthetic
+// recording_stopped for the previous run's recording if it never cleanly
+// stopped, then clears the marker so it can't re-fire on a later launch.
+function checkForOrphanedRecording() {
+  try {
+    if (fs.existsSync(getRecordingActiveMarkerPath())) {
+      trackEvent('recording_stopped', { reason: 'unclean_shutdown' });
+    }
+  } catch (_) {
+    // Silent fail
+  } finally {
+    clearRecordingActiveMarker();
+  }
+}
+
 function resetRecordingRuntimeState() {
   recordingRuntimeState = {
     startedAtMs: null,
@@ -3368,6 +3808,10 @@ function resetRecordingRuntimeState() {
     pausedTotalMs: 0,
     isPaused: false
   };
+  // Folded in here (rather than at each of this function's call sites) so
+  // every teardown path -- clean stop, a failed start, or the quit-time
+  // cleanup -- consistently clears the crash/force-quit marker.
+  clearRecordingActiveMarker();
 }
 
 function startRecordingRuntimeState() {
@@ -3377,6 +3821,7 @@ function startRecordingRuntimeState() {
     pausedTotalMs: 0,
     isPaused: false
   };
+  markRecordingActiveOnDisk();
 }
 
 function markRecordingPaused() {
@@ -3502,13 +3947,29 @@ async function processNextInQueue() {
   if (isProcessing || processingQueue.length === 0) {
     return;
   }
-  
+
   isProcessing = true;
   currentProcessingJob = processingQueue.shift();
   currentProcessingStartedAtMs = Date.now();
 
   console.log(`🔄 Processing queued job: ${currentProcessingJob.sessionName}`);
-  
+
+  // Coarse pipeline-stage tracker for error_occurred's `stage` property
+  // (processing_queue is ~96% of all logged errors with no detail today —
+  // this is the cheapest signal to distinguish a transcription crash from a
+  // summarization crash without parsing stderr). Declared in the outer scope
+  // so the catch block below can still read it after the inner Promise
+  // executor's scope has closed.
+  let processingStage = 'transcription';
+  // Read once per job (not per marker) -- engine/model/language/provider
+  // don't change mid-job, and this avoids a repeated config.json read on
+  // every stdout line.
+  const transcriptionCtx = loadTranscriptionContext();
+  const summarizationCtx = loadSummarizationContext();
+  // Set when TRANSCRIPTION_COMPLETE arrives, so summarization_completed's
+  // processing_bucket measures summarization time alone, not the whole job.
+  let transcriptionEndedAtMs = null;
+
   try {
     const queueAiEnv = getAiEnv();
     const queueEnv = Object.keys(queueAiEnv).length > 0 ? { ...require('process').env, ...queueAiEnv } : undefined;
@@ -3580,21 +4041,40 @@ async function processNextInQueue() {
             } catch (e) { console.log('CHUNK decode error:', e.message); }
           } else if (line.startsWith('TRANSCRIPTION_COMPLETE:')) {
             sendDebugLog(`Transcription complete (${line.split(':')[1]} chars)`);
-            trackEvent('transcription_completed', { success: true });
+            processingStage = 'summarization';
+            transcriptionEndedAtMs = Date.now();
+            trackEvent('transcription_completed', {
+              success: true,
+              engine: transcriptionCtx.engine,
+              model: transcriptionCtx.model,
+              language: transcriptionCtx.language,
+              processing_bucket: durationBucket((transcriptionEndedAtMs - currentProcessingStartedAtMs) / 1000),
+            });
           } else if (line.startsWith('TITLE:')) {
             const title = line.slice(6);
             if (mainWindow && !mainWindow.isDestroyed()) {
               mainWindow.webContents.send('summary-title', { title, sessionName: currentProcessingJob.sessionName });
             }
           } else if (line === 'STREAM_COMPLETE') {
-            trackEvent('summarization_completed', { success: true });
+            const summarizationStartMs = transcriptionEndedAtMs || currentProcessingStartedAtMs;
+            trackEvent('summarization_completed', {
+              success: true,
+              model: summarizationCtx.model,
+              provider: summarizationCtx.provider,
+              processing_bucket: durationBucket((Date.now() - summarizationStartMs) / 1000),
+            });
           } else if (line.startsWith('SAVED:')) {
             savedSummaryFile = line.slice(6).trim();
             sendDebugLog(`Summary saved: ${savedSummaryFile}`);
           } else if (line.startsWith('TRANSCRIPTION_FAILED:')) {
             transcriptionFailedMsg = line.slice('TRANSCRIPTION_FAILED:'.length).trim();
             sendDebugLog(`Transcription failed (audio preserved): ${transcriptionFailedMsg}`);
-            trackEvent('transcription_completed', { success: false });
+            trackEvent('transcription_completed', {
+              success: false,
+              engine: transcriptionCtx.engine,
+              model: transcriptionCtx.model,
+              language: transcriptionCtx.language,
+            });
           } else if (line.startsWith('PROGRESS:')) {
             if (mainWindow && !mainWindow.isDestroyed()) {
               // No summaryFile yet in the record->summarise flow (it's assigned
@@ -3703,7 +4183,11 @@ async function processNextInQueue() {
 
   } catch (error) {
     console.error(`❌ Processing failed for ${currentProcessingJob.sessionName}:`, error);
-    trackEvent('error_occurred', { error_type: 'processing_queue' });
+    trackEvent('error_occurred', {
+      error_type: 'processing_queue',
+      stage: processingStage,
+      reason: classifyErrorReason(error),
+    });
 
     // A processing crash (e.g. a metal::malloc OOM that SIGABRTs the
     // subprocess with a non-zero exit before Python can mark the failure)
@@ -3849,7 +4333,11 @@ function addToProcessingQueue(audioFile, sessionName, notesFile, liveTranscriptF
 // new one.
 let currentRecordingAppendTarget = null;
 
-ipcMain.handle('start-recording-ui', async (_, sessionName, appendTo) => {
+// Valid recording_started `trigger` values. Whitelisted so a stale/forged
+// renderer arg can't smuggle an arbitrary string into PostHog.
+const RECORDING_TRIGGERS = new Set(['manual', 'notification_click', 'hotkey', 'tray', 'url_scheme']);
+
+ipcMain.handle('start-recording-ui', async (_, sessionName, trigger, appendTo) => {
   try {
     if (currentRecordingProcess) {
       return { success: false, error: 'Recording already in progress' };
@@ -3913,7 +4401,31 @@ ipcMain.handle('start-recording-ui', async (_, sessionName, appendTo) => {
       sendDebugLog(`Live transcription off — engine=${engine}`);
     }
     updateTrayIcon(true);
-    trackEvent('recording_started');
+    // Fire-and-forget: the calendar lookup (network call) must never delay
+    // the actual recording start or the response below. Once it resolves we
+    // fire the single recording_started event with full context -- PostHog
+    // events are immutable, so this is one deferred call rather than an
+    // initial fire + a later "patch". Wrapped in withTimeout because
+    // getCalendarEventForNow's own 1.5s AbortController only bounds the
+    // calendar event fetch -- a stuck OAuth token-refresh request upstream of
+    // that (no timeout of its own) could otherwise hang this indefinitely
+    // and silently drop recording_started for the recording entirely.
+    const recordingTrigger = RECORDING_TRIGGERS.has(trigger) ? trigger : 'manual';
+    withTimeout(getCalendarEventForNow(), 2500)
+      .then((calEvent) => {
+        trackEvent('recording_started', {
+          trigger: recordingTrigger,
+          matched_calendar_event: Boolean(calEvent),
+          provider: calendarMeetingProvider(calEvent?.meeting_url),
+        });
+      })
+      // withTimeout itself never rejects, but the fulfillment handler above
+      // could in principle throw (e.g. a future change to it) -- and since
+      // the global unhandledRejection listener now calls process.exit(1),
+      // ANY floating promise here is a latent full-app-crash risk over
+      // nothing more than a missed telemetry event. Telemetry must never be
+      // able to take down the app.
+      .catch(() => {});
     return {
       success: true,
       sessionName: actualSessionName,
@@ -3926,7 +4438,7 @@ ipcMain.handle('start-recording-ui', async (_, sessionName, appendTo) => {
     currentRecordingAppendTarget = null;
     resetRecordingRuntimeState();
     updateTrayIcon(false);
-    trackEvent('error_occurred', { error_type: 'start_recording_ui' });
+    trackEvent('error_occurred', { error_type: 'start_recording_ui', reason: classifyErrorReason(error) });
     return { success: false, error: error.message };
   }
 });
@@ -4002,6 +4514,7 @@ function showSleepPausedNotification() {
   };
   notif.on('action', (_evt, _index) => resume());
   notif.on('click', resume);
+  trackNotificationLifecycle(notif, 'sleep_paused');
   notif.show();
   sleepPausedNotif = notif;
 }
@@ -4058,9 +4571,11 @@ ipcMain.handle('stop-recording-ui', async () => {
     systemAudioRecordingActive = false;
     stopLiveTranscribe();
     currentRecordingSessionName = null;
+    // Captured before resetRecordingRuntimeState() clears startedAtMs.
+    const recordingDurationBucket = durationBucket(getRecordingElapsedSeconds());
     resetRecordingRuntimeState();
     updateTrayIcon(false);
-    trackEvent('recording_stopped');
+    trackEvent('recording_stopped', { duration_bucket: recordingDurationBucket, reason: 'normal' });
     return { success: true, message: 'Recording stopped' };
   } catch (error) {
     console.error('Stop recording UI error:', error.message);
@@ -4068,7 +4583,7 @@ ipcMain.handle('stop-recording-ui', async () => {
     currentRecordingSessionName = null;
     resetRecordingRuntimeState();
     updateTrayIcon(false);
-    trackEvent('error_occurred', { error_type: 'stop_recording_ui' });
+    trackEvent('error_occurred', { error_type: 'stop_recording_ui', reason: classifyErrorReason(error) });
     return { success: false, error: error.message };
   }
 });
@@ -4421,6 +4936,7 @@ function showMeetingDetectedNotification(appName, originatingEvt, calEvent) {
   const trigger = () => requestAutoRecord(appName, originatingEvt, calEvent);
   notif.on('action', (_evt, _index) => trigger()); // shown when banner style = Alerts
   notif.on('click', trigger);                       // body tap (always available)
+  trackNotificationLifecycle(notif, 'meeting_detected');
   notif.show();
 }
 
@@ -4442,6 +4958,7 @@ function showMeetingEndedNotification(appName) {
       mainWindow.focus();
     }
   });
+  trackNotificationLifecycle(notif, 'meeting_ended');
   notif.show();
   return notif;
 }
@@ -4620,7 +5137,7 @@ ipcMain.handle('setup-ollama-and-model', async () => {
       if (darwinMajor < 23) {
         const macosVersion = darwinMajor >= 22 ? '13 (Ventura)' : darwinMajor >= 21 ? '12 (Monterey)' : `(Darwin ${darwinMajor})`;
         sendDebugLog(`macOS ${macosVersion} detected — Ollama requires macOS 14 (Sonoma) or later`);
-        return { success: false, error: 'StenoAI requires macOS 14 (Sonoma) or later for local AI summarization. Please update your macOS or use a remote Ollama server in Settings.' };
+        return { success: false, error: 'Steno requires macOS 14 (Sonoma) or later for local AI summarization. Please update your macOS or use a remote Ollama server in Settings.' };
       }
     }
 
@@ -4628,7 +5145,7 @@ ipcMain.handle('setup-ollama-and-model', async () => {
     const finalOllamaPath = await findOllamaExecutable();
     if (!finalOllamaPath) {
       sendDebugLog('Error: Bundled Ollama not found');
-      return { success: false, error: 'Bundled Ollama not found. Please reinstall StenoAI.' };
+      return { success: false, error: 'Bundled Ollama not found. Please reinstall Steno.' };
     }
     sendDebugLog(`Found bundled Ollama at: ${finalOllamaPath}`);
 
@@ -4706,7 +5223,7 @@ ipcMain.handle('setup-ollama-and-model', async () => {
     if (!ready) {
       if (ollamaExited) {
         if (ollamaDyldError) {
-          return { success: false, error: 'Ollama crashed due to incompatible macOS version. StenoAI requires macOS 14 (Sonoma) or later for local AI. Please update macOS or use a remote Ollama server in Settings.' };
+          return { success: false, error: 'Ollama crashed due to incompatible macOS version. Steno requires macOS 14 (Sonoma) or later for local AI. Please update macOS or use a remote Ollama server in Settings.' };
         }
         return { success: false, error: `Ollama failed to start (exit code: ${ollamaExitCode}). Check debug logs for details.` };
       }
@@ -4898,15 +5415,15 @@ ipcMain.handle('setup-test', async () => {
   try {
     sendDebugLog('Running system test...');
     sendDebugLog('$ python simple_recorder.py test');
-    
+
     // Test the complete system
     const result = await runPythonScript('simple_recorder.py', ['test']);
-    
+
     // Log the full result to debug console
     result.split('\n').forEach(line => {
       if (line.trim()) sendDebugLog(line.trim());
     });
-    
+
     if (result.includes('System check passed') || result.includes('SUCCESS')) {
       sendDebugLog('System test completed successfully');
       trackEvent('setup_completed', { step: 'system_test' });
@@ -4925,16 +5442,16 @@ ipcMain.handle('setup-test', async () => {
   }
 });
 
-// Settings window IPC handlers  
+// Settings window IPC handlers
 ipcMain.handle('trigger-setup-wizard', async () => {
   try {
     console.log('🔧 Starting setup wizard from settings...');
-    
+
     // Trigger the main window's setup flow
     if (mainWindow) {
       mainWindow.webContents.send('trigger-setup-flow');
     }
-    
+
     return { success: true, message: 'Setup wizard triggered in main window' };
   } catch (error) {
     console.error('Setup wizard failed:', error);
@@ -5006,7 +5523,7 @@ ipcMain.handle('select-storage-folder', async () => {
   try {
     const result = await dialog.showOpenDialog(mainWindow, {
       properties: ['openDirectory', 'createDirectory'],
-      title: 'Choose storage location for StenoAI data',
+      title: 'Choose storage location for Steno data',
       buttonLabel: 'Select Folder'
     });
 
@@ -5084,7 +5601,13 @@ ipcMain.handle('reorder-folders', async (event, folderIds) => {
 
 ipcMain.handle('add-meeting-to-folder', async (event, summaryFile, folderId) => {
   try {
-    const result = await runPythonScript('simple_recorder.py', ['add-meeting-to-folder', summaryFile, folderId]);
+    // Security: the renderer is untrusted, so containment-check the summary path
+    // (symlink-safe, output/ only) and pass the canonical realPath to the backend.
+    const validated = await validateMeetingFilePath(summaryFile);
+    if (validated.error) {
+      return { success: false, error: validated.error };
+    }
+    const result = await runPythonScript('simple_recorder.py', ['add-meeting-to-folder', validated.realPath, folderId]);
     const jsonMatch = result.match(/\{.*\}/s);
     return jsonMatch ? JSON.parse(jsonMatch[0]) : { success: true };
   } catch (error) {
@@ -5094,7 +5617,13 @@ ipcMain.handle('add-meeting-to-folder', async (event, summaryFile, folderId) => 
 
 ipcMain.handle('remove-meeting-from-folder', async (event, summaryFile, folderId) => {
   try {
-    const result = await runPythonScript('simple_recorder.py', ['remove-meeting-from-folder', summaryFile, folderId]);
+    // Security: the renderer is untrusted, so containment-check the summary path
+    // (symlink-safe, output/ only) and pass the canonical realPath to the backend.
+    const validated = await validateMeetingFilePath(summaryFile);
+    if (validated.error) {
+      return { success: false, error: validated.error };
+    }
+    const result = await runPythonScript('simple_recorder.py', ['remove-meeting-from-folder', validated.realPath, folderId]);
     const jsonMatch = result.match(/\{.*\}/s);
     return jsonMatch ? JSON.parse(jsonMatch[0]) : { success: true };
   } catch (error) {
@@ -5106,13 +5635,13 @@ ipcMain.handle('get-ai-prompts', async () => {
   try {
     // Read the summarization prompt from the Python backend
     const summarizerPath = path.join(__dirname, '..', 'src', 'summarizer.py');
-    
+
     if (fs.existsSync(summarizerPath)) {
       const content = fs.readFileSync(summarizerPath, 'utf8');
-      
+
       // Extract the full prompt from the _create_permissive_prompt method
       const promptMatch = content.match(/def _create_permissive_prompt[\s\S]*?return f"""([\s\S]*?)"""/);
-      
+
       if (promptMatch) {
         return {
           success: true,
@@ -5120,7 +5649,7 @@ ipcMain.handle('get-ai-prompts', async () => {
         };
       }
     }
-    
+
     return {
       success: true,
       summarization: 'Prompt not found in summarizer.py'
@@ -5252,11 +5781,11 @@ ipcMain.handle('set-model', async (event, modelName) => {
     const jsonMatch = result.match(/\{.*\}/s);
     if (jsonMatch) {
       const jsonData = JSON.parse(jsonMatch[0]);
-      trackEvent('model_changed', { model: modelName });
+      trackEvent('model_changed', { model: sanitizeModelForAnalytics(modelName), kind: 'summarization' });
       return jsonData;
     }
 
-    trackEvent('model_changed', { model: modelName });
+    trackEvent('model_changed', { model: sanitizeModelForAnalytics(modelName), kind: 'summarization' });
     return { success: true, model: modelName };
   } catch (error) {
     sendDebugLog(`Error setting model: ${error.message}`);
@@ -5351,6 +5880,7 @@ ipcMain.handle('set-transcription-engine', async (event, engine) => {
   try {
     const result = await runPythonScript('simple_recorder.py', ['set-transcription-engine', engine]);
     const jsonData = JSON.parse(result.trim());
+    trackEvent('model_changed', { model: engine, kind: 'transcription_engine' });
     return { success: true, ...jsonData };
   } catch (e) { return { success: false, error: e.message }; }
 });
@@ -5383,6 +5913,7 @@ ipcMain.handle('set-whisper-model', async (event, modelSize) => {
   try {
     const result = await runPythonScript('simple_recorder.py', ['set-whisper-model', modelSize]);
     const jsonData = JSON.parse(result.trim());
+    trackEvent('model_changed', { model: sanitizeModelForAnalytics(modelSize), kind: 'transcription' });
     return { success: true, ...jsonData };
   } catch (e) { return { success: false, error: e.message }; }
 });
@@ -5687,6 +6218,7 @@ ipcMain.handle('show-silence-auto-stop-notification', async (_event, payload) =>
         mainWindow.focus();
       }
     });
+    trackNotificationLifecycle(notif, 'silence_auto_stop');
     notif.show();
     return { success: true, shown: true };
   } catch (e) {
@@ -5736,6 +6268,8 @@ ipcMain.handle('show-note-ready-notification', async (_event, payload) => {
         if (summaryFile) mainWindow.webContents.send('navigate-to-meeting', { summaryFile });
       }
     });
+    const outcome = hardFailure ? 'hard_failure' : failed ? 'failed' : 'success';
+    trackNotificationLifecycle(notif, 'note_ready', { outcome });
     notif.show();
     return { success: true, shown: true };
   } catch (e) {
@@ -5755,9 +6289,11 @@ ipcMain.handle('set-notifications', async (event, enabled) => {
     const jsonMatch = result.match(/\{.*\}/s);
     if (jsonMatch) {
       const jsonData = JSON.parse(jsonMatch[0]);
+      refreshIdentitySuperProperties();
       return jsonData;
     }
 
+    refreshIdentitySuperProperties();
     return { success: true, notifications_enabled: enabled };
   } catch (error) {
     sendDebugLog(`Error setting notifications: ${error.message}`);
@@ -5780,20 +6316,41 @@ ipcMain.handle('get-telemetry', async () => {
   }
 });
 
-ipcMain.handle('set-telemetry', async (event, enabled) => {
+// Where the telemetry toggle was flipped -- 'setup' names the Setup.tsx
+// SCREEN, not a lifecycle stage: it's also reachable later via "run setup
+// wizard" from Settings (see trigger-setup-wizard), so this deliberately
+// does NOT claim to mean "first run". Whitelisted so a stale/forged
+// renderer arg can't smuggle an arbitrary string into PostHog.
+const TELEMETRY_TOGGLE_SOURCES = new Set(['setup', 'settings']);
+
+ipcMain.handle('set-telemetry', async (event, enabled, source) => {
   try {
     sendDebugLog(`Setting telemetry to: ${enabled}`);
+    const toggleSource = TELEMETRY_TOGGLE_SOURCES.has(source) ? source : 'settings';
     const result = await runPythonScript('simple_recorder.py', ['set-telemetry', enabled ? 'True' : 'False']);
 
-    // Update in-memory state
-    telemetryEnabled = enabled;
-
+    // telemetry_toggled is the one event that MUST fire around the opposite
+    // side of its own gate -- otherwise disabling telemetry makes the
+    // disable itself invisible (trackEvent no-ops once telemetryEnabled is
+    // false and posthogClient is torn down), and re-enabling would identify
+    // stale/absent super-properties until the next app launch.
     if (enabled && !posthogClient) {
+      // Bring the client up and identify FIRST so both the super-properties
+      // and this event land fresh, rather than waiting for next launch.
       posthogClient = new PostHog(POSTHOG_API_KEY, { host: POSTHOG_HOST });
+      telemetryEnabled = true;
+      refreshIdentitySuperProperties();
+      trackEvent('telemetry_toggled', { enabled: true, source: toggleSource });
       console.log('Telemetry re-enabled');
     } else if (!enabled && posthogClient) {
-      await shutdownTelemetry();
+      // Capture the opt-out BEFORE closing the gate -- flipping the flag or
+      // shutting down first would make this trackEvent call a silent no-op.
+      trackEvent('telemetry_toggled', { enabled: false, source: toggleSource });
+      telemetryEnabled = false;
+      await shutdownTelemetry(); // flushes the event above, then closes
       console.log('Telemetry disabled');
+    } else {
+      telemetryEnabled = enabled;
     }
 
     // Extract JSON from output
@@ -6338,7 +6895,7 @@ ipcMain.handle('set-ai-provider', async (event, provider) => {
     // reconcile or sign-out restore (last-writer-wins races on the same
     // config value); the org-lock gate is evaluated inside the op so it
     // sees post-queue session state.
-    return await enqueueProviderStateOp(async () => {
+    const result = await enqueueProviderStateOp(async () => {
       if (provider !== 'adapter') {
         // Hard lock: while a valid org session exists the provider is
         // managed by the organisation. The Settings picker is disabled
@@ -6383,6 +6940,8 @@ ipcMain.handle('set-ai-provider', async (event, provider) => {
       if (jsonMatch) return JSON.parse(jsonMatch[0]);
       return { success: true, ai_provider: provider };
     });
+    if (result && result.success !== false) refreshIdentitySuperProperties();
+    return result;
   } catch (error) {
     sendDebugLog(`Error setting AI provider: ${error.message}`);
     return { success: false, error: error.message };
@@ -6414,6 +6973,9 @@ ipcMain.handle('set-cloud-api-url', async (event, url) => {
 ipcMain.handle('set-cloud-api-key', async (event, key) => {
   try {
     const saved = saveCloudApiKey(key);
+    if (saved) {
+      trackEvent(key ? 'ai_key_added' : 'ai_key_removed');
+    }
     return { success: saved, cloud_api_key_set: saved };
   } catch (error) {
     return { success: false, error: error.message };
@@ -6660,7 +7222,7 @@ function showRecordingFailedNotification(body) {
   try {
     if (!Notification.isSupported()) return;
     new Notification({
-      title: 'StenoAI',
+      title: 'Steno',
       body: body || "Recording couldn't start.",
     }).show();
   } catch (error) {
@@ -6691,9 +7253,8 @@ ipcMain.handle('process-system-audio-recording', async (event, audioFilePath, se
 
     const actualSessionName = sessionName || 'Note';
 
-    // Check for user notes file
-    const safeName = actualSessionName.replace(/[^a-zA-Z0-9_-]/g, '_');
-    const notesFile = path.join(getBackendCwd(), '_internal', 'output', `${safeName}_notes.txt`);
+    // Same dir 'save-meeting-notes' writes to — not the read-only bundle dir.
+    const notesFile = userNotesFilePath(getOutputDir(), actualSessionName);
     const notesPath = fs.existsSync(notesFile) ? notesFile : undefined;
 
     // Snapshot the live transcript captured during this recording (#207) so the
@@ -6711,11 +7272,18 @@ ipcMain.handle('process-system-audio-recording', async (event, audioFilePath, se
     // Use the existing processing queue to avoid concurrent Ollama/Whisper runs
     addToProcessingQueue(audioFilePath, actualSessionName, notesPath, liveTranscriptFile, appendTo);
 
-    trackEvent('recording_stopped', { recording_mode: 'system_audio' });
+    // recording_stopped is NOT tracked here -- stop-recording-ui already
+    // fires it (with the real duration_bucket) for every stop. This handler
+    // fires moments later, once the renderer's MediaRecorder finishes
+    // flushing to disk and useSystemAudioCapture's own effect reacts to the
+    // status change and calls processSystemAudio -- for every normal
+    // recording that would double the count. `recording_mode: 'system_audio'`
+    // was also vestigial: this renderer-driven path is the only recording
+    // path today, so it no longer distinguishes anything.
     return { success: true, message: 'Added to processing queue' };
   } catch (error) {
     sendDebugLog(`Error queuing system audio: ${error.message}`);
-    trackEvent('error_occurred', { error_type: 'process_system_audio' });
+    trackEvent('error_occurred', { error_type: 'process_system_audio', reason: classifyErrorReason(error) });
     return { success: false, error: error.message };
   }
 });
@@ -6999,32 +7567,32 @@ async function checkForUpdates() {
       path: '/repos/ruzin/stenoai/releases/latest',
       method: 'GET',
       headers: {
-        'User-Agent': 'StenoAI-Updater'
+        'User-Agent': 'Steno-Updater'
       }
     };
 
     const req = https.request(options, (res) => {
       let data = '';
-      
+
       res.on('data', (chunk) => {
         data += chunk;
       });
-      
+
       res.on('end', () => {
         try {
           const release = JSON.parse(data);
           const latestVersion = release.tag_name.replace(/^v/, ''); // Remove 'v' prefix if present
-          
+
           // Get current version from package.json
           const packagePath = path.join(__dirname, 'package.json');
           const packageContent = JSON.parse(fs.readFileSync(packagePath, 'utf8'));
           const currentVersion = packageContent.version;
-          
+
           console.log(`Current version: ${currentVersion}, Latest version: ${latestVersion}`);
-          
+
           // Simple version comparison (works for semantic versioning)
           const isUpdateAvailable = compareVersions(currentVersion, latestVersion) < 0;
-          
+
           resolve({
             success: true,
             updateAvailable: isUpdateAvailable,
@@ -7040,17 +7608,17 @@ async function checkForUpdates() {
         }
       });
     });
-    
+
     req.on('error', (error) => {
       console.error('Error checking for updates:', error);
       resolve({ success: false, error: error.message });
     });
-    
+
     req.setTimeout(10000, () => {
       req.destroy();
       resolve({ success: false, error: 'Update check timeout' });
     });
-    
+
     req.end();
   });
 }
@@ -7058,15 +7626,15 @@ async function checkForUpdates() {
 function compareVersions(current, latest) {
   const currentParts = current.split('.').map(Number);
   const latestParts = latest.split('.').map(Number);
-  
+
   for (let i = 0; i < Math.max(currentParts.length, latestParts.length); i++) {
     const currentPart = currentParts[i] || 0;
     const latestPart = latestParts[i] || 0;
-    
+
     if (currentPart < latestPart) return -1;
     if (currentPart > latestPart) return 1;
   }
-  
+
   return 0;
 }
 
@@ -7074,22 +7642,22 @@ function getDownloadUrl(assets) {
   // Find the appropriate download URL based on platform/architecture
   const platform = process.platform;
   const arch = process.arch;
-  
+
   if (platform === 'darwin') {
     // Look for macOS DMG files
-    const armAsset = assets.find(asset => 
+    const armAsset = assets.find(asset =>
       asset.name.includes('arm64') && asset.name.includes('dmg')
     );
-    const intelAsset = assets.find(asset => 
+    const intelAsset = assets.find(asset =>
       asset.name.includes('x64') && asset.name.includes('dmg')
     );
-    
+
     // Prefer ARM64 for Apple Silicon, fallback to Intel
     if (arch === 'arm64' && armAsset) return armAsset.browser_download_url;
     if (intelAsset) return intelAsset.browser_download_url;
     if (armAsset) return armAsset.browser_download_url;
   }
-  
+
   // Fallback to first asset or releases page
   return assets.length > 0 ? assets[0].browser_download_url : null;
 }
@@ -7331,7 +7899,7 @@ function startGoogleAuth() {
         saveGoogleTokens(tokens);
 
         res.writeHead(200, { 'Content-Type': 'text/html' });
-        res.end('<html><body style="font-family: -apple-system, sans-serif; text-align: center; padding: 60px;"><h2>Connected to Google Calendar</h2><p>You can close this tab and return to StenoAI.</p></body></html>');
+        res.end('<html><body style="font-family: -apple-system, sans-serif; text-align: center; padding: 60px;"><h2>Connected to Google Calendar</h2><p>You can close this tab and return to Steno.</p></body></html>');
 
         server.close();
         if (timeoutId) clearTimeout(timeoutId);
@@ -7543,30 +8111,15 @@ function refreshAccessToken(refreshToken) {
 // noon, hiding everything past lunch. Renderer-side pagination + the "today
 // only" filter handle the visual slicing; the fetch just needs to return
 // enough raw events to draw from.
-function fetchCalendarEvents(accessToken, maxResults = 50, signal) {
+async function fetchGoogleCalendarList(accessToken, signal) {
   return new Promise((resolve, reject) => {
-    const now = new Date();
-    const weekAhead = new Date(now);
-    weekAhead.setDate(weekAhead.getDate() + 7);
-    const params = new URLSearchParams({
-      timeMin: now.toISOString(),
-      timeMax: weekAhead.toISOString(),
-      maxResults: String(maxResults),
-      singleEvents: 'true',
-      orderBy: 'startTime',
-      fields: 'items(id,status,summary,description,start,end,attendees,htmlLink,conferenceData)'
-    });
-
     const options = {
       hostname: 'www.googleapis.com',
-      path: `/calendar/v3/calendars/primary/events?${params.toString()}`,
+      path: '/calendar/v3/users/me/calendarList',
       method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${accessToken}`
-      }
+      headers: { 'Authorization': `Bearer ${accessToken}` }
     };
     if (signal) options.signal = signal;
-
     const req = https.request(options, (res) => {
       let data = '';
       res.on('data', (chunk) => { data += chunk; });
@@ -7579,14 +8132,91 @@ function fetchCalendarEvents(accessToken, maxResults = 50, signal) {
           }
           resolve(parsed.items || []);
         } catch (err) {
-          reject(new Error('Failed to parse calendar response'));
+          reject(new Error('Failed to parse calendar list response'));
         }
       });
     });
-
     req.on('error', reject);
     req.end();
   });
+}
+
+function fetchGoogleEventsForCalendar(accessToken, calendarId, params, signal) {
+  return new Promise((resolve, reject) => {
+    const options = {
+      hostname: 'www.googleapis.com',
+      path: `/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events?${params.toString()}`,
+      method: 'GET',
+      headers: { 'Authorization': `Bearer ${accessToken}` }
+    };
+    if (signal) options.signal = signal;
+    const req = https.request(options, (res) => {
+      let data = '';
+      res.on('data', (chunk) => { data += chunk; });
+      res.on('end', () => {
+        try {
+          const parsed = JSON.parse(data);
+          if (parsed.error) {
+            resolve([]);
+            return;
+          }
+          resolve(parsed.items || []);
+        } catch (err) {
+          console.warn(`Failed to parse Google events for calendar ${calendarId}:`, err);
+          resolve([]);
+        }
+      });
+    });
+    req.on('error', () => resolve([]));
+    req.end();
+  });
+}
+
+async function fetchCalendarEvents(accessToken, maxResults = 50, signal) {
+  const now = new Date();
+  const weekAhead = new Date(now);
+  weekAhead.setDate(weekAhead.getDate() + 7);
+  const params = new URLSearchParams({
+    timeMin: now.toISOString(),
+    timeMax: weekAhead.toISOString(),
+    maxResults: String(maxResults),
+    singleEvents: 'true',
+    orderBy: 'startTime',
+    fields: 'items(id,status,summary,description,start,end,attendees,htmlLink,conferenceData,colorId)'
+  });
+
+  try {
+    const calendars = await fetchGoogleCalendarList(accessToken, signal);
+    const selectedCalendars = calendars.filter(c => c.selected);
+    if (selectedCalendars.length === 0) return [];
+
+    const results = [];
+    const concurrency = 3;
+    for (let i = 0; i < selectedCalendars.length; i += concurrency) {
+      const chunk = selectedCalendars.slice(i, i + concurrency);
+      const chunkPromises = chunk.map(async (cal) => {
+        const items = await fetchGoogleEventsForCalendar(accessToken, cal.id, params, signal);
+        items.forEach(item => { 
+          item.calendarBackgroundColor = cal.backgroundColor; 
+          item._sourceCalendarId = cal.id;
+        });
+        return items;
+      });
+      const chunkResults = await Promise.all(chunkPromises);
+      results.push(...chunkResults);
+    }
+    let allEvents = results.flat();
+    
+    allEvents.sort((a, b) => {
+      const startA = new Date(a.start?.dateTime || a.start?.date || 0);
+      const startB = new Date(b.start?.dateTime || b.start?.date || 0);
+      return startA.getTime() - startB.getTime();
+    });
+
+    return allEvents.slice(0, maxResults);
+  } catch (err) {
+    throw err;
+  }
 }
 
 // ── Outlook Calendar: OAuth2 Flow with PKCE ─────────────────────────────
@@ -7669,7 +8299,7 @@ function startOutlookAuth() {
         saveOutlookTokens(tokens);
 
         res.writeHead(200, { 'Content-Type': 'text/html' });
-        res.end('<html><body style="font-family: -apple-system, sans-serif; text-align: center; padding: 60px;"><h2>Connected to Outlook Calendar</h2><p>You can close this tab and return to StenoAI.</p></body></html>');
+        res.end('<html><body style="font-family: -apple-system, sans-serif; text-align: center; padding: 60px;"><h2>Connected to Outlook Calendar</h2><p>You can close this tab and return to Steno.</p></body></html>');
 
         server.close();
         if (timeoutId) clearTimeout(timeoutId);
@@ -7866,33 +8496,15 @@ function refreshOutlookAccessToken(refreshToken) {
 
 // ── Outlook Calendar: Fetch Events ──────────────────────────────────────
 
-// Mirrors fetchCalendarEvents — 50 events to comfortably cover a week without
-// clipping mid-day. See that function's comment for rationale.
-function fetchOutlookCalendarEvents(accessToken, maxResults = 50, signal) {
+async function fetchOutlookCalendarList(accessToken, signal) {
   return new Promise((resolve, reject) => {
-    const now = new Date();
-    const weekAhead = new Date(now);
-    weekAhead.setDate(weekAhead.getDate() + 7);
-
-    const params = new URLSearchParams({
-      startDateTime: now.toISOString(),
-      endDateTime: weekAhead.toISOString(),
-      $top: String(maxResults),
-      $orderby: 'start/dateTime',
-      $select: 'id,subject,body,start,end,attendees,webLink,onlineMeeting,isOnlineMeeting,isAllDay,isCancelled,responseStatus'
-    });
-
     const options = {
       hostname: 'graph.microsoft.com',
-      path: `/v1.0/me/calendarView?${params.toString()}`,
+      path: '/v1.0/me/calendars',
       method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${accessToken}`,
-        'Prefer': 'outlook.timezone="UTC"'
-      }
+      headers: { 'Authorization': `Bearer ${accessToken}` }
     };
     if (signal) options.signal = signal;
-
     const req = https.request(options, (res) => {
       let data = '';
       res.on('data', (chunk) => { data += chunk; });
@@ -7900,20 +8512,114 @@ function fetchOutlookCalendarEvents(accessToken, maxResults = 50, signal) {
         try {
           const parsed = JSON.parse(data);
           if (parsed.error) {
-            reject(new Error(`Outlook Calendar API error: ${parsed.error.message || parsed.error}`));
+            reject(new Error(`Outlook API error: ${parsed.error.message || parsed.error}`));
+            return;
+          }
+          resolve(parsed.value || []);
+        } catch (err) {
+          reject(new Error('Failed to parse Outlook calendar list response'));
+        }
+      });
+    });
+    req.on('error', reject);
+    req.end();
+  });
+}
+
+function fetchOutlookEventsForCalendar(accessToken, calendarId, params, signal) {
+  return new Promise((resolve, reject) => {
+    const options = {
+      hostname: 'graph.microsoft.com',
+      path: `/v1.0/me/calendars/${encodeURIComponent(calendarId)}/calendarView?${params.toString()}`,
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Prefer': 'outlook.timezone="UTC"'
+      }
+    };
+    if (signal) options.signal = signal;
+    const req = https.request(options, (res) => {
+      let data = '';
+      res.on('data', (chunk) => { data += chunk; });
+      res.on('end', () => {
+        try {
+          const parsed = JSON.parse(data);
+          if (parsed.error) {
+            resolve([]);
             return;
           }
           const events = (parsed.value || []).map(normalizeOutlookEvent);
           resolve(events);
         } catch (err) {
-          reject(new Error('Failed to parse Outlook calendar response'));
+          console.warn(`Failed to parse Outlook events for calendar ${calendarId}:`, err);
+          resolve([]);
         }
       });
     });
-
-    req.on('error', reject);
+    req.on('error', () => resolve([]));
     req.end();
   });
+}
+
+async function fetchOutlookCalendarEvents(accessToken, maxResults = 50, signal) {
+  const now = new Date();
+  const weekAhead = new Date(now);
+  weekAhead.setDate(weekAhead.getDate() + 7);
+
+  const params = new URLSearchParams({
+    startDateTime: now.toISOString(),
+    endDateTime: weekAhead.toISOString(),
+    $top: String(maxResults),
+    $orderby: 'start/dateTime',
+    $select: 'id,subject,body,start,end,attendees,webLink,onlineMeeting,isOnlineMeeting,isAllDay,isCancelled,responseStatus,categories'
+  });
+
+  try {
+    const calendars = await fetchOutlookCalendarList(accessToken, signal);
+    if (calendars.length === 0) return [];
+
+    const results = [];
+    const concurrency = 3;
+    for (let i = 0; i < calendars.length; i += concurrency) {
+      const chunk = calendars.slice(i, i + concurrency);
+      const chunkPromises = chunk.map(async (cal) => {
+        const items = await fetchOutlookEventsForCalendar(accessToken, cal.id, params, signal);
+        
+        let hexColor = undefined;
+        switch (cal.color) {
+          case 'lightBlue': hexColor = '#3B82F6'; break;
+          case 'lightGreen': hexColor = '#10B981'; break;
+          case 'lightOrange': hexColor = '#F97316'; break;
+          case 'lightGray': hexColor = '#6B7280'; break;
+          case 'lightYellow': hexColor = '#EAB308'; break;
+          case 'lightTeal': hexColor = '#14B8A6'; break;
+          case 'lightPink': hexColor = '#EC4899'; break;
+          case 'lightBrown': hexColor = '#92400E'; break;
+          case 'lightRed': hexColor = '#EF4444'; break;
+          default: hexColor = '#3B82F6';
+        }
+        
+        items.forEach(item => { 
+          item.calendarBackgroundColor = hexColor; 
+          item.id = `${cal.id}_${item.id}`;
+        });
+        return items;
+      });
+      const chunkResults = await Promise.all(chunkPromises);
+      results.push(...chunkResults);
+    }
+    let allEvents = results.flat();
+    
+    allEvents.sort((a, b) => {
+      const startA = new Date(a.start?.dateTime || a.start?.date || 0);
+      const startB = new Date(b.start?.dateTime || b.start?.date || 0);
+      return startA.getTime() - startB.getTime();
+    });
+
+    return allEvents.slice(0, maxResults);
+  } catch (err) {
+    throw err;
+  }
 }
 
 function normalizeOutlookEvent(event) {
@@ -7991,6 +8697,8 @@ ipcMain.handle('google-auth-start', async () => {
     await startGoogleAuth();
     // Only disconnect Outlook after Google auth succeeds
     deleteOutlookTokens();
+    trackEvent('calendar_connected', { provider: 'google' });
+    refreshIdentitySuperProperties();
     return { success: true };
   } catch (error) {
     console.error('Google auth failed:', error.message);
@@ -8040,6 +8748,8 @@ ipcMain.handle('google-auth-disconnect', async () => {
       mainWindow.webContents.send('google-auth-changed');
     }
 
+    trackEvent('calendar_disconnected', { provider: 'google' });
+    refreshIdentitySuperProperties();
     return { success: true };
   } catch (error) {
     return { success: false, error: error.message };
@@ -8116,8 +8826,47 @@ function normalizeCalendarEvent(event) {
   // Drop events the user explicitly declined — see function header comment.
   if (responseStatus === 'declined') return null;
 
+  const GOOGLE_COLORS = {
+    '1': '#7986cb', // Lavender
+    '2': '#33b679', // Sage
+    '3': '#8e24aa', // Grape
+    '4': '#e67c73', // Flamingo
+    '5': '#f6bf26', // Banana
+    '6': '#f4511e', // Tangerine
+    '7': '#039be5', // Peacock
+    '8': '#616161', // Graphite
+    '9': '#3f51b5', // Blueberry
+    '10': '#0b8043', // Basil
+    '11': '#d50000'  // Tomato
+  };
+
+  let eventColor = undefined;
+  if (event.colorId && GOOGLE_COLORS[event.colorId]) {
+    eventColor = GOOGLE_COLORS[event.colorId];
+  } else if (Array.isArray(event.categories)) {
+    const OUTLOOK_CATEGORY_COLORS = {
+      'red category': '#F43F5E',
+      'orange category': '#F97316',
+      'yellow category': '#EAB308',
+      'green category': '#10B981',
+      'blue category': '#3B82F6',
+      'purple category': '#A855F7',
+    };
+    for (const cat of event.categories) {
+       const lowerCat = cat.toLowerCase();
+       if (OUTLOOK_CATEGORY_COLORS[lowerCat]) {
+         eventColor = OUTLOOK_CATEGORY_COLORS[lowerCat];
+         break;
+       }
+    }
+  }
+
+  if (!eventColor && event.calendarBackgroundColor) {
+    eventColor = event.calendarBackgroundColor;
+  }
+
   return {
-    id: event.id,
+    id: event._sourceCalendarId ? `${event._sourceCalendarId}_${event.id}` : event.id,
     title: event.summary || event.title || 'No title',
     start,
     end,
@@ -8128,6 +8877,7 @@ function normalizeCalendarEvent(event) {
       undefined,
     is_all_day: isAllDay,
     response_status: responseStatus,
+    color: eventColor,
   };
 }
 
@@ -8223,12 +8973,12 @@ async function getCalendarEventForNow(timeoutMs = 1500) {
     let events = null;
     const googleToken = await getValidAccessToken();
     if (googleToken) {
-      const raw = await fetchCalendarEvents(googleToken, 7, signal);
+      const raw = await fetchCalendarEvents(googleToken, 50, signal);
       events = raw.map(normalizeCalendarEvent).filter(Boolean);
     } else {
       const outlookToken = await getValidOutlookAccessToken();
       if (outlookToken) {
-        const raw = await fetchOutlookCalendarEvents(outlookToken, 7, signal);
+        const raw = await fetchOutlookCalendarEvents(outlookToken, 50, signal);
         events = raw.map(normalizeCalendarEvent).filter(Boolean);
       }
     }
@@ -8273,12 +9023,12 @@ async function fetchCalendarEventsForScheduler(timeoutMs = 4000) {
   try {
     const googleToken = await getValidAccessToken();
     if (googleToken) {
-      const raw = await fetchCalendarEvents(googleToken, 7, controller.signal);
+      const raw = await fetchCalendarEvents(googleToken, 50, controller.signal);
       return raw.map(normalizeCalendarEvent).filter(Boolean);
     }
     const outlookToken = await getValidOutlookAccessToken();
     if (outlookToken) {
-      const raw = await fetchOutlookCalendarEvents(outlookToken, 7, controller.signal);
+      const raw = await fetchOutlookCalendarEvents(outlookToken, 50, controller.signal);
       return raw.map(normalizeCalendarEvent).filter(Boolean);
     }
     return null; // no calendar connected
@@ -8288,6 +9038,65 @@ async function fetchCalendarEventsForScheduler(timeoutMs = 4000) {
   } finally {
     clearTimeout(timeoutId);
   }
+}
+
+// Content-free periodic snapshot of the connected calendar -- the usage
+// denominator for "% of calendar meetings recorded" (joined against
+// recording_started's matched_calendar_event/provider). Only counts,
+// enums and provider breakdowns are ever sent; titles/attendees/URLs are
+// discarded after the enum lookup. Throttled to <=1/day per window so the
+// 10-min premeeting re-poll doesn't spam PostHog.
+//
+// The throttle timestamp is persisted to disk (not just an in-memory
+// variable) so restarting the app doesn't reset it -- an in-memory-only
+// throttle would re-fire on every single launch, since a fresh process
+// always starts with "never sent", defeating the <=1/day intent for anyone
+// who quits and reopens the app more than once a day.
+function getCalendarSnapshotMarkerPath() {
+  return path.join(getUserDataDir(), '.last-calendar-snapshot');
+}
+
+function readLastCalendarSnapshotAtMs() {
+  try {
+    const parsed = parseInt(fs.readFileSync(getCalendarSnapshotMarkerPath(), 'utf-8').trim(), 10);
+    return Number.isFinite(parsed) ? parsed : 0;
+  } catch (_) {
+    return 0;
+  }
+}
+
+function writeLastCalendarSnapshotAtMs(ms) {
+  try {
+    fs.writeFileSync(getCalendarSnapshotMarkerPath(), String(ms));
+  } catch (_) {
+    // Best-effort -- a failed write just means the throttle resets on next launch
+  }
+}
+
+// null = not yet loaded from disk this process. Loaded lazily on first call
+// (rather than at module load) since this only matters once the premeeting
+// scheduler actually starts ticking.
+let lastCalendarSnapshotAtMs = null;
+const CALENDAR_SNAPSHOT_INTERVAL_MS = 24 * 60 * 60 * 1000;
+
+function maybeTrackCalendarSnapshot(events, now = new Date()) {
+  // Skip entirely -- including the marker read/write -- when telemetry is
+  // off. trackEvent() would no-op below regardless, but writing the marker
+  // anyway would advance the <=1/day throttle for a snapshot that was never
+  // actually sent, silently suppressing the first REAL snapshot for up to
+  // 24h after the user later re-enables telemetry.
+  if (!telemetryEnabled || !posthogClient || !anonymousId) return;
+  if (lastCalendarSnapshotAtMs === null) {
+    lastCalendarSnapshotAtMs = readLastCalendarSnapshotAtMs();
+  }
+  const nowMs = now.getTime();
+  if (nowMs - lastCalendarSnapshotAtMs < CALENDAR_SNAPSHOT_INTERVAL_MS) return;
+  lastCalendarSnapshotAtMs = nowMs;
+  writeLastCalendarSnapshotAtMs(nowMs);
+
+  const { today, week } = summarizeCalendarSnapshot(events, now);
+  trackEvent('calendar_snapshot', { window: 'today', ...today });
+  trackEvent('calendar_snapshot', { window: 'week', ...week });
 }
 
 // Mirrors the per-event predicates of Home.tsx's `upcomingToday` (timed/
@@ -8328,23 +9137,98 @@ async function firePreMeetingNotification(event) {
     sendDebugLog(`[premeeting] suppressed — already recording "${event.title}"`);
     return false;
   }
-  if (!Notification.isSupported()) return false;
-  const notif = new Notification({
-    title: 'Meeting starting',
-    body: `${event.title || 'Your meeting'} starts in 2 minutes`,
-  });
-  notif.on('click', () => {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      if (!mainWindow.isVisible()) mainWindow.show();
-      mainWindow.focus();
-    }
-  });
-  notif.show();
+
+  createNotificationWindow(event);
+  trackEvent('notification_shown', { type: 'premeeting' });
+
   // Mark fired only after we've actually shown it, so an unshowable notif
   // (no OS support) isn't permanently skipped by the scheduler's dedupe.
   premeetingFiredIds.add(event.id);
   return true;
 }
+
+function createNotificationWindow(event) {
+  if (notificationWindow && !notificationWindow.isDestroyed()) {
+    notificationWindow.close();
+  }
+
+  const { screen } = require('electron');
+  const primaryDisplay = screen.getPrimaryDisplay();
+  const { width } = primaryDisplay.workAreaSize;
+  const { x, y } = primaryDisplay.workArea;
+
+  notificationWindow = new BrowserWindow({
+    width: 400,
+    height: 70,
+    x: x + width - 425,
+    y: y + 1,
+    frame: false,
+    transparent: true,
+    alwaysOnTop: true,
+    resizable: false,
+    skipTaskbar: true,
+    focusable: false,
+    hasShadow: false,
+    backgroundColor: '#00000000',
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true,
+      preload: path.join(__dirname, 'preload.js'),
+    },
+  });
+
+  const rendererDist = path.join(__dirname, 'renderer', 'dist', 'index.html');
+  notificationWindow.loadFile(rendererDist, { hash: '/notification' });
+
+  const win = notificationWindow;
+  // Set true by close-notification-window (the renderer's Join/Focus/Close
+  // handlers all route through it, and each already tracks its own
+  // notification_clicked/_dismissed via the analytics bridge before calling
+  // it). Scoped to this window instance -- not a module-level flag -- so a
+  // new notification superseding an unactioned old one can't leak state
+  // across windows. Stays false only when the window closes via the 15s
+  // auto-close timer with no interaction at all, which is the passive-
+  // dismiss path the native Notification lifecycle already tracks but this
+  // custom BrowserWindow-based notification previously didn't.
+  win._analyticsInteracted = false;
+  let autoCloseTimer;
+  win.once('ready-to-show', () => {
+    win.showInactive();
+    win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    win.setAlwaysOnTop(true, 'screen-saver', 1);
+
+    autoCloseTimer = setTimeout(() => {
+      if (!win.isDestroyed()) {
+        win.close();
+      }
+    }, 15000);
+
+    win.on('closed', () => {
+      if (autoCloseTimer) clearTimeout(autoCloseTimer);
+      if (!win._analyticsInteracted) {
+        trackEvent('notification_dismissed', { type: 'premeeting' });
+      }
+      if (notificationWindow === win) {
+        notificationWindow = null;
+      }
+    });
+
+    win.webContents.send('show-notification', {
+      title: event.title || 'Meeting starting',
+      time: event.start ? new Date(event.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
+      meeting_url: event.meeting_url,
+      attendees: event.attendees ? event.attendees.map(a => a.name || a.email).join(', ') : '',
+    });
+  });
+}
+
+ipcMain.handle('close-notification-window', () => {
+  if (notificationWindow && !notificationWindow.isDestroyed()) {
+    notificationWindow._analyticsInteracted = true;
+    notificationWindow.close();
+  }
+});
 
 function clearPreMeetingTimers() {
   for (const t of premeetingTimers.values()) clearTimeout(t);
@@ -8357,11 +9241,21 @@ function clearPreMeetingTimers() {
 // (don't backfire). Gated on the master notifications toggle + a connected
 // calendar: a disconnect clears armed timers; a transient fetch blip keeps them.
 async function schedulePreMeetingNotifications() {
+  // Fetched once, shared by the calendar_snapshot metric (below) and the
+  // premeeting-arming logic (further down) -- avoids a second calendar API
+  // call every 10-min re-poll. The snapshot is intentionally NOT gated on
+  // the notifications toggle -- it's a usage metric, not a notification, and
+  // gating it would bias the "% of meetings recorded" metric toward users
+  // who have notifications on.
+  const events = await fetchCalendarEventsForScheduler();
+  if (events && events !== SCHEDULER_FETCH_FAILED) {
+    maybeTrackCalendarSnapshot(events);
+  }
+
   if (!(await notificationsEnabled())) {
     clearPreMeetingTimers();
     return;
   }
-  const events = await fetchCalendarEventsForScheduler();
   if (events === SCHEDULER_FETCH_FAILED) return; // transient blip — keep existing timers
   if (!events) {
     // No calendar connected — drop any reminders armed while it was. (A transient
@@ -8426,6 +9320,8 @@ ipcMain.handle('outlook-auth-start', async () => {
     await startOutlookAuth();
     // Only disconnect Google after Outlook auth succeeds
     deleteGoogleTokens();
+    trackEvent('calendar_connected', { provider: 'outlook' });
+    refreshIdentitySuperProperties();
     return { success: true };
   } catch (error) {
     console.error('Outlook auth failed:', error.message);
@@ -8455,6 +9351,8 @@ ipcMain.handle('outlook-auth-disconnect', async () => {
       mainWindow.webContents.send('outlook-auth-changed');
     }
 
+    trackEvent('calendar_disconnected', { provider: 'outlook' });
+    refreshIdentitySuperProperties();
     return { success: true };
   } catch (error) {
     return { success: false, error: error.message };

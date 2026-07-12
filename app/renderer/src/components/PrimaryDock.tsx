@@ -60,6 +60,7 @@ export function PrimaryDock({ showAskBar }: { showAskBar: boolean }) {
     if (!activeSummaryFile) return;
     void recording.startRecording(
       activeMeetingName ?? undefined,
+      'manual',
       activeSummaryFile,
     );
   };

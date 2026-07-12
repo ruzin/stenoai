@@ -73,6 +73,7 @@ import {
 import { useActiveMeeting } from '@/lib/askBarContext';
 import { ipc, type Meeting, type Report, type Template } from '@/lib/ipc';
 import { buildTranscriptBundle, defaultExportFilename } from '@/lib/transcriptBundle';
+import { buildNotesCopyText } from '@/lib/notesCopy';
 import { unwrap } from '@/lib/result';
 import { cn } from '@/lib/utils';
 import { navigate } from '@/lib/router';
@@ -222,6 +223,12 @@ function DetailContent({
   const [titleRegening, setTitleRegening] = React.useState(() =>
     pendingTitleRegens.has(summaryFile),
   );
+  const [prevSummaryFile, setPrevSummaryFile] = React.useState(summaryFile);
+  if (summaryFile !== prevSummaryFile) {
+    setPrevSummaryFile(summaryFile);
+    setTitleRegening(pendingTitleRegens.has(summaryFile));
+  }
+
   const [isEditingTitle, setIsEditingTitle] = React.useState(false);
   const [titleError, setTitleError] = React.useState<string | null>(null);
   const titleEditRef = React.useRef<HTMLSpanElement>(null);
@@ -229,7 +236,6 @@ function DetailContent({
   React.useEffect(() => {
     const pending = pendingTitleRegens.get(summaryFile);
     if (!pending) return;
-    setTitleRegening(true);
     let cancelled = false;
     pending.finally(() => {
       if (!cancelled) setTitleRegening(false);
@@ -277,15 +283,14 @@ function DetailContent({
   const [activeReportId, setActiveReportId] = React.useState<string | null>(
     meeting.active_report ?? null,
   );
+  const [prevMeetingReport, setPrevMeetingReport] = React.useState<string | null>(meeting.active_report ?? null);
+  if ((meeting.active_report ?? null) !== prevMeetingReport) {
+    setPrevMeetingReport(meeting.active_report ?? null);
+    setActiveReportId(meeting.active_report ?? null);
+  }
   const activeReport = activeReportId
     ? reports.find((r) => r.id === activeReportId) ?? null
     : null;
-  // meeting.active_report is the source of truth (the switch persists it). Re-sync
-  // local state whenever it changes so a reprocess (backend clears it to null)
-  // can't leave the UI showing a stale report. Idempotent for user clicks.
-  React.useEffect(() => {
-    setActiveReportId(meeting.active_report ?? null);
-  }, [meeting.active_report]);
   // When a report generation finishes, summaryComplete fires for THIS meeting
   // and we want to land on the freshly-created report. The IPC stream doesn't
   // carry the new report id, so we flag "the active stream is a report" and,
@@ -505,36 +510,27 @@ function DetailContent({
     }
   };
 
+  // Copies whichever note is on screen: the open template report when one is
+  // selected, otherwise the Standard structured note. Reasoning blocks are
+  // stripped like the rendered views do, so the clipboard never carries
+  // <think> content the screen hides.
   const copyNotes = () => {
-    const lines: string[] = [info.name];
     const meta = [formatDetailDate(info), formatDuration(info.duration_seconds)]
       .filter(Boolean)
       .join(' · ');
-    if (meta) lines.push(meta);
-    const summary = meeting.summary?.trim();
-    if (summary) {
-      lines.push('', 'SUMMARY', summary);
-    }
-    const dAreas = asDiscussionAreas(meeting.discussion_areas);
-    if (dAreas.length) {
-      lines.push('', 'KEY TOPICS');
-      dAreas.forEach((a) => lines.push(`- ${a.title}${a.analysis ? `: ${a.analysis}` : ''}`));
-    }
-    const kp = meeting.key_points ?? [];
-    if (kp.length) {
-      lines.push('', 'KEY POINTS');
-      kp.forEach((p) => lines.push(`- ${p}`));
-    }
-    const ai = asStringArray(meeting.action_items);
-    if (ai.length) {
-      lines.push('', 'ACTION ITEMS');
-      ai.forEach((a) => lines.push(`- ${a}`));
-    }
-    const parts = asStringArray(meeting.participants);
-    if (parts.length) {
-      lines.push('', 'PARTICIPANTS', parts.join(', '));
-    }
-    void navigator.clipboard.writeText(lines.join('\n'));
+    const text = buildNotesCopyText(
+      {
+        name: info.name,
+        meta: meta || undefined,
+        summary: meeting.summary ? stripReasoning(meeting.summary) : undefined,
+        discussionAreas: asDiscussionAreas(meeting.discussion_areas),
+        keyPoints: meeting.key_points ?? [],
+        actionItems: asStringArray(meeting.action_items),
+        participants: asStringArray(meeting.participants),
+      },
+      activeReport ? { content: stripReasoning(activeReport.content) } : null,
+    );
+    void navigator.clipboard.writeText(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -627,9 +623,13 @@ function DetailContent({
           <div className="flex items-center gap-1">
             <Tooltip>
               <TooltipTrigger asChild>
+                {/* Disabled while a summary/report stream is on screen — the
+                    clipboard would otherwise get the old note while the body
+                    shows the in-flux streamed text. */}
                 <ActionIconButton
                   label={copied ? 'Copied' : 'Copy notes'}
                   onClick={copyNotes}
+                  disabled={streamPhase !== 'idle'}
                 >
                   {copied ? <Check className="size-[13px]" /> : <Copy className="size-[13px]" />}
                 </ActionIconButton>
@@ -928,7 +928,7 @@ function DetailContent({
           data-testid="report-content"
           style={{ color: 'var(--fg-1)', maxWidth: '72ch' }}
         >
-          <ReactMarkdown>{activeReport.content}</ReactMarkdown>
+          <ReactMarkdown>{stripReasoning(activeReport.content)}</ReactMarkdown>
         </section>
       ) : (
         <div className="flex flex-col gap-9">
@@ -1523,11 +1523,12 @@ function StreamingView({ text, phase, chunkProgress }: { text: string; phase: St
   const blocks = parseMarkdownBlocks(stripReasoning(text));
   const isStreaming = phase === 'analyzing' || phase === 'generating';
 
-  const prevBlockCountRef = React.useRef(blocks.length);
-  const firstNewIdx = prevBlockCountRef.current;
-  React.useEffect(() => {
-    prevBlockCountRef.current = blocks.length;
-  }, [blocks.length]);
+  const [prevBlocksCount, setPrevBlocksCount] = React.useState(blocks.length);
+  const [firstNewIdx, setFirstNewIdx] = React.useState(blocks.length);
+  if (blocks.length !== prevBlocksCount) {
+    setFirstNewIdx(prevBlocksCount);
+    setPrevBlocksCount(blocks.length);
+  }
 
   const blocksContainerRef = React.useRef<HTMLDivElement>(null);
   const indicatorRef = React.useRef<HTMLDivElement>(null);
@@ -1696,7 +1697,11 @@ function FolderPicker({ summaryFile, assignedFolderIds }: { summaryFile: string;
   const allFolders = folders.data ?? [];
   const serverFolderId = assignedFolderIds[0] ?? null;
   const [localFolderId, setLocalFolderId] = React.useState<string | null>(serverFolderId);
-  React.useEffect(() => { setLocalFolderId(serverFolderId); }, [serverFolderId]);
+  const [prevServerFolderId, setPrevServerFolderId] = React.useState<string | null>(serverFolderId);
+  if (serverFolderId !== prevServerFolderId) {
+    setPrevServerFolderId(serverFolderId);
+    setLocalFolderId(serverFolderId);
+  }
 
   const currentFolder = allFolders.find((f) => f.id === localFolderId) ?? null;
 
@@ -1915,7 +1920,7 @@ export function pickTranscriptForShare(meeting: Meeting): string {
 export function composeShareBody(meeting: Meeting): string {
   const sections: string[] = [];
 
-  const summary = meeting.summary?.trim();
+  const summary = meeting.summary ? stripReasoning(meeting.summary).trim() : undefined;
   if (summary) {
     sections.push(`## Summary\n\n${summary}`);
   }

@@ -96,6 +96,30 @@ const STALE_MEETING = {
   participants: [],
 };
 
+// A generated template report attached to SEED_MEETING when
+// STENOAI_E2E_SEED_REPORT=1 (copy-notes-report T1). Gated separately so the
+// transcript-export T1 keeps seeing the report-less meeting it asserts on.
+const SEED_REPORT = {
+  id: 'rep_e2e_1',
+  template_id: 'tpl_e2e_status',
+  template_name: 'Status Report',
+  model: 'mock-model',
+  // Leading <think> block: the copy path must strip reasoning like the
+  // rendered view does, so the spec can assert it never reaches the clipboard.
+  content:
+    '<think>secret chain of thought</think>\n## Status Report\n\n- Pipeline healthy\n- Next: open the reqs',
+  created_at: '2026-06-19T13:00:00Z',
+};
+
+// Mutable so the stateful set-active-report mock below persists the pill
+// switch across the invalidate → get-meeting refetch, like the real sidecar.
+let seedActiveReport = null;
+
+const seededMeeting = () =>
+  process.env.STENOAI_E2E_SEED_REPORT === '1'
+    ? { ...SEED_MEETING, reports: [SEED_REPORT], active_report: seedActiveReport }
+    : SEED_MEETING;
+
 function install({ ipcMain }) {
   // In-memory stand-in for the org session + provider config that the real
   // handlers persist to disk. Mutated by the org-login / org-logout / set-ai
@@ -235,9 +259,17 @@ function install({ ipcMain }) {
         return { success: true, meetings: [STALE_MEETING] };
       }
       if (process.env.STENOAI_E2E_SEED_MEETING === '1') {
-        return { success: true, meetings: [SEED_MEETING] };
+        return { success: true, meetings: [seededMeeting()] };
       }
       return { success: true, meetings: SEEDED_MEETINGS };
+    },
+
+    // Mirror the real handler just enough for the copy-notes-report T1: persist
+    // the switch so the refetch that follows the mutation doesn't reset the
+    // pill. 'standard' clears it, like src/reports.py set_active.
+    'set-active-report': async (_event, _summaryFile, reportId) => {
+      seedActiveReport = !reportId || reportId === 'standard' ? null : reportId;
+      return { success: true };
     },
 
     // The detail route loads via get-meeting (the lazy per-meeting fetch), not
@@ -251,7 +283,9 @@ function install({ ipcMain }) {
         return { success: true, meeting: applyOverlay(STALE_MEETING) };
       }
       if (process.env.STENOAI_E2E_SEED_MEETING === '1') {
-        return { success: true, meeting: applyOverlay(SEED_MEETING) };
+        // seededMeeting() carries main's optional template-report; applyOverlay
+        // layers my user_notes edits on top (My notes tab round-trip).
+        return { success: true, meeting: applyOverlay(seededMeeting()) };
       }
       const m = SEEDED_MEETINGS.find(
         (x) => x.session_info && x.session_info.summary_file === summaryFile,
