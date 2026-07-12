@@ -352,6 +352,38 @@ class ConfigTelemetryOptInTests(unittest.TestCase):
             self.assertIs(on_disk["telemetry_enabled"], True)
             self.assertTrue(config.get_telemetry_enabled())
 
+    def test_failed_migration_persist_does_not_leak_through_save(self):
+        # If the migration's CAS write fails (lock timeout, I/O error), a
+        # later ordinary _save() must not push the in-memory reset through
+        # the merge path - that would bypass the CAS and clobber a
+        # concurrent affirmative opt-in.
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "config.json"
+            # templates_seeded present so no construction-time seed _save
+            # runs before the concurrent opt-in below; the stale instance's
+            # own set_*() below is the "later ordinary _save" under test.
+            path.write_text(
+                json.dumps({"telemetry_enabled": True, "templates_seeded": True})
+            )
+            with patch.object(
+                Config, "_persist_telemetry_migration", lambda self: None
+            ):
+                config = Config(config_path=path)
+            # Fail closed in memory for this process.
+            self.assertFalse(config.get_telemetry_enabled())
+            # Concurrent process migrated AND the user opted in meanwhile.
+            path.write_text(json.dumps({
+                "telemetry_enabled": True,
+                "telemetry_opt_in_migrated": True,
+                "templates_seeded": True,
+            }))
+            # Any ordinary save from the stale instance...
+            config.set_notifications_enabled(True)
+            # ...must not clobber the affirmative opt-in on disk.
+            on_disk = json.loads(path.read_text())
+            self.assertIs(on_disk["telemetry_enabled"], True)
+            self.assertIs(on_disk["telemetry_opt_in_migrated"], True)
+
 
 class ConfigOrgAutoBackupTests(unittest.TestCase):
     def test_default_auto_backup_is_true(self):

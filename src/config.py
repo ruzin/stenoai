@@ -337,6 +337,13 @@ class Config:
         self._config["telemetry_enabled"] = False
         self._config["telemetry_opt_in_migrated"] = True
         self._persist_telemetry_migration()
+        # Whatever the persist outcome, keep the snapshot in sync with the
+        # in-memory state of these two keys so a later ordinary _save() can
+        # never push them through the merge path and bypass the CAS above
+        # (which would clobber a concurrent affirmative opt-in). On persist
+        # failure the migration simply retries on the next load.
+        self._snapshot["telemetry_enabled"] = self._config["telemetry_enabled"]
+        self._snapshot["telemetry_opt_in_migrated"] = self._config["telemetry_opt_in_migrated"]
 
     def _persist_telemetry_migration(self) -> None:
         """Locked compare-and-set write for the telemetry consent reset.
@@ -363,16 +370,10 @@ class Config:
                     adopted = base.get("telemetry_enabled") is True
                     self._config["telemetry_enabled"] = adopted
                     self._config["telemetry_opt_in_migrated"] = True
-                    self._snapshot["telemetry_enabled"] = adopted
-                    self._snapshot["telemetry_opt_in_migrated"] = True
                     return
                 base["telemetry_enabled"] = False
                 base["telemetry_opt_in_migrated"] = True
                 _atomic_write_json(self.config_path, base)
-                # Sync the snapshot so a later _save() from this instance
-                # doesn't re-diff these keys against the pre-migration load.
-                self._snapshot["telemetry_enabled"] = False
-                self._snapshot["telemetry_opt_in_migrated"] = True
         except filelock.Timeout:
             logger.warning(
                 "Timed out acquiring config lock for telemetry consent "
