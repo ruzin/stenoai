@@ -5,7 +5,6 @@ import {
   ChevronDown,
   ChevronUp,
   Copy,
-  Mic,
   Square,
   X,
 } from 'lucide-react';
@@ -130,10 +129,9 @@ export function TranscriptBar() {
             data-testid="resume-recording-button"
             aria-label="Resume recording on this note"
             title="Resume recording — the new audio is appended to this note"
-            className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-full border-0 px-3 text-[13px] font-medium transition-colors hover:bg-[color:var(--surface-hover)]"
-            style={{ background: 'transparent', color: 'var(--fg-1)' }}
+            className="inline-flex h-8 cursor-pointer items-center rounded-full border-0 px-3.5 text-[13px] font-medium transition-colors hover:bg-[color:var(--surface-hover)]"
+            style={{ background: 'var(--surface-sunken)', color: 'var(--fg-1)' }}
           >
-            <Mic size={13} style={{ color: 'var(--recording)' }} />
             Resume
           </button>
         </div>
