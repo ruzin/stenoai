@@ -921,9 +921,8 @@ function createWindow(options = {}) {
   rendererShortcutReady = false;
 
   const windowOpts = {
-    width: 1200,
-    // A touch taller than the old 800 for more vertical room.
-    height: 853,
+    width: 1188,
+    height: 844,
     minWidth: 1000,
     minHeight: 600,
     // Explicit window/taskbar icon on Windows. Relying on the exe-embedded icon
