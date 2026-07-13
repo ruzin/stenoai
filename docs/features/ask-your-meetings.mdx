@@ -36,7 +36,7 @@ When you ask a question, Steno reads three sources from the saved note:
 | Key topics | The structured list of topics identified during summarization |
 | Full transcript | The verbatim transcript with timestamps and speaker labels |
 
-The full transcript is included when it fits within the model's context window. For long meetings, Steno trims the transcript intelligently, keeping the most relevant sections.
+The full transcript is included, bounded by the active model's context window. Very long meetings can exceed that window; switching to a model with a larger context window (see [Summarization models](/models/summarization-models)) helps if a question about the end of a long meeting gets a weaker answer.
 
 ## Privacy
 
@@ -45,11 +45,11 @@ All queries are processed by the local model on your Mac. Your questions and the
 ---
 
 <Accordion title="Can I ask questions across multiple meetings?">
-Not yet. The ask bar currently works against a single meeting's saved note. Cross-meeting search is on the roadmap.
+Yes. Alongside the inline ask bar for a single note, Steno supports library-wide chat across all of your meetings, so you can ask questions that span your whole meeting history.
 </Accordion>
 
 <Accordion title="The answers are not very accurate -- what should I try?">
-Larger models produce better answers. In **Settings → Models → Summarization**, switch to `qwen3.5:9b` or `deepseek-r1:14b`. Also check that the full transcript was saved -- if transcription failed or was skipped, the model only has the summary to work from.
+Larger models produce better answers. In **Settings → AI**, switch to `qwen3.5:9b` or `gemma4:12b-it-qat`. Also check that the full transcript was saved -- if transcription failed or was skipped, the model only has the summary to work from.
 </Accordion>
 
 <Accordion title="Can I ask in a language other than English?">

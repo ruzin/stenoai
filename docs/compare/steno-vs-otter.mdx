@@ -11,16 +11,16 @@ Otter.ai is a cloud-based AI meeting transcription service. Steno is a local mac
 |---|---|---|
 | **Audio processing** | On your Mac, always | Otter's servers |
 | **Account required** | No | Yes |
-| **Price** | Free | Free tier (limited) / $16.99-$30/month |
+| **Price** | Free (personal & team) | Free tier (limited) / $16.99-$30/month |
 | **Works offline** | Yes | No |
 | **Meeting bot** | No | Yes (OtterPilot) |
 | **Other participants see the bot** | No | Yes |
-| **Transcription engine** | Whisper (on-device) | Proprietary cloud |
-| **Supported languages** | 99 | Primarily English |
+| **Transcription engine** | Parakeet / Whisper (on-device) | Proprietary cloud |
+| **Supported languages** | 25 European languages, including English, on the default engine; 99 via Whisper | Primarily English |
 | **Speaker labels** | Yes | Yes |
 | **Shared team workspace** | No | Yes |
 | **Mobile app** | No (macOS only) | Yes (iOS, Android) |
-| **Calendar integration** | Via Apple Shortcuts | Yes (native) |
+| **Calendar integration** | Native (Google & Outlook auto-detect), plus Apple Shortcuts | Yes (native) |
 | **Data used for training** | No | Check current policy |
 | **Suitable for confidential audio** | Yes | Requires review |
 | **Platform** | macOS only | Cross-platform |
@@ -35,7 +35,7 @@ Steno processes everything on your Mac. No audio is transmitted anywhere. This m
 
 Otter.ai's free tier limits monthly transcription minutes and restricts features. The Pro plan costs $16.99/month and Business is $30/user/month.
 
-Steno is free and open source. The only cost is disk space for model files (~3-5GB for the default setup).
+Steno is free for personal and team use and open source. The only cost is disk space for model files (roughly 7GB for the default setup).
 
 ## Meeting bot
 
@@ -45,9 +45,9 @@ Steno has no meeting bot. It records audio from your Mac's audio system -- the o
 
 ## Accuracy and language support
 
-Both tools offer high transcription accuracy for clear, English-language audio. Whisper (Steno's engine) performs well across accents and in noisy environments.
+Both tools offer high transcription accuracy for clear, English-language audio. Steno transcribes on-device with two engines -- Parakeet (the default) and Whisper (optional) -- and performs well across accents and in noisy environments.
 
-Otter is primarily optimized for English. Steno's Whisper models support 99 languages automatically -- it detects the language and transcribes accordingly.
+Otter is primarily optimized for English. Steno's default Parakeet engine covers 25 European languages, including English; switching to the Whisper engine adds automatic detection across 99 languages.
 
 ## Team features
 
@@ -76,5 +76,5 @@ Yes. They do not conflict. Some users run Steno for sensitive or private meeting
 </Accordion>
 
 <Accordion title="How does transcription accuracy compare?">
-Both use strong transcription engines and perform similarly for clear, English-language audio. Whisper's main advantage is language breadth (99 languages vs Otter's primarily English focus) and the fact that it runs on-device without sending audio anywhere.
+Both use strong transcription engines and perform similarly for clear, English-language audio. Steno's main advantage is that it runs on-device without sending audio anywhere; its default Parakeet engine covers 25 European languages, including English, and the optional Whisper engine adds language breadth (99 languages vs Otter's primarily English focus).
 </Accordion>

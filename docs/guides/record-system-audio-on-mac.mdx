@@ -1,0 +1,33 @@
+---
+title: "How to record system audio on a Mac"
+description: "Capture the audio your Mac plays — calls, videos, any app — with Steno. A one-time permission setup enables system-audio recording alongside your microphone."
+---
+
+To record system audio on a Mac, Steno uses a one-time audio-permission setup that lets it capture the sound your Mac plays back — the other side of a call, a video, or any app — at the same time as your microphone. Once enabled, every recording can include system audio, with your mic and the system audio kept as separate channels for speaker labels.
+
+## One-time setup
+
+1. In Steno, open the recording options popover (the **···** button next to the record button) and turn on **Record system audio**.
+2. If macOS prompts for permission, open **System Settings → Privacy & Security → Screen & System Audio Recording**.
+3. Enable Steno, then relaunch the app if macOS asks you to.
+4. The toggle stays on for future recordings until you turn it off.
+
+See [Recording](/features/recording) for the full recording options.
+
+## What system audio captures
+
+System audio is everything your Mac plays through its output — the remote participants on a call, a video you are watching, or audio from any app. Combined with your microphone, it lets Steno record both sides of a conversation. There is no per-app filtering; Steno captures the system output as a whole. System audio capture requires macOS 14.4 or later; on older macOS versions the toggle is hidden.
+
+## Speaker labels
+
+Because your microphone and the system audio are recorded as separate channels, the transcript is labelled `[You]` (your mic) and `[Others]` (system audio). See [Speaker labels](/features/speaker-labels).
+
+---
+
+<Accordion title="Why does it need Screen & System Audio Recording permission?">
+macOS requires explicit permission before an app can capture system audio. After you allow Steno in System Settings, future system-audio recordings work without repeating setup.
+</Accordion>
+
+<Accordion title="Is the system audio uploaded anywhere?">
+No. The recording is saved locally and transcribed on your Mac. No meeting content is uploaded unless you have configured an optional cloud summarization model. The app does send anonymous usage analytics by default (no meeting content), which you can turn off in **Settings → Advanced**. See [How on-device processing works](/privacy/how-on-device-works).
+</Accordion>

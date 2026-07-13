@@ -3,18 +3,18 @@ title: "What is Steno?"
 description: "Steno is a macOS app that records, transcribes, and summarizes meetings entirely on-device. Your audio never leaves your Mac."
 ---
 
-Steno is a macOS app that records, transcribes, and summarizes meetings using AI models that run entirely on your device. By default there are no cloud uploads and no accounts required; the only outbound requests are model downloads during setup and update checks on launch. Your audio, transcripts, and summaries are stored locally in `~/Library/Application Support/stenoai/` (you can change the location in Settings).
+Steno is a macOS app that records, transcribes, and summarizes meetings using AI models that run entirely on your device. By default there are no cloud uploads and no accounts required; the only outbound requests are model downloads during setup, periodic update checks, and anonymous usage analytics (no meeting content) that you can turn off in Settings. Your audio, transcripts, and summaries are stored locally in `~/Library/Application Support/stenoai/` (you can change the location in Settings).
 
 ## How it works
 
 Steno runs a local pipeline on every recording:
 
-1. **Record** -- captures microphone audio, system audio (both sides of a call), or both simultaneously
-2. **Transcribe** -- runs [Whisper](https://github.com/ggerganov/whisper.cpp) locally to produce a verbatim transcript with speaker labels
+1. **Record** -- always captures microphone audio, with system audio (both sides of a call) as an optional add-on toggle
+2. **Transcribe** -- runs a local speech-to-text engine to produce a verbatim transcript with speaker labels when system audio is on. Steno ships two engines: Parakeet (the default, which also shows a live transcript while you record) and Whisper (an optional alternate you can switch to in Settings)
 3. **Summarize** -- passes the transcript to a small language model running via [Ollama](https://ollama.com) on your Mac to produce structured notes: summary, key topics, and action items
 4. **Query** -- ask natural-language questions against any saved note from the inline ask bar
 
-Every step runs offline. Steno does not communicate with any external server unless you explicitly configure a cloud model (OpenAI, Anthropic, or a custom endpoint) as an optional alternative to the local model.
+Recording, transcription, and summarization all run offline. Steno does not send meeting content to any external server unless you explicitly configure a non-local backend (a cloud model such as OpenAI, Anthropic, AWS Bedrock, or a custom OpenAI-compatible endpoint, or a remote Ollama / organization adapter) as an optional alternative to the local model.
 
 ## Who it's for
 
@@ -33,12 +33,12 @@ Steno is not a meeting bot. It does not join your video calls as a participant, 
 
 ## Supported platforms
 
-macOS 12 (Monterey) or later. Apple Silicon and Intel both supported.
+macOS 12 (Monterey) or later, on Apple Silicon (M1 and newer). Intel Macs are not supported since v0.4.0.
 
 ---
 
 <Accordion title="Does Steno require an internet connection?">
-No, in the default local configuration. After the initial download and model installation, Steno runs offline -- transcription and summarization happen on your Mac. The app still performs a lightweight update check on launch, and if you opt into a cloud summarization model (OpenAI, Anthropic, or a custom endpoint) it will reach that provider's API for summary generation only.
+No, in the default local configuration. After the initial download and model installation, Steno runs offline -- transcription and summarization happen on your Mac. The app still performs periodic update checks and sends anonymous usage analytics (no meeting content, can be turned off in Settings), and if you opt into a cloud summarization model (OpenAI, Anthropic, AWS Bedrock, or a custom OpenAI-compatible endpoint) it will reach that provider's API for summary generation only.
 </Accordion>
 
 <Accordion title="What data does Steno store and where?">
@@ -50,5 +50,5 @@ Yes. The source code is available at [github.com/ruzin/stenoai](https://github.c
 </Accordion>
 
 <Accordion title="What hardware does Steno need?">
-A Mac with at least 8GB of RAM. Apple Silicon (M1 or later) gives the best transcription and summarization performance. Intel Macs are supported but will run more slowly on larger models.
+An Apple Silicon Mac (M1 or later) with at least 8GB of RAM -- the default models total roughly 7GB on disk. Larger optional summarization models need more RAM and disk space.
 </Accordion>

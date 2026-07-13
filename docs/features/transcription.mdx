@@ -1,25 +1,20 @@
 ---
 title: "Transcription"
-description: "Steno transcribes recordings using Whisper running locally on your Mac. 99 languages, automatic language detection, no audio uploads."
+description: "Steno transcribes recordings on-device with two engines: Parakeet (default) and Whisper (optional). Automatic language detection, live transcription, no audio uploads."
 ---
 
-Steno transcribes recordings using [whisper.cpp](https://github.com/ggerganov/whisper.cpp), a local implementation of OpenAI's Whisper model. Transcription runs entirely on your device -- your audio is never sent to any server.
+Steno transcribes with two on-device engines: **Parakeet** (the default, NVIDIA Parakeet TDT v3 running via MLX on Apple Silicon) and **Whisper** (an optional alternate, OpenAI's Whisper `large-v3-turbo`). Both run entirely on your device -- your audio is never sent to any server. You choose the engine in **Settings → Transcribe**.
 
 ## How it works
 
-When you stop a recording, Steno automatically starts transcription. The Whisper model processes the audio file locally and outputs a verbatim transcript with timestamps.
-
-Transcription speed on Apple Silicon:
-
-| Model | 30-min recording |
-|-------|----------------|
-| `whisper-base` | ~1-2 min |
-| `whisper-small` (default) | ~2-4 min |
-| `whisper-medium` | ~5-10 min |
+Transcription runs on-device and is fast on Apple Silicon. With the default Parakeet engine, a live transcript appears while you record, and Steno finalizes it when you stop. With the Whisper engine, transcription runs after you stop the recording. Either way, the active engine processes the audio file locally and outputs a verbatim transcript with timestamps.
 
 ## Language support
 
-Steno auto-detects the language from the audio. 99 languages are supported. You do not need to set the language manually.
+Language coverage depends on the engine. Steno auto-detects the language -- you do not need to set it manually.
+
+- **Parakeet (default)** transcribes 25 European languages, including English, French, German, Spanish, Italian, Dutch, Portuguese, Russian, and Polish. A curated subset of six (English, French, German, Spanish, Dutch, Portuguese) can be pinned as the summary output language.
+- **Whisper (optional)** covers the full set of 99 languages, including Japanese, Chinese, Korean, Hindi, and Arabic. To transcribe any of these, switch to the Whisper engine in **Settings → Transcribe**.
 
 ## Speaker labels
 
@@ -29,18 +24,14 @@ Transcripts include `[You]` and `[Others]` labels when system audio is enabled. 
 
 The full transcript appears in the right pane of any saved note, below the AI summary. Transcripts are also saved as plain text files in `~/Library/Application Support/stenoai/transcripts/`.
 
-## Re-transcribing a recording
+## Choosing an engine
 
-You can re-run transcription on any saved recording -- for example, to use a more accurate model or to fix a previous transcription. Open the recording, click the options menu, and select **Re-transcribe**.
-
-## Choosing a model
-
-See [Transcription models](/models/transcription-models) for a full comparison of the available Whisper models.
+See [Transcription models](/models/transcription-models) for a comparison of the Parakeet and Whisper engines.
 
 ---
 
 <Accordion title="Does Steno transcribe in real time?">
-No. Steno transcribes after recording is stopped. Real-time transcription is on the roadmap.
+Yes. On macOS with the default Parakeet engine, a live transcript appears while you record. If you switch to the Whisper engine, transcription runs after you stop the recording.
 </Accordion>
 
 <Accordion title="Can I edit the transcript?">

@@ -3,11 +3,11 @@ title: "Recording"
 description: "Record microphone audio, system audio, or both. Steno captures audio locally and never uploads your recordings."
 ---
 
-Steno can record from three audio sources: your microphone, your Mac's system audio (what you hear through your headphones or speakers), or both simultaneously.
+Steno always records your microphone, with system audio (what you hear through your headphones or speakers) as an optional add-on you can toggle on or off.
 
 ## Microphone recording
 
-Microphone recording is the default. It captures your voice and any voices in the same room as your Mac. No setup is required beyond granting microphone permission on first use.
+Microphone recording is always on. It captures your voice and any voices in the same room as your Mac. No setup is required beyond granting microphone permission on first use.
 
 Best for: in-person meetings, interviews, one-on-one conversations where you are the primary speaker.
 
@@ -17,14 +17,14 @@ System audio capture records the audio playing through your Mac -- including the
 
 **Setup (one time)**
 
-macOS requires explicit permission for apps to record system audio. Steno uses a virtual audio driver to access this. On first use:
+macOS requires explicit permission for apps to record system audio. On first use:
 
-1. Click **Record** and select **System audio** or **Microphone + system audio**
-2. Steno will prompt you to install the audio extension -- click **Allow**
-3. macOS may require your administrator password
-4. Restart Steno after installation
+1. Open the recording options popover (the **···** button next to the record button) and turn on **Record system audio**
+2. If macOS prompts for permission, open **System Settings → Privacy & Security → Screen & System Audio Recording**
+3. Enable Steno
+4. Relaunch Steno if macOS asks you to
 
-After this one-time setup, system audio recording works without any additional steps.
+After this one-time setup, the toggle stays on for future recordings until you turn it off. System audio capture requires macOS 14.4 or later; on older macOS versions the toggle is hidden and Steno records the microphone only.
 
 ## Speaker labels
 
@@ -34,10 +34,7 @@ Speaker labels appear automatically -- no configuration is needed.
 
 ## Starting a recording
 
-1. Click the **Record** button in the toolbar or use the menu bar icon
-2. Enter a name for the recording, or leave it blank (Steno will auto-generate a title)
-3. Select the audio source if you want to change from the default
-4. Click **Start**
+Click **New note** in the toolbar or use the menu bar icon -- recording starts immediately with an auto-generated title, which you can rename from the note's detail view at any time.
 
 ## Stopping a recording
 
@@ -50,7 +47,7 @@ You can start and stop recordings remotely using Apple Shortcuts and the `stenoa
 ---
 
 <Accordion title="What audio format does Steno record in?">
-Steno records in WAV format. By default, files are stored in `~/Library/Application Support/stenoai/recordings/`. You can change the storage location in **Settings → Storage**.
+Steno records in WebM/Opus format. By default, files are stored in `~/Library/Application Support/stenoai/recordings/`. You can change the storage location in **Settings → Advanced**.
 </Accordion>
 
 <Accordion title="Can I record audio from a specific app only?">
