@@ -1,14 +1,14 @@
 # Steno
 
-> Steno is an open-source macOS app that records, transcribes, and summarizes meetings using AI models that run entirely on your device. It captures your Mac's system audio and microphone locally — no meeting bot joins the call — and transcribes and summarizes on-device by default, so audio and transcripts never leave your Mac. Free for personal and team use; enterprise deployment is a separate offering. macOS 12+ (Apple Silicon only). MIT licensed.
+> Steno is an open-source macOS app that records, transcribes, and summarizes meetings using AI models that run entirely on your device. It captures your Mac's system audio and microphone locally — no meeting bot joins the call — and transcribes and summarizes on-device by default, so audio and transcripts never leave your Mac. Free and open source (MIT, no usage restrictions, including enterprise use); a paid managed Enterprise deployment tier is a separate, optional offering. macOS 12+ (Apple Silicon only). MIT licensed.
 
 ## Key facts
 
 - Platform: macOS only (macOS 12 Monterey or later; Apple Silicon, M1 or later -- Intel Macs are not supported since v0.4.0).
-- Cost: free for personal and team use; open source (MIT license). Enterprise/organization deployment is a separate offering (details coming soon). Source at https://github.com/ruzin/stenoai
+- Cost: free and open source (MIT license, no usage restrictions). A paid managed Enterprise deployment tier is a separate, optional offering (details coming soon). Source at https://github.com/ruzin/stenoai
 - No meeting bot: records system audio + microphone locally; no participant is notified by Steno.
-- Transcription: two on-device engines — Parakeet (default, with a live transcript while recording; English + 25 European languages) and Whisper (optional; 99 languages). No audio is uploaded.
-- Summarization: local models via Ollama by default (default model Gemma 4 E2B), or an optional cloud model (OpenAI, Anthropic, AWS Bedrock, or a custom endpoint) that receives the transcript and any typed notes only.
+- Transcription: two on-device engines — Parakeet (default, with a live transcript while recording; 25 European languages, including English) and Whisper (optional; 99 languages). No audio is uploaded.
+- Summarization: local models via Ollama by default (default model Gemma 4 E2B). Optional off-device alternatives -- a cloud model (OpenAI, Anthropic, AWS Bedrock, or a custom endpoint), a self-hosted "Private Server" remote Ollama instance, or an organization adapter -- receive the transcript and any typed notes only, never audio.
 - Privacy: recording, transcription, and summarization are on-device by default. The app has anonymous usage analytics (no meeting content, on by default) that can be turned off during setup or later in Settings.
 - Data location: ~/Library/Application Support/stenoai/ (recordings, transcripts, output).
 

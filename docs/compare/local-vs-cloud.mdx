@@ -13,7 +13,7 @@ Your audio or a live audio stream is sent to the vendor's servers. Transcription
 
 **Local meeting AI** (Steno)
 
-All processing happens on your Mac using models downloaded during setup. No audio leaves your device. Transcription uses two on-device engines -- Parakeet (the default, with a live transcript while you record) and Whisper (optional, chosen in Settings). Summarization uses a local language model running via [Ollama](https://ollama.com). There are no ongoing cloud costs and no vendor relationship for your audio data.
+By default, all processing happens on your Mac using models downloaded during setup. No audio leaves your device. Transcription uses two on-device engines -- Parakeet (the default, with a live transcript while you record) and Whisper (optional, chosen in Settings). Summarization uses a local language model running via [Ollama](https://ollama.com) by default, with an optional cloud model (OpenAI, Anthropic, AWS Bedrock, or a custom endpoint) as an alternative -- in which case that provider's usage fees apply and your transcript is sent to it. In the default local configuration there are no ongoing costs and no vendor relationship for your audio data.
 
 ## Side-by-side comparison
 
@@ -53,7 +53,7 @@ Cloud tools have real advantages in certain situations:
 
 ## Accuracy
 
-Steno transcribes on-device with two engines: Parakeet (the default) and Whisper (optional, selected in **Settings → Transcribe**). Accuracy is high across common recording conditions. Parakeet covers English + 25 European languages and produces a live transcript while you record; switch to Whisper when you need one of its 99 supported languages.
+Steno transcribes on-device with two engines: Parakeet (the default) and Whisper (optional, selected in **Settings → Transcribe**). Accuracy is high across common recording conditions. Parakeet covers 25 European languages, including English, and produces a live transcript while you record; switch to Whisper when you need one of its 99 supported languages.
 
 ---
 

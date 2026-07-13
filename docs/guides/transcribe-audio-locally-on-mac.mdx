@@ -13,7 +13,7 @@ You can also transcribe an audio file you already have, without recording it in 
 
 ## Choosing an engine
 
-- **Parakeet (default)** — fast on Apple Silicon, with live transcription. Covers English and 25 other European languages.
+- **Parakeet (default)** — fast on Apple Silicon, with live transcription. Covers 25 European languages, including English.
 - **Whisper (optional)** — covers the full set of 99 languages, including Japanese, Chinese, Korean, Hindi, and Arabic. Switch to it in **Settings → Transcribe**.
 
 See [Transcription models](/models/transcription-models) for the full comparison.
@@ -29,5 +29,5 @@ Only for the one-time model download during setup. After that, transcription run
 </Accordion>
 
 <Accordion title="Can I transcribe a recording I already made?">
-Yes, if it's an audio file: use **Import audio file…** from the recording options popover to transcribe and summarize it locally. There is currently no way to re-transcribe a recording already processed by Steno with a different engine -- the engine choice applies going forward, to new recordings and imports.
+Yes, if it's an audio file: use **Import audio file…** from the recording options popover. Transcription always runs locally; summarization uses whichever model is configured in **Settings → AI** (local by default, or a cloud model if you've set one up). There is currently no way to re-transcribe a recording already processed by Steno with a different engine -- the engine choice applies going forward, to new recordings and imports.
 </Accordion>

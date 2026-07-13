@@ -1,26 +1,28 @@
 ---
 title: "Pricing"
-description: "Steno is free and open source (MIT) for personal and team use, with no per-seat fees or accounts. Enterprise/organization deployment is a separate offering."
+description: "Steno is free and open source (MIT), with no usage restrictions and no per-seat fees or accounts. A paid managed Enterprise deployment tier is a separate, optional offering."
 ---
 
 # Pricing — Steno
 
-Steno is **free for personal and team use** (non-enterprise) and **open source**
-(MIT licensed). For individuals and teams there are no per-seat fees, subscriptions,
-or accounts.
+Steno is **free and open source** (MIT licensed) -- the MIT license places no
+restriction on who can use it or at what scale, including enterprise and commercial
+use. There are no per-seat fees, subscriptions, or accounts. Separately, Steno also
+offers a paid **Enterprise** tier: managed deployment with admin controls and
+organization-specific features, for teams that want that on top of the free app.
 
-## Free — personal & team
+## Free — for everyone, including enterprise use
 - Price: $0
-- License: MIT (open source)
+- License: MIT (open source) -- no usage restrictions, including for commercial or enterprise deployments
 - Source code: https://github.com/ruzin/stenoai
 - Account required: no
 - Includes: recording (system audio + microphone), on-device transcription (Parakeet and
   Whisper engines), on-device summarization (local models via Ollama), live transcription,
   report templates, ask-your-meetings chat, speaker labels, and Apple Shortcuts automation.
 
-## Enterprise
-- Managed / organization deployment (admin controls and organization features) is available
-  as a separate offering.
+## Enterprise (optional paid tier)
+- A separate, optional offering on top of the free app: managed deployment with admin controls
+  and organization-specific features.
 - Enterprise pricing and packaging is being finalized — details coming soon.
 
 ## Optional costs (not paid to Steno)

@@ -14,7 +14,7 @@ Steno runs a local pipeline on every recording:
 3. **Summarize** -- passes the transcript to a small language model running via [Ollama](https://ollama.com) on your Mac to produce structured notes: summary, key topics, and action items
 4. **Query** -- ask natural-language questions against any saved note from the inline ask bar
 
-Recording, transcription, and summarization all run offline. Steno does not send meeting content to any external server unless you explicitly configure a cloud model (OpenAI, Anthropic, AWS Bedrock, or a custom OpenAI-compatible endpoint) as an optional alternative to the local model.
+Recording, transcription, and summarization all run offline. Steno does not send meeting content to any external server unless you explicitly configure a non-local backend (a cloud model such as OpenAI, Anthropic, AWS Bedrock, or a custom OpenAI-compatible endpoint, or a remote Ollama / organization adapter) as an optional alternative to the local model.
 
 ## Who it's for
 

@@ -3,11 +3,11 @@ title: "How to record a Microsoft Teams meeting on a Mac"
 description: "Record and transcribe Microsoft Teams calls on macOS without a bot. Steno captures system audio and your microphone locally and writes the notes on-device."
 ---
 
-To record a Microsoft Teams meeting on a Mac, use Steno: it captures your Mac's system audio (the other participants) and your microphone together, then transcribes and summarizes the call entirely on your device. No bot joins the meeting, and nothing is uploaded. Because it records the audio your Mac plays, it works with Teams in the desktop app or a browser.
+To record a Microsoft Teams meeting on a Mac, use Steno: it captures your Mac's system audio (the other participants) and your microphone together, then transcribes the call entirely on your device and summarizes it locally by default. No bot joins the meeting, and no meeting content is uploaded unless you configure a cloud summarization model. Because it records the audio your Mac plays, it works with Teams in the desktop app or a browser.
 
 ## Steps
 
-1. Install Steno and grant microphone and system-audio permission, and turn on the **Record system audio** toggle (see [Installation](/getting-started/installation) and [Recording](/features/recording)).
+1. Install Steno and grant microphone and system-audio permission, and turn on the **Record system audio** toggle (requires macOS 14.4+; see [Installation](/getting-started/installation) and [Recording](/features/recording)). On older macOS versions the toggle is hidden and Steno records the microphone only.
 2. Join your Teams call as usual.
 3. In Steno, click **New note** to start recording. It captures your microphone and system audio together.
 4. When the call ends, click **Stop**. Steno transcribes the recording and generates notes automatically.
@@ -27,5 +27,5 @@ Yes. Steno records your Mac's system audio, so it captures the call whether you 
 </Accordion>
 
 <Accordion title="Is my Teams call uploaded anywhere?">
-No. Recording, transcription, and summarization all run on your Mac. Nothing is uploaded unless you have configured an optional cloud summarization model. See [How on-device processing works](/privacy/how-on-device-works).
+No. Recording, transcription, and summarization all run on your Mac. No meeting content is uploaded unless you have configured an optional cloud summarization model. The app does send anonymous usage analytics by default (no meeting content), which you can turn off in **Settings → Advanced**. See [How on-device processing works](/privacy/how-on-device-works).
 </Accordion>

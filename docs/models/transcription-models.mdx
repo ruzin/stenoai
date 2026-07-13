@@ -9,7 +9,7 @@ Steno transcribes recordings entirely on your Mac -- no audio is sent to any ser
 
 | Engine | Model | Size | Notes |
 |--------|-------|------|-------|
-| **Parakeet** (default) | `mlx-community/parakeet-tdt-0.6b-v3` | ~572MB | Live transcript while recording; English + 25 European languages |
+| **Parakeet** (default) | `mlx-community/parakeet-tdt-0.6b-v3` | ~572MB | Live transcript while recording; 25 European languages, including English |
 | **Whisper** (optional) | `large-v3-turbo` | ~1.6GB | Full 99-language coverage; transcribes after you stop |
 
 **Parakeet** is the default on new installs. It runs via MLX on Apple Silicon and shows a live transcript as you record.
@@ -35,7 +35,7 @@ Transcription runs on-device and is fast on Apple Silicon. Parakeet additionally
 
 Language coverage depends on the engine you choose.
 
-- **Parakeet (default)** transcribes English and 25 other European languages, including French, German, Spanish, Italian, Portuguese, Dutch, Russian, and Polish. A curated subset of six (English, French, German, Spanish, Dutch, Portuguese) can be pinned as the summary output language.
+- **Parakeet (default)** transcribes 25 European languages, including English, French, German, Spanish, Italian, Portuguese, Dutch, Russian, and Polish. A curated subset of six (English, French, German, Spanish, Dutch, Portuguese) can be pinned as the summary output language.
 - **Whisper (optional)** covers the full set of **99 languages**, auto-detected. Switch to Whisper for Japanese, Chinese, Korean, Hindi, Arabic, and any language outside Parakeet's set.
 
 Steno auto-detects the language from the audio -- you do not need to configure this manually.
@@ -44,12 +44,12 @@ Steno auto-detects the language from the audio -- you do not need to configure t
 
 - **Record in a quiet environment** -- background noise is the biggest accuracy factor
 - **Use system audio capture** -- capturing both call sides is more accurate than microphone-only for virtual meetings
-- **Switch to Whisper for non-European languages** -- Parakeet covers English and 25 European languages; Whisper covers the full 99-language set
+- **Switch to Whisper for non-European languages** -- Parakeet covers 25 European languages, including English; Whisper covers the full 99-language set
 
 ---
 
 <Accordion title="Which engine should I start with?">
-Start with **Parakeet** (the default). It runs on-device, shows a live transcript while you record, and covers English plus 25 European languages. Switch to **Whisper** in **Settings → Transcribe** if you need a language outside Parakeet's set.
+Start with **Parakeet** (the default). It runs on-device, shows a live transcript while you record, and covers 25 European languages, including English. Switch to **Whisper** in **Settings → Transcribe** if you need a language outside Parakeet's set.
 </Accordion>
 
 <Accordion title="Can I switch engines for future recordings?">
@@ -57,5 +57,5 @@ Yes. Change the engine in **Settings → Transcribe** -- it applies to recording
 </Accordion>
 
 <Accordion title="Does transcription accuracy vary by language?">
-Yes. Parakeet covers English and 25 European languages (French, German, Spanish, Italian, Dutch, Portuguese, Russian, Polish, and others). For other languages -- including Japanese, Chinese, Korean, Hindi, and Arabic -- switch to the Whisper engine, which covers all 99 languages.
+Yes. Parakeet covers 25 European languages, including English, French, German, Spanish, Italian, Dutch, Portuguese, Russian, and Polish. For other languages -- including Japanese, Chinese, Korean, Hindi, and Arabic -- switch to the Whisper engine, which covers all 99 languages.
 </Accordion>

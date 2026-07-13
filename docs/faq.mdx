@@ -6,7 +6,7 @@ description: "Answers to common questions about Steno -- installation, privacy, 
 ## About Steno
 
 <Accordion title="Is Steno free? Is it open source?">
-Yes. Steno is free for personal and team use, MIT-licensed, and open source. The source is available on GitHub, so you can read exactly what it does, and there is no account to create. Enterprise and organization deployments (managed setup and admin features) are a separate offering — details coming soon.
+Yes. Steno is free and open source under the MIT license, which places no restriction on who can use it or at what scale -- including enterprise and commercial use. The source is available on GitHub, so you can read exactly what it does, and there is no account to create. On top of the free app, a paid managed Enterprise deployment tier (admin controls, organization-specific features) is a separate, optional offering — details coming soon.
 </Accordion>
 
 <Accordion title="Does Steno work offline?">
@@ -28,7 +28,7 @@ Everything Steno stores lives under `~/Library/Application Support/stenoai/` -- 
 ## Privacy and data
 
 <Accordion title="Does Steno send my recordings anywhere?">
-No. Steno processes all recordings using AI models that run locally on your Mac. No audio, transcript, or summary is transmitted to any external server (unless you opt into a cloud summarization model). The app also sends anonymous usage analytics by default -- see the telemetry question below.
+No. Steno processes all recordings using AI models that run locally on your Mac. No audio, transcript, or summary is transmitted to any external server unless you configure an off-device summarization backend (cloud model, private server, or organization adapter). The app also sends anonymous usage analytics by default -- see the telemetry question below.
 </Accordion>
 
 <Accordion title="Where does Steno store my data?">
@@ -100,7 +100,7 @@ Switch to a larger summarization model. In **Settings → AI**, try `qwen3.5:9b`
 </Accordion>
 
 <Accordion title="Can Steno transcribe recordings in languages other than English?">
-Yes. The default Parakeet engine transcribes English and 25 other European languages, including French, German, Spanish, Italian, Dutch, Portuguese, Russian, and Polish. A curated subset of six (English, French, German, Spanish, Dutch, Portuguese) is available to pin as the summary output language. For Japanese, Chinese, Korean, Hindi, Arabic, and the full set of 99 languages, switch to the Whisper engine in **Settings → Transcribe**, which auto-detects the language from the audio.
+Yes. The default Parakeet engine transcribes 25 European languages, including English, French, German, Spanish, Italian, Dutch, Portuguese, Russian, and Polish. A curated subset of six (English, French, German, Spanish, Dutch, Portuguese) is available to pin as the summary output language. For Japanese, Chinese, Korean, Hindi, Arabic, and the full set of 99 languages, switch to the Whisper engine in **Settings → Transcribe**, which auto-detects the language from the audio.
 </Accordion>
 
 ## Models
