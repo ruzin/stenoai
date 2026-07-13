@@ -1,5 +1,5 @@
 import { cn } from '@/lib/utils';
-import { AskBar } from '@/components/AskBar';
+import { AskBar, TranscriptToggle } from '@/components/AskBar';
 import { LiveDock } from '@/components/LiveDock';
 import { LiveTranscriptBar } from '@/components/LiveTranscriptBar';
 import { useLiveTranscriptOpen } from '@/hooks/liveTranscriptOpenStore';
@@ -56,10 +56,14 @@ export function PrimaryDock({ showAskBar }: { showAskBar: boolean }) {
       data-testid="primary-dock-row"
       className={cn('flex items-end gap-3', !showAskBar && 'justify-center')}
     >
-      {recordingActive && (
+      {recordingActive ? (
         <div className="shrink-0">
           <LiveDock />
         </div>
+      ) : (
+        // Idle: the standalone transcript toggle sits left of the Ask bar
+        // (Granola-style). While recording, the pill owns the left slot.
+        <TranscriptToggle />
       )}
       {showAskBar && (
         <div className="min-w-0 flex-1">
