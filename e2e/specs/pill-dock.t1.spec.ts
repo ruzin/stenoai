@@ -158,10 +158,11 @@ test('whisper variant: compact pill has no expand and no pause', async ({ launch
   await expect(pill.getByRole('button', { name: 'Stop recording' })).toBeVisible();
 });
 
-test('continue-recording: a note detail offers resume-transcription; stale notes offer Regenerate', async ({
+test('continue-recording: the transcript panel footer offers Resume (Granola-style)', async ({
   launchApp,
 }) => {
-  // A summarised note: the dock offers the continue-recording mic while idle.
+  // A summarised note. Resume lives in the transcript panel footer now — there
+  // is no standalone dock mic.
   const { page } = await launchApp({
     mockIpc: true,
     env: { ...PILL_ENV, STENOAI_E2E_SEED_MEETING: '1' },
@@ -169,14 +170,19 @@ test('continue-recording: a note detail offers resume-transcription; stale notes
   await page.evaluate(() => {
     window.location.hash = '#/meetings/epsilon_summary.json';
   });
-  const continueBtn = page.getByTestId('continue-recording-button');
-  await expect(continueBtn).toBeVisible();
-
-  // Clicking it starts a recording (append target is main-side state): the
-  // pill replaces the mic and the Ask bar goes inert.
-  await continueBtn.click();
-  await expect(page.getByTestId('transcription-pill')).toBeVisible();
+  // The old standalone mic is gone.
   await expect(page.getByTestId('continue-recording-button')).toHaveCount(0);
+
+  // Open the transcript (the Ask bar composer toggle) → the footer shows Resume.
+  await page.getByRole('button', { name: 'Show transcript' }).click();
+  const resume = page.getByTestId('resume-recording-button');
+  await expect(resume).toBeVisible();
+
+  // Resume starts a recording that appends to this note: the pill takes over
+  // and the Ask bar goes inert.
+  await resume.click();
+  await expect(page.getByTestId('transcription-pill')).toBeVisible();
+  await expect(page.getByTestId('resume-recording-button')).toHaveCount(0);
   await expect(page.getByPlaceholder('Chat available after recording')).toBeDisabled();
 });
 

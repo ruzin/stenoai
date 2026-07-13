@@ -5,6 +5,7 @@ import {
   ChevronDown,
   ChevronUp,
   Copy,
+  Mic,
   Square,
   X,
 } from 'lucide-react';
@@ -22,6 +23,7 @@ import {
   TranscriptPanelContent,
 } from '@/components/TranscriptPanel';
 import { useMeeting } from '@/hooks/useMeetings';
+import { useRecording } from '@/hooks/useRecording';
 import { buildTranscriptBundle } from '@/lib/transcriptBundle';
 
 // ---------------------------------------------------------------------------
@@ -29,11 +31,25 @@ import { buildTranscriptBundle } from '@/lib/transcriptBundle';
 // ---------------------------------------------------------------------------
 
 export function TranscriptBar() {
-  const { activeSummaryFile, activeOrgMeeting, transcriptOpen, setTranscriptOpen } = useAskBar();
+  const { activeSummaryFile, activeMeetingName, activeOrgMeeting, transcriptOpen, setTranscriptOpen } =
+    useAskBar();
   const meeting = useMeeting(activeSummaryFile ?? undefined);
+  const recording = useRecording();
   const [copied, setCopied] = React.useState(false);
   const orgTranscript = activeOrgMeeting?.transcript ?? '';
   const hasOrgTranscript = orgTranscript.trim().length > 0;
+
+  // Resume = continue recording INTO this note (the new segment is appended;
+  // the note is then marked stale → "Regenerate notes"). Local notes only —
+  // you can't record into a shared org note — and only while idle. Lives in
+  // the transcript footer (Granola-style), replacing the old standalone dock
+  // mic; the live pill takes over once recording starts.
+  const canResume = Boolean(activeSummaryFile) && recording.status === 'idle';
+  const onResume = () => {
+    if (!activeSummaryFile) return;
+    setTranscriptOpen(false);
+    void recording.startRecording(activeMeetingName ?? undefined, 'manual', activeSummaryFile);
+  };
 
   const copyTranscript = async () => {
     let text = '';
@@ -102,6 +118,26 @@ export function TranscriptBar() {
           <TranscriptPanelContent summaryFile={activeSummaryFile!} />
         )}
       </div>
+      {/* Footer — Resume (continue recording into this note), Granola-style. */}
+      {canResume && (
+        <div
+          className="flex items-center px-3 py-2"
+          style={{ borderTop: '1px solid var(--border-subtle)' }}
+        >
+          <button
+            type="button"
+            onClick={onResume}
+            data-testid="resume-recording-button"
+            aria-label="Resume recording on this note"
+            title="Resume recording — the new audio is appended to this note"
+            className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-full border-0 px-3 text-[13px] font-medium transition-colors hover:bg-[color:var(--surface-hover)]"
+            style={{ background: 'transparent', color: 'var(--fg-1)' }}
+          >
+            <Mic size={13} style={{ color: 'var(--recording)' }} />
+            Resume
+          </button>
+        </div>
+      )}
     </div>
   );
 }
