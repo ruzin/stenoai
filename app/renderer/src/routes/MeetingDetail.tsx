@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import {
   Popover,
+  PopoverAnchor,
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover';
@@ -1259,33 +1260,39 @@ function NoteViewToggle({
         <span aria-hidden="true" style={{ width: 1, background: 'var(--border-subtle)' }} />
         {/* Right — a split button: the label switches to the active summary/
             report view directly; only the chevron opens the template menu. */}
-        <div
-          className="inline-flex items-stretch"
-          style={{ background: summaryActive ? 'var(--surface-active)' : 'transparent' }}
-        >
-          <button
-            type="button"
-            role="tab"
-            aria-selected={summaryActive}
-            data-testid="tab-summary"
-            onClick={() => onTab('summary')}
-            className="inline-flex items-center py-1 pl-3 pr-1.5 text-[13px] font-medium transition-colors focus-visible:outline-none"
-            style={{ color: summaryActive ? 'var(--fg-1)' : 'var(--fg-2)' }}
-          >
-            {generating ? 'Generating…' : activeLabel}
-          </button>
-          <Popover open={menuOpen} onOpenChange={setMenuOpen}>
-            <PopoverTrigger asChild>
+        <Popover open={menuOpen} onOpenChange={setMenuOpen}>
+          {/* Anchor the menu to the WHOLE right segment (label + chevron) so it
+              drops straight down from the Summary box, not off the tiny
+              chevron. */}
+          <PopoverAnchor asChild>
+            <div
+              className="inline-flex items-stretch"
+              style={{ background: summaryActive ? 'var(--surface-active)' : 'transparent' }}
+            >
               <button
                 type="button"
-                aria-label="Choose view or template"
-                data-testid="note-view-menu-trigger"
-                className="inline-flex items-center py-1 pl-0.5 pr-2.5 transition-colors focus-visible:outline-none hover:text-[color:var(--fg-1)]"
-                style={{ color: 'var(--fg-2)' }}
+                role="tab"
+                aria-selected={summaryActive}
+                data-testid="tab-summary"
+                onClick={() => onTab('summary')}
+                className="inline-flex items-center py-1 pl-3 pr-1.5 text-[13px] font-medium transition-colors focus-visible:outline-none"
+                style={{ color: summaryActive ? 'var(--fg-1)' : 'var(--fg-2)' }}
               >
-                <ChevronDown className="size-[13px]" />
+                {generating ? 'Generating…' : activeLabel}
               </button>
-            </PopoverTrigger>
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  aria-label="Choose view or template"
+                  data-testid="note-view-menu-trigger"
+                  className="inline-flex items-center py-1 pl-0.5 pr-2.5 transition-colors focus-visible:outline-none hover:text-[color:var(--fg-1)]"
+                  style={{ color: 'var(--fg-2)' }}
+                >
+                  <ChevronDown className="size-[13px]" />
+                </button>
+              </PopoverTrigger>
+            </div>
+          </PopoverAnchor>
           <PopoverContent align="start" className="w-56 p-1" data-testid="note-view-menu">
             <ViewMenuItem
               selected={summaryActive && activeReportId === null}
@@ -1356,7 +1363,6 @@ function NoteViewToggle({
             )}
           </PopoverContent>
         </Popover>
-        </div>
       </div>
 
       <ConfirmDialog
