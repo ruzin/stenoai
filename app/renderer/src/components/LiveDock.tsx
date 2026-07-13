@@ -5,7 +5,6 @@ import { useRecording } from '@/hooks/useRecording';
 import { useLiveTranscript } from '@/hooks/useLiveTranscript';
 import { useLiveTranscriptOpen } from '@/hooks/liveTranscriptOpenStore';
 import { useLiveTranscriptAvailable } from '@/hooks/useModels';
-import { formatElapsed } from '@/lib/utils';
 
 /**
  * Compact (Granola-style) transcription pill shown whenever a recording is
@@ -89,18 +88,16 @@ export function LiveDock() {
           gap={2}
         />
       </span>
-      {/* Compact elapsed timer; swaps to the warm-up hint while the live
-          model loads (the recording itself is already capturing). */}
-      <span
-        className="tabular-nums px-1.5"
-        style={{
-          fontFamily: prepareLabel ? 'var(--font-sans)' : 'var(--font-mono)',
-          fontSize: 12.5,
-          color: 'var(--fg-2)',
-        }}
-      >
-        {prepareLabel ?? formatElapsed(recording.elapsed)}
-      </span>
+      {/* No elapsed timer here — the toolbar's recording chip already shows it.
+          Keep only the transient warm-up hint while the live model loads. */}
+      {prepareLabel && (
+        <span
+          className="px-1.5"
+          style={{ fontFamily: 'var(--font-sans)', fontSize: 12.5, color: 'var(--fg-2)' }}
+        >
+          {prepareLabel}
+        </span>
+      )}
       {/* Resume — only when the system auto-paused (sleep / meeting-app mic
           drop). There is no manual pause: stop ends the segment and the note
           can be continued later. */}
