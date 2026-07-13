@@ -575,7 +575,7 @@ function DetailContent({
     notesNotGenerated && !transcriptionFailed && !isProcessing && Boolean(meeting.transcript);
   // A continued note (continue-recording appended a segment after notes were
   // generated): the summary no longer covers the transcript — offer the same
-  // floating CTA as "Regenerate notes". reprocess clears the flag on rewrite.
+  // floating "Generate notes" CTA. reprocess clears the flag on rewrite.
   const summaryStale =
     meeting.session_info.notes_stale === true &&
     !transcriptionFailed &&
@@ -593,7 +593,9 @@ function DetailContent({
       publishReprocess({
         summaryFile: routeSummaryFile,
         streaming: reprocessStreaming,
-        label: summaryPending ? 'Generate notes' : 'Regenerate notes',
+        // Always "Generate notes" — no separate Regenerate wording. Every
+        // record/continue → stop leaves this one CTA.
+        label: 'Generate notes',
         start: stableStartReprocess,
       });
     } else {
@@ -663,15 +665,15 @@ function DetailContent({
                 {copiedTranscript ? 'Copied!' : 'Copy transcript'}
               </TooltipContent>
             </Tooltip>
-            {/* Regenerate re-runs summarisation on the existing transcript.
-                A transcription-failure note has no transcript, so reprocess
+            {/* Re-runs summarisation on the existing transcript. A
+                transcription-failure note has no transcript, so reprocess
                 would exit non-zero and strand the UI on a spinner — hide it
                 until a real re-transcribe-from-audio retry ships. */}
             {!info.transcription_failed && (
               <Tooltip>
                 <TooltipTrigger asChild>
                   <ActionIconButton
-                    label="Regenerate notes"
+                    label="Generate notes"
                     onClick={startReprocess}
                     disabled={reprocess.isPending || streamPhase !== 'idle'}
                   >
@@ -686,7 +688,7 @@ function DetailContent({
                     />
                   </ActionIconButton>
                 </TooltipTrigger>
-                <TooltipContent side="bottom">Regenerate notes</TooltipContent>
+                <TooltipContent side="bottom">Generate notes</TooltipContent>
               </Tooltip>
             )}
             <Popover>
@@ -944,7 +946,7 @@ function DetailContent({
             onClick={startReprocess}
             disabled={reprocess.isPending || streamPhase !== 'idle'}
           >
-            {notesNotGenerated ? 'Generate notes' : 'Regenerate notes'}
+            Generate notes
           </Button>
         </section>
       )}

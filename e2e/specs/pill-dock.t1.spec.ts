@@ -186,7 +186,10 @@ test('continue-recording: the transcript panel footer offers Resume (Granola-sty
   await expect(page.getByPlaceholder('Chat available after recording')).toBeDisabled();
 });
 
-test('stale note: floating CTA reads Regenerate notes', async ({ launchApp }) => {
+test('stale note (continued): floating CTA reads Generate notes', async ({ launchApp }) => {
+  // A continued note (notes_stale) surfaces the SAME "Generate notes" CTA as a
+  // never-summarised one — there is no separate "Regenerate" wording. Every
+  // record/continue → stop leaves this one button.
   const { page } = await launchApp({
     mockIpc: true,
     env: { ...PILL_ENV, STENOAI_E2E_SEED_STALE_NOTE: '1' },
@@ -196,5 +199,5 @@ test('stale note: floating CTA reads Regenerate notes', async ({ launchApp }) =>
   });
   const cta = page.getByTestId('generate-notes-dock-button');
   await expect(cta).toBeVisible();
-  await expect(cta).toHaveText(/Regenerate notes/);
+  await expect(cta).toHaveText(/Generate notes/);
 });
