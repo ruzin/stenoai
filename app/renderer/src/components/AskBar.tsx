@@ -164,7 +164,7 @@ export function TranscriptToggle() {
       aria-label={transcriptOpen ? 'Hide transcript' : 'Show transcript'}
       aria-pressed={transcriptOpen}
       title="Transcript"
-      className="pointer-events-auto inline-flex size-11 shrink-0 cursor-pointer items-center justify-center rounded-full border-0 transition-colors"
+      className="pointer-events-auto inline-flex h-11 shrink-0 cursor-pointer items-center justify-center gap-0.5 rounded-full border-0 px-3 transition-colors"
       style={{
         background: transcriptOpen ? 'var(--surface-active)' : 'var(--surface-raised)',
         border: '1px solid var(--border-subtle)',
@@ -179,10 +179,20 @@ export function TranscriptToggle() {
             : 'mv-transcript-wave mv-transcript-wave-static'
         }
         aria-hidden="true"
-        style={{ width: 18, height: 14 }}
+        style={{ width: 16, height: 13 }}
       >
         <span /><span /><span /><span /><span /><span /><span />
       </span>
+      {/* Expand indicator (Granola-style) — points up to reveal the transcript,
+          flips down when it's open. */}
+      <ChevronUp
+        size={13}
+        className="transition-transform"
+        style={{
+          color: 'var(--fg-2)',
+          transform: transcriptOpen ? 'rotate(180deg)' : 'none',
+        }}
+      />
     </button>
   );
 }
