@@ -26,9 +26,10 @@ organization-specific features, for teams that want that on top of the free app.
 - Enterprise pricing and packaging is being finalized — details coming soon.
 
 ## Optional costs (not paid to Steno)
-- **Cloud summarization (optional, off by default):** if you choose a cloud model
-  (OpenAI, Anthropic, AWS Bedrock, or a custom endpoint) instead of the local model, you pay
-  that provider directly for API usage. Steno does not resell or mark up these services.
+- **Cloud summarization (optional, off by default):** if you choose OpenAI, Anthropic, or AWS
+  Bedrock instead of the local model, you pay that provider directly for API usage. Steno does
+  not resell or mark up these services. A custom endpoint may be a paid API (same as above) or
+  your own self-hosted server, which may have no per-request cost.
 - Everything works with no cloud provider — the default pipeline is fully local and free.
 
 ## Platform
