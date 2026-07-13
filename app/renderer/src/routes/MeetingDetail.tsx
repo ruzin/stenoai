@@ -921,17 +921,32 @@ function DetailContent({
       {tab === 'summary' && (
       <>
       {reprocessFailed && (
-        <div
-          className="rounded-lg p-3 text-sm"
+        <section
+          className="flex flex-col items-start gap-2 rounded-lg p-4"
           style={{
             background: 'var(--surface-raised)',
-            border: '1px solid var(--border-subtle)',
-            color: 'var(--fg-2)',
+            border: '1px solid var(--border-subtle, var(--surface-raised))',
           }}
+          data-testid="reprocess-retry"
         >
-          Summary generation failed — the model may have run out of memory or context.
-          Try switching to a smaller model like <strong style={{ color: 'var(--fg-1)' }}>Gemma 4 E2B</strong> in Settings.
-        </div>
+          <div className="text-[15px] font-medium" style={{ color: 'var(--fg-1)' }}>
+            Notes weren’t generated
+          </div>
+          <p
+            className="text-[14px] leading-[1.6]"
+            style={{ color: 'var(--fg-2)', maxWidth: '64ch' }}
+          >
+            That didn’t work this time — give it another go. If it keeps failing
+            on a long meeting, switch to a smaller model in Settings.
+          </p>
+          <Button
+            className="mt-1"
+            onClick={startReprocess}
+            disabled={reprocess.isPending || streamPhase !== 'idle'}
+          >
+            {notesNotGenerated ? 'Generate notes' : 'Regenerate notes'}
+          </Button>
+        </section>
       )}
       {streamPhase !== 'idle' ? (
         <StreamingView text={streamText} phase={streamPhase} chunkProgress={chunkProgress} />
