@@ -10,11 +10,11 @@ Yes. Steno is free for personal and team use, MIT-licensed, and open source. The
 </Accordion>
 
 <Accordion title="Does Steno work offline?">
-Yes. After the first-run model download, Steno works fully offline -- transcription and summarization run on-device, so no meeting audio, transcript, or summary is ever sent to a server. Only the initial download and a version check need the network.
+Yes. After the first-run model download, Steno works fully offline -- transcription and summarization run on-device, so no meeting audio, transcript, or summary is ever sent to a server. The app periodically checks for updates and sends anonymous usage analytics (no meeting content) by default; both can run without affecting offline recording, transcription, and summarization.
 </Accordion>
 
 <Accordion title="Is there a Windows, iPhone, or web version?">
-Steno is macOS only today. It runs as a native Mac app on Apple Silicon and Intel Macs. There is no Windows, iPhone, or web version.
+Steno is macOS only today, running on Apple Silicon Macs (M1 and later) -- Intel Macs are not supported since v0.4.0. There is no Windows, iPhone, or web version.
 </Accordion>
 
 <Accordion title="Can I export my notes to Notion, Obsidian, or other tools?">
@@ -28,13 +28,13 @@ Everything Steno stores lives under `~/Library/Application Support/stenoai/` -- 
 ## Privacy and data
 
 <Accordion title="Does Steno send my recordings anywhere?">
-No. Steno processes all recordings using AI models that run locally on your Mac. No audio, transcript, or summary is transmitted to any external server. The only network requests Steno makes are the initial model download and a version check on launch.
+No. Steno processes all recordings using AI models that run locally on your Mac. No audio, transcript, or summary is transmitted to any external server (unless you opt into a cloud summarization model). The app also sends anonymous usage analytics by default -- see the telemetry question below.
 </Accordion>
 
 <Accordion title="Where does Steno store my data?">
 All data is stored in `~/Library/Application Support/stenoai/`:
 
-- `recordings/` -- raw `.wav` audio files
+- `recordings/` -- raw `.webm` audio files
 - `transcripts/` -- verbatim transcript text
 - `output/` -- Markdown summaries and notes
 
@@ -42,7 +42,7 @@ Nothing is stored remotely.
 </Accordion>
 
 <Accordion title="Does Steno collect telemetry or analytics?">
-No. The Steno app has no analytics, crash reporting, or usage tracking. (The Steno documentation site uses PostHog analytics separately from the app.)
+Yes, anonymous usage analytics are on by default -- event names (e.g. "recording started," "summarization completed"), error types, and an anonymous install ID. This never includes audio, transcripts, notes, or summaries. Turn it off in **Settings → Advanced**.
 </Accordion>
 
 <Accordion title="Is Steno suitable for confidential meetings?">
@@ -92,23 +92,23 @@ No. Steno captures audio from your Mac's audio system without joining the call a
 ## Transcription and summaries
 
 <Accordion title="Transcription is slow -- how do I speed it up?">
-Steno defaults to the Parakeet engine, which is fast on Apple Silicon and shows a live transcript while you record. If you have switched to the Whisper engine in **Settings → Transcription**, switching back to Parakeet is usually faster; Whisper transcribes only after you stop recording.
+Steno defaults to the Parakeet engine, which is fast on Apple Silicon and shows a live transcript while you record. If you have switched to the Whisper engine in **Settings → Transcribe**, switching back to Parakeet is usually faster; Whisper transcribes only after you stop recording.
 </Accordion>
 
 <Accordion title="The summary is missing key points from my meeting -- what should I try?">
-Switch to a larger summarization model. In **Settings → Models → Summarization**, try `qwen3.5:9b`, `gemma4:12b-it-qat`, or `gpt-oss:20b`. Larger models produce more detailed and accurate notes. You can re-summarize any existing recording from its detail view.
+Switch to a larger summarization model. In **Settings → AI**, try `qwen3.5:9b`, `gemma4:12b-it-qat`, or `gpt-oss:20b`. Larger models produce more detailed and accurate notes. You can regenerate notes for any existing recording from its detail view.
 </Accordion>
 
 <Accordion title="Can Steno transcribe recordings in languages other than English?">
-Yes. The default Parakeet engine auto-detects and transcribes major European languages -- English, French, German, Spanish, Dutch, and Portuguese. For Japanese, Chinese, Korean, Hindi, Arabic, and the full set of 99 languages, switch to the Whisper engine in **Settings → Transcription**, which auto-detects the language from the audio.
+Yes. The default Parakeet engine transcribes English and 25 other European languages, including French, German, Spanish, Italian, Dutch, Portuguese, Russian, and Polish. A curated subset of six (English, French, German, Spanish, Dutch, Portuguese) is available to pin as the summary output language. For Japanese, Chinese, Korean, Hindi, Arabic, and the full set of 99 languages, switch to the Whisper engine in **Settings → Transcribe**, which auto-detects the language from the audio.
 </Accordion>
 
 ## Models
 
 <Accordion title="What models does Steno use?">
-Transcription: two on-device engines -- Parakeet (the default) and [Whisper](https://github.com/ggerganov/whisper.cpp) (optional, its single `large-v3-turbo` model), selected in **Settings → Transcription**. Summarization: a local model via [Ollama](https://ollama.com), with `gemma4:e2b-it-qat` as the default. See [Transcription models](/models/transcription-models) and [Summarization models](/models/summarization-models) for the full comparison.
+Transcription: two on-device engines -- Parakeet (the default) and [Whisper](https://github.com/ggerganov/whisper.cpp) (optional, its single `large-v3-turbo` model), selected in **Settings → Transcribe**. Summarization: a local model via [Ollama](https://ollama.com), with `gemma4:e2b-it-qat` as the default. See [Transcription models](/models/transcription-models) and [Summarization models](/models/summarization-models) for the full comparison.
 </Accordion>
 
 <Accordion title="Can I use OpenAI or Claude for summarization?">
-Yes. Steno optionally supports OpenAI, Anthropic, AWS Bedrock, or a custom OpenAI-compatible endpoint as an alternative to the local model. Configure this in **Settings → Models → Summarization → Cloud model**. It is off by default. Note that this sends your transcript (not audio) to the selected provider's API.
+Yes. Steno optionally supports OpenAI, Anthropic, AWS Bedrock, or a custom OpenAI-compatible endpoint as an alternative to the local model. Configure this in **Settings → AI**, under **Cloud API**. It is off by default. Note that this sends your transcript and any typed notes (not audio) to the selected provider's API.
 </Accordion>

@@ -9,17 +9,19 @@ After transcription, Steno passes the transcript to a language model to generate
 
 | Model | Size | Notes |
 |-------|------|-------|
-| `gemma4:e2b-it-qat` | ~4.3GB | Default. Fast, 128K context. |
-| `gemma4:e4b-it-qat` | ~6.1GB | Higher quality, modest footprint. |
+| `gemma4:e2b-it-qat` | ~4.3GB (~6.5GB on Apple Silicon) | Default. Fast, 128K context. |
+| `gemma4:e4b-it-qat` | ~6.1GB (~8.8GB on Apple Silicon) | Higher quality, modest footprint. |
 | `qwen3.5:9b` | ~6.6GB | Strong at structured output and action items. |
-| `gemma4:12b-it-qat` | ~7.2GB | 256K context, best for long meetings. |
+| `gemma4:12b-it-qat` | ~7.2GB (~7.7GB on Apple Silicon) | 256K context, best for long meetings. |
 | `gpt-oss:20b` | ~14GB | Highest quality, reasoning. |
 
-`gemma4:e2b-it-qat` (Gemma 4 E2B) is the default and handles most meetings well. It replaces the older `llama3.2:3b`. Larger models produce better-structured, more detailed notes; the trade-off is processing time and disk space.
+On Apple Silicon, the three Gemma 4 models are automatically pulled as MLX/NVFP4 builds instead of the base GGUF -- a meaningful speed win, at a larger download size (shown above).
+
+`gemma4:e2b-it-qat` (Gemma 4 E2B) is the default and handles most meetings well. `llama3.2:3b` is still available for existing users pinned to it, but is deprecated in favor of the Gemma 4 lineup and hidden from the default model picker. Larger models produce better-structured, more detailed notes; the trade-off is processing time and disk space.
 
 ## How to change models
 
-1. Open **Settings → Models → Summarization**
+1. Open **Settings → AI**
 2. Select a model from the list
 3. If the model is not yet downloaded, Steno will download it via Ollama
 
@@ -35,11 +37,11 @@ The new model is used for all future recordings. You can re-summarize an existin
 
 ## Using a cloud model
 
-Steno optionally supports OpenAI, Anthropic, AWS Bedrock, or a custom API endpoint as an alternative to a local model. If configured, your transcript (not your audio) is sent to that API for summarization.
+Steno optionally supports OpenAI, Anthropic, AWS Bedrock, or a custom API endpoint as an alternative to a local model. If configured, your transcript and any typed notes (not your audio) are sent to that API for summarization.
 
 To configure a cloud model:
-1. Open **Settings → Models → Summarization**
-2. Select **Cloud model**
+1. Open **Settings → AI**
+2. Select **Cloud API**
 3. Choose the provider and enter your credentials
 
 Cloud models are off by default. If you work with confidential recordings, use a local model.
@@ -59,5 +61,5 @@ Yes. Run `ollama rm [model-name]` in Terminal to remove a model and free the dis
 </Accordion>
 
 <Accordion title="My Mac has 8GB RAM -- which model should I use?">
-Stick with `gemma4:e2b-it-qat` (the default). It runs comfortably on 8GB. The larger models will cause swapping on 8GB, significantly slowing both summarization and your Mac.
+Stick with `gemma4:e2b-it-qat` (the default) -- it has the smallest footprint of the curated lineup. The larger models need more RAM to hold the model weights, so on an 8GB Mac they are more likely to cause swapping, which slows both summarization and the rest of your system.
 </Accordion>

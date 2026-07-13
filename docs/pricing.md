@@ -1,3 +1,8 @@
+---
+title: "Pricing"
+description: "Steno is free and open source (MIT) for personal and team use, with no per-seat fees or accounts. Enterprise/organization deployment is a separate offering."
+---
+
 # Pricing — Steno
 
 Steno is **free for personal and team use** (non-enterprise) and **open source**
@@ -25,7 +30,7 @@ or accounts.
 - Everything works with no cloud provider — the default pipeline is fully local and free.
 
 ## Platform
-- macOS only (macOS 12 Monterey or later; Apple Silicon and Intel).
+- macOS only (macOS 12 Monterey or later; Apple Silicon, M1 or later -- Intel Macs are not supported since v0.4.0).
 
 ## Download
 - https://stenoai.co/#download

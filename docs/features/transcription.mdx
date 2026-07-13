@@ -3,7 +3,7 @@ title: "Transcription"
 description: "Steno transcribes recordings on-device with two engines: Parakeet (default) and Whisper (optional). Automatic language detection, live transcription, no audio uploads."
 ---
 
-Steno transcribes with two on-device engines: **Parakeet** (the default, NVIDIA Parakeet TDT v3 running via MLX on Apple Silicon) and **Whisper** (an optional alternate, OpenAI's Whisper). Both run entirely on your device -- your audio is never sent to any server. You choose the engine in **Settings → Transcription**.
+Steno transcribes with two on-device engines: **Parakeet** (the default, NVIDIA Parakeet TDT v3 running via MLX on Apple Silicon) and **Whisper** (an optional alternate, OpenAI's Whisper `large-v3-turbo`). Both run entirely on your device -- your audio is never sent to any server. You choose the engine in **Settings → Transcribe**.
 
 ## How it works
 
@@ -13,8 +13,8 @@ Transcription runs on-device and is fast on Apple Silicon. With the default Para
 
 Language coverage depends on the engine. Steno auto-detects the language -- you do not need to set it manually.
 
-- **Parakeet (default)** transcribes major European languages: English, French, German, Spanish, Dutch, and Portuguese.
-- **Whisper (optional)** covers the full set of 99 languages, including Japanese, Chinese, Korean, Hindi, and Arabic. To transcribe any of these, switch to the Whisper engine in **Settings → Transcription**.
+- **Parakeet (default)** transcribes English and 25 other European languages, including French, German, Spanish, Italian, Dutch, Portuguese, Russian, and Polish. A curated subset of six (English, French, German, Spanish, Dutch, Portuguese) can be pinned as the summary output language.
+- **Whisper (optional)** covers the full set of 99 languages, including Japanese, Chinese, Korean, Hindi, and Arabic. To transcribe any of these, switch to the Whisper engine in **Settings → Transcribe**.
 
 ## Speaker labels
 
@@ -23,10 +23,6 @@ Transcripts include `[You]` and `[Others]` labels when system audio is enabled. 
 ## Viewing the transcript
 
 The full transcript appears in the right pane of any saved note, below the AI summary. Transcripts are also saved as plain text files in `~/Library/Application Support/stenoai/transcripts/`.
-
-## Re-transcribing a recording
-
-You can re-run transcription on any saved recording -- for example, to switch engines or to fix a previous transcription. Open the recording, click the options menu, and select **Re-transcribe**.
 
 ## Choosing an engine
 

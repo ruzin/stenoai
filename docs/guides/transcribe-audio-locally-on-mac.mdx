@@ -9,10 +9,12 @@ To transcribe audio locally on a Mac, use Steno: it runs the speech-to-text mode
 
 When you stop a recording, Steno transcribes it on your Mac and saves a plain-text transcript under `~/Library/Application Support/stenoai/transcripts/`. With the default Parakeet engine, a live transcript also appears while you record. See [Live transcription](/features/live-transcription) and [Transcription](/features/transcription).
 
+You can also transcribe an audio file you already have, without recording it in Steno: open the recording options popover (the **···** button next to the record button) and choose **Import audio file…**. Steno transcribes and summarizes the imported file the same way as a live recording.
+
 ## Choosing an engine
 
-- **Parakeet (default)** — fast on Apple Silicon, with live transcription. Covers major European languages.
-- **Whisper (optional)** — covers the full set of 99 languages, including Japanese, Chinese, Korean, Hindi, and Arabic. Switch to it in **Settings → Transcription**.
+- **Parakeet (default)** — fast on Apple Silicon, with live transcription. Covers English and 25 other European languages.
+- **Whisper (optional)** — covers the full set of 99 languages, including Japanese, Chinese, Korean, Hindi, and Arabic. Switch to it in **Settings → Transcribe**.
 
 See [Transcription models](/models/transcription-models) for the full comparison.
 
@@ -27,5 +29,5 @@ Only for the one-time model download during setup. After that, transcription run
 </Accordion>
 
 <Accordion title="Can I transcribe a recording I already made?">
-Yes. Open the recording, use the options menu, and select **Re-transcribe** — for example, to switch engines. See [Transcription](/features/transcription).
+Yes, if it's an audio file: use **Import audio file…** from the recording options popover to transcribe and summarize it locally. There is currently no way to re-transcribe a recording already processed by Steno with a different engine -- the engine choice applies going forward, to new recordings and imports.
 </Accordion>

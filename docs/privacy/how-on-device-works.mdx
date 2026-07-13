@@ -3,7 +3,7 @@ title: "How on-device processing works"
 description: "Steno transcribes and summarizes your meetings using AI models that run entirely on your Mac. No audio is sent to any server."
 ---
 
-Steno processes your recordings using two AI models that run locally on your hardware. After the initial model download, the app makes no network requests related to your recordings by default. Your audio, transcripts, and summaries stay on your Mac unless you optionally configure a cloud summarization model (see below).
+Steno processes your recordings using two AI models that run locally on your hardware. Your audio, transcripts, and summaries stay on your Mac unless you optionally configure a cloud summarization model (see below) -- meeting content is never uploaded by default. The app does send anonymous product-usage analytics (see below), which is on by default and can be turned off in Settings.
 
 ## The processing pipeline
 
@@ -23,7 +23,7 @@ In the default local configuration, no step in this pipeline contacts an externa
 
 **Transcription -- Parakeet or Whisper**
 
-Steno transcribes with one of two on-device engines. **Parakeet** (the default) runs via MLX on Apple Silicon and produces a live transcript while you record. **Whisper** (`large-v3-turbo`) is an optional alternate for the full 99-language set, selectable in **Settings → Transcription**. Both run entirely in-process -- the model weights are stored under `~/Library/Application Support/stenoai/` and there is no transcription API call.
+Steno transcribes with one of two on-device engines. **Parakeet** (the default) runs via MLX on Apple Silicon and produces a live transcript while you record. **Whisper** (`large-v3-turbo`) is an optional alternate for the full 99-language set, selectable in **Settings → Transcribe**. Both run entirely in-process -- the model weights are stored under `~/Library/Application Support/stenoai/` and there is no transcription API call.
 
 **Summarization -- Ollama**
 
@@ -34,10 +34,10 @@ Steno bundles [Ollama](https://ollama.com), which manages and runs small languag
 | Request | When | Why |
 |---------|------|-----|
 | Model download | First launch / setup only | Downloads transcription and Ollama model weights |
-| Update check | On app launch | Checks `github.com/ruzin/stenoai` for new releases |
-| Nothing else | Never | No telemetry, no usage tracking, no audio upload |
+| Update check | On app launch, then periodically | Checks `github.com/ruzin/stenoai` for new releases |
+| Anonymous usage analytics | On events like recording start/stop, transcription/summarization completion, and errors | Anonymous product-usage telemetry (event names and counts only -- never meeting content); on by default, can be turned off in **Settings → Advanced** |
 
-To verify this yourself, you can monitor network traffic with [Little Snitch](https://www.obdev.at/products/littlesnitch/) or macOS's built-in `nettop` while Steno is processing a recording.
+None of these requests include your audio, transcript, or summary content. To verify this yourself, you can monitor network traffic with [Little Snitch](https://www.obdev.at/products/littlesnitch/) or macOS's built-in `nettop` while Steno is processing a recording.
 
 ## Where your data is stored
 
@@ -45,7 +45,7 @@ All data lives in `~/Library/Application Support/stenoai/`:
 
 ```
 stenoai/
-├── recordings/      # .wav audio files
+├── recordings/      # .webm audio files
 ├── transcripts/     # .txt verbatim transcripts
 ├── output/          # .md summaries and notes
 └── models/          # transcription model weights
@@ -55,14 +55,16 @@ Ollama model weights are stored separately in `~/.ollama/models/` (Ollama's defa
 
 ## Using a cloud model (optional)
 
-Steno optionally supports OpenAI, Anthropic, AWS Bedrock, or a custom API endpoint as an alternative to the local Ollama model. If you configure a cloud model in **Settings → Models**, your transcripts (not audio) are sent to that provider's API for summarization.
+Steno optionally supports OpenAI, Anthropic, AWS Bedrock, or a custom API endpoint ("Cloud API" in Settings) as an alternative to the local Ollama model, plus a "Private Server" mode that points at a remote Ollama instance you control. If you configure one of these in **Settings → AI**, your transcript and any notes you've typed for that meeting (not audio) are sent to that provider's API for summarization.
 
-This is opt-in, off by default, and clearly indicated in the UI. If you work with confidential data, use the local model.
+Organizations can also connect Steno to a self-hosted adapter under **Settings → Organisation**, which proxies summarization requests server-side. As with the other cloud options, this sends the transcript (and notes) off-device but never the audio.
+
+Cloud and organization modes are opt-in, off by default, and clearly indicated in the UI. If you work with confidential data, use the local model.
 
 ---
 
 <Accordion title="Does Steno send any telemetry or usage data?">
-No. The Steno app does not include any analytics, crash reporting, or telemetry. In the default local configuration, the only outbound requests from the app are the update check on launch and model downloads during setup. If you enable a cloud summarization model, transcripts are sent to that provider's API. (The Steno documentation site itself uses PostHog for anonymous visitor counts -- this is independent of the app and does not run when you use Steno.)
+Yes, anonymous product-usage analytics are on by default -- event names like "recording started" or "summarization completed," plus error types and an anonymous install ID. This never includes audio, transcripts, notes, or summaries. You can turn it off in **Settings → Advanced**. Separately, the only other outbound requests from the app are the update check and model downloads during setup. If you enable a cloud summarization model, transcripts are sent to that provider's API.
 </Accordion>
 
 <Accordion title="Can I use Steno in an air-gapped environment?">
@@ -70,7 +72,7 @@ Yes, after the initial setup. Download the app and models on a connected machine
 </Accordion>
 
 <Accordion title="Is Steno suitable for confidential recordings?">
-Steno is designed for professionals handling confidential audio. Because all processing is local and no data leaves your device, it is suitable for use cases where sending audio to a cloud service would be inappropriate -- clinical consultations, legal calls, financial briefings. Review your organization's specific policies before using any recording tool for regulated data.
+Steno is designed for professionals handling confidential audio. Because all processing is local and no meeting content (audio, transcript, notes, or summary) leaves your device by default, it is suitable for use cases where sending audio to a cloud service would be inappropriate -- clinical consultations, legal calls, financial briefings. If you need zero network activity at all, turn off anonymous usage analytics in **Settings → Advanced**. Review your organization's specific policies before using any recording tool for regulated data.
 </Accordion>
 
 <Accordion title="Where does Ollama run?">
