@@ -13,6 +13,7 @@ import {
   Folder as FolderIcon,
   Globe,
   MoreHorizontal,
+  PencilLine,
   RefreshCw,
   Trash2,
   Users,
@@ -903,21 +904,21 @@ function DetailContent({
         )}
       </header>
 
-      <DetailTabs tab={tab} onTab={setTab} hasNotes={hasUserNotes} />
+      <NoteViewToggle
+        tab={tab}
+        onTab={setTab}
+        hasNotes={hasUserNotes}
+        activeReportId={activeReportId}
+        reports={reports}
+        templates={reportTemplates}
+        onSelectReport={onSelectReport}
+        onDeleteReport={onDeleteReport}
+        onGenerate={onGenerateReport}
+        generating={generateReport.isPending}
+      />
 
       {tab === 'summary' && (
       <>
-      {streamPhase === 'idle' && (reports.length > 0 || reportTemplates.length > 0) && (
-        <ReportSwitch
-          reports={reports}
-          activeReportId={activeReportId}
-          onSelect={onSelectReport}
-          onDelete={onDeleteReport}
-          templates={reportTemplates}
-          onGenerate={onGenerateReport}
-          generating={generateReport.isPending}
-        />
-      )}
       {reprocessFailed && (
         <div
           className="rounded-lg p-3 text-sm"
@@ -1174,60 +1175,214 @@ function DetailContent({
  * notes layer survives regardless of summary state); a dot marks when notes
  * exist so the tab reads as non-empty without opening it.
  */
-function DetailTabs({
+/**
+ * Split toggle (Granola-style): one pill split into "My notes" (left) and a
+ * template picker (right). The left switches to the notes editor; the right
+ * shows the active summary/report view and drops a menu of Summary + generated
+ * reports + "Generate from template". Replaces the old Summary/My-notes tabs +
+ * the separate report switcher — one control for every view of the note.
+ */
+function NoteViewToggle({
   tab,
   onTab,
   hasNotes,
+  activeReportId,
+  reports,
+  templates,
+  onSelectReport,
+  onDeleteReport,
+  onGenerate,
+  generating,
 }: {
   tab: 'summary' | 'notes';
   onTab: (t: 'summary' | 'notes') => void;
   hasNotes: boolean;
+  activeReportId: string | null;
+  reports: Report[];
+  templates: Template[];
+  onSelectReport: (id: string | null) => void;
+  onDeleteReport: (reportId: string) => void;
+  onGenerate: (templateId: string) => void;
+  generating: boolean;
 }) {
-  const base =
-    'relative rounded-full px-3 py-1 text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--focus-ring)]';
+  const [menuOpen, setMenuOpen] = React.useState(false);
+  const [deleteTarget, setDeleteTarget] = React.useState<Report | null>(null);
+  const notesActive = tab === 'notes';
+  const summaryActive = tab === 'summary';
+  const activeLabel =
+    activeReportId === null
+      ? 'Summary'
+      : reports.find((r) => r.id === activeReportId)?.template_name ?? 'Summary';
+
+  const selectView = (id: string | null) => {
+    setMenuOpen(false);
+    onSelectReport(id);
+    onTab('summary');
+  };
+  const generateView = (templateId: string) => {
+    setMenuOpen(false);
+    onGenerate(templateId);
+    onTab('summary');
+  };
+
   return (
-    <div
-      role="tablist"
-      aria-label="Note view"
-      data-testid="detail-tabs"
-      className="flex items-center gap-1"
-    >
-      <button
-        type="button"
-        role="tab"
-        aria-selected={tab === 'summary'}
-        data-testid="tab-summary"
-        onClick={() => onTab('summary')}
-        className={base}
-        style={{
-          background: tab === 'summary' ? 'var(--surface-active)' : 'transparent',
-          color: tab === 'summary' ? 'var(--fg-1)' : 'var(--fg-2)',
-        }}
+    <div className="flex items-center" data-testid="note-view-toggle">
+      <div
+        role="tablist"
+        aria-label="Note view"
+        className="inline-flex items-stretch overflow-hidden rounded-full"
+        style={{ border: '1px solid var(--border-subtle)' }}
       >
-        Summary
-      </button>
-      <button
-        type="button"
-        role="tab"
-        aria-selected={tab === 'notes'}
-        data-testid="tab-notes"
-        onClick={() => onTab('notes')}
-        className={cn(base, 'inline-flex items-center gap-1.5')}
-        style={{
-          background: tab === 'notes' ? 'var(--surface-active)' : 'transparent',
-          color: tab === 'notes' ? 'var(--fg-1)' : 'var(--fg-2)',
+        {/* Left — My notes */}
+        <button
+          type="button"
+          role="tab"
+          aria-selected={notesActive}
+          data-testid="tab-notes"
+          onClick={() => onTab('notes')}
+          className="inline-flex items-center gap-1.5 px-3 py-1 text-[13px] font-medium transition-colors focus-visible:outline-none"
+          style={{
+            background: notesActive ? 'var(--surface-active)' : 'transparent',
+            color: notesActive ? 'var(--fg-1)' : 'var(--fg-2)',
+          }}
+        >
+          <PencilLine className="size-[13px]" />
+          My notes
+          {hasNotes && !notesActive && (
+            <span
+              aria-hidden="true"
+              className="size-1.5 rounded-full"
+              style={{ background: 'var(--accent-primary)' }}
+            />
+          )}
+        </button>
+        <span aria-hidden="true" style={{ width: 1, background: 'var(--border-subtle)' }} />
+        {/* Right — template picker */}
+        <Popover open={menuOpen} onOpenChange={setMenuOpen}>
+          <PopoverTrigger asChild>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={summaryActive}
+              data-testid="tab-summary"
+              className="inline-flex items-center gap-1.5 px-3 py-1 text-[13px] font-medium transition-colors focus-visible:outline-none"
+              style={{
+                background: summaryActive ? 'var(--surface-active)' : 'transparent',
+                color: summaryActive ? 'var(--fg-1)' : 'var(--fg-2)',
+              }}
+            >
+              {generating ? 'Generating…' : activeLabel}
+              <ChevronDown className="size-[13px]" style={{ color: 'var(--fg-2)' }} />
+            </button>
+          </PopoverTrigger>
+          <PopoverContent align="start" className="w-56 p-1" data-testid="note-view-menu">
+            <ViewMenuItem
+              selected={summaryActive && activeReportId === null}
+              onClick={() => selectView(null)}
+            >
+              Summary
+            </ViewMenuItem>
+            {reports.map((r) => {
+              const meta = [r.model, formatReportDate(r.created_at)].filter(Boolean).join(' · ');
+              return (
+                <div
+                  key={r.id}
+                  className="group flex items-center rounded-md transition-colors hover:bg-[color:var(--surface-hover)]"
+                >
+                  <button
+                    type="button"
+                    onClick={() => selectView(r.id)}
+                    className="flex min-w-0 flex-1 flex-col items-start gap-0.5 px-3 py-2 text-left text-sm"
+                    style={{ color: 'var(--fg-1)' }}
+                    title={meta || undefined}
+                  >
+                    <span className="truncate">{r.template_name}</span>
+                    {meta && (
+                      <span className="text-[10.5px]" style={{ color: 'var(--fg-2)' }}>
+                        {meta}
+                      </span>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={`Delete report ${r.template_name}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setDeleteTarget(r);
+                    }}
+                    className="mr-1.5 rounded-full p-1 opacity-0 transition-opacity hover:bg-[color:var(--danger-bg)] hover:text-[color:var(--danger)] group-hover:opacity-100"
+                    style={{ color: 'var(--fg-2)' }}
+                  >
+                    <Trash2 className="size-[11px]" />
+                  </button>
+                </div>
+              );
+            })}
+            {templates.length > 0 && (
+              <>
+                <div className="my-1 border-t" style={{ borderColor: 'var(--border-subtle)' }} />
+                <div
+                  className="px-3 pb-1 pt-1.5 text-[11px] font-medium"
+                  style={{ color: 'var(--fg-muted)' }}
+                >
+                  Generate from template
+                </div>
+                {templates.map((t) => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    disabled={generating}
+                    onClick={() => generateView(t.id)}
+                    data-testid="note-view-generate"
+                    className="flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-sm transition-colors hover:bg-[color:var(--surface-hover)] disabled:opacity-50"
+                    style={{ color: 'var(--fg-1)' }}
+                  >
+                    <FileText className="size-[13px] shrink-0" style={{ color: 'var(--fg-2)' }} />
+                    <span className="truncate">{t.name}</span>
+                  </button>
+                ))}
+              </>
+            )}
+          </PopoverContent>
+        </Popover>
+      </div>
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        onOpenChange={(o) => !o && setDeleteTarget(null)}
+        title={deleteTarget ? `Delete report "${deleteTarget.template_name}"?` : ''}
+        description="This permanently deletes this generated report. The transcript and other reports are not affected."
+        confirmLabel="Delete"
+        destructive
+        onConfirm={() => {
+          if (!deleteTarget) return;
+          onDeleteReport(deleteTarget.id);
+          setDeleteTarget(null);
         }}
-      >
-        My notes
-        {hasNotes && (
-          <span
-            aria-hidden="true"
-            className="size-1.5 rounded-full"
-            style={{ background: 'var(--accent-primary)' }}
-          />
-        )}
-      </button>
+      />
     </div>
+  );
+}
+
+function ViewMenuItem({
+  selected,
+  onClick,
+  children,
+}: {
+  selected: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex w-full items-center justify-between gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors hover:bg-[color:var(--surface-hover)]"
+      style={{ color: 'var(--fg-1)', fontWeight: selected ? 600 : 400 }}
+    >
+      <span className="truncate">{children}</span>
+      {selected && <Check className="size-[13px]" style={{ color: 'var(--fg-2)' }} />}
+    </button>
   );
 }
 
@@ -1347,171 +1502,6 @@ const ActionIconButton = React.forwardRef<
     </button>
   );
 });
-
-// ---------------------------------------------------------------------------
-// Report switch — segmented pills (Standard + one per generated report) plus a
-// "Generate report" dropdown of the non-Standard templates. Controls which
-// body the detail view renders; generation reuses the summary stream.
-// ---------------------------------------------------------------------------
-
-interface ReportSwitchProps {
-  reports: Report[];
-  activeReportId: string | null;
-  onSelect: (id: string | null) => void;
-  onDelete: (reportId: string) => void;
-  templates: Template[];
-  onGenerate: (templateId: string) => void;
-  generating: boolean;
-}
-
-function ReportSwitch({
-  reports,
-  activeReportId,
-  onSelect,
-  onDelete,
-  templates,
-  onGenerate,
-  generating,
-}: ReportSwitchProps) {
-  const [open, setOpen] = React.useState(false);
-  // Report pending deletion → drives the confirmation dialog.
-  const [deleteTarget, setDeleteTarget] = React.useState<Report | null>(null);
-  return (
-    <div className="flex flex-wrap items-center gap-1.5" data-testid="report-switch">
-      <ReportPill active={activeReportId === null} onClick={() => onSelect(null)}>
-        Standard
-      </ReportPill>
-      {reports.map((r) => {
-        const when = formatReportDate(r.created_at);
-        const meta = [r.model, when].filter(Boolean).join(' · ');
-        return (
-          <ReportPill
-            key={r.id}
-            active={activeReportId === r.id}
-            onClick={() => onSelect(r.id)}
-            onDelete={() => setDeleteTarget(r)}
-            title={meta || undefined}
-          >
-            <span className="flex flex-col items-start leading-tight">
-              <span>{r.template_name}</span>
-              {meta && (
-                <span
-                  className="text-[10.5px]"
-                  style={{ color: 'var(--fg-2)', fontWeight: 400 }}
-                >
-                  {meta}
-                </span>
-              )}
-            </span>
-          </ReportPill>
-        );
-      })}
-      {templates.length > 0 && (
-        <Popover open={open} onOpenChange={setOpen}>
-          <PopoverTrigger asChild>
-            <button
-              type="button"
-              data-testid="generate-report-trigger"
-              disabled={generating}
-              className="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[12.5px] transition-colors hover:bg-[color:var(--surface-hover)] disabled:opacity-50"
-              style={{
-                color: 'var(--fg-2)',
-                border: '1px solid var(--border-subtle)',
-              }}
-            >
-              <FileText className="size-[12px]" />
-              {generating ? 'Generating…' : 'Generate report'}
-              <ChevronDown className="size-[12px]" />
-            </button>
-          </PopoverTrigger>
-          <PopoverContent align="start" className="w-56 p-1">
-            {templates.map((t) => (
-              <button
-                key={t.id}
-                type="button"
-                className="flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-sm transition-colors hover:bg-[color:var(--surface-hover)]"
-                style={{ color: 'var(--fg-1)' }}
-                onClick={() => {
-                  setOpen(false);
-                  onGenerate(t.id);
-                }}
-              >
-                <span className="truncate">{t.name}</span>
-              </button>
-            ))}
-          </PopoverContent>
-        </Popover>
-      )}
-
-      <ConfirmDialog
-        open={!!deleteTarget}
-        onOpenChange={(o) => !o && setDeleteTarget(null)}
-        title={
-          deleteTarget ? `Delete report "${deleteTarget.template_name}"?` : ''
-        }
-        description="This permanently deletes this generated report. The transcript and other reports are not affected."
-        confirmLabel="Delete"
-        destructive
-        onConfirm={() => {
-          if (!deleteTarget) return;
-          onDelete(deleteTarget.id);
-          setDeleteTarget(null);
-        }}
-      />
-    </div>
-  );
-}
-
-function ReportPill({
-  active,
-  onClick,
-  onDelete,
-  title,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  onDelete?: () => void;
-  title?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <span
-      className="inline-flex items-center rounded-full transition-colors"
-      style={{
-        color: active ? 'var(--fg-1)' : 'var(--fg-2)',
-        background: active ? 'var(--surface-raised)' : 'transparent',
-        border: '1px solid var(--border-subtle)',
-        fontWeight: active ? 600 : 400,
-      }}
-    >
-      <button
-        type="button"
-        onClick={onClick}
-        title={title}
-        aria-pressed={active}
-        className="inline-flex items-center rounded-full py-1 pl-3 text-[12.5px]"
-        style={{ paddingRight: onDelete ? '0.375rem' : '0.75rem' }}
-      >
-        {children}
-      </button>
-      {onDelete && (
-        <button
-          type="button"
-          aria-label="Delete report"
-          title="Delete report"
-          onClick={(e) => {
-            e.stopPropagation();
-            onDelete();
-          }}
-          className="mr-1.5 inline-flex items-center rounded-full p-0.5 text-[color:var(--fg-2)] transition-colors hover:bg-[color:var(--danger-bg)] hover:text-[color:var(--danger)]"
-        >
-          <Trash2 className="size-[11px]" />
-        </button>
-      )}
-    </span>
-  );
-}
 
 // ---------------------------------------------------------------------------
 // Streaming view (kept in this file because StreamingView's pinned-indicator

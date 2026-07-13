@@ -921,10 +921,12 @@ function createWindow(options = {}) {
   rendererShortcutReady = false;
 
   const windowOpts = {
-    width: 1200,
-    height: 800,
+    // Roomier default to match Granola's footprint (a bit wider + taller). No
+    // bounds persistence today, so this is what every launch opens at.
+    width: 1400,
+    height: 920,
     minWidth: 1000,
-    minHeight: 600,
+    minHeight: 640,
     // Explicit window/taskbar icon on Windows. Relying on the exe-embedded icon
     // is unreliable (Windows icon cache shows a stale/default icon), so we point
     // at the bundled .ico directly. macOS uses its .icns via the app bundle.

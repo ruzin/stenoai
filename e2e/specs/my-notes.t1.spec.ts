@@ -18,8 +18,8 @@ test('My notes tab: switch, edit, autosave, and persistence across reload', asyn
     window.location.hash = '#/meetings/epsilon_summary.json';
   });
 
-  // Detail resolves on the Summary tab by default (summary content visible).
-  await expect(page.getByTestId('detail-tabs')).toBeVisible();
+  // Detail resolves on the Summary view by default (summary content visible).
+  await expect(page.getByTestId('note-view-toggle')).toBeVisible();
   await expect(page.getByTestId('tab-summary')).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByTestId('tab-summary-content')).toBeVisible();
   await expect(page.getByTestId('my-notes')).toHaveCount(0);
