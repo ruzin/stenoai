@@ -1,6 +1,6 @@
 ---
 import { ShieldCheck, Lock, HandCoins, BotOff } from "lucide-react";
-import { HeroStatusPill } from "../components/HeroStatusPill";
+import ProviderCluster from "../components/ProviderCluster.astro";
 import { AppWindowDemo } from "../components/AppWindowDemo";
 import AppleIcon from "../components/icons/AppleIcon.astro";
 import WindowsIcon from "../components/icons/WindowsIcon.astro";
@@ -13,7 +13,7 @@ const DOWNLOAD_WIN = "https://github.com/ruzin/stenoai/releases/latest/download/
   <div class="container-site text-center">
 
     <div class="mb-5 flex justify-center">
-      <HeroStatusPill client:load />
+      <ProviderCluster />
     </div>
 
     <h1
@@ -35,7 +35,7 @@ const DOWNLOAD_WIN = "https://github.com/ruzin/stenoai/releases/latest/download/
       class="text-fg-2 text-lg leading-[1.55] mt-6 mb-8 mx-auto"
       style="max-width: 64ch"
     >
-      Steno is the privacy-first AI notepad for all your confidential conversations.
+      Steno is the privacy-first AI notetaker for all your confidential conversations.
       No cloud, no usage limits and your private data never leaves your premises.
     </p>
 
