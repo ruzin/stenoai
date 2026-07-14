@@ -18,13 +18,15 @@ const description =
 
 <BaseLayout title={title} description={description} canonical="https://stenoai.co/">
   <Nav client:load />
-  <Hero />
-  <TrustStrip />
-  <HowItWorks />
-  <Features />
-  <Models />
-  <Industries />
-  <FAQ client:visible />
-  <CTAFooter />
+  <main>
+    <Hero />
+    <TrustStrip />
+    <HowItWorks />
+    <Features />
+    <Models />
+    <Industries />
+    <FAQ client:visible />
+    <CTAFooter />
+  </main>
   <Footer />
 </BaseLayout>

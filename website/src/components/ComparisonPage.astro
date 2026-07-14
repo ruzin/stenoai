@@ -237,4 +237,13 @@ function toneIconMarkup(tone) {
       if (minus) minus.style.display = open ? "none" : "";
     });
   });
+
+  // Keep open panels sized to their content after viewport resize / reflow,
+  // otherwise the frozen pixel height clips the answer.
+  window.addEventListener("resize", () => {
+    document.querySelectorAll("[data-faq-toggle][aria-expanded='true']").forEach((btn) => {
+      const panel = btn.nextElementSibling;
+      if (panel) panel.style.height = `${panel.scrollHeight}px`;
+    });
+  });
 </script>

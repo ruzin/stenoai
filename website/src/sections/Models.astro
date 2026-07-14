@@ -140,9 +140,9 @@ const BRAND_ICONS = {
             class:list={["models-row-btn flex items-center gap-3 px-4 py-[14px] rounded-[8px] border-0 bg-transparent cursor-pointer w-full text-left", i === 0 && "is-active"]}
           >
             <span set:html={BRAND_ICONS[m.brand]} />
-            <div class="flex flex-col gap-0.5 flex-1">
+            <div class="flex flex-col gap-0.5 flex-1 min-w-0">
               <span class="text-[15px] font-medium text-fg-1">{m.label}</span>
-              <code class="text-fg-2" style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}>{m.id}</code>
+              <code class="text-fg-2 block truncate" style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}>{m.id}</code>
             </div>
             <span class="text-fg-2 text-[13px] whitespace-nowrap">{m.detail}</span>
             <Check size={14} class="model-check-icon text-fg-1" style={{ display: i === 0 ? "block" : "none" }} aria-hidden="true" />
