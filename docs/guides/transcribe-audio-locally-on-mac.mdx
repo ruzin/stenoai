@@ -1,0 +1,33 @@
+---
+title: "How to transcribe audio locally on a Mac"
+description: "Transcribe meetings and recordings entirely on your Mac with Steno — no cloud upload. On-device Parakeet or Whisper models, with automatic language detection."
+---
+
+To transcribe audio locally on a Mac, use Steno: it runs the speech-to-text model on your device, so recordings are transcribed without uploading anything to a server. Steno offers two on-device engines — **Parakeet** (the default, with a live transcript while you record) and **Whisper** (optional, covering 99 languages) — and auto-detects the language.
+
+## How local transcription works
+
+When you stop a recording, Steno transcribes it on your Mac and saves a plain-text transcript under `~/Library/Application Support/stenoai/transcripts/`. With the default Parakeet engine, a live transcript also appears while you record. See [Live transcription](/features/live-transcription) and [Transcription](/features/transcription).
+
+You can also transcribe an audio file you already have, without recording it in Steno: open the recording options popover (the **···** button next to the record button) and choose **Import audio file…**. Steno transcribes and summarizes the imported file the same way as a live recording.
+
+## Choosing an engine
+
+- **Parakeet (default)** — fast on Apple Silicon, with live transcription. Covers 25 European languages, including English.
+- **Whisper (optional)** — covers the full set of 99 languages, including Japanese, Chinese, Korean, Hindi, and Arabic. Switch to it in **Settings → Transcribe**.
+
+See [Transcription models](/models/transcription-models) for the full comparison.
+
+## Privacy
+
+Because transcription runs on-device, your audio never leaves your Mac. This makes local transcription a good fit for confidential recordings — see [Confidential use cases](/privacy/confidential-use-cases).
+
+---
+
+<Accordion title="Do I need an internet connection to transcribe?">
+Only for the one-time model download during setup. After that, transcription runs fully offline on your Mac.
+</Accordion>
+
+<Accordion title="Can I transcribe a recording I already made?">
+Yes, if it's an audio file: use **Import audio file…** from the recording options popover. Transcription always runs locally; summarization uses whichever model is configured in **Settings → AI** (local by default, or a cloud model if you've set one up). There is currently no way to re-transcribe a recording already processed by Steno with a different engine -- the engine choice applies going forward, to new recordings and imports.
+</Accordion>

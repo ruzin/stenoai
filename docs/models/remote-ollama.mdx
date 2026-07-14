@@ -16,7 +16,7 @@ This keeps summarization local to your network (no cloud involvement) while free
 
   <Step title="Pull the model you want to use">
     ```bash
-    ollama pull deepseek-r1:14b
+    ollama pull gemma4:12b-it-qat
     ```
     You can use any model supported by Ollama, including larger ones that would not run on your laptop.
   </Step>
@@ -38,8 +38,8 @@ This keeps summarization local to your network (no cloud involvement) while free
 
 ## Point Steno at the remote Ollama
 
-1. Open **Settings → Models → Summarization**
-2. Select **Remote Ollama**
+1. Open **Settings → AI**
+2. Select **Private Server**
 3. Enter the remote machine's address: `http://192.168.1.10:11434`
 4. Select the model you want to use
 
@@ -48,8 +48,8 @@ Steno will send the transcript to the remote Ollama for summarization. Audio is 
 ## Notes
 
 - Both machines must be on the same network. This does not work over the internet without additional configuration (VPN or tunnel).
-- If the remote machine is not reachable, Steno will fall back to the local model.
-- The remote Ollama address is not persisted if Steno is reinstalled -- you will need to re-enter it.
+- If the remote machine is not reachable, summarization fails with an error rather than falling back to the local model -- switch back to **Local** in Settings if you need to keep working offline.
+- The remote Ollama address is saved in your local Steno config and persists across app updates and reinstalls, as long as your `~/Library/Application Support/stenoai/` data is not deleted.
 
 ---
 

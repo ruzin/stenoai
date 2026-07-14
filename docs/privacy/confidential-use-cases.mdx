@@ -3,10 +3,10 @@ title: "Confidential use cases"
 description: "Steno is used by healthcare, legal, and finance professionals who cannot send meeting audio to cloud services. Here is how it fits each context."
 ---
 
-Steno was built for professionals who work with audio they cannot send to a cloud service. In its default configuration, all transcription and summarization runs on-device, making it suitable for contexts where confidentiality is a hard requirement. If you use the optional cloud summarization feature, transcripts are sent to the configured provider — do not enable this for confidential recordings.
+Steno was built for professionals who work with audio they cannot send to a cloud service. In its default configuration, all transcription and summarization runs on-device, making it suitable for contexts where confidentiality is a hard requirement. If you use the optional cloud summarization feature (OpenAI, Anthropic, AWS Bedrock, a custom endpoint, or an organization adapter), transcripts and any typed notes are sent to the configured provider — do not enable this for confidential recordings.
 
 <Warning>
-Steno is not certified under HIPAA, SOC 2, or any other compliance framework. It does not make compliance claims. If you work in a regulated environment, consult your compliance team before using any recording tool -- including Steno. The value Steno provides is technical: in its default configuration, no data leaves your device. Do not configure a cloud summarization model for recordings containing regulated or privileged information.
+Steno is not certified under HIPAA, SOC 2, or any other compliance framework. It does not make compliance claims. If you work in a regulated environment, consult your compliance team before using any recording tool -- including Steno. The value Steno provides is technical: in its default configuration, no meeting content (audio, transcript, notes, or summary) leaves your device. The app does send anonymous product-usage analytics (event names, error types, no meeting content) by default -- turn this off in **Settings → Advanced** if your policy requires zero network activity. Do not configure a cloud summarization model for recordings containing regulated or privileged information.
 </Warning>
 
 ## Healthcare
@@ -17,7 +17,7 @@ Clinical conversations contain protected health information. Cloud-based meeting
 
 **How Steno fits**
 
-- Audio is processed entirely on the clinician's Mac using a local Whisper model
+- Audio is processed entirely on the clinician's Mac using a local transcription engine
 - Transcripts and summaries are stored in the local filesystem, not synced to any cloud
 - No vendor relationship is created for PHI processing
 - Clinicians can use Steno on their organization-issued Mac without installing third-party cloud services

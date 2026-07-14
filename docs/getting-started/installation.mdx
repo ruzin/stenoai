@@ -5,20 +5,15 @@ description: "Download and install Steno on macOS. The setup takes about five mi
 
 ## Requirements
 
-- macOS 12 (Monterey) or later
+- macOS 12 (Monterey) or later, on Apple Silicon (M1 or newer) -- Intel Macs are not supported since v0.4.0; the last release with Intel support is [v0.3.8](https://github.com/ruzin/stenoai/releases/tag/v0.3.8)
 - 8GB RAM minimum (16GB recommended for larger models)
-- ~5GB free disk space for the default models
+- ~8GB free disk space for the default models
 
 ## Install Steno
 
 <Steps>
   <Step title="Download the DMG">
-    Go to [stenoai.co](https://stenoai.co) and click **Download**. Choose the right build for your Mac:
-
-    - **Apple Silicon** (M1, M2, M3, M4) -- use the `arm64` build
-    - **Intel** -- use the `x64` build
-
-    If you are unsure, go to **Apple menu → About This Mac** and look for "Apple M" in the chip name.
+    Go to [stenoai.co](https://stenoai.co) and click **Download** to get the `arm64` build for Apple Silicon Macs (M1 through M5).
   </Step>
 
   <Step title="Open the DMG and drag to Applications">
@@ -34,8 +29,8 @@ description: "Download and install Steno on macOS. The setup takes about five mi
   <Step title="Download models">
     On first launch, Steno will prompt you to download the default models:
 
-    - Transcription: `whisper-small` (~480MB)
-    - Summarization: `llama3.2:3b` (~2GB)
+    - Transcription: Parakeet (~572MB)
+    - Summarization: Gemma 4 E2B (~6.5GB)
 
     Both downloads happen inside the app. This requires an internet connection and takes a few minutes depending on your connection. After this, Steno runs entirely offline.
   </Step>
@@ -49,7 +44,7 @@ description: "Download and install Steno on macOS. The setup takes about five mi
 
 Once setup is complete, go to **Settings → Setup Check** inside the app. This runs a diagnostic that confirms:
 
-- Whisper model is installed and functional
+- The transcription model is installed and functional
 - Ollama is running and the summarization model is loaded
 - Storage paths are writable
 

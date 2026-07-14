@@ -1,61 +1,61 @@
 ---
 title: "Transcription models"
-description: "Steno uses Whisper models for local transcription. Choose the right model based on your accuracy requirements and available hardware."
+description: "Steno transcribes on-device with one of two engines: Parakeet (the default) and Whisper (optional). Choose the engine that matches your language and workflow needs."
 ---
 
-Steno transcribes recordings using [whisper.cpp](https://github.com/ggerganov/whisper.cpp), a local port of OpenAI's Whisper model. All transcription runs on your Mac -- no audio is sent to any server.
+Steno transcribes recordings entirely on your Mac -- no audio is sent to any server. There are two transcription engines: **Parakeet**, the default, and **Whisper**, an optional alternate you can switch to in Settings.
 
-## Available models
+## The two engines
 
-| Model | Size | Speed | Accuracy | Best for |
-|-------|------|-------|----------|----------|
-| `whisper-base` | ~150MB | Fastest | Good | Quick notes, clear audio |
-| `whisper-small` | ~480MB | Fast | Very good | Most meetings **(default)** |
-| `whisper-medium` | ~1.5GB | Moderate | Excellent | Important recordings, difficult audio |
+| Engine | Model | Size | Notes |
+|--------|-------|------|-------|
+| **Parakeet** (default) | `mlx-community/parakeet-tdt-0.6b-v3` | ~572MB | Live transcript while recording; 25 European languages, including English |
+| **Whisper** (optional) | `large-v3-turbo` | ~1.6GB | Full 99-language coverage; transcribes after you stop |
 
-`whisper-small` is the default and handles most meetings well. The larger models take longer to process but produce noticeably better results for noisy recordings, strong accents, or technical terminology.
+**Parakeet** is the default on new installs. It runs via MLX on Apple Silicon and shows a live transcript as you record.
 
-## How to change models
+**Whisper** is a single model, `large-v3-turbo`. Choose it in **Settings → Transcribe** when you need a language Parakeet does not cover. Whisper recordings are transcribed only after you stop the recording.
+
+Both engines run 100% on-device.
+
+## How to change engines
 
 1. Open **Settings** in Steno
-2. Select **Models → Transcription**
-3. Choose a model from the list
-4. If the model is not yet downloaded, Steno will prompt you to download it
+2. Select **Transcribe**
+3. Choose **Parakeet** or **Whisper**
+4. If the engine's model is not yet downloaded, Steno will prompt you to download it
 
-The model is applied to all future recordings. Existing recordings are not re-transcribed automatically, but you can re-run transcription on any recording from its detail view.
+The engine is applied to all future recordings. Existing recordings are not re-transcribed automatically -- transcription only runs once, when the recording is first processed.
 
-## Speed estimates (Apple Silicon)
+## Speed
 
-Transcription runs faster than real-time on Apple Silicon. These are approximate figures for a 30-minute recording on an M-series Mac:
-
-| Model | Processing time |
-|-------|----------------|
-| `whisper-base` | ~1-2 minutes |
-| `whisper-small` | ~2-4 minutes |
-| `whisper-medium` | ~5-10 minutes |
-
-On Intel Macs, expect roughly 2-3× slower processing times.
+Transcription runs on-device and is fast on Apple Silicon. Parakeet additionally shows a live transcript while you record, so notes are ready shortly after you stop. Whisper transcribes after the recording ends rather than during it.
 
 ## Language support
 
-All Whisper models support 99 languages. Steno auto-detects the language from the first few seconds of audio -- you do not need to configure this manually. English, Spanish, French, German, Japanese, Chinese, and Portuguese perform especially well.
+Language coverage depends on the engine you choose.
+
+- **Parakeet (default)** transcribes 25 European languages, including English, French, German, Spanish, Italian, Portuguese, Dutch, Russian, and Polish. A curated subset of six (English, French, German, Spanish, Dutch, Portuguese) can be pinned as the summary output language.
+- **Whisper (optional)** covers the full set of **99 languages**, auto-detected. Switch to Whisper for Japanese, Chinese, Korean, Hindi, Arabic, and any language outside Parakeet's set.
+
+Steno auto-detects the language from the audio -- you do not need to configure this manually.
 
 ## Accuracy tips
 
 - **Record in a quiet environment** -- background noise is the biggest accuracy factor
-- **Use a good microphone** -- system audio capture (both call sides) is more accurate than microphone-only for virtual meetings
-- **Use `whisper-medium` for technical content** -- it handles domain-specific terminology, proper nouns, and acronyms better than the smaller models
+- **Use system audio capture** -- capturing both call sides is more accurate than microphone-only for virtual meetings
+- **Switch to Whisper for non-European languages** -- Parakeet covers 25 European languages, including English; Whisper covers the full 99-language set
 
 ---
 
-<Accordion title="Which model should I start with?">
-Start with `whisper-small` (the default). It is fast and accurate for most meeting types. Switch to `whisper-medium` if you notice accuracy issues with important recordings.
+<Accordion title="Which engine should I start with?">
+Start with **Parakeet** (the default). It runs on-device, shows a live transcript while you record, and covers 25 European languages, including English. Switch to **Whisper** in **Settings → Transcribe** if you need a language outside Parakeet's set.
 </Accordion>
 
-<Accordion title="Can I re-transcribe a recording with a different model?">
-Yes. Open the recording, click the options menu, and select **Re-transcribe**. Choose the model you want to use. This overwrites the existing transcript.
+<Accordion title="Can I switch engines for future recordings?">
+Yes. Change the engine in **Settings → Transcribe** -- it applies to recordings from that point on. There is currently no way to re-transcribe an already-processed recording with a different engine; you can regenerate its summary, but not its transcript.
 </Accordion>
 
 <Accordion title="Does transcription accuracy vary by language?">
-Yes. Whisper was trained on significantly more English data than other languages. English, Spanish, French, and German accuracy is high. Less common languages may have lower accuracy, particularly for technical vocabulary.
+Yes. Parakeet covers 25 European languages, including English, French, German, Spanish, Italian, Dutch, Portuguese, Russian, and Polish. For other languages -- including Japanese, Chinese, Korean, Hindi, and Arabic -- switch to the Whisper engine, which covers all 99 languages.
 </Accordion>

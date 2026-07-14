@@ -27,10 +27,23 @@
             "pages": [
               "features/recording",
               "features/transcription",
+              "features/live-transcription",
               "features/summaries",
+              "features/report-templates",
               "features/ask-your-meetings",
               "features/speaker-labels",
               "features/apple-shortcuts"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/record-zoom-on-mac",
+              "guides/record-teams-on-mac",
+              "guides/record-google-meet-on-mac",
+              "guides/record-system-audio-on-mac",
+              "guides/transcribe-audio-locally-on-mac",
+              "guides/in-person-meeting-notes"
             ]
           },
           {
@@ -53,13 +66,19 @@
             "pages": [
               "compare/local-vs-cloud",
               "compare/steno-vs-otter",
-              "compare/steno-vs-fireflies"
+              "compare/steno-vs-fireflies",
+              "compare/steno-vs-granola",
+              "compare/steno-vs-fathom",
+              "compare/steno-vs-tldv",
+              "compare/steno-vs-zoom-ai-companion",
+              "compare/steno-vs-macwhisper"
             ]
           },
           {
             "group": "Reference",
             "pages": [
-              "faq"
+              "faq",
+              "pricing"
             ]
           }
         ]
