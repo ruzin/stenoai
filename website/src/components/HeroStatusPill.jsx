@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { m as Motion, AnimatePresence } from "framer-motion";
+import { m as Motion, AnimatePresence, LazyMotion, domMax } from "framer-motion";
 import { Loader2, Check } from "lucide-react";
 import { RecordingWave } from "./RecordingWave";
 
@@ -64,34 +64,36 @@ export function HeroStatusPill() {
   }, [step.key]);
 
   return (
-    <div
-      aria-hidden="true"
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 8,
-        padding: "6px 14px",
-        borderRadius: 999,
-        background: "var(--surface-raised)",
-        border: "1px solid var(--border-subtle)",
-        boxShadow: "var(--shadow-sm)",
-        fontSize: 13,
-        fontFamily: "var(--font-sans)",
-        overflow: "hidden",
-      }}
-    >
-      <AnimatePresence mode="wait">
-        <Motion.span
-          key={step.key}
-          initial={{ opacity: 0, y: 4 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: -4 }}
-          transition={{ duration: 0.25 }}
-          style={{ display: "inline-flex", alignItems: "center", gap: 8 }}
-        >
-          <StepContent step={step.key} seconds={seconds} />
-        </Motion.span>
-      </AnimatePresence>
-    </div>
+    <LazyMotion features={domMax} strict={false}>
+      <div
+        aria-hidden="true"
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 8,
+          padding: "6px 14px",
+          borderRadius: 999,
+          background: "var(--surface-raised)",
+          border: "1px solid var(--border-subtle)",
+          boxShadow: "var(--shadow-sm)",
+          fontSize: 13,
+          fontFamily: "var(--font-sans)",
+          overflow: "hidden",
+        }}
+      >
+        <AnimatePresence mode="wait">
+          <Motion.span
+            key={step.key}
+            initial={{ opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4 }}
+            transition={{ duration: 0.25 }}
+            style={{ display: "inline-flex", alignItems: "center", gap: 8 }}
+          >
+            <StepContent step={step.key} seconds={seconds} />
+          </Motion.span>
+        </AnimatePresence>
+      </div>
+    </LazyMotion>
   );
 }

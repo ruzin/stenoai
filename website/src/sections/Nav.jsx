@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
-import { Github, Download, Menu, X, ChevronDown } from "lucide-react";
-import { m as Motion, AnimatePresence } from "framer-motion";
+import { Github, Download, Menu, X, ChevronDown, Landmark, Shield, Scale, Stethoscope, Banknote, Briefcase } from "lucide-react";
+import { m as Motion, AnimatePresence, LazyMotion, domMax } from "framer-motion";
 import { StenoMark, Wordmark } from "../components/Brand";
 import { ThemeToggle } from "../components/ThemeToggle";
 import { trackDownload, trackGitHub } from "../analytics";
@@ -19,19 +19,19 @@ const NAV_LINKS = [
 // /enterprise/ data modules) so the nav doesn't pull the full page copy into
 // the homepage bundle.
 const COMPARE_LINKS = [
-  { href: "/vs/granola/", label: "Steno vs Granola" },
-  { href: "/vs/otter/", label: "Steno vs Otter.ai" },
-  { href: "/vs/fireflies/", label: "Steno vs Fireflies" },
-  { href: "/vs/meetily/", label: "Steno vs Meetily" },
+  { href: "/vs/granola/", label: "vs Granola" },
+  { href: "/vs/otter/", label: "vs Otter.ai" },
+  { href: "/vs/fireflies/", label: "vs Fireflies" },
+  { href: "/vs/meetily/", label: "vs Meetily" },
 ];
 
 const ENTERPRISE_LINKS = [
-  { href: "/enterprise/government/", label: "Government" },
-  { href: "/enterprise/defense/", label: "Defense" },
-  { href: "/enterprise/legal/", label: "Legal" },
-  { href: "/enterprise/healthcare/", label: "Healthcare" },
-  { href: "/enterprise/finance/", label: "Finance" },
-  { href: "/enterprise/executive/", label: "Executive" },
+  { href: "/enterprise/government/", label: "Government", icon: Landmark },
+  { href: "/enterprise/defense/", label: "Defense", icon: Shield },
+  { href: "/enterprise/legal/", label: "Legal", icon: Scale },
+  { href: "/enterprise/healthcare/", label: "Healthcare", icon: Stethoscope },
+  { href: "/enterprise/finance/", label: "Finance", icon: Banknote },
+  { href: "/enterprise/executive/", label: "Executive", icon: Briefcase },
 ];
 
 function formatStars(n) {
@@ -140,12 +140,13 @@ function NavDropdown({ label, hubHref, hubLabel, ariaLabel, links }) {
                 boxShadow: "var(--shadow-md)",
               }}
             >
-              {links.map(({ href, label: itemLabel }) => (
+              {links.map(({ href, label: itemLabel, icon: Icon }) => (
                 <a
                   key={href}
                   href={href}
-                  className="px-4 py-2 text-fg-2 text-sm no-underline hover:text-fg-1 hover:bg-surface-hover transition-colors whitespace-nowrap"
+                  className="flex items-center gap-2.5 px-4 py-2 text-fg-2 text-sm no-underline hover:text-fg-1 hover:bg-surface-hover transition-colors whitespace-nowrap"
                 >
+                  {Icon && <Icon size={14} aria-hidden="true" className="text-fg-muted flex-shrink-0" />}
                   {itemLabel}
                 </a>
               ))}
@@ -195,6 +196,7 @@ export function Nav({ subpage = false }) {
   }, []);
 
   return (
+    <LazyMotion features={domMax} strict={false}>
     <nav
       className="sticky top-0 z-40 transition-shadow"
       style={{
@@ -313,14 +315,15 @@ export function Nav({ subpage = false }) {
                 >
                   Enterprise
                 </a>
-                {ENTERPRISE_LINKS.map(({ href, label }) => (
+                {ENTERPRISE_LINKS.map(({ href, label, icon: Icon }) => (
                   <a
                     key={href}
                     href={href}
                     onClick={() => setMenuOpen(false)}
-                    className="block text-fg-2 text-sm no-underline hover:text-fg-1 transition-colors"
+                    className="flex items-center gap-2.5 text-fg-2 text-sm no-underline hover:text-fg-1 transition-colors"
                     style={{ padding: "10px 0" }}
                   >
+                    {Icon && <Icon size={14} aria-hidden="true" className="text-fg-muted flex-shrink-0" />}
                     {label}
                   </a>
                 ))}
@@ -362,5 +365,6 @@ export function Nav({ subpage = false }) {
         )}
       </AnimatePresence>
     </nav>
+    </LazyMotion>
   );
 }

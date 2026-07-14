@@ -1,0 +1,110 @@
+---
+import BaseLayout from "../../layouts/BaseLayout.astro";
+import { Nav } from "../../sections/Nav";
+import Footer from "../../sections/Footer.astro";
+import CTAFooter from "../../sections/CTAFooter.astro";
+import { getCollection } from "astro:content";
+import { VERIFIED } from "../../content/comparisons.data.js";
+import { ArrowRight } from "lucide-react";
+
+const comparisons = await getCollection("comparisons");
+
+const title = "Steno vs Granola, Otter, Fireflies & Meetily — Compare AI Meeting Notetakers";
+const description =
+  "How Steno's free, on-device meeting transcription compares with Granola, Otter.ai, Fireflies, and Meetily — pricing, privacy, bots, and usage limits, stated as fairly as we can.";
+
+const breadcrumbJsonLd = {
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  itemListElement: [
+    { "@type": "ListItem", position: 1, name: "Home", item: "https://stenoai.co/" },
+    { "@type": "ListItem", position: 2, name: "Compare", item: "https://stenoai.co/vs/" },
+  ],
+};
+---
+
+<BaseLayout
+  title={title}
+  description={description}
+  canonical="https://stenoai.co/vs/"
+  structuredData={[breadcrumbJsonLd]}
+>
+  <Nav subpage client:load />
+
+  <main>
+    <section class="pt-[48px] pb-[24px] md:pt-[72px]">
+      <div class="container-site" style="max-width: 880px">
+        <p
+          class="text-fg-2 text-[12px] mb-5"
+          style={{ fontFamily: "var(--font-mono)", textTransform: "uppercase", letterSpacing: "0.14em" }}
+        >
+          Comparisons
+        </p>
+        <h1
+          style={{
+            fontFamily: "var(--font-serif)",
+            fontWeight: 400,
+            fontSize: "clamp(36px, 5vw, 58px)",
+            lineHeight: 1.05,
+            letterSpacing: "-0.025em",
+            color: "var(--fg-1)",
+            maxWidth: "22ch",
+          }}
+        >
+          How Steno compares.
+        </h1>
+        <p class="text-fg-2 text-lg leading-[1.6] mt-6" style="max-width: 66ch">
+          Steno transcribes and summarizes meetings entirely on your device — free, open source,
+          no bot, no account. Here is how that stacks up against the tools you might be using
+          instead, stated as fairly as we can. Competitor details verified {VERIFIED}.
+        </p>
+      </div>
+    </section>
+
+    <section class="pt-[40px] pb-[24px]">
+      <div class="container-site" style="max-width: 880px">
+        <div class="flex flex-col">
+          {comparisons.map(({ data: c }, i) => (
+            <a
+              href={`/vs/${c.slug}/`}
+              class="vs-index-row group no-underline hover:no-underline"
+              style={{
+                borderTop: "1px solid var(--border-subtle)",
+                borderBottom: i === comparisons.length - 1 ? "1px solid var(--border-subtle)" : "none",
+              }}
+            >
+              <div class="flex items-center justify-between gap-5 py-7">
+                <div>
+                  <span
+                    class="block text-fg-1"
+                    style={{
+                      fontFamily: "var(--font-serif)",
+                      fontWeight: 400,
+                      fontSize: "clamp(22px, 2.8vw, 28px)",
+                      letterSpacing: "-0.015em",
+                      lineHeight: 1.2,
+                    }}
+                  >
+                    Steno vs {c.name}
+                  </span>
+                  <span class="block text-fg-2 text-[15px] leading-[1.6] mt-2" style="max-width: 58ch">
+                    {c.oneLiner}
+                  </span>
+                </div>
+                <ArrowRight
+                  size={18}
+                  aria-hidden="true"
+                  class="flex-shrink-0 text-fg-muted transition-transform group-hover:translate-x-1 group-hover:text-fg-1"
+                />
+              </div>
+            </a>
+          ))}
+        </div>
+      </div>
+    </section>
+
+    <CTAFooter />
+  </main>
+
+  <Footer />
+</BaseLayout>

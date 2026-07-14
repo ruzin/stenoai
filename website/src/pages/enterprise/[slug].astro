@@ -1,0 +1,46 @@
+---
+import BaseLayout from "../../layouts/BaseLayout.astro";
+import IndustryPage from "../../components/IndustryPage.astro";
+import { getCollection } from "astro:content";
+
+export async function getStaticPaths() {
+  const industries = await getCollection("industries");
+  return industries.map((entry) => ({
+    params: { slug: entry.data.slug },
+    props: { data: entry.data },
+  }));
+}
+
+const { data } = Astro.props;
+
+const canonical = `https://stenoai.co/enterprise/${data.slug}/`;
+
+const faqJsonLd = {
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  mainEntity: data.faqs.map((f) => ({
+    "@type": "Question",
+    name: f.q,
+    acceptedAnswer: { "@type": "Answer", text: f.a },
+  })),
+};
+
+const breadcrumbJsonLd = {
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  itemListElement: [
+    { "@type": "ListItem", position: 1, name: "Home", item: "https://stenoai.co/" },
+    { "@type": "ListItem", position: 2, name: "Enterprise", item: "https://stenoai.co/enterprise/" },
+    { "@type": "ListItem", position: 3, name: data.name, item: canonical },
+  ],
+};
+---
+
+<BaseLayout
+  title={data.metaTitle}
+  description={data.metaDescription}
+  canonical={canonical}
+  structuredData={[faqJsonLd, breadcrumbJsonLd]}
+>
+  <IndustryPage data={data} />
+</BaseLayout>
