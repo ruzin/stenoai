@@ -185,6 +185,20 @@ _AUTO_NAMED_PATTERN = re.compile(
 #   equivalent — see #346. Any edit here has to land there too.
 _REASONING_TAG_HEADER_PATTERN = re.compile(r'(</(?:think|thought|thinking|reasoning)>)\s*(#{1,6}\s)', re.IGNORECASE)
 
+# Opts one-off/manual diarization CLI invocations (never the normal
+# per-meeting pipeline) into GPU instead of the steno-diarize sidecar's own
+# power/thermal-efficient ANE default -- exactly the escape hatch
+# main.swift's resolveComputeUnits() documents for "bulk backfill runs
+# where throughput matters more than power/thermal efficiency". Benchmarked
+# on a real ~21-minute recording (post-highContextV2 config swap): ANE
+# 23.0s vs GPU 18.0s wall-clock (~1.28x), with near-identical speaker
+# clusters/segment totals between the two -- a real, worthwhile win for a
+# manual/background bulk run. Not wired into the normal live pipeline,
+# which keeps the ANE default (see Phase 6 of the plan doc for the
+# power/thermal tradeoff discussion -- that's a user-facing decision, not
+# made here).
+_DIARIZE_BULK_ENV = {"STENOAI_DIARIZE_COMPUTE_UNITS": "cpuAndGPU"}
+
 def _normalize_markdown_for_parsing(md_text: str) -> str:
     """Ensure headers immediately following a reasoning tag start on a new line."""
     return _REASONING_TAG_HEADER_PATTERN.sub(r'\1\n\2', md_text)
@@ -525,9 +539,11 @@ Summary output language: {config.get_language_name(output_language)}
         # Extract diarisation fields
         is_diarised = False
         diarised_text = None
+        speaker_clusters: dict = {}
         if isinstance(transcript_result, dict):
             is_diarised = transcript_result.get("is_diarised", False)
             diarised_text = transcript_result.get("diarised_text")
+            speaker_clusters = transcript_result.get("speaker_clusters") or {}
 
         # Convert the transcript to the selected Chinese script (no-op otherwise).
         transcript_text = _apply_chinese_variant(transcript_text)
@@ -561,6 +577,7 @@ Summary output language: {config.get_language_name(output_language)}
             "is_diarised": is_diarised,
             "diarised_text": diarised_text,
             "output_language": output_language,
+            "speaker_clusters": speaker_clusters,
         }
 
     def _handle_transcription_failure(
@@ -812,6 +829,19 @@ Summary output language: {config.get_language_name(output_language)}
             md_lines.append('')
             md_lines.append(notes_text)
         summary_path.write_text('\n'.join(md_lines), encoding='utf-8')
+
+        # Persist the raw diarization clusters/embeddings this run already
+        # computed (zero extra diarization cost -- see
+        # src.transcriber._tag_channel_segments' clusters_out param) so
+        # src.speaker_suggestions has something to read for this meeting.
+        # Previously only the separate, manual backfill-speaker-embeddings
+        # CLI command ever wrote this sidecar, so a normally-recorded
+        # meeting never got a Speakers review panel at all, even when
+        # diarization succeeded (is_diarised: true).
+        speaker_clusters = transcript_data.get("speaker_clusters") or {}
+        if speaker_clusters:
+            from src.speaker_suggestions import write_speakers_sidecar
+            write_speakers_sidecar(self.output_dir, audio_path.stem, speaker_clusters)
 
         # Clean up
         from src.config import get_config
@@ -1080,6 +1110,7 @@ def process_streaming(audio_file, name, notes, live_transcript, append_to):
 
         def _heartbeat_sink(done, total):
             sys.stdout.write(f"HEARTBEAT:transcribe:{done}/{total}\n")
+            sys.stdout.write(f"PROGRESS:transcribe:{done}/{total}\n")
             sys.stdout.flush()
 
         print("HEARTBEAT:transcribe:start", flush=True)
@@ -1371,6 +1402,19 @@ def process_streaming(audio_file, name, notes, live_transcript, append_to):
             md_lines.append('')
             md_lines.append(notes_text)
         summary_path.write_text('\n'.join(md_lines), encoding='utf-8')
+
+        # Persist the raw diarization clusters/embeddings this run already
+        # computed (zero extra diarization cost -- see
+        # src.transcriber._tag_channel_segments' clusters_out param) so
+        # src.speaker_suggestions has something to read for this meeting.
+        # Previously only the separate, manual backfill-speaker-embeddings
+        # CLI command ever wrote this sidecar, so a normally-recorded
+        # meeting never got a Speakers review panel at all, even when
+        # diarization succeeded (is_diarised: true).
+        speaker_clusters = transcript_data.get("speaker_clusters") or {}
+        if speaker_clusters:
+            from src.speaker_suggestions import write_speakers_sidecar
+            write_speakers_sidecar(recorder.output_dir, audio_path.stem, speaker_clusters)
 
         # Clean up audio. When we fell back to the live transcript the batch
         # transcription was empty/failed, so KEEP the audio regardless of the
@@ -4195,6 +4239,800 @@ def reset_template(template_id):
     print(json.dumps({"success": ok}))
     if not ok:
         sys.exit(1)
+
+
+@cli.command(name='enroll-voiceprint')
+@click.argument('name')
+@click.argument('audio_file')
+@click.option('--self', 'is_self', is_flag=True, default=False,
+              help='Enroll as the device owner\'s own voice (matched to "You" on the mic channel).')
+def enroll_voiceprint(name, audio_file, is_self):
+    """Extract a voiceprint embedding from an audio clip and save it under NAME.
+
+    Runs the real steno-diarize sidecar on the clip — the same embedding
+    extraction pipeline used for actual meetings (FluidAudio's WeSpeaker
+    model, overlap-excluded and averaged across chunks — see
+    diarize-sidecar/Sources/main.swift) — rather than a separate ad-hoc
+    embedding path, so enrollment-time and match-time embeddings are
+    directly comparable. A clean solo clip should diarize as effectively
+    one speaker; whichever speaker has the most total speaking time is
+    used. Testing surface for the voiceprint-identification feature before
+    any Settings/renderer UI exists — mirrors the existing template CLI
+    commands (list/save/delete) in shape.
+    """
+    from src.config import get_config
+    from src.transcriber import STENO_DIARIZE_TIMEOUT_FLOOR_S, _run_steno_diarize
+
+    audio_path = Path(audio_file)
+    if not audio_path.exists():
+        print(json.dumps({"success": False, "error": f"Audio file not found: {audio_file}"}))
+        sys.exit(1)
+
+    result = _run_steno_diarize(audio_path, STENO_DIARIZE_TIMEOUT_FLOOR_S, extra_env=_DIARIZE_BULK_ENV)
+    if not result:
+        print(json.dumps({"success": False, "error": "Diarization/embedding failed (see logs)"}))
+        sys.exit(1)
+    segments, embeddings = result
+    if not embeddings:
+        print(json.dumps({"success": False, "error": "No voiceprint embedding extracted from clip"}))
+        sys.exit(1)
+
+    totals: dict = {}
+    for seg in segments:
+        totals[seg["speaker"]] = totals.get(seg["speaker"], 0.0) + (seg["end"] - seg["start"])
+    candidates = [sid for sid in totals if sid in embeddings]
+    if not candidates:
+        print(json.dumps({"success": False, "error": "No embedded speaker found in clip"}))
+        sys.exit(1)
+    dominant = max(candidates, key=lambda sid: totals[sid])
+
+    saved = get_config().save_voiceprint(
+        name, embeddings[dominant], is_self=is_self, duration=totals[dominant],
+    )
+    print(json.dumps({
+        "success": True,
+        "name": saved["name"],
+        "centroid_sample_count": saved["centroid_sample_count"],
+        "is_self": saved["is_self"],
+    }))
+
+
+@cli.command(name='list-voiceprints')
+def list_voiceprints():
+    """List stored voiceprints (name, centroid sample count, recent-sample
+    count, self-flag) — never prints the raw embedding vectors."""
+    from src.config import get_config
+    voiceprints = get_config().get_voiceprints()
+    print(json.dumps({
+        "voiceprints": [
+            {
+                "name": v.get("name"),
+                "centroid_sample_count": v.get("centroid_sample_count", 0),
+                "recent_sample_count": len(v.get("embeddings") or []),
+                "updated_at": v.get("updated_at"),
+                "is_self": v.get("is_self", False),
+            }
+            for v in voiceprints
+        ],
+    }))
+
+
+@cli.command(name='delete-voiceprint')
+@click.argument('name')
+def delete_voiceprint(name):
+    """Delete a stored voiceprint by name."""
+    from src.config import get_config
+    ok = get_config().delete_voiceprint(name)
+    print(json.dumps({"success": ok}))
+    if not ok:
+        sys.exit(1)
+
+
+@cli.command(name='list-person-profiles')
+def list_person_profiles():
+    """List named (non-self) person profiles: display name, prototype/
+    hard-negative counts per recording_type — never prints raw embeddings.
+    Testing surface for the human-confirmed speaker-suggestion feature
+    (see src.speaker_suggestions) before any approval UI exists — mirrors
+    the existing template/voiceprint CLI commands in shape."""
+    from src.config import get_config
+    profiles = get_config().get_person_profiles()
+
+    def _counts_by_context(entries):
+        counts: dict = {}
+        for e in entries:
+            rt = e.get("recording_type", "unknown")
+            counts[rt] = counts.get(rt, 0) + 1
+        return counts
+
+    print(json.dumps({
+        "person_profiles": [
+            {
+                "person_id": p.get("person_id"),
+                "display_name": p.get("display_name"),
+                "prototype_counts": _counts_by_context(p.get("prototypes") or []),
+                "hard_negative_counts": _counts_by_context(p.get("hard_negatives") or []),
+                "updated_at": p.get("updated_at"),
+            }
+            for p in profiles
+        ],
+    }))
+
+
+@cli.command(name='create-person-profile')
+@click.argument('display_name')
+def create_person_profile(display_name):
+    """Create a new, empty named person profile."""
+    from src.config import get_config
+    try:
+        profile = get_config().create_person_profile(display_name)
+    except ValueError as e:
+        print(json.dumps({"success": False, "error": str(e)}))
+        sys.exit(1)
+    print(json.dumps({"success": True, "person_id": profile["person_id"], "display_name": profile["display_name"]}))
+
+
+@cli.command(name='rename-person-profile')
+@click.argument('person_id')
+@click.argument('display_name')
+def rename_person_profile(person_id, display_name):
+    """Rename an existing person profile."""
+    from src.config import get_config
+    try:
+        ok = get_config().rename_person_profile(person_id, display_name)
+    except ValueError as e:
+        print(json.dumps({"success": False, "error": str(e)}))
+        sys.exit(1)
+    print(json.dumps({"success": ok}))
+    if not ok:
+        sys.exit(1)
+
+
+@cli.command(name='delete-person-profile')
+@click.argument('person_id')
+def delete_person_profile(person_id):
+    """Delete a person profile and all its prototypes/hard-negatives."""
+    from src.config import get_config
+    ok = get_config().delete_person_profile(person_id)
+    print(json.dumps({"success": ok}))
+    if not ok:
+        sys.exit(1)
+
+
+@cli.command(name='confirm-speaker')
+@click.argument('meeting_stem')
+@click.argument('channel')
+@click.argument('diarization_speaker_id')
+@click.option('--person-id', default=None, help="Confirm as this existing known person.")
+@click.option('--new-person', default=None, help="Confirm as a brand-new person with this display name.")
+@click.option(
+    '--relabel-transcript', is_flag=True, default=False,
+    help="Also rewrite this speaker's turns in the meeting's saved transcript with their real name.",
+)
+def confirm_speaker(meeting_stem, channel, diarization_speaker_id, person_id, new_person, relabel_transcript):
+    """Confirm one diarized cluster as a real person.
+
+    Creates the person's first SpeakerPrototype (or adds another if they
+    already have some) from the cluster's embedding in the
+    `{meeting_stem}_speakers.json` sidecar. For every OTHER speaker already
+    confirmed in this same meeting+channel, records MUTUAL hard-negative
+    evidence between them -- confirming speakers one at a time (as a human
+    naturally would) still builds the full hard-negative graph once all of
+    a meeting's speakers are confirmed, no batch call needed.
+
+    Exactly one of --person-id/--new-person is required -- two explicit
+    modes rather than one fuzzy name-lookup, so a typo can never silently
+    create a duplicate person instead of matching an existing one.
+
+    By default does NOT touch the meeting's saved transcript -- this keeps
+    the plain CLI/backfill-validation workflow's existing behavior
+    unchanged. Pass --relabel-transcript (what the approval UI always
+    does) to also rewrite this speaker's turns with their real name, via
+    timestamp-overlap matching against the sidecar's stored segments (see
+    src.speaker_suggestions.relabel_transcript_speaker) -- never fails the
+    confirm itself if the transcript is missing or nothing matches.
+    """
+    from src.config import get_config, get_data_dirs
+    from src.speaker_suggestions import (
+        clusters_from_sidecar_channel,
+        merge_same_channel_fragments,
+        read_speakers_sidecar,
+        relabel_transcript_speaker,
+    )
+
+    if bool(person_id) == bool(new_person):
+        print(json.dumps({"success": False, "error": "Specify exactly one of --person-id or --new-person"}))
+        sys.exit(1)
+
+    output_dir = get_data_dirs()["output"]
+    sidecar = read_speakers_sidecar(output_dir, meeting_stem)
+    if sidecar is None:
+        print(json.dumps({"success": False, "error": f"No speakers sidecar found for {meeting_stem!r}"}))
+        sys.exit(1)
+    channel_data = (sidecar.get("channels") or {}).get(channel)
+    if channel_data is None:
+        print(json.dumps({"success": False, "error": f"No {channel!r} channel in sidecar for {meeting_stem!r}"}))
+        sys.exit(1)
+
+    raw_clusters = clusters_from_sidecar_channel(meeting_stem, channel_data)
+    if diarization_speaker_id not in raw_clusters:
+        print(json.dumps({
+            "success": False,
+            "error": f"No cluster {diarization_speaker_id!r} in {channel!r} channel of {meeting_stem!r}",
+        }))
+        sys.exit(1)
+
+    # Same-recording diarizer fragments of one continuous voice (e.g. one
+    # real speaker split into multiple IDs over a long call) collapse into
+    # one entry here first, so confirming ANY of the fragment ids produces
+    # the same high-quality, duration-weighted-combined prototype -- see
+    # the plan doc's Phase 3.6.
+    clusters, id_resolution = merge_same_channel_fragments(raw_clusters)
+    resolved_id = id_resolution[diarization_speaker_id]
+
+    config = get_config()
+    if new_person:
+        try:
+            person = config.create_person_profile(new_person)
+        except ValueError as e:
+            print(json.dumps({"success": False, "error": str(e)}))
+            sys.exit(1)
+    else:
+        person = config.get_person_profile(person_id)
+        if person is None:
+            print(json.dumps({"success": False, "error": f"No person profile with id {person_id!r}"}))
+            sys.exit(1)
+
+    embedding, context = clusters[resolved_id]
+    prototype = config.add_speaker_prototype(
+        person["person_id"], embedding,
+        recording_type=context.recording_type, meeting_id=meeting_stem,
+        diarization_speaker_id=resolved_id,
+        speech_duration_seconds=context.speech_duration_seconds,
+        segment_count=context.segment_count,
+        created_from="user_confirmed",
+    )
+
+    # Mutual hard negatives against any OTHER speaker already confirmed in
+    # this same meeting+channel -- scoped to this channel only (not
+    # cross-channel): a hybrid meeting's mic and system speakers aren't
+    # necessarily confirmed-different (e.g. echo/feedback bleed), so only
+    # within-channel confirmations are trustworthy negative evidence.
+    other_sids = [sid for sid in clusters if sid != resolved_id]
+    hard_negatives_added = []
+    for other_person in config.get_person_profiles():
+        if other_person["person_id"] == person["person_id"]:
+            continue
+        match = next(
+            (p for p in (other_person.get("prototypes") or [])
+             if p.get("meeting_id") == meeting_stem and p.get("diarization_speaker_id") in other_sids),
+            None,
+        )
+        if match is None:
+            continue
+        other_sid = match["diarization_speaker_id"]
+        other_embedding, other_context = clusters[other_sid]
+        config.add_speaker_prototype(
+            person["person_id"], other_embedding,
+            recording_type=other_context.recording_type, meeting_id=meeting_stem,
+            diarization_speaker_id=other_sid,
+            speech_duration_seconds=other_context.speech_duration_seconds,
+            segment_count=other_context.segment_count,
+            created_from="user_confirmed", negative=True,
+        )
+        config.add_speaker_prototype(
+            other_person["person_id"], embedding,
+            recording_type=context.recording_type, meeting_id=meeting_stem,
+            diarization_speaker_id=resolved_id,
+            speech_duration_seconds=context.speech_duration_seconds,
+            segment_count=context.segment_count,
+            created_from="user_confirmed", negative=True,
+        )
+        hard_negatives_added.append(other_person["display_name"])
+
+    relabeled_lines = 0
+    if relabel_transcript:
+        raw_clusters_by_id = channel_data.get("clusters") or {}
+        pooled_segments = []
+        for fragment_id in [resolved_id, *context.merged_from]:
+            pooled_segments.extend(raw_clusters_by_id.get(fragment_id, {}).get("segments") or [])
+        transcript_path = get_data_dirs()["transcripts"] / f"{meeting_stem}_transcript.txt"
+        relabeled_lines = relabel_transcript_speaker(transcript_path, pooled_segments, person["display_name"])
+
+    print(json.dumps({
+        "success": True,
+        "person_id": person["person_id"],
+        "display_name": person["display_name"],
+        "prototype_id": prototype["prototype_id"],
+        "resolved_diarization_speaker_id": resolved_id,
+        "merged_from": context.merged_from,
+        "relabeled_lines": relabeled_lines,
+        "hard_negatives_added_against": hard_negatives_added,
+    }))
+
+
+@cli.command(name='speaker-timestamps')
+@click.argument('meeting_stem')
+@click.argument('channel')
+@click.argument('diarization_speaker_id')
+def speaker_timestamps(meeting_stem, channel, diarization_speaker_id):
+    """Print every timestamp range where a diarized cluster was detected
+    speaking -- for manually cross-referencing against your own memory of
+    the meeting (or the saved transcript's [MM:SS] markers) before running
+    `confirm-speaker`, since a cluster id and a duration total alone don't
+    tell you WHO it actually is.
+    """
+    from src.config import get_data_dirs
+    from src.speaker_suggestions import read_speakers_sidecar
+    from src.transcriber import _format_timestamp
+
+    output_dir = get_data_dirs()["output"]
+    sidecar = read_speakers_sidecar(output_dir, meeting_stem)
+    if sidecar is None:
+        print(json.dumps({"success": False, "error": f"No speakers sidecar found for {meeting_stem!r}"}))
+        sys.exit(1)
+    channel_data = (sidecar.get("channels") or {}).get(channel)
+    if channel_data is None:
+        print(json.dumps({"success": False, "error": f"No {channel!r} channel in sidecar for {meeting_stem!r}"}))
+        sys.exit(1)
+    cluster = (channel_data.get("clusters") or {}).get(diarization_speaker_id)
+    if cluster is None:
+        print(json.dumps({
+            "success": False,
+            "error": f"No cluster {diarization_speaker_id!r} in {channel!r} channel of {meeting_stem!r}",
+        }))
+        sys.exit(1)
+
+    segments = cluster.get("segments") or []
+    print(f"{meeting_stem} [{channel}] {diarization_speaker_id}: "
+          f"{cluster.get('speech_duration_seconds', 0):.1f}s total across {len(segments)} turns")
+    for seg in segments:
+        print(f"  [{_format_timestamp(seg['start'])} - {_format_timestamp(seg['end'])}]")
+
+
+@cli.command(name='suggest-speakers')
+@click.argument('meeting_stem')
+def suggest_speakers(meeting_stem):
+    """Suggest names for every diarized speaker cluster in one meeting.
+
+    Reads the `{meeting_stem}_speakers.json` sidecar (written by the live
+    pipeline or the backfill command — see src.speaker_suggestions) and
+    ranks known person profiles as candidates per cluster. NEVER
+    auto-assigns a name to the meeting's saved transcript — this only
+    prints suggestions for review; applying one is a separate, explicit
+    action (not yet wired to a command — the approval UI is the intended
+    surface, see the plan doc).
+    """
+    from src.config import get_config
+    from src.speaker_suggestions import (
+        SUGGESTION_MIN_AVG_TURN_SECONDS,
+        clusters_from_sidecar_channel,
+        extract_sample_text,
+        merge_same_channel_fragments,
+        read_speakers_sidecar,
+        suggest_speakers_for_meeting,
+    )
+    from src.config import get_data_dirs
+    from src.transcriber import _format_timestamp
+
+    dirs = get_data_dirs()
+    sidecar = read_speakers_sidecar(dirs["output"], meeting_stem)
+    if sidecar is None:
+        print(json.dumps({
+            "success": False,
+            "error": f"No speakers sidecar found for {meeting_stem!r} — run the backfill "
+                     "command first, or record a new meeting.",
+        }))
+        sys.exit(1)
+
+    # Whether a play button can appear at all -- checked once per meeting,
+    # not per cluster, since it's the same source recording either way.
+    # Most historical meetings have no source audio left (keep_recordings
+    # defaults off) -- the panel needs to know this upfront rather than
+    # discovering it only after a failed play click.
+    recording_path = _find_recording_file(dirs["recordings"], meeting_stem)
+    transcript_path = dirs["transcripts"] / f"{meeting_stem}_transcript.txt"
+
+    profiles = get_config().get_person_profiles()
+    channels_out = {}
+    for channel_name, channel in (sidecar.get("channels") or {}).items():
+        raw_clusters = clusters_from_sidecar_channel(meeting_stem, channel)
+        # Same-recording diarizer fragments of one voice (see the plan
+        # doc's Phase 3.6) collapse before scoring, so they're suggested as
+        # one cluster instead of several partial-duration ones.
+        clusters, _ = merge_same_channel_fragments(raw_clusters)
+        results = suggest_speakers_for_meeting(clusters, profiles)
+        raw_clusters_by_id = channel.get("clusters") or {}
+        recording_type = channel.get("recording_type")
+        cluster_out = {}
+        for sid, r in results.items():
+            context = clusters[sid][1]
+            fragment_ids = [sid, *context.merged_from]
+            pooled_segments = [
+                seg
+                for fragment_id in fragment_ids
+                for seg in (raw_clusters_by_id.get(fragment_id, {}).get("segments") or [])
+            ]
+            avg_turn = (
+                context.speech_duration_seconds / context.segment_count
+                if context.segment_count else 0.0
+            )
+            # Whether a human has ALREADY confirmed this exact cluster,
+            # derived from real persisted state (an existing prototype),
+            # not transient UI state -- a suggestion's status/tier can stay
+            # "possible" even after a real confirm (SUGGESTION_MIN_CONFIRMED_MEETINGS
+            # not yet met), and any client-side "just confirmed" feedback
+            # is gone the moment the panel unmounts (e.g. navigating away
+            # and back). This survives both.
+            confirmed_by_user = None
+            for person in profiles:
+                if any(
+                    p.get("meeting_id") == meeting_stem
+                    and p.get("diarization_speaker_id") in fragment_ids
+                    and p.get("recording_type") == recording_type
+                    for p in (person.get("prototypes") or [])
+                ):
+                    confirmed_by_user = person["display_name"]
+                    break
+            cluster_out[sid] = {
+                "status": r.status,
+                "suggested_person_id": r.suggested_person_id,
+                "suggested_name": r.suggested_name,
+                "merged_from": context.merged_from,
+                "candidates": [
+                    {"person_id": c.person_id, "display_name": c.display_name,
+                     "distance": round(c.distance, 4), "hard_negative_conflict": c.hard_negative_conflict}
+                    for c in r.candidates
+                ],
+                "reasons": r.reasons,
+                # Nothing here identifies WHO a cluster is -- without some
+                # anchor into the recording, a human reviewing an
+                # "Unidentified speaker" row has no way to go listen and
+                # figure out who it actually is. speech_duration_seconds/
+                # segment_count give a sense of how substantial this
+                # speaker's presence is; first_timestamp (MM:SS, earliest of
+                # this cluster's pooled segments) is where in the recording
+                # to go listen; sample_text quotes what they actually said
+                # at the longest (most trustworthy) segment.
+                "speech_duration_seconds": round(context.speech_duration_seconds, 1),
+                "segment_count": context.segment_count,
+                "first_timestamp": (
+                    _format_timestamp(min(seg["start"] for seg in pooled_segments))
+                    if pooled_segments else None
+                ),
+                "sample_text": extract_sample_text(transcript_path, pooled_segments),
+                # Same signal already used to gate suggestion status (real-
+                # data-validated this session against the echo/crosstalk
+                # artifact pattern) -- reused here to flag likely-artifact
+                # rows so the review panel can hide them by default instead
+                # of showing every raw diarizer cluster as equally
+                # actionable noise. Never excludes a cluster from the
+                # sidecar or from confirm-speaker -- purely a UI hint.
+                "is_likely_artifact": avg_turn < SUGGESTION_MIN_AVG_TURN_SECONDS,
+                "confirmed_by_user": confirmed_by_user,
+            }
+        channels_out[channel_name] = cluster_out
+
+    print(json.dumps({
+        "success": True,
+        "meeting_id": meeting_stem,
+        "recording_available": recording_path is not None,
+        "channels": channels_out,
+    }))
+
+
+@cli.command(name='get-speaker-sample-audio')
+@click.argument('meeting_stem')
+@click.argument('channel')
+@click.argument('diarization_speaker_id')
+def get_speaker_sample_audio(meeting_stem, channel, diarization_speaker_id):
+    """Extract a short audio clip of one diarized cluster, for the review
+    UI's play button. Picks the cluster's single LONGEST pooled segment
+    (primary + merged fragments) to avoid cross-voice contamination --
+    mirrors pasrom/meeting-transcriber's SpeakerNamingView.swift and uses
+    the exact same time range `suggest-speakers`' `sample_text` quotes, so
+    what a human reads matches what they'd hear.
+
+    Always fails gracefully (`{"success": false, "error": ...}`, never a
+    non-JSON crash) when there's no source recording left on disk (the
+    common case for an older backfilled meeting -- keep_recordings
+    defaults off) or ffmpeg extraction otherwise fails -- this is a
+    best-effort UI aid, never something that can break the review panel.
+    """
+    import tempfile
+
+    from src.config import get_data_dirs
+    from src.speaker_suggestions import (
+        clusters_from_sidecar_channel,
+        extract_speaker_sample_audio,
+        merge_same_channel_fragments,
+        read_speakers_sidecar,
+    )
+
+    dirs = get_data_dirs()
+    sidecar = read_speakers_sidecar(dirs["output"], meeting_stem)
+    if sidecar is None:
+        print(json.dumps({"success": False, "error": f"No speakers sidecar found for {meeting_stem!r}"}))
+        sys.exit(1)
+    channel_data = (sidecar.get("channels") or {}).get(channel)
+    if channel_data is None:
+        print(json.dumps({"success": False, "error": f"No {channel!r} channel in sidecar for {meeting_stem!r}"}))
+        sys.exit(1)
+
+    raw_clusters = clusters_from_sidecar_channel(meeting_stem, channel_data)
+    if diarization_speaker_id not in raw_clusters:
+        print(json.dumps({
+            "success": False,
+            "error": f"No cluster {diarization_speaker_id!r} in {channel!r} channel of {meeting_stem!r}",
+        }))
+        sys.exit(1)
+
+    clusters, id_resolution = merge_same_channel_fragments(raw_clusters)
+    resolved_id = id_resolution[diarization_speaker_id]
+    context = clusters[resolved_id][1]
+
+    recording_path = _find_recording_file(dirs["recordings"], meeting_stem)
+    if recording_path is None:
+        print(json.dumps({"success": False, "error": "no source audio available"}))
+        return
+
+    raw_clusters_by_id = channel_data.get("clusters") or {}
+    pooled_segments = [
+        seg
+        for fragment_id in [resolved_id, *context.merged_from]
+        for seg in (raw_clusters_by_id.get(fragment_id, {}).get("segments") or [])
+    ]
+
+    output_path = Path(tempfile.gettempdir()) / f"steno_sample_{meeting_stem}_{channel}_{resolved_id}.wav"
+    ok = extract_speaker_sample_audio(recording_path, channel, pooled_segments, output_path)
+    if not ok:
+        print(json.dumps({"success": False, "error": "could not extract audio sample"}))
+        return
+
+    # Return the clip's bytes inline (base64), not a filesystem path: the
+    # renderer's strict CSP (media-src 'self' blob:) has no file: allowance,
+    # so a raw path could never actually play in the packaged app -- the
+    # renderer builds a blob: URL from these bytes instead. Clips are short
+    # (a few seconds of 16kHz mono PCM), safely small enough to inline.
+    import base64
+    audio_bytes = output_path.read_bytes()
+    output_path.unlink(missing_ok=True)
+    print(json.dumps({
+        "success": True,
+        "audio_base64": base64.b64encode(audio_bytes).decode("ascii"),
+    }))
+
+
+def _find_recording_file(recordings_dir, stem, extension=None):
+    """Locate a meeting's source recording.
+
+    `extension` (e.g. "webm"), if given, is the ONLY format considered --
+    no auto-detection, no fallback to any other format present for that
+    stem. Without it: the capture pipeline saves whatever format the
+    source produced (`.webm` is the dominant one in real libraries, plus
+    `.wav`/`.m4a`), so this prefers an exact `.wav` if one exists
+    (already-decoded PCM), otherwise takes whatever's there -- ffmpeg
+    (used throughout _split_stereo_to_channels/the Swift sidecar) decodes
+    any container, so the extension doesn't otherwise matter."""
+    if extension:
+        path = recordings_dir / f"{stem}.{extension.lstrip('.')}"
+        return path if path.exists() else None
+    wav_path = recordings_dir / f"{stem}.wav"
+    if wav_path.exists():
+        return wav_path
+    matches = sorted(recordings_dir.glob(f"{stem}.*"))
+    return matches[0] if matches else None
+
+
+def _enumerate_meeting_stems(output_dir):
+    """Every meeting stem with a saved summary, JSON preferred over MD when
+    both exist for the same stem -- same glob+dedupe shape as list_meetings/
+    list_failed, without their "also rescan the default location after a
+    custom storage_path change" migration handling (out of scope for a
+    backfill/testing command)."""
+    seen = set()
+    stems = []
+    for pattern in ("*_summary.json", "*_summary.md"):
+        for f in sorted(output_dir.glob(pattern)):
+            stem = f.stem.replace("_summary", "")
+            if stem not in seen:
+                seen.add(stem)
+                stems.append(stem)
+    return sorted(stems)
+
+
+@cli.command(name='backfill-speaker-embeddings')
+@click.option('--limit', type=int, default=None,
+              help='Process at most N meetings that actually need it (already-processed/no-audio '
+                   'meetings don\'t count against this).')
+@click.option('--extension', 'extension', default=None,
+              help='Only consider recordings with this extension (e.g. "webm"), no auto-detection/fallback to '
+                   'other formats for the same meeting. Default: prefer .wav, else whatever format is present.')
+@click.option('--force', is_flag=True, default=False,
+              help='Reprocess meetings that already have a {stem}_speakers.json sidecar '
+                   '(default: skip them -- diarization + embedding extraction is expensive, '
+                   'sometimes 10+ minutes for a long recording).')
+@click.option('--meeting', 'meeting_stem', default=None,
+              help='Process only this one meeting stem, ignoring --limit/the already-processed skip '
+                   '(always reprocesses it) -- for refreshing a single meeting (e.g. after a sidecar '
+                   'schema change) without re-doing the whole library via --force.')
+def backfill_speaker_embeddings(limit, extension, force, meeting_stem):
+    """Re-diarize + extract speaker embeddings for every existing meeting
+    whose source audio is still on disk, writing {stem}_speakers.json
+    sidecars for src.speaker_suggestions to read.
+
+    Diarizes and embeds only -- explicitly skips ASR/_tag_channel_segments/
+    transcribe_diarised entirely, so this never re-transcribes anything and
+    NEVER touches a meeting's saved transcript file.
+
+    Skips meetings that already have a sidecar by default -- pass --force
+    to redo them all (e.g. after a diarize-sidecar/embedding-quality
+    change), or --meeting <stem> to refresh just one. Meetings with no
+    source recording on disk (keep_recordings defaults to False, so many
+    historical meetings won't have one) are always skipped and reported,
+    never treated as failures. The capture pipeline saves whatever format
+    the source produced (.webm/.wav/.m4a, no single fixed extension) --
+    use --extension to restrict to exactly one format instead of the
+    default auto-detection.
+    """
+    from src.config import get_data_dirs
+    from src.transcriber import WhisperTranscriber, STENO_DIARIZE_TIMEOUT_FLOOR_S, _run_steno_diarize
+    from src.speaker_suggestions import (
+        build_clusters_from_diarization, determine_recording_type,
+        speakers_sidecar_path, write_speakers_sidecar,
+    )
+
+    dirs = get_data_dirs()
+    output_dir = dirs["output"]
+    recordings_dir = dirs["recordings"]
+
+    skipped_already_processed = []
+    if meeting_stem:
+        all_stems = [meeting_stem]
+        stems = [meeting_stem]  # explicitly named -> always (re)process it
+    else:
+        all_stems = _enumerate_meeting_stems(output_dir)
+        stems = []
+        for stem in all_stems:
+            if not force and speakers_sidecar_path(output_dir, stem).exists():
+                skipped_already_processed.append(stem)
+                continue
+            stems.append(stem)
+        if limit:
+            stems = stems[:limit]
+
+    # No model load needed -- _split_stereo_to_channels/_check_rms_energy
+    # are pure audio-file helpers that don't touch instance state.
+    transcriber = WhisperTranscriber.__new__(WhisperTranscriber)
+
+    processed = []
+    skipped_no_audio = []
+    skipped_no_clusters = []
+    errors = []
+
+    for stem in stems:
+        recording_path = _find_recording_file(recordings_dir, stem, extension=extension)
+        if recording_path is None:
+            skipped_no_audio.append(stem)
+            continue
+        try:
+            mic_path, system_path, duration = transcriber._split_stereo_to_channels(recording_path)
+            channel_paths = [("mic", mic_path), ("system", system_path)] if mic_path else [("mic", recording_path)]
+
+            channels_out = {}
+            for channel_name, channel_path in channel_paths:
+                if channel_path is None:
+                    continue
+                has_audio = transcriber._check_rms_energy(channel_path)
+                if not has_audio:
+                    continue
+                timeout = max(STENO_DIARIZE_TIMEOUT_FLOOR_S, int(duration or 0))
+                result = _run_steno_diarize(channel_path, timeout, extra_env=_DIARIZE_BULK_ENV)
+                if not result:
+                    continue
+                segments, embeddings = result
+                if not embeddings:
+                    continue
+
+                clusters = build_clusters_from_diarization(segments, embeddings)
+                if not clusters:
+                    continue
+                channels_out[channel_name] = {
+                    "recording_type": determine_recording_type(channel_name, has_audio=True),
+                    "clusters": clusters,
+                }
+
+            if channels_out:
+                write_speakers_sidecar(output_dir, stem, channels_out)
+                processed.append(stem)
+            else:
+                # A real audio file WAS found and diarization ran against
+                # it -- distinct from skipped_no_audio (no file at all).
+                # These used to share one list, which read as "no audio
+                # found" for a meeting that in fact had audio and simply
+                # produced no usable clusters (e.g. every channel fell
+                # back to legacy single-speaker labeling, or a real
+                # diarization failure) -- actively misleading when
+                # diagnosing why a specific meeting has no sidecar.
+                skipped_no_clusters.append(stem)
+        except Exception as e:
+            logger.warning(f"backfill-speaker-embeddings failed for {stem}: {e}")
+            errors.append({"stem": stem, "error": str(e)})
+
+    print(json.dumps({
+        "success": True,
+        "processed": processed,
+        "skipped_no_audio": skipped_no_audio,
+        "skipped_no_clusters": skipped_no_clusters,
+        "skipped_already_processed": skipped_already_processed,
+        "errors": errors,
+        "total_meetings": len(all_stems),
+    }))
+
+
+@cli.command(name='speaker-suggestion-report')
+def speaker_suggestion_report():
+    """Human-readable accuracy report: runs suggest-speakers over every
+    meeting with a {stem}_speakers.json sidecar (from
+    backfill-speaker-embeddings or the live pipeline) against the real
+    person-profile library, so suggestion quality can be inspected before
+    any approval UI exists. Same purpose as this session's AMI three-bucket
+    reports, but against real meetings instead of a proxy dataset -- see
+    the plan doc's Phase 3."""
+    from src.config import get_config, get_data_dirs
+    from src.speaker_suggestions import (
+        clusters_from_sidecar_channel,
+        merge_same_channel_fragments,
+        suggest_speakers_for_meeting,
+    )
+
+    output_dir = get_data_dirs()["output"]
+    profiles = get_config().get_person_profiles()
+    if not profiles:
+        print("No person profiles stored yet -- nothing to suggest against.")
+        print("Create one with: simple_recorder.py create-person-profile <name>")
+        return
+
+    sidecar_files = sorted(output_dir.glob("*_speakers.json"))
+    if not sidecar_files:
+        print("No speakers sidecars found -- run backfill-speaker-embeddings first.")
+        return
+
+    total_clusters = 0
+    status_counts = {"confirmed": 0, "possible": 0, "none": 0}
+
+    for sidecar_file in sidecar_files:
+        stem = sidecar_file.stem.replace("_speakers", "")
+        try:
+            sidecar = json.loads(sidecar_file.read_text())
+        except (json.JSONDecodeError, OSError) as e:
+            print(f"{stem}: could not read sidecar ({e})")
+            continue
+
+        print(f"=== {stem} ===")
+        for channel_name, channel in (sidecar.get("channels") or {}).items():
+            raw_clusters = clusters_from_sidecar_channel(stem, channel)
+            # Same-recording diarizer fragments of one voice (see the plan
+            # doc's Phase 3.6) collapse before scoring/reporting.
+            clusters, _ = merge_same_channel_fragments(raw_clusters)
+            for sid, (_, context) in clusters.items():
+                if context.merged_from:
+                    print(f"  [{channel_name}] merged: {sid}, {', '.join(context.merged_from)} "
+                          "(same-recording fragments of one voice)")
+            results = suggest_speakers_for_meeting(clusters, profiles)
+            for sid in sorted(results):
+                result = results[sid]
+                total_clusters += 1
+                status_counts[result.status] = status_counts.get(result.status, 0) + 1
+                top = result.candidates[0] if result.candidates else None
+                top_desc = f"{top.display_name!r} @ {top.distance:.4f}" if top else "no candidates"
+                print(f"  [{channel_name}] {sid}: status={result.status} "
+                      f"suggested={result.suggested_name!r} top_candidate={top_desc}")
+
+    print()
+    print(f"=== {total_clusters} clusters across {len(sidecar_files)} meetings ===")
+    for status, count in status_counts.items():
+        print(f"  {status}: {count}")
 
 
 @cli.command()

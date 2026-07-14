@@ -2362,6 +2362,22 @@ ipcMain.handle('get-system-audio-support', async () => {
 // runPythonScript is provided by createBackendCli(...) wired near the top of
 // this file (verbatim body moved to ./backend-cli).
 
+// Recovers a graceful {"success": false, "error": ...} a CLI command printed
+// to stdout right before exiting non-zero (see runPythonScript's err.stdout
+// above) -- without this, a real "already exists"/"not found" message gets
+// discarded in favor of a generic "Python script failed with code 1: <stderr>"
+// wrapper that's useless to a human. Falls back to that generic message when
+// stdout wasn't valid JSON (an actual crash, not a graceful failure).
+function parsePythonFailureJson(error) {
+  try {
+    const parsed = JSON.parse(error.stdout || '');
+    if (parsed && typeof parsed === 'object' && parsed.success === false) return parsed;
+  } catch (_) {
+    // stdout wasn't JSON -- fall through to the generic error below.
+  }
+  return { success: false, error: error.message };
+}
+
 async function getBackendStatusInternal(silent = true) {
   const result = await runPythonScript('simple_recorder.py', ['status'], silent);
   return { success: true, status: result };
@@ -7518,6 +7534,83 @@ ipcMain.handle('set-default-template', async (_e, id) => {
 ipcMain.handle('reset-template', async (_e, id) => {
   try {
     const out = await runPythonScript('simple_recorder.py', ['reset-template', id]);
+    return JSON.parse(out);
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('list-person-profiles', async () => {
+  try {
+    const out = await runPythonScript('simple_recorder.py', ['list-person-profiles']);
+    return { success: true, ...JSON.parse(out) };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('suggest-speakers', async (_e, meetingStem) => {
+  try {
+    const out = await runPythonScript('simple_recorder.py', ['suggest-speakers', meetingStem]);
+    return JSON.parse(out);
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('confirm-speaker', async (_e, params) => {
+  try {
+    const args = [
+      'confirm-speaker',
+      params.meetingStem,
+      params.channel,
+      params.diarizationSpeakerId,
+    ];
+    if (params.personId) args.push('--person-id', params.personId);
+    if (params.newPersonName) args.push('--new-person', params.newPersonName);
+    // The UI path always relabels the saved transcript on confirm; the
+    // bare CLI/backfill-validation workflow leaves this flag off by
+    // default (see the plan doc's Phase 4 section).
+    args.push('--relabel-transcript');
+    const out = await runPythonScript('simple_recorder.py', args);
+    return JSON.parse(out);
+  } catch (error) {
+    return parsePythonFailureJson(error);
+  }
+});
+
+ipcMain.handle('create-person-profile', async (_e, displayName) => {
+  try {
+    const out = await runPythonScript('simple_recorder.py', ['create-person-profile', displayName]);
+    return JSON.parse(out);
+  } catch (error) {
+    return parsePythonFailureJson(error);
+  }
+});
+
+ipcMain.handle('rename-person-profile', async (_e, id, displayName) => {
+  try {
+    const out = await runPythonScript('simple_recorder.py', ['rename-person-profile', id, displayName]);
+    return JSON.parse(out);
+  } catch (error) {
+    return parsePythonFailureJson(error);
+  }
+});
+
+ipcMain.handle('delete-person-profile', async (_e, id) => {
+  try {
+    const out = await runPythonScript('simple_recorder.py', ['delete-person-profile', id]);
+    return JSON.parse(out);
+  } catch (error) {
+    return parsePythonFailureJson(error);
+  }
+});
+
+ipcMain.handle('get-speaker-sample-audio', async (_e, meetingStem, channel, diarizationSpeakerId) => {
+  try {
+    const out = await runPythonScript('simple_recorder.py', [
+      'get-speaker-sample-audio', meetingStem, channel, diarizationSpeakerId,
+    ]);
     return JSON.parse(out);
   } catch (error) {
     return { success: false, error: error.message };
