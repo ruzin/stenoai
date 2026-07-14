@@ -14,6 +14,15 @@ const STACK_LAYERS = [
   { label: "Summary", type: "summary", y: 200 },
 ];
 
+// Per-layer glyphs drawn to the left of each stack row's label. Stroke styling
+// (colour / width / linecap) is applied by the wrapping <g> at the call site.
+const STACK_GLYPHS = {
+  audio: `<line x1="2" y1="6" x2="2" y2="12" /><line x1="6" y1="2" x2="6" y2="16" /><line x1="10" y1="4" x2="10" y2="14" /><line x1="14" y1="6" x2="14" y2="12" />`,
+  transcript: `<line x1="1" y1="4" x2="17" y2="4" /><line x1="1" y1="9" x2="17" y2="9" /><line x1="1" y1="14" x2="11" y2="14" />`,
+  model: `<rect x="4" y="4" width="10" height="10" rx="2" /><line x1="9" y1="0" x2="9" y2="4" /><line x1="9" y1="14" x2="9" y2="18" /><line x1="0" y1="9" x2="4" y2="9" /><line x1="14" y1="9" x2="18" y2="9" />`,
+  summary: `<rect x="3" y="1" width="12" height="16" rx="2" /><line x1="6" y1="6" x2="12" y2="6" /><line x1="6" y1="9" x2="12" y2="9" /><line x1="6" y1="12" x2="10" y2="12" />`,
+};
+
 const LANG_ROWS = [
   ["English", "Español", "中文", "Français", "Deutsch", "Português", "日本語", "한국어", "Italiano", "Русский"],
   ["العربية", "Nederlands", "Polski", "Türkçe", "Українська", "Ελληνικά", "हिंदी", "Tiếng Việt", "Čeština", "Svenska"],
@@ -27,6 +36,48 @@ const AI_SPOKES = [
   { id: "spoke-gemini",  d: "M150 102 C150 136, 235 136, 235 170", delay: 1.6 },
 ];
 
+// Pentagon of badges around the center hub, 72° apart starting from the top.
+const MEETING_BADGES = [
+  { id: "spoke-meet",     key: "googlemeet", cx: 150.0,  cy: 45.0,   delay: 0 },
+  { id: "spoke-zoom",     key: "zoom",       cx: 240.35, cy: 110.64, delay: 0.48 },
+  { id: "spoke-teams",    key: "teams",      cx: 205.84, cy: 216.86, delay: 0.96 },
+  { id: "spoke-slack",    key: "slack",      cx: 94.16,  cy: 216.86, delay: 1.44 },
+  { id: "spoke-inperson", key: "inperson",   cx: 59.65,  cy: 110.64, delay: 1.92 },
+];
+
+// Official app-icon marks for each platform, downloaded from each brand's own
+// asset source (Zoom app icon MIT-licensed via Garuda Technology's sketch-icons;
+// Google Meet, Microsoft Teams and Slack are each brand's current official app icon).
+// Gradient/mask/filter ids are namespaced per brand to avoid collisions when several
+// are inlined on the same page. Colors are unmodified from the source files.
+const MEETING_LOGOS = {
+  googlemeet: {
+    w: 22,
+    h: 17.25,
+    svg: `<svg width="22" height="17.25" fill="none" viewBox="0 0 176 138" xmlns="http://www.w3.org/2000/svg"><path fill="url(#gmeet-a)" d="M 102.015,81.88 C 95.186,77.162 95.094,67.102 101.836,62.26 L 157,22.643 c 7.94,-5.701 19,-0.038 19,9.737 v 77.755 c 0,9.675 -10.861,15.359 -18.821,9.859 z" style="fill:url(#gmeet-a)" /><path fill="url(#gmeet-b)" d="M 0,44 C 0,19.7 19.7,0 44,0 h 64 c 11.046,0 20,8.954 20,20 v 98 c 0,11.046 -8.954,20 -20,20 H 20 C 8.9539999,138 0,129.046 0,118 Z" style="fill:url(#gmeet-b)" /><mask id="gmeet-e" width="129" height="138" x="8" y="27" maskUnits="userSpaceOnUse"><path fill="#ffffff" d="M 8,71 C 8,46.7 27.7,27 52,27 h 64 c 11.046,0 20,8.954 20,20 v 98 c 0,11.046 -8.954,20 -20,20 H 28 C 16.954,165 8,156.046 8,145 Z" /></mask><g filter="url(#gmeet-c)" mask="url(#gmeet-e)" transform="translate(-8,-27)"><path fill="url(#gmeet-f)" d="M 73.906,99.198 183.906,36 v 124 z" style="fill:url(#gmeet-f)" /></g><circle cx="30" cy="108" r="14" fill="#ffffff" /><defs><linearGradient id="gmeet-a" x1="128.8" x2="227.2" y1="104.44" y2="104.44" gradientUnits="userSpaceOnUse" gradientTransform="translate(-8,-27)"><stop stop-color="#f6a100" /><stop offset="1" stop-color="#ffbe00" /></linearGradient><linearGradient id="gmeet-f" x1="136.22" x2="78.5" y1="91.32" y2="91.190002" gradientUnits="userSpaceOnUse"><stop offset=".15" stop-color="#ffb5e8" /><stop offset="1" stop-color="#ffdbf5" stop-opacity="0" /></linearGradient><radialGradient id="gmeet-b" cx="0" cy="0" r="1" gradientTransform="matrix(-159.725,0,0,-135.852,152.325,69)" gradientUnits="userSpaceOnUse"><stop offset=".15" stop-color="#ffe921" /><stop offset="1" stop-color="#fec700" /></radialGradient><filter id="gmeet-c" width="166" height="180" x="45.91" y="8" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse"><feFlood flood-opacity="0" result="BackgroundImageFix" /><feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape" mode="normal" /><feGaussianBlur result="effect1_foregroundBlur_37584_9338" stdDeviation="14" /></filter></defs></svg>`,
+  },
+  zoom: {
+    w: 22,
+    h: 22,
+    svg: `<svg width="22" height="22" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M2 11.6C2 8.23969 2 6.55953 2.65396 5.27606C3.2292 4.14708 4.14708 3.2292 5.27606 2.65396C6.55953 2 8.23969 2 11.6 2H20.4C23.7603 2 25.4405 2 26.7239 2.65396C27.8529 3.2292 28.7708 4.14708 29.346 5.27606C30 6.55953 30 8.23969 30 11.6V20.4C30 23.7603 30 25.4405 29.346 26.7239C28.7708 27.8529 27.8529 28.7708 26.7239 29.346C25.4405 30 23.7603 30 20.4 30H11.6C8.23969 30 6.55953 30 5.27606 29.346C4.14708 28.7708 3.2292 27.8529 2.65396 26.7239C2 25.4405 2 23.7603 2 20.4V11.6Z" fill="#4087FC"/><path d="M8.26667 10C7.56711 10 7 10.6396 7 11.4286V18.3571C7 20.369 8.44612 22 10.23 22L17.7333 21.9286C18.4329 21.9286 19 21.289 19 20.5V13.5C19 11.4881 17.2839 10 15.5 10L8.26667 10Z" fill="white"/><path d="M20.7122 12.7276C20.2596 13.1752 20 13.8211 20 14.5V17.3993C20 18.0782 20.2596 18.7242 20.7122 19.1717L23.5288 21.6525C24.1019 22.2191 25 21.7601 25 20.9005V11.1352C25 10.2755 24.1019 9.81654 23.5288 10.3832L20.7122 12.7276Z" fill="white"/></svg>`,
+  },
+  teams: {
+    w: 20.84,
+    h: 22,
+    svg: `<svg width="20.84" height="22" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="4 4 36 38"><path fill="url(#msteams-a)" d="M21.9999 20h12c3.3137 0 6 2.6863 6 6v10c0 3.3137-2.6863 6-6 6s-6-2.6863-6-6V26c0-3.3137-2.6863-6-6-6"/><path fill="url(#msteams-b)" d="M7.99988 24c0-3.3137 2.68632-6 6.00002-6h8c3.3137 0 6 2.6863 6 6v12c0 3.3137 2.6863 6 6 6l-16.0001-.0001c-5.5228 0-9.99992-4.4771-9.99992-10z"/><path fill="url(#msteams-c)" fill-opacity=".7" d="M7.99988 24c0-3.3137 2.68632-6 6.00002-6h8c3.3137 0 6 2.6863 6 6v12c0 3.3137 2.6863 6 6 6l-16.0001-.0001c-5.5228 0-9.99992-4.4771-9.99992-10z"/><path fill="url(#msteams-d)" fill-opacity=".7" d="M7.99988 24c0-3.3137 2.68632-6 6.00002-6h8c3.3137 0 6 2.6863 6 6v12c0 3.3137 2.6863 6 6 6l-16.0001-.0001c-5.5228 0-9.99992-4.4771-9.99992-10z"/><path fill="url(#msteams-e)" d="M32.9999 18c2.7614 0 5-2.2386 5-5s-2.2386-5-5-5-5 2.2386-5 5 2.2386 5 5 5"/><path fill="url(#msteams-f)" fill-opacity=".46" d="M32.9999 18c2.7614 0 5-2.2386 5-5s-2.2386-5-5-5-5 2.2386-5 5 2.2386 5 5 5"/><path fill="url(#msteams-g)" fill-opacity=".4" d="M32.9999 18c2.7614 0 5-2.2386 5-5s-2.2386-5-5-5-5 2.2386-5 5 2.2386 5 5 5"/><path fill="url(#msteams-h)" d="M17.9999 16c3.3137 0 6-2.6863 6-6 0-3.31371-2.6863-6-6-6s-6 2.68629-6 6c0 3.3137 2.6863 6 6 6"/><path fill="url(#msteams-i)" fill-opacity=".6" d="M17.9999 16c3.3137 0 6-2.6863 6-6 0-3.31371-2.6863-6-6-6s-6 2.68629-6 6c0 3.3137 2.6863 6 6 6"/><path fill="url(#msteams-j)" fill-opacity=".5" d="M17.9999 16c3.3137 0 6-2.6863 6-6 0-3.31371-2.6863-6-6-6s-6 2.68629-6 6c0 3.3137 2.6863 6 6 6"/><rect width="16" height="16" x="4" y="23" fill="url(#msteams-k)" rx="3.25"/><rect width="16" height="16" x="4" y="23" fill="url(#msteams-l)" fill-opacity=".7" rx="3.25"/><path fill="#fff" d="M15.4792 28.1054h-2.4471v7.466h-2.0648v-7.466H8.52014v-1.6768h6.95906z"/><defs><radialGradient id="msteams-a" cx="0" cy="0" r="1" gradientTransform="matrix(13.4784 0 0 33.2694 39.7967 22.1739)" gradientUnits="userSpaceOnUse"><stop stop-color="#a98aff"/><stop offset=".14" stop-color="#8c75ff"/><stop offset=".565" stop-color="#5f50e2"/><stop offset=".9" stop-color="#3c2cb8"/></radialGradient><radialGradient id="msteams-b" cx="0" cy="0" r="1" gradientTransform="rotate(68.1539 -7.71566095 14.71355834)scale(32.752 33.1231)" gradientUnits="userSpaceOnUse"><stop stop-color="#85c2ff"/><stop offset=".69" stop-color="#7588ff"/><stop offset="1" stop-color="#6459fe"/></radialGradient><radialGradient id="msteams-d" cx="0" cy="0" r="1" gradientTransform="rotate(113.326 8.09285255 17.64474501)scale(19.2186 15.4273)" gradientUnits="userSpaceOnUse"><stop stop-color="#bd96ff"/><stop offset=".686685" stop-color="#bd96ff" stop-opacity="0"/></radialGradient><radialGradient id="msteams-e" cx="0" cy="0" r="1" gradientTransform="matrix(0 -10 12.6216 0 32.9999 11.5714)" gradientUnits="userSpaceOnUse"><stop offset=".268201" stop-color="#6868f7"/><stop offset="1" stop-color="#3923b1"/></radialGradient><radialGradient id="msteams-f" cx="0" cy="0" r="1" gradientTransform="rotate(40.0516 -.03068196 44.8729095)scale(7.14629 10.3363)" gradientUnits="userSpaceOnUse"><stop offset=".270711" stop-color="#a1d3ff"/><stop offset=".813393" stop-color="#a1d3ff" stop-opacity="0"/></radialGradient><radialGradient id="msteams-g" cx="0" cy="0" r="1" gradientTransform="rotate(-41.6581 32.11799918 -43.41948423)scale(8.51275 20.8824)" gradientUnits="userSpaceOnUse"><stop stop-color="#e3acfd"/><stop offset=".816041" stop-color="#9fa2ff" stop-opacity="0"/></radialGradient><radialGradient id="msteams-h" cx="0" cy="0" r="1" gradientTransform="matrix(0 -12 15.146 0 17.9999 8.28571)" gradientUnits="userSpaceOnUse"><stop offset=".268201" stop-color="#8282ff"/><stop offset="1" stop-color="#3923b1"/></radialGradient><radialGradient id="msteams-i" cx="0" cy="0" r="1" gradientTransform="rotate(40.0516 -3.15465147 21.41641466)scale(8.57554 12.4035)" gradientUnits="userSpaceOnUse"><stop offset=".270711" stop-color="#a1d3ff"/><stop offset=".813393" stop-color="#a1d3ff" stop-opacity="0"/></radialGradient><radialGradient id="msteams-j" cx="0" cy="0" r="1" gradientTransform="rotate(-41.6581 20.38180375 -26.51566158)scale(10.2153 25.0589)" gradientUnits="userSpaceOnUse"><stop stop-color="#e3acfd"/><stop offset=".816041" stop-color="#9fa2ff" stop-opacity="0"/></radialGradient><radialGradient id="msteams-k" cx="0" cy="0" r="1" gradientTransform="rotate(45 -25.76345597 16.32842712)scale(22.6274)" gradientUnits="userSpaceOnUse"><stop offset=".046875" stop-color="#688eff"/><stop offset=".946875" stop-color="#230f94"/></radialGradient><radialGradient id="msteams-l" cx="0" cy="0" r="1" gradientTransform="matrix(0 11.2 -13.0702 0 12 32.6)" gradientUnits="userSpaceOnUse"><stop offset=".570647" stop-color="#6965f6" stop-opacity="0"/><stop offset="1" stop-color="#8f8fff"/></radialGradient><linearGradient id="msteams-c" x1="20.5936" x2="20.5936" y1="18" y2="42" gradientUnits="userSpaceOnUse"><stop offset=".801159" stop-color="#6864f6" stop-opacity="0"/><stop offset="1" stop-color="#5149de"/></linearGradient></defs></svg>`,
+  },
+  slack: {
+    w: 16,
+    h: 16,
+    svg: `<svg width="16" height="16" viewBox="0 0 127 127" xmlns="http://www.w3.org/2000/svg"><path d="M27.2 80c0 7.3-5.9 13.2-13.2 13.2C6.7 93.2.8 87.3.8 80c0-7.3 5.9-13.2 13.2-13.2h13.2V80zm6.6 0c0-7.3 5.9-13.2 13.2-13.2 7.3 0 13.2 5.9 13.2 13.2v33c0 7.3-5.9 13.2-13.2 13.2-7.3 0-13.2-5.9-13.2-13.2V80z" fill="#E01E5A"/><path d="M47 27c-7.3 0-13.2-5.9-13.2-13.2C33.8 6.5 39.7.6 47 .6c7.3 0 13.2 5.9 13.2 13.2V27H47zm0 6.7c7.3 0 13.2 5.9 13.2 13.2 0 7.3-5.9 13.2-13.2 13.2H13.9C6.6 60.1.7 54.2.7 46.9c0-7.3 5.9-13.2 13.2-13.2H47z" fill="#36C5F0"/><path d="M99.9 46.9c0-7.3 5.9-13.2 13.2-13.2 7.3 0 13.2 5.9 13.2 13.2 0 7.3-5.9 13.2-13.2 13.2H99.9V46.9zm-6.6 0c0 7.3-5.9 13.2-13.2 13.2-7.3 0-13.2-5.9-13.2-13.2V13.8C66.9 6.5 72.8.6 80.1.6c7.3 0 13.2 5.9 13.2 13.2v33.1z" fill="#2EB67D"/><path d="M80.1 99.8c7.3 0 13.2 5.9 13.2 13.2 0 7.3-5.9 13.2-13.2 13.2-7.3 0-13.2-5.9-13.2-13.2V99.8h13.2zm0-6.6c-7.3 0-13.2-5.9-13.2-13.2 0-7.3 5.9-13.2 13.2-13.2h33.1c7.3 0 13.2 5.9 13.2 13.2 0 7.3-5.9 13.2-13.2 13.2H80.1z" fill="#ECB22E"/></svg>`,
+  },
+  inperson: {
+    w: 18,
+    h: 18,
+    svg: `<svg viewBox="0 0 24 24" width="18" height="18" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="var(--fg-1)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><path d="M16 3.128a4 4 0 0 1 0 7.744" /><path d="M22 21v-2a4 4 0 0 0-3-3.87" /><circle cx="9" cy="7" r="4" /></svg>`,
+  },
+};
+
 const CODE_LINES = [
   { text: "def summarize(text):", y: 64, opacity: 0.92 },
   { text: "    # on-device only", y: 94, opacity: 0.4 },
@@ -36,13 +87,15 @@ const CODE_LINES = [
 ];
 
 const FEATURES = [
-  { kind: "chat-with-notes", title: "Chat with your notes", body: "Ask questions across any note or recording. Surface decisions, action items, and key themes instantly.", wide: true },
-  { kind: "ai-notepad", title: "AI notepad", body: "Jot notes during a recording. They're merged with the transcript to shape the AI summary." },
+  { kind: "no-meeting-bots", title: "No meeting bots", body: "No bot joins your call, no unfamiliar face waiting in the room. Steno listens through your system audio instead — the meeting looks exactly like it always does.", wide: true },
+  { kind: "works-with-any-meeting", title: "Works with any meeting", body: "Zoom, Google Meet, Microsoft Teams, Slack huddles. Steno works the same way every time." },
   { kind: "sovereign-ai", title: "Sovereign AI", body: "You own the entire stack — models and data stay on your device or network, under your control. Works offline on planes, in hospitals, in restricted areas." },
+  { kind: "chat-with-notes", title: "Chat with your notes", body: "Ask questions across any note or recording. Surface decisions, action items, and key themes instantly.", wide: true },
   { kind: "no-data-leaves", title: "No data leaves", body: "Zero network requests after install. Your device is functionally air-gapped from the moment you launch it." },
+  { kind: "ai-notepad", title: "AI notepad", body: "Jot notes during a recording. They're merged with the transcript to shape the AI summary." },
   { kind: "languages", title: "99 languages", body: "Whisper auto-detects the language spoken. Works equally well across multilingual meetings." },
-  { kind: "ai-agent", title: "AI agent ready", body: "Summaries and notes save as plain Markdown. Pipe into any AI agent, vault, or workflow your team already runs.", wide: true },
   { kind: "open-source", title: "Open source", body: "Every line of code is public. Audit it yourself, fork it, or verify our privacy claims — nothing is hidden behind a black box." },
+  { kind: "ai-agent", title: "AI agent ready", body: "Summaries and notes save as plain Markdown. Pipe into any AI agent, vault, or workflow your team already runs.", wide: true },
 ];
 ---
 
@@ -80,6 +133,71 @@ const FEATURES = [
             {kind === "chat-with-notes" && <ChatWithNotesImage client:visible />}
             {kind === "ai-notepad" && <AiNotepadImage client:visible />}
 
+            {kind === "no-meeting-bots" && (
+              <div
+                style={{
+                  position: "absolute",
+                  inset: "28px",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <img
+                  src="/images/no-meeting-bots.jpg"
+                  alt="A video call between two people, with no recording bot present in the call"
+                  width="1400"
+                  height="886"
+                  style={{
+                    maxWidth: "100%",
+                    maxHeight: "100%",
+                    width: "auto",
+                    height: "auto",
+                    borderRadius: 10,
+                    border: "1px solid var(--border-subtle)",
+                    boxShadow: "0 4px 24px rgba(27,27,25,0.12), 0 1px 4px rgba(27,27,25,0.06)",
+                    display: "block",
+                  }}
+                />
+              </div>
+            )}
+
+            {kind === "works-with-any-meeting" && (
+              <svg viewBox="0 0 300 285" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg" style={{ display: "block" }}>
+                <defs>
+                  {MEETING_BADGES.map(({ id, cx, cy }) => (
+                    <path id={id} d={`M${cx} ${cy} L150 140`} fill="none" />
+                  ))}
+                </defs>
+                {MEETING_BADGES.map(({ cx, cy }) => (
+                  <path d={`M150 140 L${cx} ${cy}`} stroke="var(--border)" stroke-width="1.5" fill="none" />
+                ))}
+                {MEETING_BADGES.map(({ id, delay }) => (
+                  <circle r="3" fill="#8A8A83">
+                    <animate attributeName="opacity" values="0;1;1;0" keyTimes="0;0.12;0.88;1" dur="2.4s" begin={`${delay}s`} repeatCount="indefinite" />
+                    <animateMotion dur="2.4s" begin={`${delay}s`} repeatCount="indefinite" calcMode="linear">
+                      <mpath href={`#${id}`} />
+                    </animateMotion>
+                  </circle>
+                ))}
+                {MEETING_BADGES.map(({ key, cx, cy }) => {
+                  const logo = MEETING_LOGOS[key];
+                  return (
+                    <>
+                      <rect x={cx - 23} y={cy - 23} width="46" height="46" rx="11" fill="var(--surface-raised)" stroke="var(--border)" stroke-width="1" />
+                      <g transform={`translate(${cx - logo.w / 2},${cy - logo.h / 2})`} set:html={logo.svg} />
+                    </>
+                  );
+                })}
+                <rect x="127" y="117" width="46" height="46" rx="11" fill="var(--surface-raised)" stroke="var(--border)" stroke-width="1" />
+                <g transform="translate(150,140) scale(0.47)" stroke="var(--fg-1)" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" fill="none">
+                  <g transform="translate(-32,-32)">
+                    <path d={STENO_MARK_PATH} />
+                  </g>
+                </g>
+              </svg>
+            )}
+
             {kind === "sovereign-ai" && (
               <svg viewBox="0 0 300 285" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg" style={{ display: "block" }}>
                 <defs>
@@ -93,9 +211,10 @@ const FEATURES = [
                   </clipPath>
                 </defs>
                 <rect x="48" y="34" width="204" height="218" rx="16" fill="var(--surface-raised)" stroke="var(--border)" stroke-width="1.5" />
-                {STACK_LAYERS.map(({ label, y }) => (
+                {STACK_LAYERS.map(({ label, type, y }) => (
                   <g>
                     <rect x="64" y={y} width="172" height="36" rx="10" fill="var(--surface-hover)" stroke="var(--border-subtle)" stroke-width="1" />
+                    <g transform={`translate(76,${y + 9})`} stroke="var(--fg-2)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" fill="none" set:html={STACK_GLYPHS[type]} />
                     <text x="104" y={y + 18} dominant-baseline="central" font-size="13" font-weight="500" fill="var(--fg-1)" font-family="var(--font-sans)">
                       {label}
                     </text>
@@ -195,12 +314,12 @@ const FEATURES = [
                     <path d={STENO_MARK_PATH} />
                   </g>
                 </g>
-                <rect x="42" y="170" width="46" height="46" rx="11" fill="#F0EEE6" />
+                <rect x="42" y="170" width="46" height="46" rx="11" fill="var(--surface-raised)" stroke="var(--border)" stroke-width="1" />
                 <g transform="translate(53,181)" fill="#D97757">
                   <path d="m4.7144 15.9555 4.7174-2.6471.079-.2307-.079-.1275h-.2307l-.7893-.0486-2.6956-.0729-2.3375-.0971-2.2646-.1214-.5707-.1215-.5343-.7042.0546-.3522.4797-.3218.686.0608 1.5179.1032 2.2767.1578 1.6514.0972 2.4468.255h.3886l.0546-.1579-.1336-.0971-.1032-.0972L6.973 9.8356l-2.55-1.6879-1.3356-.9714-.7225-.4918-.3643-.4614-.1578-1.0078.6557-.7225.8803.0607.2246.0607.8925.686 1.9064 1.4754 2.4893 1.8336.3643.3035.1457-.1032.0182-.0728-.164-.2733-1.3539-2.4467-1.445-2.4893-.6435-1.032-.17-.6194c-.0607-.255-.1032-.4674-.1032-.7285L6.287.1335 6.6997 0l.9957.1336.419.3642.6192 1.4147 1.0018 2.2282 1.5543 3.0296.4553.8985.2429.8318.091.255h.1579v-.1457l.1275-1.706.2368-2.0947.2307-2.6957.0789-.7589.3764-.9107.7468-.4918.5828.2793.4797.686-.0668.4433-.2853 1.8517-.5586 2.9021-.3643 1.9429h.2125l.2429-.2429.9835-1.3053 1.6514-2.0643.7286-.8196.85-.9046.5464-.4311h1.0321l.759 1.1293-.34 1.1657-1.0625 1.3478-.8804 1.1414-1.2628 1.7-.7893 1.36.0729.1093.1882-.0183 2.8535-.607 1.5421-.2794 1.8396-.3157.8318.3886.091.3946-.3278.8075-1.967.4857-2.3072.4614-3.4364.8136-.0425.0304.0486.0607 1.5482.1457.6618.0364h1.621l3.0175.2247.7892.522.4736.6376-.079.4857-1.2142.6193-1.6393-.3886-3.825-.9107-1.3113-.3279h-.1822v.1093l1.0929 1.0686 2.0035 1.8092 2.5075 2.3314.1275.5768-.3218.4554-.34-.0486-2.2039-1.6575-.85-.7468-1.9246-1.621h-.1275v.17l.4432.6496 2.3436 3.5214.1214 1.0807-.17.3521-.6071.2125-.6679-.1214-1.3721-1.9246L14.38 17.959l-1.1414-1.9428-.1397.079-.674 7.2552-.3156.3703-.7286.2793-.6071-.4614-.3218-.7468.3218-1.4753.3886-1.9246.3157-1.53.2853-1.9004.17-.6314-.0121-.0425-.1397.0182-1.4328 1.9672-2.1796 2.9446-1.7243 1.8456-.4128.164-.7164-.3704.0667-.6618.4008-.5889 2.386-3.0357 1.4389-1.882.929-1.0868-.0062-.1579h-.0546l-6.3385 4.1164-1.1293.1457-.4857-.4554.0608-.7467.2307-.2429 1.9064-1.3114Z" />
                 </g>
-                <rect x="127" y="170" width="46" height="46" rx="11" fill="#111111" />
-                <g transform="translate(138,181)" fill="white">
+                <rect x="127" y="170" width="46" height="46" rx="11" fill="var(--surface-raised)" stroke="var(--border)" stroke-width="1" />
+                <g transform="translate(138,181)" fill="var(--fg-1)">
                   <path d="M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z" />
                 </g>
                 <rect x="212" y="170" width="46" height="46" rx="11" fill="var(--surface-raised)" stroke="var(--border)" stroke-width="1" />
