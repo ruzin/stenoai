@@ -2,7 +2,7 @@
 // A fanned cluster of meeting-provider app tiles (Slack, Teams, Zoom, Google
 // Meet), overlapping and each tilted at its own angle. Sits above the H1 in
 // place of the old status pill — a compact "works with all your tools" cue.
-// The tiles idle-bob gently and lift/straighten on hover. Pure CSS, no JS.
+// The tiles idle-bob gently. Pure CSS, no JS.
 const PROVIDERS = [
   { slug: "slack",       name: "Slack",           rotate: -11, delay: "0s"    },
   { slug: "teams",       name: "Microsoft Teams", rotate: 6,   delay: "-1s"   },
@@ -47,7 +47,7 @@ const PROVIDERS = [
     margin-left: -13px;
   }
 
-  /* Stack left-to-right so the fan reads cleanly; hover jumps to the top. */
+  /* Stack left-to-right so the fan reads cleanly. */
   .pc-tile:nth-child(1) { z-index: 1; }
   .pc-tile:nth-child(2) { z-index: 2; }
   .pc-tile:nth-child(3) { z-index: 3; }

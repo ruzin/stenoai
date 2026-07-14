@@ -1,5 +1,7 @@
 # Steno marketing website
 
+Part of the [Steno](https://github.com/ruzin/stenoai) project, licensed under [MIT](../LICENSE).
+
 Built with [Astro](https://astro.build) — static output, React islands for
 interactive pieces (nav, FAQ accordion, animated hero demo), Tailwind v4.
 

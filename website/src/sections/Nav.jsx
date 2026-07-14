@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { Github, Download, Menu, X, ChevronDown, Landmark, Shield, Scale, Stethoscope, Banknote, Briefcase } from "lucide-react";
-import { m as Motion, AnimatePresence, LazyMotion, domMax } from "framer-motion";
+import { m as Motion, AnimatePresence, LazyMotion, domAnimation } from "framer-motion";
 import { StenoMark, Wordmark } from "../components/Brand";
 import { ThemeToggle } from "../components/ThemeToggle";
 import { trackDownload, trackGitHub } from "../analytics";
@@ -196,7 +196,7 @@ export function Nav({ subpage = false }) {
   }, []);
 
   return (
-    <LazyMotion features={domMax} strict={false}>
+    <LazyMotion features={domAnimation} strict={false}>
     <nav
       className="sticky top-0 z-40 transition-shadow"
       style={{
