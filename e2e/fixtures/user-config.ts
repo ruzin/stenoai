@@ -102,6 +102,12 @@ export interface FixtureMeetingMarkdown {
   summaryMarkdown: string;
   transcript: string;
   notes?: string;
+  /**
+   * Extra frontmatter keys appended verbatim (e.g. `{ notes_stale: true }`,
+   * `{ processing: true }`). Lets a spec seed the optional markers the detail
+   * parser must surface into `session_info` without a real record/append run.
+   */
+  frontmatter?: Record<string, string | number | boolean>;
 }
 
 /**
@@ -149,6 +155,9 @@ export function writeMeetingMarkdown(
     `duration_seconds: 0`,
     `language: "en"`,
     `is_diarised: false`,
+    ...Object.entries(meeting.frontmatter ?? {}).map(([k, v]) =>
+      typeof v === 'string' ? `${k}: "${escapeYaml(v)}"` : `${k}: ${v}`,
+    ),
     '---',
     '',
     meeting.summaryMarkdown,

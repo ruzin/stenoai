@@ -2004,6 +2004,20 @@ function parseMeetingMarkdown(content, mdPath) {
   if (meta.notes_generated === false) {
     sessionInfo.notes_generated = false;
   }
+  // Mirror the Python list parser (_parse_meeting_markdown): the detail page
+  // needs these markers too, or its Generate-notes CTA / processing affordance
+  // never fires. notes_stale drives the floating "Generate notes" CTA after a
+  // continue-recording append; is_live_transcript flags a live-sourced note;
+  // processing is the instant-stop "finishing up" placeholder state.
+  if (meta.notes_stale) {
+    sessionInfo.notes_stale = true;
+  }
+  if (meta.is_live_transcript) {
+    sessionInfo.is_live_transcript = true;
+  }
+  if (meta.processing) {
+    sessionInfo.processing = true;
+  }
 
   return {
     session_info: sessionInfo,
