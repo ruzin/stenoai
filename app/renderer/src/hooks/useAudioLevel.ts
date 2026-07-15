@@ -32,15 +32,25 @@ export function useAudioLevel({
   );
   // Mirrors the same pinned-device setting the actual recording capture uses
   // (useSystemAudioCapture.ts), so this level meter visualizes the mic that's
-  // actually being recorded rather than always the OS default.
+  // actually being recorded rather than always the OS default. Tracked live
+  // here, but the capture effect below only reads it at the moment a session
+  // STARTS (enabled flips false -> true) and freezes it for that session's
+  // duration — matching useSystemAudioCapture.ts's own semantics, where the
+  // pin is read once at recording start, not live. Without that freeze,
+  // changing the Settings > Microphone pin mid-recording would make this
+  // meter visualize a DIFFERENT device than what's actually being captured.
   const microphone = useMicrophoneSetting();
-  const pinnedDeviceId = microphone.data?.device_id ?? null;
+  const pinnedDeviceIdRef = React.useRef<string | null>(null);
+  React.useEffect(() => {
+    pinnedDeviceIdRef.current = microphone.data?.device_id ?? null;
+  }, [microphone.data?.device_id]);
 
   React.useEffect(() => {
     if (!enabled) {
       setLevels(new Array(bars).fill(floor));
       return;
     }
+    const pinnedDeviceId = pinnedDeviceIdRef.current;
 
     let cancelled = false;
     let stream: MediaStream | null = null;
@@ -108,7 +118,7 @@ export function useAudioLevel({
       if (ctx) ctx.close().catch(() => {});
       if (stream) stream.getTracks().forEach((t) => t.stop());
     };
-  }, [enabled, bars, smoothing, floor, pinnedDeviceId]);
+  }, [enabled, bars, smoothing, floor]);
 
   return levels;
 }

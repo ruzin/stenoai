@@ -75,11 +75,20 @@ class ConfigMicrophoneTests(unittest.TestCase):
 
     def test_set_microphone_device_persists_id_and_label(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
-            config = Config(config_path=Path(tmp_dir) / "config.json")
+            path = Path(tmp_dir) / "config.json"
+            config = Config(config_path=path)
             success = config.set_microphone_device("abc123", "USB Microphone")
             self.assertTrue(success)
             self.assertEqual(
                 config.get_microphone_device(),
+                {"device_id": "abc123", "label": "USB Microphone"},
+            )
+            # Round-trip via a fresh Config instance — get_microphone_device()
+            # reads the in-memory _config dict directly, so without this a
+            # silently-failed _save() would still pass.
+            reloaded = Config(config_path=path)
+            self.assertEqual(
+                reloaded.get_microphone_device(),
                 {"device_id": "abc123", "label": "USB Microphone"},
             )
 

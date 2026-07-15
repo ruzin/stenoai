@@ -394,6 +394,18 @@ describe('GeneralTab Microphone setting', () => {
 
     expect(h.setMicrophone.mutate).toHaveBeenCalledWith({ deviceId: 'default', label: '' });
   });
+
+  // No dedicated test for "re-selecting the already-pinned disconnected
+  // device preserves its stored label" (the fix for the label-overwrite bug
+  // above onValueChange in GeneralTab.tsx): Radix's SelectItem.handleSelect
+  // fires via onClick only when pointerTypeRef reads 'mouse' (set by a prior
+  // real pointerdown/pointermove) or via onPointerUp otherwise — a bare
+  // fireEvent.click on the CURRENTLY-selected item doesn't reliably trigger
+  // either path in jsdom, unlike selecting a different item (which the tests
+  // above cover fine). The fix itself is a one-line, side-effect-free
+  // fallback verified by manual reasoning against Radix's source
+  // (SelectItem.handleSelect calls context.onValueChange(value)
+  // unconditionally, including for the already-selected value).
 });
 
 describe('GeneralTab Record system audio — Screen Recording permission', () => {
@@ -471,6 +483,24 @@ describe('GeneralTab Record system audio — Screen Recording permission', () =>
     // FIRST observed value, not just the current one.
     h.systemAudioSupport.data = { supported: true, osVersion: '14.4', screenPermission: 'granted' };
     render(<GeneralTab />);
+    expect(screen.queryByRole('button', { name: 'Relaunch' })).toBeNull();
+  });
+
+  test('unsupported macOS version: no permission action buttons even if screenPermission reads not-determined/denied', () => {
+    // getMediaAccessStatus('screen') predates the 14.4 loopback requirement,
+    // so it can still return a non-'granted' value on an unsupported OS —
+    // the toggle below is already disabled for OS-version reasons, so no
+    // actionable-looking button should appear alongside it.
+    h.systemAudioSupport.data = {
+      supported: false,
+      osVersion: '13.0',
+      screenPermission: 'not-determined',
+    };
+    render(<GeneralTab />);
+    expect(screen.getByText(/requires macOS 14.4\+/)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Grant Access' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Open Settings' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Check Again' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Relaunch' })).toBeNull();
   });
 });

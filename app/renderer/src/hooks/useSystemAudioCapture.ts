@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { ipc } from '@/lib/ipc';
 import { appendDebugLog } from '@/lib/debugLogs';
 import { isMac } from '@/lib/utils';
@@ -8,6 +9,7 @@ import { getLiveDraft } from './liveDraftStore';
 import { useRecording } from './useRecording';
 import { useTranscriptionEngine } from './useModels';
 import {
+  settingsKeys,
   useMicrophoneSetting,
   useSystemAudioSetting,
   useSystemAudioSupport,
@@ -71,11 +73,15 @@ export function useSystemAudioCapture() {
   // rejecting cleanly (electron-audio-loopback's internal request handler
   // re-throws inside an async callback Electron never awaits/catches, so a
   // getSources() failure becomes an unhandled rejection in the main process).
-  // Skip the attempt entirely rather than let it reach that broken path —
-  // same "assume OK while loading" default as loopbackSupported above, so a
-  // fast user isn't blocked by the query not having resolved yet.
+  // Unlike loopbackSupported above, this must NOT default optimistically
+  // while loading: a wrong "true" assumption here reaches that broken crash
+  // path, whereas loopbackSupported's wrong-default failure mode is just a
+  // silent/broken system-audio channel (non-fatal). A wrong "false" here
+  // only costs a fast user their very first recording's system-audio side
+  // right after a cold launch — self-correcting on the next recording once
+  // this near-instant local IPC call resolves.
   const screenPermissionOk = isMac
-    ? !systemAudioSupport.data || systemAudioSupport.data.screenPermission === 'granted'
+    ? systemAudioSupport.data?.screenPermission === 'granted'
     : true;
   const loopbackEnabled = isMac
     ? (systemAudio.data ?? true) && loopbackSupported && screenPermissionOk
@@ -88,28 +94,39 @@ export function useSystemAudioCapture() {
     loopbackEnabledRef.current = loopbackEnabled;
   }, [loopbackEnabled]);
 
-  // True specifically when the user WANTS system audio and the OS supports
-  // it, but Screen Recording permission is the actual blocker — as opposed
-  // to the toggle being off or the OS being too old, neither of which is a
-  // surprise worth interrupting a recording start for. Drives the one-shot
-  // "Recording mic-only" notification below (Settings already surfaces the
-  // same state passively via GeneralTab's Record-system-audio row).
+  // True specifically when we KNOW (systemAudioSupport.data has loaded — not
+  // merely "screenPermissionOk is false," which is also true while loading,
+  // per its conservative default above) that the user wants system audio,
+  // the OS supports it, and Screen Recording permission is the actual
+  // blocker — as opposed to the toggle being off, the OS being too old, or
+  // the query simply not having resolved yet, none of which is a surprise
+  // worth interrupting a recording start for. Drives the one-shot "Recording
+  // mic-only" notification below (Settings also surfaces the same state
+  // passively via GeneralTab's Record-system-audio row).
   const screenPermissionBlocked =
-    isMac && (systemAudio.data ?? true) && loopbackSupported && !screenPermissionOk;
+    isMac &&
+    !!systemAudioSupport.data &&
+    systemAudioSupport.data.screenPermission !== 'granted' &&
+    (systemAudio.data ?? true) &&
+    loopbackSupported;
   const screenPermissionBlockedRef = React.useRef(screenPermissionBlocked);
   React.useEffect(() => {
     screenPermissionBlockedRef.current = screenPermissionBlocked;
   }, [screenPermissionBlocked]);
 
-  // The pinned microphone device (Settings > Microphone). Read into a ref for
-  // the same reason as loopbackEnabledRef: startCapture reads it once when a
-  // recording starts, so changing the setting mid-meeting doesn't tear down
-  // or restart the active capture — it applies to the next recording.
-  const microphone = useMicrophoneSetting();
-  const microphoneDeviceIdRef = React.useRef<string | null>(null);
-  React.useEffect(() => {
-    microphoneDeviceIdRef.current = microphone.data?.device_id ?? null;
-  }, [microphone.data?.device_id]);
+  // The pinned microphone device (Settings > Microphone). Kept mounted here
+  // (App-level, per this hook's own docstring) purely to warm react-query's
+  // cache from launch, so the ensureQueryData call in startCapture below is
+  // normally an instant cache hit. Deliberately NOT read into a ref the way
+  // loopbackEnabledRef is: a ref populated by an effect can still be stale
+  // (null/unset) if a recording starts before that effect has run even once
+  // — e.g. a fast user right after a cold launch — silently capturing the
+  // system default instead of the pin. startCapture instead reads the query
+  // cache directly (via the queryClient below) at the moment it actually
+  // needs the value, which resolves that race: an instant hit in the common
+  // case, and a real (if rare) short wait for the in-flight fetch otherwise.
+  useMicrophoneSetting();
+  const qc = useQueryClient();
 
   const recorderRef = React.useRef<MediaRecorder | null>(null);
   const micStreamRef = React.useRef<MediaStream | null>(null);
@@ -206,8 +223,18 @@ export function useSystemAudioCapture() {
         //    noise, and AGC squashes quiet system audio when ducking.
         //    When a specific device is pinned (Settings > Microphone), request
         //    it via deviceId — this is what stops the OS silently switching to
-        //    e.g. an AirPods mic from changing what gets recorded.
-        const pinnedDeviceId = microphoneDeviceIdRef.current;
+        //    e.g. an AirPods mic from changing what gets recorded. Reads the
+        //    query cache directly (usually an instant hit — see the comment
+        //    by useMicrophoneSetting() above) rather than a ref, so a fast
+        //    user right after a cold launch still gets the real pin instead
+        //    of silently falling through to the system default.
+        const pinnedDeviceId = (
+          await qc.ensureQueryData({
+            queryKey: settingsKeys.microphone(),
+            queryFn: async () => unwrap(await bridge.settings.getMicrophone()),
+          })
+        ).device_id;
+        if (cancelled()) { stopAcquired(); return; }
         try {
           micStream = await navigator.mediaDevices.getUserMedia({
             audio: {
@@ -218,9 +245,19 @@ export function useSystemAudioCapture() {
             },
           });
         } catch (micErr) {
-          // Pinned device unplugged/unavailable — fall back to the system
-          // default rather than failing the whole recording.
-          if (!pinnedDeviceId) throw micErr;
+          // Only fall back to the system default when the pinned device
+          // itself is the problem — genuinely gone (OverconstrainedError: the
+          // exact deviceId constraint couldn't be satisfied) or removed from
+          // the device list entirely (NotFoundError). Anything else — the
+          // mic is busy in another app (NotReadableError), permission was
+          // revoked (NotAllowedError), etc. — must propagate rather than
+          // silently switching to a DIFFERENT physical microphone the user
+          // never chose. That silent swap is exactly the surprise pinning a
+          // device is meant to prevent in the first place.
+          const isMissingDeviceError =
+            micErr instanceof DOMException &&
+            (micErr.name === 'OverconstrainedError' || micErr.name === 'NotFoundError');
+          if (!pinnedDeviceId || !isMissingDeviceError) throw micErr;
           console.warn('[systemAudioCapture] pinned microphone unavailable, falling back to system default', micErr);
           micStream = await navigator.mediaDevices.getUserMedia({
             audio: {
@@ -778,7 +815,10 @@ export function useSystemAudioCapture() {
     ) {
       void stopCapture();
     }
-  }, [status]);
+    // qc (useQueryClient()) is referentially stable for the app's lifetime
+    // (the same QueryClient instance from the root Provider) — listing it
+    // here doesn't cause extra effect re-runs, it just satisfies the rule.
+  }, [status, qc]);
 
   // Unmount-only safety net (empty deps = no cleanup on dep changes). Runs
   // when the App tree unmounts (e.g. window close, page reload, StrictMode

@@ -348,7 +348,14 @@ export function GeneralTab() {
               return;
             }
             const device = audioInputDevices.find((d) => d.deviceId === deviceId);
-            setMicrophone.mutate({ deviceId, label: device?.label ?? '' });
+            // Re-selecting the already-pinned-but-disconnected device (the
+            // synthetic SelectItem below) won't be found in audioInputDevices
+            // — fall back to its already-known stored label instead of
+            // overwriting it with an empty string.
+            const label =
+              device?.label ??
+              (deviceId === microphone.data?.device_id ? microphone.data?.label ?? '' : '');
+            setMicrophone.mutate({ deviceId, label });
           }}
           disabled={microphone.data === undefined}
         >
@@ -380,7 +387,14 @@ export function GeneralTab() {
       {isMac && (
         <SettingRow label="Record system audio" description={systemAudioDescription}>
           <div className="flex items-center gap-2">
-            {needsRelaunchForScreenRecording ? (
+            {/* Only offer permission actions when the OS actually supports the
+                feature — on an unsupported macOS version, screenPermission can
+                still read 'not-determined'/'denied' (that API predates the
+                14.4 loopback requirement), but granting it wouldn't do
+                anything: the toggle below is already disabled for OS reasons,
+                so the description explaining "requires macOS 14.4+" should be
+                the only thing shown, not an actionable-looking button. */}
+            {systemAudioSupport.data?.supported === false ? null : needsRelaunchForScreenRecording ? (
               <Button
                 variant="outline"
                 size="sm"

@@ -84,6 +84,13 @@ test('name / path / folder / URL setters redact their value arg(s)', () => {
   assert.strictEqual(sanitizeArgsForLog(['set-cloud-api-url', 'https://api.example.com/v1']), 'set-cloud-api-url <redacted>');
 });
 
+test('set-microphone redacts the device id + user-assigned label', () => {
+  assert.strictEqual(
+    sanitizeArgsForLog(['set-microphone', 'abc123deviceid', "Valentin's AirPods"]),
+    'set-microphone <redacted>',
+  );
+});
+
 test('set-storage-path with no value (reset) echoes just the command', () => {
   assert.strictEqual(sanitizeArgsForLog(['set-storage-path']), 'set-storage-path');
 });
