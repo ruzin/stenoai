@@ -6598,6 +6598,37 @@ ipcMain.handle('set-language', async (event, languageCode) => {
   }
 });
 
+// Microphone selection IPC handlers
+ipcMain.handle('get-microphone', async () => {
+  try {
+    const result = await runPythonScript('simple_recorder.py', ['get-microphone'], true);
+    const jsonData = JSON.parse(result);
+    return { success: true, ...jsonData };
+  } catch (error) {
+    sendDebugLog(`Error getting microphone setting: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('set-microphone', async (event, deviceId, label) => {
+  try {
+    sendDebugLog(`Setting microphone to: ${deviceId ?? 'default'}`);
+    const result = await runPythonScript('simple_recorder.py', [
+      'set-microphone',
+      deviceId ?? '',
+      label ?? '',
+    ]);
+    const jsonMatch = result.match(/\{.*\}/s);
+    if (jsonMatch) {
+      return JSON.parse(jsonMatch[0]);
+    }
+    return { success: true, device_id: deviceId ?? null, label: label ?? null };
+  } catch (error) {
+    sendDebugLog(`Error setting microphone: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+});
+
 ipcMain.handle('get-user-name', async () => {
   try {
     const result = await runPythonScript('simple_recorder.py', ['get-user-name'], true);

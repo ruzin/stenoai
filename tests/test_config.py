@@ -65,6 +65,45 @@ class ConfigLanguageTests(unittest.TestCase):
             self.assertEqual(config.get_language_name("auto"), "Auto (detect)")
 
 
+class ConfigMicrophoneTests(unittest.TestCase):
+    def test_default_microphone_is_system_default(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config = Config(config_path=Path(tmp_dir) / "config.json")
+            self.assertEqual(
+                config.get_microphone_device(), {"device_id": None, "label": None}
+            )
+
+    def test_set_microphone_device_persists_id_and_label(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config = Config(config_path=Path(tmp_dir) / "config.json")
+            success = config.set_microphone_device("abc123", "USB Microphone")
+            self.assertTrue(success)
+            self.assertEqual(
+                config.get_microphone_device(),
+                {"device_id": "abc123", "label": "USB Microphone"},
+            )
+
+    def test_set_microphone_device_default_clears_selection(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config = Config(config_path=Path(tmp_dir) / "config.json")
+            config.set_microphone_device("abc123", "USB Microphone")
+            success = config.set_microphone_device("default", "")
+            self.assertTrue(success)
+            self.assertEqual(
+                config.get_microphone_device(), {"device_id": None, "label": None}
+            )
+
+    def test_set_microphone_device_none_clears_selection(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config = Config(config_path=Path(tmp_dir) / "config.json")
+            config.set_microphone_device("abc123", "USB Microphone")
+            success = config.set_microphone_device(None, None)
+            self.assertTrue(success)
+            self.assertEqual(
+                config.get_microphone_device(), {"device_id": None, "label": None}
+            )
+
+
 class ConfigWhisperModelTests(unittest.TestCase):
     def test_default_whisper_model_is_large_v3_turbo(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

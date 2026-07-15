@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { useMicrophoneSetting } from './useSettings';
 
 interface UseAudioLevelOptions {
   /** When false, the hook tears down the audio graph and returns zeros. */
@@ -29,6 +30,11 @@ export function useAudioLevel({
   const [levels, setLevels] = React.useState<number[]>(() =>
     new Array(bars).fill(floor),
   );
+  // Mirrors the same pinned-device setting the actual recording capture uses
+  // (useSystemAudioCapture.ts), so this level meter visualizes the mic that's
+  // actually being recorded rather than always the OS default.
+  const microphone = useMicrophoneSetting();
+  const pinnedDeviceId = microphone.data?.device_id ?? null;
 
   React.useEffect(() => {
     if (!enabled) {
@@ -46,7 +52,14 @@ export function useAudioLevel({
 
     void (async () => {
       try {
-        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            audio: pinnedDeviceId ? { deviceId: { exact: pinnedDeviceId } } : true,
+          });
+        } catch (err) {
+          if (!pinnedDeviceId) throw err;
+          stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        }
         if (cancelled) {
           stream.getTracks().forEach((t) => t.stop());
           return;
@@ -95,7 +108,7 @@ export function useAudioLevel({
       if (ctx) ctx.close().catch(() => {});
       if (stream) stream.getTracks().forEach((t) => t.stop());
     };
-  }, [enabled, bars, smoothing, floor]);
+  }, [enabled, bars, smoothing, floor, pinnedDeviceId]);
 
   return levels;
 }

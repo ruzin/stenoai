@@ -24,10 +24,12 @@ import {
   useAutoDetectMeetingsSetting,
   useDockIconSetting,
   useLaunchOnLoginSetting,
+  useMicrophoneSetting,
   useNotificationsSetting,
   useSetAutoDetectMeetings,
   useSetDockIcon,
   useSetLaunchOnLogin,
+  useSetMicrophone,
   useSetNotifications,
   useSetSilenceAutoStopEnabled,
   useSetSilenceAutoStopMinutes,
@@ -38,11 +40,14 @@ import {
   useSystemAudioSupport,
   useUserName,
 } from '@/hooks/useSettings';
+import { useAudioInputDevices } from '@/hooks/useAudioInputDevices';
 import {
   useGoogleCalendarAuth,
   useOutlookCalendarAuth,
 } from '@/hooks/useCalendarEvents';
 import { COMPACT_BTN, COMPACT_TRIGGER, SettingRow } from './primitives';
+
+const DEFAULT_MIC_VALUE = 'default';
 
 export function GeneralTab() {
   const { theme, setTheme } = useTheme();
@@ -60,6 +65,9 @@ export function GeneralTab() {
   const setSilenceAutoStopMinutes = useSetSilenceAutoStopMinutes();
   const dockIcon = useDockIconSetting();
   const setDockIcon = useSetDockIcon();
+  const microphone = useMicrophoneSetting();
+  const setMicrophone = useSetMicrophone();
+  const audioInputDevices = useAudioInputDevices();
   const google = useGoogleCalendarAuth();
   const outlook = useOutlookCalendarAuth();
   const userName = useUserName();
@@ -287,6 +295,45 @@ export function GeneralTab() {
           onCheckedChange={(v) => setNotifications.mutate(v)}
           disabled={notifications.data === undefined}
         />
+      </SettingRow>
+
+      <SettingRow
+        label="Microphone"
+        description="Which input device Steno records from. Pins your choice so the OS switching its default (e.g. AirPods connecting) doesn't silently change what gets recorded. Applies the next time you start a recording."
+      >
+        <Select
+          value={microphone.data?.device_id ?? DEFAULT_MIC_VALUE}
+          onValueChange={(deviceId) => {
+            if (deviceId === DEFAULT_MIC_VALUE) {
+              setMicrophone.mutate({ deviceId: DEFAULT_MIC_VALUE, label: '' });
+              return;
+            }
+            const device = audioInputDevices.find((d) => d.deviceId === deviceId);
+            setMicrophone.mutate({ deviceId, label: device?.label ?? '' });
+          }}
+          disabled={microphone.data === undefined}
+        >
+          <SelectTrigger className="h-8 w-56 text-sm">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={DEFAULT_MIC_VALUE}>System Default</SelectItem>
+            {audioInputDevices.map((d, i) => (
+              <SelectItem key={d.deviceId} value={d.deviceId}>
+                {d.label || `Microphone ${i + 1}`}
+              </SelectItem>
+            ))}
+            {/* The selected device was unplugged / isn't in the current device
+                list — keep it selectable so the dropdown doesn't silently jump
+                back to "System Default" out from under the user. */}
+            {microphone.data?.device_id &&
+              !audioInputDevices.some((d) => d.deviceId === microphone.data?.device_id) && (
+                <SelectItem value={microphone.data.device_id}>
+                  {microphone.data.label || 'Unknown device (disconnected)'}
+                </SelectItem>
+              )}
+          </SelectContent>
+        </Select>
       </SettingRow>
 
       {/* macOS only: chooses mic-only vs mic+system. Windows always records

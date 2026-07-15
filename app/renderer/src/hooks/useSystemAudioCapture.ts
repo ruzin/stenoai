@@ -8,6 +8,7 @@ import { getLiveDraft } from './liveDraftStore';
 import { useRecording } from './useRecording';
 import { useTranscriptionEngine } from './useModels';
 import {
+  useMicrophoneSetting,
   useSystemAudioSetting,
   useSystemAudioSupport,
   useSilenceAutoStopSetting,
@@ -63,8 +64,21 @@ export function useSystemAudioCapture() {
   // When the support query is still loading we assume supported so a fast user
   // who records before the IPC resolves still gets loopback.
   const loopbackSupported = systemAudioSupport.data?.supported ?? true;
+  // macOS also needs Screen Recording permission for the CoreAudio Process Tap
+  // (desktopCapturer.getSources() needs it) — 'granted' required; anything
+  // else (denied/not-determined/restricted) means getDisplayMedia() would
+  // fail at the OS level in a way that crashes the WHOLE APP rather than
+  // rejecting cleanly (electron-audio-loopback's internal request handler
+  // re-throws inside an async callback Electron never awaits/catches, so a
+  // getSources() failure becomes an unhandled rejection in the main process).
+  // Skip the attempt entirely rather than let it reach that broken path —
+  // same "assume OK while loading" default as loopbackSupported above, so a
+  // fast user isn't blocked by the query not having resolved yet.
+  const screenPermissionOk = isMac
+    ? !systemAudioSupport.data || systemAudioSupport.data.screenPermission === 'granted'
+    : true;
   const loopbackEnabled = isMac
-    ? (systemAudio.data ?? true) && loopbackSupported
+    ? (systemAudio.data ?? true) && loopbackSupported && screenPermissionOk
     : loopbackSupported;
   // Read into a ref so startCapture (closed over once) sees the current value
   // without the capture effect depending on it — toggling mid-recording must
@@ -73,6 +87,16 @@ export function useSystemAudioCapture() {
   React.useEffect(() => {
     loopbackEnabledRef.current = loopbackEnabled;
   }, [loopbackEnabled]);
+
+  // The pinned microphone device (Settings > Microphone). Read into a ref for
+  // the same reason as loopbackEnabledRef: startCapture reads it once when a
+  // recording starts, so changing the setting mid-meeting doesn't tear down
+  // or restart the active capture — it applies to the next recording.
+  const microphone = useMicrophoneSetting();
+  const microphoneDeviceIdRef = React.useRef<string | null>(null);
+  React.useEffect(() => {
+    microphoneDeviceIdRef.current = microphone.data?.device_id ?? null;
+  }, [microphone.data?.device_id]);
 
   const recorderRef = React.useRef<MediaRecorder | null>(null);
   const micStreamRef = React.useRef<MediaStream | null>(null);
@@ -167,13 +191,32 @@ export function useSystemAudioCapture() {
         //    using headphones) doesn't double-up the remote audio in the
         //    mix. Noise suppression and AGC OFF — whisper handles ambient
         //    noise, and AGC squashes quiet system audio when ducking.
-        micStream = await navigator.mediaDevices.getUserMedia({
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: false,
-            autoGainControl: false,
-          },
-        });
+        //    When a specific device is pinned (Settings > Microphone), request
+        //    it via deviceId — this is what stops the OS silently switching to
+        //    e.g. an AirPods mic from changing what gets recorded.
+        const pinnedDeviceId = microphoneDeviceIdRef.current;
+        try {
+          micStream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+              echoCancellation: true,
+              noiseSuppression: false,
+              autoGainControl: false,
+              ...(pinnedDeviceId ? { deviceId: { exact: pinnedDeviceId } } : {}),
+            },
+          });
+        } catch (micErr) {
+          // Pinned device unplugged/unavailable — fall back to the system
+          // default rather than failing the whole recording.
+          if (!pinnedDeviceId) throw micErr;
+          console.warn('[systemAudioCapture] pinned microphone unavailable, falling back to system default', micErr);
+          micStream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+              echoCancellation: true,
+              noiseSuppression: false,
+              autoGainControl: false,
+            },
+          });
+        }
         if (cancelled()) { stopAcquired(); return; }
         micStreamRef.current = micStream;
 

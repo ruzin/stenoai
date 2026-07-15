@@ -483,6 +483,10 @@ export type GetSilenceAutoStopResponse = Result<{
 export type SetSilenceAutoStopEnabledResponse = Result<{ silence_auto_stop_enabled: boolean }>;
 export type SetSilenceAutoStopMinutesResponse = Result<{ silence_auto_stop_minutes: number }>;
 export type GetLanguageResponse = Result<{ language: string }>;
+export type GetMicrophoneResponse = Result<{
+  device_id: string | null;
+  label: string | null;
+}>;
 export type GetUserNameResponse = Result<{ user_name: string }>;
 export type StoragePathResponse = Result<{
   storage_path: string | null;
@@ -893,6 +897,8 @@ export interface StenoaiBridge {
     >;
     getLanguage: RequestFn<[], GetLanguageResponse>;
     setLanguage: RequestFn<[code: string], Result<Record<string, never>>>;
+    getMicrophone: RequestFn<[], GetMicrophoneResponse>;
+    setMicrophone: RequestFn<[deviceId: string, label: string], GetMicrophoneResponse>;
     getUserName: RequestFn<[], GetUserNameResponse>;
     setUserName: RequestFn<[name: string], Result<Record<string, never>>>;
     getStoragePath: RequestFn<[], StoragePathResponse>;

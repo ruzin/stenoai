@@ -13,6 +13,7 @@ export const settingsKeys = {
   launchOnLogin: () => [...settingsKeys.all, 'launchOnLogin'] as const,
   silenceAutoStop: () => [...settingsKeys.all, 'silenceAutoStop'] as const,
   language: () => [...settingsKeys.all, 'language'] as const,
+  microphone: () => [...settingsKeys.all, 'microphone'] as const,
   storagePath: () => [...settingsKeys.all, 'storagePath'] as const,
   appVersion: () => [...settingsKeys.all, 'appVersion'] as const,
   userName: () => [...settingsKeys.all, 'userName'] as const,
@@ -129,6 +130,22 @@ export function useSetLanguage() {
   return useMutation({
     mutationFn: async (code: string) => unwrap(await ipc().settings.setLanguage(code)),
     onSuccess: () => qc.invalidateQueries({ queryKey: settingsKeys.language() }),
+  });
+}
+
+export function useMicrophoneSetting() {
+  return useQuery({
+    queryKey: settingsKeys.microphone(),
+    queryFn: async () => unwrap(await ipc().settings.getMicrophone()),
+  });
+}
+
+export function useSetMicrophone() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ deviceId, label }: { deviceId: string; label: string }) =>
+      unwrap(await ipc().settings.setMicrophone(deviceId, label)),
+    onSuccess: () => qc.invalidateQueries({ queryKey: settingsKeys.microphone() }),
   });
 }
 
