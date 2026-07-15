@@ -88,6 +88,19 @@ export function useSystemAudioCapture() {
     loopbackEnabledRef.current = loopbackEnabled;
   }, [loopbackEnabled]);
 
+  // True specifically when the user WANTS system audio and the OS supports
+  // it, but Screen Recording permission is the actual blocker — as opposed
+  // to the toggle being off or the OS being too old, neither of which is a
+  // surprise worth interrupting a recording start for. Drives the one-shot
+  // "Recording mic-only" notification below (Settings already surfaces the
+  // same state passively via GeneralTab's Record-system-audio row).
+  const screenPermissionBlocked =
+    isMac && (systemAudio.data ?? true) && loopbackSupported && !screenPermissionOk;
+  const screenPermissionBlockedRef = React.useRef(screenPermissionBlocked);
+  React.useEffect(() => {
+    screenPermissionBlockedRef.current = screenPermissionBlocked;
+  }, [screenPermissionBlocked]);
+
   // The pinned microphone device (Settings > Microphone). Read into a ref for
   // the same reason as loopbackEnabledRef: startCapture reads it once when a
   // recording starts, so changing the setting mid-meeting doesn't tear down
@@ -234,6 +247,12 @@ export function useSystemAudioCapture() {
         //    failure above still aborts.
         try {
           if (!loopbackEnabledRef.current) {
+            // Surface it right when it actually affects THIS recording,
+            // rather than only passively in Settings — fire-and-forget, the
+            // main-process handler itself gates on notifications_enabled.
+            if (screenPermissionBlockedRef.current) {
+              void bridge.settings.showSystemAudioMicOnlyNotification();
+            }
             throw new Error('loopback disabled');
           }
           await bridge.recording.enableLoopbackAudio();

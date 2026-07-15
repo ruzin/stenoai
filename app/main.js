@@ -6338,6 +6338,36 @@ ipcMain.handle('show-silence-auto-stop-notification', async (_event, payload) =>
   }
 });
 
+// Fired by useSystemAudioCapture.ts at the start of a recording whenever it's
+// about to fall back to mic-only specifically because Screen Recording
+// permission isn't granted (not when the user has the "Record system audio"
+// toggle off, and not on unsupported macOS versions — those are the user's
+// own choice / a hardware limit, not a surprise). Clicking it opens Settings
+// via the same tray-open-settings event the tray menu uses, so the user lands
+// on the row with the Grant Access / Open Settings actions.
+ipcMain.handle('show-system-audio-mic-only-notification', async () => {
+  try {
+    if (!(await notificationsEnabled())) return { success: true, shown: false };
+    const notif = new Notification({
+      title: 'Recording mic-only',
+      body: 'Screen Recording permission is needed to capture both sides of the call. Click to fix this in Settings.',
+    });
+    notif.on('click', () => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        if (!mainWindow.isVisible()) mainWindow.show();
+        mainWindow.focus();
+        mainWindow.webContents.send('tray-open-settings');
+      }
+    });
+    trackNotificationLifecycle(notif, 'system_audio_mic_only');
+    notif.show();
+    return { success: true, shown: true };
+  } catch (e) {
+    sendDebugLog(`Failed to show system-audio mic-only notification: ${e.message}`);
+    return { success: false, error: e.message };
+  }
+});
+
 // Fired by the renderer's processing-complete handler when we skipped
 // auto-navigate (user was on a route other than /meetings/processing).
 // Clicking the banner is an explicit "take me there" from the user (unlike

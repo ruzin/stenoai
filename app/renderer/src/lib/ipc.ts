@@ -893,6 +893,10 @@ export interface StenoaiBridge {
       [payload: { minutes: number; sessionName: string | null }],
       Result<Record<string, never>>
     >;
+    /** Fired at recording start when loopback is skipped specifically because
+     *  Screen Recording permission isn't granted (see main.js — not fired for
+     *  the toggle-off or OS-unsupported cases, which aren't a surprise). */
+    showSystemAudioMicOnlyNotification: RequestFn<[], Result<Record<string, never>>>;
     showNoteReadyNotification: RequestFn<
       [
         payload: {

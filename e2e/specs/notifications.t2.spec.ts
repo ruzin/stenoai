@@ -4,10 +4,10 @@ import { readUserConfig } from '../fixtures/user-config';
 
 /**
  * T2 — notifications: get/set toggle persistence + that the toggle GATES the
- * note-ready / silence-auto-stop notifications. The handlers now return a
- * `shown` flag (the observable design-for-test signal — a native banner isn't
- * inspectable) reflecting whether the notifications_enabled gate let it through.
- * Deterministic + model-free.
+ * note-ready / silence-auto-stop / system-audio-mic-only notifications. The
+ * handlers now return a `shown` flag (the observable design-for-test signal —
+ * a native banner isn't inspectable) reflecting whether the
+ * notifications_enabled gate let it through. Deterministic + model-free.
  */
 
 type Toggle = { success: boolean; notifications_enabled?: boolean };
@@ -20,6 +20,7 @@ type StenoWindow = Window & {
       setNotifications: (v: boolean) => Promise<Toggle>;
       showSilenceAutoStopNotification: (payload: unknown) => Promise<ShowResult>;
       showNoteReadyNotification: (payload: unknown) => Promise<ShowResult>;
+      showSystemAudioMicOnlyNotification: () => Promise<ShowResult>;
     };
   };
 };
@@ -38,15 +39,17 @@ const showNote = (page: import('@playwright/test').Page) =>
       summaryFile: 'e2e-note.json',
     }),
   );
+const showMicOnly = (page: import('@playwright/test').Page) =>
+  page.evaluate(() => (window as StenoWindow).stenoai.settings.showSystemAudioMicOnlyNotification());
 
-test('notifications toggle persists and gates the note-ready / silence notifications; real dir untouched', async ({
+test('notifications toggle persists and gates the note-ready / silence / mic-only notifications; real dir untouched', async ({
   launchApp,
   userDataDir,
 }) => {
   const realDirBefore = fileSig(realUserDataDir());
   const { page } = await launchApp();
 
-  // Disable -> persisted + both notifications are gated off (shown:false, no banner).
+  // Disable -> persisted + all three notifications are gated off (shown:false, no banner).
   const off = await page.evaluate(() =>
     (window as StenoWindow).stenoai.settings.setNotifications(false),
   );
@@ -56,6 +59,7 @@ test('notifications toggle persists and gates the note-ready / silence notificat
 
   expect((await showSilence(page)).shown).toBe(false);
   expect((await showNote(page)).shown).toBe(false);
+  expect((await showMicOnly(page)).shown).toBe(false);
 
   // Enable -> persisted + the gate now lets both through (shown is not false;
   // it's true when the native show() succeeds, and on a headless runner where
@@ -69,6 +73,7 @@ test('notifications toggle persists and gates the note-ready / silence notificat
 
   expect((await showSilence(page)).shown).not.toBe(false);
   expect((await showNote(page)).shown).not.toBe(false);
+  expect((await showMicOnly(page)).shown).not.toBe(false);
 
   // Keystone: the real user-data dir is byte-for-byte untouched.
   expect(fileSig(realUserDataDir())).toBe(realDirBefore);
