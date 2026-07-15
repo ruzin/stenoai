@@ -227,13 +227,22 @@ export function useSystemAudioCapture() {
         //    query cache directly (usually an instant hit — see the comment
         //    by useMicrophoneSetting() above) rather than a ref, so a fast
         //    user right after a cold launch still gets the real pin instead
-        //    of silently falling through to the system default.
-        const pinnedDeviceId = (
-          await qc.ensureQueryData({
-            queryKey: settingsKeys.microphone(),
-            queryFn: async () => unwrap(await bridge.settings.getMicrophone()),
-          })
-        ).device_id;
+        //    of silently falling through to the system default. This lookup
+        //    is best-effort: it's an OPTIONAL preference, so a transient
+        //    failure (subprocess spawn hiccup, IPC timeout) must not abort
+        //    the whole recording — treat it the same as "no pin" and let
+        //    getUserMedia fall through to the system default below.
+        let pinnedDeviceId: string | null = null;
+        try {
+          pinnedDeviceId = (
+            await qc.ensureQueryData({
+              queryKey: settingsKeys.microphone(),
+              queryFn: async () => unwrap(await bridge.settings.getMicrophone()),
+            })
+          ).device_id;
+        } catch (micPrefErr) {
+          console.warn('[systemAudioCapture] failed to read microphone preference, using system default', micPrefErr);
+        }
         if (cancelled()) { stopAcquired(); return; }
         try {
           micStream = await navigator.mediaDevices.getUserMedia({
