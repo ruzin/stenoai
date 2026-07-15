@@ -313,7 +313,7 @@ export function GeneralTab() {
           }}
           disabled={microphone.data === undefined}
         >
-          <SelectTrigger className="h-8 w-56 text-sm">
+          <SelectTrigger className="h-8 w-56 text-sm" data-testid="microphone-select">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>

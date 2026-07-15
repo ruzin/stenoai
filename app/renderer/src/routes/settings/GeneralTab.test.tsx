@@ -1,6 +1,15 @@
 import { describe, test, expect, beforeEach, vi } from 'vitest';
 import { render, screen, fireEvent, act } from '@testing-library/react';
 
+// Radix Select (used by the Microphone dropdown) checks these on the
+// trigger/viewport at open time; jsdom doesn't implement them.
+if (!Element.prototype.hasPointerCapture) {
+  Element.prototype.hasPointerCapture = () => false;
+}
+if (!Element.prototype.scrollIntoView) {
+  Element.prototype.scrollIntoView = () => {};
+}
+
 /**
  * Race coverage for GeneralTab's calendar OAuth flow (#306) and the name-field
  * seed race (#307). Both are pre-existing behavioural bugs surfaced during the
@@ -41,6 +50,9 @@ const h = vi.hoisted(() => {
     outlook: makeAuth(),
     userName: { data: undefined as string | undefined, isPending: true, isPlaceholderData: false },
     setUserName: { mutate: vi.fn() },
+    microphone: { data: { device_id: null as string | null, label: null as string | null } },
+    setMicrophone: { mutate: vi.fn() },
+    audioInputDevices: [] as { deviceId: string; label: string }[],
   };
 });
 
@@ -74,8 +86,14 @@ vi.mock('@/hooks/useSettings', () => {
     useSetDockIcon: m,
     useUserName: () => h.userName,
     useSetUserName: () => h.setUserName,
+    useMicrophoneSetting: () => q(h.microphone.data),
+    useSetMicrophone: () => h.setMicrophone,
   };
 });
+
+vi.mock('@/hooks/useAudioInputDevices', () => ({
+  useAudioInputDevices: () => h.audioInputDevices,
+}));
 
 // Import after the mocks are registered.
 import { GeneralTab } from './GeneralTab';
@@ -96,6 +114,9 @@ beforeEach(() => {
   resetAuth(h.outlook);
   h.userName = { data: undefined, isPending: true, isPlaceholderData: false };
   h.setUserName.mutate.mockReset();
+  h.microphone.data = { device_id: null, label: null };
+  h.setMicrophone.mutate.mockReset();
+  h.audioInputDevices = [];
 });
 
 // hidden:true because once the OAuth dialog is open (modal), Radix marks the
@@ -283,5 +304,66 @@ describe('GeneralTab name-field seed race (#307)', () => {
     });
 
     expect((screen.getByTestId('user-name-input') as HTMLInputElement).value).toBe('Ruzin');
+  });
+});
+
+describe('GeneralTab Microphone setting', () => {
+  test('shows "System Default" when no device is pinned', () => {
+    render(<GeneralTab />);
+    expect(screen.getByTestId('microphone-select').textContent).toContain(
+      'System Default',
+    );
+  });
+
+  test('shows the persisted device label when one is pinned', () => {
+    h.microphone.data = { device_id: 'abc123', label: 'USB Microphone' };
+    render(<GeneralTab />);
+    expect(screen.getByTestId('microphone-select').textContent).toContain(
+      'USB Microphone',
+    );
+  });
+
+  test('falls back to a disconnected-device label when the pinned device is no longer enumerated', () => {
+    h.microphone.data = { device_id: 'gone', label: 'Old USB Mic' };
+    h.audioInputDevices = [{ deviceId: 'abc123', label: 'USB Microphone' }];
+    render(<GeneralTab />);
+    expect(screen.getByTestId('microphone-select').textContent).toContain(
+      'Old USB Mic',
+    );
+  });
+
+  test('picking a real device calls setMicrophone with its id and label', async () => {
+    h.audioInputDevices = [
+      { deviceId: 'abc123', label: 'USB Microphone' },
+      { deviceId: 'def456', label: 'AirPods' },
+    ];
+    render(<GeneralTab />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('microphone-select'));
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('option', { name: 'AirPods' }));
+    });
+
+    expect(h.setMicrophone.mutate).toHaveBeenCalledWith({
+      deviceId: 'def456',
+      label: 'AirPods',
+    });
+  });
+
+  test('picking "System Default" clears the pinned device', async () => {
+    h.microphone.data = { device_id: 'abc123', label: 'USB Microphone' };
+    h.audioInputDevices = [{ deviceId: 'abc123', label: 'USB Microphone' }];
+    render(<GeneralTab />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('microphone-select'));
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('option', { name: 'System Default' }));
+    });
+
+    expect(h.setMicrophone.mutate).toHaveBeenCalledWith({ deviceId: 'default', label: '' });
   });
 });
