@@ -94,14 +94,25 @@ conventions), which is not yet merged into `main`. Practically:
 
 ## Analytics
 
-- On mount: fire `trackDownload('download_page_auto', 'arm64')` when the
-  auto-trigger fires — this becomes the canonical "download actually
-  started" signal.
-- On manual link click: `trackDownload('download_page_manual', 'arm64')`.
+- The Mac buttons on `Hero.astro`/`CTAFooter.astro` now navigate to
+  `/download` (a real page load, not a same-tab file download), so their
+  click-time `trackDownload('hero'|'cta_footer', 'arm64')` calls are dropped
+  — an async analytics call fired right before a page unload risks being cut
+  off mid-flight, and would also double-count the same download alongside
+  the page's own tracking below.
+- Instead, the Mac links carry `?src=hero` / `?src=cta_footer`, and
+  `download.astro`'s auto-trigger script reads that query param and fires
+  `trackDownload(`download_page:${src}`, 'arm64')` (falling back to `'direct'`
+  for a bookmarked/shared link with no query param) — this becomes the one
+  canonical "download actually started" signal, tagged with where the
+  visitor came from.
+- On manual link click: `trackDownload('download_page:manual', 'arm64')`,
+  via the existing `data-track`/`data-location`/`data-arch` attributes and
+  `BaseLayout`'s delegated click listener (safe here since the manual link
+  triggers a file download, not a page unload).
 - No new analytics functions needed — reuses the existing
   `trackDownload(location, arch)` from `website/src/analytics.js`, just with
-  new `location` values. `BaseLayout`'s existing delegated `data-track`
-  listener picks these up the same way it does for other buttons.
+  new `location` values.
 
 ## Testing / verification
 
