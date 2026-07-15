@@ -26,6 +26,9 @@ import {
   useLaunchOnLoginSetting,
   useMicrophoneSetting,
   useNotificationsSetting,
+  useOpenScreenRecordingSettings,
+  useRelaunchApp,
+  useRequestScreenRecordingPermission,
   useSetAutoDetectMeetings,
   useSetDockIcon,
   useSetLaunchOnLogin,
@@ -56,6 +59,42 @@ export function GeneralTab() {
   const systemAudio = useSystemAudioSetting();
   const setSystemAudio = useSetSystemAudio();
   const systemAudioSupport = useSystemAudioSupport();
+  const requestScreenRecording = useRequestScreenRecordingPermission();
+  const openScreenRecordingSettings = useOpenScreenRecordingSettings();
+  const relaunchApp = useRelaunchApp();
+  // Screen Recording permission changes don't apply to an already-running
+  // process — captures the FIRST value seen this session so a later flip to
+  // 'granted' (via the request button, or the user fixing it in System
+  // Settings and coming back) can be told apart from "was already granted
+  // when the app launched" and only then prompt for a relaunch.
+  const [initialScreenPermission, setInitialScreenPermission] = React.useState<
+    string | undefined
+  >(undefined);
+  React.useEffect(() => {
+    if (initialScreenPermission === undefined && systemAudioSupport.data?.screenPermission) {
+      setInitialScreenPermission(systemAudioSupport.data.screenPermission);
+    }
+  }, [initialScreenPermission, systemAudioSupport.data?.screenPermission]);
+  const needsRelaunchForScreenRecording =
+    initialScreenPermission !== undefined &&
+    initialScreenPermission !== 'granted' &&
+    systemAudioSupport.data?.screenPermission === 'granted';
+  const screenPermission = systemAudioSupport.data?.screenPermission;
+  const systemAudioDescription = (() => {
+    if (systemAudioSupport.data && !systemAudioSupport.data.supported) {
+      return `Capture both sides of a call (requires macOS 14.4+, you're on ${systemAudioSupport.data.osVersion || 'an older version'}). Mic-only recording still works.`;
+    }
+    if (needsRelaunchForScreenRecording) {
+      return 'Screen Recording access granted — relaunch Steno to start capturing both sides of a call.';
+    }
+    if (screenPermission === 'not-determined') {
+      return 'Capture both sides of a call. Needs Screen Recording access first — mic-only recording still works either way.';
+    }
+    if (screenPermission === 'denied' || screenPermission === 'restricted') {
+      return 'Capture both sides of a call. Screen Recording access was denied — enable it in System Settings, then relaunch Steno. Mic-only recording still works either way.';
+    }
+    return 'Capture both sides of a call. Turn off to record your mic only.';
+  })();
   const autoDetect = useAutoDetectMeetingsSetting();
   const setAutoDetect = useSetAutoDetectMeetings();
   const launchOnLogin = useLaunchOnLoginSetting();
@@ -339,19 +378,53 @@ export function GeneralTab() {
       {/* macOS only: chooses mic-only vs mic+system. Windows always records
           mic+system (toggle hidden), so this control isn't shown there. */}
       {isMac && (
-        <SettingRow
-          label="Record system audio"
-          description={
-            systemAudioSupport.data && !systemAudioSupport.data.supported
-              ? `Capture both sides of a call (requires macOS 14.4+, you're on ${systemAudioSupport.data.osVersion || 'an older version'}). Mic-only recording still works.`
-              : 'Capture both sides of a call. Turn off to record your mic only.'
-          }
-        >
-          <Switch
-            checked={(systemAudio.data ?? true) && (systemAudioSupport.data?.supported ?? true)}
-            onCheckedChange={(v) => setSystemAudio.mutate(v)}
-            disabled={systemAudio.data === undefined || systemAudioSupport.data?.supported === false}
-          />
+        <SettingRow label="Record system audio" description={systemAudioDescription}>
+          <div className="flex items-center gap-2">
+            {needsRelaunchForScreenRecording ? (
+              <Button
+                variant="outline"
+                size="sm"
+                className={COMPACT_BTN}
+                onClick={() => relaunchApp.mutate()}
+              >
+                Relaunch
+              </Button>
+            ) : screenPermission === 'not-determined' ? (
+              <Button
+                variant="outline"
+                size="sm"
+                className={COMPACT_BTN}
+                onClick={() => requestScreenRecording.mutate()}
+                disabled={requestScreenRecording.isPending}
+              >
+                Grant Access
+              </Button>
+            ) : screenPermission === 'denied' || screenPermission === 'restricted' ? (
+              <>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className={COMPACT_BTN}
+                  onClick={() => void systemAudioSupport.refetch()}
+                >
+                  Check Again
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className={COMPACT_BTN}
+                  onClick={() => openScreenRecordingSettings.mutate()}
+                >
+                  Open Settings
+                </Button>
+              </>
+            ) : null}
+            <Switch
+              checked={(systemAudio.data ?? true) && (systemAudioSupport.data?.supported ?? true)}
+              onCheckedChange={(v) => setSystemAudio.mutate(v)}
+              disabled={systemAudio.data === undefined || systemAudioSupport.data?.supported === false}
+            />
+          </div>
         </SettingRow>
       )}
 

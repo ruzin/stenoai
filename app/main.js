@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell, systemPreferences, globalShortcut, safeStorage, Tray, Menu, nativeImage, Notification, powerMonitor, net, session } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, systemPreferences, globalShortcut, safeStorage, Tray, Menu, nativeImage, Notification, powerMonitor, net, session, desktopCapturer } = require('electron');
 
 // Prevent EPIPE crashes when stdout/stderr pipe is broken (e.g. launching terminal closed)
 process.stdout?.on('error', () => {});
@@ -1764,6 +1764,56 @@ ipcMain.handle('get-system-audio-support', async () => {
   } catch (error) {
     return { success: false, error: error.message };
   }
+});
+
+// Safely triggers macOS's native Screen Recording permission prompt for a
+// 'not-determined' user, by calling desktopCapturer.getSources() directly in
+// a plain try/caught async handler. Deliberately NOT the same code path as
+// the recording capture flow: electron-audio-loopback's own request handler
+// makes this same call inside an async function passed straight to
+// session.setDisplayMediaRequestHandler, which Electron invokes without
+// awaiting/catching — a failure there becomes an unhandled rejection that
+// used to crash the whole app (see useSystemAudioCapture.ts's
+// screenPermissionOk gate). Calling it here, in an ordinary ipcMain.handle,
+// has no such landmine: a rejection is just a normal rejected promise this
+// handler catches like any other. Only meaningful on macOS — 'not-determined'
+// only exists there.
+ipcMain.handle('request-screen-recording-permission', async () => {
+  if (process.platform !== 'darwin') {
+    return { success: true, screenPermission: 'granted' };
+  }
+  try {
+    await desktopCapturer.getSources({ types: ['screen'] });
+  } catch (error) {
+    sendDebugLog(`[loopback] screen recording permission request failed: ${error.message}`);
+  }
+  let screenPermission = 'unknown';
+  try { screenPermission = systemPreferences.getMediaAccessStatus('screen'); } catch (_) {}
+  return { success: true, screenPermission };
+});
+
+// Once denied/restricted, macOS will not re-prompt — the user has to flip it
+// in System Settings themselves. Deep-links straight to the Screen Recording
+// pane. The URL is a fixed literal (not renderer-supplied), so this is safe
+// despite the generic 'open-external' handler restricting to http/https only.
+ipcMain.handle('open-screen-recording-settings', async () => {
+  if (process.platform !== 'darwin') {
+    return { success: false, error: 'macOS only' };
+  }
+  try {
+    await shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture');
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+// Screen Recording permission changes don't take effect for an already-running
+// process (unlike mic/camera) — macOS requires a full relaunch. Offered as a
+// one-click follow-up after granting so the user doesn't have to know that.
+ipcMain.handle('relaunch-app', async () => {
+  app.relaunch();
+  app.exit(0);
 });
 
 // Debug functionality handled by side panel now

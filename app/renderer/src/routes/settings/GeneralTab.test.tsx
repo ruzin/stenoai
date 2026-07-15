@@ -53,6 +53,17 @@ const h = vi.hoisted(() => {
     microphone: { data: { device_id: null as string | null, label: null as string | null } },
     setMicrophone: { mutate: vi.fn() },
     audioInputDevices: [] as { deviceId: string; label: string }[],
+    systemAudioSupport: {
+      data: {
+        supported: true,
+        osVersion: '14.4',
+        screenPermission: 'granted' as string,
+      },
+      refetch: vi.fn(),
+    },
+    requestScreenRecording: { mutate: vi.fn(), isPending: false },
+    openScreenRecordingSettings: { mutate: vi.fn() },
+    relaunchApp: { mutate: vi.fn() },
   };
 });
 
@@ -65,6 +76,14 @@ vi.mock('@/hooks/useTheme', () => ({
   useTheme: () => ({ theme: 'system', setTheme: vi.fn() }),
 }));
 
+// jsdom's navigator.userAgent reports "darwin" (not "Macintosh"), so the real
+// isMac constant evaluates false here — force it true so the macOS-only
+// "Record system audio" row (isMac-gated in GeneralTab.tsx) is reachable.
+vi.mock('@/lib/utils', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/utils')>();
+  return { ...actual, isMac: true };
+});
+
 vi.mock('@/hooks/useSettings', () => {
   const q = (data: unknown) => ({ data, isPending: false, isPlaceholderData: false });
   const m = () => ({ mutate: vi.fn() });
@@ -73,7 +92,10 @@ vi.mock('@/hooks/useSettings', () => {
     useSetNotifications: m,
     useSystemAudioSetting: () => q(true),
     useSetSystemAudio: m,
-    useSystemAudioSupport: () => q({ supported: true, osVersion: '14.4' }),
+    useSystemAudioSupport: () => h.systemAudioSupport,
+    useRequestScreenRecordingPermission: () => h.requestScreenRecording,
+    useOpenScreenRecordingSettings: () => h.openScreenRecordingSettings,
+    useRelaunchApp: () => h.relaunchApp,
     useAutoDetectMeetingsSetting: () => q(true),
     useSetAutoDetectMeetings: m,
     useLaunchOnLoginSetting: () => q(true),
@@ -117,6 +139,12 @@ beforeEach(() => {
   h.microphone.data = { device_id: null, label: null };
   h.setMicrophone.mutate.mockReset();
   h.audioInputDevices = [];
+  h.systemAudioSupport.data = { supported: true, osVersion: '14.4', screenPermission: 'granted' };
+  h.systemAudioSupport.refetch.mockReset();
+  h.requestScreenRecording.mutate.mockReset();
+  h.requestScreenRecording.isPending = false;
+  h.openScreenRecordingSettings.mutate.mockReset();
+  h.relaunchApp.mutate.mockReset();
 });
 
 // hidden:true because once the OAuth dialog is open (modal), Radix marks the
@@ -365,5 +393,84 @@ describe('GeneralTab Microphone setting', () => {
     });
 
     expect(h.setMicrophone.mutate).toHaveBeenCalledWith({ deviceId: 'default', label: '' });
+  });
+});
+
+describe('GeneralTab Record system audio — Screen Recording permission', () => {
+  test('granted: plain toggle description, no action buttons', () => {
+    render(<GeneralTab />);
+    expect(screen.getByText('Capture both sides of a call. Turn off to record your mic only.')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Grant Access' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Open Settings' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Relaunch' })).toBeNull();
+  });
+
+  test('not-determined: shows a "Grant Access" button that requests permission', async () => {
+    h.systemAudioSupport.data = { supported: true, osVersion: '14.4', screenPermission: 'not-determined' };
+    render(<GeneralTab />);
+
+    expect(
+      screen.getByText(/Needs Screen Recording access first/),
+    ).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Grant Access' }));
+    });
+    expect(h.requestScreenRecording.mutate).toHaveBeenCalledTimes(1);
+  });
+
+  test('denied: shows "Check Again" and "Open Settings" buttons', async () => {
+    h.systemAudioSupport.data = { supported: true, osVersion: '14.4', screenPermission: 'denied' };
+    render(<GeneralTab />);
+
+    expect(screen.getByText(/Screen Recording access was denied/)).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Open Settings' }));
+    });
+    expect(h.openScreenRecordingSettings.mutate).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Check Again' }));
+    });
+    expect(h.systemAudioSupport.refetch).toHaveBeenCalledTimes(1);
+  });
+
+  test('restricted: same treatment as denied (MDM/parental controls)', () => {
+    h.systemAudioSupport.data = { supported: true, osVersion: '14.4', screenPermission: 'restricted' };
+    render(<GeneralTab />);
+    expect(screen.getByRole('button', { name: 'Open Settings' })).toBeTruthy();
+  });
+
+  test('permission flips to granted mid-session: prompts to relaunch instead of re-showing the request button', async () => {
+    h.systemAudioSupport.data = { supported: true, osVersion: '14.4', screenPermission: 'not-determined' };
+    const { rerender } = render(<GeneralTab />);
+    expect(screen.getByRole('button', { name: 'Grant Access' })).toBeTruthy();
+
+    // Permission granted (e.g. the user answered the native prompt) — the
+    // query refetches and now reports 'granted'.
+    h.systemAudioSupport.data = { supported: true, osVersion: '14.4', screenPermission: 'granted' };
+    await act(async () => {
+      rerender(<GeneralTab />);
+    });
+
+    expect(screen.getByText(/relaunch Steno to start capturing/)).toBeTruthy();
+    const relaunchBtn = screen.getByRole('button', { name: 'Relaunch' });
+    expect(relaunchBtn).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Grant Access' })).toBeNull();
+
+    await act(async () => {
+      fireEvent.click(relaunchBtn);
+    });
+    expect(h.relaunchApp.mutate).toHaveBeenCalledTimes(1);
+  });
+
+  test('permission already granted when the app launched: no relaunch prompt', () => {
+    // Distinguishes "was already granted at launch" from "granted mid-session"
+    // — the whole point of needsRelaunchForScreenRecording tracking the
+    // FIRST observed value, not just the current one.
+    h.systemAudioSupport.data = { supported: true, osVersion: '14.4', screenPermission: 'granted' };
+    render(<GeneralTab />);
+    expect(screen.queryByRole('button', { name: 'Relaunch' })).toBeNull();
   });
 });

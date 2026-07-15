@@ -310,6 +310,7 @@ export type SetupCheckResponse = Result<{
 
 export type MicPermissionResponse = Result<{ status: MicPermissionStatus }>;
 export type MicPermissionGrantResponse = Result<{ granted: boolean }>;
+export type ScreenRecordingPermissionResponse = Result<{ screenPermission: string }>;
 
 /** Mirrors RECORDING_TRIGGERS in main.js -- what UI action started the
  *  recording, so PostHog can tell whether the meeting-detected nudge
@@ -685,7 +686,13 @@ type Subscribe<P = void> = (cb: (payload: P) => void) => () => void;
 export interface StenoaiBridge {
   version: number;
 
-  app: { getVersion: RequestFn<[], AppVersionResponse> };
+  app: {
+    getVersion: RequestFn<[], AppVersionResponse>;
+    /** Screen Recording permission changes don't apply to an already-running
+     *  process on macOS — this is the one-click "apply it now" follow-up.
+     *  Never actually resolves (the process exits first). */
+    relaunch: RequestFn<[], void>;
+  };
 
   window: { focus: SendFn<[]>; readyToShow: SendFn<[]> };
 
@@ -716,6 +723,14 @@ export interface StenoaiBridge {
   perm: {
     checkMicrophone: RequestFn<[], MicPermissionResponse>;
     requestMicrophone: RequestFn<[], MicPermissionGrantResponse>;
+    /** macOS only: safely triggers the native prompt for a 'not-determined'
+     *  user by calling desktopCapturer.getSources() in an ordinary, properly
+     *  try/caught main-process handler — deliberately NOT the same code path
+     *  recording capture uses (see main.js for why that one can't do this). */
+    requestScreenRecording: RequestFn<[], ScreenRecordingPermissionResponse>;
+    /** Deep-links to System Settings > Screen Recording — macOS won't
+     *  re-prompt once denied/restricted, so this is the only way back. */
+    openScreenRecordingSettings: RequestFn<[], Result<Record<string, never>>>;
   };
 
   recording: {

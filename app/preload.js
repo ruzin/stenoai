@@ -58,6 +58,7 @@ const stenoai = {
 
   app: {
     getVersion: () => invoke('get-app-version'),
+    relaunch: () => invoke('relaunch-app'),
   },
 
   window: {
@@ -93,6 +94,8 @@ const stenoai = {
   perm: {
     checkMicrophone: () => invoke('check-microphone-permission'),
     requestMicrophone: () => invoke('request-microphone-permission'),
+    requestScreenRecording: () => invoke('request-screen-recording-permission'),
+    openScreenRecordingSettings: () => invoke('open-screen-recording-settings'),
   },
 
   recording: {
