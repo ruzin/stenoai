@@ -63,21 +63,14 @@ export function GeneralTab() {
   const openScreenRecordingSettings = useOpenScreenRecordingSettings();
   const relaunchApp = useRelaunchApp();
   // Screen Recording permission changes don't apply to an already-running
-  // process — captures the FIRST value seen this session so a later flip to
-  // 'granted' (via the request button, or the user fixing it in System
-  // Settings and coming back) can be told apart from "was already granted
-  // when the app launched" and only then prompt for a relaunch.
-  const [initialScreenPermission, setInitialScreenPermission] = React.useState<
-    string | undefined
-  >(undefined);
-  React.useEffect(() => {
-    if (initialScreenPermission === undefined && systemAudioSupport.data?.screenPermission) {
-      setInitialScreenPermission(systemAudioSupport.data.screenPermission);
-    }
-  }, [initialScreenPermission, systemAudioSupport.data?.screenPermission]);
+  // process — `screenPermissionAtLaunch` is frozen main-side at startup, so
+  // comparing it to the live `screenPermission` tells apart "granted before
+  // launch" from "granted mid-session, needs a relaunch to take effect."
+  // (Deliberately not component state: that broke on tab remount, since a
+  // freshly-mounted component would re-seed its "initial" value from the
+  // now-live 'granted' status and silently lose the relaunch prompt.)
   const needsRelaunchForScreenRecording =
-    initialScreenPermission !== undefined &&
-    initialScreenPermission !== 'granted' &&
+    systemAudioSupport.data?.screenPermissionAtLaunch !== 'granted' &&
     systemAudioSupport.data?.screenPermission === 'granted';
   const screenPermission = systemAudioSupport.data?.screenPermission;
   const systemAudioDescription = (() => {

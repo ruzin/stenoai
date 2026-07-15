@@ -750,6 +750,11 @@ export interface StenoaiBridge {
         supported: boolean;
         osVersion: string;
         screenPermission: string;
+        // Screen Recording permission as of process launch (macOS only;
+        // frozen at startup — a mid-session grant only takes effect after a
+        // relaunch, so consumers gating loopback usability must read this,
+        // not the live `screenPermission`).
+        screenPermissionAtLaunch: string;
         experimental?: boolean;
         platform?: string;
       }>

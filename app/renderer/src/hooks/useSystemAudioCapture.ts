@@ -80,8 +80,13 @@ export function useSystemAudioCapture() {
   // only costs a fast user their very first recording's system-audio side
   // right after a cold launch — self-correcting on the next recording once
   // this near-instant local IPC call resolves.
+  // Gates on screenPermissionAtLaunch (frozen main-side at process start),
+  // not the live screenPermission: macOS doesn't apply a mid-session grant
+  // to the already-running process, so treating a live 'granted' as usable
+  // here would re-enable loopback (and the broken getSources() code path
+  // above) before the relaunch that's actually required for it to work.
   const screenPermissionOk = isMac
-    ? systemAudioSupport.data?.screenPermission === 'granted'
+    ? systemAudioSupport.data?.screenPermissionAtLaunch === 'granted'
     : true;
   const loopbackEnabled = isMac
     ? (systemAudio.data ?? true) && loopbackSupported && screenPermissionOk
@@ -106,7 +111,7 @@ export function useSystemAudioCapture() {
   const screenPermissionBlocked =
     isMac &&
     !!systemAudioSupport.data &&
-    systemAudioSupport.data.screenPermission !== 'granted' &&
+    systemAudioSupport.data.screenPermissionAtLaunch !== 'granted' &&
     (systemAudio.data ?? true) &&
     loopbackSupported;
   const screenPermissionBlockedRef = React.useRef(screenPermissionBlocked);

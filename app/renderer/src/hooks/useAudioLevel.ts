@@ -67,7 +67,15 @@ export function useAudioLevel({
             audio: pinnedDeviceId ? { deviceId: { exact: pinnedDeviceId } } : true,
           });
         } catch (err) {
-          if (!pinnedDeviceId) throw err;
+          // Only fall back to the system default on a genuinely-missing
+          // device — matches useSystemAudioCapture.ts's own rule. Falling
+          // back on any error (e.g. NotReadableError/NotAllowedError) would
+          // let the meter visualize a different mic than what's actually
+          // being recorded.
+          const isMissingDeviceError =
+            err instanceof DOMException &&
+            (err.name === 'OverconstrainedError' || err.name === 'NotFoundError');
+          if (!pinnedDeviceId || !isMissingDeviceError) throw err;
           stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         }
         if (cancelled) {

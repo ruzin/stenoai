@@ -175,7 +175,12 @@ export function useSetMicrophone() {
   return useMutation({
     mutationFn: async ({ deviceId, label }: { deviceId: string; label: string }) =>
       unwrap(await ipc().settings.setMicrophone(deviceId, label)),
-    onSuccess: () => qc.invalidateQueries({ queryKey: settingsKeys.microphone() }),
+    // Write the mutation's own result straight into the cache instead of
+    // invalidating: a bare invalidate leaves a window where a recording
+    // started immediately after switching mics (via ensureQueryData in
+    // useSystemAudioCapture.ts) could still read the pre-switch cached
+    // value before the refetch lands.
+    onSuccess: (result) => qc.setQueryData(settingsKeys.microphone(), result),
   });
 }
 

@@ -224,6 +224,13 @@ let shortcutQueue = [];
 let pendingShortcutUrls = [];
 let rendererShortcutReady = false;
 let launchedByShortcut = false;
+// Screen Recording permission as of process launch, frozen once at startup.
+// macOS doesn't apply a mid-session grant to the running process — only a
+// relaunch picks it up — so gates that decide "is loopback usable this
+// session" must read this, not the live systemPreferences status, or a
+// mid-session grant re-enables a code path (electron-audio-loopback's
+// setDisplayMediaRequestHandler) that's still broken until the app restarts.
+let screenPermissionAtLaunch = 'granted';
 // true when this launch was triggered by the OS login item (auto-launch).
 // Set once at startup (before the app_opened event). On a login launch we
 // suppress the first window show so Steno starts hidden in the tray/menu bar,
@@ -1302,6 +1309,9 @@ if (!gotSingleInstanceLock) {
   });
 
   app.whenReady().then(async () => {
+    if (process.platform === 'darwin') {
+      try { screenPermissionAtLaunch = systemPreferences.getMediaAccessStatus('screen'); } catch (_) {}
+    }
     // Resolve whether this launch was an OS login-item auto-launch BEFORE the
     // app_opened event and the first window show below. macOS reports it via
     // wasOpenedAtLogin (the deprecated openAsHidden no longer works on 13+);
@@ -1760,7 +1770,15 @@ ipcMain.handle('get-system-audio-support', async () => {
     } else {
       try { osVersion = process.getSystemVersion(); } catch (_) {}
     }
-    return { success: true, supported, experimental, platform: process.platform, osVersion, screenPermission };
+    return {
+      success: true,
+      supported,
+      experimental,
+      platform: process.platform,
+      osVersion,
+      screenPermission,
+      screenPermissionAtLaunch,
+    };
   } catch (error) {
     return { success: false, error: error.message };
   }
@@ -1812,8 +1830,15 @@ ipcMain.handle('open-screen-recording-settings', async () => {
 // process (unlike mic/camera) — macOS requires a full relaunch. Offered as a
 // one-click follow-up after granting so the user doesn't have to know that.
 ipcMain.handle('relaunch-app', async () => {
+  if (process.platform !== 'darwin') {
+    return { success: false, error: 'macOS only' };
+  }
+  // app.quit() (not app.exit()) so before-quit/will-quit still run: the
+  // recording-in-progress confirmation, WebM finalization, Ollama pid-tree
+  // kill, and telemetry flush all live there.
   app.relaunch();
-  app.exit(0);
+  app.quit();
+  return { success: true };
 });
 
 // Debug functionality handled by side panel now
@@ -6693,8 +6718,13 @@ ipcMain.handle('get-microphone', async () => {
 ipcMain.handle('set-microphone', async (event, deviceId, label) => {
   try {
     sendDebugLog(`Setting microphone to: ${deviceId ?? 'default'}`);
+    // '--' ends Click's option parsing: without it, a device label starting
+    // with '--' (e.g. "--help") is parsed as a flag, the subcommand prints
+    // help and exits 0 without saving, and the fallback below would then
+    // report a false success.
     const result = await runPythonScript('simple_recorder.py', [
       'set-microphone',
+      '--',
       deviceId ?? '',
       label ?? '',
     ]);
@@ -6702,7 +6732,8 @@ ipcMain.handle('set-microphone', async (event, deviceId, label) => {
     if (jsonMatch) {
       return JSON.parse(jsonMatch[0]);
     }
-    return { success: true, device_id: deviceId ?? null, label: label ?? null };
+    const normalizedId = deviceId && deviceId !== 'default' ? deviceId : null;
+    return { success: true, device_id: normalizedId, label: normalizedId ? label ?? null : null };
   } catch (error) {
     sendDebugLog(`Error setting microphone: ${error.message}`);
     return { success: false, error: error.message };

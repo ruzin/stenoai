@@ -58,6 +58,7 @@ const h = vi.hoisted(() => {
         supported: true,
         osVersion: '14.4',
         screenPermission: 'granted' as string,
+        screenPermissionAtLaunch: 'granted' as string,
       },
       refetch: vi.fn(),
     },
@@ -139,7 +140,12 @@ beforeEach(() => {
   h.microphone.data = { device_id: null, label: null };
   h.setMicrophone.mutate.mockReset();
   h.audioInputDevices = [];
-  h.systemAudioSupport.data = { supported: true, osVersion: '14.4', screenPermission: 'granted' };
+  h.systemAudioSupport.data = {
+    supported: true,
+    osVersion: '14.4',
+    screenPermission: 'granted',
+    screenPermissionAtLaunch: 'granted',
+  };
   h.systemAudioSupport.refetch.mockReset();
   h.requestScreenRecording.mutate.mockReset();
   h.requestScreenRecording.isPending = false;
@@ -418,7 +424,7 @@ describe('GeneralTab Record system audio — Screen Recording permission', () =>
   });
 
   test('not-determined: shows a "Grant Access" button that requests permission', async () => {
-    h.systemAudioSupport.data = { supported: true, osVersion: '14.4', screenPermission: 'not-determined' };
+    h.systemAudioSupport.data = { supported: true, osVersion: '14.4', screenPermission: 'not-determined', screenPermissionAtLaunch: 'not-determined' };
     render(<GeneralTab />);
 
     expect(
@@ -432,7 +438,7 @@ describe('GeneralTab Record system audio — Screen Recording permission', () =>
   });
 
   test('denied: shows "Check Again" and "Open Settings" buttons', async () => {
-    h.systemAudioSupport.data = { supported: true, osVersion: '14.4', screenPermission: 'denied' };
+    h.systemAudioSupport.data = { supported: true, osVersion: '14.4', screenPermission: 'denied', screenPermissionAtLaunch: 'denied' };
     render(<GeneralTab />);
 
     expect(screen.getByText(/Screen Recording access was denied/)).toBeTruthy();
@@ -449,19 +455,26 @@ describe('GeneralTab Record system audio — Screen Recording permission', () =>
   });
 
   test('restricted: same treatment as denied (MDM/parental controls)', () => {
-    h.systemAudioSupport.data = { supported: true, osVersion: '14.4', screenPermission: 'restricted' };
+    h.systemAudioSupport.data = { supported: true, osVersion: '14.4', screenPermission: 'restricted', screenPermissionAtLaunch: 'restricted' };
     render(<GeneralTab />);
     expect(screen.getByRole('button', { name: 'Open Settings' })).toBeTruthy();
   });
 
   test('permission flips to granted mid-session: prompts to relaunch instead of re-showing the request button', async () => {
-    h.systemAudioSupport.data = { supported: true, osVersion: '14.4', screenPermission: 'not-determined' };
+    h.systemAudioSupport.data = { supported: true, osVersion: '14.4', screenPermission: 'not-determined', screenPermissionAtLaunch: 'not-determined' };
     const { rerender } = render(<GeneralTab />);
     expect(screen.getByRole('button', { name: 'Grant Access' })).toBeTruthy();
 
     // Permission granted (e.g. the user answered the native prompt) — the
-    // query refetches and now reports 'granted'.
-    h.systemAudioSupport.data = { supported: true, osVersion: '14.4', screenPermission: 'granted' };
+    // query refetches and now reports 'granted'. screenPermissionAtLaunch
+    // stays 'not-determined' — it's frozen at process start and only a
+    // relaunch updates it, which is exactly what this test is asserting.
+    h.systemAudioSupport.data = {
+      supported: true,
+      osVersion: '14.4',
+      screenPermission: 'granted',
+      screenPermissionAtLaunch: 'not-determined',
+    };
     await act(async () => {
       rerender(<GeneralTab />);
     });
@@ -481,7 +494,12 @@ describe('GeneralTab Record system audio — Screen Recording permission', () =>
     // Distinguishes "was already granted at launch" from "granted mid-session"
     // — the whole point of needsRelaunchForScreenRecording tracking the
     // FIRST observed value, not just the current one.
-    h.systemAudioSupport.data = { supported: true, osVersion: '14.4', screenPermission: 'granted' };
+    h.systemAudioSupport.data = {
+      supported: true,
+      osVersion: '14.4',
+      screenPermission: 'granted',
+      screenPermissionAtLaunch: 'granted',
+    };
     render(<GeneralTab />);
     expect(screen.queryByRole('button', { name: 'Relaunch' })).toBeNull();
   });
@@ -495,6 +513,7 @@ describe('GeneralTab Record system audio — Screen Recording permission', () =>
       supported: false,
       osVersion: '13.0',
       screenPermission: 'not-determined',
+      screenPermissionAtLaunch: 'not-determined',
     };
     render(<GeneralTab />);
     expect(screen.getByText(/requires macOS 14.4\+/)).toBeTruthy();
