@@ -167,6 +167,47 @@ nav, aside, [class*="sidebar"] {
   color: #1A1A18;
 }
 
+/* ── Changelog version badge ────────────────────────────────────────────────── */
+
+/* The <Update> component's built-in badge uses bg-primary/10 + dark:text-primary-light,
+   which we never define a dark-mode tint for — a 10%-opacity near-black background
+   is nearly invisible on a dark page. Use the same ink/paper chip inversion as the
+   topbar CTA button so the version badge stands out in both themes. */
+[data-component-part="update-label"] {
+  background-color: var(--ink-900) !important;
+  color: var(--paper-0) !important;
+}
+
+/* The label/date column reserves a fixed 160px, far wider than the badge or date
+   text needs, then adds another 24px gap before the content column -- reads as a
+   large empty gutter. Narrow the column and tighten the gap so content sits closer
+   to the version/date. */
+@media (min-width: 1024px) {
+  .update-container {
+    gap: 1rem !important;
+  }
+
+  .update-container > div:first-child {
+    width: 120px !important;
+  }
+}
+
+/* Below the xl breakpoint the "On this page" TOC column disappears and #content-area
+   (box-border, so padding shrinks its content rather than growing the box) stretches
+   edge-to-edge with no right-hand breathing room. Add padding so the reading column
+   stays narrower even without the TOC reserving space. */
+@media (min-width: 1024px) {
+  #content-area {
+    padding-right: 3rem;
+  }
+}
+
+@media (min-width: 1280px) {
+  #content-area {
+    padding-right: 4rem;
+  }
+}
+
 /* ── Dark mode adjustments ──────────────────────────────────────────────────── */
 
 .dark body, .dark .mintlify-root {
