@@ -73,7 +73,7 @@ conventions), which is not yet merged into `main`. Practically:
 
 ## Content & layout
 
-- Pill: "DOWNLOAD STARTED" with check icon, small-caps, `--surface-raised`
+- Pill: "DOWNLOAD STARTED" with check icon, small-caps, `--surface-sunken`
   background.
 - Heading: "Thanks for downloading! Just a few steps left" in
   `var(--font-serif)` — already the site's existing display-heading font
