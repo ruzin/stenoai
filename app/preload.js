@@ -58,6 +58,7 @@ const stenoai = {
 
   app: {
     getVersion: () => invoke('get-app-version'),
+    relaunch: () => invoke('relaunch-app'),
   },
 
   window: {
@@ -93,6 +94,8 @@ const stenoai = {
   perm: {
     checkMicrophone: () => invoke('check-microphone-permission'),
     requestMicrophone: () => invoke('request-microphone-permission'),
+    requestScreenRecording: () => invoke('request-screen-recording-permission'),
+    openScreenRecordingSettings: () => invoke('open-screen-recording-settings'),
   },
 
   recording: {
@@ -239,11 +242,14 @@ const stenoai = {
     setSilenceAutoStopMinutes: (v) => invoke('set-silence-auto-stop-minutes', v),
     showSilenceAutoStopNotification: (payload) => invoke('show-silence-auto-stop-notification', payload),
     showNoteReadyNotification: (payload) => invoke('show-note-ready-notification', payload),
+    showSystemAudioMicOnlyNotification: () => invoke('show-system-audio-mic-only-notification'),
     // Design-for-test seam: the production fire path is the main-side scheduler
     // timer; this lets e2e drive the gate + suppression deterministically.
     showPremeetingNotification: (payload) => invoke('show-premeeting-notification', payload),
     getLanguage: () => invoke('get-language'),
     setLanguage: (code) => invoke('set-language', code),
+    getMicrophone: () => invoke('get-microphone'),
+    setMicrophone: (deviceId, label) => invoke('set-microphone', deviceId, label),
     getUserName: () => invoke('get-user-name'),
     setUserName: (name) => invoke('set-user-name', name),
     getStoragePath: () => invoke('get-storage-path'),

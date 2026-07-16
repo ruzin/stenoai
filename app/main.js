@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell, systemPreferences, globalShortcut, safeStorage, Tray, Menu, nativeImage, Notification, powerMonitor, net, session } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, systemPreferences, globalShortcut, safeStorage, Tray, Menu, nativeImage, Notification, powerMonitor, net, session, desktopCapturer } = require('electron');
 
 // Prevent EPIPE crashes when stdout/stderr pipe is broken (e.g. launching terminal closed)
 process.stdout?.on('error', () => {});
@@ -224,6 +224,13 @@ let shortcutQueue = [];
 let pendingShortcutUrls = [];
 let rendererShortcutReady = false;
 let launchedByShortcut = false;
+// Screen Recording permission as of process launch, frozen once at startup.
+// macOS doesn't apply a mid-session grant to the running process — only a
+// relaunch picks it up — so gates that decide "is loopback usable this
+// session" must read this, not the live systemPreferences status, or a
+// mid-session grant re-enables a code path (electron-audio-loopback's
+// setDisplayMediaRequestHandler) that's still broken until the app restarts.
+let screenPermissionAtLaunch = 'granted';
 // true when this launch was triggered by the OS login item (auto-launch).
 // Set once at startup (before the app_opened event). On a login launch we
 // suppress the first window show so Steno starts hidden in the tray/menu bar,
@@ -1302,6 +1309,9 @@ if (!gotSingleInstanceLock) {
   });
 
   app.whenReady().then(async () => {
+    if (process.platform === 'darwin') {
+      try { screenPermissionAtLaunch = systemPreferences.getMediaAccessStatus('screen'); } catch (_) {}
+    }
     // Resolve whether this launch was an OS login-item auto-launch BEFORE the
     // app_opened event and the first window show below. macOS reports it via
     // wasOpenedAtLogin (the deprecated openAsHidden no longer works on 13+);
@@ -1760,10 +1770,75 @@ ipcMain.handle('get-system-audio-support', async () => {
     } else {
       try { osVersion = process.getSystemVersion(); } catch (_) {}
     }
-    return { success: true, supported, experimental, platform: process.platform, osVersion, screenPermission };
+    return {
+      success: true,
+      supported,
+      experimental,
+      platform: process.platform,
+      osVersion,
+      screenPermission,
+      screenPermissionAtLaunch,
+    };
   } catch (error) {
     return { success: false, error: error.message };
   }
+});
+
+// Safely triggers macOS's native Screen Recording permission prompt for a
+// 'not-determined' user, by calling desktopCapturer.getSources() directly in
+// a plain try/caught async handler. Deliberately NOT the same code path as
+// the recording capture flow: electron-audio-loopback's own request handler
+// makes this same call inside an async function passed straight to
+// session.setDisplayMediaRequestHandler, which Electron invokes without
+// awaiting/catching — a failure there becomes an unhandled rejection that
+// used to crash the whole app (see useSystemAudioCapture.ts's
+// screenPermissionOk gate). Calling it here, in an ordinary ipcMain.handle,
+// has no such landmine: a rejection is just a normal rejected promise this
+// handler catches like any other. Only meaningful on macOS — 'not-determined'
+// only exists there.
+ipcMain.handle('request-screen-recording-permission', async () => {
+  if (process.platform !== 'darwin') {
+    return { success: true, screenPermission: 'granted' };
+  }
+  try {
+    await desktopCapturer.getSources({ types: ['screen'] });
+  } catch (error) {
+    sendDebugLog(`[loopback] screen recording permission request failed: ${error.message}`);
+  }
+  let screenPermission = 'unknown';
+  try { screenPermission = systemPreferences.getMediaAccessStatus('screen'); } catch (_) {}
+  return { success: true, screenPermission };
+});
+
+// Once denied/restricted, macOS will not re-prompt — the user has to flip it
+// in System Settings themselves. Deep-links straight to the Screen Recording
+// pane. The URL is a fixed literal (not renderer-supplied), so this is safe
+// despite the generic 'open-external' handler restricting to http/https only.
+ipcMain.handle('open-screen-recording-settings', async () => {
+  if (process.platform !== 'darwin') {
+    return { success: false, error: 'macOS only' };
+  }
+  try {
+    await shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture');
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+// Screen Recording permission changes don't take effect for an already-running
+// process (unlike mic/camera) — macOS requires a full relaunch. Offered as a
+// one-click follow-up after granting so the user doesn't have to know that.
+ipcMain.handle('relaunch-app', async () => {
+  if (process.platform !== 'darwin') {
+    return { success: false, error: 'macOS only' };
+  }
+  // app.quit() (not app.exit()) so before-quit/will-quit still run: the
+  // recording-in-progress confirmation, WebM finalization, Ollama pid-tree
+  // kill, and telemetry flush all live there.
+  app.relaunch();
+  app.quit();
+  return { success: true };
 });
 
 // Debug functionality handled by side panel now
@@ -6288,6 +6363,36 @@ ipcMain.handle('show-silence-auto-stop-notification', async (_event, payload) =>
   }
 });
 
+// Fired by useSystemAudioCapture.ts at the start of a recording whenever it's
+// about to fall back to mic-only specifically because Screen Recording
+// permission isn't granted (not when the user has the "Record system audio"
+// toggle off, and not on unsupported macOS versions — those are the user's
+// own choice / a hardware limit, not a surprise). Clicking it opens Settings
+// via the same tray-open-settings event the tray menu uses, so the user lands
+// on the row with the Grant Access / Open Settings actions.
+ipcMain.handle('show-system-audio-mic-only-notification', async () => {
+  try {
+    if (!(await notificationsEnabled())) return { success: true, shown: false };
+    const notif = new Notification({
+      title: 'Recording mic-only',
+      body: 'Screen Recording permission is needed to capture both sides of the call. Click to fix this in Settings.',
+    });
+    notif.on('click', () => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        if (!mainWindow.isVisible()) mainWindow.show();
+        mainWindow.focus();
+        mainWindow.webContents.send('tray-open-settings');
+      }
+    });
+    trackNotificationLifecycle(notif, 'system_audio_mic_only');
+    notif.show();
+    return { success: true, shown: true };
+  } catch (e) {
+    sendDebugLog(`Failed to show system-audio mic-only notification: ${e.message}`);
+    return { success: false, error: e.message };
+  }
+});
+
 // Fired by the renderer's processing-complete handler when we skipped
 // auto-navigate (user was on a route other than /meetings/processing).
 // Clicking the banner is an explicit "take me there" from the user (unlike
@@ -6594,6 +6699,43 @@ ipcMain.handle('set-language', async (event, languageCode) => {
     return { success: true, language: languageCode };
   } catch (error) {
     sendDebugLog(`Error setting language: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+});
+
+// Microphone selection IPC handlers
+ipcMain.handle('get-microphone', async () => {
+  try {
+    const result = await runPythonScript('simple_recorder.py', ['get-microphone'], true);
+    const jsonData = JSON.parse(result);
+    return { success: true, ...jsonData };
+  } catch (error) {
+    sendDebugLog(`Error getting microphone setting: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('set-microphone', async (event, deviceId, label) => {
+  try {
+    sendDebugLog(`Setting microphone to: ${deviceId ?? 'default'}`);
+    // '--' ends Click's option parsing: without it, a device label starting
+    // with '--' (e.g. "--help") is parsed as a flag, the subcommand prints
+    // help and exits 0 without saving, and the fallback below would then
+    // report a false success.
+    const result = await runPythonScript('simple_recorder.py', [
+      'set-microphone',
+      '--',
+      deviceId ?? '',
+      label ?? '',
+    ]);
+    const jsonMatch = result.match(/\{.*\}/s);
+    if (jsonMatch) {
+      return JSON.parse(jsonMatch[0]);
+    }
+    const normalizedId = deviceId && deviceId !== 'default' ? deviceId : null;
+    return { success: true, device_id: normalizedId, label: normalizedId ? label ?? null : null };
+  } catch (error) {
+    sendDebugLog(`Error setting microphone: ${error.message}`);
     return { success: false, error: error.message };
   }
 });

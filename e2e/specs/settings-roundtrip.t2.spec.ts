@@ -38,6 +38,10 @@ type SettingsBridge = {
     setDockIcon: (v: boolean) => Promise<unknown>;
     setLaunchOnLogin: (v: boolean) => Promise<unknown>;
     setStoragePath: (p: string) => Promise<{ success?: boolean; error?: string }>;
+    setMicrophone: (
+      deviceId: string,
+      label: string,
+    ) => Promise<{ success?: boolean; device_id?: string | null; label?: string | null }>;
   };
   transcriptionEngine: { set: (v: string) => Promise<unknown> };
 };
@@ -124,6 +128,37 @@ test('settings setters persist each value to the right config.json key; real dir
   }
 
   // Keystone: the real user-data dir is byte-for-byte untouched.
+  expect(fileSig(realUserDataDir())).toBe(realDirBefore);
+});
+
+// set-microphone takes two args (device_id, label) and writes two config
+// keys, so it doesn't fit the single-value CASES shape above — same reason
+// set-storage-path gets its own test below.
+test('set-microphone persists device id + label, and clears back to system default', async ({
+  launchApp,
+  userDataDir,
+}) => {
+  const realDirBefore = fileSig(realUserDataDir());
+  const { page } = await launchApp();
+
+  const setRes = await page.evaluate(
+    () => (window as StenoWindow).stenoai.settings.setMicrophone('abc123', 'USB Microphone'),
+  );
+  expect(setRes.success).toBe(true);
+  await expect
+    .poll(() => readUserConfig(userDataDir).microphone_device_id)
+    .toBe('abc123');
+  expect(readUserConfig(userDataDir).microphone_device_label).toBe('USB Microphone');
+
+  const clearRes = await page.evaluate(
+    () => (window as StenoWindow).stenoai.settings.setMicrophone('default', ''),
+  );
+  expect(clearRes.success).toBe(true);
+  await expect
+    .poll(() => readUserConfig(userDataDir).microphone_device_id)
+    .toBe(null);
+  expect(readUserConfig(userDataDir).microphone_device_label).toBe(null);
+
   expect(fileSig(realUserDataDir())).toBe(realDirBefore);
 });
 

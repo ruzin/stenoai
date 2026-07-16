@@ -13,6 +13,7 @@ export const settingsKeys = {
   launchOnLogin: () => [...settingsKeys.all, 'launchOnLogin'] as const,
   silenceAutoStop: () => [...settingsKeys.all, 'silenceAutoStop'] as const,
   language: () => [...settingsKeys.all, 'language'] as const,
+  microphone: () => [...settingsKeys.all, 'microphone'] as const,
   storagePath: () => [...settingsKeys.all, 'storagePath'] as const,
   appVersion: () => [...settingsKeys.all, 'appVersion'] as const,
   userName: () => [...settingsKeys.all, 'userName'] as const,
@@ -87,6 +88,36 @@ export function useSystemAudioSupport() {
   });
 }
 
+/** macOS only: safely triggers the native Screen Recording prompt for a
+ *  'not-determined' user (see ipc.ts for why this must NOT go through the
+ *  recording capture path). Re-fetches systemAudioSupport afterward so the
+ *  Settings row's message updates immediately — actually using the
+ *  permission still needs a relaunch (see useRelaunchApp usage below). */
+export function useRequestScreenRecordingPermission() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async () => unwrap(await ipc().perm.requestScreenRecording()),
+    onSuccess: () => qc.invalidateQueries({ queryKey: settingsKeys.systemAudioSupport() }),
+  });
+}
+
+/** Deep-links to System Settings > Screen Recording for the denied/restricted
+ *  case, where macOS won't show the native prompt again. */
+export function useOpenScreenRecordingSettings() {
+  return useMutation({
+    mutationFn: async () => unwrap(await ipc().perm.openScreenRecordingSettings()),
+  });
+}
+
+/** The process exits before this ever resolves — callers fire-and-forget. */
+export function useRelaunchApp() {
+  return useMutation({
+    mutationFn: async () => {
+      void ipc().app.relaunch();
+    },
+  });
+}
+
 export function useAutoDetectMeetingsSetting() {
   return useQuery({
     queryKey: settingsKeys.autoDetectMeetings(),
@@ -129,6 +160,27 @@ export function useSetLanguage() {
   return useMutation({
     mutationFn: async (code: string) => unwrap(await ipc().settings.setLanguage(code)),
     onSuccess: () => qc.invalidateQueries({ queryKey: settingsKeys.language() }),
+  });
+}
+
+export function useMicrophoneSetting() {
+  return useQuery({
+    queryKey: settingsKeys.microphone(),
+    queryFn: async () => unwrap(await ipc().settings.getMicrophone()),
+  });
+}
+
+export function useSetMicrophone() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ deviceId, label }: { deviceId: string; label: string }) =>
+      unwrap(await ipc().settings.setMicrophone(deviceId, label)),
+    // Write the mutation's own result straight into the cache instead of
+    // invalidating: a bare invalidate leaves a window where a recording
+    // started immediately after switching mics (via ensureQueryData in
+    // useSystemAudioCapture.ts) could still read the pre-switch cached
+    // value before the refetch lands.
+    onSuccess: (result) => qc.setQueryData(settingsKeys.microphone(), result),
   });
 }
 

@@ -1054,6 +1054,36 @@ class Config:
             or (language_code.upper() if language_code else "Unknown")
         )
 
+    def get_microphone_device(self) -> Dict[str, Optional[str]]:
+        """Get the selected microphone device (None/None = system default)."""
+        return {
+            "device_id": self._config.get("microphone_device_id"),
+            "label": self._config.get("microphone_device_label"),
+        }
+
+    def set_microphone_device(
+        self, device_id: Optional[str], label: Optional[str]
+    ) -> bool:
+        """
+        Set the microphone device to record from.
+
+        Args:
+            device_id: browser MediaDeviceInfo.deviceId, or None/"default" to
+                clear back to the OS system default input device
+            label: human-readable device label, stored so Settings can display
+                the selection even before enumerateDevices() re-resolves it
+
+        Returns:
+            True if saved successfully, False otherwise
+        """
+        if not device_id or device_id == "default":
+            self._config["microphone_device_id"] = None
+            self._config["microphone_device_label"] = None
+        else:
+            self._config["microphone_device_id"] = device_id
+            self._config["microphone_device_label"] = label or None
+        return self._save()
+
     # --- AI provider settings ---
 
     VALID_AI_PROVIDERS = ("local", "remote", "cloud", "adapter")
