@@ -22,7 +22,7 @@ const MEETING_APP_ALLOWLIST = [
   /^com\.google\.Chrome/,              // Chrome (+ helpers)
   /^org\.chromium\./,                  // Chromium
   /^com\.microsoft\.edgemac/,          // Edge
-  /^company\.thebrowser\.Browser/,     // Arc
+  /^company\.thebrowser\./i,           // Arc (app: …thebrowser.Browser, helpers: …thebrowser.browser.helper)
   /^com\.brave\.Browser/,              // Brave
   /^org\.mozilla\./,                   // Firefox
 ];
