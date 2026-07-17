@@ -382,7 +382,7 @@ export function Setup() {
                 (e.target as HTMLInputElement).blur();
               }
             }}
-            placeholder="Ruzin"
+            placeholder="Your name"
             autoComplete="given-name"
             className="w-[160px]"
           />

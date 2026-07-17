@@ -3,6 +3,8 @@ import { ExternalLink, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
+import { GoogleCalendarIcon } from '@/components/ui/google-calendar-icon';
+import { OutlookIcon } from '@/components/ui/outlook-icon';
 import {
   Select,
   SelectContent,
@@ -25,14 +27,18 @@ import {
   useDockIconSetting,
   useLaunchOnLoginSetting,
   useNotificationsSetting,
+  usePremeetingNotificationsSetting,
   useSetAutoDetectMeetings,
   useSetDockIcon,
   useSetLaunchOnLogin,
   useSetNotifications,
+  useSetPremeetingNotifications,
+  useSetShowMenuBarIcon,
   useSetSilenceAutoStopEnabled,
   useSetSilenceAutoStopMinutes,
   useSetSystemAudio,
   useSetUserName,
+  useShowMenuBarIconSetting,
   useSilenceAutoStopSetting,
   useSystemAudioSetting,
   useSystemAudioSupport,
@@ -42,12 +48,14 @@ import {
   useGoogleCalendarAuth,
   useOutlookCalendarAuth,
 } from '@/hooks/useCalendarEvents';
-import { COMPACT_BTN, COMPACT_TRIGGER, SettingRow } from './primitives';
+import { COMPACT_BTN, COMPACT_TRIGGER, SectionHeading, SettingRow } from './primitives';
 
 export function GeneralTab() {
   const { theme, setTheme } = useTheme();
   const notifications = useNotificationsSetting();
   const setNotifications = useSetNotifications();
+  const premeetingNotifications = usePremeetingNotificationsSetting();
+  const setPremeetingNotifications = useSetPremeetingNotifications();
   const systemAudio = useSystemAudioSetting();
   const setSystemAudio = useSetSystemAudio();
   const systemAudioSupport = useSystemAudioSupport();
@@ -60,6 +68,8 @@ export function GeneralTab() {
   const setSilenceAutoStopMinutes = useSetSilenceAutoStopMinutes();
   const dockIcon = useDockIconSetting();
   const setDockIcon = useSetDockIcon();
+  const menuBarIcon = useShowMenuBarIconSetting();
+  const setMenuBarIcon = useSetShowMenuBarIcon();
   const google = useGoogleCalendarAuth();
   const outlook = useOutlookCalendarAuth();
   const userName = useUserName();
@@ -180,6 +190,12 @@ export function GeneralTab() {
     setOauth(null);
   };
 
+  // Both the menu bar icon and the dock icon are ways back into a hidden
+  // window (see Sidebar's requestSingleInstanceLock recovery via
+  // Applications/Spotlight relaunch) — hiding both isn't blocked, just
+  // called out, since it's easy to miss that the recovery path still works.
+  const bothIconsHidden = (dockIcon.data ?? false) && !(menuBarIcon.data ?? true);
+
   return (
     <section data-settings-tab="general">
       <SettingRow
@@ -201,9 +217,9 @@ export function GeneralTab() {
               (e.target as HTMLInputElement).blur();
             }
           }}
-          placeholder="Ruzin"
+          placeholder="Your name"
           autoComplete="given-name"
-          className="h-[30px] w-[180px] rounded-[6px] text-[13px]"
+          className="h-[30px] w-[180px] rounded-[6px] bg-[color:var(--surface-raised)] text-[13px]"
           data-testid="user-name-input"
         />
       </SettingRow>
@@ -211,6 +227,7 @@ export function GeneralTab() {
       <SettingRow
         label="Appearance"
         description="Choose light, dark, or match your system"
+        noBorder
       >
         <Select
           value={theme}
@@ -230,13 +247,16 @@ export function GeneralTab() {
         </Select>
       </SettingRow>
 
+      <SectionHeading>Calendar</SectionHeading>
+
       <SettingRow
-        label="Calendar"
+        label="Connect calendar"
         description={
           calendarConnected
             ? `Connected to ${calendarProvider}`
             : 'Show upcoming meetings on the home screen'
         }
+        noBorder
       >
         {calendarConnected ? (
           <Button
@@ -248,6 +268,11 @@ export function GeneralTab() {
               else outlook.disconnect.mutate();
             }}
           >
+            {google.status.data?.connected ? (
+              <GoogleCalendarIcon size={13} />
+            ) : (
+              <OutlookIcon size={13} />
+            )}
             Disconnect
           </Button>
         ) : (
@@ -258,6 +283,7 @@ export function GeneralTab() {
               className={COMPACT_BTN}
               onClick={() => void startConnect('google')}
             >
+              <GoogleCalendarIcon size={13} />
               Google
             </Button>
             <Button
@@ -266,6 +292,7 @@ export function GeneralTab() {
               className={COMPACT_BTN}
               onClick={() => void startConnect('outlook')}
             >
+              <OutlookIcon size={13} />
               Outlook
             </Button>
           </div>
@@ -278,9 +305,34 @@ export function GeneralTab() {
         onRetry={() => oauth && void startConnect(oauth.provider)}
       />
 
+      <SectionHeading>Meeting notifications</SectionHeading>
+
       <SettingRow
-        label="Desktop notifications"
-        description="App Notifications"
+        label="Scheduled meetings"
+        description="Show a notification before meetings start, based on your calendar."
+      >
+        <Switch
+          checked={premeetingNotifications.data ?? true}
+          onCheckedChange={(v) => setPremeetingNotifications.mutate(v)}
+          disabled={premeetingNotifications.data === undefined}
+        />
+      </SettingRow>
+
+      <SettingRow
+        label="Auto-detected meetings"
+        description="Watch for other apps using your microphone and notify you when a call starts, with a one-click button to record."
+      >
+        <Switch
+          checked={autoDetect.data ?? true}
+          onCheckedChange={(v) => setAutoDetect.mutate(v)}
+          disabled={autoDetect.data === undefined}
+        />
+      </SettingRow>
+
+      <SettingRow
+        label="Post meeting notifications"
+        description="Notify when your notes are ready or a recording auto-stops from silence."
+        noBorder
       >
         <Switch
           checked={notifications.data ?? false}
@@ -288,6 +340,8 @@ export function GeneralTab() {
           disabled={notifications.data === undefined}
         />
       </SettingRow>
+
+      <SectionHeading>Recording</SectionHeading>
 
       {/* macOS only: chooses mic-only vs mic+system. Windows always records
           mic+system (toggle hidden), so this control isn't shown there. */}
@@ -309,30 +363,9 @@ export function GeneralTab() {
       )}
 
       <SettingRow
-        label="Auto-detect meetings"
-        description="Show a notification when another app starts using the microphone, with a one-click button to start recording."
-      >
-        <Switch
-          checked={autoDetect.data ?? true}
-          onCheckedChange={(v) => setAutoDetect.mutate(v)}
-          disabled={autoDetect.data === undefined}
-        />
-      </SettingRow>
-
-      <SettingRow
-        label="Launch on login"
-        description="Start Steno automatically when you log in, hidden in the menu bar. Turn off to launch it manually."
-      >
-        <Switch
-          checked={launchOnLogin.data ?? true}
-          onCheckedChange={(v) => setLaunchOnLogin.mutate(v)}
-          disabled={launchOnLogin.data === undefined}
-        />
-      </SettingRow>
-
-      <SettingRow
         label="Auto-stop on silence"
         description="End the recording and start processing it once both the mic and system audio have been silent for the chosen duration. Useful when you forget to stop after a meeting ends."
+        noBorder
       >
         <div className="flex items-center gap-3">
           <Select
@@ -361,13 +394,45 @@ export function GeneralTab() {
         </div>
       </SettingRow>
 
+      <SectionHeading>System</SectionHeading>
+
+      <SettingRow
+        label="Launch on login"
+        description="Start Steno automatically when you log in, hidden in the menu bar. Turn off to launch it manually."
+      >
+        <Switch
+          checked={launchOnLogin.data ?? true}
+          onCheckedChange={(v) => setLaunchOnLogin.mutate(v)}
+          disabled={launchOnLogin.data === undefined}
+        />
+      </SettingRow>
+
+      <SettingRow
+        label="Show in menu bar"
+        description={
+          bothIconsHidden
+            ? 'Both your dock icon and menu bar icon will be hidden. Reopen Steno from Applications or Spotlight to bring the window back.'
+            : 'Show a Steno icon in the menu bar for quick access.'
+        }
+      >
+        <Switch
+          checked={menuBarIcon.data ?? true}
+          onCheckedChange={(v) => setMenuBarIcon.mutate(v)}
+          disabled={menuBarIcon.data === undefined}
+        />
+      </SettingRow>
+
       {/* Dock + menu bar are macOS-only concepts and the apply logic in
           main.js is darwin-gated, so the toggle is a no-op off-mac. Hide it
           entirely on Windows/Linux rather than show a broken control. */}
       {isMac && (
         <SettingRow
           label="Hide dock icon"
-          description="Run as menu bar app only"
+          description={
+            bothIconsHidden
+              ? 'Both your dock icon and menu bar icon will be hidden. Reopen Steno from Applications or Spotlight to bring the window back.'
+              : 'Run as menu bar app only'
+          }
           noBorder
         >
           <Switch

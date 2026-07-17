@@ -7,9 +7,11 @@ export const settingsKeys = {
   notifications: () => [...settingsKeys.all, 'notifications'] as const,
   telemetry: () => [...settingsKeys.all, 'telemetry'] as const,
   dockIcon: () => [...settingsKeys.all, 'dockIcon'] as const,
+  menuBarIcon: () => [...settingsKeys.all, 'menuBarIcon'] as const,
   systemAudio: () => [...settingsKeys.all, 'systemAudio'] as const,
   systemAudioSupport: () => [...settingsKeys.all, 'systemAudioSupport'] as const,
   autoDetectMeetings: () => [...settingsKeys.all, 'autoDetectMeetings'] as const,
+  premeetingNotifications: () => [...settingsKeys.all, 'premeetingNotifications'] as const,
   launchOnLogin: () => [...settingsKeys.all, 'launchOnLogin'] as const,
   silenceAutoStop: () => [...settingsKeys.all, 'silenceAutoStop'] as const,
   language: () => [...settingsKeys.all, 'language'] as const,
@@ -64,6 +66,21 @@ export function useSetDockIcon() {
   });
 }
 
+export function useShowMenuBarIconSetting() {
+  return useQuery({
+    queryKey: settingsKeys.menuBarIcon(),
+    queryFn: async () => unwrap(await ipc().settings.getMenuBarIcon()).show_menu_bar_icon,
+  });
+}
+
+export function useSetShowMenuBarIcon() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (v: boolean) => unwrap(await ipc().settings.setMenuBarIcon(v)),
+    onSuccess: () => qc.invalidateQueries({ queryKey: settingsKeys.menuBarIcon() }),
+  });
+}
+
 export function useSystemAudioSetting() {
   return useQuery({
     queryKey: settingsKeys.systemAudio(),
@@ -99,6 +116,22 @@ export function useSetAutoDetectMeetings() {
   return useMutation({
     mutationFn: async (v: boolean) => unwrap(await ipc().settings.setAutoDetectMeetings(v)),
     onSuccess: () => qc.invalidateQueries({ queryKey: settingsKeys.autoDetectMeetings() }),
+  });
+}
+
+export function usePremeetingNotificationsSetting() {
+  return useQuery({
+    queryKey: settingsKeys.premeetingNotifications(),
+    queryFn: async () =>
+      unwrap(await ipc().settings.getPremeetingNotifications()).premeeting_notifications_enabled,
+  });
+}
+
+export function useSetPremeetingNotifications() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (v: boolean) => unwrap(await ipc().settings.setPremeetingNotifications(v)),
+    onSuccess: () => qc.invalidateQueries({ queryKey: settingsKeys.premeetingNotifications() }),
   });
 }
 

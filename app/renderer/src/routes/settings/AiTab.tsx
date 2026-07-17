@@ -1,8 +1,9 @@
 import * as React from 'react';
-import { Check, ChevronDown, ChevronRight, Loader2, X } from 'lucide-react';
+import { Building2, Check, ChevronDown, ChevronRight, Cloud, Laptop, Loader2, Server, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Input } from '@/components/ui/input';
+import { Switch } from '@/components/ui/switch';
 import {
   Select,
   SelectContent,
@@ -10,6 +11,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { OpenAiIcon } from '@/components/ui/openai-icon';
+import { AnthropicIcon } from '@/components/ui/anthropic-icon';
+import { AwsIcon } from '@/components/ui/aws-icon';
+import { NvidiaIcon } from '@/components/ui/nvidia-icon';
+import { GoogleIcon } from '@/components/ui/google-icon';
+import { MetaIcon } from '@/components/ui/meta-icon';
+import { QwenIcon } from '@/components/ui/qwen-icon';
 import { cn } from '@/lib/utils';
 import type { AiProvider, CloudProvider } from '@/lib/ipc';
 import {
@@ -29,23 +37,299 @@ import {
   useCurrentModel,
   useDeleteModel,
   useModels,
+  useParakeetModels,
   usePullModel,
+  usePullParakeetModel,
+  usePullWhisperModel,
+  useSetActiveTranscription,
   useSetCurrentModel,
   useSwitchToFasterBuild,
+  useTranscriptionEngine,
+  useWhisperModels,
 } from '@/hooks/useModels';
+import {
+  useAutoSummarizeSetting,
+  useKeepRecordingsSetting,
+  useLanguageSetting,
+  useSetAutoSummarize,
+  useSetKeepRecordings,
+  useSetLanguage,
+} from '@/hooks/useSettings';
 import { useOrgSession } from '@/hooks/useOrg';
-import { COMPACT_BTN, COMPACT_TRIGGER, SectionHeading, SettingRow } from './primitives';
-import { ModelCard, formatModelSize, isDefaultModel } from './model-card';
+import { COMPACT_BTN, COMPACT_INPUT, COMPACT_TRIGGER, SectionHeading, SettingRow } from './primitives';
+import { ModelCard, formatModelSize, isDefaultModel, parsePullPercent } from './model-card';
+import { LANGUAGES_PARAKEET, LANGUAGES_WHISPER } from './languages';
 
 export function AiTab() {
+  return (
+    <section data-settings-tab="ai">
+      <SectionHeading>Transcription</SectionHeading>
+      <p
+        className="text-[13px] leading-[1.5]"
+        style={{ color: 'var(--fg-2)', marginBottom: 4 }}
+      >
+        Speech-to-text always runs on your device — your audio never leaves
+        your computer.
+      </p>
+      <TranscriptionSection />
+
+      <SectionHeading>Summarisation &amp; Chat</SectionHeading>
+      <p
+        className="text-[13px] leading-[1.5]"
+        style={{ color: 'var(--fg-2)', marginBottom: 4 }}
+      >
+        Turns your transcript into notes and answers your questions. This is
+        the one step that can run locally or in the cloud — if you choose a
+        cloud provider, only the text transcript is sent, never audio.
+      </p>
+      <SummarisationSection />
+    </section>
+  );
+}
+
+function TranscriptionSection() {
+  const language = useLanguageSetting();
+  const setLanguage = useSetLanguage();
+  const keepRecordings = useKeepRecordingsSetting();
+  const setKeepRecordings = useSetKeepRecordings();
+  const engineQuery = useTranscriptionEngine();
+
+  const engine = engineQuery.data ?? 'parakeet';
+  const options = engine === 'whisper' ? LANGUAGES_WHISPER : LANGUAGES_PARAKEET;
+  // useSetActiveTranscription coerces language to 'auto' when switching
+  // to an engine that doesn't support the current pick. So by the time
+  // this renders, persisted is normally in `options`. Edge case (CLI
+  // user, migrated config): fall back to 'auto' for display so the
+  // trigger isn't blank — the persisted value stays on disk until they
+  // pick something new.
+  const persisted = language.data ?? 'auto';
+  const displayValue = options.some((o) => o.value === persisted) ? persisted : 'auto';
+
+  return (
+    // Retains the pre-merge data-settings-tab="transcription" identity as a
+    // nested wrapper (the page-level section is now data-settings-tab="ai").
+    <div data-settings-tab="transcription">
+      <SettingRow
+        label="Language"
+        description="Auto-detects by default. Pick one to pin it."
+      >
+        <Select
+          value={displayValue}
+          onValueChange={(v) => setLanguage.mutate(v)}
+          disabled={!language.data}
+        >
+          {/* Explicit testid: the Model dropdown below is a second combobox in
+              this section now, so parakeet-language-picker.t1 can no longer
+              assume "the only combobox" to find this trigger. */}
+          <SelectTrigger className={COMPACT_TRIGGER} data-testid="transcription-language-select">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {options.map((l) => (
+              <SelectItem key={l.value} value={l.value}>
+                {l.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </SettingRow>
+
+      <SettingRow
+        label="Save recordings"
+        description="Save audio files to your storage location (see Advanced) after processing. Uses 1–10 MB per minute depending on capture mode."
+      >
+        <Switch
+          checked={keepRecordings.data ?? false}
+          onCheckedChange={(v) => setKeepRecordings.mutate(v)}
+          disabled={keepRecordings.data === undefined}
+        />
+      </SettingRow>
+
+      <TranscriptionModelList />
+    </div>
+  );
+}
+
+// Tight, model-specific taglines for the dropdown items -- deliberately not
+// the backend's longer `description` strings (those are written for the
+// old card layout's note line). Keyed by engine since each only ever has
+// one supported model today (see SUPPORTED_PARAKEET_MODELS /
+// SUPPORTED_WHISPER_MODELS in the Python registries).
+const ENGINE_TAGLINE: Record<'parakeet' | 'whisper', string> = {
+  parakeet: 'Fastest — English + European languages',
+  whisper: 'Most accurate — 99 languages',
+};
+
+/**
+ * Parakeet vs. Whisper picker, as a single dropdown -- each engine has
+ * exactly one supported model today, so this is really an engine switch,
+ * not a long model list. Icons attribute the model's maker (Whisper ->
+ * OpenAI, Parakeet -> NVIDIA); neither is a provider you configure
+ * (transcription is always local either way).
+ *
+ * Picking an installed engine switches immediately. Picking one that isn't
+ * installed starts a download and the trigger shows the pending target
+ * (icon + name) plus an inline spinner (Parakeet only reports coarse
+ * stage, no percent) or live percent (Whisper). The trigger is disabled
+ * for the whole download -- neither pull hook guards against a second,
+ * concurrent download of the other engine, so this is the only thing
+ * stopping a switch-mid-download race where whichever download finishes
+ * last silently wins.
+ */
+function TranscriptionModelList() {
+  const parakeet = useParakeetModels();
+  const whisper = useWhisperModels();
+  const engine = useTranscriptionEngine();
+  const setActive = useSetActiveTranscription();
+  const pullParakeet = usePullParakeetModel();
+  const pullWhisper = usePullWhisperModel();
+
+  const isLoading = parakeet.isLoading || whisper.isLoading || engine.isLoading;
+  const isError = parakeet.isError || whisper.isError || engine.isError;
+
+  // Keep the row's own label/description in place and swap only the
+  // dropdown slot for a same-sized placeholder — replacing the whole row
+  // with a bare "Loading models…" line dropped the label/description and
+  // caused a layout jump once the real dropdown appeared.
+  if (isLoading) {
+    return (
+      <SettingRow
+        label="Model"
+        description="Which speech-to-text model transcribes your recordings."
+        noBorder
+      >
+        <div
+          className={cn(COMPACT_TRIGGER, 'w-[190px] flex items-center gap-1.5')}
+          style={{ color: 'var(--fg-muted)' }}
+        >
+          <Loader2 className="size-3.5 shrink-0 animate-spin" />
+          <span className="truncate">Loading models…</span>
+        </div>
+      </SettingRow>
+    );
+  }
+  if (isError) {
+    return (
+      <SettingRow
+        label="Model"
+        description="Which speech-to-text model transcribes your recordings."
+        noBorder
+      >
+        <div className={cn(COMPACT_TRIGGER, 'w-[190px] flex items-center')} style={{ color: 'var(--fg-2)' }}>
+          <span className="truncate">Could not load models.</span>
+        </div>
+      </SettingRow>
+    );
+  }
+
+  const parakeetModel = parakeet.data?.models[0];
+  const whisperModel = whisper.data?.models[0];
+  if (!parakeetModel || !whisperModel) return null;
+
+  const activeEngine = engine.data ?? 'parakeet';
+  // pull-*-model's IPC handle resolves only once the whole download (or a
+  // failure/timeout) settles -- so the mutation's own isPending spans the
+  // full download, unlike the progress dict which only lights up once the
+  // first progress event arrives.
+  const parakeetDownloading = pullParakeet.isPending;
+  const whisperDownloading = pullWhisper.isPending;
+  const downloadingEngine = parakeetDownloading ? 'parakeet' : whisperDownloading ? 'whisper' : null;
+  const isDownloading = downloadingEngine !== null;
+  const value = downloadingEngine ?? activeEngine;
+
+  const options: Array<{
+    engine: 'parakeet' | 'whisper';
+    model: typeof parakeetModel;
+    icon: React.ReactNode;
+  }> = [
+    { engine: 'parakeet', model: parakeetModel, icon: <NvidiaIcon size={12} /> },
+    { engine: 'whisper', model: whisperModel, icon: <OpenAiIcon size={12} /> },
+  ];
+  const current = options.find((o) => o.engine === value)!;
+  const whisperPercent =
+    downloadingEngine === 'whisper' ? parsePullPercent(pullWhisper.progress[whisperModel.name]) : null;
+
+  const onValueChange = (next: string) => {
+    if (next === activeEngine) return;
+    if (next === 'parakeet') {
+      if (parakeetModel.installed) {
+        setActive.mutate({ engine: 'parakeet' });
+      } else {
+        pullParakeet.mutate(parakeetModel.name);
+      }
+    } else if (whisperModel.installed) {
+      setActive.mutate({ engine: 'whisper', whisperModel: whisperModel.name });
+    } else {
+      pullWhisper.mutate(whisperModel.name);
+    }
+  };
+
+  return (
+    <SettingRow
+      label="Model"
+      description="Which speech-to-text model transcribes your recordings."
+      noBorder
+    >
+      <Select value={value} onValueChange={onValueChange} disabled={isDownloading}>
+        <SelectTrigger
+          className={cn(COMPACT_TRIGGER, 'w-[190px]')}
+          data-testid="transcription-model-select"
+        >
+          {/* A plain div, not a span: SelectTrigger applies
+              `[&>span]:line-clamp-1` to any direct-child span, and
+              line-clamp's `display: -webkit-box` clobbers this row's
+              `inline-flex`, stacking the icon above the name instead of
+              beside it. */}
+          <div className="flex min-w-0 items-center gap-1.5">
+            {current.icon}
+            <span className="truncate">{current.model.displayName ?? current.model.name}</span>
+            {isDownloading &&
+              (whisperPercent !== null ? (
+                <span className="shrink-0 text-[11px] tabular-nums" style={{ color: 'var(--fg-muted)' }}>
+                  {whisperPercent}%
+                </span>
+              ) : (
+                <Loader2 className="size-3 shrink-0 animate-spin" style={{ color: 'var(--fg-muted)' }} />
+              ))}
+          </div>
+        </SelectTrigger>
+        <SelectContent className="w-72">
+          {options.map((o) => (
+            <SelectItem key={o.engine} value={o.engine} description={ENGINE_TAGLINE[o.engine]}>
+              <span className="inline-flex items-center gap-1.5">
+                {o.icon}
+                {o.model.displayName ?? o.model.name}
+              </span>
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </SettingRow>
+  );
+}
+
+function SummarisationSection() {
   const provider = useAiProvider();
   const setProvider = useSetAiProvider();
   const orgSession = useOrgSession();
+  const autoSummarize = useAutoSummarizeSetting();
+  const setAutoSummarize = useSetAutoSummarize();
   const current = provider.data?.ai_provider ?? 'local';
   const orgSignedIn = orgSession.data?.signedIn ?? false;
 
   return (
-    <section data-settings-tab="ai">
+    <>
+      <SettingRow
+        label="Generate notes automatically"
+        description="Summarise each recording right after transcription. Turn off to stop at a transcript and generate notes on demand."
+      >
+        <Switch
+          checked={autoSummarize.data ?? true}
+          onCheckedChange={(v) => setAutoSummarize.mutate(v)}
+          disabled={autoSummarize.data === undefined}
+        />
+      </SettingRow>
+
       <SettingRow
         label="AI provider"
         description={
@@ -53,30 +337,41 @@ export function AiTab() {
             ? "Managed by your organisation while you're signed in. Sign out under Settings > Organisation to change it."
             : 'Where models run. Local keeps all data on your device.'
         }
+        // The Model section right below (local provider) has no divider of
+        // its own — Remote/Cloud/Adapter's config blocks do (their own
+        // bottom border), so they still want this row's divider to separate
+        // from it.
+        noBorder={current !== 'cloud' && current !== 'adapter' && !orgSignedIn}
       >
         <Select
           value={current}
           onValueChange={(v) => setProvider.mutate(v as AiProvider)}
           disabled={!provider.data || orgSignedIn}
         >
-          <SelectTrigger className={cn(COMPACT_TRIGGER, 'min-w-[180px]')}>
+          <SelectTrigger
+            className={cn(COMPACT_TRIGGER, 'min-w-[180px]')}
+            data-testid="ai-provider-select"
+          >
             <SelectValue />
           </SelectTrigger>
           <SelectContent className="w-72">
             <SelectItem
               value="local"
+              icon={<Laptop className="size-4" />}
               description="Runs entirely on your device. Private and free, no internet required."
             >
               Local (on-device)
             </SelectItem>
             <SelectItem
               value="remote"
+              icon={<Server className="size-4" />}
               description="Connect to your own Ollama server. Data stays within your network."
             >
               Private Server
             </SelectItem>
             <SelectItem
               value="cloud"
+              icon={<Cloud className="size-4" />}
               description="Use OpenAI, Anthropic, or a compatible API. Best quality, requires a paid key."
             >
               Cloud API
@@ -84,6 +379,7 @@ export function AiTab() {
             <SelectItem
               value="adapter"
               disabled={!orgSignedIn}
+              icon={<Building2 className="size-4" />}
               description={
                 orgSignedIn
                   ? "Uses your organisation's AI key. No setup needed."
@@ -103,14 +399,23 @@ export function AiTab() {
       {/* orgSignedIn check: while locked, the provider is (or is about to
           be reconciled to) 'adapter' — never show a local model list under
           the "Managed by your organisation" copy, even if the cached
-          provider value is momentarily stale. */}
+          provider value is momentarily stale.
+          Labelled like a SettingRow (not SectionHeading) -- this is still
+          part of Summarisation & Chat, just a row whose control is a list
+          of cards instead of a single trigger, so SectionHeading's
+          top-level weight read as its own section on the page. */}
       {current !== 'cloud' && current !== 'adapter' && !orgSignedIn && (
-        <>
-          <SectionHeading>Model</SectionHeading>
+        <div style={{ marginTop: '20px' }}>
+          <div className="text-[14px] font-normal" style={{ color: 'var(--fg-1)', marginBottom: 2 }}>
+            Model
+          </div>
+          <p className="text-[13px] leading-[1.5]" style={{ color: 'var(--fg-2)', marginBottom: 8 }}>
+            Which model generates your summaries, titles, and chat answers.
+          </p>
           <ModelList />
-        </>
+        </div>
       )}
-    </section>
+    </>
   );
 }
 
@@ -170,7 +475,7 @@ function RemoteProviderConfig() {
           onChange={(e) => setLocalUrl(e.target.value)}
           placeholder="http://192.168.1.100:11434"
           onBlur={() => url && setUrl.mutate(url)}
-          className="h-[30px] text-[13px]"
+          className="h-[30px] bg-[color:var(--surface-raised)] text-[13px]"
         />
       </div>
       <div className="flex items-center gap-3">
@@ -197,6 +502,13 @@ function RemoteProviderConfig() {
     </div>
   );
 }
+
+const CLOUD_SERVICE_ICON: Record<CloudProvider, React.ReactNode> = {
+  openai: <OpenAiIcon size={12} />,
+  anthropic: <AnthropicIcon size={12} />,
+  bedrock: <AwsIcon size={12} />,
+  custom: null,
+};
 
 function CloudProviderConfig() {
   const provider = useAiProvider();
@@ -300,13 +612,28 @@ function CloudProviderConfig() {
           value={cloudProvider}
           onValueChange={(v) => setCloudProvider.mutate(v as CloudProvider)}
         >
-          <SelectTrigger className="h-[30px] text-[13px]">
+          <SelectTrigger className={COMPACT_INPUT}>
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="openai">OpenAI</SelectItem>
-            <SelectItem value="anthropic">Anthropic (Claude)</SelectItem>
-            <SelectItem value="bedrock">AWS Bedrock (Claude)</SelectItem>
+            <SelectItem value="openai">
+              <span className="inline-flex items-center gap-1.5">
+                {CLOUD_SERVICE_ICON.openai}
+                OpenAI
+              </span>
+            </SelectItem>
+            <SelectItem value="anthropic">
+              <span className="inline-flex items-center gap-1.5">
+                {CLOUD_SERVICE_ICON.anthropic}
+                Anthropic (Claude)
+              </span>
+            </SelectItem>
+            <SelectItem value="bedrock">
+              <span className="inline-flex items-center gap-1.5">
+                {CLOUD_SERVICE_ICON.bedrock}
+                AWS Bedrock (Claude)
+              </span>
+            </SelectItem>
             <SelectItem value="custom">Custom (OpenAI-compatible)</SelectItem>
           </SelectContent>
         </Select>
@@ -327,7 +654,7 @@ function CloudProviderConfig() {
               onBlur={() =>
                 bedrockRegion && setBedrockRegion.mutate(bedrockRegion)
               }
-              className="h-[30px] text-[13px]"
+              className={COMPACT_INPUT}
             />
           </div>
           <div>
@@ -342,7 +669,7 @@ function CloudProviderConfig() {
               onChange={(e) => setBedrockProfileState(e.target.value)}
               placeholder="us.anthropic.claude-…"
               onBlur={() => setBedrockProfile.mutate(bedrockProfile.trim())}
-              className="h-[30px] text-[13px]"
+              className={COMPACT_INPUT}
             />
           </div>
         </>
@@ -360,7 +687,7 @@ function CloudProviderConfig() {
             onChange={(e) => setApiUrl(e.target.value)}
             placeholder="https://api.example.com/v1"
             onBlur={() => apiUrl && setCloudUrl.mutate(apiUrl)}
-            className="h-[30px] text-[13px]"
+            className={COMPACT_INPUT}
           />
         </div>
       )}
@@ -385,7 +712,7 @@ function CloudProviderConfig() {
                   : 'sk-…'
           }
           onBlur={() => apiKey && setCloudKey.mutate(apiKey)}
-          className="h-[30px] text-[13px]"
+          className={COMPACT_INPUT}
         />
       </div>
       <div>
@@ -397,7 +724,7 @@ function CloudProviderConfig() {
         </label>
         {showModelDropdown ? (
           <Select value={model} onValueChange={onModelSelect}>
-            <SelectTrigger className="h-[30px] text-[13px]">
+            <SelectTrigger className={COMPACT_INPUT}>
               <SelectValue placeholder="Select a model" />
             </SelectTrigger>
             <SelectContent>
@@ -428,7 +755,7 @@ function CloudProviderConfig() {
                     : 'gpt-…'
               }
               onBlur={() => model && setCloudModel.mutate(model)}
-              className="h-[30px] text-[13px]"
+              className={COMPACT_INPUT}
             />
             {availableModels.length > 0 && customModelMode && (
               <Button
@@ -496,6 +823,19 @@ function ConnectionStatus({
       {message ?? (ok ? 'Connected' : 'Failed')}
     </span>
   );
+}
+
+// Attribution icon for the local Ollama model list -- matched by prefix
+// against the model id (e.g. "gemma4:e2b-it-qat"), not the display name,
+// since ids are the stable identifier. Remote-provider models can be
+// anything a user's Ollama server has pulled, so unmatched ids just render
+// without an icon rather than guessing.
+function getOllamaModelIcon(modelId: string): React.ReactNode | undefined {
+  if (modelId.startsWith('gemma')) return <GoogleIcon size={12} />;
+  if (modelId.startsWith('llama')) return <MetaIcon size={12} />;
+  if (modelId.startsWith('qwen')) return <QwenIcon size={12} />;
+  if (modelId.startsWith('gpt-oss') || modelId.startsWith('gpt')) return <OpenAiIcon size={12} />;
+  return undefined;
 }
 
 function ModelList() {
@@ -629,6 +969,7 @@ function ModelList() {
     return (
       <ModelCard
         key={m.name}
+        icon={getOllamaModelIcon(m.name)}
         name={m.name}
         sizeLabel={sizeLabel}
         note={note}

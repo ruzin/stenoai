@@ -584,6 +584,14 @@ class Config:
         return {
             "model": self.DEFAULT_MODEL,
             "notifications_enabled": True,
+            # Default ON — the calendar-based pre-meeting heads-up, independent
+            # of notifications_enabled (which now only covers note-ready/
+            # silence-auto-stop). Requires a connected calendar to fire at all.
+            "premeeting_notifications_enabled": True,
+            # Default ON — mirrors hide_dock_icon's absence from this dict
+            # (both use a .get() fallback); listed explicitly here since it's
+            # new and the default matters for the "both hidden" warning logic.
+            "show_menu_bar_icon": True,
             "telemetry_enabled": True,
             # Default ON on macOS — CoreAudio Process Tap captures system
             # audio alongside the mic on macOS 14.4+. Older macOS auto-falls
@@ -833,6 +841,25 @@ class Config:
         self._config["notifications_enabled"] = enabled
         return self._save()
 
+    def get_premeeting_notifications_enabled(self) -> bool:
+        """Get whether the calendar-based pre-meeting heads-up notification
+        is enabled. Independent of notifications_enabled (post-meeting)."""
+        return self._config.get("premeeting_notifications_enabled", True)
+
+    def set_premeeting_notifications_enabled(self, enabled: bool) -> bool:
+        """
+        Set whether the calendar-based pre-meeting heads-up notification
+        is enabled.
+
+        Args:
+            enabled: True to enable the pre-meeting notification, False to disable
+
+        Returns:
+            True if saved successfully, False otherwise
+        """
+        self._config["premeeting_notifications_enabled"] = enabled
+        return self._save()
+
     def get_telemetry_enabled(self) -> bool:
         """Get whether anonymous usage analytics are enabled."""
         return self._config.get("telemetry_enabled", True)
@@ -865,6 +892,23 @@ class Config:
             True if saved successfully, False otherwise
         """
         self._config["hide_dock_icon"] = enabled
+        return self._save()
+
+    def get_show_menu_bar_icon(self) -> bool:
+        """Get whether the menu bar / system tray icon should be shown."""
+        return self._config.get("show_menu_bar_icon", True)
+
+    def set_show_menu_bar_icon(self, enabled: bool) -> bool:
+        """
+        Set whether the menu bar / system tray icon should be shown.
+
+        Args:
+            enabled: True to show the tray icon, False to hide it
+
+        Returns:
+            True if saved successfully, False otherwise
+        """
+        self._config["show_menu_bar_icon"] = enabled
         return self._save()
 
     def get_org_auto_backup_enabled(self) -> bool:

@@ -248,7 +248,19 @@ function install({ ipcMain }) {
       : [];
 
   const DEFAULTS = {
-    'get-app-version': '0.0.0-e2e',
+    'get-app-version': { success: true, version: '0.0.0-e2e', name: 'Steno' },
+    // Read-only display poll for the About tab's "Check for Updates" button
+    // (settings-about.t1). Fully hermetic — no real GitHub call under mock
+    // IPC, so this is the only source of truth for that flow in T1.
+    'check-for-updates': {
+      success: true,
+      updateAvailable: false,
+      currentVersion: '0.0.0-e2e',
+      latestVersion: '0.0.0-e2e',
+      releaseUrl: '',
+      releaseName: '',
+      downloadUrl: null,
+    },
     // Fires on first paint once signed in (Sidebar + RouteView gate the
     // Shared notes feature on it). Default to feature-enabled to match the
     // adapter's default and keep the org-lock spec's UI unchanged. A spec can
@@ -262,18 +274,121 @@ function install({ ipcMain }) {
     },
     'list-folders': { success: true, folders: [] },
     'get-calendar-events': { success: true, events: [] },
-    'parakeet-status': { success: true, model: '', installed: false },
+    // installed:true (was false) — matches the list-parakeet-models entry
+    // below now shipping an installed model, and doubles as belt-and-braces
+    // against App.tsx's first-run setup gate (checks this exact channel).
+    'parakeet-status': { success: true, model: 'mlx-community/parakeet-tdt-0.6b-v3', installed: true },
     // Transcribe tab reads these on first paint. Default to Parakeet (the new
     // default engine) + auto so the language picker renders enabled and shows
     // the Parakeet language set (parakeet-language-picker.t1).
     'get-transcription-engine': { success: true, engine: 'parakeet' },
     'get-language': { success: true, language: 'auto' },
+    // Real production catalog (src/whisper_models.py / src/parakeet_models.py)
+    // rather than empty — so the Settings UI's model list actually renders
+    // cards to look at (manual/dev use) instead of always erroring "Could not
+    // load transcription models." Parakeet ships pre-"installed" (matches the
+    // fresh-install default engine); Whisper stays uninstalled so the
+    // Download button state is also visible in the same screen.
     'list-whisper-models': {
       success: true,
-      supported_models: {},
+      supported_models: {
+        'large-v3-turbo': {
+          name: 'Whisper Large V3 Turbo',
+          size: '1.6GB',
+          installed: false,
+          description:
+            'Best accuracy Whisper model. Supports 99 languages including non-European languages such as Chinese, Japanese, Arabic, Korean, and Hindi.',
+          speed: 'medium',
+          quality: 'excellent',
+        },
+      },
       current_model: '',
       provider: 'whisper',
     },
+    'list-parakeet-models': {
+      success: true,
+      supported_models: {
+        'mlx-community/parakeet-tdt-0.6b-v3': {
+          name: 'Parakeet TDT v3',
+          size: '572MB',
+          installed: true,
+          description:
+            'Highest quality. Supports live transcription in English and 25 European languages — Spanish, French, German, Italian, Portuguese, Dutch, Russian, Polish, Czech, and 16 others.',
+          speed: 'very fast',
+          quality: 'excellent',
+        },
+      },
+      current_model: 'mlx-community/parakeet-tdt-0.6b-v3',
+    },
+    // Summarisation & Chat's local "Model" list (ModelList in AiTab.tsx). Real
+    // production catalog (Config.SUPPORTED_MODELS in src/config.py) so that
+    // section also renders cards to look at under mock IPC instead of always
+    // erroring "Could not reach Ollama." -- the same reasoning as the Whisper/
+    // Parakeet lists above. Only the default model ships "installed"; the
+    // matches config.py's fresh-install default and its deprecated flag.
+    'list-models': {
+      success: true,
+      current_model: 'gemma4:e2b-it-qat',
+      provider: 'local',
+      supported_models: {
+        'gemma4:e2b-it-qat': {
+          name: 'Gemma 4 E2B (QAT)',
+          size: '4.3GB',
+          params: '2B',
+          description: 'Lightest Gemma 4, quantization-aware, real 128K context (default)',
+          speed: 'fast',
+          quality: 'good',
+          installed: true,
+        },
+        'gemma4:e4b-it-qat': {
+          name: 'Gemma 4 E4B (QAT)',
+          size: '6.1GB',
+          params: '4B',
+          description: 'Quantization-aware E4B — higher quality than E2B at a modest footprint',
+          speed: 'medium',
+          quality: 'excellent',
+          installed: false,
+        },
+        'llama3.2:3b': {
+          name: 'Llama 3.2 3B',
+          size: '2GB',
+          params: '3B',
+          description: 'Replaced by Gemma 4 E2B',
+          speed: 'very fast',
+          quality: 'good',
+          deprecated: true,
+          installed: false,
+        },
+        'qwen3.5:9b': {
+          name: 'Qwen 3.5 9B',
+          size: '6.6GB',
+          params: '9B',
+          description: 'Excellent at structured output and action items',
+          speed: 'medium',
+          quality: 'excellent',
+          installed: false,
+        },
+        'gemma4:12b-it-qat': {
+          name: 'Gemma 4 12B (QAT)',
+          size: '7.2GB',
+          params: '12B',
+          description: 'Large 256K context, quantization-aware - best for long meetings',
+          speed: 'medium',
+          quality: 'excellent',
+          installed: false,
+        },
+        'gpt-oss:20b': {
+          name: 'GPT-OSS 20B',
+          size: '14GB',
+          params: '20B',
+          description: 'OpenAI open-weight model with reasoning capabilities',
+          speed: 'medium',
+          quality: 'excellent',
+          installed: false,
+        },
+      },
+    },
+    'get-current-model': { success: true, model: 'gemma4:e2b-it-qat' },
     'get-queue-status': {
       success: true,
       isProcessing: false,
@@ -284,6 +399,47 @@ function install({ ipcMain }) {
       isPaused: false,
       elapsedSeconds: 0,
       sessionName: null,
+    },
+    // Settings > Templates renders a row per template with badge/prompt/action
+    // variety (default, locked built-in, unlocked built-in, custom) — an empty
+    // list would only ever show the "New Template" row.
+    'list-templates': {
+      success: true,
+      templates: [
+        {
+          id: 'standard',
+          name: 'Standard Summary',
+          icon: '',
+          prompt: '',
+          language: 'auto',
+          format: 'structured',
+          builtin: true,
+          locked: true,
+        },
+        {
+          id: 'action-items',
+          name: 'Action Items',
+          icon: '',
+          prompt:
+            'Summarise the meeting into a punchy list of action items, each with an owner and a due date if one was mentioned.',
+          language: 'auto',
+          format: 'markdown',
+          builtin: true,
+          locked: false,
+        },
+        {
+          id: 'exec-summary',
+          name: '1:1 Notes',
+          icon: '',
+          prompt:
+            'Write a short executive summary followed by decisions made and open questions still outstanding.',
+          language: 'en',
+          format: 'markdown',
+          builtin: false,
+          locked: false,
+        },
+      ],
+      default_template_id: 'standard',
     },
   };
 

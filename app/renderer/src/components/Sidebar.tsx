@@ -2,6 +2,7 @@ import * as React from 'react';
 import {
   ChevronDown,
   Globe,
+  HelpCircle,
   Home as HomeIcon,
   Inbox,
   LogIn,
@@ -13,6 +14,7 @@ import {
 } from 'lucide-react';
 import { navigate, rememberNonSettingsRoute, toggleSettings } from '@/lib/router';
 import { cn, shortcut } from '@/lib/utils';
+import { ipc } from '@/lib/ipc';
 import { LucideIcon, IconPicker } from '@/components/IconPicker';
 import { useUpdateFolderIcon } from '@/hooks/useFolders';
 import { useOrgLogout, useOrgSession, useSharedNotesGate } from '@/hooks/useOrg';
@@ -509,6 +511,21 @@ export function Sidebar({
           ) : (
             <span />
           )}
+          {/* Grouped together so justify-between (which splits this row into
+              exactly two sides: profile/sign-in-CTA on the left, this group
+              on the right) doesn't treat Help as a third independent side and
+              spread it away from the Settings cog. */}
+          <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={() => void ipc().shell.openExternal('https://docs.stenoai.co')}
+            aria-label="Help"
+            title="Help"
+            className="inline-flex h-[26px] w-7 items-center justify-center rounded-md transition-colors hover:bg-[color:var(--surface-hover)] hover:text-[color:var(--fg-1)]"
+            style={{ color: 'var(--fg-2)' }}
+          >
+            <HelpCircle className="size-[15px]" />
+          </button>
           <button
             type="button"
             onClick={() => toggleSettings(currentRoute)}
@@ -526,6 +543,7 @@ export function Sidebar({
           >
             <SettingsIcon className="size-[15px]" />
           </button>
+          </div>
         </div>
 
         {iconPicker && (

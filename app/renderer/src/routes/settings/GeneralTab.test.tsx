@@ -59,6 +59,8 @@ vi.mock('@/hooks/useSettings', () => {
   return {
     useNotificationsSetting: () => q(true),
     useSetNotifications: m,
+    usePremeetingNotificationsSetting: () => q(true),
+    useSetPremeetingNotifications: m,
     useSystemAudioSetting: () => q(true),
     useSetSystemAudio: m,
     useSystemAudioSupport: () => q({ supported: true, osVersion: '14.4' }),
@@ -72,6 +74,8 @@ vi.mock('@/hooks/useSettings', () => {
     useSetSilenceAutoStopMinutes: m,
     useDockIconSetting: () => q(false),
     useSetDockIcon: m,
+    useShowMenuBarIconSetting: () => q(true),
+    useSetShowMenuBarIcon: m,
     useUserName: () => h.userName,
     useSetUserName: () => h.setUserName,
   };

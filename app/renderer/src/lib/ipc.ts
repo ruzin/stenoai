@@ -466,8 +466,10 @@ export type GetTelemetryResponse = Result<{
   anonymous_id?: string;
 }>;
 export type GetDockIconResponse = Result<{ hide_dock_icon: boolean }>;
+export type GetMenuBarIconResponse = Result<{ show_menu_bar_icon: boolean }>;
 export type GetSystemAudioResponse = Result<{ system_audio_enabled: boolean }>;
 export type GetAutoDetectMeetingsResponse = Result<{ auto_detect_meetings_enabled: boolean }>;
+export type GetPremeetingNotificationsResponse = Result<{ premeeting_notifications_enabled: boolean }>;
 export type GetLaunchOnLoginResponse = Result<{ launch_on_login: boolean }>;
 export type GetWhisperModelResponse = Result<{ whisper_model: string; supported_models: string[] }>;
 export type GetKeepRecordingsResponse = Result<{ keep_recordings: boolean }>;
@@ -855,10 +857,14 @@ export interface StenoaiBridge {
     setTelemetry: RequestFn<[v: boolean, source: TelemetryToggleSource], Result<Record<string, never>>>;
     getDockIcon: RequestFn<[], GetDockIconResponse>;
     setDockIcon: RequestFn<[v: boolean], Result<Record<string, never>>>;
+    getMenuBarIcon: RequestFn<[], GetMenuBarIconResponse>;
+    setMenuBarIcon: RequestFn<[v: boolean], Result<Record<string, never>>>;
     getSystemAudio: RequestFn<[], GetSystemAudioResponse>;
     setSystemAudio: RequestFn<[v: boolean], Result<Record<string, never>>>;
     getAutoDetectMeetings: RequestFn<[], GetAutoDetectMeetingsResponse>;
     setAutoDetectMeetings: RequestFn<[v: boolean], Result<Record<string, never>>>;
+    getPremeetingNotifications: RequestFn<[], GetPremeetingNotificationsResponse>;
+    setPremeetingNotifications: RequestFn<[v: boolean], Result<Record<string, never>>>;
     getLaunchOnLogin: RequestFn<[], GetLaunchOnLoginResponse>;
     setLaunchOnLogin: RequestFn<[v: boolean], Result<Record<string, never>>>;
     getWhisperModel: RequestFn<[], GetWhisperModelResponse>;

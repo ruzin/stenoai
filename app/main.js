@@ -364,6 +364,21 @@ async function notificationsEnabled() {
   }
 }
 
+// Same shape as notificationsEnabled(), but for the calendar-based
+// pre-meeting heads-up specifically — independent of the "post meeting"
+// notifications_enabled toggle (note-ready / silence-auto-stop). Used by
+// firePreMeetingNotification and schedulePreMeetingNotifications instead of
+// notificationsEnabled(), so the two gates never share state.
+async function premeetingNotificationsEnabled() {
+  try {
+    const settings = await handleGetPremeetingNotifications();
+    if (!settings.success) return true;
+    return settings.premeeting_notifications_enabled !== false;
+  } catch (_) {
+    return true;
+  }
+}
+
 async function showShortcutNotification(body) {
   if (process.platform !== 'darwin') {
     return;
@@ -1447,7 +1462,7 @@ if (!gotSingleInstanceLock) {
     }
 
     createWindow();
-    if (!IS_E2E) createTray();
+    if (!IS_E2E && loadShowMenuBarIconEnabled()) createTray();
     setupAutoUpdater();
     setupAutoMeetingDetector();
     // Pre-meeting heads-up scheduler (calendar-time based). Skipped under E2E —
@@ -1864,6 +1879,21 @@ async function handleGetNotifications() {
     };
   } catch (error) {
     sendDebugLog(`Error getting notification settings: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+}
+
+async function handleGetPremeetingNotifications() {
+  try {
+    const result = await runPythonScript('simple_recorder.py', ['get-premeeting-notifications']);
+    const jsonData = JSON.parse(result);
+
+    return {
+      success: true,
+      ...jsonData
+    };
+  } catch (error) {
+    sendDebugLog(`Error getting pre-meeting notification settings: ${error.message}`);
     return { success: false, error: error.message };
   }
 }
@@ -3773,6 +3803,19 @@ function loadAutoDetectMeetingsEnabled() {
     if (!fs.existsSync(cfgPath)) return true;
     const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf-8'));
     return cfg.auto_detect_meetings_enabled !== false;
+  } catch (_) {
+    return true;
+  }
+}
+
+// Same sync-read-at-startup pattern as loadAutoDetectMeetingsEnabled(), used
+// to decide whether createTray() should run at all without spawning Python.
+function loadShowMenuBarIconEnabled() {
+  try {
+    const cfgPath = path.join(getUserDataDir(), 'config.json');
+    if (!fs.existsSync(cfgPath)) return true;
+    const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf-8'));
+    return cfg.show_menu_bar_icon !== false;
   } catch (_) {
     return true;
   }
@@ -6472,6 +6515,60 @@ ipcMain.handle('set-dock-icon', async (event, hidden) => {
   }
 });
 
+ipcMain.handle('get-menu-bar-icon', async () => {
+  try {
+    const result = await runPythonScript('simple_recorder.py', ['get-menu-bar-icon']);
+    const jsonData = JSON.parse(result);
+
+    return {
+      success: true,
+      ...jsonData
+    };
+  } catch (error) {
+    sendDebugLog(`Error getting menu bar icon settings: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('set-menu-bar-icon', async (event, enabled) => {
+  try {
+    sendDebugLog(`Setting show menu bar icon to: ${enabled}`);
+    const result = await runPythonScript('simple_recorder.py', ['set-menu-bar-icon', enabled ? 'True' : 'False']);
+
+    // Apply immediately — create or destroy the live Tray instance. No
+    // process.platform gate here (unlike dock icon): Electron's Tray API is
+    // cross-platform (macOS menu bar / Windows system tray) and createTray()
+    // itself has no platform branch.
+    if (!IS_E2E) {
+      if (enabled) {
+        if (!tray) {
+          createTray();
+          // createTray() always builds the idle icon — sync it to the
+          // actual recording state immediately, since this can now run
+          // mid-recording (unlike the startup-only call), not just when
+          // the app launches with nothing recording yet.
+          updateTrayIcon(currentRecordingProcess !== null || systemAudioRecordingActive);
+        }
+      } else if (tray) {
+        tray.destroy();
+        tray = null;
+      }
+    }
+
+    // Extract JSON from output
+    const jsonMatch = result.match(/\{.*\}/s);
+    if (jsonMatch) {
+      const jsonData = JSON.parse(jsonMatch[0]);
+      return jsonData;
+    }
+
+    return { success: true, show_menu_bar_icon: enabled };
+  } catch (error) {
+    sendDebugLog(`Error setting menu bar icon: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+});
+
 // System audio capture IPC handlers
 ipcMain.handle('get-system-audio', async () => {
   try {
@@ -6537,6 +6634,23 @@ ipcMain.handle('set-auto-detect-meetings', async (_event, enabled) => {
     return parsed;
   } catch (error) {
     sendDebugLog(`Error setting auto-detect: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('get-premeeting-notifications', handleGetPremeetingNotifications);
+
+ipcMain.handle('set-premeeting-notifications', async (_event, enabled) => {
+  try {
+    sendDebugLog(`Setting pre-meeting notifications to: ${enabled}`);
+    const result = await runPythonScript('simple_recorder.py', ['set-premeeting-notifications', enabled ? 'True' : 'False']);
+    const jsonMatch = result.match(/\{.*\}/s);
+    if (jsonMatch) {
+      return JSON.parse(jsonMatch[0]);
+    }
+    return { success: true, premeeting_notifications_enabled: enabled };
+  } catch (error) {
+    sendDebugLog(`Error setting pre-meeting notifications: ${error.message}`);
     return { success: false, error: error.message };
   }
 });
@@ -7748,7 +7862,17 @@ function getDownloadUrl(assets) {
 }
 
 ipcMain.handle('check-for-updates', async () => {
-  return await checkForUpdates();
+  const result = await checkForUpdates();
+  // The GitHub comparison above is a read-only display poll — it never
+  // itself starts a download. Kick the real autoUpdater check alongside it
+  // so a manual "Check for Updates" click actually starts a background
+  // download when one's available, instead of only reporting the latest
+  // tag and waiting for the next scheduled interval. Same guard as
+  // setupAutoUpdater() so this stays a no-op (and network-free) in e2e/dev.
+  if (!IS_E2E && app.isPackaged) {
+    autoUpdater.checkForUpdates().catch(() => {});
+  }
+  return result;
 });
 
 
@@ -9203,9 +9327,9 @@ function isPremeetingEligible(e, nowMs) {
 // ids on re-poll) so the seam can drive it repeatedly in tests.
 async function firePreMeetingNotification(event) {
   premeetingTimers.delete(event.id);
-  // Gate: the master notifications toggle (no dedicated pre-meeting toggle —
-  // this folds under "Desktop notifications").
-  if (!(await notificationsEnabled())) return false;
+  // Gate: the dedicated "Scheduled meetings" toggle — independent of the
+  // "Post meeting notifications" master switch (see premeetingNotificationsEnabled).
+  if (!(await premeetingNotificationsEnabled())) return false;
   // Suppress only while we're recording THIS meeting — matched by name. A
   // recording started from a calendar event is named after its title (auto-detect
   // accept + Home upcoming-card both pass event.title), so the live session name
@@ -9337,7 +9461,7 @@ async function schedulePreMeetingNotifications() {
     maybeTrackCalendarSnapshot(events);
   }
 
-  if (!(await notificationsEnabled())) {
+  if (!(await premeetingNotificationsEnabled())) {
     clearPreMeetingTimers();
     return;
   }

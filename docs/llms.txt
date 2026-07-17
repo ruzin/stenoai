@@ -14,38 +14,38 @@
 
 ## Getting started
 
-- [What is Steno](https://stenoai.co/docs/getting-started/what-is-steno): overview and requirements.
-- [Installation](https://stenoai.co/docs/getting-started/installation): download, permissions, setup.
-- [Your first recording](https://stenoai.co/docs/getting-started/first-recording): the record → transcribe → summarize flow.
+- [What is Steno](https://docs.stenoai.co/getting-started/what-is-steno): overview and requirements.
+- [Installation](https://docs.stenoai.co/getting-started/installation): download, permissions, setup.
+- [Your first recording](https://docs.stenoai.co/getting-started/first-recording): the record → transcribe → summarize flow.
 
 ## Features
 
-- [Recording](https://stenoai.co/docs/features/recording): microphone, system audio, or both.
-- [Transcription](https://stenoai.co/docs/features/transcription): Parakeet and Whisper engines.
-- [Live transcription](https://stenoai.co/docs/features/live-transcription): real-time transcript while recording.
-- [Summaries and notes](https://stenoai.co/docs/features/summaries): on-device summarization.
-- [Report templates](https://stenoai.co/docs/features/report-templates): editable, per-meeting note formats.
-- [Ask your meetings](https://stenoai.co/docs/features/ask-your-meetings): chat over one meeting or your whole library.
-- [Speaker labels](https://stenoai.co/docs/features/speaker-labels): [You] / [Others] via stereo-channel diarization.
-- [Apple Shortcuts](https://stenoai.co/docs/features/apple-shortcuts): stenoai:// deep links for automation.
+- [Recording](https://docs.stenoai.co/features/recording): microphone, system audio, or both.
+- [Transcription](https://docs.stenoai.co/features/transcription): Parakeet and Whisper engines.
+- [Live transcription](https://docs.stenoai.co/features/live-transcription): real-time transcript while recording.
+- [Summaries and notes](https://docs.stenoai.co/features/summaries): on-device summarization.
+- [Report templates](https://docs.stenoai.co/features/report-templates): editable, per-meeting note formats.
+- [Ask your meetings](https://docs.stenoai.co/features/ask-your-meetings): chat over one meeting or your whole library.
+- [Speaker labels](https://docs.stenoai.co/features/speaker-labels): [You] / [Others] via stereo-channel diarization.
+- [Apple Shortcuts](https://docs.stenoai.co/features/apple-shortcuts): stenoai:// deep links for automation.
 
 ## Guides
 
-- [Record a Zoom meeting on a Mac](https://stenoai.co/docs/guides/record-zoom-on-mac)
-- [Record a Microsoft Teams meeting on a Mac](https://stenoai.co/docs/guides/record-teams-on-mac)
-- [Record a Google Meet call on a Mac](https://stenoai.co/docs/guides/record-google-meet-on-mac)
-- [Record system audio on a Mac](https://stenoai.co/docs/guides/record-system-audio-on-mac)
-- [Transcribe audio locally on a Mac](https://stenoai.co/docs/guides/transcribe-audio-locally-on-mac)
-- [In-person meeting notes on a Mac](https://stenoai.co/docs/guides/in-person-meeting-notes)
+- [Record a Zoom meeting on a Mac](https://docs.stenoai.co/guides/record-zoom-on-mac)
+- [Record a Microsoft Teams meeting on a Mac](https://docs.stenoai.co/guides/record-teams-on-mac)
+- [Record a Google Meet call on a Mac](https://docs.stenoai.co/guides/record-google-meet-on-mac)
+- [Record system audio on a Mac](https://docs.stenoai.co/guides/record-system-audio-on-mac)
+- [Transcribe audio locally on a Mac](https://docs.stenoai.co/guides/transcribe-audio-locally-on-mac)
+- [In-person meeting notes on a Mac](https://docs.stenoai.co/guides/in-person-meeting-notes)
 
 ## Privacy and models
 
-- [How on-device processing works](https://stenoai.co/docs/privacy/how-on-device-works)
-- [Confidential use cases](https://stenoai.co/docs/privacy/confidential-use-cases)
-- [Transcription models](https://stenoai.co/docs/models/transcription-models)
-- [Summarization models](https://stenoai.co/docs/models/summarization-models)
-- [Remote Ollama setup](https://stenoai.co/docs/models/remote-ollama)
+- [How on-device processing works](https://docs.stenoai.co/privacy/how-on-device-works)
+- [Confidential use cases](https://docs.stenoai.co/privacy/confidential-use-cases)
+- [Transcription models](https://docs.stenoai.co/models/transcription-models)
+- [Summarization models](https://docs.stenoai.co/models/summarization-models)
+- [Remote Ollama setup](https://docs.stenoai.co/models/remote-ollama)
 
 ## Reference
 
-- [FAQ](https://stenoai.co/docs/faq)
+- [FAQ](https://docs.stenoai.co/faq)

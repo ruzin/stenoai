@@ -25,6 +25,13 @@ interface AppShellProps {
    * own header/scroll layout (e.g. Settings). Implied by hideToolbar.
    */
   bleed?: boolean;
+  /**
+   * Settings' full-takeover layout: threaded straight through to
+   * MainToolbar, which hides the sidebar-collapse toggle, the recording-
+   * options popover, and (while idle) the record/new-note button. Defaults
+   * false, so every other route is unaffected.
+   */
+  settingsMode?: boolean;
   children: React.ReactNode;
 }
 
@@ -40,6 +47,7 @@ export function AppShell({
   contentAlign = 'top',
   hideToolbar = false,
   bleed = false,
+  settingsMode = false,
   children,
 }: AppShellProps) {
   const effectiveWidth = sidebarCollapsed ? 0 : sidebarWidth;
@@ -63,6 +71,7 @@ export function AppShell({
             onToggleRecording={onToggleRecording}
             sidebarCollapsed={sidebarCollapsed}
             onToggleSidebar={onToggleSidebar}
+            settingsMode={settingsMode}
           />
         )}
 

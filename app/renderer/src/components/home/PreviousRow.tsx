@@ -9,18 +9,6 @@ interface PreviousRowProps {
   folderName?: string;
 }
 
-const AVATAR_COLORS = [
-  '#A855F7', '#EAB308', '#3B82F6', '#F43F5E', '#10B981',
-];
-
-function getAvatarColor(str: string) {
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    hash = str.charCodeAt(i) + ((hash << 5) - hash);
-  }
-  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
-}
-
 export function PreviousRow({ meeting, folderName }: PreviousRowProps) {
   const info = meeting.session_info;
   const when = formatTime(info.processed_at ?? info.updated_at);
@@ -45,8 +33,6 @@ export function PreviousRow({ meeting, folderName }: PreviousRowProps) {
 
   const title = info.name || 'Untitled note';
   const initial = title.charAt(0).toUpperCase();
-  const avatarBg = getAvatarColor(title);
-  const avatarFg = '#FFFFFF';
 
   return (
     <div
@@ -72,10 +58,10 @@ export function PreviousRow({ meeting, folderName }: PreviousRowProps) {
       }}
     >
       <div className="flex min-w-0 flex-1 items-center gap-3.5">
-        <div 
+        <div
           aria-hidden="true"
           className="flex size-9 flex-shrink-0 items-center justify-center rounded-lg font-medium text-[15px]"
-          style={{ backgroundColor: avatarBg, color: avatarFg }}
+          style={{ backgroundColor: 'var(--ink-100)', color: 'var(--ink-900)' }}
         >
           {initial}
         </div>
