@@ -141,7 +141,8 @@ export function SettingsNav({ activeTab, onSelect, onBack, version }: SettingsNa
                 <button
                   key={item.id}
                   type="button"
-                  aria-current={active ? 'page' : undefined}
+                  role="tab"
+                  aria-selected={active}
                   data-settings-nav={item.id}
                   onClick={() => onSelect(item.id)}
                   className={cn('sb-row', active && 'active')}

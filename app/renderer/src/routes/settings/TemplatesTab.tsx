@@ -195,6 +195,7 @@ export function TemplatesTab({
                 <div
                   className="flex shrink-0 items-center gap-2 opacity-0 transition-opacity duration-fast ease-steno group-hover:opacity-100 group-focus-within:opacity-100"
                   onClick={(e) => e.stopPropagation()}
+                  onKeyDown={(e) => e.stopPropagation()}
                 >
                   {!isDefault && (
                     <Button

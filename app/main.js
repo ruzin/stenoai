@@ -4801,6 +4801,15 @@ ipcMain.handle('startup-setup-check', async () => {
 });
 
 // ── Auto-updater ──
+// Set once 'update-downloaded' fires, cleared on install. AboutTab only
+// gets the live 'update-downloaded' IPC event while it's mounted — since
+// Settings tabs unmount on switch, a download that finishes while the user
+// is on a different tab (or away from Settings entirely) would otherwise
+// vanish with no way to see "Restart to Update" again. get-update-status
+// lets AboutTab re-seed this on every mount instead of only reacting to the
+// one-shot event.
+let pendingUpdateVersion = null;
+
 function setupAutoUpdater() {
   if (IS_E2E) {
     sendDebugLog('Auto-updater: skipped (E2E mode)');
@@ -4839,6 +4848,7 @@ function setupAutoUpdater() {
 
   autoUpdater.on('update-downloaded', (info) => {
     sendDebugLog(`Auto-updater: v${info.version} ready to install`);
+    pendingUpdateVersion = info.version;
     if (mainWindow) {
       mainWindow.webContents.send('update-downloaded', { version: info.version });
     }
@@ -6640,11 +6650,20 @@ ipcMain.handle('set-menu-bar-icon', async (event, enabled) => {
     sendDebugLog(`Setting show menu bar icon to: ${enabled}`);
     const result = await runPythonScript('simple_recorder.py', ['set-menu-bar-icon', enabled ? 'True' : 'False']);
 
-    // Apply immediately — create or destroy the live Tray instance. No
-    // process.platform gate here (unlike dock icon): Electron's Tray API is
-    // cross-platform (macOS menu bar / Windows system tray) and createTray()
-    // itself has no platform branch.
-    if (!IS_E2E) {
+    // Extract JSON from output
+    const jsonMatch = result.match(/\{.*\}/s);
+    const jsonData = jsonMatch
+      ? JSON.parse(jsonMatch[0])
+      : { success: true, show_menu_bar_icon: enabled };
+
+    // Apply immediately — create or destroy the live Tray instance — but
+    // only once the preference actually persisted. Otherwise a failed save
+    // (e.g. a disk/permission error) would still flip the live tray, leaving
+    // it out of sync with both the on-disk config and the {success:false}
+    // this handler returns to the UI. No process.platform gate here (unlike
+    // dock icon): Electron's Tray API is cross-platform (macOS menu bar /
+    // Windows system tray) and createTray() itself has no platform branch.
+    if (jsonData.success && !IS_E2E) {
       if (enabled) {
         if (!tray) {
           createTray();
@@ -6660,14 +6679,7 @@ ipcMain.handle('set-menu-bar-icon', async (event, enabled) => {
       }
     }
 
-    // Extract JSON from output
-    const jsonMatch = result.match(/\{.*\}/s);
-    if (jsonMatch) {
-      const jsonData = JSON.parse(jsonMatch[0]);
-      return jsonData;
-    }
-
-    return { success: true, show_menu_bar_icon: enabled };
+    return jsonData;
   } catch (error) {
     sendDebugLog(`Error setting menu bar icon: ${error.message}`);
     return { success: false, error: error.message };
@@ -6750,10 +6762,23 @@ ipcMain.handle('set-premeeting-notifications', async (_event, enabled) => {
     sendDebugLog(`Setting pre-meeting notifications to: ${enabled}`);
     const result = await runPythonScript('simple_recorder.py', ['set-premeeting-notifications', enabled ? 'True' : 'False']);
     const jsonMatch = result.match(/\{.*\}/s);
-    if (jsonMatch) {
-      return JSON.parse(jsonMatch[0]);
+    const jsonData = jsonMatch
+      ? JSON.parse(jsonMatch[0])
+      : { success: true, premeeting_notifications_enabled: enabled };
+
+    // Re-arm live instead of waiting for the next periodic re-poll
+    // (PREMEETING_RESCHEDULE_MS, 10 minutes): schedulePreMeetingNotifications
+    // skips events already inside the lead window ("don't backfire"), so a
+    // meeting that starts soon after the user re-enables this toggle could
+    // otherwise silently miss its reminder for up to 10 minutes. Same E2E
+    // gate as startPreMeetingScheduler() — a spec drives the fire path
+    // directly via the show-premeeting-notification test seam, not this
+    // live scheduler.
+    if (jsonData.success && !IS_E2E) {
+      void schedulePreMeetingNotifications();
     }
-    return { success: true, premeeting_notifications_enabled: enabled };
+
+    return jsonData;
   } catch (error) {
     sendDebugLog(`Error setting pre-meeting notifications: ${error.message}`);
     return { success: false, error: error.message };
@@ -8017,6 +8042,13 @@ ipcMain.handle('check-for-updates', async () => {
   return result;
 });
 
+// Lets a freshly-(re)mounted About tab recover "an update already
+// downloaded" state — the 'update-downloaded' IPC event only reaches a
+// listener that's mounted at the exact moment it fires; this is the seam
+// for everyone else.
+ipcMain.handle('get-update-status', async () => {
+  return { success: true, downloadedVersion: pendingUpdateVersion };
+});
 
 ipcMain.handle('open-release-page', async (event, url) => {
   try {

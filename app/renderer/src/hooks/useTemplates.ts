@@ -1,3 +1,4 @@
+import * as React from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ipc, type Template } from '@/lib/ipc';
 import { unwrap } from '@/lib/result';
@@ -42,18 +43,27 @@ export const useDeleteTemplate = () =>
 // rather than expecting an instant in-place UI change.
 export const useSetDefaultTemplate = () => {
   const qc = useQueryClient();
+  // Guards the rollback below against a stale failure: if the user picks A
+  // then B before A's request settles, A's eventual onError must not stomp
+  // B's already-applied (optimistic or successful) state with A's outdated
+  // pre-A snapshot. Only the attempt that's still the most recent one is
+  // allowed to roll back.
+  const latestAttempt = React.useRef(0);
   return useMutation({
     mutationFn: async (id: string) => unwrap(await ipc().templates.setDefault(id)),
     onMutate: async (id: string) => {
+      const attempt = ++latestAttempt.current;
       await qc.cancelQueries({ queryKey: templatesKeys.list() });
       const previous = qc.getQueryData(templatesKeys.list());
       qc.setQueryData(templatesKeys.list(), (old: TemplatesListData | undefined) =>
         old ? { ...old, default_template_id: id } : old,
       );
-      return { previous };
+      return { previous, attempt };
     },
     onError: (_err, _id, context) => {
-      if (context?.previous) qc.setQueryData(templatesKeys.list(), context.previous);
+      if (context?.previous && context.attempt === latestAttempt.current) {
+        qc.setQueryData(templatesKeys.list(), context.previous);
+      }
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: templatesKeys.all }),
   });

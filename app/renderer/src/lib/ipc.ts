@@ -531,6 +531,11 @@ export type CheckForUpdatesResponse = Result<{
   downloadUrl: string | null;
 }>;
 
+// null when no update has finished downloading yet (or one has and was
+// already installed). Lets a freshly-mounted About tab recover this state
+// instead of only reacting to the one-shot 'update-downloaded' IPC event.
+export type GetUpdateStatusResponse = Result<{ downloadedVersion: string | null }>;
+
 // ---------- event payloads ----------
 export interface ProcessingProgressEvent {
   line: string;
@@ -970,6 +975,7 @@ export interface StenoaiBridge {
 
   updates: {
     check: RequestFn<[], CheckForUpdatesResponse>;
+    getStatus: RequestFn<[], GetUpdateStatusResponse>;
     openReleasePage: RequestFn<[url: string], Result<Record<string, never>>>;
     install: SendFn<[]>;
   };

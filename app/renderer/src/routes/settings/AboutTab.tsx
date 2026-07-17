@@ -66,6 +66,26 @@ export function AboutTab() {
     };
   }, []);
 
+  // The 'update-downloaded' event above only reaches a listener mounted at
+  // the exact moment it fires — Settings tabs unmount on switch, so a
+  // download finishing while the user is elsewhere would otherwise leave
+  // About with no way to show "Restart to Update" again. Re-seed from main's
+  // persisted state on every mount. Merge rather than overwrite: if the live
+  // event above already set a version (e.g. it fired while this request was
+  // in flight), a stale/null response here must not clobber it.
+  React.useEffect(() => {
+    let cancelled = false;
+    void ipc()
+      .updates.getStatus()
+      .then((result) => {
+        if (cancelled || !result.success || !result.downloadedVersion) return;
+        setDownloadedVersion((v) => v ?? result.downloadedVersion);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const onCheck = async () => {
     setCheckState({ kind: 'checking' });
     try {

@@ -247,6 +247,14 @@ function install({ ipcMain }) {
         ]
       : [];
 
+  // Matches src/parakeet.py's platform dispatch: MLX on darwin, ONNX
+  // elsewhere. Mock IDs should track that split so a T1 run on Windows/Linux
+  // CI doesn't advertise a macOS-only model as installed/current.
+  const PARAKEET_MODEL_ID =
+    process.platform === 'darwin'
+      ? 'mlx-community/parakeet-tdt-0.6b-v3'
+      : 'istupakov/parakeet-tdt-0.6b-v3-onnx';
+
   const DEFAULTS = {
     'get-app-version': { success: true, version: '0.0.0-e2e', name: 'Steno' },
     // Read-only display poll for the About tab's "Check for Updates" button
@@ -277,7 +285,7 @@ function install({ ipcMain }) {
     // installed:true (was false) — matches the list-parakeet-models entry
     // below now shipping an installed model, and doubles as belt-and-braces
     // against App.tsx's first-run setup gate (checks this exact channel).
-    'parakeet-status': { success: true, model: 'mlx-community/parakeet-tdt-0.6b-v3', installed: true },
+    'parakeet-status': { success: true, model: PARAKEET_MODEL_ID, installed: true },
     // Transcribe tab reads these on first paint. Default to Parakeet (the new
     // default engine) + auto so the language picker renders enabled and shows
     // the Parakeet language set (parakeet-language-picker.t1).
@@ -308,7 +316,7 @@ function install({ ipcMain }) {
     'list-parakeet-models': {
       success: true,
       supported_models: {
-        'mlx-community/parakeet-tdt-0.6b-v3': {
+        [PARAKEET_MODEL_ID]: {
           name: 'Parakeet TDT v3',
           size: '572MB',
           installed: true,
@@ -318,7 +326,7 @@ function install({ ipcMain }) {
           quality: 'excellent',
         },
       },
-      current_model: 'mlx-community/parakeet-tdt-0.6b-v3',
+      current_model: PARAKEET_MODEL_ID,
     },
     // Summarisation & Chat's local "Model" list (ModelList in AiTab.tsx). Real
     // production catalog (Config.SUPPORTED_MODELS in src/config.py) so that

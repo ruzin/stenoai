@@ -296,6 +296,7 @@ const stenoai = {
 
   updates: {
     check: () => invoke('check-for-updates'),
+    getStatus: () => invoke('get-update-status'),
     openReleasePage: (url) => invoke('open-release-page', url),
     install: () => send('install-update'),
   },
