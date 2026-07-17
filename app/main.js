@@ -4801,14 +4801,16 @@ ipcMain.handle('startup-setup-check', async () => {
 });
 
 // ── Auto-updater ──
-// Set once 'update-downloaded' fires, cleared on install. AboutTab only
-// gets the live 'update-downloaded' IPC event while it's mounted — since
-// Settings tabs unmount on switch, a download that finishes while the user
-// is on a different tab (or away from Settings entirely) would otherwise
-// vanish with no way to see "Restart to Update" again. get-update-status
-// lets AboutTab re-seed this on every mount instead of only reacting to the
-// one-shot event.
+// Mirrors the autoUpdater event sequence (available -> progress* ->
+// downloaded) so AboutTab can recover its state on every mount instead of
+// only reacting to whichever one-shot IPC event fires while it happens to be
+// mounted — Settings tabs unmount on switch, so a download in progress (or
+// already finished) when the user is on a different tab would otherwise be
+// invisible until they'd already missed it. pendingDownloadPercent is
+// non-null only while a download is actively in flight (cleared once it
+// lands in pendingUpdateVersion); get-update-status exposes both.
 let pendingUpdateVersion = null;
+let pendingDownloadPercent = null;
 
 function setupAutoUpdater() {
   if (IS_E2E) {
@@ -4830,6 +4832,9 @@ function setupAutoUpdater() {
 
   autoUpdater.on('update-available', (info) => {
     sendDebugLog(`Auto-updater: update available (v${info.version})`);
+    // Matches the renderer's own `setDownloadPercent((p) => p ?? 0)` — marks
+    // a download as started before the first real progress tick arrives.
+    if (pendingDownloadPercent === null) pendingDownloadPercent = 0;
     if (mainWindow) {
       mainWindow.webContents.send('update-available', { version: info.version });
     }
@@ -4841,6 +4846,7 @@ function setupAutoUpdater() {
 
   autoUpdater.on('download-progress', (progress) => {
     sendDebugLog(`Auto-updater: downloading ${Math.round(progress.percent)}%`);
+    pendingDownloadPercent = Math.round(progress.percent);
     if (mainWindow) {
       mainWindow.webContents.send('update-download-progress', { percent: Math.round(progress.percent) });
     }
@@ -4848,6 +4854,7 @@ function setupAutoUpdater() {
 
   autoUpdater.on('update-downloaded', (info) => {
     sendDebugLog(`Auto-updater: v${info.version} ready to install`);
+    pendingDownloadPercent = null;
     pendingUpdateVersion = info.version;
     if (mainWindow) {
       mainWindow.webContents.send('update-downloaded', { version: info.version });
@@ -8047,7 +8054,7 @@ ipcMain.handle('check-for-updates', async () => {
 // listener that's mounted at the exact moment it fires; this is the seam
 // for everyone else.
 ipcMain.handle('get-update-status', async () => {
-  return { success: true, downloadedVersion: pendingUpdateVersion };
+  return { success: true, downloadedVersion: pendingUpdateVersion, downloadPercent: pendingDownloadPercent };
 });
 
 ipcMain.handle('open-release-page', async (event, url) => {

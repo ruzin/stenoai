@@ -113,7 +113,7 @@ export function TemplatesTab({
               key={t.id}
               className={cn(
                 "group flex items-center gap-4 rounded-[8px] px-4 py-3 transition-all duration-fast ease-steno",
-                isEditable && "cursor-pointer hover:shadow-sm hover:border-[color:var(--fg-2)]",
+                isEditable && "hover:shadow-sm hover:border-[color:var(--fg-2)]",
                 isEditable && !isDefault && "hover:bg-[color:var(--surface-hover)]",
               )}
               style={{
@@ -121,21 +121,29 @@ export function TemplatesTab({
                 background:
                   isDefault ? 'var(--surface-raised)' : 'transparent',
               }}
-              role={isEditable ? 'button' : undefined}
-              tabIndex={isEditable ? 0 : undefined}
-              onClick={isEditable ? () => setEditing(t) : undefined}
-              onKeyDown={
-                isEditable
-                  ? (e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        setEditing(t);
-                      }
-                    }
-                  : undefined
-              }
             >
-              <div className="min-w-0 flex-1">
+              {/* The row's edit trigger. Deliberately scoped to just this
+                  content block rather than the whole row div above — the
+                  actions div below (real <button> elements) is this div's
+                  sibling, not its child, so a role="button" ancestor never
+                  contains focusable descendants (an invalid nested-
+                  interactive-control pattern that confuses screen readers). */}
+              <div
+                className={cn("min-w-0 flex-1", isEditable && "cursor-pointer")}
+                role={isEditable ? 'button' : undefined}
+                tabIndex={isEditable ? 0 : undefined}
+                onClick={isEditable ? () => setEditing(t) : undefined}
+                onKeyDown={
+                  isEditable
+                    ? (e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          setEditing(t);
+                        }
+                      }
+                    : undefined
+                }
+              >
                 <div className="flex flex-wrap items-center gap-2">
                   <span
                     className="truncate text-[13px] font-medium"
@@ -189,14 +197,12 @@ export function TemplatesTab({
               </div>
 
               {hasActions && (
-                // Hidden until the row is hovered/focused — the row itself
-                // is the click target for editing, so these are just the
-                // secondary actions (make default / delete).
-                <div
-                  className="flex shrink-0 items-center gap-2 opacity-0 transition-opacity duration-fast ease-steno group-hover:opacity-100 group-focus-within:opacity-100"
-                  onClick={(e) => e.stopPropagation()}
-                  onKeyDown={(e) => e.stopPropagation()}
-                >
+                // Hidden until the row is hovered/focused — a sibling of the
+                // content div's edit-trigger above (not nested inside it), so
+                // there's no ancestor click/keydown handler these could leak
+                // into; these are just the secondary actions (make default /
+                // delete).
+                <div className="flex shrink-0 items-center gap-2 opacity-0 transition-opacity duration-fast ease-steno group-hover:opacity-100 group-focus-within:opacity-100">
                   {!isDefault && (
                     <Button
                       variant="ghost"
@@ -293,6 +299,13 @@ function TemplateEditor({
   const reset = useResetTemplate();
   const { defaultId } = useTemplates();
   const setDefault = useSetDefaultTemplate();
+  // Save and Reset both write this template and both close the editor on
+  // success — letting them run concurrently (e.g. click Reset, then Save
+  // before it settles) races two writes against each other, and whichever
+  // response lands last silently wins over the other's intent. Mutual
+  // exclusion: each of Save/Reset/Make Default is disabled while any of the
+  // three is in flight.
+  const busy = save.isPending || reset.isPending || setDefault.isPending;
   const [name, setName] = React.useState(editing?.name ?? '');
   const [prompt, setPrompt] = React.useState(editing?.prompt ?? '');
   const [language, setLanguage] = React.useState(editing?.language ?? 'auto');
@@ -320,7 +333,7 @@ function TemplateEditor({
           <button
             type="button"
             onClick={onClose}
-            disabled={save.isPending}
+            disabled={busy}
             aria-label="Back to templates"
             className="inline-flex size-8 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-[color:var(--surface-hover)] hover:text-[color:var(--fg-1)] disabled:pointer-events-none disabled:opacity-50"
             style={{ color: 'var(--fg-2)' }}
@@ -343,7 +356,7 @@ function TemplateEditor({
               variant="outline"
               size="sm"
               className={COMPACT_BTN}
-              disabled={setDefault.isPending}
+              disabled={busy}
               onClick={() => {
                 if (editing.id) setDefault.mutate(editing.id);
               }}
@@ -356,7 +369,7 @@ function TemplateEditor({
               variant="ghost"
               size="sm"
               className={COMPACT_BTN}
-              disabled={reset.isPending}
+              disabled={busy}
               title="Discard your edits and revert to Steno's shipped version of this template"
               onClick={() => {
                 if (editing.id) reset.mutate(editing.id, { onSuccess: () => onClose() });
@@ -369,7 +382,7 @@ function TemplateEditor({
             size="sm"
             className={COMPACT_BTN}
             onClick={onSave}
-            disabled={save.isPending || !name.trim()}
+            disabled={busy || !name.trim()}
           >
             {save.isPending ? (
               <>

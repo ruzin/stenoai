@@ -531,10 +531,16 @@ export type CheckForUpdatesResponse = Result<{
   downloadUrl: string | null;
 }>;
 
-// null when no update has finished downloading yet (or one has and was
-// already installed). Lets a freshly-mounted About tab recover this state
-// instead of only reacting to the one-shot 'update-downloaded' IPC event.
-export type GetUpdateStatusResponse = Result<{ downloadedVersion: string | null }>;
+// downloadedVersion is null until a download finishes (or after one already
+// installed). downloadPercent is non-null only while a download is actively
+// in flight — cleared once it lands in downloadedVersion. Lets a freshly-
+// mounted About tab recover either state instead of only reacting to
+// whichever one-shot 'update-available'/'update-download-progress'/
+// 'update-downloaded' IPC event fires while it happens to be mounted.
+export type GetUpdateStatusResponse = Result<{
+  downloadedVersion: string | null;
+  downloadPercent: number | null;
+}>;
 
 // ---------- event payloads ----------
 export interface ProcessingProgressEvent {

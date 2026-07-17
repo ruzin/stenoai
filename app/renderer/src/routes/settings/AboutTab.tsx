@@ -66,20 +66,26 @@ export function AboutTab() {
     };
   }, []);
 
-  // The 'update-downloaded' event above only reaches a listener mounted at
-  // the exact moment it fires — Settings tabs unmount on switch, so a
-  // download finishing while the user is elsewhere would otherwise leave
-  // About with no way to show "Restart to Update" again. Re-seed from main's
-  // persisted state on every mount. Merge rather than overwrite: if the live
-  // event above already set a version (e.g. it fired while this request was
-  // in flight), a stale/null response here must not clobber it.
+  // The events above only reach a listener mounted at the exact moment they
+  // fire — Settings tabs unmount on switch, so returning to About after a
+  // download finished (or while one is still actively running) would
+  // otherwise show nothing until the next event happens to land. Re-seed
+  // from main's persisted state on every mount: a finished download restores
+  // "Restart to Update", an in-flight one restores the progress bar instead
+  // of hiding it until completion. Merge rather than overwrite: if a live
+  // event above already set state (e.g. it fired while this request was in
+  // flight), a stale response here must not clobber it.
   React.useEffect(() => {
     let cancelled = false;
     void ipc()
       .updates.getStatus()
       .then((result) => {
-        if (cancelled || !result.success || !result.downloadedVersion) return;
-        setDownloadedVersion((v) => v ?? result.downloadedVersion);
+        if (cancelled || !result.success) return;
+        if (result.downloadedVersion) {
+          setDownloadedVersion((v) => v ?? result.downloadedVersion);
+        } else if (result.downloadPercent !== null) {
+          setDownloadPercent((p) => p ?? result.downloadPercent);
+        }
       });
     return () => {
       cancelled = true;
