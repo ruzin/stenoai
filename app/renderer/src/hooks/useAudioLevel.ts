@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { useMicrophoneSetting } from './useSettings';
 
 interface UseAudioLevelOptions {
   /** When false, the hook tears down the audio graph and returns zeros. */
@@ -29,12 +30,27 @@ export function useAudioLevel({
   const [levels, setLevels] = React.useState<number[]>(() =>
     new Array(bars).fill(floor),
   );
+  // Mirrors the same pinned-device setting the actual recording capture uses
+  // (useSystemAudioCapture.ts), so this level meter visualizes the mic that's
+  // actually being recorded rather than always the OS default. Tracked live
+  // here, but the capture effect below only reads it at the moment a session
+  // STARTS (enabled flips false -> true) and freezes it for that session's
+  // duration — matching useSystemAudioCapture.ts's own semantics, where the
+  // pin is read once at recording start, not live. Without that freeze,
+  // changing the Settings > Microphone pin mid-recording would make this
+  // meter visualize a DIFFERENT device than what's actually being captured.
+  const microphone = useMicrophoneSetting();
+  const pinnedDeviceIdRef = React.useRef<string | null>(null);
+  React.useEffect(() => {
+    pinnedDeviceIdRef.current = microphone.data?.device_id ?? null;
+  }, [microphone.data?.device_id]);
 
   React.useEffect(() => {
     if (!enabled) {
       setLevels(new Array(bars).fill(floor));
       return;
     }
+    const pinnedDeviceId = pinnedDeviceIdRef.current;
 
     let cancelled = false;
     let stream: MediaStream | null = null;
@@ -46,7 +62,22 @@ export function useAudioLevel({
 
     void (async () => {
       try {
-        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            audio: pinnedDeviceId ? { deviceId: { exact: pinnedDeviceId } } : true,
+          });
+        } catch (err) {
+          // Only fall back to the system default on a genuinely-missing
+          // device — matches useSystemAudioCapture.ts's own rule. Falling
+          // back on any error (e.g. NotReadableError/NotAllowedError) would
+          // let the meter visualize a different mic than what's actually
+          // being recorded.
+          const isMissingDeviceError =
+            err instanceof DOMException &&
+            (err.name === 'OverconstrainedError' || err.name === 'NotFoundError');
+          if (!pinnedDeviceId || !isMissingDeviceError) throw err;
+          stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        }
         if (cancelled) {
           stream.getTracks().forEach((t) => t.stop());
           return;

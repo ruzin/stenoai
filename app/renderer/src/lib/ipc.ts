@@ -310,6 +310,7 @@ export type SetupCheckResponse = Result<{
 
 export type MicPermissionResponse = Result<{ status: MicPermissionStatus }>;
 export type MicPermissionGrantResponse = Result<{ granted: boolean }>;
+export type ScreenRecordingPermissionResponse = Result<{ screenPermission: string }>;
 
 /** Mirrors RECORDING_TRIGGERS in main.js -- what UI action started the
  *  recording, so PostHog can tell whether the meeting-detected nudge
@@ -485,6 +486,10 @@ export type GetSilenceAutoStopResponse = Result<{
 export type SetSilenceAutoStopEnabledResponse = Result<{ silence_auto_stop_enabled: boolean }>;
 export type SetSilenceAutoStopMinutesResponse = Result<{ silence_auto_stop_minutes: number }>;
 export type GetLanguageResponse = Result<{ language: string }>;
+export type GetMicrophoneResponse = Result<{
+  device_id: string | null;
+  label: string | null;
+}>;
 export type GetUserNameResponse = Result<{ user_name: string }>;
 export type StoragePathResponse = Result<{
   storage_path: string | null;
@@ -683,7 +688,13 @@ type Subscribe<P = void> = (cb: (payload: P) => void) => () => void;
 export interface StenoaiBridge {
   version: number;
 
-  app: { getVersion: RequestFn<[], AppVersionResponse> };
+  app: {
+    getVersion: RequestFn<[], AppVersionResponse>;
+    /** Screen Recording permission changes don't apply to an already-running
+     *  process on macOS — this is the one-click "apply it now" follow-up.
+     *  Never actually resolves (the process exits first). */
+    relaunch: RequestFn<[], void>;
+  };
 
   window: { focus: SendFn<[]>; readyToShow: SendFn<[]> };
 
@@ -714,6 +725,14 @@ export interface StenoaiBridge {
   perm: {
     checkMicrophone: RequestFn<[], MicPermissionResponse>;
     requestMicrophone: RequestFn<[], MicPermissionGrantResponse>;
+    /** macOS only: safely triggers the native prompt for a 'not-determined'
+     *  user by calling desktopCapturer.getSources() in an ordinary, properly
+     *  try/caught main-process handler — deliberately NOT the same code path
+     *  recording capture uses (see main.js for why that one can't do this). */
+    requestScreenRecording: RequestFn<[], ScreenRecordingPermissionResponse>;
+    /** Deep-links to System Settings > Screen Recording — macOS won't
+     *  re-prompt once denied/restricted, so this is the only way back. */
+    openScreenRecordingSettings: RequestFn<[], Result<Record<string, never>>>;
   };
 
   recording: {
@@ -733,6 +752,11 @@ export interface StenoaiBridge {
         supported: boolean;
         osVersion: string;
         screenPermission: string;
+        // Screen Recording permission as of process launch (macOS only;
+        // frozen at startup — a mid-session grant only takes effect after a
+        // relaunch, so consumers gating loopback usability must read this,
+        // not the live `screenPermission`).
+        screenPermissionAtLaunch: string;
         experimental?: boolean;
         platform?: string;
       }>
@@ -880,6 +904,10 @@ export interface StenoaiBridge {
       [payload: { minutes: number; sessionName: string | null }],
       Result<Record<string, never>>
     >;
+    /** Fired at recording start when loopback is skipped specifically because
+     *  Screen Recording permission isn't granted (see main.js — not fired for
+     *  the toggle-off or OS-unsupported cases, which aren't a surprise). */
+    showSystemAudioMicOnlyNotification: RequestFn<[], Result<Record<string, never>>>;
     showNoteReadyNotification: RequestFn<
       [
         payload: {
@@ -899,6 +927,8 @@ export interface StenoaiBridge {
     >;
     getLanguage: RequestFn<[], GetLanguageResponse>;
     setLanguage: RequestFn<[code: string], Result<Record<string, never>>>;
+    getMicrophone: RequestFn<[], GetMicrophoneResponse>;
+    setMicrophone: RequestFn<[deviceId: string, label: string], GetMicrophoneResponse>;
     getUserName: RequestFn<[], GetUserNameResponse>;
     setUserName: RequestFn<[name: string], Result<Record<string, never>>>;
     getStoragePath: RequestFn<[], StoragePathResponse>;

@@ -4030,6 +4030,27 @@ def set_language(language_code):
         print(json.dumps({"success": False, "error": "Failed to save language setting"}))
 
 
+@cli.command(name='get-microphone')
+def get_microphone_cmd():
+    """Get the selected microphone device (null/null = system default)."""
+    from src.config import get_config
+    print(json.dumps(get_config().get_microphone_device()))
+
+
+@cli.command(name='set-microphone')
+@click.argument('device_id', default='')
+@click.argument('label', default='')
+def set_microphone_cmd(device_id, label):
+    """Set the microphone device to record from ("default"/empty clears it)."""
+    from src.config import get_config
+    success = get_config().set_microphone_device(device_id or None, label or None)
+    if success:
+        result = get_config().get_microphone_device()
+        print(json.dumps({"success": True, **result}))
+    else:
+        print(json.dumps({"success": False, "error": "Failed to save microphone setting"}))
+
+
 @cli.command(name='get-user-name')
 def get_user_name_cmd():
     """Get the user's first name (for in-app greetings)."""

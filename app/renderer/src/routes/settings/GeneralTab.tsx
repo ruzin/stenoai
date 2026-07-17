@@ -26,11 +26,16 @@ import {
   useAutoDetectMeetingsSetting,
   useDockIconSetting,
   useLaunchOnLoginSetting,
+  useMicrophoneSetting,
   useNotificationsSetting,
+  useOpenScreenRecordingSettings,
   usePremeetingNotificationsSetting,
+  useRelaunchApp,
+  useRequestScreenRecordingPermission,
   useSetAutoDetectMeetings,
   useSetDockIcon,
   useSetLaunchOnLogin,
+  useSetMicrophone,
   useSetNotifications,
   useSetPremeetingNotifications,
   useSetShowMenuBarIcon,
@@ -44,11 +49,14 @@ import {
   useSystemAudioSupport,
   useUserName,
 } from '@/hooks/useSettings';
+import { useAudioInputDevices } from '@/hooks/useAudioInputDevices';
 import {
   useGoogleCalendarAuth,
   useOutlookCalendarAuth,
 } from '@/hooks/useCalendarEvents';
 import { COMPACT_BTN, COMPACT_TRIGGER, SectionHeading, SettingRow } from './primitives';
+
+const DEFAULT_MIC_VALUE = 'default';
 
 export function GeneralTab() {
   const { theme, setTheme } = useTheme();
@@ -59,6 +67,35 @@ export function GeneralTab() {
   const systemAudio = useSystemAudioSetting();
   const setSystemAudio = useSetSystemAudio();
   const systemAudioSupport = useSystemAudioSupport();
+  const requestScreenRecording = useRequestScreenRecordingPermission();
+  const openScreenRecordingSettings = useOpenScreenRecordingSettings();
+  const relaunchApp = useRelaunchApp();
+  // Screen Recording permission changes don't apply to an already-running
+  // process — `screenPermissionAtLaunch` is frozen main-side at startup, so
+  // comparing it to the live `screenPermission` tells apart "granted before
+  // launch" from "granted mid-session, needs a relaunch to take effect."
+  // (Deliberately not component state: that broke on tab remount, since a
+  // freshly-mounted component would re-seed its "initial" value from the
+  // now-live 'granted' status and silently lose the relaunch prompt.)
+  const needsRelaunchForScreenRecording =
+    systemAudioSupport.data?.screenPermissionAtLaunch !== 'granted' &&
+    systemAudioSupport.data?.screenPermission === 'granted';
+  const screenPermission = systemAudioSupport.data?.screenPermission;
+  const systemAudioDescription = (() => {
+    if (systemAudioSupport.data && !systemAudioSupport.data.supported) {
+      return `Capture both sides of a call (requires macOS 14.4+, you're on ${systemAudioSupport.data.osVersion || 'an older version'}). Mic-only recording still works.`;
+    }
+    if (needsRelaunchForScreenRecording) {
+      return 'Screen Recording access granted — relaunch Steno to start capturing both sides of a call.';
+    }
+    if (screenPermission === 'not-determined') {
+      return 'Capture both sides of a call. Needs Screen Recording access first — mic-only recording still works either way.';
+    }
+    if (screenPermission === 'denied' || screenPermission === 'restricted') {
+      return 'Capture both sides of a call. Screen Recording access was denied — enable it in System Settings, then relaunch Steno. Mic-only recording still works either way.';
+    }
+    return 'Capture both sides of a call. Turn off to record your mic only.';
+  })();
   const autoDetect = useAutoDetectMeetingsSetting();
   const setAutoDetect = useSetAutoDetectMeetings();
   const launchOnLogin = useLaunchOnLoginSetting();
@@ -70,6 +107,9 @@ export function GeneralTab() {
   const setDockIcon = useSetDockIcon();
   const menuBarIcon = useShowMenuBarIconSetting();
   const setMenuBarIcon = useSetShowMenuBarIcon();
+  const microphone = useMicrophoneSetting();
+  const setMicrophone = useSetMicrophone();
+  const audioInputDevices = useAudioInputDevices();
   const google = useGoogleCalendarAuth();
   const outlook = useOutlookCalendarAuth();
   const userName = useUserName();
@@ -343,22 +383,109 @@ export function GeneralTab() {
 
       <SectionHeading>Recording</SectionHeading>
 
+      <SettingRow
+        label="Microphone"
+        description="Which input device Steno records from. Pins your choice so the OS switching its default (e.g. AirPods connecting) doesn't silently change what gets recorded. Applies the next time you start a recording."
+      >
+        <Select
+          value={microphone.data?.device_id ?? DEFAULT_MIC_VALUE}
+          onValueChange={(deviceId) => {
+            if (deviceId === DEFAULT_MIC_VALUE) {
+              setMicrophone.mutate({ deviceId: DEFAULT_MIC_VALUE, label: '' });
+              return;
+            }
+            const device = audioInputDevices.find((d) => d.deviceId === deviceId);
+            // Re-selecting the already-pinned-but-disconnected device (the
+            // synthetic SelectItem below) won't be found in audioInputDevices
+            // — fall back to its already-known stored label instead of
+            // overwriting it with an empty string.
+            const label =
+              device?.label ??
+              (deviceId === microphone.data?.device_id ? microphone.data?.label ?? '' : '');
+            setMicrophone.mutate({ deviceId, label });
+          }}
+          disabled={microphone.data === undefined}
+        >
+          <SelectTrigger className="h-8 w-56 text-sm" data-testid="microphone-select">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={DEFAULT_MIC_VALUE}>System Default</SelectItem>
+            {audioInputDevices.map((d, i) => (
+              <SelectItem key={d.deviceId} value={d.deviceId}>
+                {d.label || `Microphone ${i + 1}`}
+              </SelectItem>
+            ))}
+            {/* The selected device was unplugged / isn't in the current device
+                list — keep it selectable so the dropdown doesn't silently jump
+                back to "System Default" out from under the user. */}
+            {microphone.data?.device_id &&
+              !audioInputDevices.some((d) => d.deviceId === microphone.data?.device_id) && (
+                <SelectItem value={microphone.data.device_id}>
+                  {microphone.data.label || 'Unknown device (disconnected)'}
+                </SelectItem>
+              )}
+          </SelectContent>
+        </Select>
+      </SettingRow>
+
       {/* macOS only: chooses mic-only vs mic+system. Windows always records
           mic+system (toggle hidden), so this control isn't shown there. */}
       {isMac && (
-        <SettingRow
-          label="Record system audio"
-          description={
-            systemAudioSupport.data && !systemAudioSupport.data.supported
-              ? `Capture both sides of a call (requires macOS 14.4+, you're on ${systemAudioSupport.data.osVersion || 'an older version'}). Mic-only recording still works.`
-              : 'Capture both sides of a call. Turn off to record your mic only.'
-          }
-        >
-          <Switch
-            checked={(systemAudio.data ?? true) && (systemAudioSupport.data?.supported ?? true)}
-            onCheckedChange={(v) => setSystemAudio.mutate(v)}
-            disabled={systemAudio.data === undefined || systemAudioSupport.data?.supported === false}
-          />
+        <SettingRow label="Record system audio" description={systemAudioDescription}>
+          <div className="flex items-center gap-2">
+            {/* Only offer permission actions when the OS actually supports the
+                feature — on an unsupported macOS version, screenPermission can
+                still read 'not-determined'/'denied' (that API predates the
+                14.4 loopback requirement), but granting it wouldn't do
+                anything: the toggle below is already disabled for OS reasons,
+                so the description explaining "requires macOS 14.4+" should be
+                the only thing shown, not an actionable-looking button. */}
+            {systemAudioSupport.data?.supported === false ? null : needsRelaunchForScreenRecording ? (
+              <Button
+                variant="outline"
+                size="sm"
+                className={COMPACT_BTN}
+                onClick={() => relaunchApp.mutate()}
+              >
+                Relaunch
+              </Button>
+            ) : screenPermission === 'not-determined' ? (
+              <Button
+                variant="outline"
+                size="sm"
+                className={COMPACT_BTN}
+                onClick={() => requestScreenRecording.mutate()}
+                disabled={requestScreenRecording.isPending}
+              >
+                Grant Access
+              </Button>
+            ) : screenPermission === 'denied' || screenPermission === 'restricted' ? (
+              <>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className={COMPACT_BTN}
+                  onClick={() => void systemAudioSupport.refetch()}
+                >
+                  Check Again
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className={COMPACT_BTN}
+                  onClick={() => openScreenRecordingSettings.mutate()}
+                >
+                  Open Settings
+                </Button>
+              </>
+            ) : null}
+            <Switch
+              checked={(systemAudio.data ?? true) && (systemAudioSupport.data?.supported ?? true)}
+              onCheckedChange={(v) => setSystemAudio.mutate(v)}
+              disabled={systemAudio.data === undefined || systemAudioSupport.data?.supported === false}
+            />
+          </div>
         </SettingRow>
       )}
 
