@@ -425,7 +425,7 @@ function OpenAiAsrConfig() {
         style={{ color: 'var(--fg-muted)' }}
       >
         Examples: OpenAI → <code>whisper-1</code> · Groq →{' '}
-        <code>whisper-large-v3</code> · Azure → your deployment name
+        <code>whisper-large-v3</code>
       </div>
     </div>
   );
