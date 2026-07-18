@@ -102,11 +102,21 @@ if (process.env.DISCORD_DRY_RUN === '1') {
   process.exit(0);
 }
 
-const res = await fetch(webhook, {
-  method: 'POST',
-  headers: { 'content-type': 'application/json' },
-  body: JSON.stringify(payload),
-});
+let res;
+try {
+  res = await fetch(webhook, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+} catch (err) {
+  // Transport-level failure (DNS, timeout, connection refused) rejects the
+  // fetch promise — handle it the same as an HTTP error so a network hiccup
+  // logs cleanly and exits 0 rather than surfacing as an unhandled rejection
+  // (the design intent is to NEVER fail the release).
+  console.error(`Discord webhook request failed: ${err?.message || err}`);
+  process.exit(0);
+}
 
 if (!res.ok) {
   const body = await res.text().catch(() => '');
