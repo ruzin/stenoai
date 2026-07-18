@@ -220,7 +220,8 @@ Releases are automated via `.github/workflows/build-release.yml`. Never create r
    - Builds signed + notarized DMGs for both arm64 and x64
    - Creates a GitHub Release with the tag message as the body
    - Uploads both DMGs as release assets
-10. Do NOT build DMGs locally for releases, do NOT use `gh release create` manually.
+   - Posts a release announcement to Discord (summary + a few headline features + the contributor thank-you), via the `Announce release on Discord` step (`scripts/discord-release-announce.mjs`). This is automatic and requires no manual Discord post. It no-ops unless the `DISCORD_WEBHOOK_URL` repo secret is set (an incoming webhook for the announcements channel), and is `continue-on-error` so a Discord hiccup never fails the release.
+10. Do NOT build DMGs locally for releases, do NOT use `gh release create` manually. Do NOT post the Discord release announcement by hand — the workflow does it.
 
 ## Session Logging
 When the user says "log session" or similar (e.g., "update session log", "document this session"):
