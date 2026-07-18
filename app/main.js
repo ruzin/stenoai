@@ -6341,9 +6341,12 @@ ipcMain.handle('set-openai-asr-config', async (_event, cfg) => {
   try {
     const args = ['set-openai-asr-config'];
     if (cfg.api_url !== undefined) { args.push('--api-url', cfg.api_url); }
-    if (cfg.api_key !== undefined) { args.push('--api-key', cfg.api_key); }
     if (cfg.model !== undefined)   { args.push('--model',   cfg.model);   }
-    const result = await runPythonScript('simple_recorder.py', args);
+    const extraEnv = {};
+    if (cfg.api_key !== undefined) { 
+      extraEnv.STENOAI_OAI_API_KEY = cfg.api_key; 
+    }
+    const result = await runPythonScript('simple_recorder.py', args, false, extraEnv);
     return JSON.parse(result.trim());
   } catch (e) { return { success: false, error: e.message }; }
 });

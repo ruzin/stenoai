@@ -716,10 +716,23 @@ class WhisperTranscriber:
         import urllib.request
         import uuid
 
+        import os
+        import urllib.parse
+
         api_url = (getattr(self, "_openai_asr_api_url", "") or "https://api.openai.com/v1").rstrip("/")
         api_key = getattr(self, "_openai_asr_api_key", "")
         model = getattr(self, "_openai_asr_model", "") or "whisper-1"
-        endpoint = f"{api_url}/audio/transcriptions"
+        
+        is_azure = "azure.com" in api_url.lower()
+        if "/audio/transcriptions" not in api_url:
+            if "?" in api_url:
+                parts = urllib.parse.urlsplit(api_url)
+                new_path = parts.path.rstrip("/") + "/audio/transcriptions"
+                endpoint = urllib.parse.urlunsplit((parts.scheme, parts.netloc, new_path, parts.query, parts.fragment))
+            else:
+                endpoint = f"{api_url}/audio/transcriptions"
+        else:
+            endpoint = api_url
 
         logger.info(
             "openai-asr: POST %s  model=%s  file=%s",
@@ -732,7 +745,6 @@ class WhisperTranscriber:
                 "Set it in Settings → Transcribe → OpenAI-compatible ASR."
             )
 
-        # Build multipart/form-data body using only stdlib.
         boundary = uuid.uuid4().hex
         mime_type = mimetypes.guess_type(str(audio_filepath))[0] or "audio/wav"
 
@@ -743,40 +755,56 @@ class WhisperTranscriber:
                 f"{value}\r\n"
             ).encode()
 
-        def _file_field(name: str, filename: str, content: bytes, ctype: str) -> bytes:
-            header = (
+        def _file_field_header(name: str, filename: str, ctype: str) -> bytes:
+            return (
                 f"--{boundary}\r\n"
                 f'Content-Disposition: form-data; name="{name}"; filename="{filename}"\r\n'
                 f"Content-Type: {ctype}\r\n\r\n"
             ).encode()
-            return header + content + b"\r\n"
 
-        def _build_body(response_format: str) -> bytes:
-            with open(audio_filepath, "rb") as fh:
-                file_bytes = fh.read()
-            parts: list[bytes] = [
-                _field("model", model),
-                _field("response_format", response_format),
-            ]
-            # Only send language when it's a concrete code, not "auto"
-            # (some endpoints reject "auto" as a language value).
-            if language and language != "auto":
-                parts.append(_field("language", language))
-            parts.append(_file_field("file", audio_filepath.name, file_bytes, mime_type))
-            parts.append(f"--{boundary}--\r\n".encode())
-            return b"".join(parts)
+        class _MultipartStream:
+            def __init__(self, response_format: str):
+                self.prefix_parts = [
+                    _field("model", model),
+                    _field("response_format", response_format),
+                ]
+                if language and language != "auto":
+                    self.prefix_parts.append(_field("language", language))
+                self.prefix_parts.append(_file_field_header("file", audio_filepath.name, mime_type))
+                
+                self.prefix_bytes = b"".join(self.prefix_parts)
+                self.suffix_bytes = f"\r\n--{boundary}--\r\n".encode()
+                
+                self.file_size = os.path.getsize(audio_filepath)
+                self.total_size = len(self.prefix_bytes) + self.file_size + len(self.suffix_bytes)
+
+            def __iter__(self):
+                yield self.prefix_bytes
+                with open(audio_filepath, "rb") as fh:
+                    while True:
+                        chunk = fh.read(8192 * 8)
+                        if not chunk:
+                            break
+                        yield chunk
+                yield self.suffix_bytes
+
+            def __len__(self):
+                return self.total_size
 
         headers = {
-            "Authorization": f"Bearer {api_key}",
             "Content-Type": f"multipart/form-data; boundary={boundary}",
         }
+        if is_azure:
+            headers["api-key"] = api_key
+        else:
+            headers["Authorization"] = f"Bearer {api_key}"
 
         def _do_request(response_format: str) -> bytes:
-            body = _build_body(response_format)
+            stream = _MultipartStream(response_format)
             req = urllib.request.Request(
                 endpoint,
-                data=body,
-                headers={**headers, "Content-Length": str(len(body))},
+                data=stream,
+                headers={**headers, "Content-Length": str(len(stream))},
                 method="POST",
             )
             try:
