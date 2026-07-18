@@ -293,7 +293,16 @@ export function Nav({ subpage = false }) {
             style={{ borderTop: "1px solid var(--border-subtle)" }}
           >
             <div className="container-site flex flex-col py-3">
-              {[...PRODUCT_LINKS, ...NAV_LINKS].map(({ href, label }) => (
+              {/* Product group — mirrors the desktop Product dropdown so the
+                  mobile information architecture matches. No hub page, so the
+                  header is a plain label rather than a link. */}
+              <span
+                className="block text-fg-muted text-[12px] py-2"
+                style={{ fontFamily: "var(--font-mono)", textTransform: "uppercase", letterSpacing: "0.12em" }}
+              >
+                Product
+              </span>
+              {PRODUCT_LINKS.map(({ href, label }) => (
                 <a
                   key={href}
                   href={subpage ? `/${href}` : href}
@@ -326,6 +335,19 @@ export function Nav({ subpage = false }) {
                   </a>
                 ))}
               </div>
+              {/* Flat top-level links (FAQ) — after the grouped sections,
+                  matching the desktop order (Product, Enterprise, FAQ). */}
+              {NAV_LINKS.map(({ href, label }) => (
+                <a
+                  key={href}
+                  href={subpage ? `/${href}` : href}
+                  onClick={(e) => { if (!subpage) scrollToHash(e, href); setMenuOpen(false); }}
+                  className="mt-2 pt-2 text-fg-2 text-sm no-underline hover:text-fg-1 transition-colors"
+                  style={{ padding: "10px 0", borderTop: "1px solid var(--border-subtle)" }}
+                >
+                  {label}
+                </a>
+              ))}
               <a
                 href={GITHUB_URL}
                 target="_blank"
