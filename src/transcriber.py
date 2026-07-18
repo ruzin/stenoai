@@ -800,9 +800,19 @@ class WhisperTranscriber:
                 old_url = urllib.parse.urlsplit(req.full_url)
                 target_url = urllib.parse.urlsplit(newurl)
                 if (old_url.scheme, old_url.netloc) == (target_url.scheme, target_url.netloc):
-                    return super().redirect_request(req, fp, code, msg, hdrs, newurl)
+                    # Same-origin redirect. Replay the original POST request with its body
+                    # and headers, avoiding standard urllib behavior which drops POST bodies.
+                    new_req = urllib.request.Request(
+                        newurl,
+                        data=req.data,
+                        headers=req.headers,
+                        method=req.method,
+                        origin_req_host=req.origin_req_host,
+                        unverifiable=True
+                    )
+                    return new_req
                 raise urllib.error.HTTPError(
-                    req.full_url, code, f"Redirect to {newurl} denied", hdrs, fp
+                    req.full_url, code, f"Cross-origin redirect to {newurl} denied", hdrs, fp
                 )
         opener = urllib.request.build_opener(NoRedirectHandler)
 
