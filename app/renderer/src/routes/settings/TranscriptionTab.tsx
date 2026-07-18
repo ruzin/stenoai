@@ -229,6 +229,13 @@ function TranscriptionModelList() {
           onValueChange={(v) => {
             if (v === 'openai-asr') {
               setShowPrivacyWarning(true);
+            } else if (v === 'whisper') {
+              const currentModel = whisper.data?.models.find((m) => m.name === activeWhisperModel);
+              if (currentModel && !currentModel.installed) {
+                pullWhisper.mutate(currentModel.name);
+              } else {
+                setActive.mutate({ engine: 'whisper' });
+              }
             } else {
               setActive.mutate({ engine: v as TranscriptionEngine });
             }

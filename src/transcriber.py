@@ -709,7 +709,6 @@ class WhisperTranscriber:
         try/except records them as ``transcription_failed`` (audio preserved,
         reprocessable) rather than silently returning an empty meeting.
         """
-        import io
         import json as _json
         import mimetypes
         import urllib.error
@@ -723,7 +722,6 @@ class WhisperTranscriber:
         api_key = getattr(self, "_openai_asr_api_key", "")
         model = getattr(self, "_openai_asr_model", "") or "whisper-1"
         
-        is_azure = "azure.com" in api_url.lower()
         if "/audio/transcriptions" not in api_url:
             if "?" in api_url:
                 parts = urllib.parse.urlsplit(api_url)
@@ -793,11 +791,16 @@ class WhisperTranscriber:
 
         headers = {
             "Content-Type": f"multipart/form-data; boundary={boundary}",
+            "Authorization": f"Bearer {api_key}"
         }
-        if is_azure:
-            headers["api-key"] = api_key
-        else:
-            headers["Authorization"] = f"Bearer {api_key}"
+
+        # Prevent credential leak to cross-origin redirect targets
+        class NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+            def redirect_request(self, req, fp, code, msg, hdrs, newurl):
+                raise urllib.error.HTTPError(
+                    req.full_url, code, f"Redirect to {newurl} denied", hdrs, fp
+                )
+        opener = urllib.request.build_opener(NoRedirectHandler)
 
         def _do_request(response_format: str) -> bytes:
             stream = _MultipartStream(response_format)
@@ -808,7 +811,7 @@ class WhisperTranscriber:
                 method="POST",
             )
             try:
-                with urllib.request.urlopen(req, timeout=300) as resp:
+                with opener.open(req, timeout=300) as resp:
                     return resp.read()
             except urllib.error.HTTPError as e:
                 err_body = e.read().decode(errors="replace")[:500]
@@ -845,6 +848,15 @@ class WhisperTranscriber:
                 "detected_language_probability": None,
             }
         except Exception as primary_err:
+            fallback = False
+            if isinstance(primary_err, _json.JSONDecodeError):
+                fallback = True
+            elif isinstance(primary_err, RuntimeError) and getattr(primary_err.__cause__, "code", None) in (400, 422, 501):
+                fallback = True
+
+            if not fallback:
+                raise
+
             logger.warning(
                 "openai-asr verbose_json failed (%s); falling back to text format",
                 primary_err,
