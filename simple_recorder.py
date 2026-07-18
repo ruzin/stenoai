@@ -1463,13 +1463,19 @@ def get_openai_asr_config_cmd():
 
 @cli.command(name='set-openai-asr-config')
 @click.option('--api-url', default=None, help='Base URL of the OpenAI-compatible STT endpoint')
-@click.option('--api-key', default=None, help='Bearer token / API key')
+@click.option('--api-key', default=None, help='Bearer token / API key (deprecated, use STENOAI_OAI_API_KEY env)')
 @click.option('--model', default=None, help='Model name (e.g. whisper-1)')
 def set_openai_asr_config_cmd(api_url, api_key, model):
     """Persist OpenAI-compatible ASR endpoint settings. Omit an option to leave it unchanged."""
+    import os
     from src.config import get_config
     config = get_config()
     errors = []
+    
+    env_api_key = os.environ.get('STENOAI_OAI_API_KEY')
+    if env_api_key is not None:
+        api_key = env_api_key
+
     if api_url is not None:
         if not config.set_openai_asr_api_url(api_url):
             errors.append("Failed to save api_url")
