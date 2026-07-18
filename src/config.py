@@ -254,7 +254,7 @@ class Config:
         "yi": "Yiddish", "yo": "Yoruba", "zh": "Chinese",
     }
 
-    VALID_TRANSCRIPTION_ENGINES = ("parakeet", "whisper")
+    VALID_TRANSCRIPTION_ENGINES = ("parakeet", "whisper", "openai-asr")
 
     def __init__(self, config_path: Optional[Path] = None):
         """
@@ -617,6 +617,14 @@ class Config:
             "auto_summarize_enabled": True,
             "whisper_model": "large-v3-turbo",
             "transcription_engine": "parakeet",
+            # OpenAI-compatible ASR endpoint settings.
+            # api_url: base URL of any OpenAI Speech-to-Text compatible
+            #   server (e.g. https://api.openai.com/v1, Groq, Azure, etc.).
+            # api_key: Bearer token sent in the Authorization header.
+            # model: model name passed in the multipart form (e.g. whisper-1).
+            "openai_asr_api_url": "https://api.openai.com/v1",
+            "openai_asr_api_key": "",
+            "openai_asr_model": "whisper-1",
             "version": "1.0"
         }
 
@@ -981,6 +989,53 @@ class Config:
             logger.error(f"Unsupported Whisper model: {model_size}")
             return False
         self._config["whisper_model"] = model_size
+        return self._save()
+
+    # ------------------------------------------------------------------
+    # OpenAI-compatible ASR endpoint settings
+    # ------------------------------------------------------------------
+
+    def get_openai_asr_api_url(self) -> str:
+        """Base URL of the OpenAI-compatible STT endpoint.
+
+        Defaults to the official OpenAI endpoint. Users can override with
+        any compatible server: Groq, Azure OpenAI, local llama.cpp, etc.
+        The transcriber appends ``/audio/transcriptions`` to this URL.
+        """
+        return self._config.get("openai_asr_api_url", "https://api.openai.com/v1")
+
+    def set_openai_asr_api_url(self, url: str) -> bool:
+        """Set the base URL for the OpenAI-compatible STT endpoint."""
+        self._config["openai_asr_api_url"] = (url or "").strip()
+        return self._save()
+
+    def get_openai_asr_api_key(self) -> str:
+        """Bearer token for the OpenAI-compatible STT endpoint.
+
+        Stored in config.json (same convention as cloud_api_key for the
+        summarisation cloud provider). Empty string when unset.
+        """
+        return self._config.get("openai_asr_api_key", "")
+
+    def set_openai_asr_api_key(self, key: str) -> bool:
+        """Persist the API key for the OpenAI-compatible STT endpoint."""
+        self._config["openai_asr_api_key"] = (key or "").strip()
+        return self._save()
+
+    def get_openai_asr_model(self) -> str:
+        """Model name passed to the OpenAI-compatible STT endpoint.
+
+        Defaults to ``whisper-1`` (the standard OpenAI Whisper model).
+        Groq uses ``whisper-large-v3``; other providers vary.
+        """
+        return self._config.get("openai_asr_model", "whisper-1") or "whisper-1"
+
+    def set_openai_asr_model(self, model: str) -> bool:
+        """Set the model name for the OpenAI-compatible STT endpoint."""
+        if not model or not model.strip():
+            logger.error("openai_asr_model must not be empty")
+            return False
+        self._config["openai_asr_model"] = model.strip()
         return self._save()
 
     def get_system_audio_enabled(self) -> bool:

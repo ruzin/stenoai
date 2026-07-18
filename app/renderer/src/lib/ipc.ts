@@ -479,11 +479,23 @@ export type ParakeetStatusResponse = Result<{
   installed: boolean;
 }>;
 
-export type TranscriptionEngine = 'parakeet' | 'whisper';
+export type TranscriptionEngine = 'parakeet' | 'whisper' | 'openai-asr';
 
 export type GetTranscriptionEngineResponse = Result<{
   engine: TranscriptionEngine;
   valid_engines: TranscriptionEngine[];
+}>;
+
+export type GetOpenAiAsrConfigResponse = Result<{
+  api_url: string;
+  api_key_set: boolean;
+  model: string;
+}>;
+
+export type SetOpenAiAsrConfigResponse = Result<{
+  api_url: string;
+  api_key_set: boolean;
+  model: string;
 }>;
 
 export type GetNotificationsResponse = Result<{ notifications_enabled: boolean }>;
@@ -901,6 +913,14 @@ export interface StenoaiBridge {
   transcriptionEngine: {
     get: RequestFn<[], GetTranscriptionEngineResponse>;
     set: RequestFn<[engine: TranscriptionEngine], Result<{ engine: TranscriptionEngine }>>;
+  };
+
+  openaiAsr: {
+    getConfig: RequestFn<[], GetOpenAiAsrConfigResponse>;
+    setConfig: RequestFn<
+      [cfg: { api_url?: string; api_key?: string; model?: string }],
+      SetOpenAiAsrConfigResponse
+    >;
   };
 
   settings: {

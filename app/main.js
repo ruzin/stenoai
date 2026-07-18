@@ -3845,7 +3845,8 @@ function loadTranscriptionEngine() {
     if (!fs.existsSync(cfgPath)) return 'parakeet';
     const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf-8'));
     const engine = cfg.transcription_engine;
-    return engine === 'whisper' ? 'whisper' : 'parakeet';
+    if (engine === 'whisper' || engine === 'openai-asr') return engine;
+    return 'parakeet';
   } catch (_) {
     return 'parakeet';
   }
@@ -3862,12 +3863,19 @@ function loadTranscriptionContext() {
       return { engine: 'parakeet', model: 'parakeet', language: 'auto' };
     }
     const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf-8'));
-    const engine = cfg.transcription_engine === 'whisper' ? 'whisper' : 'parakeet';
+    const rawEngine = cfg.transcription_engine;
+    const engine = (rawEngine === 'whisper' || rawEngine === 'openai-asr') ? rawEngine : 'parakeet';
+    let model;
+    if (engine === 'whisper') {
+      model = sanitizeModelForAnalytics(cfg.whisper_model);
+    } else if (engine === 'openai-asr') {
+      model = sanitizeModelForAnalytics(cfg.openai_asr_model) || 'whisper-1';
+    } else {
+      model = 'parakeet';
+    }
     return {
       engine,
-      // Parakeet has no separate user-selectable model today (single bundled
-      // default) -- report the engine name rather than guess a variant id.
-      model: engine === 'whisper' ? sanitizeModelForAnalytics(cfg.whisper_model) : 'parakeet',
+      model,
       language: cfg.language || 'auto',
     };
   } catch (_) {
@@ -6319,6 +6327,24 @@ ipcMain.handle('set-transcription-engine', async (event, engine) => {
     const jsonData = JSON.parse(result.trim());
     trackEvent('model_changed', { model: engine, kind: 'transcription_engine' });
     return { success: true, ...jsonData };
+  } catch (e) { return { success: false, error: e.message }; }
+});
+
+ipcMain.handle('get-openai-asr-config', async () => {
+  try {
+    const result = await runPythonScript('simple_recorder.py', ['get-openai-asr-config'], true);
+    return JSON.parse(result.trim());
+  } catch (e) { return { success: false, error: e.message }; }
+});
+
+ipcMain.handle('set-openai-asr-config', async (_event, cfg) => {
+  try {
+    const args = ['set-openai-asr-config'];
+    if (cfg.api_url !== undefined) { args.push('--api-url', cfg.api_url); }
+    if (cfg.api_key !== undefined) { args.push('--api-key', cfg.api_key); }
+    if (cfg.model !== undefined)   { args.push('--model',   cfg.model);   }
+    const result = await runPythonScript('simple_recorder.py', args);
+    return JSON.parse(result.trim());
   } catch (e) { return { success: false, error: e.message }; }
 });
 
