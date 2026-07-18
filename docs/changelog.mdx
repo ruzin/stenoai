@@ -1,0 +1,108 @@
+---
+title: "Changelog"
+description: "What's new in Steno -- recent releases and notable changes."
+---
+
+<Update label="v0.5.8" description="July 5, 2026">
+**New**
+- Added a "Generate notes automatically" toggle in Settings -- turn it off to skip AI summaries while recording, then generate them later whenever you're ready.
+- A new gallery of ready-made note templates to choose from in Settings.
+- Export a diagnostics file for support that hides your file paths and meeting titles.
+
+**Improved**
+- Steno is better at telling your voice apart from other speakers in the transcript.
+- Summaries are now written in the meeting's own language, instead of always defaulting to English.
+- Diagnostic logs no longer contain any of your meeting content, so they're safe to share for troubleshooting.
+
+**Fixed**
+- Improved transcription stability on Apple Silicon Macs.
+- The "note ready" notification now opens that note directly, instead of just the app.
+- Fixed a rare bug that could lose a settings change.
+- Fixed an issue that could prevent choosing your AWS region for cloud AI summaries.
+</Update>
+
+<Update label="v0.5.7" description="July 2, 2026">
+**New**
+- Every line of the transcript now shows a timestamp, so you know exactly when something was said.
+- You can pin a summary language (French, German, Spanish, Dutch, or Portuguese) instead of Steno defaulting to English.
+- Added a guide for importing your existing Granola notes into Steno.
+
+**Improved**
+- Local summaries can now run faster on Apple Silicon Macs -- turn on "Switch to faster build" in Settings.
+- Cleaner summaries -- the AI's internal reasoning no longer shows up in your notes.
+
+**Fixed**
+- Fewer false "meeting detected" prompts on newer versions of macOS.
+</Update>
+
+<Update label="v0.5.6" description="July 1, 2026">
+**New**
+- Create your own report templates, and generate more than one report per meeting.
+- Copy or save the full transcript as a text file.
+
+**Improved**
+- Long meetings now summarize reliably instead of sometimes failing.
+- The home screen now shows your current recording and upcoming meetings.
+
+**Fixed**
+- If transcription fails, Steno now uses the live transcript instead of saving a blank note.
+</Update>
+
+<Update label="v0.5.5" description="June 22, 2026">
+**New**
+- Search (⌘K) lets you jump straight to any note from anywhere in the app.
+- Import an existing audio file to transcribe and summarize it, not just live recordings.
+- Steno now reminds you a couple of minutes before a calendar meeting starts.
+
+**Improved**
+- Steno now works on corporate/work networks that route traffic through a proxy.
+- If a note fails to back up, you'll now see a warning you can click to retry.
+- Speaker separation stays accurate on long recordings, not just short ones.
+</Update>
+
+<Update label="v0.5.4" description="June 15, 2026">
+Bug fixes for reliability, on both Mac and Windows.
+
+**Fixed**
+- Fixed a bug where meeting notes could occasionally fail to save.
+- Windows: recordings, calendar sign-in, and your cloud API key were being saved in the wrong place. Nothing to do -- your existing settings move automatically.
+</Update>
+
+<Update label="v0.5.3" description="June 14, 2026">
+**New**
+- Two new AI models for summaries: one better for long meetings, one lighter for machines with less memory. Choose in Settings → AI.
+</Update>
+
+<Update label="v0.5.2" description="June 12, 2026">
+**Improved**
+- Closing your laptop lid now pauses your recording instead of letting it run with no audio. When you wake your Mac, you can resume it.
+- Audio is cleaned up before transcription, so noisy or quiet recordings come out more accurate.
+- Recordings start faster, especially on a slow or offline network.
+
+**Fixed**
+- Fixed a crash on recordings longer than 30 minutes.
+- If transcription fails, your audio is now always saved so the meeting can be reprocessed later.
+- Fixed transcription being stopped by mistake on slower Macs.
+- If transcription crashes, Steno now automatically tries again using a backup method.
+</Update>
+
+<Update label="v0.5.1" description="June 9, 2026">
+**Fixed**
+- Windows: the app now shows the correct Steno icon instead of a generic one.
+- Fixed an issue where the Windows installer could occasionally fail to download.
+</Update>
+
+<Update label="v0.5.0" description="June 9, 2026">
+**New**
+- Steno is now available on Windows (early access) -- record, transcribe, and summarize meetings fully on-device.
+- Windows can now capture both sides of a call (experimental).
+
+**Known Issues**
+- Windows may show a security warning on first launch, since the app isn't verified yet -- choose "More info" → "Run anyway" to continue.
+- Transcription and summaries are slower on Windows for now, since they don't yet use your graphics card.
+</Update>
+
+<Update label="v0.4.2" description="June 9, 2026">
+**Fixed**
+- Fixed a bug where the live transcript wouldn't appear on screen during recording. Recordings and final transcripts were not affected.
+</Update>

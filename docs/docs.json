@@ -87,6 +87,11 @@
     "global": {
       "anchors": [
         {
+          "anchor": "Changelog",
+          "href": "/changelog",
+          "icon": "clock-rotate-left"
+        },
+        {
           "anchor": "GitHub",
           "href": "https://github.com/ruzin/stenoai",
           "icon": "github"
