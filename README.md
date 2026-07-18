@@ -42,10 +42,10 @@
 If you're looking for a hosted desktop recording API, consider checking out [Recall.ai](https://www.recall.ai/product/desktop-recording-sdk?utm_source=github&utm_medium=sponsorship&utm_campaign=ruzin-stenoai), an API that records Zoom, Google Meet, Microsoft Teams, in-person meetings, and more.
 
 ## 📢 What's New
-- **2026-07-05** 🔓 Notes on demand — turn off "Generate notes automatically" (Settings) and a recording stops at a transcript-only note; generate the AI summary whenever you're ready.
-- **2026-07-05** 🗣️ Sharper speaker labels — the live transcript now uses true per-channel attribution, so `[You]` vs `[Others]` is far more accurate.
-- **2026-07-04** 🎨 Template gallery — pick from a curated set of built-in note templates, with a redesigned Templates settings and cloud-provider support.
-- **2026-07-04** 🔒 Privacy hardening — the shareable debug log no longer carries meeting content, and a new redacted "Save diagnostics" export keeps paths and PII out.
+- **2026-07-18** 🎙️ Recording that stays out of your way — a compact transcription pill docks beside the app instead of taking over, Stop lands you on the note instantly, and you can resume recording into any note (it appends). Plus a dedicated **My notes** tab that stays editable alongside the AI summary.
+- **2026-07-18** 🎚️ Microphone selection — choose which input device Steno records from in Settings.
+- **2026-07-18** 🚀 Launch on login — Steno can start hidden when you log in so capture is always ready; opt out in Settings.
+- **2026-07-18** 🌍 Smarter language detection — auto output-language now detects the transcript's language instead of defaulting to English.
 
 
 ## Features
@@ -53,8 +53,9 @@ If you're looking for a hosted desktop recording API, consider checking out [Rec
 - **Privacy-first** — 100% on-device; your recordings, transcripts, and summaries never leave your Mac.
 - **Live transcription with speaker labels** — Real-time on-screen text as you speak via Parakeet TDT v3 on Apple Silicon (MLX). Granola-style chat-bubble view with `[You]` vs `[Others]` attribution live during the recording and on the final transcript.
 - **Auto start/stop meetings** — Steno notices when a meeting starts and offers to take notes, then offers to summarise when it ends. Granola-style frictionless capture.
-- **System audio capture** — Record both sides of virtual meetings, headphones on, no extra setup or virtual cable. Native Core Audio Tap on macOS 14.4+.
-- **In-app note-taking** — Jot notes while you record; they're folded straight into the AI summary alongside the transcript.
+- **System audio capture** — Record both sides of virtual meetings, headphones on, no extra setup or virtual cable. Native Core Audio Tap on macOS 14.4+, with selectable microphone input.
+- **Recording that coexists** — A compact transcription pill docks beside the app instead of taking over; Stop lands you on the note instantly and you can resume recording into an existing note (it appends and re-generates on demand).
+- **In-app note-taking** — Jot notes while you record, or keep a dedicated **My notes** tab that stays editable alongside the AI summary; your notes are folded straight into the summary.
 - **Ask your meetings** — Natural-language Q&A across a single note *or* your entire library via the Chat tab. Pulls from summary, key topics, and the full transcript.
 - **Multi-language (25 live, 99 total)** — Parakeet covers 25 European languages with live transcription; Whisper handles 99 languages including Chinese, Japanese, Arabic, and Hindi post-stop.
 - **Markdown ownership** — Summaries and transcripts save as clean Markdown you can edit, search, or sync to whatever knowledge base you live in.
