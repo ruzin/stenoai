@@ -1464,17 +1464,22 @@ def get_openai_asr_config_cmd():
 @cli.command(name='set-openai-asr-config')
 @click.option('--api-url', default=None, help='Base URL of the OpenAI-compatible STT endpoint')
 @click.option('--model', default=None, help='Model name (e.g. whisper-1)')
-def set_openai_asr_config_cmd(api_url, model):
-    api_key = None
+@click.option('--prompt-api-key', is_flag=True, help='Securely prompt for the API key (leave blank to clear)')
+def set_openai_asr_config_cmd(api_url, model, prompt_api_key):
     """Persist OpenAI-compatible ASR endpoint settings. Omit an option to leave it unchanged."""
     import os
+    import click
     from src.config import get_config
     config = get_config()
     errors = []
     
-    env_api_key = os.environ.get('STENOAI_OAI_API_KEY')
-    if env_api_key is not None:
-        api_key = env_api_key
+    api_key = None
+    if prompt_api_key:
+        api_key = click.prompt("API Key (leave blank to clear)", hide_input=True, default="", show_default=False)
+    else:
+        env_api_key = os.environ.get('STENOAI_OAI_API_KEY')
+        if env_api_key is not None:
+            api_key = env_api_key
 
     if api_url is not None:
         if not config.set_openai_asr_api_url(api_url):

@@ -390,7 +390,9 @@ function OpenAiAsrConfig() {
           onChange={(e) => setApiKey(e.target.value)}
           placeholder={apiKeySet ? '••••••••' : 'sk-…'}
           onBlur={() => {
-            if (apiKey) setConfig.mutate({ api_key: apiKey });
+            if (apiKey !== '' || apiKeySet) {
+              setConfig.mutate({ api_key: apiKey });
+            }
           }}
           className="h-[30px] text-[13px]"
         />
