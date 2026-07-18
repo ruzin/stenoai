@@ -48,11 +48,14 @@ test('Copy notes copies the open report, and the Standard note when none is open
     window.location.hash = `#/meetings/${encodeURIComponent(f)}`;
   }, SUMMARY_FILE);
   await expect(page.getByRole('button', { name: 'Copy notes' })).toBeVisible();
-  // The seeded report shows up as a pill next to Standard.
-  const reportPill = page.getByTestId('report-switch').getByRole('button', {
-    name: /Status Report/,
-  });
-  await expect(reportPill).toBeVisible();
+
+  // The seeded report lives in the view-toggle's template dropdown (opened
+  // from the right side of the split pill).
+  const menu = page.getByTestId('note-view-menu');
+  await page.getByTestId('note-view-menu-trigger').click();
+  await expect(menu.getByRole('button', { name: /^Status Report/ })).toBeVisible();
+  // Close the menu without changing the view (default = Summary/Standard).
+  await page.keyboard.press('Escape');
 
   // Standard note open (active_report is null) → the structured-note copy.
   await page.getByRole('button', { name: 'Copy notes' }).click();
@@ -63,8 +66,9 @@ test('Copy notes copies the open report, and the Standard note when none is open
   expect(writes[0]).toContain('Alice, Bob');
   expect(writes[0]).not.toContain('## Status Report');
 
-  // Open the generated report, then copy again → the report's markdown.
-  await reportPill.click();
+  // Open the generated report from the dropdown, then copy → the report's md.
+  await page.getByTestId('note-view-menu-trigger').click();
+  await menu.getByRole('button', { name: /^Status Report/ }).click();
   await expect(page.getByText('Pipeline healthy')).toBeVisible();
   await page.getByRole('button', { name: 'Copy notes' }).click();
   writes = await clipboardWrites(page);
@@ -77,8 +81,9 @@ test('Copy notes copies the open report, and the Standard note when none is open
   // reasoning like the rendered view does.
   expect(writes[1]).not.toContain('secret chain of thought');
 
-  // Switching back to Standard restores the structured-note copy.
-  await page.getByTestId('report-switch').getByRole('button', { name: 'Standard' }).click();
+  // Switching back to Summary (Standard) restores the structured-note copy.
+  await page.getByTestId('note-view-menu-trigger').click();
+  await menu.getByRole('button', { name: 'Summary' }).click();
   await page.getByRole('button', { name: 'Copy notes' }).click();
   writes = await clipboardWrites(page);
   expect(writes).toHaveLength(3);

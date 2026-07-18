@@ -31,6 +31,20 @@ export interface SessionInfo {
    *  generated automatically (auto-summarize off, #258). The detail view
    *  offers a "Generate notes" CTA instead of a blank/"no summary" state. */
   notes_generated?: boolean;
+  /** Set when a continue-recording segment was appended to this note after
+   *  its notes were generated: the summary no longer covers the full
+   *  transcript. The UI offers the "Generate notes" CTA; reprocess clears it. */
+  notes_stale?: boolean;
+  /** Instant-stop placeholder: the note was written from the live transcript
+   *  at stop and the batch transcribe/summarise is still upgrading it in the
+   *  background. The detail view shows a quiet "finishing up" affordance; the
+   *  pipeline clears it (on success by rewriting fresh; on failure/startup via
+   *  a sweep). */
+  processing?: boolean;
+  /** Set when the batch transcription came back empty and the note's transcript
+   *  was rescued from the live capture instead (#207). Both parsers surface it;
+   *  the UI can note that no batch transcript exists. */
+  is_live_transcript?: boolean;
 }
 
 export interface Meeting {
@@ -106,6 +120,10 @@ export interface UpdateMeetingPatch {
   participants?: unknown[];
   key_points?: string[];
   action_items?: unknown[];
+  /** The user's own notes (My notes tab). Upserts the `## User Notes` body
+   *  section of the .md (or the `user_notes` field of a legacy .json); an
+   *  empty string removes the section. */
+  user_notes?: string;
 }
 
 export interface ChatSessionsBlob {
@@ -324,7 +342,14 @@ export type RecordingTrigger = 'manual' | 'notification_click' | 'hotkey' | 'tra
 export type TelemetryToggleSource = 'setup' | 'settings';
 
 export type StartRecordingResponse = Result<{ message: string; sessionName?: string }>;
-export type StopRecordingResponse = Result<{ message: string; sessionName?: string }>;
+export type StopRecordingResponse = Result<{
+  message: string;
+  sessionName?: string;
+  /** Instant stop: the note written from the live transcript at stop (or the
+   *  continued note). The renderer navigates straight to it; absent for
+   *  Whisper/import, which use the processing dock. */
+  summaryFile?: string | null;
+}>;
 export type PauseRecordingResponse = Result<{ message: string }>;
 export type ResumeRecordingResponse = Result<{ message: string }>;
 
@@ -734,7 +759,13 @@ export interface StenoaiBridge {
   };
 
   recording: {
-    start: RequestFn<[name?: string, trigger?: RecordingTrigger], StartRecordingResponse>;
+    /** trigger: analytics source (manual/hotkey/tray/…). appendTo: path of an
+     *  existing note to append this recording's transcript to
+     *  (continue-recording) instead of creating a new note. */
+    start: RequestFn<
+      [name?: string, trigger?: RecordingTrigger, appendTo?: string],
+      StartRecordingResponse
+    >;
     stop: RequestFn<[], StopRecordingResponse>;
     pause: RequestFn<[], PauseRecordingResponse>;
     resume: RequestFn<[], ResumeRecordingResponse>;

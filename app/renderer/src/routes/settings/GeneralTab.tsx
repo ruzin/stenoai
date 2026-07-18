@@ -463,7 +463,7 @@ export function GeneralTab() {
       >
         <div className="flex items-center gap-3">
           <Select
-            value={String(silenceAutoStop.data?.minutes ?? 15)}
+            value={String(silenceAutoStop.data?.minutes ?? 2)}
             onValueChange={(v) => setSilenceAutoStopMinutes.mutate(Number(v))}
             disabled={
               silenceAutoStop.data === undefined || silenceAutoStop.data.enabled === false

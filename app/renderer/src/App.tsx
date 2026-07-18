@@ -14,12 +14,11 @@ import { OrgShared, OrgSharedDetail } from '@/routes/OrgShared';
 import { useOrgSession, useSharedNotesGate } from '@/hooks/useOrg';
 import { Recording } from '@/routes/Recording';
 import { Processing, ProcessingDock } from '@/routes/Processing';
-import { AskBar, TranscriptBar } from '@/components/AskBar';
+import { TranscriptBar } from '@/components/AskBar';
+import { GenerateNotesBar } from '@/components/GenerateNotesBar';
 import { BottomDockSlot } from '@/components/BottomDockSlot';
-import { LiveDock } from '@/components/LiveDock';
-import { LiveTranscriptBar } from '@/components/LiveTranscriptBar';
+import { PrimaryDock } from '@/components/PrimaryDock';
 import { useLiveTranscriptOpen } from '@/hooks/liveTranscriptOpenStore';
-import { useTranscriptionEngine } from '@/hooks/useModels';
 import { QuitDialog } from '@/components/QuitDialog';
 import { ImportDropZone } from '@/components/ImportDropZone';
 import { CommandPaletteProvider, useCommandPalette } from '@/components/CommandPalette';
@@ -117,12 +116,10 @@ export function App() {
       (route === '/' || route === '' || route === '/meetings')
     ) {
       navigate('/meetings/processing');
-    } else if (
-      (recording.status === 'recording' || recording.status === 'paused') &&
-      (route === '/' || route === '' || route === '/meetings')
-    ) {
-      navigate('/recording');
     }
+    // No recording/paused branch: recording coexists with the app (the pill
+    // docks next to the Ask bar wherever the user is), so a cold reload
+    // mid-recording stays put instead of being yanked to a takeover route.
   }, [recording.isLoading, recording.status, route]);
 
   // First-run onboarding: auto-open the setup wizard when no transcription
@@ -164,13 +161,27 @@ export function App() {
     })();
   }, [recording.isLoading, recording.status, route]);
 
-  const isRecordingRoute = route === '/recording';
   const isProcessingRoute = route === '/meetings/processing';
   // The /chat page has its own large composer, so the floating AskBar dock
   // would just stack a second redundant input below the same page. The
   // sub-route /chat/<id> (conversation view) also owns its own composer.
+  // Note: no /recording exclusion — recording coexists with the app, and
+  // during it PrimaryDock renders the Ask bar disabled next to the pill.
   const isChatRoute = route === '/chat' || route.startsWith('/chat/');
-  const showAskBar = !isRecordingRoute && !isProcessingRoute && !isChatRoute;
+  // App-chrome routes where a chat composer never belongs. When idle the
+  // AskBar self-hides there anyway (no active meeting), but the disabled
+  // recording shell renders even without one — without this exclusion it
+  // would float over Settings/Setup and block clicks in that band; the
+  // pill docks alone there instead.
+  const isChromeRoute =
+    route === '/settings' ||
+    route.startsWith('/settings?') ||
+    route === '/setup' ||
+    route === '/dev' ||
+    route.startsWith('/dev/');
+  const showAskBar = !isProcessingRoute && !isChatRoute && !isChromeRoute;
+  const recordingActive =
+    recording.status === 'recording' || recording.status === 'paused';
 
   return (
     <CommandPaletteProvider>
@@ -182,20 +193,42 @@ export function App() {
         <ImportDropZone />
 
         {/* Bottom dock — shared anchor across recording → processing → meeting.
-            During recording the slot swaps between the compact LiveDock pill
-            and the larger LiveTranscriptBar (which owns Pause/Stop + the
-            Multi language selector when expanded). Either occupies the slot;
-            never both at once. */}
+            Recording is status-driven, not route-driven: PrimaryDock docks the
+            transcription pill next to a disabled Ask bar while a recording is
+            active (or swaps in the expanded LiveTranscriptBar), and falls back
+            to the plain Ask bar when idle. Processing owns the slot on its
+            route — UNLESS a new recording is active (back-to-back notes: note
+            A processing while note B records); the recording's pill + Stop
+            must stay reachable everywhere, so recording wins the slot. */}
         <BottomDockSlot>
-          {isRecordingRoute && <LiveRecordingDock />}
-          {isProcessingRoute && <ProcessingDock />}
-          {showAskBar && <AskBar />}
+          {isProcessingRoute && !recordingActive ? (
+            <ProcessingDock />
+          ) : (
+            <PrimaryDock showAskBar={showAskBar} />
+          )}
         </BottomDockSlot>
 
-        {/* Transcript — floats above the chat bar (only on real meeting routes). */}
+        {/* Transcript — floats above the chat bar (only on real meeting routes).
+            Coexistence invariant: both 72-band panels self-gate on a *saved*
+            meeting (activeSummaryFile), and the note being recorded is unsaved
+            — so during a recording they can only ever concern a saved meeting
+            the user is viewing, never fight the live pill row below. */}
         {showAskBar && (
           <BottomDockSlot bottomOffset={72}>
             <TranscriptBar />
+          </BottomDockSlot>
+        )}
+
+        {/* Generate-notes CTA — floats just above the chat bar for a
+            transcript-only note (auto-summarise off). Self-hides when notes
+            exist or the transcript panel is open. Shares the bottomOffset={72}
+            band with TranscriptBar above; the two stay non-overlapping because
+            they're mutually exclusive on `transcriptOpen` (TranscriptBar shows
+            only when open, this hides when open) — keep that invariant if either
+            gate changes. */}
+        {showAskBar && (
+          <BottomDockSlot bottomOffset={72}>
+            <GenerateNotesBar />
           </BottomDockSlot>
         )}
       </AskBarProvider>
@@ -218,23 +251,6 @@ function CommandPaletteHotkey() {
     return () => document.removeEventListener('keydown', onKey, true);
   }, [open]);
   return null;
-}
-
-/**
- * Recording-mode dock-slot child. Switches between the compact LiveDock pill
- * (transcript closed) and the expanded LiveTranscriptBar (transcript open).
- * They share the slot rather than stacking so the bottom of the page has a
- * single anchor at any moment.
- */
-function LiveRecordingDock() {
-  const open = useLiveTranscriptOpen((s) => s.open);
-  const engineQuery = useTranscriptionEngine();
-  // Whisper has no live transcript. Belt-and-braces vs the LiveDock toggle
-  // being hidden: the store could already be open from a prior Parakeet
-  // session, and zustand survives across recordings. Force LiveDock for
-  // whisper regardless of stored state.
-  const liveAvailable = (engineQuery.data ?? 'parakeet') === 'parakeet';
-  return open && liveAvailable ? <LiveTranscriptBar /> : <LiveDock />;
 }
 
 function RouteView({ route }: { route: string }) {

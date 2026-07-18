@@ -115,7 +115,7 @@ export function useRecording() {
   // duplicate cache invalidations and N navigations per recording.
 
   const startRecording = React.useCallback(
-    async (name?: string, trigger: RecordingTrigger = 'manual') => {
+    async (name?: string, trigger: RecordingTrigger = 'manual', appendTo?: string) => {
       // Optimistic cache write so the UI flips to status='recording'
       // instantly. The backend's start-recording-ui has a 2s warm-up and
       // the next queue poll (1s) will reconcile sessionName + elapsed.
@@ -145,6 +145,14 @@ export function useRecording() {
       // the previous session's in-memory state.
       const priorDraft = useLiveDraftStore.getState().drafts[optimisticName];
       useLiveDraftStore.getState().clear(optimisticName);
+      // Cancel any in-flight queue poll before the optimistic write — a fetch
+      // already in the air resolves with hasRecording:false and would clobber
+      // the write, unmounting the pill for up to a poll interval. Snapshot
+      // the previous cache so a start failure can restore it synchronously
+      // (the standard onMutate pattern) instead of showing a phantom
+      // "recording" pill until an invalidate round-trips.
+      await qc.cancelQueries({ queryKey: queueKey });
+      const priorQueue = qc.getQueryData<QueueStatus>(queueKey);
       qc.setQueryData(queueKey, {
         success: true,
         isProcessing: false,
@@ -155,21 +163,30 @@ export function useRecording() {
         elapsedSeconds: 0,
         sessionName: optimisticName,
       });
-      navigate('/recording');
+      // No navigation: recording coexists with the app. PrimaryDock keys off
+      // the optimistic status flip above and docks the transcription pill on
+      // whatever route the user is on; /recording stays reachable as an
+      // optional live-note editor but is never forced.
       try {
-        const data = unwrap(await ipc().recording.start(name, trigger));
+        const data = unwrap(await ipc().recording.start(name, trigger, appendTo));
         qc.invalidateQueries({ queryKey: queueKey });
         return data;
       } catch (err) {
-        // Roll back optimistic state and leave the dead /recording page.
-        // Restore the prior draft too — the recording never started so the
-        // previous session (probably still mid-processing) shouldn't lose
-        // its in-memory title / notes.
+        // Roll back optimistic state. Restore the prior draft too — the
+        // recording never started so the previous session (probably still
+        // mid-processing) shouldn't lose its in-memory title / notes.
         if (priorDraft) {
           useLiveDraftStore.getState().restore(optimisticName, priorDraft);
         }
+        qc.setQueryData(queueKey, priorQueue);
         qc.invalidateQueries({ queryKey: queueKey });
-        navigate('/');
+        // Every caller is fire-and-forget (`void startRecording()`), so an
+        // IPC-level failure would otherwise be a silent no-op: the pill
+        // flashes out with no explanation. Route it through the same native
+        // notification the renderer-capture failure path uses.
+        ipc().recording.reportCaptureError(
+          err instanceof Error ? err.message : 'Recording could not start',
+        );
         throw err;
       }
     },
@@ -177,8 +194,9 @@ export function useRecording() {
   );
 
   const stopRecording = React.useCallback(async () => {
-    // Optimistic: flip the queue cache to processing so the UI can navigate
-    // away from /recording instantly, before the backend SIGTERM round-trip.
+    // Optimistic: flip the queue cache to processing so the UI can swap the
+    // pill for the processing dock instantly, before the backend SIGTERM
+    // round-trip.
     qc.setQueryData(queueKey, (prev: QueueStatus | undefined) => ({
       success: true as const,
       isProcessing: true,
@@ -189,12 +207,23 @@ export function useRecording() {
       elapsedSeconds: 0,
       sessionName: prev?.sessionName ?? null,
     }));
-    navigate('/meetings/processing');
     try {
       const data = unwrap(await ipc().recording.stop());
+      // Instant stop: main wrote the note from the live transcript (or it's a
+      // continued note) and returns its path — land the user ON it, with the
+      // batch transcribe/summarise upgrading it in the background. Whisper/
+      // import return no summaryFile → the processing dock as before.
+      if (data.summaryFile) {
+        navigate(`/meetings/${encodeURIComponent(data.summaryFile)}`);
+      } else {
+        navigate('/meetings/processing');
+      }
       qc.invalidateQueries({ queryKey: queueKey });
       return data;
     } catch (err) {
+      // Stop failed before we learned the note path — fall back to the dock so
+      // the user isn't stranded on the recording view.
+      navigate('/meetings/processing');
       qc.invalidateQueries({ queryKey: queueKey });
       throw err;
     }

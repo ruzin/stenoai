@@ -960,8 +960,8 @@ function createWindow(options = {}) {
   rendererShortcutReady = false;
 
   const windowOpts = {
-    width: 1200,
-    height: 800,
+    width: 1188,
+    height: 844,
     minWidth: 1000,
     minHeight: 600,
     // Explicit window/taskbar icon on Windows. Relying on the exe-embedded icon
@@ -1590,6 +1590,16 @@ if (!gotSingleInstanceLock) {
     // default dir and miss a custom-storage user's recordings/ entirely.
     await sweepStaleImportMarkers();
 
+    // Instant-stop recovery: clear any `processing: true` left on a note by an
+    // app quit mid-pipeline (the child died with it). No queue is active at
+    // startup, so any such flag is stale — leaving it would strand the note
+    // "finishing up" forever. MUST run after the custom storage path load above
+    // for the same reason as the import sweep: getOutputDir() keys off
+    // _cachedCustomStoragePath, so sweeping earlier scans the default output
+    // dir and misses a custom-storage user's notes entirely. Deferred off the
+    // critical path so the per-note frontmatter scan never delays first paint.
+    setImmediate(sweepStuckProcessingFlags);
+
     // Register global hotkey for toggle recording (Cmd+Shift+R on macOS, Ctrl+Shift+R on Windows/Linux)
     const hotkeyModifier = process.platform === 'darwin' ? 'Command+Shift+R' : 'Ctrl+Shift+R';
     const registered = globalShortcut.register(hotkeyModifier, () => {
@@ -2187,6 +2197,20 @@ function parseMeetingMarkdown(content, mdPath) {
   }
   if (meta.notes_generated === false) {
     sessionInfo.notes_generated = false;
+  }
+  // Mirror the Python list parser (_parse_meeting_markdown): the detail page
+  // needs these markers too, or its Generate-notes CTA / processing affordance
+  // never fires. notes_stale drives the floating "Generate notes" CTA after a
+  // continue-recording append; is_live_transcript flags a live-sourced note;
+  // processing is the instant-stop "finishing up" placeholder state.
+  if (meta.notes_stale) {
+    sessionInfo.notes_stale = true;
+  }
+  if (meta.is_live_transcript) {
+    sessionInfo.is_live_transcript = true;
+  }
+  if (meta.processing) {
+    sessionInfo.processing = true;
   }
 
   return {
@@ -3231,6 +3255,23 @@ ipcMain.handle('save-diagnostics', async (event, defaultFilename, content) => {
   }
 });
 
+// Replace (or remove, when empty) the "## User Notes" section at the tail of a
+// meeting markdown body. Kept a pure string transform so it's unit-testable and
+// never touches the summary/transcript sections above it. `body` is everything
+// after the closing frontmatter `---`.
+function upsertUserNotesSection(body, notes) {
+  const idx = body.indexOf('\n## User Notes');
+  // Trim trailing whitespace from the kept head so re-appends don't accrete
+  // blank lines across repeated autosaves.
+  const head = (idx === -1 ? body : body.slice(0, idx)).replace(/\s+$/, '');
+  const trimmed = String(notes ?? '').replace(/\s+$/, '');
+  if (!trimmed) {
+    // Notes cleared → drop the section entirely.
+    return head + '\n';
+  }
+  return `${head}\n\n## User Notes\n\n${trimmed}\n`;
+}
+
 ipcMain.handle('update-meeting', async (event, summaryFilePath, updates) => {
   try {
     // Security: the renderer is untrusted, so containment-check the summary path
@@ -3280,10 +3321,16 @@ ipcMain.handle('update-meeting', async (event, summaryFilePath, updates) => {
       let updatedRaw = raw;
 
       if (raw.startsWith('---')) {
-        const parts = raw.split('---', 3);
+        // Split with NO limit and rejoin the tail: split('---', 3) DISCARDS any
+        // '---' in the body (markdown thematic breaks in summaries, and the
+        // '--- Resumed HH:MM ---' separators continue-recording writes into
+        // every continued note), silently TRUNCATING the transcript from the
+        // first in-body '---' to EOF on the next My-notes autosave. Mirrors
+        // clearNoteProcessingFlag / parseMeetingMarkdown's split/slice(2).join.
+        const parts = raw.split('---');
         if (parts.length >= 3) {
           const fmText = parts[1];
-          body = parts[2];
+          body = parts.slice(2).join('---');
           const lines = fmText.split('\n');
           let titleSeen = false;
           let updatedAtSeen = false;
@@ -3318,6 +3365,13 @@ ipcMain.handle('update-meeting', async (event, summaryFilePath, updates) => {
             const insertIdx = newLines[newLines.length - 1] === '' ? newLines.length - 1 : newLines.length;
             newLines.splice(insertIdx, 0, `updated_at: ${yamlQuote(updatedAt)}`);
           }
+          // Upsert the "## User Notes" body section (My notes tab). It is
+          // always the LAST section (summary → ## Transcript → ## User Notes,
+          // matching simple_recorder.py's write order), so replacing from the
+          // header to EOF preserves the summary + transcript verbatim.
+          if (updates.user_notes !== undefined) {
+            body = upsertUserNotesSection(body, updates.user_notes);
+          }
           updatedRaw = `---${newLines.join('\n')}---${body}`;
         }
       }
@@ -3348,6 +3402,9 @@ ipcMain.handle('update-meeting', async (event, summaryFilePath, updates) => {
       }
       if (updates.action_items !== undefined) {
         data.action_items = updates.action_items;
+      }
+      if (updates.user_notes !== undefined) {
+        data.user_notes = updates.user_notes;
       }
 
       data.session_info.updated_at = new Date().toISOString();
@@ -3972,6 +4029,11 @@ function resetRecordingRuntimeState() {
     pausedTotalMs: 0,
     isPaused: false
   };
+  // Instant stop: drop the recording's predicted summary path on teardown so it
+  // can't be read for a later session (open sets a fresh one). Not nulled in
+  // close-system-audio-file, which races stop-recording-ui — this runs at the
+  // end of stop, after the placeholder is written.
+  activeSysAudioSummaryFile = null;
   // Folded in here (rather than at each of this function's call sites) so
   // every teardown path -- clean stop, a failed start, or the quit-time
   // cleanup -- consistently clears the crash/force-quit marker.
@@ -4146,6 +4208,13 @@ async function processNextInQueue() {
     if (currentProcessingJob.liveTranscriptFile && fs.existsSync(currentProcessingJob.liveTranscriptFile)) {
       processArgs.push('--live-transcript', currentProcessingJob.liveTranscriptFile);
     }
+    // Continue-recording: fold this segment into an existing note instead of
+    // creating a new one. The backend appends the transcript, marks the note
+    // notes_stale, and emits SAVED:<target> so the completion event points at
+    // the continued note.
+    if (currentProcessingJob.appendTo && fs.existsSync(currentProcessingJob.appendTo)) {
+      processArgs.push('--append-to', currentProcessingJob.appendTo);
+    }
 
     await new Promise((resolve, reject) => {
       const proc = spawn(getBackendPath(), processArgs, {
@@ -4193,7 +4262,10 @@ async function processNextInQueue() {
               const encoded = line.slice(6);
               const chunk = Buffer.from(encoded, 'base64').toString('utf-8');
               if (mainWindow && !mainWindow.isDestroyed()) {
-                mainWindow.webContents.send('summary-chunk', { chunk, sessionName: currentProcessingJob.sessionName });
+                // Stamp the summaryFile (instant-stop) so MeetingDetail's
+                // filtered StreamingView listener renders a new note's first
+                // summary inline; undefined for Whisper/import → Processing dock.
+                mainWindow.webContents.send('summary-chunk', { chunk, sessionName: currentProcessingJob.sessionName, summaryFile: currentProcessingJob.summaryFile });
               }
             } catch (e) { console.log('CHUNK decode error:', e.message); }
           } else if (line.startsWith('TRANSCRIPTION_COMPLETE:')) {
@@ -4234,10 +4306,10 @@ async function processNextInQueue() {
             });
           } else if (line.startsWith('PROGRESS:')) {
             if (mainWindow && !mainWindow.isDestroyed()) {
-              // No summaryFile yet in the record->summarise flow (it's assigned
-              // via SAVED: later); this progress is consumed by the single-job
-              // Processing view, which doesn't need per-meeting scoping.
-              mainWindow.webContents.send('processing-progress', { line });
+              // Instant stop stamps the (deterministic) summaryFile so the
+              // note's own map-reduce progress bar tracks it; undefined for
+              // Whisper/import, which the single-job Processing view consumes.
+              mainWindow.webContents.send('processing-progress', { line, summaryFile: currentProcessingJob.summaryFile });
             }
           } else if (line.startsWith('HEARTBEAT:')) {
             // Liveness signal — its real job (resetting the watchdog) already
@@ -4280,7 +4352,8 @@ async function processNextInQueue() {
           if (mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.webContents.send('summary-complete', {
               success: true,
-              sessionName: sessionNameAtClose
+              sessionName: sessionNameAtClose,
+              summaryFile: currentProcessingJob.summaryFile
             });
           }
           // Look up the saved meeting so we can include meetingData in the
@@ -4356,6 +4429,12 @@ async function processNextInQueue() {
       sendDebugLog(`Preserved audio after processing failure: ${currentProcessingJob.audioFile}`);
     }
 
+    // Instant stop: the batch pass died before rewriting the note, so clear the
+    // placeholder's stuck `processing: true` — it stays a valid, reprocessable
+    // transcript-only note instead of spinning forever. No-op for the append
+    // case (its note has no processing flag).
+    clearNoteProcessingFlag(currentProcessingJob.summaryFile);
+
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('processing-complete', {
         success: false,
@@ -4374,6 +4453,19 @@ async function processNextInQueue() {
       try {
         if (fs.existsSync(currentProcessingJob.liveTranscriptFile)) {
           fs.unlinkSync(currentProcessingJob.liveTranscriptFile);
+        }
+      } catch (_) { /* best-effort cleanup */ }
+    }
+    // Remove the per-job notes snapshot temp (only temps under tmpdir reach the
+    // job now; the shared draft was already deleted at queue time).
+    if (
+      currentProcessingJob &&
+      currentProcessingJob.notesFile &&
+      currentProcessingJob.notesFile.startsWith(os.tmpdir())
+    ) {
+      try {
+        if (fs.existsSync(currentProcessingJob.notesFile)) {
+          fs.unlinkSync(currentProcessingJob.notesFile);
         }
       } catch (_) { /* best-effort cleanup */ }
     }
@@ -4477,17 +4569,157 @@ async function snapshotLiveTranscriptForFallback(sessionName) {
   }
 }
 
-function addToProcessingQueue(audioFile, sessionName, notesFile, liveTranscriptFile) {
-  processingQueue.push({ audioFile, sessionName, notesFile, liveTranscriptFile });
+// ── Instant stop (transcript-first at stop) ──────────────────────────────
+// The summary-file path is deterministic from the audio stem, so on stop we
+// write a placeholder note from the already-captured live transcript and land
+// the user on it immediately; the batch pipeline then upgrades it in place.
+// Parakeet recordings only (Whisper has no live transcript → processing dock).
+
+function summaryFileForAudio(audioFilePath) {
+  const stem = path.basename(audioFilePath, path.extname(audioFilePath));
+  return path.join(getOutputDir(), `${stem}_summary.md`);
+}
+
+// Finalised live-transcript text for the current session (mirrors the snapshot
+// filter — final segments only, joined). '' when there's nothing usable.
+function liveTranscriptTextForPlaceholder(sessionName) {
+  if (!liveTranscriptState || liveTranscriptState.sessionName !== sessionName) return '';
+  return (liveTranscriptState.segments || [])
+    .filter((s) => s && s.isFinal && s.text)
+    .map((s) => String(s.text).trim())
+    .filter(Boolean)
+    .join('\n\n')
+    .trim();
+}
+
+// Write the instant-stop placeholder note atomically. `processing: true` marks
+// it as still upgrading; process-streaming rewrites it fresh on success (which
+// drops the flag), and a failure/startup sweep clears it otherwise. Always
+// `notes_generated: false` — a valid transcript-only note is the correct
+// fallback if the batch pass never completes (the user can Generate notes).
+function writeInstantPlaceholderNote({ summaryFile, name, transcriptText, notesText }) {
+  const yamlQuote = (s) =>
+    '"' + String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n').replace(/\r/g, '') + '"';
+  const lines = [
+    '---',
+    `title: ${yamlQuote(name)}`,
+    `date: ${yamlQuote(new Date().toISOString())}`,
+    'is_diarised: false',
+    'is_live_transcript: true',
+    'processing: true',
+    'notes_generated: false',
+    '---',
+    '',
+    '## Transcript',
+    '',
+    transcriptText || '',
+  ];
+  if (notesText && notesText.trim()) {
+    lines.push('', '## User Notes', '', notesText.trim());
+  }
+  const content = lines.join('\n') + '\n';
+  const tmp = `${summaryFile}.tmp-${Date.now()}`;
+  fs.writeFileSync(tmp, content, 'utf-8');
+  fs.renameSync(tmp, summaryFile);
+}
+
+// Clear a stuck `processing: true` flag (pipeline crash / app-quit sweep),
+// leaving a valid transcript-only note. Line-based frontmatter surgery — the
+// body (transcript, notes) is untouched. No-op unless a processing line is
+// actually present, so it never mutates a normal note.
+function clearNoteProcessingFlag(summaryFile) {
+  try {
+    if (!summaryFile || !summaryFile.endsWith('.md') || !fs.existsSync(summaryFile)) return;
+    const raw = fs.readFileSync(summaryFile, 'utf8');
+    if (!raw.startsWith('---')) return;
+    // Split with NO limit and rejoin the tail: split('---', 3) would DISCARD
+    // any '---' in the body (markdown thematic breaks in summaries, resumed-
+    // segment separators), silently truncating the note. Mirrors
+    // parseMeetingMarkdown's split/slice(2).join('---') for the same reason.
+    const parts = raw.split('---');
+    if (parts.length < 3) return;
+    const frontmatter = parts[1];
+    const body = parts.slice(2).join('---');
+    let removed = false;
+    let sawNotesGenerated = false;
+    const kept = [];
+    for (const line of frontmatter.split('\n')) {
+      const key = line.slice(0, line.indexOf(':')).trim();
+      if (key === 'processing') { removed = true; continue; }
+      if (key === 'notes_generated') sawNotesGenerated = true;
+      kept.push(line);
+    }
+    if (!removed) return;
+    if (!sawNotesGenerated) {
+      const at = kept[kept.length - 1] === '' ? kept.length - 1 : kept.length;
+      kept.splice(at, 0, 'notes_generated: false');
+    }
+    const out = `---${kept.join('\n')}---${body}`;
+    const tmp = `${summaryFile}.tmp-${Date.now()}`;
+    fs.writeFileSync(tmp, out, 'utf8');
+    fs.renameSync(tmp, summaryFile);
+    sendDebugLog(`[instant-stop] cleared stuck processing flag: ${path.basename(summaryFile)}`);
+  } catch (e) {
+    sendDebugLog(`[instant-stop] failed to clear processing flag: ${e.message}`);
+  }
+}
+
+// Startup sweep: clear `processing: true` on any note left mid-process by an
+// app quit (its pipeline child died with it). Runs once at startup — there is
+// no active queue then, so any such flag is stale. Reads only the frontmatter
+// head (not whole transcripts) to decide, so a large library isn't fully
+// re-read on every launch — only notes that actually carry the flag are opened
+// in full by clearNoteProcessingFlag.
+function noteFrontmatterHasProcessing(filePath) {
+  let fd;
+  try {
+    fd = fs.openSync(filePath, 'r');
+    const buf = Buffer.alloc(2048);
+    const n = fs.readSync(fd, buf, 0, 2048, 0);
+    const head = buf.toString('utf8', 0, n);
+    if (!head.startsWith('---')) return false;
+    const end = head.indexOf('\n---', 3);
+    const frontmatter = end === -1 ? head : head.slice(0, end);
+    return /(^|\n)processing:\s*true\s*(\n|$)/.test(frontmatter);
+  } catch {
+    return false;
+  } finally {
+    if (fd !== undefined) { try { fs.closeSync(fd); } catch { /* */ } }
+  }
+}
+
+function sweepStuckProcessingFlags() {
+  try {
+    const dir = getOutputDir();
+    if (!fs.existsSync(dir)) return;
+    for (const f of fs.readdirSync(dir)) {
+      if (!f.endsWith('_summary.md')) continue;
+      const p = path.join(dir, f);
+      if (noteFrontmatterHasProcessing(p)) clearNoteProcessingFlag(p);
+    }
+  } catch (e) {
+    sendDebugLog(`[instant-stop] startup sweep failed: ${e.message}`);
+  }
+}
+
+function addToProcessingQueue(audioFile, sessionName, notesFile, liveTranscriptFile, appendTo, summaryFile) {
+  processingQueue.push({ audioFile, sessionName, notesFile, liveTranscriptFile, appendTo, summaryFile });
   console.log(`📋 Added to processing queue: ${sessionName} (Queue size: ${processingQueue.length})`);
   processNextInQueue();
 }
+
+// Continue-recording (append) target: set at start-recording-ui when the
+// renderer asked to record INTO an existing note, consumed (and cleared) when
+// the finished WebM is queued — the pipeline then runs with --append-to so
+// the segment's transcript is folded into that note instead of creating a
+// new one.
+let currentRecordingAppendTarget = null;
 
 // Valid recording_started `trigger` values. Whitelisted so a stale/forged
 // renderer arg can't smuggle an arbitrary string into PostHog.
 const RECORDING_TRIGGERS = new Set(['manual', 'notification_click', 'hotkey', 'tray', 'url_scheme']);
 
-ipcMain.handle('start-recording-ui', async (_, sessionName, trigger) => {
+ipcMain.handle('start-recording-ui', async (_, sessionName, trigger, appendTo) => {
   try {
     if (currentRecordingProcess) {
       return { success: false, error: 'Recording already in progress' };
@@ -4496,7 +4728,36 @@ ipcMain.handle('start-recording-ui', async (_, sessionName, trigger) => {
       return { success: false, error: 'Recording already in progress' };
     }
 
+    // Validate the append target up front: it must be an existing, canonical
+    // meeting file (`*_summary.md`/`.json`) scoped to an `output/` dir — the
+    // SAME check every summaryFile-taking handler uses (validateMeetingFilePath),
+    // NOT the broad getAllowedBaseDirs() check. The broad roots include the whole
+    // userData dir + project root, so a renderer-supplied `config.json` (or any
+    // JSON under them) would otherwise pass and get rewritten into a "note" by
+    // _append_segment_to_note. A bad target degrades to a normal new-note
+    // recording rather than failing the start.
+    currentRecordingAppendTarget = null;
+    if (appendTo && typeof appendTo === 'string') {
+      const validatedAppend = await validateMeetingFilePath(appendTo);
+      if (!validatedAppend.error) {
+        currentRecordingAppendTarget = validatedAppend.realPath;
+      } else {
+        sendDebugLog('[append] invalid or missing append target; recording as a new note');
+      }
+    }
+
     const actualSessionName = sessionName || 'Note';
+    // Clear any stale name-keyed draft notes before this recording starts, so a
+    // PREVIOUS recording that was abandoned (never processed → never
+    // consumed-and-cleared) can't leak its notes into this same-named one. The
+    // normal path clears it at processing; this covers the abandoned case. Not
+    // an append (which records into an existing note; its notes stay put).
+    if (!appendTo) {
+      try {
+        const staleDraft = userNotesFilePath(getOutputDir(), actualSessionName);
+        if (fs.existsSync(staleDraft)) fs.unlinkSync(staleDraft);
+      } catch (_) { /* best-effort */ }
+    }
     // Whisper recordings use the post-stop pipeline (no live drawer, no
     // sidecar). Parakeet recordings spawn the VAD-gated live consumer
     // so the renderer can show real-time text. Cached read — avoids a
@@ -4572,6 +4833,7 @@ ipcMain.handle('start-recording-ui', async (_, sessionName, trigger) => {
     console.error('Start recording UI error:', error.message);
     systemAudioRecordingActive = false;
     currentRecordingSessionName = null;
+    currentRecordingAppendTarget = null;
     resetRecordingRuntimeState();
     updateTrayIcon(false);
     trackEvent('error_occurred', { error_type: 'start_recording_ui', reason: classifyErrorReason(error) });
@@ -4699,6 +4961,45 @@ ipcMain.handle('stop-recording-ui', async () => {
     // recording that no longer exists.
     pausedBySleep = false;
     closeSleepPausedNotification();
+
+    // ── Instant stop ──────────────────────────────────────────────────────
+    // Decide (and write) the note to land the user on immediately, BEFORE we
+    // tear down recording state below. The live sidecar hasn't been stopped
+    // yet, so liveTranscriptState still holds this session's segments.
+    //   - continue-recording (append): the note already exists → navigate there.
+    //   - new Parakeet recording with live content: write a placeholder note
+    //     from the live transcript + draft notes → navigate there.
+    //   - Whisper / no live content / import: null → renderer uses the dock.
+    let instantSummaryFile = null;
+    try {
+      const sessionName = currentRecordingSessionName || 'Note';
+      if (currentRecordingAppendTarget) {
+        instantSummaryFile = currentRecordingAppendTarget;
+      } else if (loadTranscriptionEngine() === 'parakeet' && activeSysAudioSummaryFile) {
+        const transcriptText = liveTranscriptTextForPlaceholder(sessionName);
+        const notesFile = userNotesFilePath(getOutputDir(), sessionName);
+        let notesText = '';
+        try {
+          if (fs.existsSync(notesFile)) notesText = fs.readFileSync(notesFile, 'utf-8');
+        } catch (_) { /* notes are best-effort */ }
+        if (transcriptText.trim() || notesText.trim()) {
+          writeInstantPlaceholderNote({
+            summaryFile: activeSysAudioSummaryFile,
+            name: sessionName,
+            transcriptText,
+            notesText,
+          });
+          instantSummaryFile = activeSysAudioSummaryFile;
+          sendDebugLog(`[instant-stop] wrote placeholder note: ${path.basename(activeSysAudioSummaryFile)}`);
+        }
+      }
+    } catch (e) {
+      // A placeholder-write failure must never block the stop — fall back to
+      // the processing dock (instantSummaryFile stays null).
+      sendDebugLog(`[instant-stop] placeholder skipped: ${e.message}`);
+      instantSummaryFile = null;
+    }
+
     // Capture is renderer-driven; the renderer's stopCapture flow finalises the
     // WebM and reports systemAudioRecordingActive=false. Clear it here too in
     // case a race (renderer torn down / recorder errored before reporting) left
@@ -4712,7 +5013,7 @@ ipcMain.handle('stop-recording-ui', async () => {
     resetRecordingRuntimeState();
     updateTrayIcon(false);
     trackEvent('recording_stopped', { duration_bucket: recordingDurationBucket, reason: 'normal' });
-    return { success: true, message: 'Recording stopped' };
+    return { success: true, message: 'Recording stopped', summaryFile: instantSummaryFile };
   } catch (error) {
     console.error('Stop recording UI error:', error.message);
     systemAudioRecordingActive = false;
@@ -7341,6 +7642,11 @@ ipcMain.handle('get-recordings-dir', async () => {
 let activeSysAudioWriteStream = null;
 let activeSysAudioFilePath = null;
 let activeSysAudioBytesWritten = 0;
+// Deterministic summary-file path for the current recording, derived from the
+// audio filename at open. Kept separate from activeSysAudioFilePath (which the
+// renderer's close nulls) so stop-recording-ui can still write the instant-stop
+// placeholder even if close raced ahead. Reset at the next open.
+let activeSysAudioSummaryFile = null;
 
 ipcMain.handle('open-system-audio-file', async (_event, sessionName) => {
   try {
@@ -7353,6 +7659,7 @@ ipcMain.handle('open-system-audio-file', async (_event, sessionName) => {
       try { activeSysAudioWriteStream.end(); } catch (_) { /* already ended */ }
       activeSysAudioWriteStream = null;
       activeSysAudioFilePath = null;
+      activeSysAudioSummaryFile = null;
     }
     const dir = resolveRecordingsDir();
     const safeName = String(sessionName || 'Note').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 64);
@@ -7374,6 +7681,7 @@ ipcMain.handle('open-system-audio-file', async (_event, sessionName) => {
     });
     activeSysAudioWriteStream = stream;
     activeSysAudioFilePath = filePath;
+    activeSysAudioSummaryFile = summaryFileForAudio(filePath);
     activeSysAudioBytesWritten = 0;
     sendDebugLog(`[sysaudio] opened ${filename} for incremental write`);
     return { success: true, filePath };
@@ -7486,9 +7794,31 @@ ipcMain.handle('process-system-audio-recording', async (event, audioFilePath, se
 
     const actualSessionName = sessionName || 'Note';
 
-    // Same dir 'save-meeting-notes' writes to — not the read-only bundle dir.
+    // Draft notes are keyed by session NAME (`{name}_notes.txt`), so back-to-
+    // back recordings with the default name 'Note' all share one file. If it
+    // isn't consumed-and-cleared, the NEXT same-named recording (that typed no
+    // notes) inherits the previous meeting's notes — a real, persisted leak
+    // (surfaced by the My notes tab). Snapshot it to a per-job temp (mirrors
+    // the live-transcript snapshot) and DELETE the shared draft, so each job
+    // owns its notes and the draft can't leak forward. The temp is cleaned up
+    // in the queue's finally.
     const notesFile = userNotesFilePath(getOutputDir(), actualSessionName);
-    const notesPath = fs.existsSync(notesFile) ? notesFile : undefined;
+    let notesPath;
+    if (fs.existsSync(notesFile)) {
+      try {
+        const draft = fs.readFileSync(notesFile, 'utf-8');
+        fs.unlinkSync(notesFile);
+        if (draft.trim()) {
+          notesPath = path.join(
+            os.tmpdir(),
+            `stenoai-notes-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.txt`,
+          );
+          fs.writeFileSync(notesPath, draft, 'utf-8');
+        }
+      } catch (e) {
+        sendDebugLog(`[notes] failed to snapshot draft notes: ${e.message}`);
+      }
+    }
 
     // Snapshot the live transcript captured during this recording (#207) so the
     // backend can fall back to it if the batch transcription comes back empty.
@@ -7496,8 +7826,26 @@ ipcMain.handle('process-system-audio-recording', async (event, audioFilePath, se
     // recording.
     const liveTranscriptFile = await snapshotLiveTranscriptForFallback(actualSessionName);
 
+    // Consume the continue-recording target (set at start-recording-ui) so
+    // this segment is appended to its note; cleared so the next recording
+    // starts clean.
+    const appendTo = currentRecordingAppendTarget;
+    currentRecordingAppendTarget = null;
+
+    // Instant stop: the note the pipeline will write to. For an append it's the
+    // existing note; for a new Parakeet recording it's the deterministic
+    // placeholder path (stop-recording-ui already wrote the placeholder there).
+    // Whisper/import leave it undefined → the summary stream stays anonymous and
+    // is consumed by the Processing dock, not routed to a note's StreamingView.
+    const engine = loadTranscriptionEngine();
+    const jobSummaryFile = appendTo
+      ? appendTo
+      : engine === 'parakeet'
+        ? summaryFileForAudio(audioFilePath)
+        : undefined;
+
     // Use the existing processing queue to avoid concurrent Ollama/Whisper runs
-    addToProcessingQueue(audioFilePath, actualSessionName, notesPath, liveTranscriptFile);
+    addToProcessingQueue(audioFilePath, actualSessionName, notesPath, liveTranscriptFile, appendTo, jobSummaryFile);
 
     // recording_stopped is NOT tracked here -- stop-recording-ui already
     // fires it (with the real duration_bucket) for every stop. This handler
