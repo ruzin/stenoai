@@ -2,6 +2,8 @@ import * as React from 'react';
 import { cn } from '@/lib/utils';
 import { Loader2 } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import type { TranscriptionEngine } from '@/lib/ipc';
 import { Input } from '@/components/ui/input';
 import {
   Select,
@@ -120,6 +122,8 @@ function TranscriptionModelList() {
   const pullParakeet = usePullParakeetModel();
   const pullWhisper = usePullWhisperModel();
 
+  const [showPrivacyWarning, setShowPrivacyWarning] = React.useState(false);
+
   const isLoading = parakeet.isLoading || whisper.isLoading || engine.isLoading;
   const isError = parakeet.isError || whisper.isError || engine.isError;
 
@@ -222,7 +226,13 @@ function TranscriptionModelList() {
       >
         <Select
           value={activeEngine}
-          onValueChange={(v) => setActive.mutate({ engine: v as any })}
+          onValueChange={(v) => {
+            if (v === 'openai-asr') {
+              setShowPrivacyWarning(true);
+            } else {
+              setActive.mutate({ engine: v as TranscriptionEngine });
+            }
+          }}
           disabled={engine.isLoading}
         >
           <SelectTrigger className={cn(COMPACT_TRIGGER, 'min-w-[180px]')}>
@@ -290,6 +300,19 @@ function TranscriptionModelList() {
       )}
 
       {activeEngine === 'openai-asr' && <OpenAiAsrConfig />}
+
+      <ConfirmDialog
+        open={showPrivacyWarning}
+        onOpenChange={setShowPrivacyWarning}
+        title="Enable Cloud Transcription"
+        description="Your transcript will be sent to the configured cloud API for transcription, which means your audio and text will leave your device. Your privacy may be at risk depending on the provider you configure. Do you understand and wish to proceed?"
+        confirmLabel="I understand"
+        cancelLabel="Cancel"
+        onConfirm={() => {
+          setActive.mutate({ engine: 'openai-asr' });
+          setShowPrivacyWarning(false);
+        }}
+      />
     </div>
   );
 }
@@ -310,7 +333,9 @@ function OpenAiAsrConfig() {
 
   React.useEffect(() => {
     if (configQuery.data) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setApiUrl(configQuery.data.api_url ?? 'https://api.openai.com/v1');
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setModel(configQuery.data.model ?? 'whisper-1');
       // Never pre-fill the key field — only show the placeholder sentinel.
     }
