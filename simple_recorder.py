@@ -857,20 +857,30 @@ def process_streaming(audio_file, name, notes, live_transcript, append_to):
 
         # Instant-stop: if a placeholder note already exists at the target path
         # (main wrote it from the live transcript at stop), prefer ITS
-        # '## User Notes' over the --notes draft — the user may have edited My
-        # notes on the placeholder while this batch pass ran, and the final
-        # rewrite below must not clobber that edit. Append runs a different path
-        # (it never rewrites the note wholesale), so this only affects the
-        # new-recording rewrite.
-        if not append_to:
+        # '## User Notes' over the --notes draft — the user may edit My notes on
+        # the placeholder WHILE this (minutes-long) batch pass runs. Reading only
+        # here at command start would clobber any edit made during the window:
+        # the final rewrite would restore this stale snapshot. So re-read right
+        # before EACH write below via this helper, shrinking the race to ms.
+        # Append runs a different path (never rewrites the note wholesale), so
+        # this only affects the new-recording writes.
+        placeholder_note = None if append_to else (
+            recorder.output_dir / f"{Path(audio_file).stem}_summary.md"
+        )
+
+        def _refresh_edited_notes(current):
+            if placeholder_note is None:
+                return current
             try:
-                placeholder = recorder.output_dir / f"{Path(audio_file).stem}_summary.md"
-                edited = _read_existing_user_notes(placeholder)
+                edited = _read_existing_user_notes(placeholder_note)
                 if edited is not None:
-                    notes_text = edited
                     logger.info(f"Preserved edited My notes from placeholder ({len(edited)} chars)")
+                    return edited
             except Exception as e:
                 logger.debug(f"No placeholder notes to preserve: {e}")
+            return current
+
+        notes_text = _refresh_edited_notes(notes_text)
 
         # Read the live transcript fallback (#207). The renderer accumulates
         # live segments during recording; Electron writes them to this file so
@@ -1062,6 +1072,9 @@ def process_streaming(audio_file, name, notes, live_transcript, append_to):
             md_lines.append('## Transcript')
             md_lines.append('')
             md_lines.append(diarised_text or transcript_text)
+            # Re-read My notes right before writing (see _refresh_edited_notes):
+            # catches an edit made during this pass so the write doesn't clobber it.
+            notes_text = _refresh_edited_notes(notes_text)
             if notes_text:
                 md_lines.append('')
                 md_lines.append('## User Notes')
@@ -1167,6 +1180,10 @@ def process_streaming(audio_file, name, notes, live_transcript, append_to):
         md_lines.append('## Transcript')
         md_lines.append('')
         md_lines.append(diarised_text or transcript_text)
+        # Re-read My notes right before writing (see _refresh_edited_notes): the
+        # summary just streamed for seconds/minutes, during which the user may
+        # have edited My notes on the note — don't clobber that with the snapshot.
+        notes_text = _refresh_edited_notes(notes_text)
         if notes_text:
             md_lines.append('')
             md_lines.append('## User Notes')

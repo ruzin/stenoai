@@ -1278,13 +1278,6 @@ if (!gotSingleInstanceLock) {
       console.warn('setProxy(system) threw (non-fatal):', e?.message);
     }
 
-    // Instant-stop recovery: clear any `processing: true` left on a note by an
-    // app quit mid-pipeline (the child died with it). No queue is active at
-    // startup, so any such flag is stale — leaving it would strand the note
-    // "finishing up" forever. Deferred off the critical startup path so the
-    // per-note frontmatter scan never delays first paint.
-    setImmediate(sweepStuckProcessingFlags);
-
     // Persistent diagnostic log under <userData>/logs (honors
     // STENOAI_USER_DATA_DIR via getUserDataDir, so e2e/tests stay isolated).
     // The startup marker is a stable anchor that separates sessions.
@@ -1470,6 +1463,16 @@ if (!gotSingleInstanceLock) {
     // keys off _cachedCustomStoragePath, so sweeping earlier would scan the
     // default dir and miss a custom-storage user's recordings/ entirely.
     await sweepStaleImportMarkers();
+
+    // Instant-stop recovery: clear any `processing: true` left on a note by an
+    // app quit mid-pipeline (the child died with it). No queue is active at
+    // startup, so any such flag is stale — leaving it would strand the note
+    // "finishing up" forever. MUST run after the custom storage path load above
+    // for the same reason as the import sweep: getOutputDir() keys off
+    // _cachedCustomStoragePath, so sweeping earlier scans the default output
+    // dir and misses a custom-storage user's notes entirely. Deferred off the
+    // critical path so the per-note frontmatter scan never delays first paint.
+    setImmediate(sweepStuckProcessingFlags);
 
     // Register global hotkey for toggle recording (Cmd+Shift+R on macOS, Ctrl+Shift+R on Windows/Linux)
     const hotkeyModifier = process.platform === 'darwin' ? 'Command+Shift+R' : 'Ctrl+Shift+R';
@@ -3127,10 +3130,16 @@ ipcMain.handle('update-meeting', async (event, summaryFilePath, updates) => {
       let updatedRaw = raw;
 
       if (raw.startsWith('---')) {
-        const parts = raw.split('---', 3);
+        // Split with NO limit and rejoin the tail: split('---', 3) DISCARDS any
+        // '---' in the body (markdown thematic breaks in summaries, and the
+        // '--- Resumed HH:MM ---' separators continue-recording writes into
+        // every continued note), silently TRUNCATING the transcript from the
+        // first in-body '---' to EOF on the next My-notes autosave. Mirrors
+        // clearNoteProcessingFlag / parseMeetingMarkdown's split/slice(2).join.
+        const parts = raw.split('---');
         if (parts.length >= 3) {
           const fmText = parts[1];
-          body = parts[2];
+          body = parts.slice(2).join('---');
           const lines = fmText.split('\n');
           let titleSeen = false;
           let updatedAtSeen = false;
@@ -4528,14 +4537,19 @@ ipcMain.handle('start-recording-ui', async (_, sessionName, trigger, appendTo) =
       return { success: false, error: 'Recording already in progress' };
     }
 
-    // Validate the append target up front: it must be an existing note file
-    // inside an allowed dir. A bad target degrades to a normal new-note
+    // Validate the append target up front: it must be an existing, canonical
+    // meeting file (`*_summary.md`/`.json`) scoped to an `output/` dir — the
+    // SAME check every summaryFile-taking handler uses (validateMeetingFilePath),
+    // NOT the broad getAllowedBaseDirs() check. The broad roots include the whole
+    // userData dir + project root, so a renderer-supplied `config.json` (or any
+    // JSON under them) would otherwise pass and get rewritten into a "note" by
+    // _append_segment_to_note. A bad target degrades to a normal new-note
     // recording rather than failing the start.
     currentRecordingAppendTarget = null;
     if (appendTo && typeof appendTo === 'string') {
-      const allowed = getAllowedBaseDirs();
-      if (validateSafeFilePath(appendTo, allowed) && fs.existsSync(appendTo)) {
-        currentRecordingAppendTarget = appendTo;
+      const validatedAppend = await validateMeetingFilePath(appendTo);
+      if (!validatedAppend.error) {
+        currentRecordingAppendTarget = validatedAppend.realPath;
       } else {
         sendDebugLog('[append] invalid or missing append target; recording as a new note');
       }

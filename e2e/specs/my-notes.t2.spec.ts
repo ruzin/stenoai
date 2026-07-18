@@ -92,3 +92,65 @@ test('My notes upsert round-trips through update-meeting + the parser, decoupled
   // Keystone: the real user-data dir is untouched.
   expect(fileSig(realUserDataDir())).toBe(realDirBefore);
 });
+
+test('update-meeting preserves a note body containing "---" (continued-note data-loss guard)', async ({
+  launchApp,
+  userDataDir,
+}) => {
+  // Regression: update-meeting used split('---', 3) → body = parts[2], which
+  // DISCARDS everything after the first in-body '---'. Every continued note
+  // carries a '--- Resumed HH:MM ---' separator in its Transcript, and My-notes
+  // autosaves through update-meeting — so a single autosave would truncate the
+  // resumed segment (and anything after it) off disk. This asserts the whole
+  // body survives an update.
+  const outputDir = path.join(userDataDir, 'output');
+  mkdirSync(outputDir, { recursive: true });
+  const continued = [
+    '---',
+    'title: "Continued Note"',
+    'date: "2026-07-15T09:00:00"',
+    'duration_seconds: 300',
+    'language: "en"',
+    'is_diarised: false',
+    'notes_stale: true',
+    '---',
+    '',
+    '## Summary',
+    '',
+    'First pass summary.',
+    '',
+    '## Transcript',
+    '',
+    'Alice: opening remarks.',
+    '',
+    '--- Resumed 09:20 ---',
+    '',
+    'Bob: after the break, the tail content that must NOT be truncated.',
+    '',
+  ].join('\n');
+  const summaryPath = path.join(outputDir, 'continued_summary.md');
+  writeFileSync(summaryPath, continued, 'utf-8');
+
+  const { page } = await launchApp();
+
+  const update = (patch: Record<string, unknown>) =>
+    page.evaluate(
+      ([f, p]) => window.stenoai.meetings.update(f as string, p as object),
+      [summaryPath, patch] as const,
+    );
+
+  // Autosave My notes onto the continued note.
+  const r = await update({ user_notes: 'My live note during the meeting.' });
+  expect(r.success).toBe(true);
+
+  const md = readFileSync(summaryPath, 'utf8');
+  // The separator and EVERYTHING after it must survive.
+  expect(md).toContain('--- Resumed 09:20 ---');
+  expect(md).toContain('the tail content that must NOT be truncated');
+  expect(md).toContain('Bob: after the break');
+  // Summary + first segment intact, and the notes were added.
+  expect(md).toContain('First pass summary.');
+  expect(md).toContain('Alice: opening remarks.');
+  expect(md).toContain('## User Notes');
+  expect(md).toContain('My live note during the meeting.');
+});

@@ -1266,7 +1266,7 @@ function NoteViewToggle({
           aria-selected={notesActive}
           data-testid="tab-notes"
           onClick={() => onTab('notes')}
-          className="inline-flex items-center gap-1.5 px-3 py-1 text-[13px] font-medium transition-colors focus-visible:outline-none"
+          className="inline-flex items-center gap-1.5 px-3 py-1 text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
           style={{
             background: notesActive ? 'var(--surface-active)' : 'transparent',
             color: notesActive ? 'var(--fg-1)' : 'var(--fg-2)',
@@ -1300,7 +1300,7 @@ function NoteViewToggle({
                 aria-selected={summaryActive}
                 data-testid="tab-summary"
                 onClick={() => onTab('summary')}
-                className="inline-flex items-center py-1 pl-3 pr-1.5 text-[13px] font-medium transition-colors focus-visible:outline-none"
+                className="inline-flex items-center py-1 pl-3 pr-1.5 text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
                 style={{ color: summaryActive ? 'var(--fg-1)' : 'var(--fg-2)' }}
               >
                 {generating ? 'Generating…' : activeLabel}
@@ -1310,7 +1310,7 @@ function NoteViewToggle({
                   type="button"
                   aria-label="Choose view or template"
                   data-testid="note-view-menu-trigger"
-                  className="inline-flex items-center py-1 pl-0.5 pr-2.5 transition-colors focus-visible:outline-none hover:text-[color:var(--fg-1)]"
+                  className="inline-flex items-center py-1 pl-0.5 pr-2.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring hover:text-[color:var(--fg-1)]"
                   style={{ color: 'var(--fg-2)' }}
                 >
                   <ChevronDown className="size-[13px]" />

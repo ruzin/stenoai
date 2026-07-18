@@ -920,16 +920,18 @@ class Config:
     SUPPORTED_SILENCE_AUTO_STOP_MINUTES = (2, 5, 10, 15, 30)
 
     def get_silence_auto_stop_minutes(self) -> int:
-        """Minutes of bilateral silence before auto-stop fires. Default 2 so a
-        forgotten recording is reclaimed quickly; constrained to the supported
-        set so the Settings dropdown stays in sync with persisted values."""
-        value = self._config.get("silence_auto_stop_minutes", 2)
+        """Minutes of bilateral silence before auto-stop fires. Default 5: long
+        enough that normal in-meeting pauses (shared reading, breaks, muted
+        stretches) don't split a meeting into two notes, short enough to still
+        reclaim a forgotten recording. Constrained to the supported set so the
+        Settings dropdown stays in sync with persisted values."""
+        value = self._config.get("silence_auto_stop_minutes", 5)
         if value in self.SUPPORTED_SILENCE_AUTO_STOP_MINUTES:
             return value
         logger.warning(
-            f"Invalid silence_auto_stop_minutes in config: {value}; falling back to 2"
+            f"Invalid silence_auto_stop_minutes in config: {value}; falling back to 5"
         )
-        return 2
+        return 5
 
     def set_silence_auto_stop_minutes(self, minutes: int) -> bool:
         if minutes not in self.SUPPORTED_SILENCE_AUTO_STOP_MINUTES:

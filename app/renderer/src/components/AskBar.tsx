@@ -47,7 +47,12 @@ export function TranscriptBar() {
   const onResume = () => {
     if (!activeSummaryFile) return;
     setTranscriptOpen(false);
-    void recording.startRecording(activeMeetingName ?? undefined, 'manual', activeSummaryFile);
+    // startRecording already surfaces a capture/IPC failure to the user and
+    // rethrows; swallow the fire-and-forget rejection here so an unavailable
+    // mic or failed IPC doesn't surface as an unhandled renderer rejection.
+    void recording
+      .startRecording(activeMeetingName ?? undefined, 'manual', activeSummaryFile)
+      .catch(() => {});
   };
 
   const copyTranscript = async () => {
