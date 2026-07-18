@@ -28,13 +28,22 @@ type Meeting = {
   transcript?: string;
 };
 type GetResult = { success: boolean; meeting?: Meeting; error?: string };
+type ListResult = { success: boolean; meetings: Meeting[] };
 
 type StenoWindow = Window & {
-  stenoai: { meetings: { get: (summaryFile: string) => Promise<GetResult> } };
+  stenoai: {
+    meetings: {
+      get: (summaryFile: string) => Promise<GetResult>;
+      list: () => Promise<ListResult>;
+    };
+  };
 };
 
 const getMeeting = (page: import('@playwright/test').Page, file: string) =>
   page.evaluate((f) => (window as StenoWindow).stenoai.meetings.get(f), file);
+
+const listMeetings = (page: import('@playwright/test').Page) =>
+  page.evaluate(() => (window as StenoWindow).stenoai.meetings.list());
 
 test('get-meeting surfaces notes_stale (continued note → Generate-notes CTA)', async ({
   launchApp,
@@ -101,4 +110,48 @@ test('get-meeting leaves the markers unset for a normal summarised note', async 
   expect(res.meeting!.session_info.notes_stale).toBeFalsy();
   expect(res.meeting!.session_info.processing).toBeFalsy();
   expect(res.meeting!.session_info.is_live_transcript).toBeFalsy();
+});
+
+test('LIST (Python parser) and DETAIL (JS parser) agree on the session_info markers', async ({
+  launchApp,
+  userDataDir,
+}) => {
+  // The drift guard: list-meetings uses Python `_parse_meeting_markdown` and
+  // get-meeting uses the JS `parseMeetingMarkdown` mirror in main.js. They must
+  // surface the SAME markers or the detail page silently loses a flag (the very
+  // bug this spec was born from). Seed one note carrying every statically-
+  // assertable marker and assert both parsers agree.
+  //   NB: `processing` is deliberately excluded — the startup sweep clears it
+  //   before either read, so it isn't a stable parity signal here.
+  const file = writeMeetingMarkdown(userDataDir, 'parity', {
+    name: 'Parity Note',
+    summaryMarkdown: '## Summary\nSeeded with markers.',
+    transcript: 'A transcript rescued from the live capture.',
+    frontmatter: { notes_stale: true, is_live_transcript: true, notes_generated: false },
+  });
+
+  const { page } = await launchApp();
+
+  const detail = await getMeeting(page, file);
+  expect(detail.success, detail.error).toBe(true);
+
+  const listed = (await listMeetings(page)).meetings.find(
+    (m) => m.session_info.summary_file === file,
+  );
+  expect(listed, 'seeded note present in list').toBeTruthy();
+
+  const markers = (si: Meeting['session_info']) => ({
+    notes_stale: si.notes_stale ?? false,
+    is_live_transcript: si.is_live_transcript ?? false,
+    notes_generated: si.notes_generated ?? true,
+  });
+  const detailMarkers = markers(detail.meeting!.session_info);
+  // Both parsers must produce the seeded values...
+  expect(detailMarkers).toEqual({
+    notes_stale: true,
+    is_live_transcript: true,
+    notes_generated: false,
+  });
+  // ...and must agree with each other (drift guard).
+  expect(detailMarkers).toEqual(markers(listed!.session_info));
 });

@@ -33,7 +33,7 @@ export interface SessionInfo {
   notes_generated?: boolean;
   /** Set when a continue-recording segment was appended to this note after
    *  its notes were generated: the summary no longer covers the full
-   *  transcript. The UI offers "Regenerate notes"; reprocess clears it. */
+   *  transcript. The UI offers the "Generate notes" CTA; reprocess clears it. */
   notes_stale?: boolean;
   /** Instant-stop placeholder: the note was written from the live transcript
    *  at stop and the batch transcribe/summarise is still upgrading it in the
@@ -41,6 +41,10 @@ export interface SessionInfo {
    *  pipeline clears it (on success by rewriting fresh; on failure/startup via
    *  a sweep). */
   processing?: boolean;
+  /** Set when the batch transcription came back empty and the note's transcript
+   *  was rescued from the live capture instead (#207). Both parsers surface it;
+   *  the UI can note that no batch transcript exists. */
+  is_live_transcript?: boolean;
 }
 
 export interface Meeting {

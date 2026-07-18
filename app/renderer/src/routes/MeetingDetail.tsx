@@ -579,6 +579,7 @@ function DetailContent({
   const summaryStale =
     meeting.session_info.notes_stale === true &&
     !transcriptionFailed &&
+    !isProcessing &&
     Boolean(meeting.transcript);
   const reprocessStreaming = reprocess.isPending || streamPhase !== 'idle';
   const startReprocessRef = React.useRef(startReprocess);
@@ -589,7 +590,13 @@ function DetailContent({
     // against activeSummaryFile, which useActiveMeeting registered from the
     // route. info.summary_file can be a realpath'd variant of the same file
     // (symlinked storage path) and would never match.
-    if (summaryPending || summaryStale) {
+    // When reprocess has FAILED, the inline retry card (data-testid=
+    // "reprocess-retry") owns the CTA — don't also publish the floating dock
+    // button, or the user sees two identical "Generate notes" buttons at once
+    // (the failure path doesn't invalidate the query, so notes_stale /
+    // notes_generated stay true here). The floating CTA returns on the next
+    // startReprocess, which resets reprocessFailed.
+    if ((summaryPending || summaryStale) && !reprocessFailed) {
       publishReprocess({
         summaryFile: routeSummaryFile,
         streaming: reprocessStreaming,
@@ -605,6 +612,7 @@ function DetailContent({
   }, [
     summaryPending,
     summaryStale,
+    reprocessFailed,
     reprocessStreaming,
     routeSummaryFile,
     stableStartReprocess,

@@ -16,8 +16,8 @@ interface ReprocessBridge {
   summaryFile: string | null;
   /** True while that note's reprocess is analyzing/streaming (disables triggers). */
   streaming: boolean;
-  /** Button label: "Generate notes" (transcript-only note) or
-   *  "Regenerate notes" (a continued note marked notes_stale). */
+  /** Button label — always "Generate notes" (transcript-only OR a continued
+   *  note marked notes_stale; there is no separate "Regenerate" wording). */
   label: string;
   /** The detail's `startReprocess` for that note (stable wrapper). */
   start: (() => void) | null;

@@ -39,7 +39,7 @@ export function TranscriptBar() {
   const hasOrgTranscript = orgTranscript.trim().length > 0;
 
   // Resume = continue recording INTO this note (the new segment is appended;
-  // the note is then marked stale → "Regenerate notes"). Local notes only —
+  // the note is then marked stale → the "Generate notes" CTA). Local notes only —
   // you can't record into a shared org note — and only while idle. Lives in
   // the transcript footer (Granola-style), replacing the old standalone dock
   // mic; the live pill takes over once recording starts.
