@@ -50,3 +50,7 @@ export function trackDownload(location, arch) {
 export function trackGitHub(location) {
   loadPosthog().then((posthog) => posthog.capture('github_clicked', { location }))
 }
+
+export function trackDemoRequest(location) {
+  loadPosthog().then((posthog) => posthog.capture('demo_requested', { location }))
+}

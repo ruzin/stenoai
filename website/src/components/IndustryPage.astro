@@ -1,0 +1,192 @@
+---
+import { Check, ShieldCheck, Plus, Minus } from "lucide-react";
+import { Nav } from "../sections/Nav";
+import Footer from "../sections/Footer.astro";
+import CTAFooter from "../sections/CTAFooter.astro";
+import AppleIcon from "./icons/AppleIcon.astro";
+import { ALL, COMPLIANCE_BODY, CTA_MAILTO } from "../content/industries.data.js";
+
+const { data } = Astro.props;
+const others = ALL.filter((c) => c.slug !== data.slug);
+
+const DOWNLOAD_ARM = "https://github.com/ruzin/stenoai/releases/latest/download/stenoAI-macos-arm64.dmg";
+
+const H2_STYLE = {
+  fontFamily: "var(--font-serif)",
+  fontWeight: 400,
+  fontSize: "clamp(28px, 3.6vw, 40px)",
+  lineHeight: 1.1,
+  letterSpacing: "-0.02em",
+  color: "var(--fg-1)",
+};
+---
+
+<Nav subpage client:load />
+
+<main>
+  <section class="pt-[48px] pb-[24px] md:pt-[72px]">
+    <div class="container-site" style="max-width: 880px">
+      <p
+        class="text-fg-2 text-[12px] mb-5"
+        style={{ fontFamily: "var(--font-mono)", textTransform: "uppercase", letterSpacing: "0.14em" }}
+      >
+        {data.eyebrow}
+      </p>
+      <h1
+        style={{
+          fontFamily: "var(--font-serif)",
+          fontWeight: 400,
+          fontSize: "clamp(36px, 5vw, 58px)",
+          lineHeight: 1.05,
+          letterSpacing: "-0.025em",
+          color: "var(--fg-1)",
+          maxWidth: "22ch",
+        }}
+      >
+        {data.h1}
+      </h1>
+      <p class="text-fg-2 text-lg leading-[1.6] mt-6" style="max-width: 66ch">
+        {data.intro}
+      </p>
+      <div class="flex flex-wrap gap-5 mt-7">
+        {data.chips.map((c) => (
+          <span class="inline-flex items-center gap-1.5 text-fg-2 text-[13px]">
+            <ShieldCheck size={13} aria-hidden="true" /> {c}
+          </span>
+        ))}
+      </div>
+      <div class="flex gap-[10px] flex-wrap mt-8">
+        <a
+          href={CTA_MAILTO}
+          data-track="demo_request"
+          data-location={`enterprise_${data.slug}`}
+          class="btn-base btn-primary inline-flex items-center gap-2 no-underline hover:no-underline"
+        >
+          Book a demo
+        </a>
+        <a
+          href={DOWNLOAD_ARM}
+          data-track="download"
+          data-location={`enterprise_${data.slug}`}
+          data-arch="arm64"
+          class="btn-base btn-ghost inline-flex items-center gap-2 no-underline hover:no-underline"
+        >
+          <AppleIcon size={15} /> Download for macOS
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <section class="pt-[48px] pb-[8px]">
+    <div class="container-site" style="max-width: 880px">
+      <h2 class="mb-6" style={H2_STYLE}>Why cloud tools don't fit</h2>
+      <ul class="m-0 p-0 flex flex-col gap-4" style="list-style: none; max-width: 68ch">
+        {data.pains.map((p) => (
+          <li class="flex items-start gap-3 text-fg-2 text-[15px] leading-[1.6]">
+            <span aria-hidden="true" style={{ color: "var(--fg-muted)", marginTop: 2 }}>—</span>
+            <span>{p}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  </section>
+
+  <section class="pt-[56px] pb-[8px]">
+    <div class="container-site" style="max-width: 880px">
+      <div class="grid md:grid-cols-2 gap-x-12 gap-y-9">
+        {data.points.map((pt) => (
+          <div>
+            <h3 class="text-fg-1 mb-2 flex items-center gap-2" style={{ fontWeight: 500, fontSize: 17 }}>
+              <Check size={16} strokeWidth={2.2} aria-hidden="true" style={{ color: "var(--fg-1)" }} />
+              {pt.h}
+            </h3>
+            <p class="text-fg-2 text-[15px] leading-[1.6]" style="max-width: 48ch">{pt.b}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <section class="pt-[64px] pb-[8px]">
+    <div class="container-site" style="max-width: 880px">
+      <div class="rounded-[14px] p-8 md:p-10" style={{ background: "var(--surface-sunken)", border: "1px solid var(--border-subtle)" }}>
+        <h2 class="mb-4" style={{ ...H2_STYLE, fontSize: "clamp(22px, 2.6vw, 28px)" }}>
+          On compliance
+        </h2>
+        <p class="text-fg-2 text-[15px] leading-[1.65]" style="max-width: 68ch">
+          {COMPLIANCE_BODY}
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="sect" style="padding-bottom: 48px">
+    <div class="container-site" style="max-width: 820px">
+      <h2 class="mb-10" style={H2_STYLE}>Questions</h2>
+      <div class="flex flex-col faq-accordion">
+        {data.faqs.map((f, i) => (
+          <div style={{ borderTop: "1px solid var(--border-subtle)", borderBottom: i === data.faqs.length - 1 ? "1px solid var(--border-subtle)" : "none" }}>
+            <button
+              type="button"
+              data-faq-toggle
+              aria-expanded="false"
+              class="w-full bg-transparent border-0 py-6 flex justify-between items-center gap-5 cursor-pointer text-left text-fg-1 text-base md:text-[17px]"
+              style={{ fontFamily: "var(--font-sans)", fontWeight: 500 }}
+            >
+              <span>{f.q}</span>
+              <span class="text-fg-2 flex-shrink-0 faq-icon">
+                <Plus size={16} aria-hidden="true" class="icon-plus" />
+                <Minus size={16} aria-hidden="true" class="icon-minus" style={{ display: "none" }} />
+              </span>
+            </button>
+            <div class="faq-panel overflow-hidden" style="height: 0">
+              <p class="text-fg-2 text-[15px] leading-[1.6] pb-6" style="max-width: 64ch">{f.a}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <section class="pb-[16px]">
+    <div class="container-site" style="max-width: 820px">
+      <p class="text-fg-2 text-sm">
+        Also built for:{" "}
+        {others.map((c, i) => (
+          <span>
+            <a href={`/enterprise/${c.slug}/`}>{c.name}</a>
+            {i < others.length - 1 ? " · " : ""}
+          </span>
+        ))}
+      </p>
+    </div>
+  </section>
+
+  <CTAFooter />
+</main>
+
+<Footer />
+
+<script>
+  document.querySelectorAll("[data-faq-toggle]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const panel = btn.nextElementSibling;
+      const plus = btn.querySelector(".icon-plus");
+      const minus = btn.querySelector(".icon-minus");
+      const open = btn.getAttribute("aria-expanded") === "true";
+      btn.setAttribute("aria-expanded", String(!open));
+      if (panel) panel.style.height = open ? "0" : `${panel.scrollHeight}px`;
+      if (plus) plus.style.display = open ? "" : "none";
+      if (minus) minus.style.display = open ? "none" : "";
+    });
+  });
+
+  // Keep open panels sized to their content after viewport resize / reflow,
+  // otherwise the frozen pixel height clips the answer.
+  window.addEventListener("resize", () => {
+    document.querySelectorAll("[data-faq-toggle][aria-expanded='true']").forEach((btn) => {
+      const panel = btn.nextElementSibling;
+      if (panel) panel.style.height = `${panel.scrollHeight}px`;
+    });
+  });
+</script>

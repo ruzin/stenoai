@@ -1,0 +1,249 @@
+---
+import { Check, Minus, X, Plus, ArrowRight } from "lucide-react";
+import { Nav } from "../sections/Nav";
+import Footer from "../sections/Footer.astro";
+import CTAFooter from "../sections/CTAFooter.astro";
+import AppleIcon from "./icons/AppleIcon.astro";
+import WindowsIcon from "./icons/WindowsIcon.astro";
+import { ALL, VERIFIED } from "../content/comparisons.data.js";
+
+const { data } = Astro.props;
+const others = ALL.filter((c) => c.slug !== data.slug);
+
+const DOWNLOAD_ARM = "https://github.com/ruzin/stenoai/releases/latest/download/stenoAI-macos-arm64.dmg";
+const DOWNLOAD_WIN = "https://github.com/ruzin/stenoai/releases/latest/download/stenoAI-windows-x64.exe";
+
+const H2_STYLE = {
+  fontFamily: "var(--font-serif)",
+  fontWeight: 400,
+  fontSize: "clamp(28px, 3.6vw, 40px)",
+  lineHeight: 1.1,
+  letterSpacing: "-0.02em",
+  color: "var(--fg-1)",
+};
+
+function toneIconMarkup(tone) {
+  if (tone === "good") return { Icon: Check, color: "var(--fg-1)", strokeWidth: 2.2 };
+  if (tone === "bad") return { Icon: X, color: "var(--fg-muted)", strokeWidth: 2 };
+  return { Icon: Minus, color: "var(--fg-muted)", strokeWidth: 2 };
+}
+---
+
+<Nav subpage client:load />
+
+<main>
+  <section class="pt-[48px] pb-[24px] md:pt-[72px]">
+    <div class="container-site" style="max-width: 880px">
+      <p
+        class="text-fg-2 text-[12px] mb-5"
+        style={{ fontFamily: "var(--font-mono)", textTransform: "uppercase", letterSpacing: "0.14em" }}
+      >
+        {data.eyebrow}
+      </p>
+      <h1
+        style={{
+          fontFamily: "var(--font-serif)",
+          fontWeight: 400,
+          fontSize: "clamp(36px, 5vw, 58px)",
+          lineHeight: 1.05,
+          letterSpacing: "-0.025em",
+          color: "var(--fg-1)",
+          maxWidth: "24ch",
+        }}
+      >
+        {data.h1}
+      </h1>
+      <p class="text-fg-2 text-lg leading-[1.6] mt-6" style="max-width: 66ch">
+        {data.intro}
+      </p>
+      <div class="flex gap-[10px] flex-wrap mt-8">
+        <a
+          href={DOWNLOAD_ARM}
+          data-track="download"
+          data-location={`vs_${data.slug}`}
+          data-arch="arm64"
+          class="btn-base btn-primary inline-flex items-center gap-2 no-underline hover:no-underline"
+        >
+          <AppleIcon size={15} /> Download for macOS
+        </a>
+        <a
+          href={DOWNLOAD_WIN}
+          data-track="download"
+          data-location={`vs_${data.slug}`}
+          data-arch="win-x64"
+          class="btn-base btn-ghost inline-flex items-center gap-2 no-underline hover:no-underline"
+        >
+          <WindowsIcon size={15} /> Windows (alpha)
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <section class="pt-[40px] pb-[24px]">
+    <div class="container-site" style="max-width: 880px">
+      <div class="vs-table-wrap">
+        <table class="vs-table">
+          <caption class="sr-only">Feature comparison between Steno and {data.name}</caption>
+          <thead>
+            <tr>
+              <th scope="col" aria-label="Feature"></th>
+              <th scope="col" class="vs-col-steno">Steno</th>
+              <th scope="col">{data.name}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.rows.map((row) => {
+              const stenoTone = toneIconMarkup(row.steno.tone);
+              const themTone = toneIconMarkup(row.them.tone);
+              const StenoIcon = stenoTone.Icon;
+              const ThemIcon = themTone.Icon;
+              return (
+                <tr>
+                  <th scope="row">{row.label}</th>
+                  <td class="vs-col-steno">
+                    <div class="flex items-start gap-2">
+                      <StenoIcon size={15} strokeWidth={stenoTone.strokeWidth} aria-hidden="true" style={{ color: stenoTone.color, flexShrink: 0, marginTop: 2 }} />
+                      <span>{row.steno.text}</span>
+                    </div>
+                  </td>
+                  <td>
+                    <div class="flex items-start gap-2">
+                      <ThemIcon size={15} strokeWidth={themTone.strokeWidth} aria-hidden="true" style={{ color: themTone.color, flexShrink: 0, marginTop: 2 }} />
+                      <span>{row.them.text}</span>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <p class="text-fg-muted text-[13px] mt-4" style="max-width: 70ch">
+        {data.name} details taken from its public website and documentation, verified {VERIFIED}. Pricing
+        and features change — check their site for current terms.
+      </p>
+    </div>
+  </section>
+
+  <section class="pt-[48px] pb-[8px]">
+    <div class="container-site" style="max-width: 880px">
+      <blockquote class="m-0 py-2 pl-6 md:pl-8" style="border-left: 2px solid var(--fg-1)">
+        <p
+          style={{
+            fontFamily: "var(--font-serif)",
+            fontWeight: 400,
+            fontSize: "clamp(20px, 2.6vw, 26px)",
+            lineHeight: 1.4,
+            letterSpacing: "-0.01em",
+            color: "var(--fg-1)",
+            maxWidth: "52ch",
+          }}
+        >
+          {data.verdict}
+        </p>
+      </blockquote>
+    </div>
+  </section>
+
+  <section class="pt-[64px] pb-[16px]">
+    <div class="container-site" style="max-width: 880px">
+      <div class="grid md:grid-cols-2 gap-10 md:gap-14">
+        <div>
+          <h2 class="mb-6" style={H2_STYLE}>Choose Steno if</h2>
+          <ul class="m-0 p-0 flex flex-col gap-4" style="list-style: none">
+            {data.chooseSteno.map((item) => (
+              <li class="flex items-start gap-3 text-fg-2 text-[15px] leading-[1.6]">
+                <Check size={15} strokeWidth={2.2} aria-hidden="true" style={{ color: "var(--fg-1)", flexShrink: 0, marginTop: 4 }} />
+                <span>{item}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+        <div>
+          <h2 class="mb-6" style={H2_STYLE}>Choose {data.name} if</h2>
+          <ul class="m-0 p-0 flex flex-col gap-4" style="list-style: none">
+            {data.chooseThem.map((item) => (
+              <li class="flex items-start gap-3 text-fg-2 text-[15px] leading-[1.6]">
+                <ArrowRight size={15} strokeWidth={2} aria-hidden="true" style={{ color: "var(--fg-muted)", flexShrink: 0, marginTop: 4 }} />
+                <span>{item}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="sect" style="padding-bottom: 48px">
+    <div class="container-site" style="max-width: 820px">
+      <h2 class="mb-10" style={H2_STYLE}>Questions</h2>
+      <div class="flex flex-col faq-accordion">
+        {data.faqs.map((f, i) => (
+          <div style={{ borderTop: "1px solid var(--border-subtle)", borderBottom: i === data.faqs.length - 1 ? "1px solid var(--border-subtle)" : "none" }}>
+            <button
+              type="button"
+              data-faq-toggle
+              aria-expanded="false"
+              class="w-full bg-transparent border-0 py-6 flex justify-between items-center gap-5 cursor-pointer text-left text-fg-1 text-base md:text-[17px]"
+              style={{ fontFamily: "var(--font-sans)", fontWeight: 500 }}
+            >
+              <span>{f.q}</span>
+              <span class="text-fg-2 flex-shrink-0 faq-icon">
+                <Plus size={16} aria-hidden="true" class="icon-plus" />
+                <Minus size={16} aria-hidden="true" class="icon-minus" style={{ display: "none" }} />
+              </span>
+            </button>
+            <div class="faq-panel overflow-hidden" style="height: 0">
+              <p class="text-fg-2 text-[15px] leading-[1.6] pb-6" style="max-width: 62ch">{f.a}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <section class="pb-[16px]">
+    <div class="container-site" style="max-width: 820px">
+      <p class="text-fg-2 text-sm">
+        More comparisons:{" "}
+        {others.map((c, i) => (
+          <span>
+            <a href={`/vs/${c.slug}/`}>Steno vs {c.name}</a>
+            {i < others.length - 1 ? " · " : ""}
+          </span>
+        ))}
+      </p>
+    </div>
+  </section>
+
+  <CTAFooter />
+</main>
+
+<Footer />
+
+<script>
+  // Plain accordion — no React hydration needed for a show/hide toggle.
+  // Both Plus/Minus icons are pre-rendered; this just swaps which is visible
+  // and animates the panel height.
+  document.querySelectorAll("[data-faq-toggle]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const panel = btn.nextElementSibling;
+      const plus = btn.querySelector(".icon-plus");
+      const minus = btn.querySelector(".icon-minus");
+      const open = btn.getAttribute("aria-expanded") === "true";
+      btn.setAttribute("aria-expanded", String(!open));
+      if (panel) panel.style.height = open ? "0" : `${panel.scrollHeight}px`;
+      if (plus) plus.style.display = open ? "" : "none";
+      if (minus) minus.style.display = open ? "none" : "";
+    });
+  });
+
+  // Keep open panels sized to their content after viewport resize / reflow,
+  // otherwise the frozen pixel height clips the answer.
+  window.addEventListener("resize", () => {
+    document.querySelectorAll("[data-faq-toggle][aria-expanded='true']").forEach((btn) => {
+      const panel = btn.nextElementSibling;
+      if (panel) panel.style.height = `${panel.scrollHeight}px`;
+    });
+  });
+</script>

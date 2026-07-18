@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Plus, Minus } from "lucide-react";
-import { AnimatePresence, m as Motion } from "framer-motion";
+import { AnimatePresence, m as Motion, LazyMotion, domMax } from "framer-motion";
 
 const faqs = [
   { q: "What's included for free?", a: "Unlimited local transcription and summarization. No account, no tier, no upsell. Steno is open source. You can build and run it yourself if you prefer." },
@@ -29,6 +29,7 @@ export function FAQ() {
   const [open, setOpen] = useState(null);
 
   return (
+    <LazyMotion features={domMax} strict={false}>
     <section id="faq" className="sect">
       <script
         type="application/ld+json"
@@ -90,5 +91,6 @@ export function FAQ() {
         </div>
       </div>
     </section>
+    </LazyMotion>
   );
 }

@@ -1,0 +1,60 @@
+---
+import AppleIcon from "../components/icons/AppleIcon.astro";
+import WindowsIcon from "../components/icons/WindowsIcon.astro";
+
+const DOWNLOAD_ARM = "https://github.com/ruzin/stenoai/releases/latest/download/stenoAI-macos-arm64.dmg";
+const DOWNLOAD_WIN = "https://github.com/ruzin/stenoai/releases/latest/download/stenoAI-windows-x64.exe";
+---
+
+<section id="download" class="pb-[120px] pt-[80px]">
+  <div class="container-site">
+    <div
+      class="cta-wrap rounded-[14px] md:rounded-[20px] px-6 py-14 sm:px-10 sm:py-16 md:px-16 md:py-24 text-center"
+      style={{ backgroundColor: "var(--primary)", color: "var(--primary-fg)" }}
+    >
+      <div style="max-width: 520px; margin: 0 auto">
+        <h2
+          class="mb-[14px]"
+          style={{
+            fontFamily: "var(--font-serif)",
+            fontWeight: 400,
+            fontSize: "clamp(34px, 4.6vw, 52px)",
+            lineHeight: 1.08,
+            letterSpacing: "-0.02em",
+            color: "var(--primary-fg)",
+          }}
+        >
+          Start keeping private notes.
+        </h2>
+        <p class="text-lg mb-8" style={{ color: "var(--primary-fg)", opacity: 0.7 }}>
+          Free. Open source. No account needed.
+        </p>
+
+        <div class="flex gap-[10px] justify-center flex-wrap">
+          <a
+            href={DOWNLOAD_ARM}
+            data-track="download"
+            data-location="cta_footer"
+            data-arch="arm64"
+            class="btn-base btn-primary no-underline"
+          >
+            <AppleIcon size={15} /> Download for Apple Silicon
+          </a>
+          <a
+            href={DOWNLOAD_WIN}
+            data-track="download"
+            data-location="cta_footer"
+            data-arch="win-x64"
+            class="btn-base btn-ghost no-underline"
+          >
+            <WindowsIcon size={15} /> Download for Windows (alpha)
+          </a>
+        </div>
+
+        <p class="mt-5 text-[13px]" style={{ color: "var(--primary-fg)", opacity: 0.5 }}>
+          macOS 12+ (Apple Silicon) · Windows 10/11 (x64, alpha — unsigned) · ~4 GB for the default model
+        </p>
+      </div>
+    </div>
+  </div>
+</section>

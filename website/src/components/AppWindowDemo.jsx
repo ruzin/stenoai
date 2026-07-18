@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { m as Motion, AnimatePresence } from "framer-motion";
+import { m as Motion, AnimatePresence, LazyMotion, domMax } from "framer-motion";
 import {
   Search, Settings, Home, ChevronDown, ChevronLeft,
   Calendar as CalendarIcon, Clock, PencilLine, ArrowUp, FolderPlus,
@@ -677,6 +677,7 @@ export function AppWindowDemo() {
   }, []);
 
   return (
+    <LazyMotion features={domMax} strict={false}>
     <div aria-hidden="true" inert className="relative max-w-full" style={{ padding: "2px 2px 32px", textAlign: "left", pointerEvents: "none", userSelect: "none" }}>
       <div
         ref={outerRef}
@@ -709,5 +710,6 @@ export function AppWindowDemo() {
         </div>
       </div>
     </div>
+    </LazyMotion>
   );
 }
