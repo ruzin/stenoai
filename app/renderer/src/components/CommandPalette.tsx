@@ -2,7 +2,7 @@ import * as React from 'react';
 import { Search } from 'lucide-react';
 import { useMeetings, LIVE_SUMMARY_PREFIX } from '@/hooks/useMeetings';
 import { searchNotes, snippet } from '@/lib/noteSearch';
-import { navigate } from '@/lib/router';
+import { navigate, useRoute } from '@/lib/router';
 import type { Meeting } from '@/lib/ipc';
 
 interface PaletteContextValue {
@@ -45,7 +45,30 @@ export function CommandPaletteProvider({ children }: { children: React.ReactNode
   );
 }
 
+const SETTINGS_INDEX = [
+  { id: 'general-theme', tab: 'general', title: 'Appearance', sub: 'Dark mode, light mode, system theme' },
+  { id: 'general-name', tab: 'general', title: 'Your name', sub: 'In-app greetings' },
+  { id: 'general-calendar', tab: 'general', title: 'Calendar', sub: 'Google, Outlook integration' },
+  { id: 'general-notifications', tab: 'general', title: 'Desktop notifications', sub: 'App notifications' },
+  { id: 'general-mic', tab: 'general', title: 'Microphone', sub: 'Input device' },
+  { id: 'general-system-audio', tab: 'general', title: 'Record system audio', sub: 'Screen recording access' },
+  { id: 'general-autodetect', tab: 'general', title: 'Auto-detect meetings', sub: 'Notification when another app starts using mic' },
+  { id: 'general-launch', tab: 'general', title: 'Launch on login', sub: 'Start automatically' },
+  { id: 'transcription-engine', tab: 'transcription', title: 'Transcription engine', sub: 'Parakeet, Whisper, Cloud API (OpenAI)' },
+  { id: 'transcription-lang', tab: 'transcription', title: 'Language', sub: 'Transcription and summaries language' },
+  { id: 'transcription-keep', tab: 'transcription', title: 'Keep recordings', sub: 'Save audio files' },
+  { id: 'transcription-notes', tab: 'transcription', title: 'Generate notes automatically', sub: 'Summarise after transcription' },
+  { id: 'ai-provider', tab: 'ai', title: 'AI provider', sub: 'Local, Private Server, Cloud API, Organisation' },
+  { id: 'templates', tab: 'templates', title: 'Templates', sub: 'Custom note formats' },
+  { id: 'org', tab: 'organisation', title: 'Organisation', sub: 'Sign in to share notes' },
+  { id: 'advanced-export', tab: 'advanced', title: 'Export data', sub: 'Download all notes' },
+  { id: 'advanced-cache', tab: 'advanced', title: 'Storage & Cache', sub: 'Clear cached models' },
+  { id: 'developer', tab: 'developer', title: 'Developer', sub: 'Debug logs, experimental features' },
+];
+
 function CommandPalette({ onClose }: { onClose: () => void }) {
+  const currentRoute = useRoute();
+  const isSettingsMode = currentRoute.startsWith('/settings');
   const meetings = useMeetings();
   // One recency sort feeds both paths: empty-query recents and search results
   // (searchNotes preserves input order, so results stay newest-first).
@@ -75,16 +98,28 @@ function CommandPalette({ onClose }: { onClose: () => void }) {
     return () => prev?.focus?.();
   }, []);
 
-  const results = React.useMemo<Meeting[]>(() => {
+  const settingsResults = React.useMemo(() => {
+    if (!isSettingsMode) return [];
+    if (!query.trim()) return SETTINGS_INDEX;
+    const q = query.toLowerCase();
+    return SETTINGS_INDEX.filter((s) => 
+      s.title.toLowerCase().includes(q) || s.sub.toLowerCase().includes(q)
+    );
+  }, [isSettingsMode, query]);
+
+  const noteResults = React.useMemo<Meeting[]>(() => {
+    if (isSettingsMode) return [];
     if (!query.trim()) return sorted.slice(0, RECENT_COUNT);
     return searchNotes(sorted, query).slice(0, MAX_RESULTS);
-  }, [sorted, query]);
+  }, [isSettingsMode, sorted, query]);
+
+  const resultCount = isSettingsMode ? settingsResults.length : noteResults.length;
 
   // Keep selection within [0, len-1]; never let it stick at -1 once results
   // appear (ArrowDown on an empty list would otherwise leave it negative).
   React.useEffect(() => {
-    setSelected((s) => Math.max(0, Math.min(s, results.length - 1)));
-  }, [results.length]);
+    setSelected((s) => Math.max(0, Math.min(s, resultCount - 1)));
+  }, [resultCount]);
 
   // Scroll the active option into view as the keyboard selection moves.
   React.useEffect(() => {
@@ -99,6 +134,12 @@ function CommandPalette({ onClose }: { onClose: () => void }) {
     onClose();
   };
 
+  const openSetting = (s: typeof SETTINGS_INDEX[0] | undefined) => {
+    if (!s) return;
+    navigate(`/settings?tab=${s.tab}`);
+    onClose();
+  };
+
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Escape') {
       e.preventDefault();
@@ -108,13 +149,17 @@ function CommandPalette({ onClose }: { onClose: () => void }) {
       onClose();
     } else if (e.key === 'ArrowDown') {
       e.preventDefault();
-      setSelected((s) => Math.min(s + 1, results.length - 1));
+      setSelected((s) => Math.min(s + 1, resultCount - 1));
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
       setSelected((s) => Math.max(s - 1, 0));
     } else if (e.key === 'Enter') {
       e.preventDefault();
-      openMeeting(results[selected]);
+      if (isSettingsMode) {
+        openSetting(settingsResults[selected]);
+      } else {
+        openMeeting(noteResults[selected]);
+      }
     } else if (e.key === 'Tab') {
       // The input is the only tab stop in the dialog; trap Tab so focus can't
       // escape behind the aria-modal overlay.
@@ -122,7 +167,7 @@ function CommandPalette({ onClose }: { onClose: () => void }) {
     }
   };
 
-  const activeId = results[selected] ? `cmdk-opt-${selected}` : undefined;
+  const activeId = resultCount > 0 ? `cmdk-opt-${selected}` : undefined;
 
   return (
     <div
@@ -150,8 +195,8 @@ function CommandPalette({ onClose }: { onClose: () => void }) {
             data-testid="command-palette-input"
             className="w-full bg-transparent text-[14px] outline-none"
             style={{ color: 'var(--fg-1)', fontFamily: 'var(--font-sans)' }}
-            placeholder="Search notes…"
-            aria-label="Search notes"
+            placeholder={isSettingsMode ? "Search settings…" : "Search notes…"}
+            aria-label={isSettingsMode ? "Search settings" : "Search notes"}
             role="combobox"
             aria-expanded="true"
             aria-controls="cmdk-listbox"
@@ -171,44 +216,71 @@ function CommandPalette({ onClose }: { onClose: () => void }) {
           aria-label="Search results"
           className="scrollbar-clean max-h-[50vh] overflow-auto py-1"
         >
-          {results.length === 0 ? (
+          {resultCount === 0 ? (
             <li
               className="px-3.5 py-6 text-center text-[13px]"
               style={{ color: 'var(--fg-muted)' }}
             >
-              {query.trim() ? `No notes match “${query.trim()}”` : 'No notes yet'}
+              {query.trim() 
+                ? `No results for “${query.trim()}”` 
+                : (isSettingsMode ? 'No settings match' : 'No notes yet')}
             </li>
           ) : (
-            results.map((m, i) => {
-              const title = m.session_info.name || 'Untitled Meeting';
-              const sub = snippet(m.summary, query);
-              return (
-                <li
-                  key={m.session_info.summary_file}
-                  id={`cmdk-opt-${i}`}
-                  role="option"
-                  aria-selected={i === selected}
-                  data-index={i}
-                  data-testid="command-palette-result"
-                  className="mx-1 cursor-pointer rounded-md px-2.5 py-2"
-                  style={i === selected ? { background: 'var(--surface-active)' } : undefined}
-                  onMouseEnter={() => setSelected(i)}
-                  onMouseDown={(e) => {
-                    e.preventDefault();
-                    openMeeting(m);
-                  }}
-                >
-                  <div className="truncate text-[13.5px]" style={{ color: 'var(--fg-1)' }}>
-                    {title}
-                  </div>
-                  {sub && (
-                    <div className="truncate text-[12px]" style={{ color: 'var(--fg-muted)' }}>
-                      {sub}
+            isSettingsMode 
+              ? settingsResults.map((s, i) => (
+                  <li
+                    key={s.id}
+                    id={`cmdk-opt-${i}`}
+                    role="option"
+                    aria-selected={i === selected}
+                    data-index={i}
+                    data-testid="command-palette-result"
+                    className="mx-1 cursor-pointer rounded-md px-2.5 py-2"
+                    style={i === selected ? { background: 'var(--surface-active)' } : undefined}
+                    onMouseEnter={() => setSelected(i)}
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      openSetting(s);
+                    }}
+                  >
+                    <div className="truncate text-[13.5px]" style={{ color: 'var(--fg-1)' }}>
+                      {s.title}
                     </div>
-                  )}
-                </li>
-              );
-            })
+                    <div className="truncate text-[12px]" style={{ color: 'var(--fg-muted)' }}>
+                      {s.sub}
+                    </div>
+                  </li>
+                ))
+              : noteResults.map((m, i) => {
+                  const title = m.session_info.name || 'Untitled Meeting';
+                  const sub = snippet(m.summary, query);
+                  return (
+                    <li
+                      key={m.session_info.summary_file}
+                      id={`cmdk-opt-${i}`}
+                      role="option"
+                      aria-selected={i === selected}
+                      data-index={i}
+                      data-testid="command-palette-result"
+                      className="mx-1 cursor-pointer rounded-md px-2.5 py-2"
+                      style={i === selected ? { background: 'var(--surface-active)' } : undefined}
+                      onMouseEnter={() => setSelected(i)}
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        openMeeting(m);
+                      }}
+                    >
+                      <div className="truncate text-[13.5px]" style={{ color: 'var(--fg-1)' }}>
+                        {title}
+                      </div>
+                      {sub && (
+                        <div className="truncate text-[12px]" style={{ color: 'var(--fg-muted)' }}>
+                          {sub}
+                        </div>
+                      )}
+                    </li>
+                  );
+                })
           )}
         </ul>
 
