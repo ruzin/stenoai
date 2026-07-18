@@ -331,15 +331,15 @@ function OpenAiAsrConfig() {
   const [apiKey, setApiKey] = React.useState('');
   const [model, setModel] = React.useState('');
 
-  React.useEffect(() => {
+  // Sync state from query when it resolves/changes (React recommended pattern vs useEffect)
+  const [prevConfig, setPrevConfig] = React.useState(configQuery.data);
+  if (configQuery.data !== prevConfig) {
+    setPrevConfig(configQuery.data);
     if (configQuery.data) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setApiUrl(configQuery.data.api_url ?? 'https://api.openai.com/v1');
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setModel(configQuery.data.model ?? 'whisper-1');
-      // Never pre-fill the key field — only show the placeholder sentinel.
     }
-  }, [configQuery.data]);
+  }
 
   const apiKeySet = configQuery.data?.api_key_set ?? false;
 
