@@ -75,6 +75,7 @@ const ARGS_ECHO_REDACTORS = {
   'set-remote-ollama-url': redactRest,
   'test-remote-ollama': redactRest,
   'set-cloud-api-url': redactRest,
+  'set-openai-asr-config': redactRest,
   // device_id + a user-assigned device label (e.g. "Valentin's AirPods") —
   // same PII class as set-user-name.
   'set-microphone': redactRest,
