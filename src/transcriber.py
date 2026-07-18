@@ -797,6 +797,10 @@ class WhisperTranscriber:
         # Prevent credential leak to cross-origin redirect targets
         class NoRedirectHandler(urllib.request.HTTPRedirectHandler):
             def redirect_request(self, req, fp, code, msg, hdrs, newurl):
+                old_url = urllib.parse.urlsplit(req.full_url)
+                target_url = urllib.parse.urlsplit(newurl)
+                if (old_url.scheme, old_url.netloc) == (target_url.scheme, target_url.netloc):
+                    return super().redirect_request(req, fp, code, msg, hdrs, newurl)
                 raise urllib.error.HTTPError(
                     req.full_url, code, f"Redirect to {newurl} denied", hdrs, fp
                 )
