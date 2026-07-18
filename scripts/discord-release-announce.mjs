@@ -78,17 +78,25 @@ function truncate(s, n) {
   return s.length > n ? s.slice(0, n - 1).trimEnd() + '…' : s;
 }
 
-// Assemble the embed description (Discord markdown; 4096-char cap — we're well under).
+// Casual @here greeting lives in `content` — embeds can't ping, so a mention
+// only fires from the message body. allowed_mentions lets the @here actually
+// notify the channel (webhooks otherwise won't ping @here/@everyone).
+const greeting = `🚀 Hey @here — **Steno v${version}** is out!`;
+
+// The embed carries the substance: summary, headline features, contributor
+// thanks, and a link to the full notes.
 const parts = [truncate(summary, 300)];
-if (features.length) parts.push(`**What's new**\n${features.join('\n')}`);
-if (contributors) parts.push(`**${contributors}**`);
-parts.push(`[Download & full release notes →](${releaseUrl})`);
+if (features.length) parts.push(`**A bunch of great features:**\n${features.join('\n')}`);
+if (contributors) parts.push(contributors);
+parts.push(`[Full release notes →](${releaseUrl})`);
 
 const payload = {
   username: 'Steno Releases',
+  content: greeting,
+  allowed_mentions: { parse: ['everyone'] }, // enables the @here ping
   embeds: [
     {
-      title: `📢 Steno v${version} is out`,
+      title: `Steno v${version}`,
       url: releaseUrl,
       description: parts.join('\n\n'),
       color: 0x1b1b19, // brand ink
