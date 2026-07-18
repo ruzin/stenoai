@@ -168,7 +168,12 @@ export function Sidebar({
   const [iconPicker, setIconPicker] = React.useState<{ id: string; anchorRect: DOMRect } | null>(null);
 
   const isSettingsMode = currentRoute.startsWith('/settings');
-  const activeSettingsTab = isSettingsMode ? (getRouteParam(currentRoute, 'tab') || 'general') : null;
+  const requestedSettingsTab = getRouteParam(currentRoute, 'tab');
+  const activeSettingsTab = isSettingsMode && SETTINGS_TABS.some((t) => t.id === requestedSettingsTab)
+    ? requestedSettingsTab
+    : isSettingsMode
+      ? 'general'
+      : null;
   const updateIcon = useUpdateFolderIcon();
 
   const isHomeActive = currentRoute === '/' || currentRoute === '';
