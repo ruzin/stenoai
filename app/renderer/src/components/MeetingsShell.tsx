@@ -104,17 +104,15 @@ export function MeetingsShell({
   const totalMeetings = meetings.data?.length ?? 0;
 
   const isRecording = recording.status === 'recording' || recording.status === 'paused';
-  // Toolbar button behaviour: idle or processing → start a new recording
-  // (auto-navigates to /recording, previous note keeps processing in the
-  // background queue); recording or paused → navigate back to /recording
-  // instead of stopping. Stop is intentionally only available from the
-  // LiveDock on the /recording route.
+  // Toolbar button behaviour: idle or processing → start a new recording AND
+  // open the live-note editor (/recording) so the user has somewhere to write
+  // notes while it records (a previous note keeps processing in the background
+  // queue); recording or paused → re-open that editor. Coexistence still holds
+  // — the pill follows the user if they navigate away — but the explicit "New
+  // note" action lands them on the note, not nowhere. Stop lives on the pill.
   const onToggleRecording = () => {
-    if (isRecording) {
-      navigate('/recording');
-    } else {
-      void recording.startRecording();
-    }
+    if (!isRecording) void recording.startRecording();
+    navigate('/recording');
   };
 
   const onDropMeetingOnFolder = async (summaryFile: string, folderId: string | null) => {

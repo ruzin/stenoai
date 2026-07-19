@@ -99,7 +99,8 @@ const stenoai = {
   },
 
   recording: {
-    start: (name, trigger) => invoke('start-recording-ui', name, trigger),
+    start: (name, trigger, appendTo) =>
+      invoke('start-recording-ui', name, trigger, appendTo),
     stop: () => invoke('stop-recording-ui'),
     pause: () => invoke('pause-recording-ui'),
     resume: () => invoke('resume-recording-ui'),

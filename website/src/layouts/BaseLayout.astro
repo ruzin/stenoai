@@ -1,0 +1,130 @@
+---
+import '../index.css'
+
+const {
+  title,
+  description,
+  canonical,
+  ogImage = 'https://stenoai.co/og-image.png',
+  structuredData = [],
+  noindex = false,
+} = Astro.props
+
+const isHome = Astro.url.pathname === '/'
+
+const softwareApplicationJsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'SoftwareApplication',
+  name: 'Steno',
+  url: 'https://stenoai.co/',
+  description:
+    'Steno is the privacy-first AI notepad and meeting assistant. It records, transcribes, and summarizes meetings entirely on your device — a free, open-source AI notetaker with no cloud, no bots joining calls, and no usage limits.',
+  applicationCategory: 'BusinessApplication',
+  operatingSystem: 'macOS, Windows',
+  offers: {
+    '@type': 'Offer',
+    price: '0',
+    priceCurrency: 'USD',
+  },
+}
+
+const allStructuredData = isHome ? [softwareApplicationJsonLd, ...structuredData] : structuredData
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/stenoai-logo.svg" />
+    <link rel="icon" type="image/png" href="/favicon-64.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content={description} />
+    <title>{title}</title>
+    {noindex && <meta name="robots" content="noindex" />}
+    {canonical && <link rel="canonical" href={canonical} />}
+
+    <!-- Open Graph -->
+    <meta property="og:type" content="website" />
+    {canonical && <meta property="og:url" content={canonical} />}
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:image" content={ogImage} />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+
+    <!-- Twitter -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
+    <meta name="twitter:image" content={ogImage} />
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="preconnect" href="https://us.i.posthog.com" />
+    <link rel="preconnect" href="https://us-assets.i.posthog.com" />
+    <link rel="preconnect" href="https://www.googletagmanager.com" />
+    <!-- Non-blocking font load: fetch in parallel, apply once ready, no render-blocking round trip -->
+    <link
+      rel="preload"
+      as="style"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;600&family=JetBrains+Mono:wght@400;500&display=swap"
+    />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;600&family=JetBrains+Mono:wght@400;500&display=swap"
+      media="print"
+      onload="this.media='all'"
+    />
+    <noscript>
+      <link
+        rel="stylesheet"
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;600&family=JetBrains+Mono:wght@400;500&display=swap"
+      />
+    </noscript>
+
+    {allStructuredData.map((data) => (
+      <script type="application/ld+json" set:html={JSON.stringify(data).replace(/</g, '\\u003c')} />
+    ))}
+
+    <!-- No-flash dark mode: apply class before first paint -->
+    <script is:inline>
+      (function() {
+        var stored = localStorage.getItem('theme');
+        var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        if (stored === 'dark' || (!stored && prefersDark)) {
+          document.documentElement.classList.add('dark');
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <slot />
+
+    <script>
+      import { initAnalytics, trackDownload, trackGitHub, trackDemoRequest } from '../analytics'
+
+      // Defer analytics init until the browser is idle so it never competes
+      // with first paint / interaction for main-thread time.
+      if ('requestIdleCallback' in window) {
+        requestIdleCallback(initAnalytics)
+      } else {
+        setTimeout(initAnalytics, 1)
+      }
+
+      // One delegated click listener for every [data-track] element on the
+      // page (download CTAs, GitHub links, demo-request links) instead of
+      // per-component onClick handlers — works across static Astro markup
+      // and React islands alike.
+      document.addEventListener('click', (event) => {
+        const target = event.target
+        if (!(target instanceof Element)) return
+        const el = target.closest('[data-track]')
+        if (!el) return
+        const { track, location, arch } = el.dataset
+        if (track === 'download') trackDownload(location, arch)
+        else if (track === 'github') trackGitHub(location)
+        else if (track === 'demo_request') trackDemoRequest(location)
+      })
+    </script>
+  </body>
+</html>

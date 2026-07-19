@@ -22,6 +22,7 @@ import {
   TranscriptPanelContent,
 } from '@/components/TranscriptPanel';
 import { useMeeting } from '@/hooks/useMeetings';
+import { useRecording } from '@/hooks/useRecording';
 import { buildTranscriptBundle } from '@/lib/transcriptBundle';
 
 // ---------------------------------------------------------------------------
@@ -29,11 +30,30 @@ import { buildTranscriptBundle } from '@/lib/transcriptBundle';
 // ---------------------------------------------------------------------------
 
 export function TranscriptBar() {
-  const { activeSummaryFile, activeOrgMeeting, transcriptOpen, setTranscriptOpen } = useAskBar();
+  const { activeSummaryFile, activeMeetingName, activeOrgMeeting, transcriptOpen, setTranscriptOpen } =
+    useAskBar();
   const meeting = useMeeting(activeSummaryFile ?? undefined);
+  const recording = useRecording();
   const [copied, setCopied] = React.useState(false);
   const orgTranscript = activeOrgMeeting?.transcript ?? '';
   const hasOrgTranscript = orgTranscript.trim().length > 0;
+
+  // Resume = continue recording INTO this note (the new segment is appended;
+  // the note is then marked stale → the "Generate notes" CTA). Local notes only —
+  // you can't record into a shared org note — and only while idle. Lives in
+  // the transcript footer (Granola-style), replacing the old standalone dock
+  // mic; the live pill takes over once recording starts.
+  const canResume = Boolean(activeSummaryFile) && recording.status === 'idle';
+  const onResume = () => {
+    if (!activeSummaryFile) return;
+    setTranscriptOpen(false);
+    // startRecording already surfaces a capture/IPC failure to the user and
+    // rethrows; swallow the fire-and-forget rejection here so an unavailable
+    // mic or failed IPC doesn't surface as an unhandled renderer rejection.
+    void recording
+      .startRecording(activeMeetingName ?? undefined, 'manual', activeSummaryFile)
+      .catch(() => {});
+  };
 
   const copyTranscript = async () => {
     let text = '';
@@ -102,11 +122,92 @@ export function TranscriptBar() {
           <TranscriptPanelContent summaryFile={activeSummaryFile!} />
         )}
       </div>
+      {/* Footer — Resume (continue recording into this note), Granola-style. */}
+      {canResume && (
+        <div
+          className="flex items-center px-3 py-2"
+          style={{ borderTop: '1px solid var(--border-subtle)' }}
+        >
+          <button
+            type="button"
+            onClick={onResume}
+            data-testid="resume-recording-button"
+            aria-label="Resume recording on this note"
+            title="Resume recording — the new audio is appended to this note"
+            className="inline-flex h-8 cursor-pointer items-center rounded-full border-0 px-3.5 text-[13px] font-medium transition-colors hover:bg-[color:var(--surface-hover)]"
+            style={{ background: 'var(--surface-sunken)', color: 'var(--fg-1)' }}
+          >
+            Resume
+          </button>
+        </div>
+      )}
     </div>
   );
 }
 
-export function AskBar() {
+/**
+ * Standalone circular transcript toggle — sits LEFT of the Ask bar (Granola-
+ * style, separate from the composer). Opens/closes the floating TranscriptBar.
+ * Shown only for a meeting that actually has a transcript.
+ */
+export function TranscriptToggle() {
+  const { activeSummaryFile, activeOrgMeeting, transcriptOpen, setTranscriptOpen } = useAskBar();
+  const [hover, setHover] = React.useState(false);
+  const hasTranscript =
+    Boolean(activeSummaryFile) || (activeOrgMeeting?.transcript ?? '').trim().length > 0;
+  if (!hasTranscript) return null;
+
+  return (
+    <button
+      type="button"
+      data-testid="transcript-toggle"
+      onClick={() => setTranscriptOpen(!transcriptOpen)}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      aria-label={transcriptOpen ? 'Hide transcript' : 'Show transcript'}
+      aria-pressed={transcriptOpen}
+      title="Transcript"
+      className="pointer-events-auto inline-flex h-11 shrink-0 cursor-pointer items-center justify-center gap-0.5 rounded-full border-0 px-3 transition-colors"
+      style={{
+        background: transcriptOpen ? 'var(--surface-active)' : 'var(--surface-raised)',
+        border: '1px solid var(--border-subtle)',
+        boxShadow: 'var(--shadow-md)',
+        color: 'var(--fg-1)',
+      }}
+    >
+      <span
+        className={
+          transcriptOpen || hover
+            ? 'mv-transcript-wave'
+            : 'mv-transcript-wave mv-transcript-wave-static'
+        }
+        aria-hidden="true"
+        style={{ width: 16, height: 13 }}
+      >
+        <span /><span /><span /><span /><span /><span /><span />
+      </span>
+      {/* Expand indicator (Granola-style) — points up to reveal the transcript,
+          flips down when it's open. */}
+      <ChevronUp
+        size={13}
+        className="transition-transform"
+        style={{
+          color: 'var(--fg-2)',
+          transform: transcriptOpen ? 'rotate(180deg)' : 'none',
+        }}
+      />
+    </button>
+  );
+}
+
+/**
+ * The floating chat composer. `disabled` renders it visible-but-inert while a
+ * recording is active (chat needs the processed note, so the input carries a
+ * "Chat available after recording" hint instead of a dead field) — and unlike
+ * the idle state it renders even with no active meeting, so the recording
+ * pill always has the bar beside it.
+ */
+export function AskBar({ disabled = false }: { disabled?: boolean }) {
   const {
     activeSummaryFile,
     activeMeetingName,
@@ -125,7 +226,6 @@ export function AskBar() {
 
   const [expanded, setExpanded] = React.useState(false);
   const [sessionMenuOpen, setSessionMenuOpen] = React.useState(false);
-  const [transcriptHover, setTranscriptHover] = React.useState(false);
   const [input, setInput] = React.useState('');
   const [activeStreamId, setActiveStreamId] = React.useState<string | null>(null);
   const pendingPersistRef = React.useRef<string | null>(null);
@@ -138,7 +238,7 @@ export function AskBar() {
   const session = chat.activeSession;
   const hasMessages = (session?.messages.length ?? 0) > 0;
   const hidden = !activeSummaryFile && !activeOrgMeeting;
-  const canSend = input.trim().length > 0 && !isStreaming;
+  const canSend = input.trim().length > 0 && !isStreaming && !disabled;
 
   const cancelStreamRef = React.useRef(streaming.cancelStream);
   cancelStreamRef.current = streaming.cancelStream;
@@ -155,6 +255,14 @@ export function AskBar() {
       return null;
     });
   }, [activeSummaryFile, activeOrgMeeting?.id, setTranscriptOpen]);
+
+  // Recording started: close a saved-meeting transcript panel that was
+  // already open. The whole bar goes inert (the toggle below is hidden while
+  // disabled), and leaving the 72-band panel up would let it overlap the
+  // expanded LiveTranscriptBar — the one stacking the dock can't resolve.
+  React.useEffect(() => {
+    if (disabled) setTranscriptOpen(false);
+  }, [disabled, setTranscriptOpen]);
 
   React.useEffect(() => {
     if (!expanded && !transcriptOpen) return;
@@ -208,7 +316,7 @@ export function AskBar() {
 
   const submitPrompt = async (raw: string) => {
     const q = raw.trim();
-    if (!q || isStreaming) return;
+    if (!q || isStreaming || disabled) return;
     if (!activeSummaryFile && !activeOrgMeeting) return;
     if (submittingRef.current) return;
     submittingRef.current = true;
@@ -271,15 +379,6 @@ export function AskBar() {
     setExpanded(true);
   };
 
-  const handleTranscriptToggle = () => {
-    if (transcriptOpen) {
-      setTranscriptOpen(false);
-    } else {
-      setTranscriptOpen(true);
-      setExpanded(false);
-      setSessionMenuOpen(false);
-    }
-  };
 
   const handleInputFocus = () => {
     setExpanded(true);
@@ -291,9 +390,13 @@ export function AskBar() {
     setSessionMenuOpen(false);
   };
 
-  if (hidden) return null;
+  // Idle with no meeting in context: nothing to chat about, render nothing.
+  // Disabled (recording active) is the exception — the bar stays visible as
+  // an inert shell so the transcription pill has the composer beside it and
+  // the user can see chat will return after processing.
+  if (hidden && !disabled) return null;
 
-  const showChatPanel = expanded && (hasMessages || isStreaming);
+  const showChatPanel = !disabled && expanded && (hasMessages || isStreaming);
 
   return (
     <div ref={containerRef} data-ask-bar className="flex w-full flex-col gap-2.5" style={{ pointerEvents: 'auto' }}>
@@ -328,7 +431,7 @@ export function AskBar() {
       )}
 
       {/* Suggestion chips — appear when ask bar is focused with empty conversation */}
-      {expanded && !hasMessages && !isStreaming && (
+      {!disabled && expanded && !hasMessages && !isStreaming && (
         <div
           className="mv-chat flex flex-wrap items-center gap-2"
           style={{ padding: '10px 14px' }}
@@ -352,50 +455,16 @@ export function AskBar() {
         className="mv-chat"
         onSubmit={(e) => { e.preventDefault(); void submit(); }}
       >
-        {/* Transcript toggle — shown for any meeting that actually has a
-            transcript. For local meetings that's always true; for shared
-            (org) notes it depends on whether the original share included
-            a transcript artifact. Older shared notes have no transcript
-            and the toggle stays hidden. */}
-        {(activeSummaryFile || (activeOrgMeeting?.transcript ?? '').trim()) && (
-        <button
-          type="button"
-          className={cn('mv-chat-tool', transcriptOpen && 'active')}
-          onClick={handleTranscriptToggle}
-          onMouseEnter={() => setTranscriptHover(true)}
-          onMouseLeave={() => setTranscriptHover(false)}
-          aria-label={transcriptOpen ? 'Hide transcript' : 'Show transcript'}
-          aria-pressed={transcriptOpen}
-          title="Transcript"
-        >
-          {/* Animation states:
-              - Closed at rest: static (no animation), so it doesn't compete
-                with other UI motion.
-              - Closed + hovered: animated, signals "click me" affordance.
-              - Open: animated continuously — matches the prior behavior
-                where the open-transcript wave conveys "live thing".
-              The "active" class on the wrapping button also flips the
-              icon color when the transcript bar is open, preserving the
-              persistent open-state cue alongside the motion. */}
-          <span
-            className={
-              transcriptOpen || transcriptHover
-                ? 'mv-transcript-wave'
-                : 'mv-transcript-wave mv-transcript-wave-static'
-            }
-            aria-hidden="true"
-            style={{ width: 16, height: 12 }}
-          >
-            <span /><span /><span /><span /><span /><span /><span />
-          </span>
-        </button>
-        )}
+        {/* Transcript toggle lives as a standalone circular button LEFT of the
+            Ask bar (see TranscriptToggle, rendered by PrimaryDock) — Granola-
+            style, separate from the composer. */}
 
         {/* Text input */}
         <input
           ref={inputRef}
           className="mv-chat-input"
           value={input}
+          disabled={disabled}
           onChange={(e) => setInput(e.target.value)}
           onFocus={handleInputFocus}
           onKeyDown={(e) => {
@@ -409,7 +478,13 @@ export function AskBar() {
               (e.target as HTMLElement).blur();
             }
           }}
-          placeholder={hasMessages ? 'Continue chat…' : 'Ask anything about this meeting…'}
+          placeholder={
+            disabled
+              ? 'Chat available after recording'
+              : hasMessages
+                ? 'Continue chat…'
+                : 'Ask anything about this meeting…'
+          }
           aria-label="Ask about this meeting"
         />
 

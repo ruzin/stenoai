@@ -142,6 +142,27 @@ export function useUpdateMeeting() {
   });
 }
 
+/**
+ * Autosave for the My notes tab. Unlike useUpdateMeeting it does NOT invalidate
+ * the whole meetings list (a full backend re-scan) on every debounced save —
+ * user_notes is invisible in the list, so it patches only the detail cache in
+ * place. The textarea is the source of truth while focused; this just persists.
+ */
+export function useUpdateUserNotes() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: { summaryFile: string; userNotes: string }) =>
+      unwrap(
+        await ipc().meetings.update(args.summaryFile, { user_notes: args.userNotes }),
+      ),
+    onSuccess: (_data, args) => {
+      qc.setQueryData<Meeting>(meetingsKeys.detail(args.summaryFile), (prev) =>
+        prev ? { ...prev, user_notes: args.userNotes } : prev,
+      );
+    },
+  });
+}
+
 export function useDeleteMeeting() {
   const qc = useQueryClient();
   return useMutation({

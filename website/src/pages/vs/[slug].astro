@@ -1,0 +1,46 @@
+---
+import BaseLayout from "../../layouts/BaseLayout.astro";
+import ComparisonPage from "../../components/ComparisonPage.astro";
+import { getCollection } from "astro:content";
+
+export async function getStaticPaths() {
+  const comparisons = await getCollection("comparisons");
+  return comparisons.map((entry) => ({
+    params: { slug: entry.data.slug },
+    props: { data: entry.data },
+  }));
+}
+
+const { data } = Astro.props;
+
+const canonical = `https://stenoai.co/vs/${data.slug}/`;
+
+const faqJsonLd = {
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  mainEntity: data.faqs.map((f) => ({
+    "@type": "Question",
+    name: f.q,
+    acceptedAnswer: { "@type": "Answer", text: f.a },
+  })),
+};
+
+const breadcrumbJsonLd = {
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  itemListElement: [
+    { "@type": "ListItem", position: 1, name: "Home", item: "https://stenoai.co/" },
+    { "@type": "ListItem", position: 2, name: "Compare", item: "https://stenoai.co/vs/" },
+    { "@type": "ListItem", position: 3, name: `Steno vs ${data.name}`, item: canonical },
+  ],
+};
+---
+
+<BaseLayout
+  title={data.metaTitle}
+  description={data.metaDescription}
+  canonical={canonical}
+  structuredData={[faqJsonLd, breadcrumbJsonLd]}
+>
+  <ComparisonPage data={data} />
+</BaseLayout>

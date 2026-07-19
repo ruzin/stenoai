@@ -129,13 +129,13 @@ test('auto-summarize off writes a transcript-only note with no LLM call; the Gen
           await page.evaluate((h) => {
             window.location.hash = h;
           }, meetingHash);
-          return page.getByTestId('generate-notes-cta').isVisible();
+          return page.getByTestId('generate-notes-dock-button').isVisible();
         },
         { timeout: 20_000, intervals: [250] },
       )
       .toBe(true);
 
-    await page.getByTestId('generate-notes-cta').click();
+    await page.getByTestId('generate-notes-dock-button').click();
 
     // Reprocess rewrites the note with a summary and drops notes_generated.
     await expect

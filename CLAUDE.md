@@ -194,24 +194,34 @@ Releases are automated via `.github/workflows/build-release.yml`. Never create r
    - Keep only the **most recent 4 entries** in the section — trim older ones as you add new ones, regardless of date. The section is a rolling marquee, not a changelog.
    - Update the "Features" list if any new user-facing capability is being added (or an existing one materially changed).
    - Update "Models & Performance" if the bundled Whisper or Ollama model lineup changed.
-3. **Bump version** in `app/package.json`.
-4. **Commit and merge** the README + version bump to `main` (or push directly if explicitly authorised).
-5. **Draft release notes** as markdown — they become the GitHub Release body verbatim:
+3. **Update `docs/changelog.mdx`** (the public docs changelog page) with a new `<Update label="v<version>" description="<Month DD, YYYY>">` block, grouped under `**New**` / `**Improved**` / `**Fixed**` / `**Known Issues**` as applicable — same source list as the README bullets, but every entry gets its own line here (not trimmed to 4).
+   - **Copy-review pass before merging:** re-read every bullet for readability, not just accuracy. Rewrite any sentence that:
+     - buries the actual instruction after multiple clauses (put the action first: "Turn off X to do Y" beats "Do Y, whenever ..., turn off X");
+     - has a trailing modifier or restatement that makes you re-read it (drop "with X hidden"-style tails; don't restate the same point twice, e.g. "...so it can be reprocessed -- it's never lost");
+     - uses a pronoun with no clear antecedent ("turn it on" referring to something not named in the sentence);
+     - is vague about what actually broke ("Fixed an issue choosing X" → "Fixed an issue that could prevent choosing X").
+   - Each bullet should read as one clear clause on first pass. If in doubt, read it aloud.
+4. **Bump version** in `app/package.json`.
+5. **Commit and merge** the README + changelog + version bump to `main` (or push directly if explicitly authorised).
+6. **Draft release notes** as markdown — they become the GitHub Release body verbatim:
    - One-line summary at the top.
    - Headline features grouped under `### Section` headers (e.g., "System audio", "UX polish", "Under the hood", "Fixes").
    - Migration/upgrade notes if anything changed paths, identifiers, defaults, or requires user action.
-6. **Run the release gate (blocks the tag).** Push a `release/v<version>` branch — `git push origin main:refs/heads/release/v0.3.0` — to trigger `.github/workflows/e2e-release-gate.yml`, which runs the full e2e matrix (T1 + macOS/Windows T2 + `@pipeline` + the `@long-meeting` T3 smoke). **Do not create the tag until this run is green.** The gate runs on the branch, before the immutable tag exists, so a failure is fixed-and-re-pushed rather than leaving a half-released tag. (You can also dry-run it via `workflow_dispatch`.) `build-release.yml` additionally runs a fast T1 backstop smoke (`gate-smoke`) before signing, but that is defense-in-depth — the branch gate is the real signal.
-7. **Create an annotated tag** on `main` with the release notes as the tag message. **Always pass `--cleanup=whitespace`** — without it, `git tag -F` strips every line starting with `#`, which silently deletes Markdown `### Section` headers from the release body:
+   - A `### Thanks to our contributors` section crediting everyone with a merged PR since the last tag — derive the list with `git shortlog -sne v<previous>..HEAD`, resolve each to their GitHub @handle (`gh pr list --state merged --json number,author,mergedAt`), and @-mention them so they're linked and notified in the release body. Credit the external contributors (the maintainer running the release need not self-credit).
+   - Apply the same copy-review pass as step 3 — these notes are public-facing too.
+7. **Run the release gate (blocks the tag).** Push a `release/v<version>` branch — `git push origin main:refs/heads/release/v0.3.0` — to trigger `.github/workflows/e2e-release-gate.yml`, which runs the full e2e matrix (T1 + macOS/Windows T2 + `@pipeline` + the `@long-meeting` T3 smoke). **Do not create the tag until this run is green.** The gate runs on the branch, before the immutable tag exists, so a failure is fixed-and-re-pushed rather than leaving a half-released tag. (You can also dry-run it via `workflow_dispatch`.) `build-release.yml` additionally runs a fast T1 backstop smoke (`gate-smoke`) before signing, but that is defense-in-depth — the branch gate is the real signal.
+8. **Create an annotated tag** on `main` with the release notes as the tag message. **Always pass `--cleanup=whitespace`** — without it, `git tag -F` strips every line starting with `#`, which silently deletes Markdown `### Section` headers from the release body:
    ```
    git tag -a v0.3.0 --cleanup=whitespace -F /path/to/notes.md
    git push origin v0.3.0
    ```
    (If using `-m` instead of `-F`, pass `--cleanup=whitespace` anyway — the comment-stripping default applies to both.)
-8. The tag push triggers the workflow which:
+9. The tag push triggers the workflow which:
    - Builds signed + notarized DMGs for both arm64 and x64
    - Creates a GitHub Release with the tag message as the body
    - Uploads both DMGs as release assets
-9. Do NOT build DMGs locally for releases, do NOT use `gh release create` manually.
+   - Posts a release announcement to Discord (summary + a few headline features + the contributor thank-you), via the `Announce release on Discord` step (`scripts/discord-release-announce.mjs`). This is automatic and requires no manual Discord post. It no-ops unless the `DISCORD_WEBHOOK_URL` repo secret is set (an incoming webhook for the announcements channel), and is `continue-on-error` so a Discord hiccup never fails the release.
+10. Do NOT build DMGs locally for releases, do NOT use `gh release create` manually. Do NOT post the Discord release announcement by hand — the workflow does it.
 
 ## Session Logging
 When the user says "log session" or similar (e.g., "update session log", "document this session"):

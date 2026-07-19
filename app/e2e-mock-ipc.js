@@ -43,10 +43,80 @@ const SEED_MEETING = {
   // exercises the same key buildTranscriptBundle reads for saved meetings.
   user_notes: 'Remember to send the deck.',
   participants: ['Alice', 'Bob'],
+  // Non-empty so this seed is a genuinely *summarised* note — the
+  // generate-notes-bar T1's "hides for a normal note" case must take the
+  // has-summary render path, not the "no summary available" fallback
+  // (#313 review).
+  summary: 'The team agreed to ship on Friday; Bob owns the release notes.',
+  key_points: [],
+  action_items: [],
+  discussion_areas: [],
+};
+
+// A transcript-only note (auto-summarise off, #276 → notes_generated:false):
+// has a transcript, no summary. Drives the GenerateNotesBar T1 (the floating
+// "Generate notes" CTA above the Ask bar). Seeded only when
+// STENOAI_E2E_SEED_PENDING_NOTE=1.
+const PENDING_MEETING = {
+  session_info: {
+    name: 'New note',
+    summary_file: 'pending_summary.md',
+    processed_at: '2026-07-05T10:00:00Z',
+    duration_seconds: 60,
+    notes_generated: false,
+  },
+  transcript: '[00:03] [You] we ship Friday.\n[00:06] [Others] I will prep the release notes.',
+  is_diarised: true,
   summary: '',
   key_points: [],
   action_items: [],
   discussion_areas: [],
+  participants: [],
+};
+
+// A continued note (continue-recording appended a segment after notes were
+// generated → notes_stale:true): has a summary AND a stale marker. Drives the
+// "Regenerate notes" variant of the floating CTA. Seeded only when
+// STENOAI_E2E_SEED_STALE_NOTE=1.
+const STALE_MEETING = {
+  session_info: {
+    name: 'Continued note',
+    summary_file: 'stale_summary.md',
+    processed_at: '2026-07-10T10:00:00Z',
+    duration_seconds: 300,
+    notes_stale: true,
+  },
+  transcript:
+    '[00:03] [You] first segment.\n\n--- Resumed 10:20 ---\n\n[00:02] [You] second segment.',
+  is_diarised: true,
+  summary: 'Covers only the first segment.',
+  key_points: [],
+  action_items: [],
+  discussion_areas: [],
+  participants: [],
+};
+
+// An instant-stop placeholder (processing:true): written from the live
+// transcript at stop, still upgrading in the background. Drives the
+// "Finishing up…" affordance + the stop-navigates-to-note behaviour. Seeded
+// only when STENOAI_E2E_SEED_PROCESSING_NOTE=1.
+const PROCESSING_NOTE_FILE = 'processing_summary.md';
+const PROCESSING_MEETING = {
+  session_info: {
+    name: 'Instant Note',
+    summary_file: PROCESSING_NOTE_FILE,
+    processed_at: '2026-07-12T10:00:00Z',
+    duration_seconds: 60,
+    notes_generated: false,
+    processing: true,
+  },
+  transcript: '[00:03] we ship Friday.',
+  is_diarised: false,
+  summary: '',
+  key_points: [],
+  action_items: [],
+  discussion_areas: [],
+  participants: [],
 };
 
 // A generated template report attached to SEED_MEETING when
@@ -87,10 +157,102 @@ function install({ ipcMain }) {
     remoteUrl: '', // remote Ollama URL (empty = not configured)
   };
 
+  // In-memory recording state machine for the pill-dock T1: start/pause/
+  // resume/stop mutate it and get-queue-status reflects it, so the renderer's
+  // queue poll drives the same status transitions the real backend would.
+  // Idle shape matches the old static default, so specs that never record
+  // see no difference.
+  const rec = {
+    active: false,
+    paused: false,
+    processing: false,
+    sessionName: null,
+    startedAt: 0,
+    pausedAt: 0,
+  };
+
+  // In-memory overlay so update-meeting → get-meeting round-trips the My notes
+  // tab in T1 (summaryFile → { user_notes }). The real handler persists to the
+  // note file; the T1 seeds are consts, so we overlay here instead.
+  const meetingOverlay = {};
+  const applyOverlay = (m) => {
+    if (!m || !m.session_info) return m;
+    const o = meetingOverlay[m.session_info.summary_file];
+    return o ? { ...m, ...o } : m;
+  };
+
   // Channels with behaviour a test depends on. Each is (event, ...args) like a
   // real ipcMain.handle callback. Mirror the real handlers' return shapes from
   // app/main.js (get-ai-provider ~5950, org-* ~7990).
   const MOCKS = {
+    'start-recording-ui': async (_event, name) => {
+      rec.active = true;
+      rec.paused = false;
+      rec.processing = false;
+      rec.sessionName = name && String(name).trim() ? String(name).trim() : 'Note';
+      rec.startedAt = Date.now();
+      return { success: true, sessionName: rec.sessionName };
+    },
+    'stop-recording-ui': async () => {
+      rec.active = false;
+      rec.paused = false;
+      // Park in "processing" — T1 has no backend to complete it; the spec only
+      // asserts the renderer's optimistic transition to the processing dock.
+      rec.processing = true;
+      // Instant stop: with the processing-note seed, return the placeholder's
+      // path so useRecording.stopRecording navigates to the note (not the dock).
+      if (process.env.STENOAI_E2E_SEED_PROCESSING_NOTE === '1') {
+        return { success: true, summaryFile: PROCESSING_NOTE_FILE };
+      }
+      return { success: true };
+    },
+    'pause-recording-ui': async () => {
+      if (rec.active && !rec.paused) {
+        rec.paused = true;
+        rec.pausedAt = Date.now();
+      }
+      return { success: true };
+    },
+    'resume-recording-ui': async () => {
+      if (rec.active && rec.paused) {
+        rec.paused = false;
+        // Freeze elapsed across the pause, like the real backend: shift the
+        // start forward by the paused span so elapsed doesn't tick while
+        // paused.
+        rec.startedAt += Date.now() - rec.pausedAt;
+      }
+      return { success: true };
+    },
+    'get-queue-status': async () => ({
+      success: true,
+      isProcessing: rec.processing,
+      queueSize: 0,
+      currentJob: rec.processing ? rec.sessionName : null,
+      currentReprocesses: [],
+      hasRecording: rec.active,
+      isPaused: rec.paused,
+      elapsedSeconds: rec.active
+        ? Math.floor(((rec.paused ? rec.pausedAt : Date.now()) - rec.startedAt) / 1000)
+        : 0,
+      sessionName: rec.active || rec.processing ? rec.sessionName : null,
+    }),
+
+    // Engine is static per launch; STENOAI_E2E_MOCK_ENGINE lets the pill-dock
+    // T1 drive the Whisper variant (no live transcript, inline pause/resume).
+    'get-transcription-engine': async () => ({
+      success: true,
+      engine: process.env.STENOAI_E2E_MOCK_ENGINE || 'parakeet',
+    }),
+
+    // Default not-installed keeps most T1 specs on their routes; the pill-dock
+    // T1 sets STENOAI_E2E_MOCK_PARAKEET_INSTALLED=1 so App.tsx's first-run
+    // setup gate doesn't redirect it to /setup before it can hit Record.
+    'parakeet-status': async () => ({
+      success: true,
+      model: '',
+      installed: process.env.STENOAI_E2E_MOCK_PARAKEET_INSTALLED === '1',
+    }),
+
     'get-ai-provider': async () => ({
       success: true,
       ai_provider: state.provider,
@@ -118,6 +280,15 @@ function install({ ipcMain }) {
     // lives in MOCKS, which shadows DEFAULTS, so it is the single source for the
     // channel.
     'list-meetings': async () => {
+      if (process.env.STENOAI_E2E_SEED_PENDING_NOTE === '1') {
+        return { success: true, meetings: [PENDING_MEETING] };
+      }
+      if (process.env.STENOAI_E2E_SEED_STALE_NOTE === '1') {
+        return { success: true, meetings: [STALE_MEETING] };
+      }
+      if (process.env.STENOAI_E2E_SEED_PROCESSING_NOTE === '1') {
+        return { success: true, meetings: [PROCESSING_MEETING] };
+      }
       if (process.env.STENOAI_E2E_SEED_MEETING === '1') {
         return { success: true, meetings: [seededMeeting()] };
       }
@@ -136,13 +307,38 @@ function install({ ipcMain }) {
     // by filtering list-meetings — answer it with the same seeded meeting so the
     // transcript-export detail route resolves and renders the transcript actions.
     'get-meeting': async (_event, summaryFile) => {
+      if (process.env.STENOAI_E2E_SEED_PENDING_NOTE === '1') {
+        return { success: true, meeting: applyOverlay(PENDING_MEETING) };
+      }
+      if (process.env.STENOAI_E2E_SEED_STALE_NOTE === '1') {
+        return { success: true, meeting: applyOverlay(STALE_MEETING) };
+      }
+      if (process.env.STENOAI_E2E_SEED_PROCESSING_NOTE === '1') {
+        return { success: true, meeting: applyOverlay(PROCESSING_MEETING) };
+      }
       if (process.env.STENOAI_E2E_SEED_MEETING === '1') {
-        return { success: true, meeting: seededMeeting() };
+        // seededMeeting() carries main's optional template-report; applyOverlay
+        // layers my user_notes edits on top (My notes tab round-trip).
+        return { success: true, meeting: applyOverlay(seededMeeting()) };
       }
       const m = SEEDED_MEETINGS.find(
         (x) => x.session_info && x.session_info.summary_file === summaryFile,
       );
-      return m ? { success: true, meeting: m } : { success: false, error: 'meeting not found' };
+      return m
+        ? { success: true, meeting: applyOverlay(m) }
+        : { success: false, error: 'meeting not found' };
+    },
+
+    // My notes autosave: persist the overlay so a follow-up get-meeting sees
+    // the edit (mirrors the real update-meeting body-section upsert).
+    'update-meeting': async (_event, summaryFile, patch) => {
+      if (patch && typeof patch.user_notes === 'string') {
+        meetingOverlay[summaryFile] = {
+          ...(meetingOverlay[summaryFile] || {}),
+          user_notes: patch.user_notes,
+        };
+      }
+      return { success: true, message: 'ok' };
     },
 
     // Mirror the real export-transcript handler's seam: with STENOAI_E2E_EXPORT_PATH
@@ -254,6 +450,12 @@ function install({ ipcMain }) {
     process.platform === 'darwin'
       ? 'mlx-community/parakeet-tdt-0.6b-v3'
       : 'istupakov/parakeet-tdt-0.6b-v3-onnx';
+  // src/whisper_models.py's real model id. Kept as a computed key below
+  // (not an inline string literal) — ipc-contract.test.js's e2e-mock stub
+  // scan flags any hyphenated quoted key as a claimed channel name, and
+  // this id has hyphens too, so an inline literal here reads as a stale-
+  // channel false positive.
+  const WHISPER_MODEL_ID = 'large-v3-turbo';
 
   const DEFAULTS = {
     'get-app-version': { success: true, version: '0.0.0-e2e', name: 'Steno' },
@@ -282,14 +484,10 @@ function install({ ipcMain }) {
     },
     'list-folders': { success: true, folders: [] },
     'get-calendar-events': { success: true, events: [] },
-    // installed:true (was false) — matches the list-parakeet-models entry
-    // below now shipping an installed model, and doubles as belt-and-braces
-    // against App.tsx's first-run setup gate (checks this exact channel).
-    'parakeet-status': { success: true, model: PARAKEET_MODEL_ID, installed: true },
-    // Transcribe tab reads these on first paint. Default to Parakeet (the new
-    // default engine) + auto so the language picker renders enabled and shows
-    // the Parakeet language set (parakeet-language-picker.t1).
-    'get-transcription-engine': { success: true, engine: 'parakeet' },
+    // parakeet-status lives in MOCKS (env-gated installed flag).
+    // Transcribe tab reads this on first paint. (The engine itself moved to
+    // MOCKS so STENOAI_E2E_MOCK_ENGINE can override it; default parakeet keeps
+    // the language picker enabled — parakeet-language-picker.t1.)
     'get-language': { success: true, language: 'auto' },
     // Real production catalog (src/whisper_models.py / src/parakeet_models.py)
     // rather than empty — so the Settings UI's model list actually renders
@@ -300,7 +498,7 @@ function install({ ipcMain }) {
     'list-whisper-models': {
       success: true,
       supported_models: {
-        'large-v3-turbo': {
+        [WHISPER_MODEL_ID]: {
           name: 'Whisper Large V3 Turbo',
           size: '1.6GB',
           installed: false,
@@ -397,17 +595,8 @@ function install({ ipcMain }) {
       },
     },
     'get-current-model': { success: true, model: 'gemma4:e2b-it-qat' },
-    'get-queue-status': {
-      success: true,
-      isProcessing: false,
-      queueSize: 0,
-      currentJob: null,
-      currentReprocesses: [],
-      hasRecording: false,
-      isPaused: false,
-      elapsedSeconds: 0,
-      sessionName: null,
-    },
+    // get-queue-status lives in MOCKS (stateful recording machine) — its idle
+    // shape is identical to the static default that used to sit here.
     // Settings > Templates renders a row per template with badge/prompt/action
     // variety (default, locked built-in, unlocked built-in, custom) — an empty
     // list would only ever show the "New Template" row.

@@ -33,15 +33,13 @@ export function Home({ mode }: HomeProps) {
 
   const emptyState = !meetings.data?.length;
   const isRecording = recording.status === 'recording' || recording.status === 'paused';
-  // Empty-state CTA: idle or processing → start a new recording (auto-navigates;
-  // previous note keeps processing in the background queue); recording/paused
-  // → back to /recording.
+  // Empty-state CTA: start a new recording AND open the live-note editor
+  // (/recording) so the user can write notes while it records; a previous note
+  // keeps processing in the background queue. Coexistence still holds (the pill
+  // follows on navigation) — the explicit action just lands them on the note.
   const onToggleRecording = () => {
-    if (isRecording) {
-      navigate('/recording');
-    } else {
-      void recording.startRecording();
-    }
+    if (!isRecording) void recording.startRecording();
+    navigate('/recording');
   };
 
   const folderName = React.useMemo(() => {

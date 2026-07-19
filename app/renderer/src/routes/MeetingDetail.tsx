@@ -13,12 +13,14 @@ import {
   Folder as FolderIcon,
   Globe,
   MoreHorizontal,
+  PencilLine,
   RefreshCw,
   Trash2,
   Users,
 } from 'lucide-react';
 import {
   Popover,
+  PopoverAnchor,
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover';
@@ -38,6 +40,7 @@ import {
   useGenerateReport,
   useSetActiveReport,
   useDeleteReport,
+  useUpdateUserNotes,
   meetingsKeys,
 } from '@/hooks/useMeetings';
 import { useTemplates } from '@/hooks/useTemplates';
@@ -82,6 +85,7 @@ import {
   streamCache,
   type StreamPhase,
 } from '@/lib/meetingDetailState';
+import { useReprocessBridge } from '@/hooks/reprocessBridgeStore';
 
 const LAST_OPENED_KEY = 'steno-last-opened-meeting';
 
@@ -142,13 +146,26 @@ export function MeetingDetail({ summaryFile }: MeetingDetailProps) {
           </button>
         </div>
       ) : (
-        <DetailContent key={summaryFile} meeting={meeting.data} />
+        <DetailContent key={summaryFile} meeting={meeting.data} routeSummaryFile={summaryFile} />
       )}
     </MeetingsShell>
   );
 }
 
-function DetailContent({ meeting }: { meeting: Meeting }) {
+function DetailContent({
+  meeting,
+  routeSummaryFile,
+}: {
+  meeting: Meeting;
+  /** The summaryFile as it appears in the route — the same identity
+   *  useActiveMeeting registers as activeSummaryFile. Can differ from
+   *  info.summary_file when the storage path crosses a symlink (macOS
+   *  /var → /private/var, custom storage dirs): the backend realpaths,
+   *  the route doesn't. Anything compared against activeSummaryFile
+   *  (the reprocess bridge) must use THIS identity; anything talking to
+   *  the backend keeps info.summary_file. */
+  routeSummaryFile: string;
+}) {
   const info = meeting.session_info;
   const summaryFile = info.summary_file;
   const date = formatDetailDate(info);
@@ -290,7 +307,13 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
     const sessionName = info.name;
     const offChunk = ipc().on.summaryChunk((e) => {
       if (e.summaryFile !== summaryFile) return;
-      setStreamPhase((prev) => (prev === 'analyzing' ? 'generating' : prev));
+      // Promote from idle too (not just analyzing): an instant-stop note's
+      // first-ever summary streams in with no prior reprocess to seed
+      // 'analyzing', so without idle→generating the StreamingView (gated on
+      // phase !== 'idle') would never render and the summary would silently
+      // pop in only at completion. Chunks are summaryFile-filtered, so this
+      // can't fire for the wrong note; auto-off sends no chunks, so it no-ops.
+      setStreamPhase((prev) => (prev === 'analyzing' || prev === 'idle' ? 'generating' : prev));
       setStreamText((prev) => prev + e.chunk);
     });
     const offComplete = ipc().on.summaryComplete((e) => {
@@ -402,6 +425,22 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
   };
 
   const startReprocess = () => {
+    // Synchronous re-entrancy guard (#313 review): the floating dock button's
+    // disabled state arrives one commit late (published via effect to the
+    // reprocess bridge), so a fast double-click there could fire two
+    // overlapping `reprocess` jobs for the same file — main.js deliberately
+    // allows concurrent jobs across files and has no same-file dedupe.
+    // streamCache is a module-level Map written synchronously below, so it
+    // can't lag the way state/props can.
+    const cached = streamCache.get(summaryFile);
+    if (
+      reprocess.isPending ||
+      streamPhase !== 'idle' ||
+      cached?.phase === 'analyzing' ||
+      cached?.phase === 'generating'
+    ) {
+      return;
+    }
     setStreamText('');
     setStreamPhase('analyzing');
     setChunkProgress(null);
@@ -516,6 +555,76 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
   // unparsable for unrelated reasons and would otherwise be misclassified as
   // transcript-only.
   const notesNotGenerated = meeting.session_info.notes_generated === false;
+  // Instant-stop placeholder: written from the live transcript at stop while
+  // the batch transcribe/summarise upgrades it in the background. Show a quiet
+  // "finishing up" affordance and suppress the Generate-notes CTA until the
+  // pipeline completes (or clears the flag on failure).
+  const isProcessing = meeting.session_info.processing === true;
+
+  // Publish this note's reprocess trigger + streaming state so the floating
+  // GenerateNotesBar (mounted at App level, above the Ask bar) drives THIS
+  // detail's `startReprocess` and shares its disabled state — one source of
+  // truth, no double-fire. Only while showing a transcript-only note.
+  const publishReprocess = useReprocessBridge((s) => s.publish);
+  const clearReprocess = useReprocessBridge((s) => s.clear);
+  // Mirrors the render ternary below: a transcription-failed note shows its
+  // failure notice and hides its own reprocess controls, so the floating
+  // trigger must not offer "Generate notes" for it either (#313 review —
+  // reprocess on a failed note exits non-zero and strands the UI).
+  const summaryPending =
+    notesNotGenerated && !transcriptionFailed && !isProcessing && Boolean(meeting.transcript);
+  // A continued note (continue-recording appended a segment after notes were
+  // generated): the summary no longer covers the transcript — offer the same
+  // floating "Generate notes" CTA. reprocess clears the flag on rewrite.
+  const summaryStale =
+    meeting.session_info.notes_stale === true &&
+    !transcriptionFailed &&
+    !isProcessing &&
+    Boolean(meeting.transcript);
+  const reprocessStreaming = reprocess.isPending || streamPhase !== 'idle';
+  const startReprocessRef = React.useRef(startReprocess);
+  startReprocessRef.current = startReprocess;
+  const stableStartReprocess = React.useCallback(() => startReprocessRef.current(), []);
+  React.useEffect(() => {
+    // Publish under the ROUTE identity (routeSummaryFile): the bar compares
+    // against activeSummaryFile, which useActiveMeeting registered from the
+    // route. info.summary_file can be a realpath'd variant of the same file
+    // (symlinked storage path) and would never match.
+    // When reprocess has FAILED, the inline retry card (data-testid=
+    // "reprocess-retry") owns the CTA — don't also publish the floating dock
+    // button, or the user sees two identical "Generate notes" buttons at once
+    // (the failure path doesn't invalidate the query, so notes_stale /
+    // notes_generated stay true here). The floating CTA returns on the next
+    // startReprocess, which resets reprocessFailed.
+    if ((summaryPending || summaryStale) && !reprocessFailed) {
+      publishReprocess({
+        summaryFile: routeSummaryFile,
+        streaming: reprocessStreaming,
+        // Always "Generate notes" — no separate Regenerate wording. Every
+        // record/continue → stop leaves this one CTA.
+        label: 'Generate notes',
+        start: stableStartReprocess,
+      });
+    } else {
+      clearReprocess(routeSummaryFile);
+    }
+    return () => clearReprocess(routeSummaryFile);
+  }, [
+    summaryPending,
+    summaryStale,
+    reprocessFailed,
+    reprocessStreaming,
+    routeSummaryFile,
+    stableStartReprocess,
+    publishReprocess,
+    clearReprocess,
+  ]);
+
+  // My notes tab: an always-available editable notes layer, independent of
+  // the summary. Persists to the `## User Notes` section (autosave). Local
+  // state resets per meeting because DetailContent is keyed by summaryFile.
+  const [tab, setTab] = React.useState<'summary' | 'notes'>('summary');
+  const hasUserNotes = Boolean((meeting.user_notes ?? '').trim());
 
   return (
     <article data-testid="meeting-detail" className="space-y-9">
@@ -564,15 +673,15 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
                 {copiedTranscript ? 'Copied!' : 'Copy transcript'}
               </TooltipContent>
             </Tooltip>
-            {/* Regenerate re-runs summarisation on the existing transcript.
-                A transcription-failure note has no transcript, so reprocess
+            {/* Re-runs summarisation on the existing transcript. A
+                transcription-failure note has no transcript, so reprocess
                 would exit non-zero and strand the UI on a spinner — hide it
                 until a real re-transcribe-from-audio retry ships. */}
             {!info.transcription_failed && (
               <Tooltip>
                 <TooltipTrigger asChild>
                   <ActionIconButton
-                    label="Regenerate notes"
+                    label="Generate notes"
                     onClick={startReprocess}
                     disabled={reprocess.isPending || streamPhase !== 'idle'}
                   >
@@ -587,7 +696,7 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
                     />
                   </ActionIconButton>
                 </TooltipTrigger>
-                <TooltipContent side="bottom">Regenerate notes</TooltipContent>
+                <TooltipContent side="bottom">Generate notes</TooltipContent>
               </Tooltip>
             )}
             <Popover>
@@ -806,29 +915,48 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
         )}
       </header>
 
-      {streamPhase === 'idle' && (reports.length > 0 || reportTemplates.length > 0) && (
-        <ReportSwitch
-          reports={reports}
-          activeReportId={activeReportId}
-          onSelect={onSelectReport}
-          onDelete={onDeleteReport}
-          templates={reportTemplates}
-          onGenerate={onGenerateReport}
-          generating={generateReport.isPending}
-        />
-      )}
+      <NoteViewToggle
+        tab={tab}
+        onTab={setTab}
+        hasNotes={hasUserNotes}
+        activeReportId={activeReportId}
+        reports={reports}
+        templates={reportTemplates}
+        onSelectReport={onSelectReport}
+        onDeleteReport={onDeleteReport}
+        onGenerate={onGenerateReport}
+        generating={generateReport.isPending}
+      />
+
+      {tab === 'summary' && (
+      <>
       {reprocessFailed && (
-        <div
-          className="rounded-lg p-3 text-sm"
+        <section
+          className="flex flex-col items-start gap-2 rounded-lg p-4"
           style={{
             background: 'var(--surface-raised)',
-            border: '1px solid var(--border-subtle)',
-            color: 'var(--fg-2)',
+            border: '1px solid var(--border-subtle, var(--surface-raised))',
           }}
+          data-testid="reprocess-retry"
         >
-          Summary generation failed — the model may have run out of memory or context.
-          Try switching to a smaller model like <strong style={{ color: 'var(--fg-1)' }}>Gemma 4 E2B</strong> in Settings.
-        </div>
+          <div className="text-[15px] font-medium" style={{ color: 'var(--fg-1)' }}>
+            Notes weren’t generated
+          </div>
+          <p
+            className="text-[14px] leading-[1.6]"
+            style={{ color: 'var(--fg-2)', maxWidth: '64ch' }}
+          >
+            That didn’t work this time — give it another go. If it keeps failing
+            on a long meeting, switch to a smaller model in Settings.
+          </p>
+          <Button
+            className="mt-1"
+            onClick={startReprocess}
+            disabled={reprocess.isPending || streamPhase !== 'idle'}
+          >
+            Generate notes
+          </Button>
+        </section>
       )}
       {streamPhase !== 'idle' ? (
         <StreamingView text={streamText} phase={streamPhase} chunkProgress={chunkProgress} />
@@ -873,6 +1001,32 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
                 </p>
               )}
             </section>
+          ) : isProcessing ? (
+            <section
+              className="flex flex-col gap-2 rounded-lg p-4"
+              style={{
+                background: 'var(--surface-raised)',
+                border: '1px solid var(--border-subtle, var(--surface-raised))',
+              }}
+              data-testid="note-processing"
+            >
+              <div
+                className="flex items-center gap-1.5 text-[15px] font-medium"
+                style={{ color: 'var(--fg-1)' }}
+              >
+                Finishing up
+                <span className="thinking-dot" />
+                <span className="thinking-dot" />
+                <span className="thinking-dot" />
+              </div>
+              <p
+                className="text-[14px] leading-[1.6]"
+                style={{ color: 'var(--fg-2)', maxWidth: '64ch' }}
+              >
+                Your transcript is captured — refining it and generating notes in
+                the background. You can read and edit <strong>My notes</strong> now.
+              </p>
+            </section>
           ) : summary ? (
             <section className="flex flex-col gap-3">
               <SectionTitle>Summary</SectionTitle>
@@ -908,17 +1062,10 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
                 style={{ color: 'var(--fg-2)', maxWidth: '64ch' }}
               >
                 This recording was transcribed but notes were not generated
-                automatically. Copy or save the transcript from the actions
-                above, or generate notes whenever you like.
+                automatically. Use the <strong>Generate notes</strong> button
+                below to create them, or copy or save the transcript from the
+                actions above.
               </p>
-              <Button
-                className="mt-1"
-                data-testid="generate-notes-cta"
-                onClick={startReprocess}
-                disabled={reprocess.isPending || streamPhase !== 'idle'}
-              >
-                Generate notes
-              </Button>
             </section>
           ) : (
             <p className="py-2 text-sm" style={{ color: 'var(--fg-2)' }}>
@@ -974,6 +1121,15 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
           )}
 
         </div>
+      )}
+      </>
+      )}
+
+      {tab === 'notes' && (
+        <MyNotesEditor
+          summaryFile={routeSummaryFile}
+          initialNotes={meeting.user_notes ?? ''}
+        />
       )}
 
       <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
@@ -1040,6 +1196,301 @@ function DetailContent({ meeting }: { meeting: Meeting }) {
 // Subcomponents
 // ---------------------------------------------------------------------------
 
+/**
+ * Summary / My notes tab switcher. My notes is always present (the note's own
+ * notes layer survives regardless of summary state); a dot marks when notes
+ * exist so the tab reads as non-empty without opening it.
+ */
+/**
+ * Split toggle (Granola-style): one pill split into "My notes" (left) and a
+ * template picker (right). The left switches to the notes editor; the right
+ * shows the active summary/report view and drops a menu of Summary + generated
+ * reports + "Generate from template". Replaces the old Summary/My-notes tabs +
+ * the separate report switcher — one control for every view of the note.
+ */
+function NoteViewToggle({
+  tab,
+  onTab,
+  hasNotes,
+  activeReportId,
+  reports,
+  templates,
+  onSelectReport,
+  onDeleteReport,
+  onGenerate,
+  generating,
+}: {
+  tab: 'summary' | 'notes';
+  onTab: (t: 'summary' | 'notes') => void;
+  hasNotes: boolean;
+  activeReportId: string | null;
+  reports: Report[];
+  templates: Template[];
+  onSelectReport: (id: string | null) => void;
+  onDeleteReport: (reportId: string) => void;
+  onGenerate: (templateId: string) => void;
+  generating: boolean;
+}) {
+  const [menuOpen, setMenuOpen] = React.useState(false);
+  const [deleteTarget, setDeleteTarget] = React.useState<Report | null>(null);
+  const notesActive = tab === 'notes';
+  const summaryActive = tab === 'summary';
+  const activeLabel =
+    activeReportId === null
+      ? 'Summary'
+      : reports.find((r) => r.id === activeReportId)?.template_name ?? 'Summary';
+
+  const selectView = (id: string | null) => {
+    setMenuOpen(false);
+    onSelectReport(id);
+    onTab('summary');
+  };
+  const generateView = (templateId: string) => {
+    setMenuOpen(false);
+    onGenerate(templateId);
+    onTab('summary');
+  };
+
+  return (
+    <div className="flex items-center" data-testid="note-view-toggle">
+      <div
+        role="tablist"
+        aria-label="Note view"
+        className="inline-flex items-stretch overflow-hidden rounded-full"
+        style={{ border: '1px solid var(--border-subtle)' }}
+      >
+        {/* Left — My notes */}
+        <button
+          type="button"
+          role="tab"
+          aria-selected={notesActive}
+          data-testid="tab-notes"
+          onClick={() => onTab('notes')}
+          className="inline-flex items-center gap-1.5 px-3 py-1 text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+          style={{
+            background: notesActive ? 'var(--surface-active)' : 'transparent',
+            color: notesActive ? 'var(--fg-1)' : 'var(--fg-2)',
+          }}
+        >
+          <PencilLine className="size-[13px]" />
+          My notes
+          {hasNotes && !notesActive && (
+            <span
+              aria-hidden="true"
+              className="size-1.5 rounded-full"
+              style={{ background: 'var(--accent-primary)' }}
+            />
+          )}
+        </button>
+        <span aria-hidden="true" style={{ width: 1, background: 'var(--border-subtle)' }} />
+        {/* Right — a split button: the label switches to the active summary/
+            report view directly; only the chevron opens the template menu. */}
+        <Popover open={menuOpen} onOpenChange={setMenuOpen}>
+          {/* Anchor the menu to the WHOLE right segment (label + chevron) so it
+              drops straight down from the Summary box, not off the tiny
+              chevron. */}
+          <PopoverAnchor asChild>
+            <div
+              className="inline-flex items-stretch"
+              style={{ background: summaryActive ? 'var(--surface-active)' : 'transparent' }}
+            >
+              <button
+                type="button"
+                role="tab"
+                aria-selected={summaryActive}
+                data-testid="tab-summary"
+                onClick={() => onTab('summary')}
+                className="inline-flex items-center py-1 pl-3 pr-1.5 text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                style={{ color: summaryActive ? 'var(--fg-1)' : 'var(--fg-2)' }}
+              >
+                {generating ? 'Generating…' : activeLabel}
+              </button>
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  aria-label="Choose view or template"
+                  data-testid="note-view-menu-trigger"
+                  className="inline-flex items-center py-1 pl-0.5 pr-2.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring hover:text-[color:var(--fg-1)]"
+                  style={{ color: 'var(--fg-2)' }}
+                >
+                  <ChevronDown className="size-[13px]" />
+                </button>
+              </PopoverTrigger>
+            </div>
+          </PopoverAnchor>
+          <PopoverContent align="start" className="w-56 p-1" data-testid="note-view-menu">
+            <ViewMenuItem
+              selected={summaryActive && activeReportId === null}
+              onClick={() => selectView(null)}
+            >
+              Summary
+            </ViewMenuItem>
+            {reports.map((r) => {
+              const meta = [r.model, formatReportDate(r.created_at)].filter(Boolean).join(' · ');
+              return (
+                <div
+                  key={r.id}
+                  className="group flex items-center rounded-md transition-colors hover:bg-[color:var(--surface-hover)]"
+                >
+                  <button
+                    type="button"
+                    onClick={() => selectView(r.id)}
+                    className="flex min-w-0 flex-1 flex-col items-start gap-0.5 px-3 py-2 text-left text-sm"
+                    style={{ color: 'var(--fg-1)' }}
+                    title={meta || undefined}
+                  >
+                    <span className="truncate">{r.template_name}</span>
+                    {meta && (
+                      <span className="text-[10.5px]" style={{ color: 'var(--fg-2)' }}>
+                        {meta}
+                      </span>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={`Delete report ${r.template_name}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setDeleteTarget(r);
+                    }}
+                    className="mr-1.5 rounded-full p-1 opacity-0 transition-opacity hover:bg-[color:var(--danger-bg)] hover:text-[color:var(--danger)] group-hover:opacity-100"
+                    style={{ color: 'var(--fg-2)' }}
+                  >
+                    <Trash2 className="size-[11px]" />
+                  </button>
+                </div>
+              );
+            })}
+            {templates.length > 0 && (
+              <>
+                <div className="my-1 border-t" style={{ borderColor: 'var(--border-subtle)' }} />
+                <div
+                  className="px-3 pb-1 pt-1.5 text-[11px] font-medium"
+                  style={{ color: 'var(--fg-muted)' }}
+                >
+                  Generate from template
+                </div>
+                {templates.map((t) => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    disabled={generating}
+                    onClick={() => generateView(t.id)}
+                    data-testid="note-view-generate"
+                    className="flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-sm transition-colors hover:bg-[color:var(--surface-hover)] disabled:opacity-50"
+                    style={{ color: 'var(--fg-1)' }}
+                  >
+                    <FileText className="size-[13px] shrink-0" style={{ color: 'var(--fg-2)' }} />
+                    <span className="truncate">{t.name}</span>
+                  </button>
+                ))}
+              </>
+            )}
+          </PopoverContent>
+        </Popover>
+      </div>
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        onOpenChange={(o) => !o && setDeleteTarget(null)}
+        title={deleteTarget ? `Delete report "${deleteTarget.template_name}"?` : ''}
+        description="This permanently deletes this generated report. The transcript and other reports are not affected."
+        confirmLabel="Delete"
+        destructive
+        onConfirm={() => {
+          if (!deleteTarget) return;
+          onDeleteReport(deleteTarget.id);
+          setDeleteTarget(null);
+        }}
+      />
+    </div>
+  );
+}
+
+function ViewMenuItem({
+  selected,
+  onClick,
+  children,
+}: {
+  selected: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex w-full items-center justify-between gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors hover:bg-[color:var(--surface-hover)]"
+      style={{ color: 'var(--fg-1)', fontWeight: selected ? 600 : 400 }}
+    >
+      <span className="truncate">{children}</span>
+      {selected && <Check className="size-[13px]" style={{ color: 'var(--fg-2)' }} />}
+    </button>
+  );
+}
+
+/**
+ * My notes editor — an always-editable notes layer for the meeting, decoupled
+ * from the AI summary (borrowed from meetily's separate meeting_notes store).
+ * Autosaves the `## User Notes` section: debounced while typing and flushed on
+ * blur/unmount. The textarea is the source of truth while focused, so a
+ * background summary regenerate doesn't clobber in-progress typing.
+ */
+function MyNotesEditor({
+  summaryFile,
+  initialNotes,
+}: {
+  summaryFile: string;
+  initialNotes: string;
+}) {
+  const [value, setValue] = React.useState(initialNotes);
+  const save = useUpdateUserNotes();
+  const timerRef = React.useRef<number | null>(null);
+  const savedRef = React.useRef(initialNotes);
+  const valueRef = React.useRef(value);
+  valueRef.current = value;
+
+  const flush = React.useCallback(() => {
+    if (timerRef.current !== null) {
+      window.clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+    if (valueRef.current === savedRef.current) return;
+    savedRef.current = valueRef.current;
+    save.mutate({ summaryFile, userNotes: valueRef.current });
+  }, [save, summaryFile]);
+
+  // Flush any pending edit on unmount (tab switch / navigation).
+  React.useEffect(() => flush, [flush]);
+
+  const onChange = (next: string) => {
+    setValue(next);
+    if (timerRef.current !== null) window.clearTimeout(timerRef.current);
+    timerRef.current = window.setTimeout(flush, 800);
+  };
+
+  return (
+    <section className="flex flex-col gap-2" data-testid="my-notes">
+      <textarea
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onBlur={flush}
+        placeholder="Write notes…"
+        spellCheck
+        data-testid="my-notes-input"
+        className="block w-full resize-none border-0 bg-transparent text-[15.5px] outline-none"
+        style={{
+          color: 'var(--fg-1)',
+          fontFamily: 'var(--font-sans)',
+          lineHeight: 1.65,
+          minHeight: 360,
+          maxWidth: '64ch',
+        }}
+      />
+    </section>
+  );
+}
+
 function SectionTitle({ children }: { children: React.ReactNode }) {
   return (
     <h2
@@ -1094,171 +1545,6 @@ const ActionIconButton = React.forwardRef<
     </button>
   );
 });
-
-// ---------------------------------------------------------------------------
-// Report switch — segmented pills (Standard + one per generated report) plus a
-// "Generate report" dropdown of the non-Standard templates. Controls which
-// body the detail view renders; generation reuses the summary stream.
-// ---------------------------------------------------------------------------
-
-interface ReportSwitchProps {
-  reports: Report[];
-  activeReportId: string | null;
-  onSelect: (id: string | null) => void;
-  onDelete: (reportId: string) => void;
-  templates: Template[];
-  onGenerate: (templateId: string) => void;
-  generating: boolean;
-}
-
-function ReportSwitch({
-  reports,
-  activeReportId,
-  onSelect,
-  onDelete,
-  templates,
-  onGenerate,
-  generating,
-}: ReportSwitchProps) {
-  const [open, setOpen] = React.useState(false);
-  // Report pending deletion → drives the confirmation dialog.
-  const [deleteTarget, setDeleteTarget] = React.useState<Report | null>(null);
-  return (
-    <div className="flex flex-wrap items-center gap-1.5" data-testid="report-switch">
-      <ReportPill active={activeReportId === null} onClick={() => onSelect(null)}>
-        Standard
-      </ReportPill>
-      {reports.map((r) => {
-        const when = formatReportDate(r.created_at);
-        const meta = [r.model, when].filter(Boolean).join(' · ');
-        return (
-          <ReportPill
-            key={r.id}
-            active={activeReportId === r.id}
-            onClick={() => onSelect(r.id)}
-            onDelete={() => setDeleteTarget(r)}
-            title={meta || undefined}
-          >
-            <span className="flex flex-col items-start leading-tight">
-              <span>{r.template_name}</span>
-              {meta && (
-                <span
-                  className="text-[10.5px]"
-                  style={{ color: 'var(--fg-2)', fontWeight: 400 }}
-                >
-                  {meta}
-                </span>
-              )}
-            </span>
-          </ReportPill>
-        );
-      })}
-      {templates.length > 0 && (
-        <Popover open={open} onOpenChange={setOpen}>
-          <PopoverTrigger asChild>
-            <button
-              type="button"
-              data-testid="generate-report-trigger"
-              disabled={generating}
-              className="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[12.5px] transition-colors hover:bg-[color:var(--surface-hover)] disabled:opacity-50"
-              style={{
-                color: 'var(--fg-2)',
-                border: '1px solid var(--border-subtle)',
-              }}
-            >
-              <FileText className="size-[12px]" />
-              {generating ? 'Generating…' : 'Generate report'}
-              <ChevronDown className="size-[12px]" />
-            </button>
-          </PopoverTrigger>
-          <PopoverContent align="start" className="w-56 p-1">
-            {templates.map((t) => (
-              <button
-                key={t.id}
-                type="button"
-                className="flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-sm transition-colors hover:bg-[color:var(--surface-hover)]"
-                style={{ color: 'var(--fg-1)' }}
-                onClick={() => {
-                  setOpen(false);
-                  onGenerate(t.id);
-                }}
-              >
-                <span className="truncate">{t.name}</span>
-              </button>
-            ))}
-          </PopoverContent>
-        </Popover>
-      )}
-
-      <ConfirmDialog
-        open={!!deleteTarget}
-        onOpenChange={(o) => !o && setDeleteTarget(null)}
-        title={
-          deleteTarget ? `Delete report "${deleteTarget.template_name}"?` : ''
-        }
-        description="This permanently deletes this generated report. The transcript and other reports are not affected."
-        confirmLabel="Delete"
-        destructive
-        onConfirm={() => {
-          if (!deleteTarget) return;
-          onDelete(deleteTarget.id);
-          setDeleteTarget(null);
-        }}
-      />
-    </div>
-  );
-}
-
-function ReportPill({
-  active,
-  onClick,
-  onDelete,
-  title,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  onDelete?: () => void;
-  title?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <span
-      className="inline-flex items-center rounded-full transition-colors"
-      style={{
-        color: active ? 'var(--fg-1)' : 'var(--fg-2)',
-        background: active ? 'var(--surface-raised)' : 'transparent',
-        border: '1px solid var(--border-subtle)',
-        fontWeight: active ? 600 : 400,
-      }}
-    >
-      <button
-        type="button"
-        onClick={onClick}
-        title={title}
-        aria-pressed={active}
-        className="inline-flex items-center rounded-full py-1 pl-3 text-[12.5px]"
-        style={{ paddingRight: onDelete ? '0.375rem' : '0.75rem' }}
-      >
-        {children}
-      </button>
-      {onDelete && (
-        <button
-          type="button"
-          aria-label="Delete report"
-          title="Delete report"
-          onClick={(e) => {
-            e.stopPropagation();
-            onDelete();
-          }}
-          className="mr-1.5 inline-flex items-center rounded-full p-0.5 text-[color:var(--fg-2)] transition-colors hover:bg-[color:var(--danger-bg)] hover:text-[color:var(--danger)]"
-        >
-          <Trash2 className="size-[11px]" />
-        </button>
-      )}
-    </span>
-  );
-}
 
 // ---------------------------------------------------------------------------
 // Streaming view (kept in this file because StreamingView's pinned-indicator

@@ -3,7 +3,6 @@ import {
   Check,
   ChevronDown,
   Copy,
-  Pause,
   Play,
   Search as SearchIcon,
   Square,
@@ -43,7 +42,8 @@ function fmtTimestamp(seconds: number): string {
  *
  * When the user opens the transcript, this panel takes the dock slot
  * **in place of** the LiveDock pill: header on top, segments in the body,
- * and a footer that owns the recording controls (Pause/Stop) plus the
+ * and a footer that owns the recording controls (Stop, plus Resume only
+ * when the system auto-paused) and the
  * language picker. There's no separate recording pill while the panel is
  * open — all live controls live inside it.
  *
@@ -115,7 +115,7 @@ export function LiveTranscriptBar() {
   if (!open) return null;
 
   return (
-    <div className="pointer-events-auto">
+    <div className="pointer-events-auto" data-testid="live-transcript-panel">
       <div
         className="mv-transcript open"
         onMouseDown={(e) => e.stopPropagation()}
@@ -194,16 +194,22 @@ export function LiveTranscriptBar() {
         >
           <div className="flex items-center gap-2">
             <RecordingStatusChip paused={paused} elapsedSeconds={recording.elapsed} />
-            <button
-              type="button"
-              onClick={onPauseToggle}
-              aria-label={paused ? 'Resume recording' : 'Pause recording'}
-              title={paused ? 'Resume recording' : 'Pause recording'}
-              className="inline-flex size-8 cursor-pointer items-center justify-center rounded-full border-0 transition-colors hover:bg-[color:var(--surface-hover)]"
-              style={{ background: 'transparent', color: 'var(--fg-1)' }}
-            >
-              {paused ? <Play size={14} /> : <Pause size={14} />}
-            </button>
+            {/* No manual pause — stop ends the segment and the note can be
+                continued later (continue-recording). Resume appears only
+                when the SYSTEM auto-paused (sleep / meeting-app mic drop),
+                so an auto-paused recording is never stranded. */}
+            {paused && (
+              <button
+                type="button"
+                onClick={onPauseToggle}
+                aria-label="Resume recording"
+                title="Resume recording"
+                className="inline-flex size-8 cursor-pointer items-center justify-center rounded-full border-0 transition-colors hover:bg-[color:var(--surface-hover)]"
+                style={{ background: 'transparent', color: 'var(--fg-1)' }}
+              >
+                <Play size={14} />
+              </button>
+            )}
             <button
               type="button"
               onClick={onStop}

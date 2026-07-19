@@ -1,0 +1,69 @@
+---
+import { Mic, FileText, Sparkles } from "lucide-react";
+
+const steps = [
+  {
+    n: "01",
+    Icon: Mic,
+    title: "Record",
+    body: "Captures your mic, system audio, or both. Both sides of a video call are recorded without any bot or app joining.",
+  },
+  {
+    n: "02",
+    Icon: FileText,
+    title: "Transcribe",
+    body: "Your words are transcribed in real time, entirely on your device. Works in 99 languages with automatic detection — on Mac and Windows.",
+  },
+  {
+    n: "03",
+    Icon: Sparkles,
+    title: "Summarize",
+    body: "Pulls out a summary, key topics, and action items automatically. Nothing ever leaves your device.",
+  },
+];
+---
+
+<section id="how" class="sect">
+  <div class="container-site">
+    <div class="mb-[48px] md:mb-[72px]" style="max-width: 640px">
+      <h2
+        style={{
+          fontFamily: "var(--font-serif)",
+          fontWeight: 400,
+          fontSize: "clamp(34px, 4.6vw, 52px)",
+          lineHeight: 1.08,
+          letterSpacing: "-0.02em",
+          color: "var(--fg-1)",
+          margin: "0 0 18px",
+        }}
+      >
+        Everything runs locally. Zero cloud. Maximum privacy.
+      </h2>
+      <p class="text-fg-2 text-lg leading-[1.55]" style="max-width: 56ch">
+        From raw audio to structured notes, every step happens on your machine, including the language model.
+      </p>
+    </div>
+
+    <div class="grid md:grid-cols-3 gap-6">
+      {steps.map(({ n, Icon, title, body }) => (
+        <div>
+          <div class="step-card">
+            <Icon size={28} strokeWidth={1.2} style={{ color: "var(--fg-1)" }} aria-hidden="true" />
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <h3
+                class="text-fg-1"
+                style={{ fontWeight: 500, fontSize: 19, letterSpacing: "-0.01em", margin: 0 }}
+              >
+                <span class="text-fg-2 tabular-nums" style={{ fontWeight: 400 }}>{n} </span>
+                {title}
+              </h3>
+              <p class="text-fg-2 text-[15px] leading-[1.6]">
+                {body}
+              </p>
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  </div>
+</section>

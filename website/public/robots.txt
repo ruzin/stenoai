@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://stenoai.co/sitemap.xml
+Sitemap: https://stenoai.co/sitemap-index.xml

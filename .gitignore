@@ -1,3 +1,6 @@
+# Local specs (zoro) — planning artifacts, not source
+.specs/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -22,6 +25,7 @@ eggs/
 .eggs/
 lib/
 !app/renderer/src/lib/
+!website/src/lib/
 
 lib64/
 parts/

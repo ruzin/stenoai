@@ -1,0 +1,93 @@
+---
+import { StenoMark, Wordmark } from "../components/Brand";
+
+const GITHUB_URL = "https://github.com/ruzin/stenoai";
+const DISCORD_URL = "https://discord.gg/DZ6vcQnxxu";
+const DOCS_URL = "https://docs.stenoai.co";
+
+const sections = [
+  {
+    title: "Enterprise",
+    links: [
+      { href: "/enterprise/government/", name: "Government" },
+      { href: "/enterprise/defense/", name: "Defense" },
+      { href: "/enterprise/legal/", name: "Legal" },
+      { href: "/enterprise/healthcare/", name: "Healthcare" },
+      { href: "/enterprise/finance/", name: "Finance" },
+      { href: "/enterprise/executive/", name: "Executive" },
+    ],
+  },
+  {
+    title: "Compare",
+    links: [
+      { href: "/vs/granola/", name: "Granola" },
+      { href: "/vs/otter/", name: "Otter.ai" },
+      { href: "/vs/fireflies/", name: "Fireflies" },
+    ],
+  },
+  {
+    title: "Community",
+    links: [
+      { href: DOCS_URL, name: "Documentation", external: true },
+      { href: DISCORD_URL, name: "Discord", external: true },
+      { href: GITHUB_URL, name: "GitHub", external: true, track: "github" },
+    ],
+  },
+  {
+    title: "Legal",
+    links: [
+      { href: "/privacy/", name: "Privacy" },
+      { href: "/terms/", name: "Terms" },
+    ],
+  },
+];
+---
+
+<footer style={{ borderTop: "1px solid var(--border-subtle)", padding: "64px 0 40px" }}>
+  <div class="container-site">
+    <div class="grid grid-cols-2 gap-8 lg:grid-cols-6">
+      <div class="col-span-2 mb-8 lg:mb-0">
+        <a href="/" class="flex items-center gap-[10px] text-fg-1 no-underline hover:no-underline">
+          <StenoMark size={22} />
+          <Wordmark size={16} />
+        </a>
+        <p class="mt-4 text-fg-muted text-[13px] leading-[1.55]" style="max-width: 32ch">
+          Privacy-first AI notepad for meetings — records, transcribes, and summarizes entirely on your device.
+        </p>
+      </div>
+      {sections.map((section) => (
+        <div>
+          <h3 class="mb-4 text-fg-1 text-[13px] font-semibold tracking-tight">{section.title}</h3>
+          <ul class="flex flex-col gap-3 list-none p-0 m-0">
+            {section.links.map((link) => (
+              <li>
+                <a
+                  href={link.href}
+                  target={link.external ? "_blank" : undefined}
+                  rel={link.external ? "noopener noreferrer" : undefined}
+                  data-track={link.track}
+                  data-location={link.track ? "footer" : undefined}
+                  class="text-fg-2 text-[13px] no-underline hover:text-fg-1 transition-colors"
+                >
+                  {link.name}
+                </a>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
+    </div>
+
+    <div
+      class="mt-12 pt-8 flex flex-col md:flex-row md:items-center justify-between gap-4"
+      style={{ borderTop: "1px solid var(--border-subtle)" }}
+    >
+      <p class="text-fg-muted text-[13px]">© 2026 Steno</p>
+      <p class="text-fg-muted text-[12px] leading-[1.55]" style="max-width: 60ch">
+        Independent open-source project for private meeting notes. Not affiliated with any similarly named company.
+        Product names (Whisper, Llama, Gemma, Qwen, DeepSeek, Granola, Otter, Fireflies) are trademarks
+        of their respective owners; comparisons are independent editorial content.
+      </p>
+    </div>
+  </div>
+</footer>

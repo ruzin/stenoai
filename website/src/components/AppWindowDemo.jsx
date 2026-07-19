@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { m as Motion, AnimatePresence } from "framer-motion";
+import { m as Motion, AnimatePresence, LazyMotion, domMax } from "framer-motion";
 import {
   Search, Settings, Home, ChevronDown, ChevronLeft,
   Calendar as CalendarIcon, Clock, PencilLine, ArrowUp, FolderPlus,
@@ -12,25 +12,25 @@ const SCREENS = ["notes", "generating", "summary", "chat"];
 const SCREEN_MS = { notes: 5500, generating: 4000, summary: 5500, chat: 7000 };
 
 const NOTES_TEXT =
-  "- Engineering headcount +20%\n- Marketing flat vs last year\n- Reallocate $40k from Q2 ops\n- Revisit at next quarterly sync";
+  "- Rotate 2nd company off the eastern line\n- Resupply convoy delayed — reroute via northern road\n- Air-defense coverage gap at dawn\n- Engineers to reinforce forward positions";
 
 const SUMMARY_INTRO =
-  "The team aligned on Q1 budget priorities. Engineering headcount will grow by 20% with two new hires planned for March. Marketing spend stays flat, with $40k reallocated from Q2 ops to fund the paid pilot running ahead of targets.";
+  "The team aligned on the sector defense plan for the coming week. The 2nd company rotates off the eastern line for rest and refit, with resupply rerouted through the northern road after convoy delays. Engineers will reinforce the forward positions before the next rotation.";
 
 const KEY_POINTS = [
-  "Engineering headcount up 20% — two hires planned for March.",
-  "Marketing budget held flat; paid pilot running ahead of targets.",
-  "$40k reallocation from Q2 ops approved through March 31.",
+  "2nd company rotates off the eastern line for rest and refit.",
+  "Resupply convoy rerouted via the northern road after delays.",
+  "Air-defense coverage gap at dawn flagged for immediate cover.",
 ];
 
 const ACTION_ITEMS = [
-  "Marcus to file reallocation request by Friday.",
-  "Priya to update Q1 forecast and share with board.",
+  "Kovalenko to confirm the northern resupply route by 06:00.",
+  "Engineering team to reinforce forward positions before rotation.",
 ];
 
-const CHAT_Q = "What were the key budget decisions?";
+const CHAT_Q = "What were the key defensive decisions?";
 const CHAT_A =
-  "Engineering headcount will increase by 20% and $40k has been reallocated from Q2 ops to the marketing pilot. Priya is actioned to update the Q1 forecast ahead of the board review.";
+  "The 2nd company will rotate off the eastern line for refit, and resupply is rerouted via the northern road. Kovalenko is actioned to confirm the route by 06:00, and engineers will reinforce the forward positions before the next rotation.";
 
 function fmt(s) {
   const h = String(Math.floor(s / 3600)).padStart(2, "0");
@@ -207,7 +207,7 @@ function NotesScreen() {
           <div
             style={{ fontFamily: "var(--font-serif)", fontWeight: 400, fontSize: 34, lineHeight: 1.15, letterSpacing: "-0.02em", color: "var(--fg-1)", marginBottom: 10 }}
           >
-            Defence Budget Planning
+            Frontline Defense Planning
           </div>
 
           <div className="flex flex-wrap items-center gap-1.5 mb-6">
@@ -272,13 +272,13 @@ function NotesScreen() {
 // ─── Screen: Generating summary ───────────────────────────────────
 
 const GENERATING_TEXT =
-  "The team aligned on Q1 budget priorities. Engineering headcount will grow by 20%.\n\n" +
+  "The team aligned on the sector defense plan for the week. The 2nd company rotates off the eastern line.\n\n" +
   "**Key points**\n\n" +
-  "- Engineering headcount up 20% — two hires in March.\n" +
-  "- $40k reallocated from Q2 ops through March 31.\n" +
-  "- Marketing spend held flat.\n\n" +
+  "- 2nd company rotates off the eastern line for refit.\n" +
+  "- Resupply rerouted via the northern road.\n" +
+  "- Air-defense gap at dawn flagged for cover.\n\n" +
   "**Action items**\n\n" +
-  "- Marcus to file reallocation request by Friday.";
+  "- Kovalenko to confirm the northern route by 06:00.";
 
 const STAGE_LABELS = ["Analyzing transcript", "Generating notes", "Almost done…"];
 
@@ -364,7 +364,7 @@ function GeneratingScreen() {
           </button>
 
           <div style={{ fontFamily: "var(--font-serif)", fontWeight: 400, fontSize: 34, lineHeight: 1.15, letterSpacing: "-0.02em", color: "var(--fg-1)", margin: "0 0 10px" }}>
-            Defence Budget Planning
+            Frontline Defense Planning
           </div>
 
           <div className="flex flex-wrap items-center gap-1.5 mb-6">
@@ -424,7 +424,7 @@ function SummaryScreen() {
           </button>
 
           <div style={{ fontFamily: "var(--font-serif)", fontWeight: 400, fontSize: 36, lineHeight: 1.1, letterSpacing: "-0.025em", color: "var(--fg-1)", margin: "0 0 10px" }}>
-            Defence Budget Planning
+            Frontline Defense Planning
           </div>
 
           <div className="flex flex-wrap items-center gap-1.5 pb-5 mb-5" style={{ borderBottom: "1px solid var(--border-subtle)" }}>
@@ -555,7 +555,7 @@ function ChatScreen() {
           <ChevronLeft size={13} /> Work
         </div>
         <div style={{ fontFamily: "var(--font-serif)", fontSize: 30, fontWeight: 400, letterSpacing: "-0.02em", color: "var(--fg-1)", marginBottom: 10 }}>
-          Defence Budget Planning
+          Frontline Defense Planning
         </div>
         <div style={{ display: "flex", gap: 6, marginBottom: 16 }}>
           <span style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "3px 10px", background: "var(--surface-hover)", borderRadius: 20, fontSize: 12, color: "var(--fg-2)" }}>
@@ -591,7 +591,7 @@ function ChatScreen() {
             <div style={{ background: "color-mix(in srgb, var(--surface-raised) 92%, transparent)", backdropFilter: "saturate(160%) blur(10px)", WebkitBackdropFilter: "saturate(160%) blur(10px)", border: "1px solid var(--border-subtle)", borderRadius: 14, boxShadow: "var(--shadow-md)", overflow: "hidden" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", borderBottom: "1px solid var(--border-subtle)" }}>
                 <span style={{ fontSize: 13, fontWeight: 600, color: "var(--fg-1)", flex: 1 }}>
-                  Defence Budget Planning
+                  Frontline Defense Planning
                   <ChevronDown size={11} style={{ display: "inline", marginLeft: 3, color: "var(--fg-2)", verticalAlign: "middle" }} />
                 </span>
                 <button style={{ border: "1px solid var(--border-subtle)", borderRadius: 6, padding: "2px 8px", fontSize: 12, color: "var(--fg-2)", background: "transparent", cursor: "default" }}>
@@ -677,6 +677,7 @@ export function AppWindowDemo() {
   }, []);
 
   return (
+    <LazyMotion features={domMax} strict={false}>
     <div aria-hidden="true" inert className="relative max-w-full" style={{ padding: "2px 2px 32px", textAlign: "left", pointerEvents: "none", userSelect: "none" }}>
       <div
         ref={outerRef}
@@ -709,5 +710,6 @@ export function AppWindowDemo() {
         </div>
       </div>
     </div>
+    </LazyMotion>
   );
 }

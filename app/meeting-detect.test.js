@@ -8,6 +8,15 @@ test('isMeetingApp accepts a known meeting app bundle id', () => {
   assert.strictEqual(isMeetingApp({ app_id: 'com.microsoft.teams2' }), true);
 });
 
+test('isMeetingApp accepts browser helper-process bundle ids', () => {
+  // Chromium browsers capture the mic in a helper process, whose bundle id
+  // may differ in case from the main app (Arc: company.thebrowser.Browser
+  // vs company.thebrowser.browser.helper).
+  assert.strictEqual(isMeetingApp({ app_id: 'company.thebrowser.browser.helper' }), true);
+  assert.strictEqual(isMeetingApp({ app_id: 'company.thebrowser.Browser' }), true);
+  assert.strictEqual(isMeetingApp({ app_id: 'com.google.Chrome.helper' }), true);
+});
+
 test('isMeetingApp rejects a non-allowlisted app bundle id', () => {
   assert.strictEqual(isMeetingApp({ app_id: 'com.example.Conductor' }), false);
 });

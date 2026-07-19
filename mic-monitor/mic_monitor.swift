@@ -74,7 +74,7 @@ func deviceIsRunningSomewhere(_ deviceID: AudioDeviceID) -> Bool {
 }
 
 @available(macOS 14.0, *)
-func pidsCapturingInput() -> Set<pid_t> {
+func processObjectsCapturingInput() -> [pid_t: AudioObjectID] {
     var listAddr = AudioObjectPropertyAddress(
         mSelector: kAudioHardwarePropertyProcessObjectList,
         mScope: kAudioObjectPropertyScopeGlobal,
@@ -83,14 +83,14 @@ func pidsCapturingInput() -> Set<pid_t> {
     var size: UInt32 = 0
     guard AudioObjectGetPropertyDataSize(
         AudioObjectID(kAudioObjectSystemObject), &listAddr, 0, nil, &size
-    ) == noErr else { return [] }
+    ) == noErr else { return [:] }
 
     let count = Int(size) / MemoryLayout<AudioObjectID>.size
-    if count == 0 { return [] }
+    if count == 0 { return [:] }
     var processes = [AudioObjectID](repeating: 0, count: count)
     guard AudioObjectGetPropertyData(
         AudioObjectID(kAudioObjectSystemObject), &listAddr, 0, nil, &size, &processes
-    ) == noErr else { return [] }
+    ) == noErr else { return [:] }
 
     var inputAddr = AudioObjectPropertyAddress(
         mSelector: kAudioProcessPropertyIsRunningInput,
@@ -103,7 +103,7 @@ func pidsCapturingInput() -> Set<pid_t> {
         mElement: kAudioObjectPropertyElementMain
     )
 
-    var pids: Set<pid_t> = []
+    var procByPID: [pid_t: AudioObjectID] = [:]
     for proc in processes {
         var isRunningInput: UInt32 = 0
         var s1 = UInt32(MemoryLayout<UInt32>.size)
@@ -114,17 +114,60 @@ func pidsCapturingInput() -> Set<pid_t> {
         var pid: pid_t = 0
         var s2 = UInt32(MemoryLayout<pid_t>.size)
         if AudioObjectGetPropertyData(proc, &pidAddr, 0, nil, &s2, &pid) == noErr {
-            pids.insert(pid)
+            procByPID[pid] = proc
         }
     }
-    return pids
+    return procByPID
 }
 
-func appInfo(for pid: pid_t) -> (bundleId: String?, name: String?) {
-    if let app = NSRunningApplication(processIdentifier: pid) {
-        return (app.bundleIdentifier, app.localizedName)
+// Bundle id straight from the CoreAudio process object. The pid capturing
+// input is often a helper/XPC child (browser GPU process, app media helper)
+// that NSRunningApplication can't resolve — it only knows LaunchServices
+// apps — but coreaudiod records the client's bundle id for every process
+// object it vends.
+@available(macOS 14.0, *)
+func processBundleID(_ proc: AudioObjectID) -> String? {
+    var addr = AudioObjectPropertyAddress(
+        mSelector: kAudioProcessPropertyBundleID,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain
+    )
+    var size = UInt32(MemoryLayout<CFString?>.size)
+    var value: CFString?
+    let status = withUnsafeMutablePointer(to: &value) {
+        AudioObjectGetPropertyData(proc, &addr, 0, nil, &size, $0)
     }
-    return (nil, nil)
+    guard status == noErr, let s = value as String?, !s.isEmpty else { return nil }
+    return s
+}
+
+func processPath(_ pid: pid_t) -> String? {
+    var buf = [CChar](repeating: 0, count: 4096)
+    let n = proc_pidpath(pid, &buf, UInt32(buf.count))
+    guard n > 0 else { return nil }
+    return String(cString: buf)
+}
+
+// Last-resort bundle id: helpers live inside the owning .app bundle, so the
+// exe path usually contains it (…/Foo.app/Contents/…).
+func bundleIDFromPath(_ path: String) -> String? {
+    guard let range = path.range(of: ".app/") else { return nil }
+    let appPath = String(path[..<range.lowerBound]) + ".app"
+    return Bundle(path: appPath)?.bundleIdentifier
+}
+
+@available(macOS 14.0, *)
+func appInfo(for pid: pid_t, procObject: AudioObjectID?) -> (bundleId: String?, name: String?) {
+    if let app = NSRunningApplication(processIdentifier: pid), let bid = app.bundleIdentifier {
+        return (bid, app.localizedName)
+    }
+    var bundleId: String? = procObject.flatMap { processBundleID($0) }
+    var name: String? = nil
+    if let path = processPath(pid) {
+        name = (path as NSString).lastPathComponent
+        if bundleId == nil { bundleId = bundleIDFromPath(path) }
+    }
+    return (bundleId, name)
 }
 
 let POLL_INTERVAL: TimeInterval = 1.0
@@ -133,12 +176,17 @@ let POLL_INTERVAL: TimeInterval = 1.0
 let FALLBACK_PID: pid_t = -1
 
 var lastActivePIDs: Set<pid_t> = []
+// Info resolved at start time, replayed at stop time — the CoreAudio process
+// object (and often the process itself) is gone once the mic is released.
+var infoCache: [pid_t: (String?, String?)] = [:]
 
 while true {
+    var procByPID: [pid_t: AudioObjectID] = [:]
     var currentPIDs: Set<pid_t> = []
 
     if #available(macOS 14.0, *) {
-        currentPIDs = pidsCapturingInput()
+        procByPID = processObjectsCapturingInput()
+        currentPIDs = Set(procByPID.keys)
     } else if let device = defaultInputDevice(), deviceIsRunningSomewhere(device) {
         currentPIDs = [FALLBACK_PID]
     }
@@ -146,21 +194,25 @@ while true {
     let now = Date().timeIntervalSince1970
 
     for pid in currentPIDs.subtracting(lastActivePIDs) {
-        let (bundleId, name) = (pid == FALLBACK_PID) ? (nil, nil) : appInfo(for: pid)
+        var info: (String?, String?) = (nil, nil)
+        if pid != FALLBACK_PID, #available(macOS 14.0, *) {
+            info = appInfo(for: pid, procObject: procByPID[pid])
+        }
+        infoCache[pid] = info
         emit(MicEvent(
             event: "start",
-            app_id: bundleId,
-            app_name: name,
+            app_id: info.0,
+            app_name: info.1,
             pid: pid == FALLBACK_PID ? nil : pid,
             ts: now
         ))
     }
     for pid in lastActivePIDs.subtracting(currentPIDs) {
-        let (bundleId, name) = (pid == FALLBACK_PID) ? (nil, nil) : appInfo(for: pid)
+        let info = infoCache.removeValue(forKey: pid) ?? (nil, nil)
         emit(MicEvent(
             event: "stop",
-            app_id: bundleId,
-            app_name: name,
+            app_id: info.0,
+            app_name: info.1,
             pid: pid == FALLBACK_PID ? nil : pid,
             ts: now
         ))

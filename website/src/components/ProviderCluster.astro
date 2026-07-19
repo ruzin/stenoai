@@ -1,0 +1,70 @@
+---
+// A fanned cluster of meeting-provider app tiles (Slack, Teams, Zoom, Google
+// Meet), overlapping and each tilted at its own angle. Sits above the H1 in
+// place of the old status pill — a compact "works with all your tools" cue.
+// The tiles idle-bob gently. Pure CSS, no JS.
+const PROVIDERS = [
+  { slug: "slack",       name: "Slack",           rotate: -11, delay: "0s"    },
+  { slug: "teams",       name: "Microsoft Teams", rotate: 6,   delay: "-1s"   },
+  { slug: "zoom",        name: "Zoom",            rotate: -5,  delay: "-2s"   },
+  { slug: "google-meet", name: "Google Meet",     rotate: 12,  delay: "-3s"   },
+];
+---
+
+<div class="provider-cluster" role="img" aria-label="Works with Slack, Microsoft Teams, Zoom and Google Meet">
+  {PROVIDERS.map(({ slug, name, rotate, delay }) => (
+    <div class="pc-tile" style={`--r: ${rotate}deg; --d: ${delay};`}>
+      <img src={`/logos/providers/${slug}.svg`} alt="" width="27" height="27" loading="eager" />
+    </div>
+  ))}
+</div>
+
+<style>
+  .provider-cluster {
+    display: inline-flex;
+    align-items: center;
+    /* room for the tiles to lift/rotate without clipping */
+    padding: 8px 4px;
+  }
+
+  .pc-tile {
+    width: 46px;
+    height: 46px;
+    border-radius: 13px;
+    background: var(--surface-raised);
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow-md);
+    display: grid;
+    place-items: center;
+    transform: rotate(var(--r));
+    animation: pc-bob 5s ease-in-out infinite;
+    animation-delay: var(--d);
+    will-change: transform;
+  }
+
+  /* Overlap each tile onto the previous one. */
+  .pc-tile:not(:first-child) {
+    margin-left: -13px;
+  }
+
+  /* Stack left-to-right so the fan reads cleanly. */
+  .pc-tile:nth-child(1) { z-index: 1; }
+  .pc-tile:nth-child(2) { z-index: 2; }
+  .pc-tile:nth-child(3) { z-index: 3; }
+  .pc-tile:nth-child(4) { z-index: 4; }
+
+  .pc-tile img {
+    display: block;
+  }
+
+  @keyframes pc-bob {
+    0%, 100% { transform: rotate(var(--r)) translateY(0); }
+    50%      { transform: rotate(var(--r)) translateY(-4px); }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .pc-tile {
+      animation: none;
+    }
+  }
+</style>
