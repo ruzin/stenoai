@@ -1059,7 +1059,17 @@ export interface StenoaiBridge {
     navigateToMeeting: Subscribe<{ summaryFile: string }>;
     trayOpenSettings: Subscribe<void>;
     showQuitDialog: Subscribe<{ type: 'recording' | 'processing'; jobCount?: number }>;
-    showNotification: Subscribe<{ title: string; time: string; meeting_url?: string; attendees?: string }>;
+    showNotification: Subscribe<{
+      id?: string;
+      title: string;
+      time?: string;
+      body?: string;
+      meeting_url?: string;
+      attendees?: string;
+      iconType?: 'app' | 'alert' | 'success' | 'recording';
+      color?: string;
+      actions?: { id: string; text: string; type?: 'primary' | 'secondary' }[];
+    }>;
   };
 
   org: {
@@ -1088,6 +1098,8 @@ export interface StenoaiBridge {
 
   notification: {
     close: RequestFn<[], void>;
+    actionClicked: SendFn<[actionId: string, notifId?: string]>;
+    bodyClicked: SendFn<[notifId?: string]>;
   };
 
   subscribeQueryStream: (

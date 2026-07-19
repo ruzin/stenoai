@@ -2,12 +2,24 @@ import * as React from 'react';
 import { ipc } from '@/lib/ipc';
 import { useTheme } from '@/hooks/useTheme';
 import { AppIcon } from '@/components/ui/app-icon';
+import { AlertCircle, CheckCircle2, Mic, Info } from 'lucide-react';
+
+interface NotificationAction {
+  id: string;
+  text: string;
+  type?: 'primary' | 'secondary';
+}
 
 interface NotificationData {
+  id?: string;
   title: string;
-  time: string;
+  body?: string;
+  time?: string;
   meeting_url?: string;
   attendees?: string;
+  iconType?: 'app' | 'alert' | 'success' | 'recording';
+  color?: string;
+  actions?: NotificationAction[];
 }
 
 export function NotificationToast() {
@@ -25,11 +37,14 @@ export function NotificationToast() {
 
   const handleClose = (e?: React.MouseEvent) => {
     e?.stopPropagation();
-    ipc().analytics.track('notification_dismissed', { type: 'premeeting' });
+    if (!data.id) {
+      ipc().analytics.track('notification_dismissed', { type: 'premeeting' });
+    }
     ipc().notification.close();
   };
 
   const hasValidUrl = !!(data.meeting_url && /^https?:\/\//i.test(data.meeting_url));
+  const hasGenericActions = !!(data.actions && data.actions.length > 0);
 
   const handleJoin = (e?: React.MouseEvent) => {
     e?.stopPropagation();
@@ -41,13 +56,24 @@ export function NotificationToast() {
     ipc().notification.close();
   };
 
+  const handleGenericAction = (actionId: string, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    ipc().notification.actionClicked(actionId, data.id);
+    ipc().notification.close();
+  };
+
   const handleFocusMain = () => {
-    ipc().analytics.track('notification_clicked', { type: 'premeeting' });
-    ipc().window.focus();
+    if (data.id) {
+      ipc().notification.bodyClicked(data.id);
+    } else {
+      ipc().analytics.track('notification_clicked', { type: 'premeeting' });
+      ipc().window.focus();
+    }
     ipc().notification.close();
   };
 
   const getEventColor = (title: string) => {
+    if (data.color) return data.color;
     const colors = ['#10B981', '#3B82F6', '#8B5CF6', '#EC4899', '#F59E0B', '#EF4444', '#06B6D4'];
     let hash = 0;
     for (let i = 0; i < title.length; i++) {
@@ -58,6 +84,22 @@ export function NotificationToast() {
 
   const barColor = getEventColor(data.title);
 
+  const renderIcon = () => {
+    if (!data.iconType || data.iconType === 'app') {
+      return <AppIcon size={24} color="currentColor" />;
+    }
+    switch (data.iconType) {
+      case 'alert':
+        return <AlertCircle size={20} className="text-red-500" />;
+      case 'success':
+        return <CheckCircle2 size={20} className="text-green-500" />;
+      case 'recording':
+        return <Mic size={20} className="text-blue-500" />;
+      default:
+        return <Info size={20} className="text-gray-400" />;
+    }
+  };
+
   return (
     <>
       <style>{`
@@ -67,7 +109,7 @@ export function NotificationToast() {
       `}</style>
       <div className="flex h-screen w-screen items-center justify-end bg-transparent p-3">
         <div 
-        className={`group relative flex ${hasValidUrl ? 'w-[344px]' : 'w-[280px]'} cursor-pointer items-center justify-between rounded-[20px] bg-white p-2.5 pr-3 border border-gray-200 dark:bg-[#1E1E1E] dark:border-white/10`}
+        className={`group relative flex w-[344px] cursor-pointer items-center justify-between rounded-[20px] bg-white p-2.5 pr-3 border border-gray-200 shadow-sm dark:bg-[#1E1E1E] dark:border-white/10`}
         style={{ fontFamily: 'system-ui, -apple-system, sans-serif' }}
         onClick={handleFocusMain}
       >
@@ -91,12 +133,24 @@ export function NotificationToast() {
               {data.title}
             </span>
             <span className="text-[12px] font-normal text-gray-500 leading-tight mt-0.5 dark:text-gray-400 truncate">
-              {data.time}
+              {data.body || data.time}
             </span>
           </div>
         </div>
 
-        {hasValidUrl ? (
+        {hasGenericActions ? (
+          <div className="flex items-center gap-1.5 shrink-0 pl-2">
+            {data.actions!.map(action => (
+              <button
+                key={action.id}
+                onClick={(e) => handleGenericAction(action.id, e)}
+                className="flex items-center justify-center rounded-[10px] border border-gray-200 bg-white px-3 py-1.5 text-[12px] font-medium text-gray-900 transition-all hover:bg-gray-50 hover:shadow-sm active:bg-gray-100 active:scale-[0.98] shrink-0 dark:border-white/10 dark:bg-[#2C2C2E] dark:text-gray-100 dark:hover:bg-[#3C3C3E] dark:active:bg-[#1C1C1E]"
+              >
+                {action.text}
+              </button>
+            ))}
+          </div>
+        ) : hasValidUrl ? (
           <button
             onClick={handleJoin}
             className="flex items-center gap-2 rounded-[10px] border border-gray-200 bg-white px-3 py-1.5 text-[13px] font-medium text-gray-900 transition-all hover:bg-gray-50 hover:shadow-sm active:bg-gray-100 active:scale-[0.98] shrink-0 dark:border-white/10 dark:bg-[#2C2C2E] dark:text-gray-100 dark:hover:bg-[#3C3C3E] dark:active:bg-[#1C1C1E]"
@@ -106,7 +160,7 @@ export function NotificationToast() {
           </button>
         ) : (
           <div className="flex items-center justify-center shrink-0 pr-1 text-gray-500 dark:text-gray-400">
-            <AppIcon size={24} color="currentColor" />
+            {renderIcon()}
           </div>
         )}
       </div>

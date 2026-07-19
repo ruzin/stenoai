@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell, systemPreferences, globalShortcut, safeStorage, Tray, Menu, nativeImage, Notification, powerMonitor, net, session, desktopCapturer } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, systemPreferences, globalShortcut, safeStorage, Tray, Menu, nativeImage, powerMonitor, net, session, desktopCapturer } = require('electron');
 
 // Prevent EPIPE crashes when stdout/stderr pipe is broken (e.g. launching terminal closed)
 process.stdout?.on('error', () => {});
@@ -31,6 +31,99 @@ function _logStartupCrash(kind, err) {
 if (process.platform !== 'darwin') {
   process.on('uncaughtException', (err) => { _logStartupCrash('uncaughtException', err); process.exit(1); });
   process.on('unhandledRejection', (reason) => { _logStartupCrash('unhandledRejection', reason); });
+}
+
+
+const { EventEmitter } = require('events');
+
+class Notification extends EventEmitter {
+  constructor(options) {
+    super();
+    this.options = options;
+    this.payload = {
+      id: Math.random().toString(36).substring(7),
+      title: options.title,
+      body: options.body || options.subtitle || '',
+      actions: (options.actions || []).map(a => ({
+        id: a.text,
+        text: a.text,
+        type: a.type
+      }))
+    };
+    if (options.iconType) this.payload.iconType = options.iconType;
+  }
+
+  show() {
+    if (notificationWindow && !notificationWindow.isDestroyed()) {
+      notificationWindow.close();
+    }
+    const { screen } = require('electron');
+    const primaryDisplay = screen.getPrimaryDisplay();
+    const { width } = primaryDisplay.workAreaSize;
+    const { x, y } = primaryDisplay.workArea;
+
+    notificationWindow = new BrowserWindow({
+      width: 400,
+      height: 70,
+      x: x + width - 425,
+      y: y + 1,
+      frame: false,
+      transparent: true,
+      alwaysOnTop: true,
+      resizable: false,
+      skipTaskbar: true,
+      focusable: false,
+      hasShadow: false,
+      backgroundColor: '#00000000',
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true,
+        sandbox: true,
+        preload: path.join(__dirname, 'preload.js'),
+      },
+    });
+
+    const rendererDist = path.join(__dirname, 'renderer', 'dist', 'index.html');
+    notificationWindow.loadFile(rendererDist, { hash: '/notification' });
+    
+    notificationWindow._activeCustomNotification = this;
+    notificationWindow._analyticsInteracted = false;
+    let autoCloseTimer;
+    
+    notificationWindow.once('ready-to-show', () => {
+      notificationWindow.showInactive();
+      notificationWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+      notificationWindow.setAlwaysOnTop(true, 'screen-saver', 1);
+
+      autoCloseTimer = setTimeout(() => {
+        if (notificationWindow && !notificationWindow.isDestroyed()) {
+          notificationWindow.close();
+        }
+      }, 15000);
+
+      notificationWindow.on('closed', () => {
+        if (autoCloseTimer) clearTimeout(autoCloseTimer);
+        this.emit('close');
+        if (notificationWindow && notificationWindow._activeCustomNotification === this) {
+          notificationWindow = null;
+        }
+      });
+
+      notificationWindow.webContents.send('show-notification', this.payload);
+    });
+  }
+
+  close() {
+    if (notificationWindow && notificationWindow._activeCustomNotification === this) {
+      if (!notificationWindow.isDestroyed()) {
+        notificationWindow.close();
+      }
+    }
+  }
+
+  static isSupported() {
+    return true;
+  }
 }
 
 const path = require('path');
@@ -4907,6 +5000,7 @@ function showSleepPausedNotification() {
   const notif = new Notification({
     title: 'Recording paused',
     body: 'Paused while your computer was asleep. Resume to keep capturing.',
+    iconType: 'alert',
     // `actions` renders on macOS only; the click handler below covers
     // Windows, where the whole notification is the affordance.
     actions: [{ type: 'button', text: 'Resume' }],
@@ -6677,6 +6771,7 @@ ipcMain.handle('show-silence-auto-stop-notification', async (_event, payload) =>
     const notif = new Notification({
       title: 'Recording stopped',
       body,
+      iconType: 'recording',
     });
     notif.on('click', () => {
       if (mainWindow && !mainWindow.isDestroyed()) {
@@ -6706,6 +6801,7 @@ ipcMain.handle('show-system-audio-mic-only-notification', async () => {
     const notif = new Notification({
       title: 'Recording mic-only',
       body: 'Screen Recording permission is needed to capture both sides of the call. Click to fix this in Settings.',
+      iconType: 'alert',
     });
     notif.on('click', () => {
       if (mainWindow && !mainWindow.isDestroyed()) {
@@ -6756,6 +6852,7 @@ ipcMain.handle('show-note-ready-notification', async (_event, payload) => {
         : failed
           ? 'Your recording was preserved — open the note for details.'
           : (title || 'Your note has finished processing'),
+      iconType: (hardFailure || failed) ? 'alert' : 'success',
     });
     notif.on('click', () => {
       if (mainWindow && !mainWindow.isDestroyed()) {
@@ -7794,6 +7891,7 @@ function showRecordingFailedNotification(body) {
     new Notification({
       title: 'Steno',
       body: body || "Recording couldn't start.",
+      iconType: 'alert',
     }).show();
   } catch (error) {
     console.error('Failed to show recording-failed notification:', error.message);
@@ -9742,7 +9840,21 @@ async function firePreMeetingNotification(event) {
     return false;
   }
 
-  createNotificationWindow(event);
+  const notif = new Notification({
+    title: event.title || 'Meeting starting',
+    body: event.start ? new Date(event.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
+  });
+  notif.payload.meeting_url = event.meeting_url;
+  notif.payload.attendees = event.attendees ? event.attendees.map(a => a.name || a.email).join(', ') : '';
+  notif.payload.color = '#10B981'; // Provide a consistent color or let it hash
+  
+  notif.on('close', () => {
+    if (!notificationWindow || !notificationWindow._analyticsInteracted) {
+      trackEvent('notification_dismissed', { type: 'premeeting' });
+    }
+  });
+  
+  notif.show();
   trackEvent('notification_shown', { type: 'premeeting' });
 
   // Mark fired only after we've actually shown it, so an unshowable notif
@@ -9751,86 +9863,31 @@ async function firePreMeetingNotification(event) {
   return true;
 }
 
-function createNotificationWindow(event) {
-  if (notificationWindow && !notificationWindow.isDestroyed()) {
-    notificationWindow.close();
-  }
-
-  const { screen } = require('electron');
-  const primaryDisplay = screen.getPrimaryDisplay();
-  const { width } = primaryDisplay.workAreaSize;
-  const { x, y } = primaryDisplay.workArea;
-
-  notificationWindow = new BrowserWindow({
-    width: 400,
-    height: 70,
-    x: x + width - 425,
-    y: y + 1,
-    frame: false,
-    transparent: true,
-    alwaysOnTop: true,
-    resizable: false,
-    skipTaskbar: true,
-    focusable: false,
-    hasShadow: false,
-    backgroundColor: '#00000000',
-    webPreferences: {
-      nodeIntegration: false,
-      contextIsolation: true,
-      sandbox: true,
-      preload: path.join(__dirname, 'preload.js'),
-    },
-  });
-
-  const rendererDist = path.join(__dirname, 'renderer', 'dist', 'index.html');
-  notificationWindow.loadFile(rendererDist, { hash: '/notification' });
-
-  const win = notificationWindow;
-  // Set true by close-notification-window (the renderer's Join/Focus/Close
-  // handlers all route through it, and each already tracks its own
-  // notification_clicked/_dismissed via the analytics bridge before calling
-  // it). Scoped to this window instance -- not a module-level flag -- so a
-  // new notification superseding an unactioned old one can't leak state
-  // across windows. Stays false only when the window closes via the 15s
-  // auto-close timer with no interaction at all, which is the passive-
-  // dismiss path the native Notification lifecycle already tracks but this
-  // custom BrowserWindow-based notification previously didn't.
-  win._analyticsInteracted = false;
-  let autoCloseTimer;
-  win.once('ready-to-show', () => {
-    win.showInactive();
-    win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-    win.setAlwaysOnTop(true, 'screen-saver', 1);
-
-    autoCloseTimer = setTimeout(() => {
-      if (!win.isDestroyed()) {
-        win.close();
-      }
-    }, 15000);
-
-    win.on('closed', () => {
-      if (autoCloseTimer) clearTimeout(autoCloseTimer);
-      if (!win._analyticsInteracted) {
-        trackEvent('notification_dismissed', { type: 'premeeting' });
-      }
-      if (notificationWindow === win) {
-        notificationWindow = null;
-      }
-    });
-
-    win.webContents.send('show-notification', {
-      title: event.title || 'Meeting starting',
-      time: event.start ? new Date(event.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
-      meeting_url: event.meeting_url,
-      attendees: event.attendees ? event.attendees.map(a => a.name || a.email).join(', ') : '',
-    });
-  });
-}
-
 ipcMain.handle('close-notification-window', () => {
   if (notificationWindow && !notificationWindow.isDestroyed()) {
     notificationWindow._analyticsInteracted = true;
     notificationWindow.close();
+  }
+});
+
+ipcMain.on('notification-action-clicked', (event, { actionId, notifId }) => {
+  if (notificationWindow && !notificationWindow.isDestroyed()) {
+    const notif = notificationWindow._activeCustomNotification;
+    if (notif && notif.payload.id === notifId) {
+      notificationWindow._analyticsInteracted = true;
+      const index = notif.payload.actions.findIndex(a => a.id === actionId);
+      notif.emit('action', {}, index);
+    }
+  }
+});
+
+ipcMain.on('notification-body-clicked', (event, { notifId }) => {
+  if (notificationWindow && !notificationWindow.isDestroyed()) {
+    const notif = notificationWindow._activeCustomNotification;
+    if (notif && notif.payload.id === notifId) {
+      notificationWindow._analyticsInteracted = true;
+      notif.emit('click');
+    }
   }
 });
 
