@@ -1,9 +1,7 @@
 ---
 import AppleIcon from "../components/icons/AppleIcon.astro";
 import WindowsIcon from "../components/icons/WindowsIcon.astro";
-
-const DOWNLOAD_ARM = "https://github.com/ruzin/stenoai/releases/latest/download/stenoAI-macos-arm64.dmg";
-const DOWNLOAD_WIN = "https://github.com/ruzin/stenoai/releases/latest/download/stenoAI-windows-x64.exe";
+import { WINDOWS_EXE_URL } from "../lib/downloads";
 ---
 
 <section id="download" class="pb-[120px] pt-[80px]">
@@ -32,16 +30,13 @@ const DOWNLOAD_WIN = "https://github.com/ruzin/stenoai/releases/latest/download/
 
         <div class="flex gap-[10px] justify-center flex-wrap">
           <a
-            href={DOWNLOAD_ARM}
-            data-track="download"
-            data-location="cta_footer"
-            data-arch="arm64"
+            href="/download/?src=cta_footer"
             class="btn-base btn-primary no-underline"
           >
             <AppleIcon size={15} /> Download for Apple Silicon
           </a>
           <a
-            href={DOWNLOAD_WIN}
+            href={WINDOWS_EXE_URL}
             data-track="download"
             data-location="cta_footer"
             data-arch="win-x64"

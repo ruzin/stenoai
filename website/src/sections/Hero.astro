@@ -4,9 +4,7 @@ import ProviderCluster from "../components/ProviderCluster.astro";
 import { AppWindowDemo } from "../components/AppWindowDemo";
 import AppleIcon from "../components/icons/AppleIcon.astro";
 import WindowsIcon from "../components/icons/WindowsIcon.astro";
-
-const DOWNLOAD_ARM = "https://github.com/ruzin/stenoai/releases/latest/download/stenoAI-macos-arm64.dmg";
-const DOWNLOAD_WIN = "https://github.com/ruzin/stenoai/releases/latest/download/stenoAI-windows-x64.exe";
+import { WINDOWS_EXE_URL } from "../lib/downloads";
 ---
 
 <section class="pt-[40px] pb-[56px] md:pt-[56px] md:pb-[80px]">
@@ -41,10 +39,7 @@ const DOWNLOAD_WIN = "https://github.com/ruzin/stenoai/releases/latest/download/
 
     <div class="flex gap-[10px] flex-wrap justify-center" id="hero-cta">
       <a
-        href={DOWNLOAD_ARM}
-        data-track="download"
-        data-location="hero"
-        data-arch="arm64"
+        href="/download/?src=hero"
         data-os-cta="mac"
         class="btn-base btn-primary inline-flex items-center gap-2 no-underline hover:no-underline"
       >
@@ -52,7 +47,7 @@ const DOWNLOAD_WIN = "https://github.com/ruzin/stenoai/releases/latest/download/
         <span data-os-cta-label="mac">Download for macOS</span>
       </a>
       <a
-        href={DOWNLOAD_WIN}
+        href={WINDOWS_EXE_URL}
         data-track="download"
         data-location="hero"
         data-arch="win-x64"

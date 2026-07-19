@@ -1,0 +1,163 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+import { Check } from "lucide-react";
+import { MAC_DMG_URL } from "../lib/downloads";
+
+const title = "Download Steno for Mac";
+const description = "Your Steno download is starting. Follow these steps to finish installing Steno.";
+---
+
+<BaseLayout title={title} description={description} noindex>
+  <main class="container-site" style="padding-top: 96px; padding-bottom: 96px;">
+    <div class="text-center" style="max-width: 640px; margin: 0 auto;">
+      <div class="download-pill">
+        <Check size={13} aria-hidden="true" />
+        <span>Download started</span>
+      </div>
+
+      <h1 class="download-heading">You're almost set up.<br />A few quick steps to go.</h1>
+
+      <p class="text-fg-2 text-base mb-16">
+        Steno is downloading now. If nothing happened, you can <a
+          href={MAC_DMG_URL}
+          data-track="download"
+          data-location="download_page:manual"
+          data-arch="arm64"
+          class="download-manual-link"
+        >download Steno manually</a>.
+      </p>
+    </div>
+
+    <div class="download-steps">
+      <div class="download-step">
+        <div class="download-step-badge">1</div>
+        <img src="/images/download-steps/step-1.png" alt="" width="676" height="454" class="download-step-image" />
+        <p class="download-step-caption">
+          Open the <strong>Steno installer</strong> from your <strong>Downloads</strong> folder
+        </p>
+      </div>
+      <div class="download-step">
+        <div class="download-step-badge">2</div>
+        <img src="/images/download-steps/step-2.png" alt="" width="712" height="474" class="download-step-image" />
+        <p class="download-step-caption">
+          Drag the <strong>Steno</strong> icon into your <strong>Applications</strong> folder
+        </p>
+      </div>
+      <div class="download-step">
+        <div class="download-step-badge">3</div>
+        <img src="/images/download-steps/step-3.png" alt="" width="712" height="474" class="download-step-image" />
+        <p class="download-step-caption">
+          Open the <strong>Steno</strong> app from your <strong>Applications</strong> folder
+        </p>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    import { trackDownload } from "../analytics";
+    import { MAC_DMG_URL } from "../lib/downloads";
+
+    // Attribute the download to whichever button sent the visitor here
+    // (?src=hero / ?src=cta_footer), or "direct" for a bookmarked/shared
+    // link straight to this page.
+    const params = new URLSearchParams(window.location.search);
+    const src = params.get("src") || "direct";
+    trackDownload(`download_page:${src}`, "arm64");
+
+    // GitHub Releases serves this with Content-Disposition: attachment, so
+    // this starts a native browser download without navigating away.
+    window.location.href = MAC_DMG_URL;
+  </script>
+
+  <style>
+    .download-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 14px;
+      border-radius: 9999px;
+      background: var(--surface-sunken);
+      border: 1px solid var(--border);
+      color: var(--fg-2);
+      font-size: 12px;
+      font-weight: 500;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .download-heading {
+      font-family: var(--font-serif);
+      font-weight: 400;
+      font-size: clamp(30px, 4.2vw, 42px);
+      line-height: 1.15;
+      letter-spacing: -0.02em;
+      color: var(--fg-1);
+      margin: 20px 0 12px;
+    }
+
+    .download-manual-link {
+      color: var(--fg-1);
+      text-decoration: underline;
+    }
+
+    .download-steps {
+      display: flex;
+      flex-direction: column;
+      gap: 40px;
+      max-width: 900px;
+      margin: 0 auto;
+    }
+
+    @media (min-width: 768px) {
+      .download-steps {
+        flex-direction: row;
+        justify-content: center;
+        gap: 24px;
+      }
+    }
+
+    .download-step {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      flex: 1;
+      max-width: 280px;
+      margin: 0 auto;
+    }
+
+    .download-step-badge {
+      width: 28px;
+      height: 28px;
+      border-radius: 9999px;
+      background: var(--primary);
+      color: var(--primary-fg);
+      display: grid;
+      place-items: center;
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 16px;
+    }
+
+    .download-step-image {
+      width: 100%;
+      height: auto;
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      background: var(--surface-sunken);
+      display: block;
+    }
+
+    .download-step-caption {
+      margin-top: 16px;
+      font-size: 14px;
+      line-height: 1.5;
+      color: var(--fg-2);
+      text-align: center;
+    }
+
+    .download-step-caption strong {
+      color: var(--fg-1);
+      font-weight: 600;
+    }
+  </style>
+</BaseLayout>
