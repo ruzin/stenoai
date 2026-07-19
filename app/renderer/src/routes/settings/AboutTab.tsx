@@ -101,6 +101,13 @@ export function AboutTab() {
         if (result.downloadedVersion) {
           settledRef.current = true;
           setDownloadedVersion((v) => v ?? result.downloadedVersion);
+        } else if (result.downloadError) {
+          // A failed background update persists in main; restore it so
+          // returning to About still shows the failure. Terminal for this
+          // cycle (like a completed download), so mark settled — a stale
+          // percent-only snapshot must not reopen the progress bar over it.
+          settledRef.current = true;
+          setDownloadError((e) => e ?? result.downloadError);
         } else if (result.downloadPercent !== null && !settledRef.current) {
           setDownloadPercent((p) => p ?? result.downloadPercent);
         }
@@ -229,10 +236,7 @@ export function AboutTab() {
 
       {downloadedVersion && (
         <div className="py-3">
-          <Button
-            className="w-full"
-            onClick={() => ipc().updates.install()}
-          >
+          <Button className="w-full" onClick={() => ipc().updates.install()}>
             Restart to Update (v{downloadedVersion})
           </Button>
         </div>
@@ -252,7 +256,11 @@ export function AboutTab() {
         />
       </SettingRow>
 
-      <SettingRow label="GitHub" description="Steno is open source — browse the code, file issues" noBorder>
+      <SettingRow
+        label="GitHub"
+        description="Steno is open source — browse the code, file issues"
+        noBorder
+      >
         <ExternalLinkAction
           label="View"
           onClick={() => void ipc().shell.openExternal(GITHUB_URL)}
@@ -261,7 +269,10 @@ export function AboutTab() {
 
       {/* Legal footer — small, out of the settings-row rhythm above since
           these aren't actions on Steno itself. */}
-      <div className="mt-8 flex items-center gap-3 text-[12px]" style={{ color: 'var(--fg-muted)' }}>
+      <div
+        className="mt-8 flex items-center gap-3 text-[12px]"
+        style={{ color: 'var(--fg-muted)' }}
+      >
         <button
           type="button"
           onClick={() => void ipc().shell.openExternal(TERMS_URL)}

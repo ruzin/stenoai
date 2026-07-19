@@ -56,7 +56,7 @@ export const useSetDefaultTemplate = () => {
       await qc.cancelQueries({ queryKey: templatesKeys.list() });
       const previous = qc.getQueryData(templatesKeys.list());
       qc.setQueryData(templatesKeys.list(), (old: TemplatesListData | undefined) =>
-        old ? { ...old, default_template_id: id } : old,
+        old ? { ...old, default_template_id: id } : old
       );
       return { previous, attempt };
     },
@@ -73,8 +73,15 @@ export const useSetDefaultTemplate = () => {
     },
     // onSettled (not onSuccess): a failed setDefault must also refetch and
     // reconcile the cache with disk truth, not just leave whatever the
-    // optimistic write + onError rollback left behind.
-    onSettled: () => qc.invalidateQueries({ queryKey: templatesKeys.all }),
+    // optimistic write + onError rollback left behind. Gate on latestAttempt
+    // (same guard as the rollback above): if the user picked A then B, A's
+    // later-settling refetch must not clobber B's newer optimistic write with
+    // a snapshot from before B — only the most recent attempt reconciles, and
+    // its refetch is what lands the correct final state.
+    onSettled: (_data, _err, _id, context) => {
+      if (context?.attempt !== latestAttempt.current) return;
+      return qc.invalidateQueries({ queryKey: templatesKeys.all });
+    },
   });
 };
 

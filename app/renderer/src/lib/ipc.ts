@@ -104,13 +104,7 @@ export interface CalendarEvent {
   meeting_url?: string;
   description?: string;
   is_all_day?: boolean;
-  response_status?:
-    | 'accepted'
-    | 'declined'
-    | 'tentative'
-    | 'needsAction'
-    | 'organizer'
-    | 'unknown';
+  response_status?: 'accepted' | 'declined' | 'tentative' | 'needsAction' | 'organizer' | 'unknown';
   color?: string;
 }
 
@@ -495,7 +489,9 @@ export type GetDockIconResponse = Result<{ hide_dock_icon: boolean }>;
 export type GetMenuBarIconResponse = Result<{ show_menu_bar_icon: boolean }>;
 export type GetSystemAudioResponse = Result<{ system_audio_enabled: boolean }>;
 export type GetAutoDetectMeetingsResponse = Result<{ auto_detect_meetings_enabled: boolean }>;
-export type GetPremeetingNotificationsResponse = Result<{ premeeting_notifications_enabled: boolean }>;
+export type GetPremeetingNotificationsResponse = Result<{
+  premeeting_notifications_enabled: boolean;
+}>;
 export type GetLaunchOnLoginResponse = Result<{ launch_on_login: boolean }>;
 export type GetWhisperModelResponse = Result<{ whisper_model: string; supported_models: string[] }>;
 export type GetKeepRecordingsResponse = Result<{ keep_recordings: boolean }>;
@@ -565,6 +561,10 @@ export type CheckForUpdatesResponse = Result<{
 export type GetUpdateStatusResponse = Result<{
   downloadedVersion: string | null;
   downloadPercent: number | null;
+  // The last surfaced auto-updater error, so a freshly-mounted About tab can
+  // rehydrate a failed background update instead of only reacting to the
+  // one-shot 'update-error' event. Null when the last cycle didn't fail.
+  downloadError: string | null;
 }>;
 
 // ---------- event payloads ----------
@@ -844,10 +844,19 @@ export interface StenoaiBridge {
       Result<{ message: string }>
     >;
     saveNotes: RequestFn<[name: string, notes: string], SaveMeetingNotesResponse>;
-    exportTranscript: RequestFn<[defaultFilename: string, content: string], Result<{ path: string }>>;
+    exportTranscript: RequestFn<
+      [defaultFilename: string, content: string],
+      Result<{ path: string }>
+    >;
     regenTitle: RequestFn<[summaryFile: string, name: string], Result<Record<string, never>>>;
-    generateReport: RequestFn<[summaryFile: string, templateId: string], Result<{ message: string }>>;
-    setActiveReport: RequestFn<[summaryFile: string, reportId: string], Result<Record<string, never>>>;
+    generateReport: RequestFn<
+      [summaryFile: string, templateId: string],
+      Result<{ message: string }>
+    >;
+    setActiveReport: RequestFn<
+      [summaryFile: string, reportId: string],
+      Result<Record<string, never>>
+    >;
     deleteReport: RequestFn<[summaryFile: string, reportId: string], Result<Record<string, never>>>;
   };
 
@@ -870,10 +879,7 @@ export interface StenoaiBridge {
     updateIcon: RequestFn<[id: string, icon: string], Result<Record<string, never>>>;
     delete: RequestFn<[id: string], Result<Record<string, never>>>;
     reorder: RequestFn<[ids: string[]], Result<Record<string, never>>>;
-    addMeeting: RequestFn<
-      [summaryFile: string, folderId: string],
-      Result<Record<string, never>>
-    >;
+    addMeeting: RequestFn<[summaryFile: string, folderId: string], Result<Record<string, never>>>;
     removeMeeting: RequestFn<
       [summaryFile: string, folderId: string],
       Result<Record<string, never>>
@@ -923,7 +929,10 @@ export interface StenoaiBridge {
     getNotifications: RequestFn<[], GetNotificationsResponse>;
     setNotifications: RequestFn<[v: boolean], Result<Record<string, never>>>;
     getTelemetry: RequestFn<[], GetTelemetryResponse>;
-    setTelemetry: RequestFn<[v: boolean, source: TelemetryToggleSource], Result<Record<string, never>>>;
+    setTelemetry: RequestFn<
+      [v: boolean, source: TelemetryToggleSource],
+      Result<Record<string, never>>
+    >;
     getDockIcon: RequestFn<[], GetDockIconResponse>;
     setDockIcon: RequestFn<[v: boolean], Result<Record<string, never>>>;
     getMenuBarIcon: RequestFn<[], GetMenuBarIconResponse>;
@@ -980,7 +989,10 @@ export interface StenoaiBridge {
     setStoragePath: RequestFn<[p: string], Result<Record<string, never>>>;
     pickStorageFolder: RequestFn<[], PickStorageFolderResponse>;
     getAiPrompts: RequestFn<[], GetAiPromptsResponse>;
-    saveDiagnostics: RequestFn<[defaultFilename: string, content: string], Result<{ path: string }>>;
+    saveDiagnostics: RequestFn<
+      [defaultFilename: string, content: string],
+      Result<{ path: string }>
+    >;
   };
 
   ai: {
@@ -1061,7 +1073,12 @@ export interface StenoaiBridge {
     navigateToMeeting: Subscribe<{ summaryFile: string }>;
     trayOpenSettings: Subscribe<void>;
     showQuitDialog: Subscribe<{ type: 'recording' | 'processing'; jobCount?: number }>;
-    showNotification: Subscribe<{ title: string; time: string; meeting_url?: string; attendees?: string }>;
+    showNotification: Subscribe<{
+      title: string;
+      time: string;
+      meeting_url?: string;
+      attendees?: string;
+    }>;
   };
 
   org: {

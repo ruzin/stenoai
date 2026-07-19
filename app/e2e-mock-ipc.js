@@ -469,7 +469,17 @@ function install({ ipcMain }) {
     // fields fall through to the permissive default (undefined, not null),
     // and `downloadPercent !== null` reads true for undefined — showing a
     // stray "Downloading update… undefined%" bar on first paint.
-    'get-update-status': { success: true, downloadedVersion: null, downloadPercent: null },
+    // STENOAI_E2E_SEED_UPDATE_ERROR seeds a persisted failed background update
+    // so the About tab's mount-time rehydration (settings-about.t1) can assert
+    // the failure is restored on navigation, not just from the live one-shot
+    // 'update-error' event.
+    'get-update-status': () => ({
+      success: true,
+      downloadedVersion: null,
+      downloadPercent: null,
+      downloadError:
+        process.env.STENOAI_E2E_SEED_UPDATE_ERROR === '1' ? 'network unreachable' : null,
+    }),
     // Fires on first paint once signed in (Sidebar + RouteView gate the
     // Shared notes feature on it). Default to feature-enabled to match the
     // adapter's default and keep the org-lock spec's UI unchanged. A spec can
@@ -652,7 +662,9 @@ function install({ ipcMain }) {
       fn = MOCKS[channel];
     } else if (Object.prototype.hasOwnProperty.call(DEFAULTS, channel)) {
       const value = DEFAULTS[channel];
-      fn = async () => value;
+      // A function-valued default is evaluated per invoke (so it can read
+      // env seeds set for a specific spec); a plain value is returned as-is.
+      fn = typeof value === 'function' ? value : async () => value;
     } else {
       // Unknown channel — resolve permissively so no renderer invoke() rejects
       // with "no handler registered". The real (backend-spawning) handler is

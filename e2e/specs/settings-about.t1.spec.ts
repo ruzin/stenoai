@@ -27,3 +27,24 @@ test('About tab shows the version and resolves a Check for Updates click', async
     aboutSection.getByRole('button', { name: "You're on the latest version" }),
   ).toBeVisible();
 });
+
+test('About tab rehydrates a persisted failed background update on mount', async ({
+  launchApp,
+}) => {
+  // A background update that failed while the user was on another tab is only
+  // announced via the one-shot 'update-error' event. main.js persists it in
+  // get-update-status so a later About mount can restore it — this asserts that
+  // rehydration path (seeded via STENOAI_E2E_SEED_UPDATE_ERROR).
+  const { page } = await launchApp({
+    mockIpc: true,
+    env: { STENOAI_E2E_SEED_UPDATE_ERROR: '1' },
+  });
+
+  await page.evaluate(() => {
+    window.location.hash = '#/settings?tab=about';
+  });
+
+  const aboutSection = page.locator('[data-settings-tab="about"]');
+  await expect(aboutSection).toBeVisible();
+  await expect(aboutSection.getByText(/Update download failed: network unreachable/)).toBeVisible();
+});

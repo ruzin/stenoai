@@ -5112,6 +5112,13 @@ ipcMain.handle('startup-setup-check', async () => {
 // lands in pendingUpdateVersion); get-update-status exposes both.
 let pendingUpdateVersion = null;
 let pendingDownloadPercent = null;
+// The last surfaced auto-updater error, persisted the same way as the two
+// above so a freshly-mounted About tab can rehydrate it via get-update-status.
+// The one-shot 'update-error' event only reaches a listener mounted at the
+// instant it fires — without this, navigating away from About and back after
+// a failed background update would show nothing. Cleared when a new cycle
+// starts (check / available / progress) or a download completes.
+let pendingUpdateError = null;
 
 function setupAutoUpdater() {
   if (IS_E2E) {
@@ -5129,6 +5136,9 @@ function setupAutoUpdater() {
 
   autoUpdater.on('checking-for-update', () => {
     sendDebugLog('Auto-updater: checking for updates...');
+    // Fresh cycle — clear any stale error from a previous failed check so a
+    // rehydrating About tab doesn't show an error that's now being retried.
+    pendingUpdateError = null;
   });
 
   autoUpdater.on('update-available', (info) => {
@@ -5136,6 +5146,7 @@ function setupAutoUpdater() {
     // Matches the renderer's own `setDownloadPercent((p) => p ?? 0)` — marks
     // a download as started before the first real progress tick arrives.
     if (pendingDownloadPercent === null) pendingDownloadPercent = 0;
+    pendingUpdateError = null;
     if (mainWindow) {
       mainWindow.webContents.send('update-available', { version: info.version });
     }
@@ -5148,6 +5159,7 @@ function setupAutoUpdater() {
   autoUpdater.on('download-progress', (progress) => {
     sendDebugLog(`Auto-updater: downloading ${Math.round(progress.percent)}%`);
     pendingDownloadPercent = Math.round(progress.percent);
+    pendingUpdateError = null;
     if (mainWindow) {
       mainWindow.webContents.send('update-download-progress', { percent: Math.round(progress.percent) });
     }
@@ -5156,6 +5168,7 @@ function setupAutoUpdater() {
   autoUpdater.on('update-downloaded', (info) => {
     sendDebugLog(`Auto-updater: v${info.version} ready to install`);
     pendingDownloadPercent = null;
+    pendingUpdateError = null;
     pendingUpdateVersion = info.version;
     if (mainWindow) {
       mainWindow.webContents.send('update-downloaded', { version: info.version });
@@ -5180,6 +5193,9 @@ function setupAutoUpdater() {
       return;
     }
     sendDebugLog(`Auto-updater error: ${msg}`);
+    // Persist so a later About-tab mount can rehydrate it (the event below is
+    // one-shot and only reaches an already-mounted listener).
+    pendingUpdateError = msg;
     if (mainWindow) {
       mainWindow.webContents.send('update-error', { message: msg });
     }
@@ -8412,7 +8428,12 @@ ipcMain.handle('check-for-updates', async () => {
 // listener that's mounted at the exact moment it fires; this is the seam
 // for everyone else.
 ipcMain.handle('get-update-status', async () => {
-  return { success: true, downloadedVersion: pendingUpdateVersion, downloadPercent: pendingDownloadPercent };
+  return {
+    success: true,
+    downloadedVersion: pendingUpdateVersion,
+    downloadPercent: pendingDownloadPercent,
+    downloadError: pendingUpdateError,
+  };
 });
 
 ipcMain.handle('open-release-page', async (event, url) => {
