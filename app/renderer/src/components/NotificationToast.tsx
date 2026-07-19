@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { ipc } from '@/lib/ipc';
 import { useTheme } from '@/hooks/useTheme';
+import { AppIcon } from '@/components/ui/app-icon';
 
 interface NotificationData {
   title: string;
@@ -64,9 +65,9 @@ export function NotificationToast() {
           background: transparent !important;
         }
       `}</style>
-      <div className="flex h-screen w-screen items-center justify-center bg-transparent p-3">
+      <div className="flex h-screen w-screen items-center justify-end bg-transparent p-3">
         <div 
-        className="group relative flex w-full cursor-pointer items-center justify-between rounded-[20px] bg-white p-2.5 pr-3 border border-gray-200 dark:bg-[#1E1E1E] dark:border-white/10"
+        className={`group relative flex ${hasValidUrl ? 'w-[344px]' : 'w-[280px]'} cursor-pointer items-center justify-between rounded-[20px] bg-white p-2.5 pr-3 border border-gray-200 dark:bg-[#1E1E1E] dark:border-white/10`}
         style={{ fontFamily: 'system-ui, -apple-system, sans-serif' }}
         onClick={handleFocusMain}
       >
@@ -80,29 +81,33 @@ export function NotificationToast() {
           </svg>
         </button>
 
-        <div className="flex items-center">
+        <div className="flex items-center flex-1 min-w-0 pr-2">
           <div 
             className="h-8 w-1 rounded-full ml-1 shrink-0" 
             style={{ backgroundColor: barColor }}
           ></div>
-          <div className="flex flex-col justify-center ml-3">
-            <span className="text-[14px] font-medium text-gray-900 tracking-tight leading-tight truncate max-w-[150px] dark:text-gray-100">
+          <div className="flex flex-col justify-center ml-3 flex-1 min-w-0">
+            <span className="text-[14px] font-medium text-gray-900 tracking-tight leading-tight truncate dark:text-gray-100">
               {data.title}
             </span>
-            <span className="text-[12px] font-normal text-gray-500 leading-tight mt-0.5 dark:text-gray-400">
+            <span className="text-[12px] font-normal text-gray-500 leading-tight mt-0.5 dark:text-gray-400 truncate">
               {data.time}
             </span>
           </div>
         </div>
 
-        {hasValidUrl && (
+        {hasValidUrl ? (
           <button
             onClick={handleJoin}
             className="flex items-center gap-2 rounded-[10px] border border-gray-200 bg-white px-3 py-1.5 text-[13px] font-medium text-gray-900 transition-all hover:bg-gray-50 hover:shadow-sm active:bg-gray-100 active:scale-[0.98] shrink-0 dark:border-white/10 dark:bg-[#2C2C2E] dark:text-gray-100 dark:hover:bg-[#3C3C3E] dark:active:bg-[#1C1C1E]"
           >
-            <ProfessionalCameraIcon className="h-5 w-5" backgroundColor={barColor} />
+            <AppIcon size={18} />
             <span>Join & take notes</span>
           </button>
+        ) : (
+          <div className="flex items-center justify-center shrink-0 opacity-40 pr-1">
+            <AppIcon size={20} />
+          </div>
         )}
       </div>
     </div>
@@ -110,11 +115,3 @@ export function NotificationToast() {
   );
 }
 
-function ProfessionalCameraIcon({ className, backgroundColor = '#10B981' }: { className?: string, backgroundColor?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <rect width="24" height="24" rx="5.5" fill={backgroundColor}/>
-      <path d="M15.5 10.5V8C15.5 7.17157 14.8284 6.5 14 6.5H6C5.17157 6.5 4.5 7.17157 4.5 8V16C4.5 16.8284 5.17157 17.5 6 17.5H14C14.8284 17.5 15.5 16.8284 15.5 16V13.5L19.5 16.5V7.5L15.5 10.5Z" fill="white"/>
-    </svg>
-  );
-}
