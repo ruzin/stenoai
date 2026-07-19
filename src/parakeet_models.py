@@ -119,6 +119,33 @@ def maybe_enable_offline(model_id: str = DEFAULT_MODEL_ID) -> bool:
     return True
 
 
+def disable_implicit_hf_token() -> None:
+    """Never send an implicit HuggingFace token when pulling our bundled models.
+
+    Parakeet's weights live in PUBLIC HF repos, so they download fine
+    anonymously. But ``huggingface_hub`` auto-attaches an *implicit* token to
+    every request — from ``HF_TOKEN`` / ``HUGGING_FACE_HUB_TOKEN`` in the
+    environment or a cached ``~/.cache/huggingface/token``. The desktop app is
+    spawned by Electron and inherits the user's shell environment, so a stray,
+    expired, or wrong-account token turns an anonymous public download into an
+    ``HTTP 401 Unauthorized`` (a HEAD on config.json 401s, then parakeet-mlx
+    masks the real cause with a bogus local-path ``FileNotFoundError``).
+
+    ``HF_HUB_DISABLE_IMPLICIT_TOKEN=1`` tells the hub to send NO token unless
+    one is passed explicitly — which we never do for these public pulls — so
+    they're always anonymous and can't be broken by the user's environment. We
+    only decline to *send* the token; we never read, mutate, or delete it.
+
+    Like ``HF_HUB_OFFLINE``, the hub snapshots this constant at import time, so
+    this MUST run before ``huggingface_hub`` is first imported (transitively via
+    parakeet-mlx / onnx-asr). Callers invoke it at the top of ``_load_model``,
+    right beside ``maybe_enable_offline``. ``setdefault`` so an operator who
+    deliberately exported ``HF_HUB_DISABLE_IMPLICIT_TOKEN=0`` (to reach a
+    private mirror, say) isn't overridden.
+    """
+    os.environ.setdefault("HF_HUB_DISABLE_IMPLICIT_TOKEN", "1")
+
+
 def download(
     model_id: str = DEFAULT_MODEL_ID,
     progress_callback: Optional[Callable[[str], None]] = None,
@@ -148,5 +175,22 @@ def download(
         ensure_loaded(model_id)
         return True
     except Exception as e:
-        logger.error("Parakeet model download/load failed: %s", e)
+        # parakeet-mlx / onnx-asr fall back to treating the repo id as a local
+        # path when the HuggingFace fetch fails, so the exception that reaches
+        # here is often a misleading ``FileNotFoundError: '<repo_id>/config.json'``
+        # that masks the real cause (an HTTP 401/403/network error logged
+        # upstream by huggingface_hub). Detect that shape and point at the
+        # likely culprits instead of parroting the bogus local path.
+        masks_http_failure = isinstance(e, FileNotFoundError) and model_id in str(e)
+        if masks_http_failure:
+            logger.error(
+                "Parakeet model download failed for %s: the HuggingFace fetch "
+                "did not complete (see the HTTP log line above). Common causes: "
+                "no network, or a stale/invalid HF_TOKEN in the environment "
+                "(public models download anonymously — a bad token forces a 401). "
+                "Underlying error: %s",
+                model_id, e,
+            )
+        else:
+            logger.error("Parakeet model download/load failed: %s", e)
         return False
