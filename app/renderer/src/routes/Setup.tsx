@@ -14,11 +14,15 @@ import { Display, Lead, Muted } from '@/components/ui/typography';
 import { useNavigate } from '@/lib/router';
 import { useCheckMicPermission, useRequestMicPermission, useSetupStep } from '@/hooks/useSetup';
 import {
+  settingsKeys,
+  useLaunchOnLoginSetting,
+  useSetLaunchOnLogin,
   useSetTelemetry,
   useSetUserName,
   useTelemetrySetting,
   useUserName,
 } from '@/hooks/useSettings';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   useSetAiProvider,
   useSetCloudApiKey,
@@ -131,6 +135,36 @@ export function Setup() {
   const telemetry = useTelemetrySetting();
   const setTelemetry = useSetTelemetry();
   const telemetryEnabled = telemetry.data?.telemetry_enabled ?? true;
+
+  // Launch-on-login disclosed here too (defaults ON) so onboarding fully
+  // discloses the two default-on behaviours; both persist immediately via the
+  // same backend the Settings page uses.
+  const launchOnLogin = useLaunchOnLoginSetting();
+  const setLaunchOnLogin = useSetLaunchOnLogin();
+  const launchOnLoginEnabled = launchOnLogin.data ?? true;
+
+  const qc = useQueryClient();
+  // Onboarding discloses telemetry + launch-on-login, so mark the one-time
+  // privacy notice seen on the way out. Without this, an upgrader who had a
+  // config but no model (so they were routed here) would land on Home and get
+  // the consent modal a second time for the same toggles. Idempotent — a fresh
+  // install is already seen. Navigate regardless so a persist hiccup never
+  // traps the user in Setup.
+  const finishOnboarding = React.useCallback(async () => {
+    try {
+      const res = await ipc().privacy.markNoticeSeen();
+      if (res?.success) {
+        // Flip the gate synchronously before navigating home so the consent
+        // modal can't flash on the way out; invalidate reconciles with disk.
+        qc.setQueryData(settingsKeys.privacyNoticeSeen(), true);
+        qc.invalidateQueries({ queryKey: settingsKeys.privacyNoticeSeen() });
+      }
+    } catch {
+      // best-effort; the consent modal is a soft disclosure, not a gate
+    } finally {
+      navigate('/');
+    }
+  }, [qc, navigate]);
 
   // First name powers the in-app greeting ("Hi <name>, ask anything"). Stored
   // locally only — never sent anywhere. Persisted on blur to avoid a write
@@ -574,9 +608,30 @@ export function Setup() {
           />
         </div>
 
+        <div
+          className="mt-3 flex items-start gap-4 rounded-md border border-border p-4"
+          data-setup-launch
+        >
+          <div className="min-w-0 flex-1">
+            <div className="text-sm font-medium text-foreground">
+              Launch on login
+            </div>
+            <Muted className="mt-0.5">
+              Start Steno automatically when you log in (hidden in the menu
+              bar). You can change this any time in Settings.
+            </Muted>
+          </div>
+          <Switch
+            checked={launchOnLoginEnabled}
+            onCheckedChange={(v) => setLaunchOnLogin.mutate(v)}
+            disabled={launchOnLogin.data === undefined}
+            aria-label="Launch on login"
+          />
+        </div>
+
         <div className="mt-8 flex flex-col items-center gap-2">
           {done ? (
-            <Button size="lg" onClick={() => navigate('/')}>
+            <Button size="lg" onClick={() => void finishOnboarding()}>
               Continue to app
             </Button>
           ) : (

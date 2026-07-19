@@ -6,6 +6,7 @@ export const settingsKeys = {
   all: ['settings'] as const,
   notifications: () => [...settingsKeys.all, 'notifications'] as const,
   telemetry: () => [...settingsKeys.all, 'telemetry'] as const,
+  privacyNoticeSeen: () => [...settingsKeys.all, 'privacyNoticeSeen'] as const,
   dockIcon: () => [...settingsKeys.all, 'dockIcon'] as const,
   systemAudio: () => [...settingsKeys.all, 'systemAudio'] as const,
   systemAudioSupport: () => [...settingsKeys.all, 'systemAudioSupport'] as const,
@@ -47,6 +48,19 @@ export function useSetTelemetry() {
     mutationFn: async ({ enabled, source }: { enabled: boolean; source: TelemetryToggleSource }) =>
       unwrap(await ipc().settings.setTelemetry(enabled, source)),
     onSuccess: () => qc.invalidateQueries({ queryKey: settingsKeys.telemetry() }),
+  });
+}
+
+/** One-time privacy disclosure gate. `privacy_notice_seen` is false only for
+ *  existing installs whose config predates the marker (see
+ *  Config._migrate_privacy_notice_seen); fresh installs are disclosed during
+ *  onboarding and start true. The consent modal reads this and, on
+ *  acknowledgement, marks it seen forever and invalidates this query so it
+ *  won't re-open. */
+export function usePrivacyNoticeSeen() {
+  return useQuery({
+    queryKey: settingsKeys.privacyNoticeSeen(),
+    queryFn: async () => unwrap(await ipc().privacy.getNoticeSeen()).privacy_notice_seen,
   });
 }
 
