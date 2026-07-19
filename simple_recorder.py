@@ -698,28 +698,18 @@ Summary output language: {config.get_language_name(output_language)}
 
         print("STREAM_COMPLETE", flush=True)
 
-        # Step 3: Generate title
+        # Step 3: Generate title. generate_title logs its own failure detail
+        # (provider/model/response length on an empty result, or a traceback)
+        # and returns None rather than raising, so a failure simply leaves the
+        # placeholder name standing — no extra logging needed here.
         if _AUTO_NAMED_PATTERN.match(session_name):
-            try:
-                generated_title = self.summarizer.generate_title(
-                    streamed_md, transcript_text, language=output_language
-                )
-                if generated_title:
-                    session_name = generated_title
-                    print(f"TITLE:{session_name}", flush=True)
-                    print(f"Auto-generated title: {session_name}")
-                else:
-                    # generate_title returned None (empty/degenerate response).
-                    # Previously this was silent, so the placeholder name would
-                    # stick with no trace. Surface it (content-free) so the
-                    # failure is visible in diagnostics.
-                    logger.warning(
-                        "Title generation returned no title; keeping placeholder "
-                        "name %r",
-                        session_name,
-                    )
-            except Exception:
-                logger.exception("Title generation failed; keeping placeholder name")
+            generated_title = self.summarizer.generate_title(
+                streamed_md, transcript_text, language=output_language
+            )
+            if generated_title:
+                session_name = generated_title
+                print(f"TITLE:{session_name}", flush=True)
+                print(f"Auto-generated title: {session_name}")
 
         # Step 4: Parse streamed markdown into structured JSON
         parsed = self._parse_streamed_markdown(streamed_md)
@@ -2751,19 +2741,26 @@ def reprocess(summary_file, regenerate_title):
 
         streamed_md = ''.join(streamed_chunks)
 
-        # Regenerate title if requested
-        if regenerate_title:
-            try:
-                generated_title = recorder.summarizer.generate_title(
-                    streamed_md, transcript, language=output_language
-                )
-                if generated_title:
-                    session_name = generated_title
-                    existing_data["session_info"]["name"] = generated_title
-                    print(f"TITLE:{session_name}", flush=True)
-                    print(f"Auto-generated title: {session_name}")
-            except Exception as e:
-                print(f"Title regeneration skipped: {e}")
+        # Regenerate the title when explicitly forced OR when the note still has
+        # an auto/placeholder name. The latter is the common case now that the
+        # pipeline is transcript-first (#276): with auto-summarize off, a fresh
+        # recording is saved transcript-only as "Note", and the user fills it in
+        # later via "Generate notes" — which reprocesses with regenerate_title
+        # False. Without this, that path produced a summary but left the title
+        # stuck at "Note" forever. Gating on _AUTO_NAMED_PATTERN mirrors
+        # process_streaming's title step and protects a user-renamed note from
+        # being overwritten.
+        if regenerate_title or _AUTO_NAMED_PATTERN.match(session_name):
+            # generate_title logs its own failure detail and returns None rather
+            # than raising, so a failure just leaves the current name standing.
+            generated_title = recorder.summarizer.generate_title(
+                streamed_md, transcript, language=output_language
+            )
+            if generated_title:
+                session_name = generated_title
+                existing_data["session_info"]["name"] = generated_title
+                print(f"TITLE:{session_name}", flush=True)
+                print(f"Auto-generated title: {session_name}")
 
         # Add reprocess timestamp
         existing_data["session_info"]["reprocessed_at"] = datetime.now().isoformat()

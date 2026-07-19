@@ -51,6 +51,14 @@ class GenerateTitleCleanupTests(unittest.TestCase):
         self.assertEqual(_title_from("`Quarterly Roadmap Review`"), "Quarterly Roadmap Review")
         self.assertEqual(_title_from("## Team Sync Notes"), "Team Sync Notes")
 
+    def test_markdown_wrapped_prefix_is_removed(self):
+        # "**Title: Foo**" must lose the markers first so the prefix is detected.
+        self.assertEqual(_title_from("**Title: Quarterly Planning**"), "Quarterly Planning")
+
+    def test_prefix_then_markdown_wrapped_value(self):
+        # "Title: **Foo**" must lose the markers after the prefix is removed.
+        self.assertEqual(_title_from("Title: **Quarterly Planning**"), "Quarterly Planning")
+
     def test_plain_title_passes_through(self):
         self.assertEqual(_title_from("Border Security & Retreat Discussion"),
                          "Border Security & Retreat Discussion")

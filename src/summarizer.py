@@ -1751,14 +1751,19 @@ TITLE:"""
                 title = lines[-1]
             elif lines:
                 title = lines[0]
-            title = title.strip().strip('"').strip("'").strip()
+            # Strip markdown emphasis / code / heading markers BEFORE and AFTER
+            # prefix removal — a wrapped "**Title: Foo**" must lose the markers
+            # first so the "Title:" prefix is detectable, and "Title: **Foo**"
+            # must lose them after the prefix is gone.
+            def _strip_md(s: str) -> str:
+                return s.strip().strip('"').strip("'").strip(" *_`#").strip()
+
+            title = _strip_md(title)
             # Remove common prefixes the model might add
             for prefix in ["Title:", "Meeting:", "Meeting Title:", "title:", "meeting:"]:
                 if title.lower().startswith(prefix.lower()):
-                    title = title[len(prefix):].strip()
-            # Strip surrounding markdown emphasis / code / heading markers that
-            # otherwise leak into the title (e.g. "**Reissuing after Completion**").
-            title = title.strip(" *_`#").strip()
+                    title = _strip_md(title[len(prefix):])
+                    break
 
             # Enforce max length (6 words, ~60 chars)
             words = title.split()
