@@ -1,15 +1,16 @@
 import * as React from 'react';
 import { ipc, type LiveSegment } from '@/lib/ipc';
 
-export type LiveTranscriptStatus =
-  | 'idle'
-  | 'loading'
-  | 'streaming'
-  | 'error';
+export type LiveTranscriptStatus = 'idle' | 'loading' | 'streaming' | 'error';
 
 export interface UseLiveTranscriptResult {
   status: LiveTranscriptStatus;
   segments: LiveSegment[];
+  /** Finalised segments from the previous recording into this same note,
+   *  carried across a resume/continue. Display-only — render these before
+   *  `segments` so the live bar shows the earlier speech instead of blank.
+   *  Empty on a fresh (non-continued) recording. */
+  priorSegments: LiveSegment[];
   /** Last error reported by the Python consumer (model load failure, MLX
    *  missing, etc.). Null on success. */
   error: { stage: string; message?: string } | null;
@@ -57,7 +58,7 @@ function insertLiveSegment(prev: LiveSegment[], segment: LiveSegment): LiveSegme
     // dropping every same-speaker partial indiscriminately would clobber
     // that unrelated one until its next partial tick.
     const remainingPartials = partials.filter(
-      (s) => speakerKey(s) !== key || s.start > segment.end,
+      (s) => speakerKey(s) !== key || s.start > segment.end
     );
     return [...nextFinals, ...remainingPartials];
   }
@@ -86,6 +87,10 @@ function insertLiveSegment(prev: LiveSegment[], segment: LiveSegment): LiveSegme
  */
 export function useLiveTranscript(sessionName: string | null): UseLiveTranscriptResult {
   const [segments, setSegments] = React.useState<LiveSegment[]>([]);
+  // Carried over from the previous recording into this same note. Static for
+  // the session — only the getState backfill populates it (there is no live
+  // event for it), so it's set once and never folded into `segments`.
+  const [priorSegments, setPriorSegments] = React.useState<LiveSegment[]>([]);
   const [ready, setReady] = React.useState(false);
   const [error, setError] = React.useState<{ stage: string; message?: string } | null>(null);
   // Per-session marker that flips true the moment any subscription event
@@ -100,6 +105,7 @@ export function useLiveTranscript(sessionName: string | null): UseLiveTranscript
     // event can fire for the new session.
     receivedEventRef.current = false;
     setSegments([]);
+    setPriorSegments([]);
     setReady(false);
     setError(null);
 
@@ -137,6 +143,10 @@ export function useLiveTranscript(sessionName: string | null): UseLiveTranscript
       .then((res) => {
         if (cancelled || !res.success) return;
         if (res.sessionName !== sessionName) return;
+        // priorSegments are independent of the live tail (no live event ever
+        // updates them), so apply them even if a chunk raced ahead — the
+        // receivedEventRef guard below only protects the live `segments`.
+        setPriorSegments(res.priorSegments ?? []);
         if (receivedEventRef.current) return;
         // Backfilled segments already carry their true speaker tag —
         // main.js stores it verbatim in liveTranscriptState.segments.
@@ -162,7 +172,7 @@ export function useLiveTranscript(sessionName: string | null): UseLiveTranscript
     ? 'error'
     : !sessionName
       ? 'idle'
-      : segments.length > 0 || ready
+      : segments.length > 0 || priorSegments.length > 0 || ready
         ? 'streaming'
         : 'loading';
 
@@ -182,5 +192,5 @@ export function useLiveTranscript(sessionName: string | null): UseLiveTranscript
     };
   }, [status, sessionName]);
 
-  return { status, segments, error, slow };
+  return { status, segments, priorSegments, error, slow };
 }

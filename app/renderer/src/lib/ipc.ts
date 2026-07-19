@@ -104,13 +104,7 @@ export interface CalendarEvent {
   meeting_url?: string;
   description?: string;
   is_all_day?: boolean;
-  response_status?:
-    | 'accepted'
-    | 'declined'
-    | 'tentative'
-    | 'needsAction'
-    | 'organizer'
-    | 'unknown';
+  response_status?: 'accepted' | 'declined' | 'tentative' | 'needsAction' | 'organizer' | 'unknown';
   color?: string;
 }
 
@@ -371,6 +365,11 @@ export interface QueueStatus {
   isPaused: boolean;
   elapsedSeconds: number;
   sessionName: string | null;
+  /** The note (summary-file realpath) an active continue/resume is recording
+   *  INTO — lets a detail view tell "recording this note" from "recording a
+   *  different one" by identity rather than the collidable display name. Null
+   *  for a fresh new-note recording or when idle. */
+  recordingSummaryFile?: string | null;
 }
 
 export type PickAudioFileResponse = Result<{ filePath: string }>;
@@ -667,6 +666,11 @@ export interface LiveSegment {
 export type LiveTranscriptStateResponse = Result<{
   sessionName: string | null;
   segments: LiveSegment[];
+  /** Finalised segments carried over from the previous recording into this
+   *  same note on a resume/continue. Display-only — rendered before the live
+   *  tail so the bar shows earlier speech instead of starting blank. Static
+   *  for the session's lifetime; empty on a fresh (non-continued) recording. */
+  priorSegments?: LiveSegment[];
   /** True once the Python side has loaded the Parakeet model. Before this
    *  flips, the UI should show a model-loading state instead of an empty
    *  "no speech yet" panel — the difference matters for first-launch UX. */
@@ -828,10 +832,19 @@ export interface StenoaiBridge {
       Result<{ message: string }>
     >;
     saveNotes: RequestFn<[name: string, notes: string], SaveMeetingNotesResponse>;
-    exportTranscript: RequestFn<[defaultFilename: string, content: string], Result<{ path: string }>>;
+    exportTranscript: RequestFn<
+      [defaultFilename: string, content: string],
+      Result<{ path: string }>
+    >;
     regenTitle: RequestFn<[summaryFile: string, name: string], Result<Record<string, never>>>;
-    generateReport: RequestFn<[summaryFile: string, templateId: string], Result<{ message: string }>>;
-    setActiveReport: RequestFn<[summaryFile: string, reportId: string], Result<Record<string, never>>>;
+    generateReport: RequestFn<
+      [summaryFile: string, templateId: string],
+      Result<{ message: string }>
+    >;
+    setActiveReport: RequestFn<
+      [summaryFile: string, reportId: string],
+      Result<Record<string, never>>
+    >;
     deleteReport: RequestFn<[summaryFile: string, reportId: string], Result<Record<string, never>>>;
   };
 
@@ -854,10 +867,7 @@ export interface StenoaiBridge {
     updateIcon: RequestFn<[id: string, icon: string], Result<Record<string, never>>>;
     delete: RequestFn<[id: string], Result<Record<string, never>>>;
     reorder: RequestFn<[ids: string[]], Result<Record<string, never>>>;
-    addMeeting: RequestFn<
-      [summaryFile: string, folderId: string],
-      Result<Record<string, never>>
-    >;
+    addMeeting: RequestFn<[summaryFile: string, folderId: string], Result<Record<string, never>>>;
     removeMeeting: RequestFn<
       [summaryFile: string, folderId: string],
       Result<Record<string, never>>
@@ -907,7 +917,10 @@ export interface StenoaiBridge {
     getNotifications: RequestFn<[], GetNotificationsResponse>;
     setNotifications: RequestFn<[v: boolean], Result<Record<string, never>>>;
     getTelemetry: RequestFn<[], GetTelemetryResponse>;
-    setTelemetry: RequestFn<[v: boolean, source: TelemetryToggleSource], Result<Record<string, never>>>;
+    setTelemetry: RequestFn<
+      [v: boolean, source: TelemetryToggleSource],
+      Result<Record<string, never>>
+    >;
     getDockIcon: RequestFn<[], GetDockIconResponse>;
     setDockIcon: RequestFn<[v: boolean], Result<Record<string, never>>>;
     getSystemAudio: RequestFn<[], GetSystemAudioResponse>;
@@ -960,7 +973,10 @@ export interface StenoaiBridge {
     setStoragePath: RequestFn<[p: string], Result<Record<string, never>>>;
     pickStorageFolder: RequestFn<[], PickStorageFolderResponse>;
     getAiPrompts: RequestFn<[], GetAiPromptsResponse>;
-    saveDiagnostics: RequestFn<[defaultFilename: string, content: string], Result<{ path: string }>>;
+    saveDiagnostics: RequestFn<
+      [defaultFilename: string, content: string],
+      Result<{ path: string }>
+    >;
   };
 
   ai: {
@@ -1039,7 +1055,12 @@ export interface StenoaiBridge {
     navigateToMeeting: Subscribe<{ summaryFile: string }>;
     trayOpenSettings: Subscribe<void>;
     showQuitDialog: Subscribe<{ type: 'recording' | 'processing'; jobCount?: number }>;
-    showNotification: Subscribe<{ title: string; time: string; meeting_url?: string; attendees?: string }>;
+    showNotification: Subscribe<{
+      title: string;
+      time: string;
+      meeting_url?: string;
+      attendees?: string;
+    }>;
   };
 
   org: {

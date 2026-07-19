@@ -18,21 +18,11 @@ import {
   Trash2,
   Users,
 } from 'lucide-react';
-import {
-  Popover,
-  PopoverAnchor,
-  PopoverContent,
-  PopoverTrigger,
-} from '@/components/ui/popover';
+import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { useQueryClient } from '@tanstack/react-query';
 import * as SelectPrimitive from '@radix-ui/react-select';
 import { MeetingsShell } from '@/components/MeetingsShell';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectSeparator,
-} from '@/components/ui/select';
+import { Select, SelectContent, SelectItem, SelectSeparator } from '@/components/ui/select';
 import {
   useMeeting,
   useReprocessMeeting,
@@ -61,11 +51,7 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
-import {
-  Tooltip,
-  TooltipTrigger,
-  TooltipContent,
-} from '@/components/ui/tooltip';
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import {
   useFolders,
   useAddMeetingToFolder,
@@ -80,12 +66,9 @@ import { unwrap } from '@/lib/result';
 import { cn } from '@/lib/utils';
 import { navigate } from '@/lib/router';
 import { stripReasoning } from '@/lib/markdown';
-import {
-  pendingTitleRegens,
-  streamCache,
-  type StreamPhase,
-} from '@/lib/meetingDetailState';
+import { pendingTitleRegens, streamCache, type StreamPhase } from '@/lib/meetingDetailState';
 import { useReprocessBridge } from '@/hooks/reprocessBridgeStore';
+import { useRecording } from '@/hooks/useRecording';
 
 const LAST_OPENED_KEY = 'steno-last-opened-meeting';
 
@@ -123,11 +106,7 @@ export function MeetingDetail({ summaryFile }: MeetingDetailProps) {
           <p className="text-[17px] leading-[1.55]" style={{ color: 'var(--fg-2)' }}>
             {(meeting.error as Error)?.message ?? 'An error occurred loading this note.'}
           </p>
-          <button
-            type="button"
-            className="mv-chip"
-            onClick={() => navigate('/meetings')}
-          >
+          <button type="button" className="mv-chip" onClick={() => navigate('/meetings')}>
             Back to meetings
           </button>
         </div>
@@ -137,11 +116,7 @@ export function MeetingDetail({ summaryFile }: MeetingDetailProps) {
           <p className="text-[17px] leading-[1.55]" style={{ color: 'var(--fg-2)' }}>
             This recording may have been deleted. Pick another from the sidebar.
           </p>
-          <button
-            type="button"
-            className="mv-chip"
-            onClick={() => navigate('/meetings')}
-          >
+          <button type="button" className="mv-chip" onClick={() => navigate('/meetings')}>
             Back to meetings
           </button>
         </div>
@@ -223,7 +198,7 @@ function DetailContent({
     }
   };
   const [titleRegening, setTitleRegening] = React.useState(() =>
-    pendingTitleRegens.has(summaryFile),
+    pendingTitleRegens.has(summaryFile)
   );
   const [prevSummaryFile, setPrevSummaryFile] = React.useState(summaryFile);
   if (summaryFile !== prevSummaryFile) {
@@ -274,7 +249,9 @@ function DetailContent({
   const cached = streamCache.get(summaryFile);
   const [streamText, setStreamText] = React.useState(cached?.text ?? '');
   const [streamPhase, setStreamPhase] = React.useState<StreamPhase>(cached?.phase ?? 'idle');
-  const [chunkProgress, setChunkProgress] = React.useState<{ step: number; total: number } | null>(null);
+  const [chunkProgress, setChunkProgress] = React.useState<{ step: number; total: number } | null>(
+    null
+  );
   const [reprocessFailed, setReprocessFailed] = React.useState(false);
   const qc = useQueryClient();
 
@@ -283,15 +260,17 @@ function DetailContent({
   // active_report so reopening a note lands on whatever was last viewed.
   const reports = meeting.reports ?? [];
   const [activeReportId, setActiveReportId] = React.useState<string | null>(
-    meeting.active_report ?? null,
+    meeting.active_report ?? null
   );
-  const [prevMeetingReport, setPrevMeetingReport] = React.useState<string | null>(meeting.active_report ?? null);
+  const [prevMeetingReport, setPrevMeetingReport] = React.useState<string | null>(
+    meeting.active_report ?? null
+  );
   if ((meeting.active_report ?? null) !== prevMeetingReport) {
     setPrevMeetingReport(meeting.active_report ?? null);
     setActiveReportId(meeting.active_report ?? null);
   }
   const activeReport = activeReportId
-    ? reports.find((r) => r.id === activeReportId) ?? null
+    ? (reports.find((r) => r.id === activeReportId) ?? null)
     : null;
   // When a report generation finishes, summaryComplete fires for THIS meeting
   // and we want to land on the freshly-created report. The IPC stream doesn't
@@ -339,12 +318,10 @@ function DetailContent({
       // (the backend marks it active) once the fresh detail payload arrives.
       if (generatingReportRef.current) {
         generatingReportRef.current = false;
-        void qc
-          .invalidateQueries({ queryKey: meetingsKeys.detail(summaryFile) })
-          .then(() => {
-            const fresh = qc.getQueryData<Meeting>(meetingsKeys.detail(summaryFile));
-            if (fresh?.active_report) setActiveReportId(fresh.active_report);
-          });
+        void qc.invalidateQueries({ queryKey: meetingsKeys.detail(summaryFile) }).then(() => {
+          const fresh = qc.getQueryData<Meeting>(meetingsKeys.detail(summaryFile));
+          if (fresh?.active_report) setActiveReportId(fresh.active_report);
+        });
         setChunkProgress(null);
         setTimeout(() => {
           setStreamText('');
@@ -420,7 +397,7 @@ function DetailContent({
           setChunkProgress(null);
           streamCache.delete(summaryFile);
         },
-      },
+      }
     );
   };
 
@@ -461,7 +438,7 @@ function DetailContent({
           streamCache.delete(summaryFile);
           setReprocessFailed(true);
         },
-      },
+      }
     );
   };
 
@@ -508,7 +485,7 @@ function DetailContent({
     try {
       const res = await ipc().meetings.exportTranscript(
         defaultExportFilename(meeting),
-        transcriptBundle,
+        transcriptBundle
       );
       if (!res.success && res.error !== EXPORT_CANCELED_ERROR) {
         setExportError(`Couldn't save transcript: ${res.error || 'unknown error'}`);
@@ -536,7 +513,7 @@ function DetailContent({
         actionItems: asStringArray(meeting.action_items),
         participants: asStringArray(meeting.participants),
       },
-      activeReport ? { content: stripReasoning(activeReport.content) } : null,
+      activeReport ? { content: stripReasoning(activeReport.content) } : null
     );
     void navigator.clipboard.writeText(text);
     setCopied(true);
@@ -560,6 +537,18 @@ function DetailContent({
   // "finishing up" affordance and suppress the Generate-notes CTA until the
   // pipeline completes (or clears the flag on failure).
   const isProcessing = meeting.session_info.processing === true;
+  // While a recording is live on THIS note (resume/continue), the transcript
+  // is still growing — offering "Generate notes" mid-recording would summarise
+  // a moving target and strand the CTA once it finishes. Suppress it until the
+  // recording is stopped. Matched by summary-file IDENTITY (not display name,
+  // which collides for two default-"Note" notes); a recording on a *different*
+  // note leaves this note's CTA untouched.
+  const recording = useRecording();
+  const isRecordingThisNote =
+    recording.status !== 'idle' &&
+    recording.status !== 'processing' &&
+    recording.recordingSummaryFile != null &&
+    recording.recordingSummaryFile === info.summary_file;
 
   // Publish this note's reprocess trigger + streaming state so the floating
   // GenerateNotesBar (mounted at App level, above the Ask bar) drives THIS
@@ -572,7 +561,11 @@ function DetailContent({
   // trigger must not offer "Generate notes" for it either (#313 review —
   // reprocess on a failed note exits non-zero and strands the UI).
   const summaryPending =
-    notesNotGenerated && !transcriptionFailed && !isProcessing && Boolean(meeting.transcript);
+    notesNotGenerated &&
+    !transcriptionFailed &&
+    !isProcessing &&
+    !isRecordingThisNote &&
+    Boolean(meeting.transcript);
   // A continued note (continue-recording appended a segment after notes were
   // generated): the summary no longer covers the transcript — offer the same
   // floating "Generate notes" CTA. reprocess clears the flag on rewrite.
@@ -580,6 +573,7 @@ function DetailContent({
     meeting.session_info.notes_stale === true &&
     !transcriptionFailed &&
     !isProcessing &&
+    !isRecordingThisNote &&
     Boolean(meeting.transcript);
   const reprocessStreaming = reprocess.isPending || streamPhase !== 'idle';
   const startReprocessRef = React.useRef(startReprocess);
@@ -666,7 +660,11 @@ function DetailContent({
                   onClick={() => void copyTranscriptForAi()}
                   disabled={!transcriptBundle}
                 >
-                  {copiedTranscript ? <Check className="size-[13px]" /> : <FileText className="size-[13px]" />}
+                  {copiedTranscript ? (
+                    <Check className="size-[13px]" />
+                  ) : (
+                    <FileText className="size-[13px]" />
+                  )}
                 </ActionIconButton>
               </TooltipTrigger>
               <TooltipContent side="bottom">
@@ -683,7 +681,10 @@ function DetailContent({
                   <ActionIconButton
                     label="Generate notes"
                     onClick={startReprocess}
-                    disabled={reprocess.isPending || streamPhase !== 'idle'}
+                    // Disable while a recording is live on THIS note — same
+                    // reason the floating CTA hides: don't summarise a
+                    // still-growing transcript out from under the recording.
+                    disabled={reprocess.isPending || streamPhase !== 'idle' || isRecordingThisNote}
                   >
                     <RefreshCw
                       className={cn(
@@ -691,7 +692,7 @@ function DetailContent({
                         (reprocess.isPending ||
                           streamPhase === 'analyzing' ||
                           streamPhase === 'generating') &&
-                          'animate-spin',
+                          'animate-spin'
                       )}
                     />
                   </ActionIconButton>
@@ -734,8 +735,8 @@ function DetailContent({
                   <Download className="size-[13px] shrink-0" style={{ color: 'var(--fg-2)' }} />
                   Save transcript as .md…
                 </button>
-                {orgSession.data?.signedIn && (
-                  isShared ? (
+                {orgSession.data?.signedIn &&
+                  (isShared ? (
                     <button
                       type="button"
                       className="flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-sm transition-colors hover:bg-[color:var(--surface-hover)] disabled:opacity-50"
@@ -767,8 +768,7 @@ function DetailContent({
                           ? `Share failed: ${shareError}`
                           : `Share with ${orgSession.data.orgId}`}
                     </button>
-                  )
-                )}
+                  ))}
                 <button
                   type="button"
                   className="flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-sm transition-colors hover:bg-[color:var(--surface-hover)]"
@@ -818,16 +818,13 @@ function DetailContent({
               }
             }}
             disabled={
-              titleRegening ||
-              reprocess.isPending ||
-              streamPhase !== 'idle' ||
-              isEditingTitle
+              titleRegening || reprocess.isPending || streamPhase !== 'idle' || isEditingTitle
             }
             aria-label="Regenerate title"
             title="Regenerate title"
             className={cn(
               'inline-flex items-center justify-center opacity-0 transition-opacity group-hover:opacity-100 disabled:pointer-events-none',
-              titleRegening && 'opacity-100',
+              titleRegening && 'opacity-100'
             )}
             style={{
               verticalAlign: 'middle',
@@ -875,12 +872,8 @@ function DetailContent({
         </h1>
 
         <div className="flex flex-wrap gap-1.5">
-          {date && (
-            <ChipV2 icon={<CalendarIcon className="size-[11px]" />}>{date}</ChipV2>
-          )}
-          {duration && (
-            <ChipV2 icon={<Clock className="size-[11px]" />}>{duration}</ChipV2>
-          )}
+          {date && <ChipV2 icon={<CalendarIcon className="size-[11px]" />}>{date}</ChipV2>}
+          {duration && <ChipV2 icon={<Clock className="size-[11px]" />}>{duration}</ChipV2>}
           <FolderPicker
             summaryFile={summaryFile}
             assignedFolderIds={meeting.folders ?? meeting.session_info.folders ?? []}
@@ -929,207 +922,198 @@ function DetailContent({
       />
 
       {tab === 'summary' && (
-      <>
-      {reprocessFailed && (
-        <section
-          className="flex flex-col items-start gap-2 rounded-lg p-4"
-          style={{
-            background: 'var(--surface-raised)',
-            border: '1px solid var(--border-subtle, var(--surface-raised))',
-          }}
-          data-testid="reprocess-retry"
-        >
-          <div className="text-[15px] font-medium" style={{ color: 'var(--fg-1)' }}>
-            Notes weren’t generated
-          </div>
-          <p
-            className="text-[14px] leading-[1.6]"
-            style={{ color: 'var(--fg-2)', maxWidth: '64ch' }}
-          >
-            That didn’t work this time — give it another go. If it keeps failing
-            on a long meeting, switch to a smaller model in Settings.
-          </p>
-          <Button
-            className="mt-1"
-            onClick={startReprocess}
-            disabled={reprocess.isPending || streamPhase !== 'idle'}
-          >
-            Generate notes
-          </Button>
-        </section>
-      )}
-      {streamPhase !== 'idle' ? (
-        <StreamingView text={streamText} phase={streamPhase} chunkProgress={chunkProgress} />
-      ) : activeReport ? (
-        <section
-          className="stream-markdown"
-          data-testid="report-content"
-          style={{ color: 'var(--fg-1)', maxWidth: '72ch' }}
-        >
-          <ReactMarkdown>{stripReasoning(activeReport.content)}</ReactMarkdown>
-        </section>
-      ) : (
-        <div className="flex flex-col gap-9">
-          {transcriptionFailed ? (
-            <section
-              className="flex flex-col gap-2 rounded-lg p-4"
-              style={{
-                background: 'var(--surface-raised)',
-                border: '1px solid var(--border-subtle, var(--surface-raised))',
-              }}
-              data-testid="transcription-failed-notice"
-            >
-              <div
-                className="text-[15px] font-medium"
-                style={{ color: 'var(--fg-1)' }}
-              >
-                Transcription failed
-              </div>
-              <p
-                className="text-[14px] leading-[1.6]"
-                style={{ color: 'var(--fg-2)', maxWidth: '64ch' }}
-              >
-                No notes could be generated for this recording. Your audio was
-                preserved (not deleted), so nothing was lost.
-              </p>
-              {transcriptionError && (
-                <p
-                  className="text-[12.5px] leading-[1.5]"
-                  style={{ color: 'var(--fg-2)', opacity: 0.8 }}
-                >
-                  Details: {transcriptionError}
-                </p>
-              )}
-            </section>
-          ) : isProcessing ? (
-            <section
-              className="flex flex-col gap-2 rounded-lg p-4"
-              style={{
-                background: 'var(--surface-raised)',
-                border: '1px solid var(--border-subtle, var(--surface-raised))',
-              }}
-              data-testid="note-processing"
-            >
-              <div
-                className="flex items-center gap-1.5 text-[15px] font-medium"
-                style={{ color: 'var(--fg-1)' }}
-              >
-                Finishing up
-                <span className="thinking-dot" />
-                <span className="thinking-dot" />
-                <span className="thinking-dot" />
-              </div>
-              <p
-                className="text-[14px] leading-[1.6]"
-                style={{ color: 'var(--fg-2)', maxWidth: '64ch' }}
-              >
-                Your transcript is captured — refining it and generating notes in
-                the background. You can read and edit <strong>My notes</strong> now.
-              </p>
-            </section>
-          ) : summary ? (
-            <section className="flex flex-col gap-3">
-              <SectionTitle>Summary</SectionTitle>
-              <div data-testid="tab-summary-content">
-                {stripReasoning(summary).split(/\n{2,}/).map((para, i) => (
-                  <p
-                    key={i}
-                    className="text-[15.5px] leading-[1.65]"
-                    style={{ color: 'var(--fg-1)', maxWidth: '64ch' }}
-                  >
-                    {para}
-                  </p>
-                ))}
-              </div>
-            </section>
-          ) : notesNotGenerated && meeting.transcript ? (
+        <>
+          {reprocessFailed && (
             <section
               className="flex flex-col items-start gap-2 rounded-lg p-4"
               style={{
                 background: 'var(--surface-raised)',
                 border: '1px solid var(--border-subtle, var(--surface-raised))',
               }}
-              data-testid="no-notes-yet"
+              data-testid="reprocess-retry"
             >
-              <div
-                className="text-[15px] font-medium"
-                style={{ color: 'var(--fg-1)' }}
-              >
-                No notes yet
+              <div className="text-[15px] font-medium" style={{ color: 'var(--fg-1)' }}>
+                Notes weren’t generated
               </div>
               <p
                 className="text-[14px] leading-[1.6]"
                 style={{ color: 'var(--fg-2)', maxWidth: '64ch' }}
               >
-                This recording was transcribed but notes were not generated
-                automatically. Use the <strong>Generate notes</strong> button
-                below to create them, or copy or save the transcript from the
-                actions above.
+                That didn’t work this time — give it another go. If it keeps failing on a long
+                meeting, switch to a smaller model in Settings.
               </p>
+              <Button
+                className="mt-1"
+                onClick={startReprocess}
+                disabled={reprocess.isPending || streamPhase !== 'idle'}
+              >
+                Generate notes
+              </Button>
+            </section>
+          )}
+          {streamPhase !== 'idle' ? (
+            <StreamingView text={streamText} phase={streamPhase} chunkProgress={chunkProgress} />
+          ) : activeReport ? (
+            <section
+              className="stream-markdown"
+              data-testid="report-content"
+              style={{ color: 'var(--fg-1)', maxWidth: '72ch' }}
+            >
+              <ReactMarkdown>{stripReasoning(activeReport.content)}</ReactMarkdown>
             </section>
           ) : (
-            <p className="py-2 text-sm" style={{ color: 'var(--fg-2)' }}>
-              No summary available for this meeting.
-            </p>
-          )}
-
-          {discussionAreas.length > 0 && (
-            <section className="flex flex-col gap-3">
-              <SectionTitle>Key topics</SectionTitle>
-              <div className="mv-topics">
-                {discussionAreas.map((area, i) => (
-                  <div key={i} className="flex flex-col gap-1">
-                    <div className="mv-topic-title">{area.title}</div>
-                    {area.analysis && <div className="mv-topic-body">{area.analysis}</div>}
+            <div className="flex flex-col gap-9">
+              {transcriptionFailed ? (
+                <section
+                  className="flex flex-col gap-2 rounded-lg p-4"
+                  style={{
+                    background: 'var(--surface-raised)',
+                    border: '1px solid var(--border-subtle, var(--surface-raised))',
+                  }}
+                  data-testid="transcription-failed-notice"
+                >
+                  <div className="text-[15px] font-medium" style={{ color: 'var(--fg-1)' }}>
+                    Transcription failed
                   </div>
-                ))}
-              </div>
-            </section>
-          )}
+                  <p
+                    className="text-[14px] leading-[1.6]"
+                    style={{ color: 'var(--fg-2)', maxWidth: '64ch' }}
+                  >
+                    No notes could be generated for this recording. Your audio was preserved (not
+                    deleted), so nothing was lost.
+                  </p>
+                  {transcriptionError && (
+                    <p
+                      className="text-[12.5px] leading-[1.5]"
+                      style={{ color: 'var(--fg-2)', opacity: 0.8 }}
+                    >
+                      Details: {transcriptionError}
+                    </p>
+                  )}
+                </section>
+              ) : isProcessing ? (
+                <section
+                  className="flex flex-col gap-2 rounded-lg p-4"
+                  style={{
+                    background: 'var(--surface-raised)',
+                    border: '1px solid var(--border-subtle, var(--surface-raised))',
+                  }}
+                  data-testid="note-processing"
+                >
+                  <div
+                    className="flex items-center gap-1.5 text-[15px] font-medium"
+                    style={{ color: 'var(--fg-1)' }}
+                  >
+                    Finishing up
+                    <span className="thinking-dot" />
+                    <span className="thinking-dot" />
+                    <span className="thinking-dot" />
+                  </div>
+                  <p
+                    className="text-[14px] leading-[1.6]"
+                    style={{ color: 'var(--fg-2)', maxWidth: '64ch' }}
+                  >
+                    Your transcript is captured — refining it and generating notes in the
+                    background. You can read and edit <strong>My notes</strong> now.
+                  </p>
+                </section>
+              ) : summary ? (
+                <section className="flex flex-col gap-3">
+                  <SectionTitle>Summary</SectionTitle>
+                  <div data-testid="tab-summary-content">
+                    {stripReasoning(summary)
+                      .split(/\n{2,}/)
+                      .map((para, i) => (
+                        <p
+                          key={i}
+                          className="text-[15.5px] leading-[1.65]"
+                          style={{ color: 'var(--fg-1)', maxWidth: '64ch' }}
+                        >
+                          {para}
+                        </p>
+                      ))}
+                  </div>
+                </section>
+              ) : notesNotGenerated && meeting.transcript ? (
+                <section
+                  className="flex flex-col items-start gap-2 rounded-lg p-4"
+                  style={{
+                    background: 'var(--surface-raised)',
+                    border: '1px solid var(--border-subtle, var(--surface-raised))',
+                  }}
+                  data-testid="no-notes-yet"
+                >
+                  <div className="text-[15px] font-medium" style={{ color: 'var(--fg-1)' }}>
+                    No notes yet
+                  </div>
+                  <p
+                    className="text-[14px] leading-[1.6]"
+                    style={{ color: 'var(--fg-2)', maxWidth: '64ch' }}
+                  >
+                    This recording was transcribed but notes were not generated automatically. Use
+                    the <strong>Generate notes</strong> button below to create them, or copy or save
+                    the transcript from the actions above.
+                  </p>
+                </section>
+              ) : (
+                <p className="py-2 text-sm" style={{ color: 'var(--fg-2)' }}>
+                  No summary available for this meeting.
+                </p>
+              )}
 
-          {keyPoints.length > 0 && (
-            <section className="flex flex-col gap-3">
-              <SectionTitle>Key points</SectionTitle>
-              <ul className="mv-bullets">
-                {keyPoints.map((p, i) => (
-                  <li key={i}>{p}</li>
-                ))}
-              </ul>
-            </section>
-          )}
+              {discussionAreas.length > 0 && (
+                <section className="flex flex-col gap-3">
+                  <SectionTitle>Key topics</SectionTitle>
+                  <div className="mv-topics">
+                    {discussionAreas.map((area, i) => (
+                      <div key={i} className="flex flex-col gap-1">
+                        <div className="mv-topic-title">{area.title}</div>
+                        {area.analysis && <div className="mv-topic-body">{area.analysis}</div>}
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              )}
 
-          {actionItems.length > 0 && (
-            <section className="flex flex-col gap-3">
-              <SectionTitle>Action items</SectionTitle>
-              <ul className="mv-bullets">
-                {actionItems.map((a, i) => (
-                  <li key={i}>{a}</li>
-                ))}
-              </ul>
-            </section>
-          )}
+              {keyPoints.length > 0 && (
+                <section className="flex flex-col gap-3">
+                  <SectionTitle>Key points</SectionTitle>
+                  <ul className="mv-bullets">
+                    {keyPoints.map((p, i) => (
+                      <li key={i}>{p}</li>
+                    ))}
+                  </ul>
+                </section>
+              )}
 
-          {participants.length > 0 && (
-            <section className="flex flex-col gap-3">
-              <SectionTitle>Participants</SectionTitle>
-              <div className="flex flex-wrap gap-1.5">
-                {participants.map((p, i) => (
-                  <ChipV2 key={i}>{p}</ChipV2>
-                ))}
-              </div>
-            </section>
-          )}
+              {actionItems.length > 0 && (
+                <section className="flex flex-col gap-3">
+                  <SectionTitle>Action items</SectionTitle>
+                  <ul className="mv-bullets">
+                    {actionItems.map((a, i) => (
+                      <li key={i}>{a}</li>
+                    ))}
+                  </ul>
+                </section>
+              )}
 
-        </div>
-      )}
-      </>
+              {participants.length > 0 && (
+                <section className="flex flex-col gap-3">
+                  <SectionTitle>Participants</SectionTitle>
+                  <div className="flex flex-wrap gap-1.5">
+                    {participants.map((p, i) => (
+                      <ChipV2 key={i}>{p}</ChipV2>
+                    ))}
+                  </div>
+                </section>
+              )}
+            </div>
+          )}
+        </>
       )}
 
       {tab === 'notes' && (
-        <MyNotesEditor
-          summaryFile={routeSummaryFile}
-          initialNotes={meeting.user_notes ?? ''}
-        />
+        <MyNotesEditor summaryFile={routeSummaryFile} initialNotes={meeting.user_notes ?? ''} />
       )}
 
       <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
@@ -1137,7 +1121,8 @@ function DetailContent({
           <DialogHeader>
             <DialogTitle>Delete this note?</DialogTitle>
             <DialogDescription>
-              This will permanently delete the recording, transcript, and summary. This can't be undone.
+              This will permanently delete the recording, transcript, and summary. This can't be
+              undone.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -1165,8 +1150,8 @@ function DetailContent({
               Unshare from {orgSession.data?.signedIn ? orgSession.data.orgId : 'your org'}?
             </DialogTitle>
             <DialogDescription>
-              The shared copy will be removed from your organisation. Your
-              local note stays on this device. You can re-share at any time.
+              The shared copy will be removed from your organisation. Your local note stays on this
+              device. You can re-share at any time.
             </DialogDescription>
           </DialogHeader>
           {shareError && (
@@ -1238,7 +1223,7 @@ function NoteViewToggle({
   const activeLabel =
     activeReportId === null
       ? 'Summary'
-      : reports.find((r) => r.id === activeReportId)?.template_name ?? 'Summary';
+      : (reports.find((r) => r.id === activeReportId)?.template_name ?? 'Summary');
 
   const selectView = (id: string | null) => {
     setMenuOpen(false);
@@ -1589,7 +1574,15 @@ function parseMarkdownBlocks(text: string): MarkdownBlock[] {
 const CHAR_TRANSITION = 'top 0.12s ease-out';
 const ROW_TRANSITION = 'top 0.35s cubic-bezier(0.45, 0, 0.55, 1)';
 
-function StreamingView({ text, phase, chunkProgress }: { text: string; phase: StreamPhase; chunkProgress?: { step: number; total: number } | null }) {
+function StreamingView({
+  text,
+  phase,
+  chunkProgress,
+}: {
+  text: string;
+  phase: StreamPhase;
+  chunkProgress?: { step: number; total: number } | null;
+}) {
   const blocks = parseMarkdownBlocks(stripReasoning(text));
   const isStreaming = phase === 'analyzing' || phase === 'generating';
 
@@ -1629,9 +1622,12 @@ function StreamingView({ text, phase, chunkProgress }: { text: string; phase: St
         indicator.style.left = '-12px';
         indicator.style.right = '-12px';
         indicator.style.width = '';
-        requestAnimationFrame(() => requestAnimationFrame(() => {
-          if (indicatorRef.current) indicatorRef.current.style.transition = currentTransitionRef.current;
-        }));
+        requestAnimationFrame(() =>
+          requestAnimationFrame(() => {
+            if (indicatorRef.current)
+              indicatorRef.current.style.transition = currentTransitionRef.current;
+          })
+        );
         return;
       }
       indicator.style.position = 'absolute';
@@ -1685,9 +1681,12 @@ function StreamingView({ text, phase, chunkProgress }: { text: string; phase: St
     return () => window.removeEventListener('scroll', repositionIndicator);
   }, [isStreaming, repositionIndicator]);
 
-  React.useEffect(() => () => {
-    if (rowTransitionTimerRef.current) clearTimeout(rowTransitionTimerRef.current);
-  }, []);
+  React.useEffect(
+    () => () => {
+      if (rowTransitionTimerRef.current) clearTimeout(rowTransitionTimerRef.current);
+    },
+    []
+  );
 
   const indicatorLabel = chunkProgress
     ? `Summarising part ${chunkProgress.step}/${chunkProgress.total}`
@@ -1701,17 +1700,15 @@ function StreamingView({ text, phase, chunkProgress }: { text: string; phase: St
         {blocks.map((block, i) => {
           const animate = i >= firstNewIdx;
           if (block.type === 'heading') {
-            return (
-              <SectionTitle key={i}>
-                {block.text}
-              </SectionTitle>
-            );
+            return <SectionTitle key={i}>{block.text}</SectionTitle>;
           }
           if (block.type === 'bullet') {
             return (
               <div key={i} className={cn('flex gap-2', animate && 'animate-fade-in')}>
                 <span className="mt-[0.45em] size-1 flex-shrink-0 rounded-full bg-[color:var(--fg-2)]" />
-                <p className="text-sm leading-[1.65]" style={{ color: 'var(--fg-1)' }}>{block.text}</p>
+                <p className="text-sm leading-[1.65]" style={{ color: 'var(--fg-1)' }}>
+                  {block.text}
+                </p>
               </div>
             );
           }
@@ -1740,7 +1737,9 @@ function StreamingView({ text, phase, chunkProgress }: { text: string; phase: St
             className="inline-block size-3 animate-spin-fast rounded-full border-2 border-transparent"
             style={{ borderTopColor: 'var(--fg-2)' }}
           />
-          <span className="text-xs" style={{ color: 'var(--fg-1)' }}>{indicatorLabel}</span>
+          <span className="text-xs" style={{ color: 'var(--fg-1)' }}>
+            {indicatorLabel}
+          </span>
         </div>
       )}
     </div>
@@ -1754,7 +1753,13 @@ function StreamingView({ text, phase, chunkProgress }: { text: string; phase: St
 const FOLDER_NONE = '__none__';
 const FOLDER_NEW = '__new__';
 
-function FolderPicker({ summaryFile, assignedFolderIds }: { summaryFile: string; assignedFolderIds: string[] }) {
+function FolderPicker({
+  summaryFile,
+  assignedFolderIds,
+}: {
+  summaryFile: string;
+  assignedFolderIds: string[];
+}) {
   const folders = useFolders();
   const addMeeting = useAddMeetingToFolder();
   const removeMeeting = useRemoveMeetingFromFolder();
@@ -1846,7 +1851,10 @@ function FolderPicker({ summaryFile, assignedFolderIds }: { summaryFile: string;
             value={newFolderName}
             onChange={(e) => setNewFolderName(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') { e.preventDefault(); void submitNewFolder(); }
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                void submitNewFolder();
+              }
               if (e.key === 'Escape') {
                 setNewFolderName('');
                 setFolderError(null);
@@ -1867,10 +1875,7 @@ function FolderPicker({ summaryFile, assignedFolderIds }: { summaryFile: string;
 
   return (
     <div className="space-y-1">
-      <Select
-        value={localFolderId ?? FOLDER_NONE}
-        onValueChange={handleValueChange}
-      >
+      <Select value={localFolderId ?? FOLDER_NONE} onValueChange={handleValueChange}>
         <SelectPrimitive.Trigger asChild>
           <button type="button" className="mv-chip">
             {currentFolderLabel}
@@ -1880,7 +1885,9 @@ function FolderPicker({ summaryFile, assignedFolderIds }: { summaryFile: string;
           <SelectItem value={FOLDER_NONE}>No folder</SelectItem>
           <SelectSeparator />
           {allFolders.map((f) => (
-            <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>
+            <SelectItem key={f.id} value={f.id}>
+              {f.name}
+            </SelectItem>
           ))}
           <SelectSeparator />
           <SelectItem value={FOLDER_NEW}>New folder...</SelectItem>
@@ -1895,7 +1902,10 @@ function FolderPicker({ summaryFile, assignedFolderIds }: { summaryFile: string;
 // Pure formatting / parsing helpers
 // ---------------------------------------------------------------------------
 
-function formatDetailDate(info: { processed_at?: string; updated_at?: string }): string | undefined {
+function formatDetailDate(info: {
+  processed_at?: string;
+  updated_at?: string;
+}): string | undefined {
   const raw = info.processed_at ?? info.updated_at;
   if (!raw) return undefined;
   const d = new Date(raw);
@@ -2010,16 +2020,12 @@ export function composeShareBody(meeting: Meeting): string {
 
   const keyPoints = (meeting.key_points ?? []).filter(Boolean);
   if (keyPoints.length) {
-    sections.push(
-      `## Key points\n\n${keyPoints.map((kp) => `- ${kp}`).join('\n')}`,
-    );
+    sections.push(`## Key points\n\n${keyPoints.map((kp) => `- ${kp}`).join('\n')}`);
   }
 
   const actionItems = asStringArray(meeting.action_items);
   if (actionItems.length) {
-    sections.push(
-      `## Action items\n\n${actionItems.map((ai) => `- ${ai}`).join('\n')}`,
-    );
+    sections.push(`## Action items\n\n${actionItems.map((ai) => `- ${ai}`).join('\n')}`);
   }
 
   // Deliberately do NOT fall back to meeting.transcript here: the raw

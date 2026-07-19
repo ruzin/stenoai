@@ -42,9 +42,7 @@ function subscribeVisibility(callback: () => void): () => void {
 }
 
 function getVisibilitySnapshot(): boolean {
-  return typeof document !== 'undefined'
-    ? document.visibilityState === 'visible'
-    : true;
+  return typeof document !== 'undefined' ? document.visibilityState === 'visible' : true;
 }
 
 // SSR fallback. Renderer-only today, but keeps useSyncExternalStore happy.
@@ -56,7 +54,7 @@ function useIsWindowVisible(): boolean {
   return React.useSyncExternalStore(
     subscribeVisibility,
     getVisibilitySnapshot,
-    getVisibilityServerSnapshot,
+    getVisibilityServerSnapshot
   );
 }
 
@@ -162,6 +160,10 @@ export function useRecording() {
         isPaused: false,
         elapsedSeconds: 0,
         sessionName: optimisticName,
+        // Reflect the resume/continue target immediately so a detail view's
+        // "recording this note" gate flips on click, not a poll later. The
+        // next queue poll reconciles it (null for a fresh new-note start).
+        recordingSummaryFile: appendTo ?? null,
       });
       // No navigation: recording coexists with the app. PrimaryDock keys off
       // the optimistic status flip above and docks the transcription pill on
@@ -185,12 +187,12 @@ export function useRecording() {
         // flashes out with no explanation. Route it through the same native
         // notification the renderer-capture failure path uses.
         ipc().recording.reportCaptureError(
-          err instanceof Error ? err.message : 'Recording could not start',
+          err instanceof Error ? err.message : 'Recording could not start'
         );
         throw err;
       }
     },
-    [qc],
+    [qc]
   );
 
   const stopRecording = React.useCallback(async () => {
@@ -251,6 +253,10 @@ export function useRecording() {
     // otherwise Home goes blank between "stopped" and "processed" and the
     // user can't see anything is happening in the background.
     sessionName: queue.data?.sessionName ?? queue.data?.currentJob ?? null,
+    /** The note (summary-file realpath) an active continue/resume is recording
+     *  INTO — lets a detail view match by identity rather than the collidable
+     *  display name. Null for a fresh new-note recording or when idle. */
+    recordingSummaryFile: queue.data?.recordingSummaryFile ?? null,
     /** Set of summary files whose `reprocess-meeting` IPC is currently
      *  in flight. Used by useMeetings to flip the matching existing
      *  meeting rows' `is_processing` flag so Home shows the badge even
@@ -352,9 +358,7 @@ export function useRecordingProcessingEffects() {
         const newSummaryFile = newMeeting.session_info.summary_file;
         qc.setQueryData<Meeting[]>(meetingsKeys.list(), (prev) => {
           if (!prev) return [newMeeting];
-          const filtered = prev.filter(
-            (m) => m.session_info.summary_file !== newSummaryFile,
-          );
+          const filtered = prev.filter((m) => m.session_info.summary_file !== newSummaryFile);
           return [newMeeting, ...filtered];
         });
 

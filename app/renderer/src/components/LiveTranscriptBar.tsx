@@ -1,19 +1,8 @@
 import * as React from 'react';
-import {
-  Check,
-  ChevronDown,
-  Copy,
-  Play,
-  Search as SearchIcon,
-  Square,
-} from 'lucide-react';
+import { Check, ChevronDown, Copy, Play, Search as SearchIcon, Square } from 'lucide-react';
 import { AudioWave } from '@/components/AudioWave';
 import { Input } from '@/components/ui/input';
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from '@/components/ui/popover';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
 import { useLiveTranscript } from '@/hooks/useLiveTranscript';
 import { useRecording } from '@/hooks/useRecording';
@@ -56,7 +45,16 @@ export function LiveTranscriptBar() {
   const isRecording = recording.status === 'recording';
   const stopped = !paused && !isRecording;
 
-  const { status, segments, error, slow } = useLiveTranscript(sessionName);
+  const { status, segments, priorSegments, error, slow } = useLiveTranscript(sessionName);
+
+  // On a resume/continue, prior finalised segments render before the live
+  // tail so the bar shows earlier speech instead of starting blank. Merge for
+  // search/copy/scroll; a divider marks the boundary (only when unfiltered,
+  // where the first priorSegments.length rows are the carried-over ones).
+  const allSegments = React.useMemo(
+    () => (priorSegments.length ? [...priorSegments, ...segments] : segments),
+    [priorSegments, segments]
+  );
 
   const open = useLiveTranscriptOpen((s) => s.open);
   const setOpen = useLiveTranscriptOpen((s) => s.setOpen);
@@ -73,23 +71,23 @@ export function LiveTranscriptBar() {
   // were browsing past matches and a jump to the new tail would yank the
   // viewport away from what they were reading. They get the new segment
   // automatically once they clear the query.
-  const tailText = segments[segments.length - 1]?.text ?? '';
+  const tailText = allSegments[allSegments.length - 1]?.text ?? '';
   const filtering = query.trim().length > 0;
   React.useEffect(() => {
     if (filtering) return;
     const el = bodyRef.current;
     if (!el || !open) return;
     el.scrollTop = el.scrollHeight;
-  }, [segments.length, tailText, open, filtering]);
+  }, [allSegments.length, tailText, open, filtering]);
 
   const filtered = React.useMemo(() => {
-    if (!query.trim()) return segments;
+    if (!query.trim()) return allSegments;
     const needle = query.trim().toLowerCase();
-    return segments.filter((s) => s.text.toLowerCase().includes(needle));
-  }, [segments, query]);
+    return allSegments.filter((s) => s.text.toLowerCase().includes(needle));
+  }, [allSegments, query]);
 
   const copyAll = React.useCallback(async () => {
-    const text = segments
+    const text = allSegments
       .filter((s) => s.isFinal)
       .map((s) => s.text.trim())
       .filter(Boolean)
@@ -98,7 +96,7 @@ export function LiveTranscriptBar() {
     await navigator.clipboard.writeText(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
-  }, [segments]);
+  }, [allSegments]);
 
   const onPauseToggle = () => {
     if (paused) void recording.resumeRecording();
@@ -116,10 +114,7 @@ export function LiveTranscriptBar() {
 
   return (
     <div className="pointer-events-auto" data-testid="live-transcript-panel">
-      <div
-        className="mv-transcript open"
-        onMouseDown={(e) => e.stopPropagation()}
-      >
+      <div className="mv-transcript open" onMouseDown={(e) => e.stopPropagation()}>
         {/* Header — wave + "Transcript" + copy + minimize. The minimize
             (chevron) is the primary click target; copy is a sibling
             action button, not nested. (Nesting `<button>` inside `<button>`
@@ -129,7 +124,13 @@ export function LiveTranscriptBar() {
           {/* Static (non-animated) wave for the header — the "is anything
               happening?" cue lives in the footer's recording indicator. */}
           <span className="mv-transcript-wave mv-transcript-wave-static" aria-hidden="true">
-            <span /><span /><span /><span /><span /><span /><span />
+            <span />
+            <span />
+            <span />
+            <span />
+            <span />
+            <span />
+            <span />
           </span>
           <span className="mv-transcript-label">Transcript</span>
           <button
@@ -179,8 +180,9 @@ export function LiveTranscriptBar() {
             status={status}
             error={error}
             segments={filtered}
-            filtering={query.trim().length > 0}
+            filtering={filtering}
             slow={slow}
+            dividerAfter={filtering ? -1 : priorSegments.length}
           />
         </div>
 
@@ -239,16 +241,25 @@ interface BodyStateProps {
   segments: ReturnType<typeof useLiveTranscript>['segments'];
   filtering: boolean;
   slow: boolean;
+  /** Render an "Earlier" divider before this index (the boundary between
+   *  carried-over prior segments and the current session's live tail). -1
+   *  disables it (e.g. while filtering, where the boundary is meaningless). */
+  dividerAfter: number;
 }
 
-function LiveTranscriptBodyState({ status, error, segments, filtering, slow }: BodyStateProps) {
+function LiveTranscriptBodyState({
+  status,
+  error,
+  segments,
+  filtering,
+  slow,
+  dividerAfter,
+}: BodyStateProps) {
   if (status === 'error' && error) {
     return (
       <EmptyState
         title="Live transcription unavailable"
-        subtitle={
-          error.message ? `${error.stage}: ${error.message}` : `Stage: ${error.stage}`
-        }
+        subtitle={error.message ? `${error.stage}: ${error.message}` : `Stage: ${error.stage}`}
       />
     );
   }
@@ -287,32 +298,47 @@ function LiveTranscriptBodyState({ status, error, segments, filtering, slow }: B
     <ul className="flex flex-col gap-0">
       {segments.map((seg, i) => {
         const isYou = seg.speaker !== 'Others';
+        const showDivider = i === dividerAfter && dividerAfter > 0;
         return (
-          <li
-            key={i}
-            className={cn(
-              'flex flex-col gap-0.5 px-1 py-0.5',
-              isYou ? 'items-end' : 'items-start',
+          <React.Fragment key={i}>
+            {showDivider && (
+              <li
+                className="flex items-center gap-2 px-1 py-1.5"
+                aria-hidden="true"
+                data-testid="live-transcript-resume-divider"
+              >
+                <span className="h-px flex-1" style={{ background: 'var(--border-subtle)' }} />
+                <span
+                  className="text-[10px] font-medium uppercase tracking-wide"
+                  style={{ color: 'var(--fg-2)' }}
+                >
+                  Resumed
+                </span>
+                <span className="h-px flex-1" style={{ background: 'var(--border-subtle)' }} />
+              </li>
             )}
-            style={{ opacity: seg.isFinal ? 1 : 0.55 }}
-          >
-            <span
-              className="px-1.5 text-[10.5px] tabular-nums"
-              style={{ color: 'var(--fg-2)' }}
-            >
-              {fmtTimestamp(seg.start)}
-            </span>
-            <div
+            <li
               className={cn(
-                'max-w-[78%] rounded-2xl px-3 py-1.5 text-sm leading-[1.5]',
-                isYou
-                  ? 'bg-green-100 text-green-950 rounded-br-md dark:bg-green-900/40 dark:text-green-100'
-                  : 'bg-neutral-200/80 text-neutral-900 rounded-bl-md dark:bg-neutral-700/60 dark:text-neutral-100',
+                'flex flex-col gap-0.5 px-1 py-0.5',
+                isYou ? 'items-end' : 'items-start'
               )}
+              style={{ opacity: seg.isFinal ? 1 : 0.55 }}
             >
-              {seg.text}
-            </div>
-          </li>
+              <span className="px-1.5 text-[10.5px] tabular-nums" style={{ color: 'var(--fg-2)' }}>
+                {fmtTimestamp(seg.start)}
+              </span>
+              <div
+                className={cn(
+                  'max-w-[78%] rounded-2xl px-3 py-1.5 text-sm leading-[1.5]',
+                  isYou
+                    ? 'bg-green-100 text-green-950 rounded-br-md dark:bg-green-900/40 dark:text-green-100'
+                    : 'bg-neutral-200/80 text-neutral-900 rounded-bl-md dark:bg-neutral-700/60 dark:text-neutral-100'
+                )}
+              >
+                {seg.text}
+              </div>
+            </li>
+          </React.Fragment>
         );
       })}
     </ul>
@@ -373,7 +399,7 @@ function LanguageSelector() {
           type="button"
           className={cn(
             'inline-flex items-center gap-1 rounded-md px-2 py-1 text-[12px] font-medium',
-            'cursor-pointer transition-colors hover:bg-[color:var(--surface-hover)]',
+            'cursor-pointer transition-colors hover:bg-[color:var(--surface-hover)]'
           )}
           style={{ color: 'var(--fg-2)' }}
           aria-label={`Language: ${display}`}
@@ -393,7 +419,7 @@ function LanguageSelector() {
               onClick={() => pick(opt.code)}
               className={cn(
                 'flex w-full flex-col items-start gap-0.5 rounded-md px-2 py-1.5 text-left',
-                'cursor-pointer transition-colors hover:bg-[color:var(--surface-hover)]',
+                'cursor-pointer transition-colors hover:bg-[color:var(--surface-hover)]'
               )}
             >
               <span
@@ -432,14 +458,7 @@ function RecordingStatusChip({
       style={{ color: 'var(--fg-1)' }}
     >
       <span style={{ color: 'var(--recording)' }}>
-        <AudioWave
-          active={!paused}
-          paused={paused}
-          bars={7}
-          height={14}
-          barWidth={2}
-          gap={2}
-        />
+        <AudioWave active={!paused} paused={paused} bars={7} height={14} barWidth={2} gap={2} />
       </span>
       <span style={{ color: 'var(--fg-2)' }}>{label}</span>
       <span
@@ -451,4 +470,3 @@ function RecordingStatusChip({
     </span>
   );
 }
-
