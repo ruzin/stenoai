@@ -335,11 +335,11 @@ export type ScreenRecordingPermissionResponse = Result<{ screenPermission: strin
  *  actually moves the needle. */
 export type RecordingTrigger = 'manual' | 'notification_click' | 'hotkey' | 'tray' | 'url_scheme';
 
-/** Mirrors TELEMETRY_TOGGLE_SOURCES in main.js -- which SCREEN the telemetry
- *  toggle was flipped from. 'setup' names the Setup.tsx screen, not a
- *  lifecycle stage: it's also reachable later via "run setup wizard" from
- *  Settings, so this does not mean "first run". */
-export type TelemetryToggleSource = 'setup' | 'settings';
+/** Mirrors TELEMETRY_TOGGLE_SOURCES in main.js -- which UI surface the
+ *  telemetry toggle was flipped from. 'setup' names the Setup.tsx screen,
+ *  not a lifecycle stage: it's also reachable later via "run setup wizard"
+ *  from Settings, so this does not mean "first run". */
+export type TelemetryToggleSource = 'setup' | 'settings' | 'consent';
 
 export type StartRecordingResponse = Result<{ message: string; sessionName?: string }>;
 export type StopRecordingResponse = Result<{
@@ -491,6 +491,7 @@ export type GetTelemetryResponse = Result<{
   telemetry_enabled: boolean;
   anonymous_id?: string;
 }>;
+export type GetPrivacyNoticeSeenResponse = Result<{ privacy_notice_seen: boolean }>;
 export type GetDockIconResponse = Result<{ hide_dock_icon: boolean }>;
 export type GetSystemAudioResponse = Result<{ system_audio_enabled: boolean }>;
 export type GetAutoDetectMeetingsResponse = Result<{ auto_detect_meetings_enabled: boolean }>;
@@ -743,6 +744,11 @@ export interface StenoaiBridge {
     parakeet: RequestFn<[], Result<Record<string, unknown>>>;
     test: RequestFn<[], Result<Record<string, unknown>>>;
     triggerWizard: RequestFn<[], Result<Record<string, unknown>>>;
+  };
+
+  privacy: {
+    getNoticeSeen: RequestFn<[], GetPrivacyNoticeSeenResponse>;
+    markNoticeSeen: RequestFn<[], Result<Record<string, never>>>;
   };
 
   perm: {

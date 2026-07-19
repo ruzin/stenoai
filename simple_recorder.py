@@ -4064,6 +4064,28 @@ def set_telemetry(enabled):
 
 
 @cli.command()
+def get_privacy_notice_seen():
+    """Get whether the one-time privacy notice has been acknowledged."""
+    from src.config import get_config
+
+    config = get_config()
+    print(json.dumps({"privacy_notice_seen": config.get_privacy_notice_seen()}))
+
+
+@cli.command()
+def set_privacy_notice_seen():
+    """Mark the one-time privacy notice as acknowledged."""
+    from src.config import get_config
+
+    config = get_config()
+    success = config.set_privacy_notice_seen(True)
+    if success:
+        print(json.dumps({"success": True, "privacy_notice_seen": True}))
+    else:
+        print(json.dumps({"success": False, "error": "Failed to save config"}))
+
+
+@cli.command()
 def get_system_audio():
     """Get the current system audio capture preference"""
     from src.config import get_config

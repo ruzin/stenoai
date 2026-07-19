@@ -91,6 +91,11 @@ const stenoai = {
     triggerWizard: () => invoke('trigger-setup-wizard'),
   },
 
+  privacy: {
+    getNoticeSeen: () => invoke('get-privacy-notice-seen'),
+    markNoticeSeen: () => invoke('set-privacy-notice-seen'),
+  },
+
   perm: {
     checkMicrophone: () => invoke('check-microphone-permission'),
     requestMicrophone: () => invoke('request-microphone-permission'),
