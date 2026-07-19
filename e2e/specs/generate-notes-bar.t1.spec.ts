@@ -46,8 +46,9 @@ test('hides the floating Generate notes button while a recording is live on THIS
   // Resume/continue-recording into a transcript-only note: the transcript is
   // still growing, so the "Generate notes" CTA must disappear until the
   // recording stops (summarising a moving target would strand the CTA once it
-  // finishes). Matched by session name — a recording on a DIFFERENT note leaves
-  // this one's CTA alone. Regression guard for the resume-leaves-CTA bug.
+  // finishes). Matched by summary-file IDENTITY — a recording on a DIFFERENT
+  // note (even one sharing the default name) leaves this one's CTA alone.
+  // Regression guard for the resume-leaves-CTA bug.
   const { page } = await launchApp({
     mockIpc: true,
     env: { STENOAI_E2E_SEED_PENDING_NOTE: '1', STENOAI_E2E_MOCK_PARAKEET_INSTALLED: '1' },
@@ -57,9 +58,20 @@ test('hides the floating Generate notes button while a recording is live on THIS
   const cta = page.getByTestId('generate-notes-dock-button');
   await expect(cta).toBeVisible();
 
-  // Start a recording whose session name matches this note (as resume does,
-  // appending to pending_summary.md). The queue poll flips useRecording to
-  // 'recording' and the CTA must clear.
+  // A recording on a DIFFERENT note (same display name, different summary file)
+  // must NOT hide this note's CTA — identity, not name. The pill appearing
+  // proves the queue poll has seen the recording, so the CTA-still-visible
+  // assertion isn't racing an un-propagated state.
+  await page.evaluate(() =>
+    window.stenoai.recording.start('New note', 'manual', 'other_summary.md'),
+  );
+  await expect(page.getByTestId('transcription-pill')).toBeVisible();
+  await expect(cta).toBeVisible();
+  await page.evaluate(() => window.stenoai.recording.stop());
+  await expect(page.getByTestId('transcription-pill')).toHaveCount(0);
+
+  // Now resume INTO this note (append target = pending_summary.md). The queue
+  // poll flips useRecording to 'recording' on THIS note and the CTA must clear.
   await page.evaluate(() =>
     window.stenoai.recording.start('New note', 'manual', 'pending_summary.md'),
   );

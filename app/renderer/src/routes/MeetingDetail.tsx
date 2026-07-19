@@ -540,15 +540,15 @@ function DetailContent({
   // While a recording is live on THIS note (resume/continue), the transcript
   // is still growing — offering "Generate notes" mid-recording would summarise
   // a moving target and strand the CTA once it finishes. Suppress it until the
-  // recording is stopped. Matched by session name (the same identity the
-  // live-transcript chunk filter uses); a recording on a *different* note
-  // leaves this note's CTA untouched.
+  // recording is stopped. Matched by summary-file IDENTITY (not display name,
+  // which collides for two default-"Note" notes); a recording on a *different*
+  // note leaves this note's CTA untouched.
   const recording = useRecording();
   const isRecordingThisNote =
     recording.status !== 'idle' &&
     recording.status !== 'processing' &&
-    recording.sessionName != null &&
-    recording.sessionName === info.name;
+    recording.recordingSummaryFile != null &&
+    recording.recordingSummaryFile === info.summary_file;
 
   // Publish this note's reprocess trigger + streaming state so the floating
   // GenerateNotesBar (mounted at App level, above the Ask bar) drives THIS
@@ -681,7 +681,10 @@ function DetailContent({
                   <ActionIconButton
                     label="Generate notes"
                     onClick={startReprocess}
-                    disabled={reprocess.isPending || streamPhase !== 'idle'}
+                    // Disable while a recording is live on THIS note — same
+                    // reason the floating CTA hides: don't summarise a
+                    // still-growing transcript out from under the recording.
+                    disabled={reprocess.isPending || streamPhase !== 'idle' || isRecordingThisNote}
                   >
                     <RefreshCw
                       className={cn(

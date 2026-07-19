@@ -365,6 +365,11 @@ export interface QueueStatus {
   isPaused: boolean;
   elapsedSeconds: number;
   sessionName: string | null;
+  /** The note (summary-file realpath) an active continue/resume is recording
+   *  INTO — lets a detail view tell "recording this note" from "recording a
+   *  different one" by identity rather than the collidable display name. Null
+   *  for a fresh new-note recording or when idle. */
+  recordingSummaryFile?: string | null;
 }
 
 export type PickAudioFileResponse = Result<{ filePath: string }>;

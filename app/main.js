@@ -3533,7 +3533,15 @@ ipcMain.handle('get-queue-status', async () => {
       : (isProcessing && currentProcessingStartedAtMs
           ? Math.floor((Date.now() - currentProcessingStartedAtMs) / 1000)
           : 0),
-    sessionName: currentRecordingSessionName
+    sessionName: currentRecordingSessionName,
+    // The note (summary-file realpath) an active continue/resume is recording
+    // INTO, so the renderer can tell "recording this note" from "recording a
+    // different one" by identity rather than by the (collidable) display name.
+    // Null for a fresh new-note recording (no existing target) or when idle.
+    recordingSummaryFile:
+      (currentRecordingProcess !== null || systemAudioRecordingActive)
+        ? (currentRecordingAppendTarget || null)
+        : null,
   };
 });
 
@@ -3928,6 +3936,13 @@ let processingQueue = [];
 // to load, MLX missing, etc.) for the UI to surface.
 let liveTranscriptState = {
   sessionName: null,
+  // The note (summary-file realpath) this buffer belongs to, used to decide
+  // whether a resume/continue is continuing THIS note (carry its prior
+  // segments) or a different one (start fresh). Set at start for appends and
+  // stamped at stop for a fresh recording once its landing note is known — so
+  // matching on it is unambiguous even when two notes share the default "Note"
+  // name (session name alone would collide).
+  summaryFile: null,
   segments: [],
   // Display-only carry-over: the finalised segments from the PREVIOUS
   // recording into this same note, preserved across a resume/continue so the
@@ -4793,16 +4808,22 @@ ipcMain.handle('start-recording-ui', async (_, sessionName, trigger, appendTo) =
     // On a resume/continue into the SAME note, preserve the previous session's
     // finalised segments as display-only `priorSegments` so the live bar shows
     // the earlier speech instead of starting blank. Guarded on the append
-    // target + matching session name so an intervening recording of a
-    // different note can't leak its segments in; falls back to empty when the
-    // in-memory state is a fresh app launch or a different session.
+    // target matching the note the previous buffer belonged to (summary-file
+    // identity, not the display name — two "Note"-named notes would collide);
+    // falls back to empty on a fresh launch or a different note. Prepends any
+    // existing priorSegments so a SECOND continue keeps the first recording's
+    // carried-over text as well, not just the latest tail.
     const carryPrior =
       currentRecordingAppendTarget &&
-      liveTranscriptState.sessionName === actualSessionName
-        ? (liveTranscriptState.segments || []).filter((s) => s && s.isFinal && s.text)
+      liveTranscriptState.summaryFile === currentRecordingAppendTarget
+        ? [
+            ...(liveTranscriptState.priorSegments || []),
+            ...(liveTranscriptState.segments || []).filter((s) => s && s.isFinal && s.text),
+          ]
         : [];
     liveTranscriptState = {
       sessionName: actualSessionName,
+      summaryFile: currentRecordingAppendTarget || null,
       segments: [],
       priorSegments: carryPrior,
       ready: false,
@@ -5027,6 +5048,14 @@ ipcMain.handle('stop-recording-ui', async () => {
     // case a race (renderer torn down / recorder errored before reporting) left
     // it stuck true. Closing the live sidecar lets Python drain its final
     // utterance; a watchdog SIGTERM in stopLiveTranscribe covers stuck cases.
+    // Stamp the buffer with the note it landed on (fresh recordings only learn
+    // their summary file here). A later resume/continue matches on this to
+    // decide whether to carry the prior segments over — see the carry guard in
+    // start-recording-ui. Skipped when there's no landing note (Whisper/import
+    // → no live buffer to carry anyway).
+    if (instantSummaryFile) {
+      liveTranscriptState.summaryFile = instantSummaryFile;
+    }
     systemAudioRecordingActive = false;
     stopLiveTranscribe();
     currentRecordingSessionName = null;

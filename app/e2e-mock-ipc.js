@@ -167,6 +167,10 @@ function install({ ipcMain }) {
     paused: false,
     processing: false,
     sessionName: null,
+    // The append/resume target (summary file) of the active recording, mirrored
+    // into get-queue-status.recordingSummaryFile so the detail view can match
+    // "recording this note" by identity (not display name).
+    appendTo: null,
     startedAt: 0,
     pausedAt: 0,
   };
@@ -185,17 +189,19 @@ function install({ ipcMain }) {
   // real ipcMain.handle callback. Mirror the real handlers' return shapes from
   // app/main.js (get-ai-provider ~5950, org-* ~7990).
   const MOCKS = {
-    'start-recording-ui': async (_event, name) => {
+    'start-recording-ui': async (_event, name, _trigger, appendTo) => {
       rec.active = true;
       rec.paused = false;
       rec.processing = false;
       rec.sessionName = name && String(name).trim() ? String(name).trim() : 'Note';
+      rec.appendTo = appendTo && String(appendTo).trim() ? String(appendTo).trim() : null;
       rec.startedAt = Date.now();
       return { success: true, sessionName: rec.sessionName };
     },
     'stop-recording-ui': async () => {
       rec.active = false;
       rec.paused = false;
+      rec.appendTo = null;
       // Park in "processing" — T1 has no backend to complete it; the spec only
       // asserts the renderer's optimistic transition to the processing dock.
       rec.processing = true;
@@ -235,6 +241,7 @@ function install({ ipcMain }) {
         ? Math.floor(((rec.paused ? rec.pausedAt : Date.now()) - rec.startedAt) / 1000)
         : 0,
       sessionName: rec.active || rec.processing ? rec.sessionName : null,
+      recordingSummaryFile: rec.active ? rec.appendTo : null,
     }),
 
     // Live transcript backfill. Real main.js populates liveTranscriptState from
