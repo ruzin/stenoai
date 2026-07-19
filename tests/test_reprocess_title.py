@@ -68,6 +68,20 @@ class ReprocessTitleTests(unittest.TestCase):
             res, fake = _run(tmp, note)
             self.assertEqual(res.exit_code, 0, res.output)
             fake.generate_title.assert_called_once()
+            # Assert the persisted outcome (frontmatter rewritten) AND the
+            # visibility signal (TITLE: line the renderer consumes) — not just
+            # that the mock was called.
+            self.assertEqual(_title_of(note), "Friday Release Plan")
+            self.assertIn("TITLE:Friday Release Plan", res.output)
+
+    def test_null_title_does_not_crash_and_gets_named(self):
+        # A note whose title is null must not crash reprocess (re.match(None)
+        # raises) and should be named like any other unnamed note.
+        with tempfile.TemporaryDirectory() as tmp:
+            note = _write_note(tmp, "null")  # YAML null
+            res, fake = _run(tmp, note)
+            self.assertEqual(res.exit_code, 0, res.output)
+            fake.generate_title.assert_called_once()
             self.assertEqual(_title_of(note), "Friday Release Plan")
 
     def test_user_named_note_is_not_renamed_without_force(self):

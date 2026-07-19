@@ -2750,7 +2750,10 @@ def reprocess(summary_file, regenerate_title):
         # stuck at "Note" forever. Gating on _AUTO_NAMED_PATTERN mirrors
         # process_streaming's title step and protects a user-renamed note from
         # being overwritten.
-        if regenerate_title or _AUTO_NAMED_PATTERN.match(session_name):
+        # `not session_name` guards a note whose title is null/empty: it should
+        # be named (treat as auto), and it must short-circuit before the regex
+        # since re.match(None) raises.
+        if regenerate_title or not session_name or _AUTO_NAMED_PATTERN.match(session_name):
             # generate_title logs its own failure detail and returns None rather
             # than raising, so a failure just leaves the current name standing.
             generated_title = recorder.summarizer.generate_title(
