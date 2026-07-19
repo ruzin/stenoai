@@ -708,8 +708,18 @@ Summary output language: {config.get_language_name(output_language)}
                     session_name = generated_title
                     print(f"TITLE:{session_name}", flush=True)
                     print(f"Auto-generated title: {session_name}")
-            except Exception as e:
-                logger.warning(f"Title generation failed: {e}")
+                else:
+                    # generate_title returned None (empty/degenerate response).
+                    # Previously this was silent, so the placeholder name would
+                    # stick with no trace. Surface it (content-free) so the
+                    # failure is visible in diagnostics.
+                    logger.warning(
+                        "Title generation returned no title; keeping placeholder "
+                        "name %r",
+                        session_name,
+                    )
+            except Exception:
+                logger.exception("Title generation failed; keeping placeholder name")
 
         # Step 4: Parse streamed markdown into structured JSON
         parsed = self._parse_streamed_markdown(streamed_md)

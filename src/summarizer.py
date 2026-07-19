@@ -25,6 +25,11 @@ logger = logging.getLogger(__name__)
 # body text isn't touched.
 _LEADING_TIMESTAMP_RE = re.compile(r'(?m)^\[\d{1,3}:\d{2}(?::\d{2})?\]\s*')
 
+# Reasoning-model wrapper blocks (<think>…</think> and variants). Reasoning
+# models can emit these even when asked for a bare title; stripped before the
+# title is parsed out of the response.
+_RE_THINK_BLOCK = re.compile(r'(?is)<(think|thought|thinking|reasoning)>.*?</\1>')
+
 
 def _strip_leading_timestamps(transcript: str) -> str:
     if not transcript:
@@ -1676,8 +1681,12 @@ TRANSCRIPT:
             A short title string, or None if generation failed
         """
         try:
-            # Use summary if available, otherwise fall back to first part of transcript
-            context = summary if summary else _strip_leading_timestamps(transcript)[:2000]
+            # Use summary if available, otherwise fall back to first part of
+            # transcript. Bound the length either way: an unbounded summary from
+            # a long meeting can overflow a small-context model's num_ctx and
+            # push the trailing "TITLE:" instruction out of the window, so the
+            # model never sees the actual task and returns nothing usable.
+            context = (summary if summary else _strip_leading_timestamps(transcript))[:4000]
             if not context or context.strip() == "":
                 return None
 
@@ -1728,12 +1737,28 @@ TITLE:"""
                 )
                 response_text = ollama_response['message']['content'].strip()
 
-            # Clean up the response
-            title = response_text.strip().strip('"').strip("'").strip()
+            # Clean up the response. Reasoning models (e.g. deepseek-r1) can
+            # ignore the "just the title" instruction and wrap the answer in a
+            # <think> block, a "TITLE:" label on its own line, or markdown
+            # emphasis (**bold**, `code`, # heading) — none of which should end
+            # up in the saved title.
+            title = _RE_THINK_BLOCK.sub("", response_text).strip()
+            # Reasoning tends to precede the title, and a "TITLE:\n<title>"
+            # shape puts the answer on the last line — so when multi-line, keep
+            # the last non-empty line.
+            lines = [ln.strip() for ln in title.splitlines() if ln.strip()]
+            if len(lines) > 1:
+                title = lines[-1]
+            elif lines:
+                title = lines[0]
+            title = title.strip().strip('"').strip("'").strip()
             # Remove common prefixes the model might add
             for prefix in ["Title:", "Meeting:", "Meeting Title:", "title:", "meeting:"]:
                 if title.lower().startswith(prefix.lower()):
                     title = title[len(prefix):].strip()
+            # Strip surrounding markdown emphasis / code / heading markers that
+            # otherwise leak into the title (e.g. "**Reissuing after Completion**").
+            title = title.strip(" *_`#").strip()
 
             # Enforce max length (6 words, ~60 chars)
             words = title.split()
@@ -1745,10 +1770,21 @@ TITLE:"""
                 logger.info(f"Generated meeting title ({len(title)} chars)")
                 return title
 
+            # Empty/degenerate title. Log the response LENGTH (not content) so
+            # this otherwise-silent failure mode is visible in diagnostics
+            # without leaking meeting text.
+            logger.warning(
+                "Title generation produced no usable title (provider=%s, model=%s, "
+                "response chars=%d)",
+                self.ai_provider, self.model_name, len(response_text),
+            )
             return None
 
-        except Exception as e:
-            logger.warning(f"Failed to generate meeting title: {e}")
+        except Exception:
+            logger.exception(
+                "Failed to generate meeting title (provider=%s, model=%s)",
+                self.ai_provider, self.model_name,
+            )
             return None
 
     def _build_query_prompt(self, transcript: str, question: str, language: str = "en") -> str:
