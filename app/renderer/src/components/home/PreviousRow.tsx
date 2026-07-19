@@ -1,4 +1,4 @@
-import { FileText, Folder as FolderIcon, Loader2 } from 'lucide-react';
+import { Folder as FolderIcon, Loader2 } from 'lucide-react';
 import type { Meeting } from '@/lib/ipc';
 import { navigate } from '@/lib/router';
 import { useMeetingsList } from '@/lib/meetingsListContext';
@@ -62,10 +62,10 @@ export function PreviousRow({ meeting, folderName }: PreviousRowProps) {
             as meaningful and collided with the reserved status hues). */}
         <div
           aria-hidden="true"
-          className="flex size-9 flex-shrink-0 items-center justify-center rounded-lg"
+          className="flex size-9 flex-shrink-0 items-center justify-center rounded-lg text-[15px] font-medium"
           style={{ background: 'var(--surface-sunken)', color: 'var(--fg-2)' }}
         >
-          <FileText className="size-[17px]" />
+          {title.charAt(0).toUpperCase()}
         </div>
         
         <div className="flex min-w-0 flex-col gap-1">

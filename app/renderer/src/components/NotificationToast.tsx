@@ -101,12 +101,12 @@ export function NotificationToast() {
             onClick={handleJoin}
             className="flex items-center gap-2 rounded-[10px] border border-gray-200 bg-white px-3 py-1.5 text-[13px] font-medium text-gray-900 transition-all hover:bg-gray-50 hover:shadow-sm active:bg-gray-100 active:scale-[0.98] shrink-0 dark:border-white/10 dark:bg-[#2C2C2E] dark:text-gray-100 dark:hover:bg-[#3C3C3E] dark:active:bg-[#1C1C1E]"
           >
-            <AppIcon size={18} />
+            <AppIcon size={18} color="currentColor" />
             <span>Join & take notes</span>
           </button>
         ) : (
-          <div className="flex items-center justify-center shrink-0 opacity-40 pr-1">
-            <AppIcon size={20} />
+          <div className="flex items-center justify-center shrink-0 pr-1 text-gray-500 dark:text-gray-400">
+            <AppIcon size={24} color="currentColor" />
           </div>
         )}
       </div>
