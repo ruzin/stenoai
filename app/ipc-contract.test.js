@@ -80,11 +80,15 @@ function preloadSubscribeChannels() {
   return new Set(matchAll(PRELOAD, /\bsubscribe\(\s*["']([^"']+)["']/g));
 }
 
-// --- e2e-mock-ipc.js: the MOCKS + DEFAULTS stub keys. Every channel name is
-// kebab-case (>=1 hyphen), which distinguishes a channel key from any plain
-// object key and keeps this scan robust. ---
+// --- e2e-mock-ipc.js: the MOCKS + DEFAULTS stub keys. Anchored to the
+// top-level object-literal indent (4 spaces, both MOCKS and DEFAULTS keys
+// sit directly under `const MOCKS = {`/`const DEFAULTS = {`) rather than any
+// quoted kebab-case string anywhere in the file — a mock's *response value*
+// can itself contain kebab-case keys (e.g. a model id nested inside a
+// catalog), which would otherwise be misread as a second, stale channel
+// stub. ---
 function mockStubKeys() {
-  return new Set(matchAll(MOCK, /["']([a-z0-9]+(?:-[a-z0-9]+)+)["']\s*:/g));
+  return new Set(matchAll(MOCK, /^ {4}["']([a-z0-9]+(?:-[a-z0-9]+)+)["']\s*:/gm));
 }
 
 test('main.js has no duplicate ipcMain registrations (Electron throws on the 2nd)', () => {

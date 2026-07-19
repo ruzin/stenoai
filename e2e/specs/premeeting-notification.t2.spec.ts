@@ -3,9 +3,11 @@ import { realUserDataDir, fileSig } from '../fixtures/real-user-data';
 import { enableDeterministicRecording } from '../fixtures/user-config';
 
 /**
- * T2 — pre-meeting notification: it's gated by the master "Desktop
- * notifications" toggle (no dedicated setting), and SUPPRESSED for a meeting
- * we're already recording (matched by session name === event title). Uses the
+ * T2 — pre-meeting notification: it's gated by its own dedicated "Scheduled
+ * meetings" toggle (premeeting_notifications_enabled — independent of the
+ * "Post meeting notifications" master switch, which now only covers
+ * note-ready/silence-auto-stop), and SUPPRESSED for a meeting we're already
+ * recording (matched by session name === event title). Uses the
  * `show-premeeting-notification` design-for-test seam, which returns `shown`
  * (the production fire path is the main-side scheduler timer). Model-free.
  */
@@ -15,7 +17,7 @@ type ShowResult = { success: boolean; shown?: boolean; error?: string };
 type StenoWindow = Window & {
   stenoai: {
     settings: {
-      setNotifications: (v: boolean) => Promise<unknown>;
+      setPremeetingNotifications: (v: boolean) => Promise<unknown>;
       showPremeetingNotification: (payload: {
         event: { id: string; title?: string };
       }) => Promise<ShowResult>;
@@ -38,21 +40,21 @@ const showPremeeting = (
     event,
   );
 
-test('pre-meeting notification is gated by the master notifications toggle; real dir untouched', async ({
+test('pre-meeting notification is gated by its own "Scheduled meetings" toggle; real dir untouched', async ({
   launchApp,
 }) => {
   const realDirBefore = fileSig(realUserDataDir());
   const { page } = await launchApp();
 
-  // Default (notifications on) → the gate lets it through (shown is not false).
+  // Default (on) → the gate lets it through (shown is not false).
   expect((await showPremeeting(page, EVT)).shown).not.toBe(false);
 
-  // Master notifications OFF → pre-meeting notif is gated off too (shown:false).
-  await page.evaluate(() => (window as StenoWindow).stenoai.settings.setNotifications(false));
+  // Scheduled meetings OFF → pre-meeting notif is gated off too (shown:false).
+  await page.evaluate(() => (window as StenoWindow).stenoai.settings.setPremeetingNotifications(false));
   expect((await showPremeeting(page, EVT)).shown).toBe(false);
 
-  // Master notifications ON → gate passes again.
-  await page.evaluate(() => (window as StenoWindow).stenoai.settings.setNotifications(true));
+  // Scheduled meetings ON → gate passes again.
+  await page.evaluate(() => (window as StenoWindow).stenoai.settings.setPremeetingNotifications(true));
   expect((await showPremeeting(page, EVT)).shown).not.toBe(false);
 
   // Keystone: the real user-data dir is byte-for-byte untouched.

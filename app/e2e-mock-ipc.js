@@ -470,8 +470,43 @@ function install({ ipcMain }) {
         ]
       : [];
 
+  // Matches src/parakeet.py's platform dispatch: MLX on darwin, ONNX
+  // elsewhere. Mock IDs should track that split so a T1 run on Windows/Linux
+  // CI doesn't advertise a macOS-only model as installed/current.
+  const PARAKEET_MODEL_ID =
+    process.platform === 'darwin'
+      ? 'mlx-community/parakeet-tdt-0.6b-v3'
+      : 'istupakov/parakeet-tdt-0.6b-v3-onnx';
+
   const DEFAULTS = {
-    'get-app-version': '0.0.0-e2e',
+    'get-app-version': { success: true, version: '0.0.0-e2e', name: 'Steno' },
+    // Read-only display poll for the About tab's "Check for Updates" button
+    // (settings-about.t1). Fully hermetic — no real GitHub call under mock
+    // IPC, so this is the only source of truth for that flow in T1.
+    'check-for-updates': {
+      success: true,
+      updateAvailable: false,
+      currentVersion: '0.0.0-e2e',
+      latestVersion: '0.0.0-e2e',
+      releaseUrl: '',
+      releaseName: '',
+      downloadUrl: null,
+    },
+    // AboutTab's mount-time re-seed effect. Without an explicit stub, both
+    // fields fall through to the permissive default (undefined, not null),
+    // and `downloadPercent !== null` reads true for undefined — showing a
+    // stray "Downloading update… undefined%" bar on first paint.
+    // STENOAI_E2E_SEED_UPDATE_ERROR seeds a persisted failed background update
+    // so the About tab's mount-time rehydration (settings-about.t1) can assert
+    // the failure is restored on navigation, not just from the live one-shot
+    // 'update-error' event.
+    'get-update-status': () => ({
+      success: true,
+      downloadedVersion: null,
+      downloadPercent: null,
+      downloadError:
+        process.env.STENOAI_E2E_SEED_UPDATE_ERROR === '1' ? 'network unreachable' : null,
+    }),
     // Fires on first paint once signed in (Sidebar + RouteView gate the
     // Shared notes feature on it). Default to feature-enabled to match the
     // adapter's default and keep the org-lock spec's UI unchanged. A spec can
@@ -485,19 +520,166 @@ function install({ ipcMain }) {
     },
     'list-folders': { success: true, folders: [] },
     'get-calendar-events': { success: true, events: [] },
+    // Without these, both new toggles fall through to the permissive
+    // {success:true} default (no show_menu_bar_icon/premeeting_notifications_enabled
+    // field), and GeneralTab's disabled={...data === undefined} leaves both
+    // switches permanently disabled under mock IPC.
+    'get-menu-bar-icon': { success: true, show_menu_bar_icon: true },
+    'get-premeeting-notifications': { success: true, premeeting_notifications_enabled: true },
     // parakeet-status lives in MOCKS (env-gated installed flag).
     // Transcribe tab reads this on first paint. (The engine itself moved to
     // MOCKS so STENOAI_E2E_MOCK_ENGINE can override it; default parakeet keeps
     // the language picker enabled — parakeet-language-picker.t1.)
     'get-language': { success: true, language: 'auto' },
+    // Real production catalog (src/whisper_models.py / src/parakeet_models.py)
+    // rather than empty — so the Settings UI's model list actually renders
+    // cards to look at (manual/dev use) instead of always erroring "Could not
+    // load transcription models." Parakeet ships pre-"installed" (matches the
+    // fresh-install default engine); Whisper stays uninstalled so the
+    // Download button state is also visible in the same screen.
     'list-whisper-models': {
       success: true,
-      supported_models: {},
+      supported_models: {
+        'large-v3-turbo': {
+          name: 'Whisper Large V3 Turbo',
+          size: '1.6GB',
+          installed: false,
+          description:
+            'Best accuracy Whisper model. Supports 99 languages including non-European languages such as Chinese, Japanese, Arabic, Korean, and Hindi.',
+          speed: 'medium',
+          quality: 'excellent',
+        },
+      },
       current_model: '',
       provider: 'whisper',
     },
+    'list-parakeet-models': {
+      success: true,
+      supported_models: {
+        [PARAKEET_MODEL_ID]: {
+          name: 'Parakeet TDT v3',
+          size: '572MB',
+          installed: true,
+          description:
+            'Highest quality. Supports live transcription in English and 25 European languages — Spanish, French, German, Italian, Portuguese, Dutch, Russian, Polish, Czech, and 16 others.',
+          speed: 'very fast',
+          quality: 'excellent',
+        },
+      },
+      current_model: PARAKEET_MODEL_ID,
+    },
+    // Summarisation & Chat's local "Model" list (ModelList in AiTab.tsx). Real
+    // production catalog (Config.SUPPORTED_MODELS in src/config.py) so that
+    // section also renders cards to look at under mock IPC instead of always
+    // erroring "Could not reach Ollama." -- the same reasoning as the Whisper/
+    // Parakeet lists above. Only the default model ships "installed"; the
+    // matches config.py's fresh-install default and its deprecated flag.
+    'list-models': {
+      success: true,
+      current_model: 'gemma4:e2b-it-qat',
+      provider: 'local',
+      supported_models: {
+        'gemma4:e2b-it-qat': {
+          name: 'Gemma 4 E2B (QAT)',
+          size: '4.3GB',
+          params: '2B',
+          description: 'Lightest Gemma 4, quantization-aware, real 128K context (default)',
+          speed: 'fast',
+          quality: 'good',
+          installed: true,
+        },
+        'gemma4:e4b-it-qat': {
+          name: 'Gemma 4 E4B (QAT)',
+          size: '6.1GB',
+          params: '4B',
+          description: 'Quantization-aware E4B — higher quality than E2B at a modest footprint',
+          speed: 'medium',
+          quality: 'excellent',
+          installed: false,
+        },
+        'llama3.2:3b': {
+          name: 'Llama 3.2 3B',
+          size: '2GB',
+          params: '3B',
+          description: 'Replaced by Gemma 4 E2B',
+          speed: 'very fast',
+          quality: 'good',
+          deprecated: true,
+          installed: false,
+        },
+        'qwen3.5:9b': {
+          name: 'Qwen 3.5 9B',
+          size: '6.6GB',
+          params: '9B',
+          description: 'Excellent at structured output and action items',
+          speed: 'medium',
+          quality: 'excellent',
+          installed: false,
+        },
+        'gemma4:12b-it-qat': {
+          name: 'Gemma 4 12B (QAT)',
+          size: '7.2GB',
+          params: '12B',
+          description: 'Large 256K context, quantization-aware - best for long meetings',
+          speed: 'medium',
+          quality: 'excellent',
+          installed: false,
+        },
+        'gpt-oss:20b': {
+          name: 'GPT-OSS 20B',
+          size: '14GB',
+          params: '20B',
+          description: 'OpenAI open-weight model with reasoning capabilities',
+          speed: 'medium',
+          quality: 'excellent',
+          installed: false,
+        },
+      },
+    },
+    'get-current-model': { success: true, model: 'gemma4:e2b-it-qat' },
     // get-queue-status lives in MOCKS (stateful recording machine) — its idle
     // shape is identical to the static default that used to sit here.
+    // Settings > Templates renders a row per template with badge/prompt/action
+    // variety (default, locked built-in, unlocked built-in, custom) — an empty
+    // list would only ever show the "New Template" row.
+    'list-templates': {
+      success: true,
+      templates: [
+        {
+          id: 'standard',
+          name: 'Standard Summary',
+          icon: '',
+          prompt: '',
+          language: 'auto',
+          format: 'structured',
+          builtin: true,
+          locked: true,
+        },
+        {
+          id: 'action-items',
+          name: 'Action Items',
+          icon: '',
+          prompt:
+            'Summarise the meeting into a punchy list of action items, each with an owner and a due date if one was mentioned.',
+          language: 'auto',
+          format: 'markdown',
+          builtin: true,
+          locked: false,
+        },
+        {
+          id: 'exec-summary',
+          name: '1:1 Notes',
+          icon: '',
+          prompt:
+            'Write a short executive summary followed by decisions made and open questions still outstanding.',
+          language: 'en',
+          format: 'markdown',
+          builtin: false,
+          locked: false,
+        },
+      ],
+      default_template_id: 'standard',
+    },
   };
 
   const originalHandle = ipcMain.handle.bind(ipcMain);
@@ -507,7 +689,9 @@ function install({ ipcMain }) {
       fn = MOCKS[channel];
     } else if (Object.prototype.hasOwnProperty.call(DEFAULTS, channel)) {
       const value = DEFAULTS[channel];
-      fn = async () => value;
+      // A function-valued default is evaluated per invoke (so it can read
+      // env seeds set for a specific spec); a plain value is returned as-is.
+      fn = typeof value === 'function' ? value : async () => value;
     } else {
       // Unknown channel — resolve permissively so no renderer invoke() rejects
       // with "no handler registered". The real (backend-spawning) handler is

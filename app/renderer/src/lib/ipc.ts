@@ -491,8 +491,12 @@ export type GetTelemetryResponse = Result<{
   anonymous_id?: string;
 }>;
 export type GetDockIconResponse = Result<{ hide_dock_icon: boolean }>;
+export type GetMenuBarIconResponse = Result<{ show_menu_bar_icon: boolean }>;
 export type GetSystemAudioResponse = Result<{ system_audio_enabled: boolean }>;
 export type GetAutoDetectMeetingsResponse = Result<{ auto_detect_meetings_enabled: boolean }>;
+export type GetPremeetingNotificationsResponse = Result<{
+  premeeting_notifications_enabled: boolean;
+}>;
 export type GetLaunchOnLoginResponse = Result<{ launch_on_login: boolean }>;
 export type GetWhisperModelResponse = Result<{ whisper_model: string; supported_models: string[] }>;
 export type GetKeepRecordingsResponse = Result<{ keep_recordings: boolean }>;
@@ -551,6 +555,21 @@ export type CheckForUpdatesResponse = Result<{
   releaseUrl: string;
   releaseName: string;
   downloadUrl: string | null;
+}>;
+
+// downloadedVersion is null until a download finishes (or after one already
+// installed). downloadPercent is non-null only while a download is actively
+// in flight — cleared once it lands in downloadedVersion. Lets a freshly-
+// mounted About tab recover either state instead of only reacting to
+// whichever one-shot 'update-available'/'update-download-progress'/
+// 'update-downloaded' IPC event fires while it happens to be mounted.
+export type GetUpdateStatusResponse = Result<{
+  downloadedVersion: string | null;
+  downloadPercent: number | null;
+  // The last surfaced auto-updater error, so a freshly-mounted About tab can
+  // rehydrate a failed background update instead of only reacting to the
+  // one-shot 'update-error' event. Null when the last cycle didn't fail.
+  downloadError: string | null;
 }>;
 
 // ---------- event payloads ----------
@@ -702,6 +721,9 @@ export interface UpdateProgressEvent {
 }
 export interface UpdateDownloadedEvent {
   version: string;
+}
+export interface UpdateErrorEvent {
+  message: string;
 }
 export interface ShortcutStartRecordingEvent {
   sessionName: string | null;
@@ -923,10 +945,14 @@ export interface StenoaiBridge {
     >;
     getDockIcon: RequestFn<[], GetDockIconResponse>;
     setDockIcon: RequestFn<[v: boolean], Result<Record<string, never>>>;
+    getMenuBarIcon: RequestFn<[], GetMenuBarIconResponse>;
+    setMenuBarIcon: RequestFn<[v: boolean], Result<Record<string, never>>>;
     getSystemAudio: RequestFn<[], GetSystemAudioResponse>;
     setSystemAudio: RequestFn<[v: boolean], Result<Record<string, never>>>;
     getAutoDetectMeetings: RequestFn<[], GetAutoDetectMeetingsResponse>;
     setAutoDetectMeetings: RequestFn<[v: boolean], Result<Record<string, never>>>;
+    getPremeetingNotifications: RequestFn<[], GetPremeetingNotificationsResponse>;
+    setPremeetingNotifications: RequestFn<[v: boolean], Result<Record<string, never>>>;
     getLaunchOnLogin: RequestFn<[], GetLaunchOnLoginResponse>;
     setLaunchOnLogin: RequestFn<[v: boolean], Result<Record<string, never>>>;
     getWhisperModel: RequestFn<[], GetWhisperModelResponse>;
@@ -1011,6 +1037,7 @@ export interface StenoaiBridge {
 
   updates: {
     check: RequestFn<[], CheckForUpdatesResponse>;
+    getStatus: RequestFn<[], GetUpdateStatusResponse>;
     openReleasePage: RequestFn<[url: string], Result<Record<string, never>>>;
     install: SendFn<[]>;
   };
@@ -1042,6 +1069,7 @@ export interface StenoaiBridge {
     updateAvailable: Subscribe<UpdateAvailableEvent>;
     updateDownloadProgress: Subscribe<UpdateProgressEvent>;
     updateDownloaded: Subscribe<UpdateDownloadedEvent>;
+    updateError: Subscribe<UpdateErrorEvent>;
     googleAuthChanged: Subscribe<{ connected: boolean }>;
     outlookAuthChanged: Subscribe<{ connected: boolean }>;
     shortcutStartRecording: Subscribe<ShortcutStartRecordingEvent>;

@@ -466,7 +466,7 @@ export function Home({ mode }: HomeProps) {
   return (
     <MeetingsShell
       activeSummaryFile={null}
-      contentAlign={emptyState && mode === 'home' ? 'center' : 'top'}
+      contentAlign={emptyState ? 'center' : 'top'}
     >
       {meetings.isLoading ? (
         <div className="flex min-h-[40vh] items-center justify-center text-[color:var(--fg-2)]">

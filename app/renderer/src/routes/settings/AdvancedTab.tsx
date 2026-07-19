@@ -93,7 +93,7 @@ export function AdvancedTab() {
       >
         <div className="min-w-0 flex-1">
           <div
-            className="text-[14px] font-medium"
+            className="text-[14px] font-normal"
             style={{ color: 'var(--fg-1)', marginBottom: 2 }}
           >
             Storage location
@@ -161,6 +161,7 @@ export function AdvancedTab() {
       <SettingRow
         label="Anonymous usage analytics"
         description="Help improve Steno — no meeting content is ever sent"
+        noBorder={!telemetry.data?.anonymous_id}
       >
         <Switch
           checked={telemetry.data?.telemetry_enabled ?? false}
@@ -176,7 +177,7 @@ export function AdvancedTab() {
         >
           <div className="min-w-0 flex-1">
             <div
-              className="text-[14px] font-medium"
+              className="text-[14px] font-normal"
               style={{ color: 'var(--fg-1)', marginBottom: 2 }}
             >
               Anonymous ID

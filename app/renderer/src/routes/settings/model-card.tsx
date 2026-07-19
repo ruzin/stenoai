@@ -18,7 +18,7 @@ export function isDefaultModel(description: string | undefined): boolean {
   return /\((default|recommended)\)/i.test(description ?? '');
 }
 
-function parsePullPercent(progress: string | undefined): number | null {
+export function parsePullPercent(progress: string | undefined): number | null {
   const match = progress?.match(/(\d{1,3})%/);
   if (!match) return null;
   const value = Number(match[1]);
@@ -122,6 +122,10 @@ function PullProgressBar({
 
 interface ModelCardProps {
   name: string;
+  // Optional provider/engine brand icon shown before the name — used by the
+  // Transcription list (Whisper -> OpenAI, Parakeet -> NVIDIA); omitted by
+  // the Ollama ModelList, which doesn't attribute per-model brands.
+  icon?: React.ReactNode;
   sizeLabel?: string;
   note?: React.ReactNode;
   isCurrent: boolean;
@@ -163,6 +167,7 @@ interface ModelCardProps {
 
 export function ModelCard({
   name,
+  icon,
   sizeLabel,
   note,
   isCurrent,
@@ -208,6 +213,11 @@ export function ModelCard({
     >
       <div className="min-w-0 flex-1">
         <div className="mb-[3px] flex flex-wrap items-baseline gap-2.5">
+          {icon && (
+            <span className="inline-flex shrink-0" style={{ color: 'var(--fg-muted)' }}>
+              {icon}
+            </span>
+          )}
           <span
             className="font-mono text-[13px]"
             style={{

@@ -4030,6 +4030,34 @@ def set_dock_icon(enabled):
 
 
 @cli.command()
+def get_menu_bar_icon():
+    """Get the current show-menu-bar-icon preference"""
+    from src.config import get_config
+
+    config = get_config()
+    enabled = config.get_show_menu_bar_icon()
+
+    print(json.dumps({"show_menu_bar_icon": enabled}))
+
+
+@cli.command()
+@click.argument('enabled', callback=lambda ctx, param, v: v.lower() == 'true')
+def set_menu_bar_icon(enabled):
+    """Set show-menu-bar-icon preference (True/False)"""
+    from src.config import get_config
+
+    config = get_config()
+    success = config.set_show_menu_bar_icon(enabled)
+
+    if success:
+        print(f"SUCCESS: Show menu bar icon {'enabled' if enabled else 'disabled'}")
+        print(json.dumps({"success": True, "show_menu_bar_icon": enabled}))
+    else:
+        print(f"ERROR: Failed to save show menu bar icon preference")
+        print(json.dumps({"success": False, "error": "Failed to save config"}))
+
+
+@cli.command()
 def get_telemetry():
     """Get the current telemetry preference and anonymous ID"""
     from src.config import get_config
@@ -4113,6 +4141,32 @@ def set_auto_detect_meetings(enabled):
 
     if success:
         print(json.dumps({"success": True, "auto_detect_meetings_enabled": enabled}))
+    else:
+        print(json.dumps({"success": False, "error": "Failed to save config"}))
+
+
+@cli.command()
+def get_premeeting_notifications():
+    """Get the current pre-meeting (calendar) notification preference"""
+    from src.config import get_config
+
+    config = get_config()
+    enabled = config.get_premeeting_notifications_enabled()
+
+    print(json.dumps({"premeeting_notifications_enabled": enabled}))
+
+
+@cli.command()
+@click.argument('enabled', callback=lambda ctx, param, v: v.lower() == 'true')
+def set_premeeting_notifications(enabled):
+    """Set pre-meeting (calendar) notification preference (True/False)"""
+    from src.config import get_config
+
+    config = get_config()
+    success = config.set_premeeting_notifications_enabled(enabled)
+
+    if success:
+        print(json.dumps({"success": True, "premeeting_notifications_enabled": enabled}))
     else:
         print(json.dumps({"success": False, "error": "Failed to save config"}))
 

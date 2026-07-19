@@ -23,7 +23,9 @@ type SettingKind =
   | 'telemetry'
   | 'transcriptionEngine'
   | 'dockIcon'
-  | 'launchOnLogin';
+  | 'launchOnLogin'
+  | 'menuBarIcon'
+  | 'premeetingNotifications';
 
 type SettingsBridge = {
   settings: {
@@ -37,6 +39,8 @@ type SettingsBridge = {
     setTelemetry: (v: boolean) => Promise<unknown>;
     setDockIcon: (v: boolean) => Promise<unknown>;
     setLaunchOnLogin: (v: boolean) => Promise<unknown>;
+    setMenuBarIcon: (v: boolean) => Promise<unknown>;
+    setPremeetingNotifications: (v: boolean) => Promise<unknown>;
     setStoragePath: (p: string) => Promise<{ success?: boolean; error?: string }>;
     setMicrophone: (
       deviceId: string,
@@ -70,6 +74,11 @@ const CASES: Case[] = [
   // false flips the default (true) so the assertion has teeth — a no-op setter
   // would leave the key unset/true and fail this case.
   { kind: 'launchOnLogin', value: false, configKey: 'launch_on_login' },
+  // Both default true — false flips the default so a no-op setter fails
+  // the case. Persistence only: the live Tray create/destroy this setter
+  // also does is IS_E2E-gated (main.js), so there's no window here.
+  { kind: 'menuBarIcon', value: false, configKey: 'show_menu_bar_icon' },
+  { kind: 'premeetingNotifications', value: false, configKey: 'premeeting_notifications_enabled' },
 ];
 
 function applySetting(
@@ -101,6 +110,10 @@ function applySetting(
           return s.settings.setDockIcon(value as boolean);
         case 'launchOnLogin':
           return s.settings.setLaunchOnLogin(value as boolean);
+        case 'menuBarIcon':
+          return s.settings.setMenuBarIcon(value as boolean);
+        case 'premeetingNotifications':
+          return s.settings.setPremeetingNotifications(value as boolean);
         case 'transcriptionEngine':
           return s.transcriptionEngine.set(value as string);
         default:

@@ -371,6 +371,21 @@ async function notificationsEnabled() {
   }
 }
 
+// Same shape as notificationsEnabled(), but for the calendar-based
+// pre-meeting heads-up specifically — independent of the "post meeting"
+// notifications_enabled toggle (note-ready / silence-auto-stop). Used by
+// firePreMeetingNotification and schedulePreMeetingNotifications instead of
+// notificationsEnabled(), so the two gates never share state.
+async function premeetingNotificationsEnabled() {
+  try {
+    const settings = await handleGetPremeetingNotifications();
+    if (!settings.success) return true;
+    return settings.premeeting_notifications_enabled !== false;
+  } catch (_) {
+    return true;
+  }
+}
+
 async function showShortcutNotification(body) {
   if (process.platform !== 'darwin') {
     return;
@@ -1457,7 +1472,7 @@ if (!gotSingleInstanceLock) {
     }
 
     createWindow();
-    if (!IS_E2E) createTray();
+    if (!IS_E2E && loadShowMenuBarIconEnabled()) createTray();
     setupAutoUpdater();
     setupAutoMeetingDetector();
     // Pre-meeting heads-up scheduler (calendar-time based). Skipped under E2E —
@@ -1949,6 +1964,21 @@ async function handleGetNotifications() {
     };
   } catch (error) {
     sendDebugLog(`Error getting notification settings: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+}
+
+async function handleGetPremeetingNotifications() {
+  try {
+    const result = await runPythonScript('simple_recorder.py', ['get-premeeting-notifications']);
+    const jsonData = JSON.parse(result);
+
+    return {
+      success: true,
+      ...jsonData
+    };
+  } catch (error) {
+    sendDebugLog(`Error getting pre-meeting notification settings: ${error.message}`);
     return { success: false, error: error.message };
   }
 }
@@ -3919,6 +3949,19 @@ function loadAutoDetectMeetingsEnabled() {
   }
 }
 
+// Same sync-read-at-startup pattern as loadAutoDetectMeetingsEnabled(), used
+// to decide whether createTray() should run at all without spawning Python.
+function loadShowMenuBarIconEnabled() {
+  try {
+    const cfgPath = path.join(getUserDataDir(), 'config.json');
+    if (!fs.existsSync(cfgPath)) return true;
+    const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf-8'));
+    return cfg.show_menu_bar_icon !== false;
+  } catch (_) {
+    return true;
+  }
+}
+
 // Global recording state management
 let systemAudioRecordingActive = false;  // Track system audio recording for tray/quit
 let currentRecordingProcess = null;
@@ -5110,6 +5153,24 @@ ipcMain.handle('startup-setup-check', async () => {
 });
 
 // ── Auto-updater ──
+// Mirrors the autoUpdater event sequence (available -> progress* ->
+// downloaded) so AboutTab can recover its state on every mount instead of
+// only reacting to whichever one-shot IPC event fires while it happens to be
+// mounted — Settings tabs unmount on switch, so a download in progress (or
+// already finished) when the user is on a different tab would otherwise be
+// invisible until they'd already missed it. pendingDownloadPercent is
+// non-null only while a download is actively in flight (cleared once it
+// lands in pendingUpdateVersion); get-update-status exposes both.
+let pendingUpdateVersion = null;
+let pendingDownloadPercent = null;
+// The last surfaced auto-updater error, persisted the same way as the two
+// above so a freshly-mounted About tab can rehydrate it via get-update-status.
+// The one-shot 'update-error' event only reaches a listener mounted at the
+// instant it fires — without this, navigating away from About and back after
+// a failed background update would show nothing. Cleared when a new cycle
+// starts (check / available / progress) or a download completes.
+let pendingUpdateError = null;
+
 function setupAutoUpdater() {
   if (IS_E2E) {
     sendDebugLog('Auto-updater: skipped (E2E mode)');
@@ -5126,10 +5187,17 @@ function setupAutoUpdater() {
 
   autoUpdater.on('checking-for-update', () => {
     sendDebugLog('Auto-updater: checking for updates...');
+    // Fresh cycle — clear any stale error from a previous failed check so a
+    // rehydrating About tab doesn't show an error that's now being retried.
+    pendingUpdateError = null;
   });
 
   autoUpdater.on('update-available', (info) => {
     sendDebugLog(`Auto-updater: update available (v${info.version})`);
+    // Matches the renderer's own `setDownloadPercent((p) => p ?? 0)` — marks
+    // a download as started before the first real progress tick arrives.
+    if (pendingDownloadPercent === null) pendingDownloadPercent = 0;
+    pendingUpdateError = null;
     if (mainWindow) {
       mainWindow.webContents.send('update-available', { version: info.version });
     }
@@ -5141,6 +5209,8 @@ function setupAutoUpdater() {
 
   autoUpdater.on('download-progress', (progress) => {
     sendDebugLog(`Auto-updater: downloading ${Math.round(progress.percent)}%`);
+    pendingDownloadPercent = Math.round(progress.percent);
+    pendingUpdateError = null;
     if (mainWindow) {
       mainWindow.webContents.send('update-download-progress', { percent: Math.round(progress.percent) });
     }
@@ -5148,6 +5218,9 @@ function setupAutoUpdater() {
 
   autoUpdater.on('update-downloaded', (info) => {
     sendDebugLog(`Auto-updater: v${info.version} ready to install`);
+    pendingDownloadPercent = null;
+    pendingUpdateError = null;
+    pendingUpdateVersion = info.version;
     if (mainWindow) {
       mainWindow.webContents.send('update-downloaded', { version: info.version });
     }
@@ -5155,15 +5228,28 @@ function setupAutoUpdater() {
 
   autoUpdater.on('error', (err) => {
     const msg = (err && err.message) || String(err);
+    // Clear any in-flight download state regardless of which branch below
+    // fires — otherwise a failure after 'update-available' (which seeds
+    // pendingDownloadPercent to 0) leaves get-update-status reporting a
+    // download is still running forever, and About would show a stuck
+    // progress bar with no way to tell it failed.
+    pendingDownloadPercent = null;
     // Until a release carrying this platform's update feed (latest.yml on
     // Windows) is published, the updater 404s on the feed file. That's an
     // expected transitional state, not a real failure — log it quietly so it
-    // doesn't read as a scary stack trace for alpha testers.
+    // doesn't read as a scary stack trace for alpha testers, and don't
+    // surface it to the renderer as an error.
     if (/latest(-mac)?\.yml/i.test(msg) && /(404|cannot find)/i.test(msg)) {
       sendDebugLog('Auto-updater: no update feed published for this release yet — skipping.');
       return;
     }
     sendDebugLog(`Auto-updater error: ${msg}`);
+    // Persist so a later About-tab mount can rehydrate it (the event below is
+    // one-shot and only reaches an already-mounted listener).
+    pendingUpdateError = msg;
+    if (mainWindow) {
+      mainWindow.webContents.send('update-error', { message: msg });
+    }
   });
 
   // Check on launch (after a short delay to not block startup)
@@ -6929,6 +7015,62 @@ ipcMain.handle('set-dock-icon', async (event, hidden) => {
   }
 });
 
+ipcMain.handle('get-menu-bar-icon', async () => {
+  try {
+    const result = await runPythonScript('simple_recorder.py', ['get-menu-bar-icon']);
+    const jsonData = JSON.parse(result);
+
+    return {
+      success: true,
+      ...jsonData
+    };
+  } catch (error) {
+    sendDebugLog(`Error getting menu bar icon settings: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('set-menu-bar-icon', async (event, enabled) => {
+  try {
+    sendDebugLog(`Setting show menu bar icon to: ${enabled}`);
+    const result = await runPythonScript('simple_recorder.py', ['set-menu-bar-icon', enabled ? 'True' : 'False']);
+
+    // Extract JSON from output
+    const jsonMatch = result.match(/\{.*\}/s);
+    const jsonData = jsonMatch
+      ? JSON.parse(jsonMatch[0])
+      : { success: true, show_menu_bar_icon: enabled };
+
+    // Apply immediately — create or destroy the live Tray instance — but
+    // only once the preference actually persisted. Otherwise a failed save
+    // (e.g. a disk/permission error) would still flip the live tray, leaving
+    // it out of sync with both the on-disk config and the {success:false}
+    // this handler returns to the UI. No process.platform gate here (unlike
+    // dock icon): Electron's Tray API is cross-platform (macOS menu bar /
+    // Windows system tray) and createTray() itself has no platform branch.
+    if (jsonData.success && !IS_E2E) {
+      if (enabled) {
+        if (!tray) {
+          createTray();
+          // createTray() always builds the idle icon — sync it to the
+          // actual recording state immediately, since this can now run
+          // mid-recording (unlike the startup-only call), not just when
+          // the app launches with nothing recording yet.
+          updateTrayIcon(currentRecordingProcess !== null || systemAudioRecordingActive);
+        }
+      } else if (tray) {
+        tray.destroy();
+        tray = null;
+      }
+    }
+
+    return jsonData;
+  } catch (error) {
+    sendDebugLog(`Error setting menu bar icon: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+});
+
 // System audio capture IPC handlers
 ipcMain.handle('get-system-audio', async () => {
   try {
@@ -6994,6 +7136,36 @@ ipcMain.handle('set-auto-detect-meetings', async (_event, enabled) => {
     return parsed;
   } catch (error) {
     sendDebugLog(`Error setting auto-detect: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('get-premeeting-notifications', handleGetPremeetingNotifications);
+
+ipcMain.handle('set-premeeting-notifications', async (_event, enabled) => {
+  try {
+    sendDebugLog(`Setting pre-meeting notifications to: ${enabled}`);
+    const result = await runPythonScript('simple_recorder.py', ['set-premeeting-notifications', enabled ? 'True' : 'False']);
+    const jsonMatch = result.match(/\{.*\}/s);
+    const jsonData = jsonMatch
+      ? JSON.parse(jsonMatch[0])
+      : { success: true, premeeting_notifications_enabled: enabled };
+
+    // Re-arm live instead of waiting for the next periodic re-poll
+    // (PREMEETING_RESCHEDULE_MS, 10 minutes): schedulePreMeetingNotifications
+    // skips events already inside the lead window ("don't backfire"), so a
+    // meeting that starts soon after the user re-enables this toggle could
+    // otherwise silently miss its reminder for up to 10 minutes. Same E2E
+    // gate as startPreMeetingScheduler() — a spec drives the fire path
+    // directly via the show-premeeting-notification test seam, not this
+    // live scheduler.
+    if (jsonData.success && !IS_E2E) {
+      void schedulePreMeetingNotifications();
+    }
+
+    return jsonData;
+  } catch (error) {
+    sendDebugLog(`Error setting pre-meeting notifications: ${error.message}`);
     return { success: false, error: error.message };
   }
 });
@@ -8289,9 +8461,31 @@ function getDownloadUrl(assets) {
 }
 
 ipcMain.handle('check-for-updates', async () => {
-  return await checkForUpdates();
+  const result = await checkForUpdates();
+  // The GitHub comparison above is a read-only display poll — it never
+  // itself starts a download. Kick the real autoUpdater check alongside it
+  // so a manual "Check for Updates" click actually starts a background
+  // download when one's available, instead of only reporting the latest
+  // tag and waiting for the next scheduled interval. Same guard as
+  // setupAutoUpdater() so this stays a no-op (and network-free) in e2e/dev.
+  if (!IS_E2E && app.isPackaged) {
+    autoUpdater.checkForUpdates().catch(() => {});
+  }
+  return result;
 });
 
+// Lets a freshly-(re)mounted About tab recover "an update already
+// downloaded" state — the 'update-downloaded' IPC event only reaches a
+// listener that's mounted at the exact moment it fires; this is the seam
+// for everyone else.
+ipcMain.handle('get-update-status', async () => {
+  return {
+    success: true,
+    downloadedVersion: pendingUpdateVersion,
+    downloadPercent: pendingDownloadPercent,
+    downloadError: pendingUpdateError,
+  };
+});
 
 ipcMain.handle('open-release-page', async (event, url) => {
   try {
@@ -9744,9 +9938,9 @@ function isPremeetingEligible(e, nowMs) {
 // ids on re-poll) so the seam can drive it repeatedly in tests.
 async function firePreMeetingNotification(event) {
   premeetingTimers.delete(event.id);
-  // Gate: the master notifications toggle (no dedicated pre-meeting toggle —
-  // this folds under "Desktop notifications").
-  if (!(await notificationsEnabled())) return false;
+  // Gate: the dedicated "Scheduled meetings" toggle — independent of the
+  // "Post meeting notifications" master switch (see premeetingNotificationsEnabled).
+  if (!(await premeetingNotificationsEnabled())) return false;
   // Suppress only while we're recording THIS meeting — matched by name. A
   // recording started from a calendar event is named after its title (auto-detect
   // accept + Home upcoming-card both pass event.title), so the live session name
@@ -9866,7 +10060,23 @@ function clearPreMeetingTimers() {
 // Skips ids already fired this session and events already inside the lead window
 // (don't backfire). Gated on the master notifications toggle + a connected
 // calendar: a disconnect clears armed timers; a transient fetch blip keeps them.
-async function schedulePreMeetingNotifications() {
+// Three uncoalesced callers can invoke this (the periodic re-poll timer, the
+// premeeting-notifications toggle, and app-ready startup) — without this
+// guard, two overlapping runs both clear + rebuild premeetingTimers, and
+// whichever finishes last wins the re-arm. In practice the two calendar
+// snapshots involved are seconds apart and the next re-poll self-heals, but
+// coalescing overlapping calls onto the same in-flight run closes it outright.
+let premeetingScheduleInFlight = null;
+
+function schedulePreMeetingNotifications() {
+  if (premeetingScheduleInFlight) return premeetingScheduleInFlight;
+  premeetingScheduleInFlight = schedulePreMeetingNotificationsImpl().finally(() => {
+    premeetingScheduleInFlight = null;
+  });
+  return premeetingScheduleInFlight;
+}
+
+async function schedulePreMeetingNotificationsImpl() {
   // Fetched once, shared by the calendar_snapshot metric (below) and the
   // premeeting-arming logic (further down) -- avoids a second calendar API
   // call every 10-min re-poll. The snapshot is intentionally NOT gated on
@@ -9878,7 +10088,7 @@ async function schedulePreMeetingNotifications() {
     maybeTrackCalendarSnapshot(events);
   }
 
-  if (!(await notificationsEnabled())) {
+  if (!(await premeetingNotificationsEnabled())) {
     clearPreMeetingTimers();
     return;
   }
