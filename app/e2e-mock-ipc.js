@@ -237,6 +237,26 @@ function install({ ipcMain }) {
       sessionName: rec.active || rec.processing ? rec.sessionName : null,
     }),
 
+    // Live transcript backfill. Real main.js populates liveTranscriptState from
+    // the ASR sidecar (a model) — unreachable in T1 — so we seed it here. With
+    // STENOAI_E2E_SEED_PRIOR_SEGMENTS=1 it returns carried-over priorSegments
+    // (the resume/continue case) so the generate-notes-bar T1 can assert the
+    // live bar shows earlier speech instead of starting blank.
+    'get-live-transcript-state': async () => ({
+      success: true,
+      sessionName: rec.active || rec.processing ? rec.sessionName : null,
+      segments: [],
+      priorSegments:
+        process.env.STENOAI_E2E_SEED_PRIOR_SEGMENTS === '1' && (rec.active || rec.processing)
+          ? [
+              { text: 'earlier bit one', start: 3, end: 5, isFinal: true, speaker: 'You' },
+              { text: 'earlier bit two', start: 6, end: 8, isFinal: true, speaker: 'Others' },
+            ]
+          : [],
+      ready: true,
+      error: null,
+    }),
+
     // Engine is static per launch; STENOAI_E2E_MOCK_ENGINE lets the pill-dock
     // T1 drive the Whisper variant (no live transcript, inline pause/resume).
     'get-transcription-engine': async () => ({

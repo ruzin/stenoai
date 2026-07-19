@@ -3584,6 +3584,7 @@ ipcMain.handle('get-live-transcript-state', async () => {
     success: true,
     sessionName: liveTranscriptState.sessionName,
     segments: liveTranscriptState.segments.slice(),
+    priorSegments: (liveTranscriptState.priorSegments || []).slice(),
     ready: liveTranscriptState.ready,
     error: liveTranscriptState.error,
   };
@@ -3928,6 +3929,15 @@ let processingQueue = [];
 let liveTranscriptState = {
   sessionName: null,
   segments: [],
+  // Display-only carry-over: the finalised segments from the PREVIOUS
+  // recording into this same note, preserved across a resume/continue so the
+  // live bar shows earlier speech instead of starting blank. Kept SEPARATE
+  // from `segments` on purpose — the resumed sidecar restarts its clock at 0,
+  // so folding these into the chronologically-sorted `segments` would misorder
+  // them, and including them in the stop-time snapshot/append would duplicate
+  // text the note already holds on disk. Rendered before the live tail; never
+  // fed to the snapshot/placeholder/append pipeline.
+  priorSegments: [],
   ready: false,
   error: null,
 };
@@ -4780,9 +4790,21 @@ ipcMain.handle('start-recording-ui', async (_, sessionName, trigger, appendTo) =
     // success / clears it on failure.
     systemAudioRecordingActive = true;
     // Reset the live transcript buffer before the sidecar starts emitting.
+    // On a resume/continue into the SAME note, preserve the previous session's
+    // finalised segments as display-only `priorSegments` so the live bar shows
+    // the earlier speech instead of starting blank. Guarded on the append
+    // target + matching session name so an intervening recording of a
+    // different note can't leak its segments in; falls back to empty when the
+    // in-memory state is a fresh app launch or a different session.
+    const carryPrior =
+      currentRecordingAppendTarget &&
+      liveTranscriptState.sessionName === actualSessionName
+        ? (liveTranscriptState.segments || []).filter((s) => s && s.isFinal && s.text)
+        : [];
     liveTranscriptState = {
       sessionName: actualSessionName,
       segments: [],
+      priorSegments: carryPrior,
       ready: false,
       error: null,
     };
