@@ -15,12 +15,15 @@ from src.speaker_suggestions import (
     SUGGESTION_MIN_SEGMENT_COUNT,
     build_clusters_from_diarization,
     clusters_from_sidecar_channel,
+    confirmed_participant_names,
     determine_recording_type,
     extract_sample_text,
     extract_speaker_sample_audio,
     longest_segment,
     merge_same_channel_fragments,
     read_speakers_sidecar,
+    relabel_transcript_exact,
+    relabel_transcript_multi,
     relabel_transcript_speaker,
     score_candidates,
     suggest_speaker,
@@ -474,6 +477,45 @@ class SpeakersSidecarTests(unittest.TestCase):
         self.assertEqual(context.segment_count, 6)
 
 
+class ConfirmedParticipantNamesTests(unittest.TestCase):
+    def test_empty_profiles_returns_empty(self):
+        self.assertEqual(confirmed_participant_names("mtg001", []), [])
+
+    def test_person_with_prototype_for_meeting_is_included(self):
+        profiles = [_profile("p1", "Julian", prototypes=[_prototype([1.0, 0.0], meeting_id="mtg001")])]
+        self.assertEqual(confirmed_participant_names("mtg001", profiles), ["Julian"])
+
+    def test_person_with_prototype_for_different_meeting_is_excluded(self):
+        profiles = [_profile("p1", "Julian", prototypes=[_prototype([1.0, 0.0], meeting_id="mtg002")])]
+        self.assertEqual(confirmed_participant_names("mtg001", profiles), [])
+
+    def test_hard_negative_only_is_excluded(self):
+        # A hard-negative for this meeting (confirmed as NOT this person,
+        # via the mutual-hard-negative wiring in confirm-speaker) must
+        # never count as a confirmed participant -- hard_negatives is a
+        # structurally separate list from prototypes.
+        profiles = [_profile(
+            "p1", "Julian",
+            prototypes=[],
+            hard_negatives=[_prototype([1.0, 0.0], meeting_id="mtg001")],
+        )]
+        self.assertEqual(confirmed_participant_names("mtg001", profiles), [])
+
+    def test_two_people_confirmed_in_same_meeting_both_included_in_order(self):
+        profiles = [
+            _profile("p1", "Julian", prototypes=[_prototype([1.0, 0.0], meeting_id="mtg001")]),
+            _profile("p2", "Christian", prototypes=[_prototype([0.0, 1.0], meeting_id="mtg001")]),
+        ]
+        self.assertEqual(confirmed_participant_names("mtg001", profiles), ["Julian", "Christian"])
+
+    def test_multiple_prototypes_same_meeting_counts_person_once(self):
+        profiles = [_profile("p1", "Julian", prototypes=[
+            _prototype([1.0, 0.0], meeting_id="mtg001"),
+            _prototype([0.9, 0.1], meeting_id="mtg001"),
+        ])]
+        self.assertEqual(confirmed_participant_names("mtg001", profiles), ["Julian"])
+
+
 class RelabelTranscriptSpeakerTests(unittest.TestCase):
     def _write_transcript(self, tmp, body):
         path = Path(tmp) / "mtg001_transcript.txt"
@@ -590,6 +632,234 @@ class RelabelTranscriptSpeakerTests(unittest.TestCase):
             path = self._write_transcript(tmp, "not a diarised line at all")
             changed = relabel_transcript_speaker(path, [{"start": 4.0, "end": 6.0}], "Julian")
             self.assertEqual(changed, 0)
+
+
+class RelabelTranscriptMultiTests(unittest.TestCase):
+    """relabel_transcript_multi: the bulk-backfill-safe counterpart to
+    relabel_transcript_speaker -- must apply same-channel corrections but
+    skip genuinely cross-channel-ambiguous lines rather than let iteration
+    order silently steal a line from the wrong channel's speaker (a real
+    bug found running backfill-participants --relabel-transcripts against
+    production data -- see the plan doc's Phase 7)."""
+
+    def _write_transcript(self, tmp, body):
+        path = Path(tmp) / "mtg001_transcript.txt"
+        path.write_text(
+            "Session: mtg001\nFile: mtg001.webm\nDate: x\n\n" + "=" * 60 + "\n\n" + body,
+            encoding="utf-8",
+        )
+        return path
+
+    def test_relabels_line_claimed_by_exactly_one_channel(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write_transcript(tmp, "[00:05] [Speaker 2] hello there")
+            changed, skipped = relabel_transcript_multi(
+                path, [("mic", "Julian", [{"start": 4.0, "end": 6.0}])],
+            )
+            self.assertEqual((changed, skipped), (1, 0))
+            self.assertIn("[00:05] [Julian] hello there", path.read_text())
+
+    def test_skips_line_claimed_by_two_different_channels(self):
+        # A mic-channel assignment and a system-channel assignment both
+        # claim the same timestamp -- exactly the real collision found in
+        # production (both channels' clusters routinely span nearly the
+        # whole meeting). Must leave the line untouched, not guess.
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write_transcript(tmp, "[00:05] [Speaker 2] hello there")
+            changed, skipped = relabel_transcript_multi(path, [
+                ("mic", "Valentin Weyer", [{"start": 4.0, "end": 6.0}]),
+                ("system", "Inga Hahn", [{"start": 4.5, "end": 5.5}]),
+            ])
+            self.assertEqual((changed, skipped), (0, 1))
+            self.assertIn("[00:05] [Speaker 2] hello there", path.read_text())
+
+    def test_same_channel_later_assignment_wins_correction(self):
+        # Two DIFFERENT people confirmed for the same cluster over time on
+        # the SAME channel (a "Change" correction) -- legitimate, not
+        # ambiguous, since there's only one real channel of origin. The
+        # later assignment (by position in `assignments`, expected to be
+        # sorted oldest-first by the caller) must win.
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write_transcript(tmp, "[00:05] [Julian] hello there")
+            changed, skipped = relabel_transcript_multi(path, [
+                ("system", "Julian", [{"start": 4.0, "end": 6.0}]),
+                ("system", "Max Prechtl", [{"start": 4.0, "end": 6.0}]),
+            ])
+            self.assertEqual((changed, skipped), (1, 0))
+            self.assertIn("[00:05] [Max Prechtl] hello there", path.read_text())
+
+    def test_never_relabels_you_even_when_claimed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write_transcript(tmp, "[00:05] [You] hello there")
+            changed, skipped = relabel_transcript_multi(
+                path, [("mic", "Julian", [{"start": 4.0, "end": 6.0}])],
+            )
+            self.assertEqual((changed, skipped), (0, 0))
+            self.assertIn("[00:05] [You] hello there", path.read_text())
+
+    def test_returns_zero_when_no_assignments(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write_transcript(tmp, "[00:05] [Speaker 2] hello there")
+            changed, skipped = relabel_transcript_multi(path, [])
+            self.assertEqual((changed, skipped), (0, 0))
+
+    def test_returns_zero_when_transcript_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "nonexistent_transcript.txt"
+            changed, skipped = relabel_transcript_multi(
+                path, [("mic", "Julian", [{"start": 4.0, "end": 6.0}])],
+            )
+            self.assertEqual((changed, skipped), (0, 0))
+
+    def test_out_of_range_line_untouched_and_not_ambiguous(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write_transcript(tmp, "[00:50] [Speaker 2] hello there")
+            changed, skipped = relabel_transcript_multi(path, [
+                ("mic", "Valentin Weyer", [{"start": 4.0, "end": 6.0}]),
+                ("system", "Inga Hahn", [{"start": 4.0, "end": 6.0}]),
+            ])
+            self.assertEqual((changed, skipped), (0, 0))
+            self.assertIn("[00:50] [Speaker 2] hello there", path.read_text())
+
+
+class RelabelTranscriptExactTests(unittest.TestCase):
+    """relabel_transcript_exact: matches by EXACT recorded (channel, sid)
+    provenance from a turn_manifest, not fuzzy timestamp proximity --
+    see the plan doc's Phase 8. Immune to both the cross-channel and
+    same-channel mislabeling relabel_transcript_speaker/_multi can hit."""
+
+    def _write_transcript(self, tmp, body):
+        path = Path(tmp) / "mtg001_transcript.txt"
+        path.write_text(
+            "Session: mtg001\nFile: mtg001.webm\nDate: x\n\n" + "=" * 60 + "\n\n" + body,
+            encoding="utf-8",
+        )
+        return path
+
+    def test_relabels_line_with_matching_manifest_entry(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write_transcript(tmp, "[00:05] [Speaker 2] hello there")
+            manifest = [{"start": 5.2, "channel": "mic", "diarization_speaker_id": "SPEAKER_1"}]
+            changed = relabel_transcript_exact(path, manifest, {("mic", "SPEAKER_1")}, "Julian")
+            self.assertEqual(changed, 1)
+            self.assertIn("[00:05] [Julian] hello there", path.read_text())
+
+    def test_does_not_relabel_line_whose_manifest_entry_is_a_different_cluster(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write_transcript(tmp, "[00:05] [Speaker 2] hello there")
+            manifest = [{"start": 5.2, "channel": "mic", "diarization_speaker_id": "SPEAKER_0"}]
+            changed = relabel_transcript_exact(path, manifest, {("mic", "SPEAKER_1")}, "Julian")
+            self.assertEqual(changed, 0)
+            self.assertIn("[00:05] [Speaker 2] hello there", path.read_text())
+
+    def test_does_not_relabel_line_whose_manifest_entry_is_a_different_channel(self):
+        # The exact real bug this replaces: a mic-channel cluster's fuzzy
+        # timestamp match could steal a system-channel line. With exact
+        # provenance, a line recorded as "system" is NEVER touched by a
+        # "mic" target, regardless of timestamp closeness.
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write_transcript(tmp, "[00:05] [Speaker 2] hello there")
+            manifest = [{"start": 5.2, "channel": "system", "diarization_speaker_id": "SPEAKER_1"}]
+            changed = relabel_transcript_exact(path, manifest, {("mic", "SPEAKER_1")}, "Julian")
+            self.assertEqual(changed, 0)
+            self.assertIn("[00:05] [Speaker 2] hello there", path.read_text())
+
+    def test_never_relabels_you(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write_transcript(tmp, "[00:05] [You] hello there")
+            manifest = [{"start": 5.2, "channel": "mic", "diarization_speaker_id": "SPEAKER_1"}]
+            changed = relabel_transcript_exact(path, manifest, {("mic", "SPEAKER_1")}, "Julian")
+            self.assertEqual(changed, 0)
+            self.assertIn("[00:05] [You] hello there", path.read_text())
+
+    def test_matches_across_fragment_ids_via_target_ids_set(self):
+        # Mirrors merge_same_channel_fragments' resolved_id + merged_from
+        # -- a person confirmed from a diarizer-fragmented voice should
+        # match every fragment's manifest entries.
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write_transcript(
+                tmp, "[00:05] [Speaker 2] first fragment\n\n[00:20] [Speaker 3] second fragment",
+            )
+            manifest = [
+                {"start": 5.2, "channel": "system", "diarization_speaker_id": "SPEAKER_0"},
+                {"start": 20.4, "channel": "system", "diarization_speaker_id": "SPEAKER_2"},
+            ]
+            changed = relabel_transcript_exact(
+                path, manifest, {("system", "SPEAKER_0"), ("system", "SPEAKER_2")}, "Julian",
+            )
+            self.assertEqual(changed, 2)
+            text = path.read_text()
+            self.assertIn("[00:05] [Julian] first fragment", text)
+            self.assertIn("[00:20] [Julian] second fragment", text)
+
+    def test_returns_zero_when_manifest_empty(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write_transcript(tmp, "[00:05] [Speaker 2] hello there")
+            self.assertEqual(relabel_transcript_exact(path, [], {("mic", "SPEAKER_1")}, "Julian"), 0)
+
+    def test_returns_zero_when_target_ids_empty(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write_transcript(tmp, "[00:05] [Speaker 2] hello there")
+            manifest = [{"start": 5.2, "channel": "mic", "diarization_speaker_id": "SPEAKER_1"}]
+            self.assertEqual(relabel_transcript_exact(path, manifest, set(), "Julian"), 0)
+
+    def test_returns_zero_when_transcript_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "nonexistent_transcript.txt"
+            manifest = [{"start": 5.2, "channel": "mic", "diarization_speaker_id": "SPEAKER_1"}]
+            self.assertEqual(relabel_transcript_exact(path, manifest, {("mic", "SPEAKER_1")}, "Julian"), 0)
+
+    def test_idempotent_rerun_with_same_name_is_a_noop(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write_transcript(tmp, "[00:05] [Julian] hello there")
+            manifest = [{"start": 5.2, "channel": "mic", "diarization_speaker_id": "SPEAKER_1"}]
+            changed = relabel_transcript_exact(path, manifest, {("mic", "SPEAKER_1")}, "Julian")
+            self.assertEqual(changed, 0)
+
+    def test_rerun_with_different_name_overwrites_a_change_correction(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write_transcript(tmp, "[00:05] [Julian] hello there")
+            manifest = [{"start": 5.2, "channel": "mic", "diarization_speaker_id": "SPEAKER_1"}]
+            changed = relabel_transcript_exact(path, manifest, {("mic", "SPEAKER_1")}, "Max Prechtl")
+            self.assertEqual(changed, 1)
+            self.assertIn("[00:05] [Max Prechtl] hello there", path.read_text())
+
+    def test_matches_by_position_not_by_timestamp_collision(self):
+        # The real bug found this session in an EARLIER version of this
+        # function: it matched by truncated-integer-second timestamp
+        # lookup across the whole manifest, so two DIFFERENT lines from
+        # DIFFERENT channels sharing the same displayed second could still
+        # collide -- the same class of bug as fuzzy matching, just finer
+        # grained. Two lines here display the SAME [00:05] timestamp (a
+        # real, if rare, possibility -- e.g. two very short adjacent
+        # turns), but their manifest entries (by POSITION) are genuinely
+        # different clusters -- only the second line's cluster is targeted,
+        # and only IT must be relabeled.
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write_transcript(
+                tmp, "[00:05] [Speaker 2] first\n\n[00:05] [Speaker 3] second",
+            )
+            manifest = [
+                {"start": 5.1, "channel": "mic", "diarization_speaker_id": "SPEAKER_0"},
+                {"start": 5.9, "channel": "system", "diarization_speaker_id": "SPEAKER_0"},
+            ]
+            changed = relabel_transcript_exact(path, manifest, {("system", "SPEAKER_0")}, "Inga Hahn")
+            self.assertEqual(changed, 1)
+            text = path.read_text()
+            self.assertIn("[00:05] [Speaker 2] first", text)  # untouched -- position 0, mic
+            self.assertIn("[00:05] [Inga Hahn] second", text)  # relabeled -- position 1, system
+
+    def test_length_mismatch_refuses_to_guess_and_returns_zero(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write_transcript(
+                tmp, "[00:05] [Speaker 2] first\n\n[00:10] [Speaker 3] second",
+            )
+            manifest = [{"start": 5.1, "channel": "mic", "diarization_speaker_id": "SPEAKER_0"}]
+            changed = relabel_transcript_exact(path, manifest, {("mic", "SPEAKER_0")}, "Julian")
+            self.assertEqual(changed, 0)
+            text = path.read_text()
+            self.assertIn("[00:05] [Speaker 2] first", text)
+            self.assertIn("[00:10] [Speaker 3] second", text)
 
 
 class LongestSegmentTests(unittest.TestCase):

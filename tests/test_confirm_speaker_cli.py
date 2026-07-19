@@ -201,6 +201,81 @@ class ConfirmSpeakerCliTests(unittest.TestCase):
             self.assertIn("[00:05] [Max] hello there", text)
             self.assertIn("[00:20] [You] hi back", text)  # untouched
 
+    def test_relabel_transcript_uses_exact_matching_when_sidecar_has_manifest(self):
+        # See the plan doc's Phase 8: when the sidecar carries
+        # transcript_lines (written by a post-Phase-8 live pipeline run),
+        # confirm-speaker must relabel by EXACT recorded (channel, sid)
+        # provenance, not the fuzzy timestamp matching the other tests in
+        # this class exercise -- proven here by a line whose TIMESTAMP
+        # would fuzzy-match the confirmed cluster's segment, but whose
+        # manifest entry says it came from a DIFFERENT cluster: it must be
+        # left untouched.
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir = Path(tmp) / "output"
+            output_dir.mkdir(parents=True, exist_ok=True)
+            write_speakers_sidecar(output_dir, "mtg001", {
+                "mic": {
+                    "recording_type": "in_person",
+                    "clusters": {
+                        "SPEAKER_00": {
+                            "embedding": [1.0, 0.0], "speech_duration_seconds": 30.0, "segment_count": 5,
+                            "segments": [{"start": 4.0, "end": 6.0}],
+                        },
+                    },
+                },
+            }, turn_manifest=[
+                {"start": 5.2, "channel": "mic", "diarization_speaker_id": "SPEAKER_99"},
+            ])
+            transcripts_dir = Path(tmp) / "transcripts"
+            transcripts_dir.mkdir(parents=True, exist_ok=True)
+            transcript_path = transcripts_dir / "mtg001_transcript.txt"
+            transcript_path.write_text(
+                "Session: mtg001\n\n" + "=" * 60 + "\n\n[00:05] [Speaker 2] hello there",
+                encoding="utf-8",
+            )
+            result, _ = self._run(
+                ["mtg001", "mic", "SPEAKER_00", "--new-person", "Max", "--relabel-transcript"], tmp,
+            )
+            data = _last_json(result.output)
+            self.assertTrue(data["success"])
+            # Fuzzy matching would have relabeled this (00:05 falls inside
+            # SPEAKER_00's [4.0, 6.0] segment) -- exact matching correctly
+            # refuses, since the manifest says this line is SPEAKER_99.
+            self.assertEqual(data["relabeled_lines"], 0)
+            self.assertIn("[00:05] [Speaker 2] hello there", transcript_path.read_text())
+
+    def test_relabel_transcript_exact_match_relabels_the_right_line(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir = Path(tmp) / "output"
+            output_dir.mkdir(parents=True, exist_ok=True)
+            write_speakers_sidecar(output_dir, "mtg001", {
+                "mic": {
+                    "recording_type": "in_person",
+                    "clusters": {
+                        "SPEAKER_00": {
+                            "embedding": [1.0, 0.0], "speech_duration_seconds": 30.0, "segment_count": 5,
+                            "segments": [{"start": 4.0, "end": 6.0}],
+                        },
+                    },
+                },
+            }, turn_manifest=[
+                {"start": 5.2, "channel": "mic", "diarization_speaker_id": "SPEAKER_00"},
+            ])
+            transcripts_dir = Path(tmp) / "transcripts"
+            transcripts_dir.mkdir(parents=True, exist_ok=True)
+            transcript_path = transcripts_dir / "mtg001_transcript.txt"
+            transcript_path.write_text(
+                "Session: mtg001\n\n" + "=" * 60 + "\n\n[00:05] [Speaker 2] hello there",
+                encoding="utf-8",
+            )
+            result, _ = self._run(
+                ["mtg001", "mic", "SPEAKER_00", "--new-person", "Max", "--relabel-transcript"], tmp,
+            )
+            data = _last_json(result.output)
+            self.assertTrue(data["success"])
+            self.assertEqual(data["relabeled_lines"], 1)
+            self.assertIn("[00:05] [Max] hello there", transcript_path.read_text())
+
     def test_without_relabel_flag_transcript_is_untouched(self):
         with tempfile.TemporaryDirectory() as tmp:
             output_dir = Path(tmp) / "output"
@@ -261,6 +336,108 @@ class ConfirmSpeakerCliTests(unittest.TestCase):
             self.assertEqual(prototype["diarization_speaker_id"], "SPEAKER_0")
             self.assertAlmostEqual(prototype["speech_duration_seconds"], 1600.0 + 1538.0)
             self.assertEqual(prototype["segment_count"], 580 + 552)
+
+
+class ConfirmSpeakerUpdatesParticipantsTests(unittest.TestCase):
+    """Confirming a speaker should keep the meeting summary's `participants`
+    (JSON field / `## Participants` markdown section) in sync -- see the
+    plan doc's Phase 7."""
+
+    def _run(self, args, tmp, cfg=None):
+        cfg = cfg or Config(config_path=Path(tmp) / "config.json")
+        with mock.patch("src.config.get_config", return_value=cfg), \
+             mock.patch.dict("os.environ", {"STENOAI_USER_DATA_DIR": tmp}):
+            result = CliRunner().invoke(simple_recorder.confirm_speaker, args)
+        return result, cfg
+
+    def _seed_sidecar(self, tmp, meeting_stem="mtg001"):
+        output_dir = Path(tmp) / "output"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        write_speakers_sidecar(output_dir, meeting_stem, {
+            "mic": {
+                "recording_type": "in_person",
+                "clusters": {
+                    "SPEAKER_00": {"embedding": [1.0, 0.0], "speech_duration_seconds": 30.0, "segment_count": 5},
+                    "SPEAKER_01": {"embedding": [0.0, 1.0], "speech_duration_seconds": 25.0, "segment_count": 4},
+                },
+            },
+        })
+        return output_dir
+
+    def test_updates_json_summary_participants(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir = self._seed_sidecar(tmp)
+            summary_path = output_dir / "mtg001_summary.json"
+            summary_path.write_text(json.dumps({"session_info": {}, "participants": []}), encoding="utf-8")
+
+            result, _ = self._run(["mtg001", "mic", "SPEAKER_00", "--new-person", "Max"], tmp)
+            data = _last_json(result.output)
+            self.assertTrue(data["success"])
+            self.assertEqual(data["participants_updated"], ["Max"])
+
+            on_disk = json.loads(summary_path.read_text())
+            self.assertEqual(on_disk["participants"], ["Max"])
+
+    def test_inserts_participants_section_into_markdown_summary(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir = self._seed_sidecar(tmp)
+            summary_path = output_dir / "mtg001_summary.md"
+            summary_path.write_text(
+                "---\ntitle: \"Mtg\"\n---\n\n## Summary\n\nSome notes.\n\n## Key Points\n\n- a point\n",
+                encoding="utf-8",
+            )
+
+            result, _ = self._run(["mtg001", "mic", "SPEAKER_00", "--new-person", "Max"], tmp)
+            self.assertTrue(_last_json(result.output)["success"])
+
+            text = summary_path.read_text()
+            self.assertIn("## Participants\n\nMax", text)
+            # Inserted after Summary, before Key Points -- and Key Points
+            # itself is untouched.
+            self.assertLess(text.index("## Summary"), text.index("## Participants"))
+            self.assertLess(text.index("## Participants"), text.index("## Key Points"))
+            self.assertIn("- a point", text)
+
+    def test_replaces_existing_participants_section_not_duplicated(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir = self._seed_sidecar(tmp)
+            summary_path = output_dir / "mtg001_summary.md"
+            summary_path.write_text(
+                "---\ntitle: \"Mtg\"\n---\n\n## Summary\n\nSome notes.\n\n"
+                "## Participants\n\nOldName\n\n## Key Points\n\n- a point\n",
+                encoding="utf-8",
+            )
+
+            result, _ = self._run(["mtg001", "mic", "SPEAKER_00", "--new-person", "Max"], tmp)
+            self.assertTrue(_last_json(result.output)["success"])
+
+            text = summary_path.read_text()
+            self.assertEqual(text.count("## Participants"), 1)
+            self.assertIn("## Participants\n\nMax", text)
+            self.assertNotIn("OldName", text)
+            self.assertIn("- a point", text)
+
+    def test_second_person_confirmed_in_same_meeting_appends_not_clobbers(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir = self._seed_sidecar(tmp)
+            summary_path = output_dir / "mtg001_summary.md"
+            summary_path.write_text("---\ntitle: \"Mtg\"\n---\n\n## Summary\n\nSome notes.\n", encoding="utf-8")
+            cfg = Config(config_path=Path(tmp) / "config.json")
+
+            _, cfg = self._run(["mtg001", "mic", "SPEAKER_00", "--new-person", "Max"], tmp, cfg=cfg)
+            result, _ = self._run(["mtg001", "mic", "SPEAKER_01", "--new-person", "Julian"], tmp, cfg=cfg)
+            self.assertTrue(_last_json(result.output)["success"])
+
+            text = summary_path.read_text()
+            self.assertIn("## Participants\n\nMax, Julian", text)
+
+    def test_noops_when_no_summary_file_exists(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._seed_sidecar(tmp)  # no _summary.json/.md written at all
+            result, _ = self._run(["mtg001", "mic", "SPEAKER_00", "--new-person", "Max"], tmp)
+            data = _last_json(result.output)
+            self.assertTrue(data["success"])
+            self.assertEqual(data["participants_updated"], ["Max"])  # computed fine, just nothing to write to
 
 
 if __name__ == "__main__":

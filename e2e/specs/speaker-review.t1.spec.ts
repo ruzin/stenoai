@@ -221,6 +221,42 @@ test('confirmation persists after navigating away and back, unlike the transient
   await expect(rowAfter.getByRole('button', { name: 'Approve' })).toHaveCount(0);
 });
 
+test('confirming one row disables every OTHER row\'s actions too, not just the one in flight', async ({
+  launchApp,
+}) => {
+  // Real production incident this guards against: SpeakerReviewPanel shares
+  // ONE confirm-speaker mutation across the whole panel. An earlier version
+  // only disabled the specific row matching the in-flight mutation's
+  // variables, leaving every OTHER row's Approve/Change/New person/Keep
+  // generic buttons clickable while a confirm was still resolving --
+  // letting two confirm-speaker calls (each reading-then-atomically-
+  // rewriting the SAME saved transcript) run concurrently.
+  const { page } = await launchApp({
+    mockIpc: true,
+    env: {
+      STENOAI_E2E_SEED_SPEAKER_SUGGESTIONS: '1',
+      STENOAI_E2E_CONFIRM_SPEAKER_DELAY_MS: '400',
+    },
+  });
+  await openDetail(page);
+
+  const rowA = page.getByTestId('speaker-row-mic:SPEAKER_0');
+  const rowB = page.getByTestId('speaker-row-mic:SPEAKER_1');
+  await expect(rowB.getByRole('button', { name: 'Change' })).toBeEnabled();
+
+  await rowA.getByRole('button', { name: 'Approve' }).click();
+
+  // rowA's own confirm is now in flight (mock delayed 400ms) -- rowB's
+  // actions must ALSO be disabled during this window, not just rowA's.
+  await expect(rowB.getByRole('button', { name: 'Change' })).toBeDisabled();
+  await expect(rowB.getByRole('button', { name: 'New person' })).toBeDisabled();
+  await expect(rowB.getByRole('button', { name: 'Keep generic label' })).toBeDisabled();
+
+  // And once rowA's confirm resolves, rowB's actions become available again.
+  await expect(rowA).toContainText('✓ Confirmed as Julian');
+  await expect(rowB.getByRole('button', { name: 'Change' })).toBeEnabled();
+});
+
 test('a likely-artifact row is hidden by default, reachable via the filtered-rows toggle', async ({
   launchApp,
 }) => {

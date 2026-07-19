@@ -700,6 +700,15 @@ function install({ ipcMain }) {
     // speakerState so a subsequent suggest-speakers refetch (the panel's
     // real post-confirm behaviour) reflects the confirmation.
     'confirm-speaker': async (_event, params) => {
+      // Test-only seam: STENOAI_E2E_CONFIRM_SPEAKER_DELAY_MS holds this
+      // mutation pending for a bit so a spec can assert on the panel's
+      // in-flight disabled state (e.g. that a SECOND row's buttons are also
+      // disabled while a FIRST row's confirm is still resolving -- a real
+      // gap found in production: overlapping confirm-speaker calls both
+      // rewrite the same saved transcript, so any two must never run
+      // concurrently). No effect when unset.
+      const delayMs = Number(process.env.STENOAI_E2E_CONFIRM_SPEAKER_DELAY_MS || 0);
+      if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs));
       const { meetingStem, channel, diarizationSpeakerId, personId, newPersonName } = params || {};
       if (!meetingStem || !channel || !diarizationSpeakerId) {
         return { success: false, error: 'missing required fields' };

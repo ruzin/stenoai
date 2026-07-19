@@ -43,6 +43,7 @@ import logging
 import re
 import subprocess
 import time
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -458,16 +459,30 @@ def write_speakers_sidecar(
     output_dir: Path,
     meeting_stem: str,
     channels: dict,
+    turn_manifest: Optional[list] = None,
 ) -> Path:
     """`channels` is `{"mic" | "system": {"recording_type": str, "clusters":
     {diarization_speaker_id: {"embedding": [...], "speech_duration_seconds":
     float, "segment_count": int}}}}`. Never touches the meeting's saved
-    transcript file -- this is a separate sidecar, not a rewrite."""
+    transcript file -- this is a separate sidecar, not a rewrite.
+
+    `turn_manifest` (optional -- `src.transcriber.transcribe_diarised`/
+    `_transcribe_diarised_mono`'s `"turn_manifest"` return value, list of
+    `{"start", "channel", "diarization_speaker_id"}`, one per saved-
+    transcript turn) is persisted as the `"transcript_lines"` key when
+    given, letting a later `confirm-speaker` relabel by EXACT recorded
+    provenance (see `relabel_transcript_exact`) instead of reconstructing
+    "which line belongs to this cluster" via fuzzy timestamp matching
+    after the fact -- see the plan doc's Phase 8. Omitted (not written as
+    an empty list) when not given, so older sidecars and this key's
+    absence both read the same way via `.get("transcript_lines")`."""
     payload = {
         "meeting_id": meeting_stem,
         "created_at": time.time(),
         "channels": channels,
     }
+    if turn_manifest:
+        payload["transcript_lines"] = turn_manifest
     path = speakers_sidecar_path(output_dir, meeting_stem)
     path.write_text(json.dumps(payload, indent=2))
     return path
@@ -597,6 +612,221 @@ def relabel_transcript_speaker(
         tmp_path.write_text("\n".join(new_lines), encoding="utf-8")
         tmp_path.replace(transcript_path)
     return changed
+
+
+def relabel_transcript_multi(transcript_path: Path, assignments: list) -> tuple:
+    """Relabel a saved transcript from MULTIPLE (channel, display_name,
+    segments) assignments in one pass -- unlike relabel_transcript_speaker,
+    which is safe for confirm-speaker's one-cluster-at-a-time call (only
+    ever given one channel's segments) but unsafe to call repeatedly for
+    every channel/person of a meeting in a bulk backfill.
+
+    Why: a channel's confirmed cluster's segments routinely span almost the
+    entire meeting (mic and system channel both do), so two DIFFERENT
+    channels' segments can land within RELABEL_TIMESTAMP_TOLERANCE_SECONDS
+    of the same transcript line purely from natural conversational timing
+    -- relabeling from one channel's assignment in that case would silently
+    steal a line that actually belongs to the OTHER channel's speaker. This
+    was found for real: running relabel_transcript_speaker once per
+    channel/person in a meeting caused writes to thrash between two
+    channels' competing claims on the same lines (see the plan doc's
+    Phase 7 backfill-participants section).
+
+    `assignments`: list of (channel_name, display_name, segments), ideally
+    sorted oldest-confirmed-first (by prototype created_at) so a later
+    "Change" correction on the SAME channel correctly wins.
+
+    A line is relabeled only when exactly ONE DISTINCT CHANNEL's
+    assignments claim it. When more than one channel's segments both match
+    (genuine ambiguity -- can't tell which channel the line really came
+    from), the line is left untouched and counted in `skipped_ambiguous`
+    rather than guessed. When multiple assignments from the SAME channel
+    match (e.g. two people confirmed for the same cluster over time), the
+    LAST one in `assignments` order wins -- same "re-matches by timestamp,
+    overwrites whatever was there" semantic as relabel_transcript_speaker.
+
+    Returns (changed, skipped_ambiguous). Never raises; same defensive
+    read/write behavior as relabel_transcript_speaker.
+    """
+    if not assignments or not transcript_path.exists():
+        return 0, 0
+    try:
+        original = transcript_path.read_text(encoding="utf-8")
+    except OSError as e:
+        logger.warning("Could not read transcript %s for relabeling: %s", transcript_path, e)
+        return 0, 0
+
+    lines = original.split("\n")
+    new_lines = []
+    changed = 0
+    skipped_ambiguous = 0
+    for line in lines:
+        match = _TRANSCRIPT_LINE_RE.match(line)
+        if not match:
+            new_lines.append(line)
+            continue
+        timestamp_str, label, text = match.groups()
+        if label == "You":
+            new_lines.append(line)
+            continue
+        try:
+            timestamp_seconds = _parse_transcript_timestamp(timestamp_str)
+        except ValueError:
+            new_lines.append(line)
+            continue
+
+        claiming_channels = set()
+        winner_name = None
+        for channel_name, display_name, segments in assignments:
+            if any(
+                seg.get("start", 0) - RELABEL_TIMESTAMP_TOLERANCE_SECONDS
+                <= timestamp_seconds
+                <= seg.get("end", 0) + RELABEL_TIMESTAMP_TOLERANCE_SECONDS
+                for seg in segments
+            ):
+                claiming_channels.add(channel_name)
+                winner_name = display_name  # last match (any channel) wins
+
+        if len(claiming_channels) > 1:
+            skipped_ambiguous += 1
+            new_lines.append(line)
+        elif winner_name is not None and label != winner_name:
+            new_lines.append(f"[{timestamp_str}] [{winner_name}] {text}")
+            changed += 1
+        else:
+            new_lines.append(line)
+
+    if changed:
+        tmp_path = transcript_path.with_name(transcript_path.name + ".tmp")
+        tmp_path.write_text("\n".join(new_lines), encoding="utf-8")
+        tmp_path.replace(transcript_path)
+    return changed, skipped_ambiguous
+
+
+def relabel_transcript_exact(transcript_path: Path, turn_manifest: list, target_ids: set, display_name: str) -> int:
+    """Relabel a saved transcript using EXACT recorded speaker provenance,
+    instead of relabel_transcript_speaker/relabel_transcript_multi's fuzzy
+    timestamp-proximity matching.
+
+    `turn_manifest`: the sidecar's `"transcript_lines"` list (written by
+    src.transcriber.transcribe_diarised/_transcribe_diarised_mono) --
+    ONE ENTRY PER DIARISED TRANSCRIPT LINE, IN THE SAME ORDER, each
+    `{"start", "channel", "diarization_speaker_id"}` recording the EXACT
+    diarizer cluster that produced that specific line, known at the
+    moment the line was first written, not reconstructed later.
+    `target_ids`: a set of `(channel, diarization_speaker_id)` pairs to
+    relabel as `display_name` -- callers resolve this the same way
+    confirm-speaker/backfill_participants already do, via
+    merge_same_channel_fragments' id_resolution, so a person confirmed
+    from a diarizer-fragmented voice still matches every fragment.
+
+    Why this replaces fuzzy matching rather than supplementing it: a
+    channel's diarizer cluster segments routinely span nearly the whole
+    recording, so proximity-based matching can misattribute a line to the
+    wrong cluster -- or, worse, to a DIFFERENT CHANNEL's line entirely
+    when the rightful channel has its own coverage gap at that exact
+    moment (found for real against production data -- see the plan doc's
+    Phase 8).
+
+    Matches each transcript line to its OWN manifest entry BY POSITION --
+    the i-th diarised transcript line pairs with turn_manifest[i] -- not
+    by re-deriving a match from the line's displayed [MM:SS] timestamp.
+    This is a real, deliberate correction from an earlier version of this
+    function that matched by truncated-integer-second timestamp lookup
+    across the WHOLE manifest: that was still vulnerable to the same class
+    of cross-channel/cross-line collision as fuzzy matching, just at finer
+    (1-second) granularity, since two DIFFERENT lines from DIFFERENT
+    channels can trivially share the same displayed second. Positional
+    pairing has no such ambiguity: turn_manifest and the transcript's
+    diarised lines are built from the exact same `turns` list, in the
+    exact same order, at the exact same time -- there is nothing to
+    "match" at all, only to look up.
+
+    Never touches "You" (self-match stays out of scope, same as the other
+    two relabel functions) -- but "You" lines still consume a manifest
+    position, since they're still a real turn in the same `turns` list.
+
+    Meetings recorded before this manifest existed simply have no
+    `turn_manifest` at all -- callers should fall back to
+    relabel_transcript_speaker/relabel_transcript_multi in that case.
+    A manifest whose length doesn't match the transcript's diarised-line
+    count (e.g. a transcript hand-edited or relabeled by an older tool
+    between writes) is refused outright rather than silently mispairing
+    lines -- returns 0.
+
+    Same atomic temp+rename write, same never-raises contract as
+    relabel_transcript_speaker.
+    """
+    if not turn_manifest or not target_ids or not transcript_path.exists():
+        return 0
+    try:
+        original = transcript_path.read_text(encoding="utf-8")
+    except OSError as e:
+        logger.warning("Could not read transcript %s for relabeling: %s", transcript_path, e)
+        return 0
+
+    lines = original.split("\n")
+    diarised_line_indices = [i for i, line in enumerate(lines) if _TRANSCRIPT_LINE_RE.match(line)]
+    if len(diarised_line_indices) != len(turn_manifest):
+        logger.warning(
+            "relabel_transcript_exact: %s has %d diarised lines but turn_manifest has %d entries -- "
+            "refusing to guess a pairing, no-op.",
+            transcript_path, len(diarised_line_indices), len(turn_manifest),
+        )
+        return 0
+
+    # Diagnostic trail for a real, unexplained incident: two confirm-speaker
+    # calls on the same meeting (different clusters) left one raw cluster's
+    # lines scattered across three different labels instead of the uniform
+    # result this function's own logic (and a controlled replay of it)
+    # produces. Never reproduced from a clean replay, so this call's exact
+    # inputs/outcome are logged to give a real trail if it recurs, rather
+    # than reconstructing after the fact from the file alone.
+    before_labels = Counter(
+        _TRANSCRIPT_LINE_RE.match(lines[i]).group(2) for i in diarised_line_indices
+    )
+    logger.info(
+        "relabel_transcript_exact: %s target_ids=%s display_name=%r lines=%d before_labels=%s",
+        transcript_path, sorted(target_ids), display_name, len(diarised_line_indices),
+        dict(before_labels),
+    )
+
+    changed = 0
+    for line_idx, entry in zip(diarised_line_indices, turn_manifest):
+        match = _TRANSCRIPT_LINE_RE.match(lines[line_idx])
+        timestamp_str, label, text = match.groups()
+        if label == "You":
+            continue
+        key = (entry.get("channel"), entry.get("diarization_speaker_id"))
+        if key in target_ids and label != display_name:
+            lines[line_idx] = f"[{timestamp_str}] [{display_name}] {text}"
+            changed += 1
+
+    logger.info("relabel_transcript_exact: %s changed=%d", transcript_path, changed)
+
+    if changed:
+        tmp_path = transcript_path.with_name(transcript_path.name + ".tmp")
+        tmp_path.write_text("\n".join(lines), encoding="utf-8")
+        tmp_path.replace(transcript_path)
+    return changed
+
+
+def confirmed_participant_names(meeting_stem: str, profiles: list) -> list:
+    """Display names of every person with at least one CONFIRMED (positive)
+    prototype from this meeting.
+
+    No sidecar/cluster loading needed -- each PersonProfile's `prototypes`
+    entries (positive evidence only; hard-negatives live in a structurally
+    separate `hard_negatives` list, so no extra filtering is required)
+    already carry the `meeting_id` they were confirmed from. A person
+    counts once even with multiple prototypes from this meeting (e.g.
+    merged same-channel fragments, or confirmed on both channels).
+    """
+    names = []
+    for person in profiles:
+        if any(p.get("meeting_id") == meeting_stem for p in (person.get("prototypes") or [])):
+            names.append(person["display_name"])
+    return names
 
 
 SAMPLE_TEXT_MAX_CHARS = 140

@@ -255,12 +255,18 @@ export function SpeakerReviewPanel({ summaryFile, isDiarised }: SpeakerReviewPan
         Speakers
       </h2>
       <div className="flex flex-col gap-1.5">
+        {/* Every action below spawns a confirm-speaker subprocess that
+            reads-then-atomically-rewrites this meeting's saved transcript.
+            Two such calls overlapping (e.g. clicking a second row's action
+            before the first row's confirm has resolved) is unsafe -- gate
+            EVERY row's actions on ANY confirm being in flight, not just the
+            specific row a per-row check would match. A prior version only
+            disabled the matching row's buttons (via confirmSpeaker.variables
+            matching this row), which left every OTHER row's buttons
+            clickable while a confirm was still in progress. */}
         {visibleRows.map((row) => {
           const key = rowKey(row);
-          const isPending =
-            confirmSpeaker.isPending &&
-            confirmSpeaker.variables?.channel === row.channel &&
-            confirmSpeaker.variables?.diarizationSpeakerId === row.diarizationSpeakerId;
+          const anyConfirmPending = confirmSpeaker.isPending;
           return (
             <div
               key={key}
@@ -303,7 +309,7 @@ export function SpeakerReviewPanel({ summaryFile, isDiarised }: SpeakerReviewPan
                     meetingStem={meetingStem}
                     channel={row.channel}
                     diarizationSpeakerId={row.diarizationSpeakerId}
-                    disabled={isPending}
+                    disabled={anyConfirmPending}
                   />
                 )}
                 {/* Hidden once confirmed_by_user is set -- re-approving an
@@ -316,7 +322,7 @@ export function SpeakerReviewPanel({ summaryFile, isDiarised }: SpeakerReviewPan
                     <Button
                       size="sm"
                       variant="default"
-                      disabled={isPending}
+                      disabled={anyConfirmPending}
                       onClick={() => confirm(row, { personId: row.suggestion.suggested_person_id as string })}
                       data-testid={`speaker-approve-${key}`}
                     >
@@ -332,7 +338,7 @@ export function SpeakerReviewPanel({ summaryFile, isDiarised }: SpeakerReviewPan
                     <Button
                       size="sm"
                       variant="outline"
-                      disabled={isPending}
+                      disabled={anyConfirmPending}
                       data-testid={`speaker-change-${key}`}
                     >
                       Change
@@ -380,7 +386,7 @@ export function SpeakerReviewPanel({ summaryFile, isDiarised }: SpeakerReviewPan
                 <Button
                   size="sm"
                   variant="outline"
-                  disabled={isPending}
+                  disabled={anyConfirmPending}
                   onClick={() => {
                     setNewPersonName('');
                     setNewPersonRow(row);
@@ -395,7 +401,7 @@ export function SpeakerReviewPanel({ summaryFile, isDiarised }: SpeakerReviewPan
                   variant="ghost"
                   aria-label="Keep generic label"
                   title="Keep generic label"
-                  disabled={isPending}
+                  disabled={anyConfirmPending}
                   onClick={() => setDismissed((prev) => new Set(prev).add(key))}
                   data-testid={`speaker-keep-generic-${key}`}
                 >
