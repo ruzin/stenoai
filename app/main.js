@@ -5164,15 +5164,25 @@ function setupAutoUpdater() {
 
   autoUpdater.on('error', (err) => {
     const msg = (err && err.message) || String(err);
+    // Clear any in-flight download state regardless of which branch below
+    // fires — otherwise a failure after 'update-available' (which seeds
+    // pendingDownloadPercent to 0) leaves get-update-status reporting a
+    // download is still running forever, and About would show a stuck
+    // progress bar with no way to tell it failed.
+    pendingDownloadPercent = null;
     // Until a release carrying this platform's update feed (latest.yml on
     // Windows) is published, the updater 404s on the feed file. That's an
     // expected transitional state, not a real failure — log it quietly so it
-    // doesn't read as a scary stack trace for alpha testers.
+    // doesn't read as a scary stack trace for alpha testers, and don't
+    // surface it to the renderer as an error.
     if (/latest(-mac)?\.yml/i.test(msg) && /(404|cannot find)/i.test(msg)) {
       sendDebugLog('Auto-updater: no update feed published for this release yet — skipping.');
       return;
     }
     sendDebugLog(`Auto-updater error: ${msg}`);
+    if (mainWindow) {
+      mainWindow.webContents.send('update-error', { message: msg });
+    }
   });
 
   // Check on launch (after a short delay to not block startup)
@@ -9978,7 +9988,23 @@ function clearPreMeetingTimers() {
 // Skips ids already fired this session and events already inside the lead window
 // (don't backfire). Gated on the master notifications toggle + a connected
 // calendar: a disconnect clears armed timers; a transient fetch blip keeps them.
-async function schedulePreMeetingNotifications() {
+// Three uncoalesced callers can invoke this (the periodic re-poll timer, the
+// premeeting-notifications toggle, and app-ready startup) — without this
+// guard, two overlapping runs both clear + rebuild premeetingTimers, and
+// whichever finishes last wins the re-arm. In practice the two calendar
+// snapshots involved are seconds apart and the next re-poll self-heals, but
+// coalescing overlapping calls onto the same in-flight run closes it outright.
+let premeetingScheduleInFlight = null;
+
+function schedulePreMeetingNotifications() {
+  if (premeetingScheduleInFlight) return premeetingScheduleInFlight;
+  premeetingScheduleInFlight = schedulePreMeetingNotificationsImpl().finally(() => {
+    premeetingScheduleInFlight = null;
+  });
+  return premeetingScheduleInFlight;
+}
+
+async function schedulePreMeetingNotificationsImpl() {
   // Fetched once, shared by the calendar_snapshot metric (below) and the
   // premeeting-arming logic (further down) -- avoids a second calendar API
   // call every 10-min re-poll. The snapshot is intentionally NOT gated on

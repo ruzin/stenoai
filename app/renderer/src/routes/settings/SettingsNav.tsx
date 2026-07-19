@@ -119,7 +119,11 @@ export function SettingsNav({ activeTab, onSelect, onBack, version }: SettingsNa
         </span>
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col gap-px overflow-auto px-2 pb-2" role="tablist" aria-label="Settings sections">
+      <div
+        className="flex min-h-0 flex-1 flex-col gap-px overflow-auto px-2 pb-2"
+        role="group"
+        aria-label="Settings sections"
+      >
         {NAV_GROUPS.map((group, i) => (
           <div key={group.header ?? `group-${i}`}>
             {group.header && (
@@ -141,8 +145,7 @@ export function SettingsNav({ activeTab, onSelect, onBack, version }: SettingsNa
                 <button
                   key={item.id}
                   type="button"
-                  role="tab"
-                  aria-selected={active}
+                  aria-current={active ? 'page' : undefined}
                   data-settings-nav={item.id}
                   onClick={() => onSelect(item.id)}
                   className={cn('sb-row', active && 'active')}

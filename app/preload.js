@@ -362,6 +362,7 @@ const stenoai = {
     updateAvailable: (cb) => subscribe('update-available', cb),
     updateDownloadProgress: (cb) => subscribe('update-download-progress', cb),
     updateDownloaded: (cb) => subscribe('update-downloaded', cb),
+    updateError: (cb) => subscribe('update-error', cb),
     googleAuthChanged: (cb) => subscribe('google-auth-changed', cb),
     outlookAuthChanged: (cb) => subscribe('outlook-auth-changed', cb),
     shortcutStartRecording: (cb) => subscribe('shortcut-start-recording', cb),

@@ -712,6 +712,9 @@ export interface UpdateProgressEvent {
 export interface UpdateDownloadedEvent {
   version: string;
 }
+export interface UpdateErrorEvent {
+  message: string;
+}
 export interface ShortcutStartRecordingEvent {
   sessionName: string | null;
 }
@@ -1044,6 +1047,7 @@ export interface StenoaiBridge {
     updateAvailable: Subscribe<UpdateAvailableEvent>;
     updateDownloadProgress: Subscribe<UpdateProgressEvent>;
     updateDownloaded: Subscribe<UpdateDownloadedEvent>;
+    updateError: Subscribe<UpdateErrorEvent>;
     googleAuthChanged: Subscribe<{ connected: boolean }>;
     outlookAuthChanged: Subscribe<{ connected: boolean }>;
     shortcutStartRecording: Subscribe<ShortcutStartRecordingEvent>;

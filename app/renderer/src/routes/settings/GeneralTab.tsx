@@ -535,11 +535,13 @@ export function GeneralTab() {
       </SettingRow>
 
       <SettingRow
-        label="Show in menu bar"
+        label={isMac ? 'Show in menu bar' : 'Show in system tray'}
         description={
           bothIconsHidden
             ? 'Both your dock icon and menu bar icon will be hidden. Reopen Steno from Applications or Spotlight to bring the window back.'
-            : 'Show a Steno icon in the menu bar for quick access.'
+            : isMac
+              ? 'Show a Steno icon in the menu bar for quick access.'
+              : 'Show a Steno icon in the system tray for quick access.'
         }
       >
         <Switch
@@ -549,9 +551,11 @@ export function GeneralTab() {
         />
       </SettingRow>
 
-      {/* Dock + menu bar are macOS-only concepts and the apply logic in
-          main.js is darwin-gated, so the toggle is a no-op off-mac. Hide it
-          entirely on Windows/Linux rather than show a broken control. */}
+      {/* The dock is a macOS-only concept and the apply logic in main.js is
+          darwin-gated, so this toggle is a no-op off-mac. Hide it entirely on
+          Windows/Linux rather than show a broken control. (Unlike the tray
+          row above, which is cross-platform — Electron's Tray API covers the
+          macOS menu bar and the Windows system tray alike.) */}
       {isMac && (
         <SettingRow
           label="Hide dock icon"

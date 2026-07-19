@@ -1,4 +1,4 @@
-import { _electron as electron } from 'playwright-core';
+import { _electron as electron } from 'playwright';
 import { mkdtempSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';

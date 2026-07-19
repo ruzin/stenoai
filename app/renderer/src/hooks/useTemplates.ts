@@ -61,11 +61,20 @@ export const useSetDefaultTemplate = () => {
       return { previous, attempt };
     },
     onError: (_err, _id, context) => {
+      // Interim-only: this only smooths the UI while onSettled's refetch
+      // below is in flight. It can't fully protect against two racing
+      // requests both failing (whichever settles last "wins" the rollback
+      // with a snapshot that may itself be wrong) — onSettled always
+      // reconciling against disk is what makes the final state correct
+      // regardless of click order or failure combination.
       if (context?.previous && context.attempt === latestAttempt.current) {
         qc.setQueryData(templatesKeys.list(), context.previous);
       }
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: templatesKeys.all }),
+    // onSettled (not onSuccess): a failed setDefault must also refetch and
+    // reconcile the cache with disk truth, not just leave whatever the
+    // optimistic write + onError rollback left behind.
+    onSettled: () => qc.invalidateQueries({ queryKey: templatesKeys.all }),
   });
 };
 

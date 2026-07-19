@@ -45,24 +45,40 @@ export function AboutTab() {
   const [checkState, setCheckState] = React.useState<CheckState>({ kind: 'idle' });
   const [downloadPercent, setDownloadPercent] = React.useState<number | null>(null);
   const [downloadedVersion, setDownloadedVersion] = React.useState<string | null>(null);
+  const [downloadError, setDownloadError] = React.useState<string | null>(null);
+  // Guards against a stale getStatus() response (below) re-opening the
+  // progress bar after the download has already reached a terminal state.
+  // Both the live 'update-downloaded'/'update-error' events and getStatus()
+  // set this — whichever observes completion first wins, and once true a
+  // later-arriving percent-only snapshot is ignored rather than merged.
+  const settledRef = React.useRef(false);
 
   React.useEffect(() => {
     const offAvailable = ipc().on.updateAvailable(() => {
       // Confirms the real background updater has started fetching this
       // version — the progress bar below is about to start moving.
+      settledRef.current = false;
+      setDownloadError(null);
       setDownloadPercent((p) => p ?? 0);
     });
     const offProgress = ipc().on.updateDownloadProgress((evt) => {
       setDownloadPercent(evt.percent);
     });
     const offDownloaded = ipc().on.updateDownloaded((evt) => {
+      settledRef.current = true;
       setDownloadPercent(null);
       setDownloadedVersion(evt.version);
+    });
+    const offError = ipc().on.updateError((evt) => {
+      settledRef.current = true;
+      setDownloadPercent(null);
+      setDownloadError(evt.message);
     });
     return () => {
       offAvailable();
       offProgress();
       offDownloaded();
+      offError();
     };
   }, []);
 
@@ -73,8 +89,9 @@ export function AboutTab() {
   // from main's persisted state on every mount: a finished download restores
   // "Restart to Update", an in-flight one restores the progress bar instead
   // of hiding it until completion. Merge rather than overwrite: if a live
-  // event above already set state (e.g. it fired while this request was in
-  // flight), a stale response here must not clobber it.
+  // event above already settled this (completed or errored) while this
+  // request was in flight, a stale percent-only snapshot must not reopen
+  // the progress bar alongside it.
   React.useEffect(() => {
     let cancelled = false;
     void ipc()
@@ -82,8 +99,9 @@ export function AboutTab() {
       .then((result) => {
         if (cancelled || !result.success) return;
         if (result.downloadedVersion) {
+          settledRef.current = true;
           setDownloadedVersion((v) => v ?? result.downloadedVersion);
-        } else if (result.downloadPercent !== null) {
+        } else if (result.downloadPercent !== null && !settledRef.current) {
           setDownloadPercent((p) => p ?? result.downloadPercent);
         }
       });
@@ -200,6 +218,12 @@ export function AboutTab() {
               style={{ width: `${downloadPercent}%`, background: 'var(--fg-1)' }}
             />
           </div>
+        </div>
+      )}
+
+      {downloadError && (
+        <div className="py-3 text-[12px]" style={{ color: 'var(--danger)' }}>
+          Update download failed: {downloadError}
         </div>
       )}
 

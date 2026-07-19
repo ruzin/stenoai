@@ -30,9 +30,7 @@ test('UI sign-in flips provider to org and locks the picker', async ({ launchApp
   await expect(page.getByText(/signed in as/i)).toBeVisible();
 
   // Switch to the AI tab (click, not hash — Settings only reads ?tab on mount).
-  // SettingsNav's items are role="tab" (inside its role="tablist"), not a
-  // plain button — see SettingsNav.tsx.
-  await page.getByRole('tab', { name: 'AI', exact: true }).click();
+  await page.getByRole('button', { name: 'AI', exact: true }).click();
   const aiSection = page.locator('[data-settings-tab="ai"]');
   await expect(aiSection).toBeVisible();
 

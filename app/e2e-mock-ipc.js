@@ -450,12 +450,6 @@ function install({ ipcMain }) {
     process.platform === 'darwin'
       ? 'mlx-community/parakeet-tdt-0.6b-v3'
       : 'istupakov/parakeet-tdt-0.6b-v3-onnx';
-  // src/whisper_models.py's real model id. Kept as a computed key below
-  // (not an inline string literal) — ipc-contract.test.js's e2e-mock stub
-  // scan flags any hyphenated quoted key as a claimed channel name, and
-  // this id has hyphens too, so an inline literal here reads as a stale-
-  // channel false positive.
-  const WHISPER_MODEL_ID = 'large-v3-turbo';
 
   const DEFAULTS = {
     'get-app-version': { success: true, version: '0.0.0-e2e', name: 'Steno' },
@@ -471,6 +465,11 @@ function install({ ipcMain }) {
       releaseName: '',
       downloadUrl: null,
     },
+    // AboutTab's mount-time re-seed effect. Without an explicit stub, both
+    // fields fall through to the permissive default (undefined, not null),
+    // and `downloadPercent !== null` reads true for undefined — showing a
+    // stray "Downloading update… undefined%" bar on first paint.
+    'get-update-status': { success: true, downloadedVersion: null, downloadPercent: null },
     // Fires on first paint once signed in (Sidebar + RouteView gate the
     // Shared notes feature on it). Default to feature-enabled to match the
     // adapter's default and keep the org-lock spec's UI unchanged. A spec can
@@ -484,6 +483,12 @@ function install({ ipcMain }) {
     },
     'list-folders': { success: true, folders: [] },
     'get-calendar-events': { success: true, events: [] },
+    // Without these, both new toggles fall through to the permissive
+    // {success:true} default (no show_menu_bar_icon/premeeting_notifications_enabled
+    // field), and GeneralTab's disabled={...data === undefined} leaves both
+    // switches permanently disabled under mock IPC.
+    'get-menu-bar-icon': { success: true, show_menu_bar_icon: true },
+    'get-premeeting-notifications': { success: true, premeeting_notifications_enabled: true },
     // parakeet-status lives in MOCKS (env-gated installed flag).
     // Transcribe tab reads this on first paint. (The engine itself moved to
     // MOCKS so STENOAI_E2E_MOCK_ENGINE can override it; default parakeet keeps
@@ -498,7 +503,7 @@ function install({ ipcMain }) {
     'list-whisper-models': {
       success: true,
       supported_models: {
-        [WHISPER_MODEL_ID]: {
+        'large-v3-turbo': {
           name: 'Whisper Large V3 Turbo',
           size: '1.6GB',
           installed: false,
