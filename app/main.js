@@ -62,7 +62,7 @@ class Notification extends EventEmitter {
     const { width } = primaryDisplay.workAreaSize;
     const { x, y } = primaryDisplay.workArea;
 
-    notificationWindow = new BrowserWindow({
+    const win = new BrowserWindow({
       width: 400,
       height: 70,
       x: x + width - 425,
@@ -82,34 +82,35 @@ class Notification extends EventEmitter {
         preload: path.join(__dirname, 'preload.js'),
       },
     });
+    notificationWindow = win;
 
     const rendererDist = path.join(__dirname, 'renderer', 'dist', 'index.html');
-    notificationWindow.loadFile(rendererDist, { hash: '/notification' });
+    win.loadFile(rendererDist, { hash: '/notification' });
     
-    notificationWindow._activeCustomNotification = this;
-    notificationWindow._analyticsInteracted = false;
+    win._activeCustomNotification = this;
+    win._analyticsInteracted = false;
     let autoCloseTimer;
     
-    notificationWindow.once('ready-to-show', () => {
-      notificationWindow.showInactive();
-      notificationWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-      notificationWindow.setAlwaysOnTop(true, 'screen-saver', 1);
+    win.once('ready-to-show', () => {
+      win.showInactive();
+      win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+      win.setAlwaysOnTop(true, 'screen-saver', 1);
 
       autoCloseTimer = setTimeout(() => {
-        if (notificationWindow && !notificationWindow.isDestroyed()) {
-          notificationWindow.close();
+        if (!win.isDestroyed()) {
+          win.close();
         }
       }, 15000);
 
-      notificationWindow.on('closed', () => {
+      win.on('closed', () => {
         if (autoCloseTimer) clearTimeout(autoCloseTimer);
         this.emit('close');
-        if (notificationWindow && notificationWindow._activeCustomNotification === this) {
+        if (notificationWindow === win) {
           notificationWindow = null;
         }
       });
 
-      notificationWindow.webContents.send('show-notification', this.payload);
+      win.webContents.send('show-notification', this.payload);
     });
   }
 
