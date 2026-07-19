@@ -80,8 +80,12 @@ def _load_model(model_id: str):
         # is imported transitively by parakeet-mlx — huggingface_hub reads
         # HF_HUB_OFFLINE at import time. Gated on is_installed inside, so a
         # fresh download is left online.
-        from src.parakeet_models import maybe_enable_offline
+        from src.parakeet_models import disable_implicit_hf_token, maybe_enable_offline
         maybe_enable_offline(model_id)
+        # Public model — never send an inherited HF token, which would 401 the
+        # anonymous fetch. Must precede the parakeet-mlx import (hub reads the
+        # flag at import time), same as maybe_enable_offline.
+        disable_implicit_hf_token()
         try:
             from parakeet_mlx import from_pretrained
         except ImportError as e:
