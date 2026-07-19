@@ -42,10 +42,10 @@
 If you're looking for a hosted desktop recording API, consider checking out [Recall.ai](https://www.recall.ai/product/desktop-recording-sdk?utm_source=github&utm_medium=sponsorship&utm_campaign=ruzin-stenoai), an API that records Zoom, Google Meet, Microsoft Teams, in-person meetings, and more.
 
 ## 📢 What's New
+- **2026-07-19** ⚙️ Redesigned Settings — a left nav rail with grouped sections replaces the old tab bar, plus a new About tab (version and update check) and finer control over notifications and the menu-bar icon.
 - **2026-07-19** 🏷️ Note titles restored — a note you summarise on demand (with automatic summaries off) now gets an AI-generated title instead of staying "Note"; a title you set yourself is never overwritten.
 - **2026-07-18** 🎙️ Recording that stays out of your way — a compact transcription pill docks beside the app instead of taking over, Stop lands you on the note instantly, and you can resume recording into any note (it appends). Plus a dedicated **My notes** tab that stays editable alongside the AI summary.
 - **2026-07-18** 🎚️ Microphone selection — choose which input device Steno records from in Settings.
-- **2026-07-18** 🚀 Launch on login — Steno can start hidden when you log in so capture is always ready; opt out in Settings.
 
 
 ## Features
