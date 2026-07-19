@@ -3,6 +3,13 @@ title: "Changelog"
 description: "What's new in Steno -- recent releases and notable changes."
 ---
 
+<Update label="v0.6.1" description="July 19, 2026">
+**Fixed**
+- Notes you summarise on demand ("Generate notes") now get an AI-generated title, instead of staying "Note". A title you set yourself is never overwritten.
+- Fixed the speech-recognition model failing to download with an authorization error when an unrelated Hugging Face token was set in your environment.
+- Auto-detect meetings now recognises calls whose microphone is captured by a browser helper process.
+</Update>
+
 <Update label="v0.5.8" description="July 5, 2026">
 **New**
 - Added a "Generate notes automatically" toggle in Settings -- turn it off to skip AI summaries while recording, then generate them later whenever you're ready.
