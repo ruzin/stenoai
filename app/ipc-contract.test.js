@@ -230,3 +230,35 @@ test('ipc.ts bridge namespaces match the preload bridge (type mirror in sync)', 
     `preload bridge and StenoaiBridge namespaces drifted — only in preload: [${onlyPreload}], only in ipc.ts: [${onlyTs}]`,
   );
 });
+
+// The registration + emission scans read the sibling modules straight off disk,
+// so a module whose require()/register call was deleted from main.js would still
+// look "wired" to the union (its channels register/emit to the scanner even though
+// nothing invokes it at runtime). Assert the wiring explicitly: main.js must both
+// require each extracted module AND call its entry point.
+test('every extracted seam module is required AND invoked in main.js (reachability)', () => {
+  const modules = [
+    // handler modules: entry points are their register* exports
+    ...fs
+      .readdirSync(__dirname)
+      .filter((f) => /-ipc\.js$/.test(f) && f !== 'e2e-mock-ipc.js' && !/\.test\.js$/.test(f))
+      .map((f) => ({ file: f, entryPoints: matchAll(read(f), /function\s+(register\w+)\s*\(/g) })),
+    // emit-only module: entry point is the createDebugLog factory
+    { file: 'debug-log.js', entryPoints: ['createDebugLog'] },
+  ];
+  const unwired = [];
+  for (const { file, entryPoints } of modules) {
+    const base = file.replace(/\.js$/, '');
+    const required =
+      MAIN.includes(`require('./${base}')`) || MAIN.includes(`require("./${base}")`);
+    const invoked =
+      entryPoints.length > 0 &&
+      entryPoints.every((fn) => new RegExp(`\\b${fn}\\s*\\(`).test(MAIN));
+    if (!required || !invoked) unwired.push(`${file} (required:${required} invoked:${invoked})`);
+  }
+  assert.deepStrictEqual(
+    unwired,
+    [],
+    `extracted module(s) not wired into main.js (dead registration?): ${unwired.join('; ')}`,
+  );
+});

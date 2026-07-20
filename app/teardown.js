@@ -14,9 +14,13 @@
  *     never returns a promise and never awaits.
  *   - Drained in REVERSE registration order (last registered tears down first),
  *     mirroring how nested resources unwind.
- *   - REENTRANT-SAFE + IDEMPOTENT. drain() run twice (both before-quit and
- *     will-quit fire, or a dispose triggers another drain) does nothing the
- *     second time. Individual dispose()s should also be idempotent.
+ *   - REENTRANT-SAFE + IDEMPOTENT per disposer. A disposer runs at most once per
+ *     drain, and a drain re-entered from within a dispose is a no-op (the guard).
+ *     Each registered disposer is removed as it runs, so a redundant drain with
+ *     nothing newly registered does nothing. The registry DOES re-arm, though: a
+ *     disposer registered AFTER a drain will run on the next drain (used when a
+ *     resource is (re)created post-teardown). Individual dispose()s should also
+ *     be idempotent so a resource torn down twice is harmless.
  *   - ISOLATED. A throwing dispose() is swallowed so it can't abort the drain
  *     and strand later resources (a leaked process is worse than a lost error).
  */

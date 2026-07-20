@@ -10,14 +10,42 @@ const path = require('path');
 const cp = require('child_process');
 const realSpawn = cp.spawn;
 let spawnCalls = [];
-cp.spawn = (...args) => { spawnCalls.push(args); return { fake: true }; };
+let stubChild = { fake: true };
+cp.spawn = (...args) => { spawnCalls.push(args); return stubChild; };
 
 const { spawn, killProcessTree, createBackendCli } = require('./backend-cli');
 
 afterEach(() => {
   spawnCalls = [];
+  stubChild = { fake: true };
   mock.restoreAll();
 });
+
+// A controllable child-process double: runPythonScript registers stdout/stderr/
+// process handlers synchronously, so a test can drive them after the call.
+function fakeChild() {
+  const bags = { stdout: {}, stderr: {}, proc: {} };
+  const sink = (bag) => ({ on: (evt, cb) => { bag[evt] = cb; } });
+  return {
+    stdout: sink(bags.stdout),
+    stderr: sink(bags.stderr),
+    on: (evt, cb) => { bags.proc[evt] = cb; },
+    emit: (which, evt, arg) => { const h = bags[which][evt]; if (h) h(arg); },
+  };
+}
+
+function recordingDeps(extra = {}) {
+  const rec = { debug: [], forwarded: [], attached: [] };
+  const deps = {
+    app: { isPackaged: false },
+    sendDebugLog: (m) => rec.debug.push(m),
+    sanitizeArgsForLog: () => 'SANITIZED',
+    attachProcessingStderr: (proc, label) => rec.attached.push({ proc, label }),
+    forwardDiagnosticStdout: (line, source) => rec.forwarded.push({ line, source }),
+    ...extra,
+  };
+  return { rec, run: createBackendCli(deps).runPythonScript };
+}
 
 // ---- spawn wrapper -------------------------------------------------------
 
@@ -106,6 +134,89 @@ test('getBackendPath/getBackendCwd resolve the packaged resources dir', () => {
   } finally {
     Object.defineProperty(process, 'resourcesPath', { value: origRes, configurable: true });
   }
+});
+
+// ---- createBackendCli: runPythonScript behavior -------------------------
+
+test('runPythonScript (non-silent) sanitizes the echoed argv and streams output', async () => {
+  stubChild = fakeChild();
+  const { rec, run } = recordingDeps();
+  const p = run('simple_recorder.py', ['create-folder', 'secret'], false);
+  // The spawned argv is untouched; only the LOGGED echo is sanitized.
+  assert.deepStrictEqual(spawnCalls[0][1], ['create-folder', 'secret']);
+  assert.ok(rec.debug.includes('$ stenoai SANITIZED'));
+  // No extraEnv -> env is left undefined (inherit parent).
+  assert.strictEqual(spawnCalls[0][2].env, undefined);
+
+  stubChild.emit('stdout', 'data', Buffer.from('one\ntwo'));
+  assert.deepStrictEqual(rec.forwarded, [
+    { line: 'one', source: 'backend' },
+    { line: 'two', source: 'backend' },
+  ]);
+  stubChild.emit('stderr', 'data', Buffer.from('bad\n'));
+  assert.ok(rec.debug.includes('STDERR: bad'));
+
+  stubChild.emit('proc', 'close', 0);
+  assert.ok(rec.debug.includes('Command completed with exit code: 0'));
+  assert.strictEqual(await p, 'one\ntwo');
+});
+
+test('runPythonScript (silent) suppresses all debug-panel logging', async () => {
+  stubChild = fakeChild();
+  const { rec, run } = recordingDeps();
+  const p = run('simple_recorder.py', ['status'], true);
+  stubChild.emit('stdout', 'data', Buffer.from('quiet'));
+  stubChild.emit('stderr', 'data', Buffer.from('noise\n'));
+  stubChild.emit('proc', 'close', 0);
+  assert.deepStrictEqual(rec.debug, []);
+  assert.deepStrictEqual(rec.forwarded, []);
+  assert.strictEqual(await p, 'quiet');
+});
+
+test('runPythonScript merges extraEnv over the parent environment', async () => {
+  stubChild = fakeChild();
+  const { run } = recordingDeps();
+  const p = run('simple_recorder.py', ['x'], true, { STENO_TEST_FLAG: 'on' });
+  const env = spawnCalls[0][2].env;
+  assert.strictEqual(env.STENO_TEST_FLAG, 'on');
+  assert.strictEqual(env.PATH, process.env.PATH); // parent env preserved
+  stubChild.emit('proc', 'close', 0);
+  await p;
+});
+
+test('runPythonScript attaches persistent stderr capture only when a logLabel is given', async () => {
+  stubChild = fakeChild();
+  const withLabel = recordingDeps();
+  const p1 = withLabel.run('simple_recorder.py', ['x'], true, {}, 'process-streaming');
+  assert.strictEqual(withLabel.rec.attached.length, 1);
+  assert.strictEqual(withLabel.rec.attached[0].label, 'process-streaming');
+  stubChild.emit('proc', 'close', 0);
+  await p1;
+
+  stubChild = fakeChild();
+  const noLabel = recordingDeps();
+  const p2 = noLabel.run('simple_recorder.py', ['x'], true);
+  assert.strictEqual(noLabel.rec.attached.length, 0);
+  stubChild.emit('proc', 'close', 0);
+  await p2;
+});
+
+test('runPythonScript rejects with the stderr text on a non-zero exit', async () => {
+  stubChild = fakeChild();
+  const { run } = recordingDeps();
+  const p = run('simple_recorder.py', ['x'], true);
+  stubChild.emit('stderr', 'data', Buffer.from('boom happened'));
+  stubChild.emit('proc', 'close', 3);
+  await assert.rejects(p, /code 3: boom happened/);
+});
+
+test('runPythonScript rejects and logs on a spawn error event', async () => {
+  stubChild = fakeChild();
+  const { rec, run } = recordingDeps();
+  const p = run('simple_recorder.py', ['x'], false);
+  stubChild.emit('proc', 'error', new Error('ENOENT'));
+  await assert.rejects(p, /ENOENT/);
+  assert.ok(rec.debug.includes('Command error: ENOENT'));
 });
 
 // Restore the real child_process.spawn once this file's tests are done.
