@@ -40,6 +40,7 @@ const path = require('path');
 const { spawn, killProcessTree, createBackendCli } = require('./backend-cli');
 const { createDebugLog } = require('./debug-log');
 const { createTeardownRegistry } = require('./teardown');
+const { registerFoldersIpc } = require('./folders-ipc');
 const processingLog = require('./processing-log');
 const { isMeetingApp, allowsDeviceLevelFallback } = require('./meeting-detect');
 const { sweepOrphanedLiveSnapshots } = require('./live-snapshot-sweep');
@@ -5953,162 +5954,20 @@ ipcMain.handle('get-app-version', async () => {
   }
 });
 
-// Storage path handlers
-ipcMain.handle('get-storage-path', async () => {
-  try {
-    const result = await runPythonScript('simple_recorder.py', ['get-storage-path'], true);
-    const jsonData = JSON.parse(result.trim());
-    // Python only returns the user's custom path (empty string when not set).
-    // Augment with the platform default so the renderer can show "where your
-    // data actually lives" without hardcoding the path. custom_path mirrors
-    // storage_path but is null when empty for cleaner conditionals.
-    const customPath = jsonData.storage_path && jsonData.storage_path.trim()
-      ? jsonData.storage_path
-      : null;
-    // getUserDataDir() so the "where your data lives" path shown in Settings is
-    // correct on Windows (%APPDATA%/stenoai), not a macOS literal. It already
-    // resolves to the per-OS .../stenoai dir.
-    const defaultPath = getUserDataDir();
-    return {
-      success: true,
-      storage_path: customPath || defaultPath,
-      custom_path: customPath,
-      default_path: defaultPath,
-    };
-  } catch (error) {
-    return { success: false, error: error.message };
-  }
-});
-
-ipcMain.handle('set-storage-path', async (event, storagePath) => {
-  try {
-    const args = ['set-storage-path'];
-    if (storagePath) {
-      args.push(storagePath);
-    }
-    const result = await runPythonScript('simple_recorder.py', args);
-    // Update cached custom path for file validation
-    _cachedCustomStoragePath = storagePath || null;
-    const jsonMatch = result.match(/\{.*\}/s);
-    if (jsonMatch) {
-      return JSON.parse(jsonMatch[0]);
-    }
-    return { success: true, storage_path: storagePath };
-  } catch (error) {
-    return { success: false, error: error.message };
-  }
-});
-
-ipcMain.handle('select-storage-folder', async () => {
-  try {
-    const result = await dialog.showOpenDialog(mainWindow, {
-      properties: ['openDirectory', 'createDirectory'],
-      title: 'Choose storage location for Steno data',
-      buttonLabel: 'Select Folder'
-    });
-
-    if (!result.canceled && result.filePaths.length > 0) {
-      return { success: true, folderPath: result.filePaths[0] };
-    }
-    return { success: false, error: 'No folder selected' };
-  } catch (error) {
-    return { success: false, error: error.message };
-  }
-});
-
-// Folder management handlers
-ipcMain.handle('list-folders', async () => {
-  try {
-    const result = await runPythonScript('simple_recorder.py', ['list-folders'], true);
-    return { success: true, ...JSON.parse(result.trim()) };
-  } catch (error) {
-    return { success: false, error: error.message };
-  }
-});
-
-ipcMain.handle('create-folder', async (event, name, color) => {
-  try {
-    const args = ['create-folder', name];
-    if (color) args.push('--color', color);
-    const result = await runPythonScript('simple_recorder.py', args);
-    const jsonMatch = result.match(/\{.*\}/s);
-    return jsonMatch ? JSON.parse(jsonMatch[0]) : { success: true };
-  } catch (error) {
-    return { success: false, error: error.message };
-  }
-});
-
-ipcMain.handle('rename-folder', async (event, folderId, name) => {
-  try {
-    const result = await runPythonScript('simple_recorder.py', ['rename-folder', folderId, name]);
-    const jsonMatch = result.match(/\{.*\}/s);
-    return jsonMatch ? JSON.parse(jsonMatch[0]) : { success: true };
-  } catch (error) {
-    return { success: false, error: error.message };
-  }
-});
-
-ipcMain.handle('update-folder-icon', async (event, folderId, icon) => {
-  try {
-    const result = await runPythonScript('simple_recorder.py', ['update-folder-icon', folderId, icon]);
-    const jsonMatch = result.match(/\{.*\}/s);
-    return jsonMatch ? JSON.parse(jsonMatch[0]) : { success: true };
-  } catch (error) {
-    return { success: false, error: error.message };
-  }
-});
-
-ipcMain.handle('delete-folder', async (event, folderId) => {
-  try {
-    const result = await runPythonScript('simple_recorder.py', ['delete-folder', folderId]);
-    const jsonMatch = result.match(/\{.*\}/s);
-    return jsonMatch ? JSON.parse(jsonMatch[0]) : { success: true };
-  } catch (error) {
-    return { success: false, error: error.message };
-  }
-});
-
-ipcMain.handle('reorder-folders', async (event, folderIds) => {
-  try {
-    const args = ['reorder-folders', ...folderIds];
-    const result = await runPythonScript('simple_recorder.py', args);
-    const jsonMatch = result.match(/\{.*\}/s);
-    return jsonMatch ? JSON.parse(jsonMatch[0]) : { success: true };
-  } catch (error) {
-    return { success: false, error: error.message };
-  }
-});
-
-ipcMain.handle('add-meeting-to-folder', async (event, summaryFile, folderId) => {
-  try {
-    // Security: the renderer is untrusted, so containment-check the summary path
-    // (symlink-safe, output/ only) and pass the canonical realPath to the backend.
-    const validated = await validateMeetingFilePath(summaryFile);
-    if (validated.error) {
-      return { success: false, error: validated.error };
-    }
-    const result = await runPythonScript('simple_recorder.py', ['add-meeting-to-folder', validated.realPath, folderId]);
-    const jsonMatch = result.match(/\{.*\}/s);
-    return jsonMatch ? JSON.parse(jsonMatch[0]) : { success: true };
-  } catch (error) {
-    return { success: false, error: error.message };
-  }
-});
-
-ipcMain.handle('remove-meeting-from-folder', async (event, summaryFile, folderId) => {
-  try {
-    // Security: the renderer is untrusted, so containment-check the summary path
-    // (symlink-safe, output/ only) and pass the canonical realPath to the backend.
-    const validated = await validateMeetingFilePath(summaryFile);
-    if (validated.error) {
-      return { success: false, error: validated.error };
-    }
-    const result = await runPythonScript('simple_recorder.py', ['remove-meeting-from-folder', validated.realPath, folderId]);
-    const jsonMatch = result.match(/\{.*\}/s);
-    return jsonMatch ? JSON.parse(jsonMatch[0]) : { success: true };
-  } catch (error) {
-    return { success: false, error: error.message };
-  }
+// Folders + storage-layout IPC handlers (RFC #327 Folders pilot) — extracted to
+// ./folders-ipc and registered here in place, so registration timing + behavior
+// are identical to the inline handlers this replaces. The storage-path cache
+// stays a main.js `let`; the module updates it through the injected setter, and
+// the readers (getOutputDir / getAllowedBaseDirs / resolveRecordingsDir /
+// validateMeetingFilePath) keep reading the live binding.
+registerFoldersIpc({
+  ipcMain,
+  runPythonScript,
+  dialog,
+  getMainWindow: () => mainWindow,
+  getUserDataDir,
+  validateMeetingFilePath,
+  setCachedCustomStoragePath: (v) => { _cachedCustomStoragePath = v; },
 });
 
 ipcMain.handle('get-ai-prompts', async () => {
