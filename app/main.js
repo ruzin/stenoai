@@ -34,7 +34,12 @@ if (process.platform !== 'darwin') {
 }
 
 const path = require('path');
-const { spawn: _spawnRaw } = require('child_process');
+// Backend CLI seam (spawn wrapper, process-tree kill, bundled-backend paths,
+// runPythonScript), the debug-log sink, and the quit teardown registry are
+// carved out of this file (RFC #327, Phase 0); wired once below via factories.
+const { spawn, killProcessTree, createBackendCli } = require('./backend-cli');
+const { createDebugLog } = require('./debug-log');
+const { createTeardownRegistry } = require('./teardown');
 const processingLog = require('./processing-log');
 const { isMeetingApp, allowsDeviceLevelFallback } = require('./meeting-detect');
 const { sweepOrphanedLiveSnapshots } = require('./live-snapshot-sweep');
@@ -67,43 +72,8 @@ const {
   withTimeout,
 } = require('./analytics-helpers');
 
-// Wrap spawn so every backend / ollama launch defaults to windowsHide:true.
-// The PyInstaller backend (stenoai.exe) and bundled ollama.exe are console
-// subsystem binaries; without this Electron pops a visible console window on
-// Windows for every recording, live-transcribe, query, and the long-lived
-// `ollama serve` keeps one open for the whole session. No-op on macOS/Linux.
-// Callers can still override by passing an explicit windowsHide.
-function spawn(command, args, options) {
-  if (Array.isArray(args) || args === undefined || args === null) {
-    return _spawnRaw(command, args, { windowsHide: true, ...(options || {}) });
-  }
-  // 2-arg form: spawn(command, options)
-  return _spawnRaw(command, { windowsHide: true, ...args });
-}
-
-// Terminate a process AND its child processes. On Windows `process.kill(pid)`
-// only kills the named process, orphaning its children — `ollama serve` spawns
-// per-model "runner" subprocesses that would leak after quit. `taskkill /T`
-// walks the whole tree. On POSIX we keep the existing SIGTERM -> SIGKILL
-// escalation (ollama tears its runners down on SIGTERM there). Synchronous on
-// Windows (execFileSync) so it completes during the app's will-quit handler.
-function killProcessTree(pid) {
-  if (!pid) return;
-  if (process.platform === 'win32') {
-    try {
-      require('child_process').execFileSync(
-        'taskkill',
-        ['/PID', String(pid), '/T', '/F'],
-        { windowsHide: true, stdio: 'ignore' },
-      );
-    } catch (_) {}
-    return;
-  }
-  try { process.kill(pid, 'SIGTERM'); } catch (_) {}
-  setTimeout(() => {
-    try { process.kill(pid, 'SIGKILL'); } catch (_) {}
-  }, 1000);
-}
+// `spawn` (windowsHide wrapper) and `killProcessTree` now live in ./backend-cli
+// (imported above), with unit coverage in backend-cli.test.js.
 const fs = require('fs');
 const https = require('https');
 const http = require('http');
@@ -241,6 +211,27 @@ let launchedHidden = false;
 // (extractShortcutUrlFromArgv, sanitizeShortcutUrlForLogs, parseShortcutUrl,
 // and the parse-internal sanitizeShortcutSessionName) live in ./shortcut-url,
 // imported at the top of this file.
+// --- Phase 0 infra seams (RFC #327), wired once here ---
+// Placed after the module state declarations above and before every call site
+// (sendDebugLog, getBackendPath, runPythonScript are all used far below). The
+// debug-log sink reads the live `mainWindow` through an accessor; backend-cli's
+// runPythonScript gets the logging + diagnostics seams injected. These are
+// `const`s (not hoisted like the old function declarations), so they must be
+// defined before first use — hence their position here.
+const sendDebugLog = createDebugLog({ getMainWindow: () => mainWindow });
+const { getBackendPath, getBackendCwd, runPythonScript } = createBackendCli({
+  app,
+  sendDebugLog,
+  sanitizeArgsForLog,
+  attachProcessingStderr,
+  forwardDiagnosticStdout,
+});
+// Quit teardown registry (RFC #327 ground rule 4). No consumers yet — domains
+// that own a child process/timer (Ollama, mic monitor, recording runtime, …)
+// register an idempotent dispose() as they move out of main.js. Drained in
+// will-quit below.
+const teardown = createTeardownRegistry();
+
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
 
 function registerShortcutProtocolClient() {
@@ -260,25 +251,8 @@ function registerShortcutProtocolClient() {
   return app.setAsDefaultProtocolClient(SHORTCUT_PROTOCOL);
 }
 
-// Backend executable path - always use bundled stenoai
-function getBackendPath() {
-  const exe = process.platform === 'win32' ? 'stenoai.exe' : 'stenoai';
-  if (app.isPackaged) {
-    // Production: bundled in app resources
-    return path.join(process.resourcesPath, 'stenoai', exe);
-  } else {
-    // Development: use local build
-    return path.join(__dirname, '..', 'dist', 'stenoai', exe);
-  }
-}
-
-function getBackendCwd() {
-  if (app.isPackaged) {
-    return path.join(process.resourcesPath, 'stenoai');
-  } else {
-    return path.join(__dirname, '..', 'dist', 'stenoai');
-  }
-}
+// getBackendPath / getBackendCwd / runPythonScript now come from ./backend-cli
+// via createBackendCli(...) wired near the top of this file.
 
 // Path to the mic-in-use helper. Keeps the .exe suffix branch ready for a
 // future Windows port — the JSON-line stdout contract is platform-agnostic,
@@ -1670,6 +1644,11 @@ if (!gotSingleInstanceLock) {
       killProcessTree(ollamaPid);
       ollamaPid = null;
     }
+    // Drain the teardown registry (RFC #327 ground rule 4) BEFORE the async
+    // telemetry shutdown — Electron does not await quit handlers, so work after
+    // the first await is not a reliable barrier. Synchronous + idempotent;
+    // no-op until domains register disposers.
+    teardown.drain();
     await shutdownTelemetry();
   });
 
@@ -1869,76 +1848,8 @@ ipcMain.handle('relaunch-app', async () => {
 // Debug functionality handled by side panel now
 
 // Backend communication - always uses bundled stenoai executable
-function runPythonScript(script, args = [], silent = false, extraEnv = {}, logLabel = null) {
-  return new Promise((resolve, reject) => {
-    const backendPath = getBackendPath();
-
-    // Log the command being executed (unless silent)
-    console.log('Running:', `${backendPath} ${args.join(' ')}`);
-    if (!silent) {
-      // Sanitize the echoed argv: denylisted commands (query, save-template,
-      // set-user-name/storage-path, folder + URL setters) carry content/PII in
-      // their args. This rewrites the LOGGED string only; the spawned `args`
-      // below are untouched.
-      sendDebugLog(`$ stenoai ${sanitizeArgsForLog(args)}`);
-    }
-
-    const process = spawn(backendPath, args, {
-      cwd: getBackendCwd(),
-      env: Object.keys(extraEnv).length > 0 ? { ...require('process').env, ...extraEnv } : undefined
-    });
-
-    // Opt-in persistent capture for the legacy process-recording path only.
-    // Default null → generic backend calls (config reads, chat query, …) are
-    // NOT persisted, preserving the no-global-tee privacy boundary.
-    if (logLabel) attachProcessingStderr(process, logLabel);
-
-    let stdout = '';
-    let stderr = '';
-
-    process.stdout.on('data', (data) => {
-      const output = data.toString();
-      stdout += output;
-      console.log('Python stdout:', output);
-      // Stream stdout to debug panel in real-time (unless silent), but only the
-      // structural diagnostic markers — query answers and other content are
-      // dropped so they never reach the shareable buffer.
-      if (!silent) {
-        output.split('\n').forEach(line => {
-          forwardDiagnosticStdout(line, 'backend');
-        });
-      }
-    });
-
-    process.stderr.on('data', (data) => {
-      const output = data.toString();
-      stderr += output;
-      console.log('Python stderr:', output);
-      // Stream stderr to debug panel in real-time (unless silent)
-      if (!silent) {
-        output.split('\n').forEach(line => {
-          if (line.trim()) sendDebugLog('STDERR: ' + line.trim());
-        });
-      }
-    });
-
-    process.on('close', (code) => {
-      if (!silent) {
-        sendDebugLog(`Command completed with exit code: ${code}`);
-      }
-      if (code === 0) {
-        resolve(stdout);
-      } else {
-        reject(new Error(`Python script failed with code ${code}: ${stderr}`));
-      }
-    });
-
-    process.on('error', (error) => {
-      sendDebugLog(`Command error: ${error.message}`);
-      reject(error);
-    });
-  });
-}
+// runPythonScript is provided by createBackendCli(...) wired near the top of
+// this file (verbatim body moved to ./backend-cli).
 
 async function getBackendStatusInternal(silent = true) {
   const result = await runPythonScript('simple_recorder.py', ['status'], silent);
@@ -5610,13 +5521,8 @@ app.on('before-quit', () => {
   clearPreMeetingTimers();
 });
 
-// Add IPC handler for sending debug logs to frontend
-function sendDebugLog(message) {
-  // Send to main window (both setup console and debug panel)
-  if (mainWindow) {
-    mainWindow.webContents.send('debug-log', message);
-  }
-}
+// sendDebugLog now comes from ./debug-log via createDebugLog(...) wired near the
+// top of this file (the main-window sink is injected as an accessor).
 
 // Feed a child process's stderr into the persistent processing log, one record
 // per complete line. Node 'data' events deliver arbitrary chunks (not lines),
