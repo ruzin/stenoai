@@ -1,5 +1,4 @@
 import * as React from 'react';
-import { useQueryClient } from '@tanstack/react-query';
 
 import {
   Dialog,
@@ -13,13 +12,12 @@ import { Switch } from '@/components/ui/switch';
 import { Button } from '@/components/ui/button';
 import { SettingRow } from '@/routes/settings/primitives';
 import {
-  settingsKeys,
   useLaunchOnLoginSetting,
+  useMarkPrivacyNoticeSeen,
   useSetLaunchOnLogin,
   useSetTelemetry,
   useTelemetrySetting,
 } from '@/hooks/useSettings';
-import { ipc } from '@/lib/ipc';
 
 /**
  * One-time, soft privacy disclosure for existing installs upgrading into the
@@ -34,7 +32,7 @@ import { ipc } from '@/lib/ipc';
  * onboarding isn't disclosed to twice).
  */
 export function PrivacyConsentModal({ open }: { open: boolean }) {
-  const qc = useQueryClient();
+  const { mutateAsync: markNoticeSeen } = useMarkPrivacyNoticeSeen();
 
   const telemetry = useTelemetrySetting();
   const setTelemetry = useSetTelemetry();
@@ -52,21 +50,15 @@ export function PrivacyConsentModal({ open }: { open: boolean }) {
     if (acknowledgedRef.current) return;
     acknowledgedRef.current = true;
     try {
-      const res = await ipc().privacy.markNoticeSeen();
-      if (!res?.success) throw new Error(res?.error || 'markNoticeSeen failed');
-      // Flip the gate synchronously so App stops rendering the modal
-      // immediately — don't depend on the refetch, which could fail and leave
-      // the modal stuck open with the latch already set. The invalidate then
-      // reconciles against disk in the background.
-      qc.setQueryData(settingsKeys.privacyNoticeSeen(), true);
-      qc.invalidateQueries({ queryKey: settingsKeys.privacyNoticeSeen() });
+      // Persists the marker and flips the gate query (see the shared hook).
+      await markNoticeSeen();
     } catch {
       // Persisting the marker failed (e.g. a config-write error). Unlatch so
       // the user can dismiss again instead of being trapped behind a modal
       // that no longer responds to the button, X, or Escape.
       acknowledgedRef.current = false;
     }
-  }, [qc]);
+  }, [markNoticeSeen]);
 
   return (
     <Dialog

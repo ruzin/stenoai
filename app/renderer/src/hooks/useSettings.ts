@@ -64,6 +64,28 @@ export function usePrivacyNoticeSeen() {
   });
 }
 
+/** Persist the one-time privacy notice as seen and flip the gate query so the
+ *  disclosure can't reappear. Shared by the consent modal and onboarding so the
+ *  cache key + invalidation never drift as the gate evolves. The gate is set
+ *  synchronously on success (don't depend on the refetch, which could fail and
+ *  leave the modal stuck open); the invalidate reconciles against disk in the
+ *  background. Rejects if the backend write failed — callers own their own
+ *  control flow (re-arm, navigate) around it. */
+export function useMarkPrivacyNoticeSeen() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      const res = await ipc().privacy.markNoticeSeen();
+      if (!res?.success) throw new Error(res?.error || 'markNoticeSeen failed');
+      return res;
+    },
+    onSuccess: () => {
+      qc.setQueryData(settingsKeys.privacyNoticeSeen(), true);
+      qc.invalidateQueries({ queryKey: settingsKeys.privacyNoticeSeen() });
+    },
+  });
+}
+
 export function useDockIconSetting() {
   return useQuery({
     queryKey: settingsKeys.dockIcon(),

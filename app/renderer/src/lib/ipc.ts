@@ -748,7 +748,7 @@ export interface StenoaiBridge {
 
   privacy: {
     getNoticeSeen: RequestFn<[], GetPrivacyNoticeSeenResponse>;
-    markNoticeSeen: RequestFn<[], Result<Record<string, never>>>;
+    markNoticeSeen: RequestFn<[], Result<{ privacy_notice_seen: boolean }>>;
   };
 
   perm: {

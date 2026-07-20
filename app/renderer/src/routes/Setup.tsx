@@ -14,15 +14,14 @@ import { Display, Lead, Muted } from '@/components/ui/typography';
 import { useNavigate } from '@/lib/router';
 import { useCheckMicPermission, useRequestMicPermission, useSetupStep } from '@/hooks/useSetup';
 import {
-  settingsKeys,
   useLaunchOnLoginSetting,
+  useMarkPrivacyNoticeSeen,
   useSetLaunchOnLogin,
   useSetTelemetry,
   useSetUserName,
   useTelemetrySetting,
   useUserName,
 } from '@/hooks/useSettings';
-import { useQueryClient } from '@tanstack/react-query';
 import {
   useSetAiProvider,
   useSetCloudApiKey,
@@ -143,28 +142,23 @@ export function Setup() {
   const setLaunchOnLogin = useSetLaunchOnLogin();
   const launchOnLoginEnabled = launchOnLogin.data ?? true;
 
-  const qc = useQueryClient();
   // Onboarding discloses telemetry + launch-on-login, so mark the one-time
   // privacy notice seen on the way out. Without this, an upgrader who had a
   // config but no model (so they were routed here) would land on Home and get
   // the consent modal a second time for the same toggles. Idempotent — a fresh
   // install is already seen. Navigate regardless so a persist hiccup never
-  // traps the user in Setup.
+  // traps the user in Setup. The shared hook flips the gate query synchronously
+  // on success so the consent modal can't flash on the way home.
+  const { mutateAsync: markPrivacyNoticeSeen } = useMarkPrivacyNoticeSeen();
   const finishOnboarding = React.useCallback(async () => {
     try {
-      const res = await ipc().privacy.markNoticeSeen();
-      if (res?.success) {
-        // Flip the gate synchronously before navigating home so the consent
-        // modal can't flash on the way out; invalidate reconciles with disk.
-        qc.setQueryData(settingsKeys.privacyNoticeSeen(), true);
-        qc.invalidateQueries({ queryKey: settingsKeys.privacyNoticeSeen() });
-      }
+      await markPrivacyNoticeSeen();
     } catch {
       // best-effort; the consent modal is a soft disclosure, not a gate
     } finally {
       navigate('/');
     }
-  }, [qc, navigate]);
+  }, [markPrivacyNoticeSeen, navigate]);
 
   // First name powers the in-app greeting ("Hi <name>, ask anything"). Stored
   // locally only — never sent anywhere. Persisted on blur to avoid a write

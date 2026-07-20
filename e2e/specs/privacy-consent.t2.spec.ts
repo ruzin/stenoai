@@ -39,7 +39,14 @@ async function waitForConsentModal(page: import('@playwright/test').Page) {
         });
         return page.locator(MODAL).isVisible();
       },
-      { message: 'privacy consent modal should appear for an upgrader on a neutral route' },
+      {
+        message: 'privacy consent modal should appear for an upgrader on a neutral route',
+        // App launch + the config migration + the privacy gate query can race
+        // the one-shot /setup redirect on a loaded CI runner; the default 5s
+        // poll was occasionally too tight (flaky, green on retry). Give it more
+        // wall-clock — the assertion (modal must appear) is unchanged.
+        timeout: 20_000,
+      },
     )
     .toBe(true);
 }
