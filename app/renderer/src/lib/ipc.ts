@@ -665,6 +665,18 @@ export interface ParakeetPullCompleteEvent {
   success: boolean;
   error?: string;
 }
+/** Byte-level progress from the onboarding wizard's local summarization-model
+ *  download (main.js 'setup-ollama-and-model'). Dedicated to the Setup flow -
+ *  distinct from the Settings model-pull events, whose payload is a
+ *  { model, progress: string } string. Ollama streams per-blob progress, so
+ *  `pct` can step back toward 0 as each new layer starts; the label carries the
+ *  current phase alongside the bar. */
+export interface SetupOllamaProgressEvent {
+  status: string;
+  pct: number;
+  completed: number;
+  total: number;
+}
 
 // ---------- live transcript ----------
 export interface LiveSegment {
@@ -1063,6 +1075,7 @@ export interface StenoaiBridge {
     whisperPullComplete: Subscribe<WhisperPullCompleteEvent>;
     parakeetPullProgress: Subscribe<ParakeetPullProgressEvent>;
     parakeetPullComplete: Subscribe<ParakeetPullCompleteEvent>;
+    setupOllamaProgress: Subscribe<SetupOllamaProgressEvent>;
     liveTranscriptReady: Subscribe<LiveTranscriptReadyEvent>;
     liveTranscriptChunk: Subscribe<LiveTranscriptChunkEvent>;
     liveTranscriptError: Subscribe<LiveTranscriptErrorEvent>;

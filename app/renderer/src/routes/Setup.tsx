@@ -40,6 +40,56 @@ interface Step {
   icon: React.ComponentType<{ className?: string }>;
   status: StepStatus;
   detail?: string;
+  /** Optional download-progress affordance rendered under the detail line
+   *  while the step is running (see the transcription/summarization steps). */
+  progressNode?: React.ReactNode;
+}
+
+/** Real byte-progress bar for the local summarization-model download. Ollama
+ *  streams per-blob progress, so `pct` can step back toward 0 as each new layer
+ *  begins - the status label carries the current phase so the bar never reads
+ *  as a single misleading aggregate. */
+function OllamaProgressBar({ status, pct }: { status: string; pct: number }) {
+  const clamped = Math.max(0, Math.min(100, Math.round(pct)));
+  return (
+    <div className="mt-2" data-setup-ollama-progress>
+      <div className="mb-1 flex items-center justify-between text-[11px] text-muted-foreground">
+        <span className="truncate">{status || 'Downloading model...'}</span>
+        <span className="tabular-nums">{clamped}%</span>
+      </div>
+      <div
+        className="h-1.5 overflow-hidden rounded-full"
+        style={{ background: 'var(--surface-sunken)' }}
+        role="progressbar"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={clamped}
+        aria-label="Summarization model download progress"
+      >
+        <div
+          className="h-full rounded-full transition-[width] duration-300"
+          style={{ width: `${clamped}%`, background: 'var(--fg-1)' }}
+        />
+      </div>
+    </div>
+  );
+}
+
+/** Indeterminate bar for the transcription-model download. Parakeet only
+ *  exposes coarse stages (no byte counts), so we signal activity without
+ *  fabricating a percentage. */
+function IndeterminateBar({ label }: { label: string }) {
+  return (
+    <div className="mt-2" data-setup-transcription-progress>
+      <div className="mb-1 text-[11px] text-muted-foreground">{label}</div>
+      <div
+        className="setup-indeterminate-bar relative h-1.5 overflow-hidden rounded-full"
+        style={{ background: 'var(--surface-sunken)' }}
+        role="progressbar"
+        aria-label={label}
+      />
+    </div>
+  );
 }
 
 function Badge({ status }: { status: StepStatus }) {
@@ -83,6 +133,7 @@ function StepCard({ step }: { step: Step }) {
           <Badge status={step.status} />
         </div>
         <Muted className="mt-0.5">{step.detail ?? step.description}</Muted>
+        {step.progressNode}
       </div>
     </div>
   );
@@ -104,6 +155,13 @@ export function Setup() {
   const [done, setDone] = React.useState(false);
   const [debugOpen, setDebugOpen] = React.useState(false);
   const [logs, setLogs] = React.useState<string[]>([]);
+  // Live download progress surfaced on the step cards. Parakeet only exposes a
+  // coarse stage (indeterminate bar); Ollama streams byte-level percent.
+  const [parakeetStage, setParakeetStage] = React.useState<string | null>(null);
+  const [ollamaProgress, setOllamaProgress] = React.useState<{
+    status: string;
+    pct: number;
+  } | null>(null);
 
   React.useEffect(() => {
     if (typeof window === 'undefined' || !window.stenoai) return;
@@ -113,6 +171,23 @@ export function Setup() {
         return next.length > 500 ? next.slice(-500) : next;
       });
     });
+  }, []);
+
+  // Subscribe once to the onboarding download-progress events. These are the
+  // setup-specific channels (distinct from the Settings model-management pull
+  // events) emitted by main.js 'setup-parakeet' / 'setup-ollama-and-model'.
+  React.useEffect(() => {
+    if (typeof window === 'undefined' || !window.stenoai) return;
+    const offParakeet = ipc().on.parakeetPullProgress(({ stage }) => {
+      setParakeetStage(stage);
+    });
+    const offOllama = ipc().on.setupOllamaProgress(({ status, pct }) => {
+      setOllamaProgress({ status, pct });
+    });
+    return () => {
+      offParakeet();
+      offOllama();
+    };
   }, []);
 
   const checkMic = useCheckMicPermission();
@@ -194,6 +269,10 @@ export function Setup() {
   const runSetup = async () => {
     setRunning(true);
     setDone(false);
+    // Reset any progress left over from a previous (failed) run so a retry
+    // starts from a clean bar rather than resuming a stale one.
+    setParakeetStage(null);
+    setOllamaProgress(null);
     // Capture the snapshot so we can branch on what's already done. Skipping
     // completed steps keeps retries fast (no re-prompting for mic permission,
     // no re-initialising Whisper) when the user is just fixing a bad API key.
@@ -243,6 +322,7 @@ export function Setup() {
         } else {
           setStatus('transcription', 'running', `Downloading Parakeet TDT v3 (${isMac ? '~572 MB' : '~670 MB'})...`);
           await parakeetStep.mutateAsync();
+          setParakeetStage(null);
           setStatus('transcription', 'done', 'Transcription model ready');
         }
       }
@@ -278,6 +358,7 @@ export function Setup() {
         ipc().analytics.track('ai_provider_selected', { provider: 'local' });
         setStatus('ollama', 'running', 'Downloading model (~2 GB)...');
         await ollamaStep.mutateAsync();
+        setOllamaProgress(null);
         setStatus('ollama', 'done', 'Model installed');
       }
 
@@ -302,6 +383,10 @@ export function Setup() {
       setDone(true);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Setup step failed';
+      // Clear the bars on failure - a failed step keeps its Failed badge +
+      // error detail, not a frozen progress bar.
+      setParakeetStage(null);
+      setOllamaProgress(null);
       setStatuses((prev) => {
         const failId = (Object.keys(prev) as Step['id'][]).find((k) => prev[k] === 'running');
         if (!failId) return prev;
@@ -329,6 +414,10 @@ export function Setup() {
       icon: MessageSquare,
       status: statuses.transcription,
       detail: details.transcription,
+      progressNode:
+        statuses.transcription === 'running' && parakeetStage !== null ? (
+          <IndeterminateBar label="Downloading and preparing model..." />
+        ) : undefined,
     },
     {
       id: 'ollama',
@@ -340,6 +429,10 @@ export function Setup() {
       icon: summaryMode === 'cloud' ? Cloud : Zap,
       status: statuses.ollama,
       detail: details.ollama,
+      progressNode:
+        statuses.ollama === 'running' && ollamaProgress !== null ? (
+          <OllamaProgressBar status={ollamaProgress.status} pct={ollamaProgress.pct} />
+        ) : undefined,
     },
   ];
 

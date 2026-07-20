@@ -445,6 +445,48 @@ function install({ ipcMain }) {
       state.provider = 'local';
       return { success: true };
     },
+
+    // Onboarding permission gate. The real handlers ask macOS; under mock IPC we
+    // grant so the setup-progress spec can run past the first step. Harmless for
+    // other specs, none of which invoke these channels.
+    'check-microphone-permission': async () => ({ success: true, status: 'granted' }),
+    'request-microphone-permission': async () => ({ success: true, granted: true }),
+
+    // Onboarding model downloads. With STENOAI_E2E_SETUP_PROGRESS=1 the handler
+    // emits the same renderer progress events the real handlers do, then holds
+    // the step in its 'running' state (the promise never resolves) so the
+    // download-progress spec can observe the bar. The app is torn down at test
+    // end. Without the flag they resolve success, matching the permissive
+    // default so nothing else changes.
+    'setup-parakeet': async (event) => {
+      if (process.env.STENOAI_E2E_SETUP_PROGRESS === '1') {
+        const wc = event && event.sender;
+        if (wc && !wc.isDestroyed()) {
+          // Parakeet exposes only coarse stages (no byte counts).
+          wc.send('parakeet-pull-progress', { stage: 'downloading' });
+        }
+        return new Promise(() => {});
+      }
+      return { success: true, message: 'Parakeet model ready' };
+    },
+    'setup-ollama-and-model': async (event) => {
+      if (process.env.STENOAI_E2E_SETUP_PROGRESS === '1') {
+        const wc = event && event.sender;
+        if (wc && !wc.isDestroyed()) {
+          // Two records: the phase change (manifest -> blob) and a byte-progress
+          // line, mirroring the real { status, pct, completed, total } payload.
+          wc.send('setup-ollama-progress', { status: 'pulling manifest', pct: 0, completed: 0, total: 0 });
+          wc.send('setup-ollama-progress', {
+            status: 'pulling sha256:abcd',
+            pct: 42,
+            completed: 42,
+            total: 100,
+          });
+        }
+        return new Promise(() => {});
+      }
+      return { success: true, message: 'Ollama and AI model ready' };
+    },
   };
 
   // Static shapes for the channels that fire on first paint and would throw in

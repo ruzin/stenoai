@@ -356,6 +356,7 @@ const stenoai = {
     whisperPullComplete: (cb) => subscribe('whisper-pull-complete', cb),
     parakeetPullProgress: (cb) => subscribe('parakeet-pull-progress', cb),
     parakeetPullComplete: (cb) => subscribe('parakeet-pull-complete', cb),
+    setupOllamaProgress: (cb) => subscribe('setup-ollama-progress', cb),
     liveTranscriptReady: (cb) => subscribe('live-transcript-ready', cb),
     liveTranscriptChunk: (cb) => subscribe('live-transcript-chunk', cb),
     liveTranscriptError: (cb) => subscribe('live-transcript-error', cb),
