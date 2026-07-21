@@ -125,7 +125,7 @@ ${listItems(input.actionItems)}
     font-weight: 400;
     font-style: normal;
   }
-  @page { size: A4; margin: 18mm 16mm 16mm; }
+  @page { size: A4; margin: 18mm 18mm 16mm; }
   :root {
     --paper-0: #FAF9F5;
     --paper-1: #F5F3EC;
