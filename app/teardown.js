@@ -22,6 +22,11 @@
  *     disposer from spinning the quit path forever. A redundant drain with
  *     nothing newly registered does nothing. Individual dispose()s should also
  *     be idempotent so a resource torn down twice is harmless.
+ *     NOTE for when consumers arrive (Phase 2): at QUIT there is no "next drain",
+ *     so a dispose() that re-arms a resource mid-teardown would leak it. If a
+ *     consumer ever needs that, switch to a BOUNDED re-drain loop (N passes until
+ *     the list is empty) — bounded so a pathological self-re-register still can't
+ *     hang quit. Left simple here because there are no consumers yet.
  *   - ISOLATED. A throwing dispose() is swallowed so it can't abort the drain
  *     and strand later resources (a leaked process is worse than a lost error).
  */
