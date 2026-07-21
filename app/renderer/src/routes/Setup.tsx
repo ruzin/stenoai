@@ -178,7 +178,13 @@ export function Setup() {
   // events) emitted by main.js 'setup-parakeet' / 'setup-ollama-and-model'.
   React.useEffect(() => {
     if (typeof window === 'undefined' || !window.stenoai) return;
-    const offParakeet = ipc().on.parakeetPullProgress(({ stage }) => {
+    const offParakeet = ipc().on.parakeetPullProgress(({ model, stage }) => {
+      // Both the setup-parakeet flow and the Settings model-management pull
+      // emit on the shared 'parakeet-pull-progress' channel. Settings pulls
+      // carry a `model` id; the setup handler emits only { stage }. Ignore
+      // model-bearing events so the wizard bar can't reflect an unrelated
+      // Settings pull.
+      if (model != null) return;
       setParakeetStage(stage);
     });
     const offOllama = ipc().on.setupOllamaProgress(({ status, pct }) => {

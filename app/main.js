@@ -5879,7 +5879,6 @@ ipcMain.handle('setup-ollama-and-model', async () => {
         // mid-record, so buffer across chunks and only parse complete lines -
         // splitting each chunk in isolation would corrupt a split record.
         let buffer = '';
-        let streamError = null;
         // Ollama reports byte progress PER LAYER/blob, so completed/total reset
         // for each new layer. Track every layer's { completed, total } keyed by
         // digest, then report progress from the SINGLE largest layer (the model
@@ -5903,7 +5902,6 @@ ipcMain.handle('setup-ollama-and-model', async () => {
         const handleRecord = (json) => {
           if (json.error) {
             sendDebugLog(`Pull error: ${json.error}`);
-            streamError = json.error;
             trackEvent('setup_failed', { step: 'ollama_and_model' });
             req.destroy();
             settle({ success: false, error: 'Failed to download AI model', details: json.error });
@@ -5972,11 +5970,10 @@ ipcMain.handle('setup-ollama-and-model', async () => {
         });
 
         res.on('end', async () => {
+          // The in-stream { error } path calls settle() synchronously (via
+          // handleRecord) before 'end' fires, so `settled` already covers it —
+          // no separate streamError check is needed here.
           if (settled) return;
-          if (streamError) {
-            settle({ success: false, error: 'Failed to download AI model', details: streamError });
-            return;
-          }
           // A final NDJSON record without a trailing newline stays in the buffer.
           // If that trailing line is an { error } record, an HTTP-200 end would
           // otherwise resolve success even though the pull failed - so parse it
