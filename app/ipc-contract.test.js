@@ -246,14 +246,21 @@ test('every extracted seam module is required AND invoked in main.js (reachabili
     // emit-only module: entry point is the createDebugLog factory
     { file: 'debug-log.js', entryPoints: ['createDebugLog'] },
   ];
+  // Scan main.js with comments stripped, so a stale pointer comment that
+  // mentions a require()/factory call (e.g. "// sendDebugLog now comes from
+  // ./debug-log via createDebugLog(...)") can't satisfy the check — a de-wired
+  // module must actually fail. Line-comment strip guards against `://` in URLs.
+  const code = MAIN
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/(^|[^:])\/\/.*$/gm, '$1');
   const unwired = [];
   for (const { file, entryPoints } of modules) {
     const base = file.replace(/\.js$/, '');
     const required =
-      MAIN.includes(`require('./${base}')`) || MAIN.includes(`require("./${base}")`);
+      code.includes(`require('./${base}')`) || code.includes(`require("./${base}")`);
     const invoked =
       entryPoints.length > 0 &&
-      entryPoints.every((fn) => new RegExp(`\\b${fn}\\s*\\(`).test(MAIN));
+      entryPoints.every((fn) => new RegExp(`\\b${fn}\\s*\\(`).test(code));
     if (!required || !invoked) unwired.push(`${file} (required:${required} invoked:${invoked})`);
   }
   assert.deepStrictEqual(
