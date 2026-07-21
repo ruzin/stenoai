@@ -45,18 +45,21 @@ def bedrock_converse_url(region: str, target_id: str) -> str:
     can't drift on the URL-encoding rules — the original release shipped
     with one site only and we got bitten by it.
 
-    URL-encoding subtlety: the safe set MUST include ``/`` alongside the
-    ``:.-`` already needed for system-profile and bare-model ids, because
+    URL-encoding subtlety: the identifier MUST be fully percent-encoded
+    (``safe=""``), including ``:`` → ``%3A`` and ``/`` → ``%2F``, because
     application inference profile ARNs (the standard shape in governed
-    AWS environments) contain a path-style segment:
+    AWS environments) contain both a colon-delimited ARN prefix and a
+    path-style segment:
 
         arn:aws:bedrock:eu-west-2:…:application-inference-profile/abc123
                                                                  ^
 
-    Bedrock's REST router rejects the percent-encoded form (``%2F``) with
-    HTTP 400 "The provided model identifier is invalid". Keeping ``/``
-    literal lets ARNs flow through; non-ARN ids (no slashes) are
-    unaffected because there's nothing to leave alone.
+    Left literal, the slash makes Bedrock's REST router treat the ARN as
+    a longer path and return HTTP 200 with an ``UnknownOperationException``
+    body instead of routing to the Converse operation. Fully encoding the
+    id routes ARNs to Converse correctly; system-profile and bare-model
+    ids (which contain a ``:0`` version suffix) encode to ``%3A0`` and
+    route fine too.
 
     ``region`` must be shaped like a real AWS region code — rejected here
     too (not just in Config.set_bedrock_region()) because this function is
@@ -68,7 +71,7 @@ def bedrock_converse_url(region: str, target_id: str) -> str:
     if not BEDROCK_REGION_RE.fullmatch(region):
         raise ValueError(f"Invalid Bedrock region: {region!r}")
     import urllib.parse
-    encoded = urllib.parse.quote(target_id, safe=":.-/")
+    encoded = urllib.parse.quote(target_id, safe="")
     return f"https://bedrock-runtime.{region}.amazonaws.com/model/{encoded}/converse"
 
 

@@ -6,8 +6,10 @@ simple_recorder.test_cloud_api — both with the same too-narrow safe set
 (``":.-"``). That worked for system inference profile ids and bare model
 ids, but silently broke for application inference profile ARNs in
 governed AWS environments because the ARN contains a path-style
-``application-inference-profile/<id>`` segment. Percent-encoding the
-slash produced HTTP 400 "model identifier invalid".
+``application-inference-profile/<id>`` segment. Leaving the slash
+literal made Bedrock's router return HTTP 200 with an
+``UnknownOperationException`` body instead of routing to Converse; the
+fix fully percent-encodes the identifier (``safe=""``).
 
 These tests pin the three concrete shapes we expect to construct URLs
 for, so a regression on the safe set surfaces here before it ships.
@@ -18,18 +20,22 @@ from src.summarizer import bedrock_converse_url
 
 
 class BedrockConverseUrlTests(unittest.TestCase):
-    def test_application_inference_profile_arn_keeps_slash(self):
+    def test_application_inference_profile_arn_is_fully_encoded(self):
         arn = (
             "arn:aws:bedrock:eu-west-2:745078845594:"
             "application-inference-profile/acgdk9re2ouo"
         )
         url = bedrock_converse_url("eu-west-2", arn)
-        # The slash inside the ARN survives URL construction. If it got
-        # percent-encoded to %2F, Bedrock returns "model identifier invalid".
-        self.assertNotIn("%2F", url)
-        self.assertNotIn("%2f", url)
-        # Spot-check the segment is intact.
-        self.assertIn("application-inference-profile/acgdk9re2ouo", url)
+        # The ARN is fully percent-encoded: `:` -> %3A, `/` -> %2F. Left
+        # literal, the slash makes Bedrock return HTTP 200 with an
+        # UnknownOperationException instead of routing to Converse.
+        self.assertIn("%3A", url)
+        self.assertIn("%2F", url)
+        self.assertIn(
+            "arn%3Aaws%3Abedrock%3Aeu-west-2%3A745078845594%3A"
+            "application-inference-profile%2Facgdk9re2ouo",
+            url,
+        )
         # Host + path shape.
         self.assertTrue(
             url.startswith("https://bedrock-runtime.eu-west-2.amazonaws.com/model/")
@@ -37,20 +43,20 @@ class BedrockConverseUrlTests(unittest.TestCase):
         self.assertTrue(url.endswith("/converse"))
 
     def test_system_inference_profile_id_unchanged(self):
-        # The Anthropic system profile shape from the AWS docs. No
-        # characters that would be percent-encoded under either old or
-        # new safe set.
+        # The Anthropic system profile shape from the AWS docs. The `:0`
+        # version suffix now percent-encodes to %3A0.
         profile = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+        encoded = "us.anthropic.claude-haiku-4-5-20251001-v1%3A0"
         url = bedrock_converse_url("us-east-1", profile)
-        self.assertIn(f"/model/{profile}/converse", url)
+        self.assertIn(f"/model/{encoded}/converse", url)
 
     def test_bare_model_id_unchanged(self):
         # Direct-invoke shape. Same expectations as the system profile —
-        # the test exists so a future "tighten the safe set" change can't
-        # silently break direct invocation either.
+        # the `:0` version suffix percent-encodes to %3A0.
         model = "anthropic.claude-haiku-4-5-20251001-v1:0"
+        encoded = "anthropic.claude-haiku-4-5-20251001-v1%3A0"
         url = bedrock_converse_url("us-east-1", model)
-        self.assertIn(f"/model/{model}/converse", url)
+        self.assertIn(f"/model/{encoded}/converse", url)
 
     def test_region_lands_in_host_segment(self):
         # Defensive — ensures the region argument flows through rather
