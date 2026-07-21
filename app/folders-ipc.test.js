@@ -162,18 +162,7 @@ test('select-storage-folder opens the dialog parented to the injected window', a
 });
 
 test('backend failures surface as { success:false, error } (not a throw)', async () => {
-  const h = harness();
-  h.calls; // noop
-  const throwing = {
-    ipcMain: { handle: (ch, fn) => { throwing._h = throwing._h || {}; throwing._h[ch] = fn; } },
-    runPythonScript: async () => { throw new Error('backend exploded'); },
-    dialog: { showOpenDialog: async () => ({ canceled: true, filePaths: [] }) },
-    getMainWindow: () => ({}),
-    getUserDataDir: () => '/d',
-    validateMeetingFilePath: async (p) => ({ realPath: p }),
-    setCachedCustomStoragePath: () => {},
-  };
-  registerFoldersIpc(throwing);
-  const res = await throwing._h['list-folders']();
+  const { handlers } = harness({ pyThrows: 'backend exploded' });
+  const res = await handlers['list-folders']();
   assert.deepStrictEqual(res, { success: false, error: 'backend exploded' });
 });

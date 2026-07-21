@@ -99,9 +99,10 @@ test('killProcessTree escalates SIGTERM -> SIGKILL on POSIX', () => {
 
 test('killProcessTree tree-kills via taskkill on win32', () => {
   const origPlatform = process.platform;
-  Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
-  const execMock = mock.method(cp, 'execFileSync', () => {});
   try {
+    // Inside the try so any throw during setup still hits the finally restore.
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    const execMock = mock.method(cp, 'execFileSync', () => {});
     killProcessTree(777);
     assert.strictEqual(execMock.mock.callCount(), 1);
     const [bin, argv, opts] = execMock.mock.calls[0].arguments;
@@ -125,9 +126,10 @@ test('getBackendPath/getBackendCwd resolve the dev build via injected app', () =
 
 test('getBackendPath/getBackendCwd resolve the packaged resources dir', () => {
   const origRes = process.resourcesPath;
-  Object.defineProperty(process, 'resourcesPath', { value: '/Apps/Steno.app/Contents/Resources', configurable: true });
-  const exe = process.platform === 'win32' ? 'stenoai.exe' : 'stenoai';
   try {
+    // Inside the try so any throw during setup still hits the finally restore.
+    Object.defineProperty(process, 'resourcesPath', { value: '/Apps/Steno.app/Contents/Resources', configurable: true });
+    const exe = process.platform === 'win32' ? 'stenoai.exe' : 'stenoai';
     const { getBackendPath, getBackendCwd } = createBackendCli({ app: { isPackaged: true } });
     assert.strictEqual(getBackendPath(), path.join('/Apps/Steno.app/Contents/Resources', 'stenoai', exe));
     assert.strictEqual(getBackendCwd(), path.join('/Apps/Steno.app/Contents/Resources', 'stenoai'));

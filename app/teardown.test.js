@@ -52,6 +52,37 @@ test('ignores non-function registrations', () => {
   });
 });
 
+test('a disposer that registers during drain defers the new one (no infinite loop)', () => {
+  const ran = [];
+  const t = createTeardownRegistry();
+  let armed = false;
+  t.register(() => {
+    ran.push('first');
+    // Re-register during teardown — the buggy version would run this in the same
+    // pass and, if it kept re-registering, spin forever.
+    if (!armed) {
+      armed = true;
+      t.register(() => ran.push('late'));
+    }
+  });
+  t.drain(); // must terminate; the mid-drain registration is deferred.
+  assert.deepStrictEqual(ran, ['first']);
+  t.drain(); // next drain runs the deferred disposer.
+  assert.deepStrictEqual(ran, ['first', 'late']);
+});
+
+test('a self-re-registering disposer cannot spin the drain forever', () => {
+  let count = 0;
+  const t = createTeardownRegistry();
+  const selfReregister = () => {
+    count += 1;
+    t.register(selfReregister); // pathological: re-registers itself every run
+  };
+  t.register(selfReregister);
+  t.drain(); // terminates: only the snapshot (1 entry) runs this pass.
+  assert.strictEqual(count, 1);
+});
+
 test('register after a drain participates in the next drain', () => {
   const ran = [];
   const t = createTeardownRegistry();
