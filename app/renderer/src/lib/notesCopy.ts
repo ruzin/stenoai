@@ -6,7 +6,12 @@
  * matches what's on screen.
  */
 
-export interface NotesCopySections {
+/**
+ * The structured Standard note, decomposed into the fields both note exports
+ * consume: buildNotesCopyText (clipboard) and buildNotesHtml (branded PDF,
+ * notesPdf.ts). One shared shape so the two can't drift.
+ */
+export interface StructuredNoteSections {
   name: string;
   meta?: string;
   summary?: string;
@@ -16,8 +21,11 @@ export interface NotesCopySections {
   participants: string[];
 }
 
+/** @deprecated Use StructuredNoteSections — kept as an alias for callers. */
+export type NotesCopySections = StructuredNoteSections;
+
 export function buildNotesCopyText(
-  sections: NotesCopySections,
+  sections: StructuredNoteSections,
   activeReport: { content: string } | null,
 ): string {
   const lines: string[] = [sections.name];

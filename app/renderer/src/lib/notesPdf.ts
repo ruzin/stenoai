@@ -13,17 +13,12 @@
  */
 
 import { OVO_FONT_WOFF2_BASE64, STENO_LOGO_SVG_BASE64 } from '@/lib/brandAssets';
+import type { StructuredNoteSections } from '@/lib/notesCopy';
 
-export interface NotesPdfInput {
-  name: string;
-  /** Pre-formatted "date · duration"-style line; omitted when empty. */
-  meta?: string;
-  summary?: string;
-  discussionAreas: { title: string; analysis?: string }[];
-  keyPoints: string[];
-  actionItems: string[];
-  participants: string[];
-}
+// The PDF builder consumes the same decomposed Standard-note shape as the
+// clipboard export (one source of truth — see notesCopy.ts). `meta` is a
+// pre-formatted "date · duration"-style line, omitted when empty.
+export type NotesPdfInput = StructuredNoteSections;
 
 // Escape the five characters that are unsafe in HTML text/attribute context, so
 // note content (a title with "&", an action item with "<", etc.) can never
@@ -121,6 +116,7 @@ ${listItems(input.actionItems)}
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; font-src data:; style-src 'unsafe-inline'">
 <title>${escapeHtml(title)}</title>
 <style>
   @font-face {

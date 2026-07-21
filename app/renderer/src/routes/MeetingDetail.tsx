@@ -62,8 +62,8 @@ import {
 import { useActiveMeeting } from '@/lib/askBarContext';
 import { ipc, type Meeting, type Report, type Template } from '@/lib/ipc';
 import { buildTranscriptBundle, defaultExportFilename } from '@/lib/transcriptBundle';
-import { buildNotesCopyText } from '@/lib/notesCopy';
-import { buildNotesHtml, type NotesPdfInput } from '@/lib/notesPdf';
+import { buildNotesCopyText, type StructuredNoteSections } from '@/lib/notesCopy';
+import { buildNotesHtml, hasNotesContent } from '@/lib/notesPdf';
 import { unwrap } from '@/lib/result';
 import { cn } from '@/lib/utils';
 import { navigate } from '@/lib/router';
@@ -497,13 +497,11 @@ function DetailContent({
     }
   };
 
-  // Branded-PDF export of the Standard structured note. Built from the same
-  // structured fields as Copy notes (summary/topics/points/actions/participants,
-  // reasoning stripped), then handed as finished HTML to the export-note-pdf IPC
-  // which rasterises + writes it. Exports the Standard note (not an open template
-  // report) — the branded template is structured-note shaped. Empty on a
-  // transcript-only/failed note, which disables the action.
-  const notesPdfInput = React.useMemo<NotesPdfInput>(() => {
+  // The Standard structured note, decomposed once into the shape both note
+  // exports consume — Copy notes (clipboard) and Save notes as PDF. Reasoning
+  // blocks are stripped like the rendered views, so neither export carries
+  // <think> content the screen hides. One memo so the two can't drift.
+  const noteSections = React.useMemo<StructuredNoteSections>(() => {
     const meta = [formatDetailDate(info), formatDuration(info.duration_seconds)]
       .filter(Boolean)
       .join(' · ');
@@ -517,15 +515,22 @@ function DetailContent({
       participants: asStringArray(meeting.participants),
     };
   }, [info, meeting]);
-  const notesHtml = React.useMemo(() => buildNotesHtml(notesPdfInput), [notesPdfInput]);
 
+  // Whether the note has structured content worth exporting to PDF — the
+  // disabled state only needs this boolean, so the ~45KB branded HTML (base64
+  // font included) is built lazily on click in saveNotesPdf, not on every render.
+  const canExportNotesPdf = hasNotesContent(noteSections);
+
+  // Branded-PDF export of the Standard structured note (not an open template
+  // report — the branded template is structured-note shaped). Hands finished
+  // HTML to the export-note-pdf IPC, which rasterises + writes it.
   const saveNotesPdf = async () => {
-    if (!notesHtml) return;
+    if (!canExportNotesPdf) return;
     setExportError(null);
     try {
       const res = await ipc().meetings.exportNotePdf(
         defaultExportFilename(meeting, 'pdf'),
-        notesHtml
+        buildNotesHtml(noteSections)
       );
       if (!res.success && res.error !== EXPORT_CANCELED_ERROR) {
         setExportError(`Couldn't save notes: ${res.error || 'unknown error'}`);
@@ -536,23 +541,10 @@ function DetailContent({
   };
 
   // Copies whichever note is on screen: the open template report when one is
-  // selected, otherwise the Standard structured note. Reasoning blocks are
-  // stripped like the rendered views do, so the clipboard never carries
-  // <think> content the screen hides.
+  // selected, otherwise the Standard structured note.
   const copyNotes = () => {
-    const meta = [formatDetailDate(info), formatDuration(info.duration_seconds)]
-      .filter(Boolean)
-      .join(' · ');
     const text = buildNotesCopyText(
-      {
-        name: info.name,
-        meta: meta || undefined,
-        summary: meeting.summary ? stripReasoning(meeting.summary) : undefined,
-        discussionAreas: asDiscussionAreas(meeting.discussion_areas),
-        keyPoints: meeting.key_points ?? [],
-        actionItems: asStringArray(meeting.action_items),
-        participants: asStringArray(meeting.participants),
-      },
+      noteSections,
       activeReport ? { content: stripReasoning(activeReport.content) } : null
     );
     void navigator.clipboard.writeText(text);
@@ -780,7 +772,7 @@ function DetailContent({
                   className="flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-sm transition-colors hover:bg-[color:var(--surface-hover)] disabled:opacity-50"
                   style={{ color: 'var(--fg-1)' }}
                   onClick={() => void saveNotesPdf()}
-                  disabled={!notesHtml}
+                  disabled={!canExportNotesPdf}
                 >
                   <FileDown className="size-[13px] shrink-0" style={{ color: 'var(--fg-2)' }} />
                   Save notes as PDF…

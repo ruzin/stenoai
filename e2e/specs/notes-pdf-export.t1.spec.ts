@@ -16,10 +16,10 @@ import path from 'path';
 
 const SUMMARY_FILE = 'epsilon_summary.json';
 
-async function openDetail(page: Page) {
+async function openDetail(page: Page, summaryFile = SUMMARY_FILE) {
   await page.evaluate((f) => {
     window.location.hash = `#/meetings/${encodeURIComponent(f)}`;
-  }, SUMMARY_FILE);
+  }, summaryFile);
   await expect(page.getByRole('button', { name: 'Copy transcript' })).toBeVisible();
 }
 
@@ -65,4 +65,27 @@ test('Save notes as PDF passes the renderer-built branded HTML to export-note-pd
   } finally {
     rmSync(outDir, { recursive: true, force: true });
   }
+});
+
+test('Save notes as PDF is enabled for a note with structured content', async ({ launchApp }) => {
+  const { page } = await launchApp({ mockIpc: true, env: { STENOAI_E2E_SEED_MEETING: '1' } });
+  await openDetail(page);
+  await page.getByRole('button', { name: 'More options' }).click();
+  await expect(page.getByRole('button', { name: /Save notes as PDF/ })).toBeEnabled();
+});
+
+test('Save notes as PDF is disabled for a transcript-only note (no structured content)', async ({
+  launchApp,
+}) => {
+  // A transcript-only note (auto-summarise off) has no summary/topics/points/
+  // actions, so there is nothing to render — the action must be disabled even
+  // though "Save transcript as .md…" (which needs only a transcript) is enabled.
+  const { page } = await launchApp({
+    mockIpc: true,
+    env: { STENOAI_E2E_SEED_PENDING_NOTE: '1' },
+  });
+  await openDetail(page, 'pending_summary.md');
+  await page.getByRole('button', { name: 'More options' }).click();
+  await expect(page.getByRole('button', { name: /Save notes as PDF/ })).toBeDisabled();
+  await expect(page.getByRole('button', { name: /Save transcript as \.md/ })).toBeEnabled();
 });

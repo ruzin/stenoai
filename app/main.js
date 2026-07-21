@@ -3241,6 +3241,8 @@ ipcMain.handle('export-transcript', async (event, defaultFilename, content) => {
 // window. printBackground keeps the paper fill/ink; preferCSSPageSize honors the
 // document's own `@page { size: A4; margin: … }` so page geometry lives with the
 // template, not here. Cross-platform: printToPDF is Chromium, identical on both.
+const PDF_RENDER_TIMEOUT_MS = 15000;
+
 async function renderHtmlToPdf(html) {
   const win = new BrowserWindow({
     show: false,
@@ -3253,13 +3255,38 @@ async function renderHtmlToPdf(html) {
     },
   });
   try {
-    // Load the HTML directly as a data URL (self-contained: CSS, font, and logo
-    // are inlined), so there is no temp .html file to manage or clean up.
-    await win.loadURL('data:text/html;charset=UTF-8,' + encodeURIComponent(html));
-    return await win.webContents.printToPDF({
-      printBackground: true,
-      preferCSSPageSize: true,
+    const render = (async () => {
+      // Load the HTML directly as a data URL (self-contained: CSS, font, and
+      // logo are inlined), so there is no temp .html file to manage or clean up.
+      await win.loadURL('data:text/html;charset=UTF-8,' + encodeURIComponent(html));
+      // loadURL resolves on did-finish-load, but @font-face decoding (the
+      // embedded Ovo woff2) is async and may not be done yet — printing now can
+      // rasterise with the Georgia fallback, defeating the branded look. Wait
+      // for the fonts to settle first. executeJavaScript runs in the render
+      // window out-of-band (not subject to the document CSP), so this is safe
+      // even with scripts disabled by the page's own CSP.
+      await win.webContents.executeJavaScript('document.fonts.ready.then(() => true)');
+      return win.webContents.printToPDF({
+        printBackground: true,
+        preferCSSPageSize: true,
+      });
+    })();
+
+    // Bound the whole render. If Chromium stalls (a known intermittent
+    // printToPDF failure mode under GPU/compositor trouble), the awaited promise
+    // would never settle — hanging the IPC call and stranding the hidden window.
+    // On timeout we reject; the caller converts that to a clean {success:false}
+    // and the outer finally still tears the window down (which also unblocks the
+    // orphaned render promise).
+    let timer;
+    const timeout = new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error('PDF render timed out')), PDF_RENDER_TIMEOUT_MS);
     });
+    try {
+      return await Promise.race([render, timeout]);
+    } finally {
+      clearTimeout(timer);
+    }
   } finally {
     if (!win.isDestroyed()) win.destroy();
   }
