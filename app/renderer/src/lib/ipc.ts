@@ -858,6 +858,10 @@ export interface StenoaiBridge {
       [defaultFilename: string, content: string],
       Result<{ path: string }>
     >;
+    exportNotePdf: RequestFn<
+      [defaultFilename: string, html: string],
+      Result<{ path: string }>
+    >;
     regenTitle: RequestFn<[summaryFile: string, name: string], Result<Record<string, never>>>;
     generateReport: RequestFn<
       [summaryFile: string, templateId: string],

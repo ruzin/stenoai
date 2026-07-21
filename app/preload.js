@@ -155,6 +155,8 @@ const stenoai = {
     deleteReport: (summaryFile, reportId) => invoke('delete-report', summaryFile, reportId),
     exportTranscript: (defaultFilename, content) =>
       invoke('export-transcript', defaultFilename, content),
+    exportNotePdf: (defaultFilename, html) =>
+      invoke('export-note-pdf', defaultFilename, html),
   },
 
   query: {

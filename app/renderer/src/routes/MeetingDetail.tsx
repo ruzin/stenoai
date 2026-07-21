@@ -9,6 +9,7 @@ import {
   CloudOff,
   Copy,
   Download,
+  FileDown,
   FileText,
   Folder as FolderIcon,
   Globe,
@@ -62,6 +63,7 @@ import { useActiveMeeting } from '@/lib/askBarContext';
 import { ipc, type Meeting, type Report, type Template } from '@/lib/ipc';
 import { buildTranscriptBundle, defaultExportFilename } from '@/lib/transcriptBundle';
 import { buildNotesCopyText } from '@/lib/notesCopy';
+import { buildNotesHtml, type NotesPdfInput } from '@/lib/notesPdf';
 import { unwrap } from '@/lib/result';
 import { cn } from '@/lib/utils';
 import { navigate } from '@/lib/router';
@@ -495,6 +497,44 @@ function DetailContent({
     }
   };
 
+  // Branded-PDF export of the Standard structured note. Built from the same
+  // structured fields as Copy notes (summary/topics/points/actions/participants,
+  // reasoning stripped), then handed as finished HTML to the export-note-pdf IPC
+  // which rasterises + writes it. Exports the Standard note (not an open template
+  // report) — the branded template is structured-note shaped. Empty on a
+  // transcript-only/failed note, which disables the action.
+  const notesPdfInput = React.useMemo<NotesPdfInput>(() => {
+    const meta = [formatDetailDate(info), formatDuration(info.duration_seconds)]
+      .filter(Boolean)
+      .join(' · ');
+    return {
+      name: info.name,
+      meta: meta || undefined,
+      summary: meeting.summary ? stripReasoning(meeting.summary) : undefined,
+      discussionAreas: asDiscussionAreas(meeting.discussion_areas),
+      keyPoints: meeting.key_points ?? [],
+      actionItems: asStringArray(meeting.action_items),
+      participants: asStringArray(meeting.participants),
+    };
+  }, [info, meeting]);
+  const notesHtml = React.useMemo(() => buildNotesHtml(notesPdfInput), [notesPdfInput]);
+
+  const saveNotesPdf = async () => {
+    if (!notesHtml) return;
+    setExportError(null);
+    try {
+      const res = await ipc().meetings.exportNotePdf(
+        defaultExportFilename(meeting, 'pdf'),
+        notesHtml
+      );
+      if (!res.success && res.error !== EXPORT_CANCELED_ERROR) {
+        setExportError(`Couldn't save notes: ${res.error || 'unknown error'}`);
+      }
+    } catch (error) {
+      setExportError(`Couldn't save notes: ${getErrorMessage(error)}`);
+    }
+  };
+
   // Copies whichever note is on screen: the open template report when one is
   // selected, otherwise the Standard structured note. Reasoning blocks are
   // stripped like the rendered views do, so the clipboard never carries
@@ -734,6 +774,16 @@ function DetailContent({
                 >
                   <Download className="size-[13px] shrink-0" style={{ color: 'var(--fg-2)' }} />
                   Save transcript as .md…
+                </button>
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-sm transition-colors hover:bg-[color:var(--surface-hover)] disabled:opacity-50"
+                  style={{ color: 'var(--fg-1)' }}
+                  onClick={() => void saveNotesPdf()}
+                  disabled={!notesHtml}
+                >
+                  <FileDown className="size-[13px] shrink-0" style={{ color: 'var(--fg-2)' }} />
+                  Save notes as PDF…
                 </button>
                 {orgSession.data?.signedIn &&
                   (isShared ? (
