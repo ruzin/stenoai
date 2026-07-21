@@ -132,6 +132,11 @@ ${listItems(input.actionItems)}
     --ink-900: #1B1B19;
     --ink-500: #6B6B66;
     --rule: #E3E0D6;
+    /* Text sits inset from the content box on both sides, while the full-width
+       rules, masthead/footer borders, and the action-item fill span the whole
+       box — so the ink rules and paper tint overflow past the text measure
+       symmetrically, left and right. */
+    --inset: 11mm;
   }
   * { box-sizing: border-box; }
   html, body {
@@ -146,7 +151,7 @@ ${listItems(input.actionItems)}
   }
   .masthead {
     display: flex; align-items: center; justify-content: space-between;
-    padding-bottom: 10px; border-bottom: 1.5px solid var(--ink-900);
+    padding: 0 var(--inset) 10px; border-bottom: 1.5px solid var(--ink-900);
   }
   .brand { display: flex; align-items: center; gap: 9px; }
   .brand img { width: 26px; height: 26px; display: block; }
@@ -154,7 +159,7 @@ ${listItems(input.actionItems)}
   .masthead-meta { text-align: right; }
   .masthead .kicker { font-size: 7.5pt; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-500); }
   .masthead .site { margin-top: 3px; font-size: 8pt; letter-spacing: 0.02em; color: var(--ink-900); }
-  .title-block { margin: 26px 0; }
+  .title-block { margin: 26px 0; padding: 0 var(--inset); }
   h1 {
     font-family: 'Ovo', Georgia, serif; font-size: 24pt; font-weight: 400;
     line-height: 1.18; letter-spacing: -0.005em; margin: 0 0 10px; max-width: 30ch;
@@ -163,9 +168,12 @@ ${listItems(input.actionItems)}
   section { margin-bottom: 22px; }
   h2 {
     font-size: 8pt; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase;
-    color: var(--ink-500); margin: 0 0 9px; padding-bottom: 5px;
+    color: var(--ink-500); margin: 0 0 9px; padding: 0 var(--inset) 5px;
     border-bottom: 1px solid var(--rule); break-after: avoid;
   }
+  /* Running text insets to match the section labels; the h2 rule above spans
+     the full box (border-box), so it overflows past the text on both sides. */
+  section > p, section > ul { padding-left: var(--inset); padding-right: var(--inset); }
   .summary { font-family: 'Ovo', Georgia, serif; font-size: 12pt; line-height: 1.6; margin: 0; }
   p { margin: 0; }
   ul { margin: 0; padding: 0; list-style: none; }
@@ -177,7 +185,7 @@ ${listItems(input.actionItems)}
   li .lead { font-weight: 600; }
   .actions {
     background: var(--paper-1); border: 1px solid var(--rule); border-radius: 8px;
-    padding: 14px 16px 8px; break-inside: avoid;
+    padding: 14px 0 8px; break-inside: avoid;
   }
   .actions h2 { border-bottom: none; padding-bottom: 0; margin-bottom: 8px; }
   .actions li::before {
@@ -185,7 +193,7 @@ ${listItems(input.actionItems)}
     background: none; border: 1.2px solid var(--ink-900);
   }
   footer {
-    margin-top: 30px; padding-top: 10px; border-top: 1px solid var(--rule);
+    margin-top: 30px; padding: 10px var(--inset) 0; border-top: 1px solid var(--rule);
     font-size: 8pt; color: var(--ink-500); letter-spacing: 0.02em;
   }
 </style>
