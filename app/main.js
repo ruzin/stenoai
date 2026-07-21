@@ -602,7 +602,7 @@ async function initTelemetry() {
     anonymousId = config.anonymous_id;
 
     if (telemetryEnabled) {
-      posthogClient = new PostHog(POSTHOG_API_KEY, { host: POSTHOG_HOST });
+      posthogClient = new PostHog(POSTHOG_API_KEY, { host: POSTHOG_HOST, disableGeoip: true });
       // Identify user for DAU tracking
       posthogClient.identify({
         distinctId: anonymousId,
@@ -6920,12 +6920,38 @@ ipcMain.handle('get-telemetry', async () => {
   }
 });
 
+ipcMain.handle('get-privacy-notice-seen', async () => {
+  try {
+    const result = await runPythonScript('simple_recorder.py', ['get-privacy-notice-seen']);
+    const jsonData = JSON.parse(result);
+    return {
+      success: true,
+      privacy_notice_seen: jsonData.privacy_notice_seen
+    };
+  } catch (error) {
+    sendDebugLog(`Error getting privacy notice state: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('set-privacy-notice-seen', async () => {
+  try {
+    const result = await runPythonScript('simple_recorder.py', ['set-privacy-notice-seen']);
+    const jsonData = JSON.parse(result);
+    return jsonData;
+  } catch (error) {
+    sendDebugLog(`Error marking privacy notice seen: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+});
+
 // Where the telemetry toggle was flipped -- 'setup' names the Setup.tsx
-// SCREEN, not a lifecycle stage: it's also reachable later via "run setup
-// wizard" from Settings (see trigger-setup-wizard), so this deliberately
-// does NOT claim to mean "first run". Whitelisted so a stale/forged
-// renderer arg can't smuggle an arbitrary string into PostHog.
-const TELEMETRY_TOGGLE_SOURCES = new Set(['setup', 'settings']);
+// screen and 'consent' names the one-time privacy notice modal. 'setup' is
+// also reachable later via "run setup wizard" from Settings (see
+// trigger-setup-wizard), so this deliberately does NOT claim to mean "first
+// run". Whitelisted so a stale/forged renderer arg can't smuggle an arbitrary
+// string into PostHog.
+const TELEMETRY_TOGGLE_SOURCES = new Set(['setup', 'settings', 'consent']);
 
 ipcMain.handle('set-telemetry', async (event, enabled, source) => {
   try {
@@ -6941,7 +6967,7 @@ ipcMain.handle('set-telemetry', async (event, enabled, source) => {
     if (enabled && !posthogClient) {
       // Bring the client up and identify FIRST so both the super-properties
       // and this event land fresh, rather than waiting for next launch.
-      posthogClient = new PostHog(POSTHOG_API_KEY, { host: POSTHOG_HOST });
+      posthogClient = new PostHog(POSTHOG_API_KEY, { host: POSTHOG_HOST, disableGeoip: true });
       telemetryEnabled = true;
       refreshIdentitySuperProperties();
       trackEvent('telemetry_toggled', { enabled: true, source: toggleSource });

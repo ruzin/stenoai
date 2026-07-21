@@ -297,6 +297,7 @@ class Config:
         self._migrate_whisper_model()
         self._migrate_summary_model()
         self._migrate_transcription_engine()
+        self._migrate_privacy_notice_seen()
         self._normalize_templates()
         self._seed_sample_template()
 
@@ -317,6 +318,64 @@ class Config:
             "whisper" if self._existed_at_load else "parakeet"
         )
         self._save()
+
+    def _migrate_privacy_notice_seen(self) -> None:
+        """Seed the one-time privacy notice marker for fresh and existing installs.
+
+        Fresh installs are disclosed during onboarding, so their default marker
+        is True. Existing installs whose on-disk config predates the marker get
+        False so the upgrade notice appears once. Inspecting the disk directly
+        keeps a default-filled in-memory config from masking key absence.
+        """
+        if self._load_failed:
+            return  # never persist defaults over a corrupt-but-recoverable file
+        if not self._existed_at_load:
+            self._config["privacy_notice_seen"] = True
+            return
+
+        on_disk = self._read_disk_for_merge()
+        if on_disk is not None and "privacy_notice_seen" in on_disk:
+            adopted = on_disk.get("privacy_notice_seen") is True
+            self._config["privacy_notice_seen"] = adopted
+            self._snapshot["privacy_notice_seen"] = adopted
+            return
+
+        self._config["privacy_notice_seen"] = False
+        self._persist_privacy_notice_migration()
+        # Keep an ordinary later _save() from bypassing the locked CAS. If the
+        # persist lost a race, the helper has already adopted the disk value.
+        self._snapshot["privacy_notice_seen"] = self._config[
+            "privacy_notice_seen"
+        ]
+
+    def _persist_privacy_notice_migration(self) -> None:
+        """Locked compare-and-set write for the privacy notice marker.
+
+        Re-read config.json while holding the lock. If another process wrote
+        the marker first, adopt its value rather than clobbering it. Failures
+        leave the existing install's in-memory value False and retry next load.
+        """
+        lock_path = str(self.config_path) + ".lock"
+        try:
+            with filelock.FileLock(lock_path, timeout=self._SAVE_LOCK_TIMEOUT):
+                base = self._read_disk_for_merge()
+                if base is None:
+                    return
+                if "privacy_notice_seen" in base:
+                    adopted = base.get("privacy_notice_seen") is True
+                    self._config["privacy_notice_seen"] = adopted
+                    self._snapshot["privacy_notice_seen"] = adopted
+                    return
+                base["privacy_notice_seen"] = False
+                _atomic_write_json(self.config_path, base)
+                self._snapshot["privacy_notice_seen"] = False
+        except filelock.Timeout:
+            logger.warning(
+                "Timed out acquiring config lock for privacy notice migration; "
+                "will retry on next load"
+            )
+        except Exception as e:
+            logger.error(f"Error persisting privacy notice migration: {e}")
 
     def _migrate_whisper_model(self) -> None:
         """Map any out-of-current-list whisper model to the supported one.
@@ -593,6 +652,10 @@ class Config:
             # new and the default matters for the "both hidden" warning logic.
             "show_menu_bar_icon": True,
             "telemetry_enabled": True,
+            # Fresh installs see the disclosure during onboarding. Existing
+            # configs missing this key are migrated to False so the one-time
+            # upgrade notice is shown.
+            "privacy_notice_seen": True,
             # Default ON on macOS — CoreAudio Process Tap captures system
             # audio alongside the mic on macOS 14.4+. Older macOS auto-falls
             # back to mic-only via main.js's loadSystemAudioEnabled() OS gate.
@@ -875,6 +938,15 @@ class Config:
             True if saved successfully, False otherwise
         """
         self._config["telemetry_enabled"] = enabled
+        return self._save()
+
+    def get_privacy_notice_seen(self) -> bool:
+        """Get whether the one-time privacy notice has been acknowledged."""
+        return self._config.get("privacy_notice_seen", True) is True
+
+    def set_privacy_notice_seen(self, seen: bool) -> bool:
+        """Set the privacy notice marker and end the migration window."""
+        self._config["privacy_notice_seen"] = seen
         return self._save()
 
     def get_hide_dock_icon(self) -> bool:

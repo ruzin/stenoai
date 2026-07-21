@@ -6,6 +6,7 @@ export const settingsKeys = {
   all: ['settings'] as const,
   notifications: () => [...settingsKeys.all, 'notifications'] as const,
   telemetry: () => [...settingsKeys.all, 'telemetry'] as const,
+  privacyNoticeSeen: () => [...settingsKeys.all, 'privacyNoticeSeen'] as const,
   dockIcon: () => [...settingsKeys.all, 'dockIcon'] as const,
   menuBarIcon: () => [...settingsKeys.all, 'menuBarIcon'] as const,
   systemAudio: () => [...settingsKeys.all, 'systemAudio'] as const,
@@ -49,6 +50,41 @@ export function useSetTelemetry() {
     mutationFn: async ({ enabled, source }: { enabled: boolean; source: TelemetryToggleSource }) =>
       unwrap(await ipc().settings.setTelemetry(enabled, source)),
     onSuccess: () => qc.invalidateQueries({ queryKey: settingsKeys.telemetry() }),
+  });
+}
+
+/** One-time privacy disclosure gate. `privacy_notice_seen` is false only for
+ *  existing installs whose config predates the marker (see
+ *  Config._migrate_privacy_notice_seen); fresh installs are disclosed during
+ *  onboarding and start true. The consent modal reads this and, on
+ *  acknowledgement, marks it seen forever and invalidates this query so it
+ *  won't re-open. */
+export function usePrivacyNoticeSeen() {
+  return useQuery({
+    queryKey: settingsKeys.privacyNoticeSeen(),
+    queryFn: async () => unwrap(await ipc().privacy.getNoticeSeen()).privacy_notice_seen,
+  });
+}
+
+/** Persist the one-time privacy notice as seen and flip the gate query so the
+ *  disclosure can't reappear. Shared by the consent modal and onboarding so the
+ *  cache key + invalidation never drift as the gate evolves. The gate is set
+ *  synchronously on success (don't depend on the refetch, which could fail and
+ *  leave the modal stuck open); the invalidate reconciles against disk in the
+ *  background. Rejects if the backend write failed — callers own their own
+ *  control flow (re-arm, navigate) around it. */
+export function useMarkPrivacyNoticeSeen() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      const res = await ipc().privacy.markNoticeSeen();
+      if (!res?.success) throw new Error(res?.error || 'markNoticeSeen failed');
+      return res;
+    },
+    onSuccess: () => {
+      qc.setQueryData(settingsKeys.privacyNoticeSeen(), true);
+      qc.invalidateQueries({ queryKey: settingsKeys.privacyNoticeSeen() });
+    },
   });
 }
 

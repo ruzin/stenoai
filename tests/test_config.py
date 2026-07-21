@@ -302,6 +302,86 @@ class ConfigLaunchOnLoginTests(unittest.TestCase):
             self.assertTrue(reloaded.get_launch_on_login())
 
 
+class ConfigPrivacyNoticeTests(unittest.TestCase):
+    def test_fresh_install_seeds_notice_seen_true(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "config.json"
+            config = Config(config_path=path)
+
+            self.assertTrue(config.get_privacy_notice_seen())
+            self.assertIs(json.loads(path.read_text())["privacy_notice_seen"], True)
+
+    def test_existing_config_without_marker_seeds_false_and_persists(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "config.json"
+            path.write_text(json.dumps({"model": Config.DEFAULT_MODEL}))
+
+            config = Config(config_path=path)
+
+            self.assertFalse(config.get_privacy_notice_seen())
+            self.assertIs(json.loads(path.read_text())["privacy_notice_seen"], False)
+
+    def test_set_notice_seen_true_round_trips_and_persists(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "config.json"
+            path.write_text(json.dumps({"model": Config.DEFAULT_MODEL}))
+            config = Config(config_path=path)
+
+            self.assertTrue(config.set_privacy_notice_seen(True))
+            self.assertTrue(config.get_privacy_notice_seen())
+            self.assertIs(json.loads(path.read_text())["privacy_notice_seen"], True)
+            self.assertTrue(Config(config_path=path).get_privacy_notice_seen())
+
+    def test_present_marker_prevents_retrigger(self):
+        for seen in (False, True):
+            with self.subTest(seen=seen):
+                with tempfile.TemporaryDirectory() as tmp_dir:
+                    path = Path(tmp_dir) / "config.json"
+                    payload = {
+                        "model": Config.DEFAULT_MODEL,
+                        "privacy_notice_seen": seen,
+                    }
+                    path.write_text(json.dumps(payload))
+
+                    config = Config(config_path=path)
+
+                    self.assertIs(config.get_privacy_notice_seen(), seen)
+                    self.assertIs(
+                        json.loads(path.read_text())["privacy_notice_seen"], seen
+                    )
+
+    def test_corrupt_config_never_persisted(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "config.json"
+            path.write_text("{not json")
+
+            config = Config(config_path=path)
+
+            self.assertTrue(config.get_privacy_notice_seen())
+            self.assertEqual(path.read_text(), "{not json")
+
+    def test_migration_cas_adopts_marker_that_lands_first(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "config.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "model": Config.DEFAULT_MODEL,
+                        "privacy_notice_seen": True,
+                    }
+                )
+            )
+            config = Config(config_path=path)
+            config._config["privacy_notice_seen"] = False
+            config._snapshot.pop("privacy_notice_seen", None)
+
+            config._persist_privacy_notice_migration()
+
+            self.assertIs(json.loads(path.read_text())["privacy_notice_seen"], True)
+            self.assertTrue(config.get_privacy_notice_seen())
+            self.assertIs(config._snapshot["privacy_notice_seen"], True)
+
+
 class ConfigOrgAutoBackupTests(unittest.TestCase):
     def test_default_auto_backup_is_true(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
