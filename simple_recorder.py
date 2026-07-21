@@ -1930,6 +1930,37 @@ class _LiveVadPipeline:
     MAX_UTTERANCE_S = 30.0
     PREROLL_CHUNKS = 2  # ≈ 512 ms at 256 ms per callback
 
+    # Keep-pace guard (issue #357). Read + VAD + partial/final decode run
+    # synchronously on the single stdin-consumer thread, so a partial decode
+    # that takes longer than the audio it represents back-pressures the stdin
+    # pipe and the sidecar drifts behind real time (measured ~670 ms partial
+    # decode on a fanless M1 Air vs the 400 ms interval → ~94 % of partials
+    # over budget, audio backing up across the recording). Partials are
+    # best-effort display only — finals accumulate every sample regardless —
+    # so when decode is slow we stretch the *effective* partial cadence to an
+    # EWMA of measured decode time, dropping the partials that would otherwise
+    # queue up while always draining stdin. On fast machines (decode ≪ the
+    # interval) the effective cadence is the base interval, unchanged.
+    #
+    # Scope + known limits (kept deliberately per-channel; the shared decode
+    # coordinator belongs with the strategic ANE/threading rework):
+    #   * Cadence is tracked per channel, so two channels in *sustained*
+    #     simultaneous speech each keep their own pace but their decodes still
+    #     run serially on the one consumer thread — combined load can exceed
+    #     real time. The dominant single-speaker case (and the issue's own
+    #     measurements) is fully covered; continuous cross-talk on a fanless
+    #     Air is the residual gap, bounded by the stdin queue on the JS side.
+    #   * The EWMA only samples when a partial actually decodes, and its ALPHA
+    #     smoothing means a one-off spike inflates the interval only partly and
+    #     decays back over the next few partials of sustained speech.
+    KEEP_PACE_SAFETY = 1.15         # headroom over measured decode time
+    KEEP_PACE_ALPHA = 0.3           # EWMA weight for the newest decode sample
+    # Ceiling on the stretched cadence. High enough that a genuinely slow
+    # decoder (e.g. onnx-asr on a Windows CPU, several seconds per 15 s window)
+    # can still stretch far enough to keep pace, while ALPHA smoothing keeps a
+    # spurious spike from pinning partials at the ceiling.
+    KEEP_PACE_MAX_INTERVAL_S = 8.0
+
     @classmethod
     def _load_shared(cls, source_rate, source_label):
         """Load Parakeet config shared by both channel pipelines. Returns
@@ -2115,6 +2146,12 @@ class _LiveVadPipeline:
         self.last_partial_text = ""
         self.preroll: list = []
         self.cursor = 0
+        # Keep-pace guard state (issue #357): EWMA of measured partial-decode
+        # wall-time, used to stretch the effective partial cadence so a slow
+        # decode can't back-pressure stdin. 0.0 until the first partial has
+        # been timed (until then the fast path uses the base interval).
+        self._partial_decode_ewma_s = 0.0
+        self._keep_pace_max_interval_samples = int(sr * self.KEEP_PACE_MAX_INTERVAL_S)
 
     def parse_float32_bytes(self, raw_bytes):
         """Parse raw little-endian float32 bytes into a 1-D float32 array.
@@ -2226,23 +2263,62 @@ class _LiveVadPipeline:
         self.last_partial_count = 0
         self.last_partial_text = ""
 
+    def _effective_partial_interval_samples(self):
+        """Adaptive partial cadence in samples (issue #357 keep-pace guard).
+
+        Base cadence is ``partial_interval_samples`` (0.4 s of audio). Once a
+        partial decode has been timed and its EWMA exceeds that budget, the
+        sidecar would fall behind real time, so we require at least as much
+        *audio* between partials as the decode takes wall-clock (× a safety
+        margin), capped at ``KEEP_PACE_MAX_INTERVAL_S`` so a one-off spike
+        can't starve partials entirely. On fast machines (decode ≪ budget)
+        this returns the base cadence unchanged.
+        """
+        if self._partial_decode_ewma_s <= 0.0:
+            return self.partial_interval_samples
+        pace_samples = int(self._partial_decode_ewma_s * self.KEEP_PACE_SAFETY * self.sr)
+        effective = max(self.partial_interval_samples, pace_samples)
+        return min(effective, self._keep_pace_max_interval_samples)
+
+    def _record_partial_decode_time(self, dt_s):
+        """Fold a measured partial-decode wall-time into the keep-pace EWMA."""
+        if dt_s < 0:
+            return
+        if self._partial_decode_ewma_s <= 0.0:
+            self._partial_decode_ewma_s = dt_s
+        else:
+            self._partial_decode_ewma_s = (
+                (1.0 - self.KEEP_PACE_ALPHA) * self._partial_decode_ewma_s
+                + self.KEEP_PACE_ALPHA * dt_s
+            )
+
     def _maybe_emit_partial(self):
         delta = len(self.speech_samples) - self.last_partial_count
-        if delta < self.partial_interval_samples:
+        if delta < self._effective_partial_interval_samples():
             return
         if len(self.speech_samples) < self.min_utterance_samples:
             return
         # Only the trailing window — re-transcribing the full utterance
-        # every PARTIAL_INTERVAL_S would scale O(n²) with utterance length.
+        # every partial would scale O(n²) with utterance length.
         tail = self.speech_samples[-self.partial_window_samples:]
+        decode_started = time.monotonic()
         try:
             result = self.transcribe_samples(tail, language=self.language)
         except Exception as e:
             # Partials are best-effort. Don't tear down the consumer over
             # a transient decode hiccup; the next partial/final retries.
+            # Still fold the wall-time spent into the keep-pace EWMA — a
+            # decode that burns 700 ms before throwing is exactly the kind of
+            # cost that must widen the cadence, or a failing decoder would
+            # rebuild the backlog at the tight interval it was meant to relieve.
+            self._record_partial_decode_time(time.monotonic() - decode_started)
             logger.debug("partial transcribe failed: %s", e)
             self.last_partial_count = len(self.speech_samples)
             return
+        # Fold real decode wall-time into the keep-pace EWMA before anything
+        # can early-return, so a slow machine widens the next interval even
+        # when the text is empty or unchanged.
+        self._record_partial_decode_time(time.monotonic() - decode_started)
         text = (result.get("text") or "").strip() if result else ""
         self.last_partial_count = len(self.speech_samples)
         if text and text != self.last_partial_text:

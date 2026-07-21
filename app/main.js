@@ -3493,6 +3493,39 @@ ipcMain.handle('get-queue-status', async () => {
 // either a Node Buffer or a TypedArray; both stringify safely to bytes via
 // the same write() call. No-op if the sidecar isn't running (e.g. spawn
 // failed, or recording ended).
+// Back-pressure-aware write to the live-transcribe sidecar's stdin (#357).
+// stdin.write() returns false when the OS pipe buffer is full; ignoring that
+// signal lets a stalled sidecar force main to buffer live audio unboundedly on
+// the JS heap. We honor it: once back-pressured, queue chunks and flush them on
+// the stream's 'drain' event (listener installed in spawnLiveTranscribe). The
+// queue is bounded — under a genuine stall (which Fix #1's Python keep-pace
+// guard makes very unlikely) we drop the OLDEST (stalest) audio rather than grow
+// the heap without limit. Reaching the cap needs ~64 s of *continuous*
+// back-pressure, i.e. a sidecar that has effectively hung: at that point the
+// live transcript is already compromised and dropping (which can splice a gap
+// into the live FINAL) is the least-bad option — the post-stop batch
+// transcription reads the on-disk recording and is unaffected. All state is
+// per-process (bound on `proc` in spawnLiveTranscribe) so a quick stop→start
+// can't bleed a stale queue into the new sidecar.
+const LIVE_STDIN_MAX_QUEUE_BYTES = 8 * 1024 * 1024; // ≈ 64 s of 16 kHz stereo float32
+
+function writeLiveChunk(proc, buf) {
+  if (proc._stdinBackpressured) {
+    proc._stdinQueue.push(buf);
+    proc._stdinQueueBytes += buf.length;
+    // Bound the queue: drop the oldest chunk(s) once we exceed the cap. Keep at
+    // least the chunk we just pushed so a single oversized buffer still flows.
+    while (proc._stdinQueueBytes > LIVE_STDIN_MAX_QUEUE_BYTES
+           && proc._stdinQueue.length > 1) {
+      const dropped = proc._stdinQueue.shift();
+      proc._stdinQueueBytes -= dropped.length;
+      proc._stdinDroppedBytes += dropped.length;
+    }
+    return;
+  }
+  if (!proc.stdin.write(buf)) proc._stdinBackpressured = true;
+}
+
 ipcMain.on('live-transcribe-chunk', (event, payload) => {
   const proc = liveTranscribeProcess;
   if (!proc || proc.killed) return;
@@ -3507,7 +3540,7 @@ ipcMain.on('live-transcribe-chunk', (event, payload) => {
   // Buffer here. If a TypedArray slipped through, normalise.
   const buf = Buffer.isBuffer(payload) ? payload : Buffer.from(payload);
   try {
-    stdin.write(buf);
+    writeLiveChunk(proc, buf);
   } catch (e) {
     // EPIPE means Python exited (e.g. crashed). Drop silently; the exit
     // handler will null out the process ref.
@@ -3578,6 +3611,29 @@ function spawnLiveTranscribe(sessionName) {
   proc._drainResolve = null;
   proc._drainPromise = new Promise((resolve) => {
     proc._drainResolve = resolve;
+  });
+
+  // stdin back-pressure state (#357): honored by writeLiveChunk(). Flushed on
+  // 'drain' below. Per-process so a quick stop→start starts with an empty queue.
+  proc._stdinBackpressured = false;
+  proc._stdinQueue = [];
+  proc._stdinQueueBytes = 0;
+  proc._stdinDroppedBytes = 0;
+  proc.stdin.on('drain', () => {
+    proc._stdinBackpressured = false;
+    while (proc._stdinQueue.length > 0
+           && proc.stdin.writable && !proc.stdin.writableEnded) {
+      const chunk = proc._stdinQueue.shift();
+      proc._stdinQueueBytes -= chunk.length;
+      if (!proc.stdin.write(chunk)) { proc._stdinBackpressured = true; break; }
+    }
+    if (proc._stdinDroppedBytes > 0) {
+      sendDebugLog(
+        `live-transcribe stdin back-pressure: dropped ${proc._stdinDroppedBytes} `
+        + 'bytes of stale audio while the sidecar was behind',
+      );
+      proc._stdinDroppedBytes = 0;
+    }
   });
 
   proc.stdout.on('data', (data) => {
@@ -3770,6 +3826,17 @@ function stopLiveTranscribe() {
   // quick restart can't cross resolvers between processes (review-2, Finding 2).
   const exited = proc._drainPromise || Promise.resolve();
   try {
+    // Flush any back-pressure queue (#357) into stdin before ending it.
+    // Chunks held in proc._stdinQueue haven't reached Node's write buffer yet,
+    // so a stop while back-pressured would otherwise discard the tail of the
+    // last utterance and truncate Python's live FINAL. Handing them to write()
+    // now lets end() flush them to the sidecar; Node buffers past the OS pipe
+    // limit here, which is fine for a one-shot drain at teardown.
+    if (proc._stdinQueue && proc._stdinQueue.length > 0
+        && proc.stdin.writable && !proc.stdin.writableEnded) {
+      for (const chunk of proc._stdinQueue) proc.stdin.write(chunk);
+    }
+    if (proc._stdinQueue) { proc._stdinQueue = []; proc._stdinQueueBytes = 0; }
     proc.stdin.end();
   } catch (_) { /* already closed */ }
   // Watchdog: if THIS Python process hasn't exited in SIDECAR_KILL_WATCHDOG_MS,
