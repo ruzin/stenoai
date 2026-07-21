@@ -5849,6 +5849,23 @@ ipcMain.handle('setup-ollama-and-model', async () => {
     const http = require('http');
     return new Promise((resolve) => {
       const postData = JSON.stringify({ name: pullTarget });
+      // Resolve exactly once. A streamed error must be terminal, so guard the
+      // 'end' handler from resolving success after we've already reported a
+      // failure line.
+      let settled = false;
+      const settle = (result) => {
+        if (settled) return;
+        settled = true;
+        resolve(result);
+      };
+      // Emit progress to the renderer's setup wizard. Dedicated channel (not
+      // the Settings 'model-pull-progress') because that one's listeners expect
+      // a { model, progress: string } shape and would throw on this payload.
+      const sendOllamaProgress = (payload) => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('setup-ollama-progress', payload);
+        }
+      };
       const req = http.request({
         hostname: '127.0.0.1',
         port: 11434,
@@ -5858,37 +5875,120 @@ ipcMain.handle('setup-ollama-and-model', async () => {
         timeout: 600000
       }, (res) => {
         let lastStatus = '';
+        // Ollama streams newline-delimited JSON. A single socket chunk can end
+        // mid-record, so buffer across chunks and only parse complete lines -
+        // splitting each chunk in isolation would corrupt a split record.
+        let buffer = '';
+        // Ollama reports byte progress PER LAYER/blob, so completed/total reset
+        // for each new layer. Track every layer's { completed, total } keyed by
+        // digest, then report progress from the SINGLE largest layer (the model
+        // blob dominates the pull at ~2GB of ~2.05GB total). That approximates
+        // overall progress and stays near-monotonic, without the aggregate's
+        // premature-100%-then-drop when a small layer finishes before the blob
+        // even appears.
+        const layers = new Map();
+        // Last emitted pct, so status-only lines (e.g. "verifying sha256",
+        // "success") keep the bar where it was instead of dropping it back to 0.
+        let lastPct = 0;
+        // Dedupe the IPC emit the same way the debug log dedupes via lastStatus:
+        // Ollama emits many records/sec and the renderer flickers if every one
+        // is forwarded. Skip the emit when both status and pct are unchanged.
+        let lastEmittedStatus = null;
+        let lastEmittedPct = -1;
+
+        // Fold one parsed NDJSON record into the largest-layer tracker and emit
+        // progress. Returns true when the record is a terminal error so callers
+        // stop.
+        const handleRecord = (json) => {
+          if (json.error) {
+            sendDebugLog(`Pull error: ${json.error}`);
+            trackEvent('setup_failed', { step: 'ollama_and_model' });
+            req.destroy();
+            settle({ success: false, error: 'Failed to download AI model', details: json.error });
+            return true;
+          }
+          const status = json.status || '';
+          if (json.total) {
+            // Key by digest so each blob is tracked independently; fall back to
+            // the status label when a record carries no digest.
+            const key = json.digest || status || 'unkeyed';
+            layers.set(key, { completed: json.completed || 0, total: json.total });
+          }
+          // Drive the bar from the single layer with the largest total seen so
+          // far - the model blob. Computed from the map so status-only records
+          // (no total) still report that layer's bytes instead of dropping to 0.
+          let largest = null;
+          for (const layer of layers.values()) {
+            if (!largest || layer.total > largest.total) {
+              largest = layer;
+            }
+          }
+          const largestCompleted = largest ? largest.completed : 0;
+          const largestTotal = largest ? largest.total : 0;
+          if (json.total) {
+            // Guard divide-by-zero: leave the bar at its last position.
+            if (largestTotal > 0) {
+              lastPct = Math.round((100 * largestCompleted) / largestTotal);
+            }
+            const msg = `${status} ${lastPct}%`;
+            if (msg !== lastStatus) {
+              sendDebugLog(msg);
+              lastStatus = msg;
+            }
+          } else if (status !== lastStatus) {
+            // No byte counts on this line - retain the last bar position so
+            // phase changes update the label without a misleading reset.
+            sendDebugLog(status);
+            lastStatus = status;
+          }
+          // Emit only when status or pct actually changed, to avoid flicker.
+          if (status !== lastEmittedStatus || lastPct !== lastEmittedPct) {
+            lastEmittedStatus = status;
+            lastEmittedPct = lastPct;
+            sendOllamaProgress({ status, pct: lastPct, completed: largestCompleted, total: largestTotal });
+          }
+          return false;
+        };
+
         res.on('data', (chunk) => {
-          // Ollama streams newline-delimited JSON
-          const lines = chunk.toString().split('\n').filter(Boolean);
-          for (const line of lines) {
+          buffer += chunk.toString();
+          let nl;
+          while ((nl = buffer.indexOf('\n')) !== -1) {
+            const line = buffer.slice(0, nl).trim();
+            buffer = buffer.slice(nl + 1);
+            if (!line) continue;
+            let json;
             try {
-              const json = JSON.parse(line);
-              if (json.error) {
-                sendDebugLog(`Pull error: ${json.error}`);
-                return;
-              }
-              // Log progress without spamming duplicate status
-              const status = json.status || '';
-              if (json.total && json.completed) {
-                const pct = Math.round((json.completed / json.total) * 100);
-                const msg = `${status} ${pct}%`;
-                if (msg !== lastStatus) {
-                  sendDebugLog(msg);
-                  lastStatus = msg;
-                }
-              } else if (status !== lastStatus) {
-                sendDebugLog(status);
-                lastStatus = status;
-              }
+              json = JSON.parse(line);
             } catch (e) {
               // Non-JSON line, log as-is
-              sendDebugLog(chunk.toString().trim());
+              sendDebugLog(line);
+              continue;
             }
+            if (handleRecord(json)) return;
           }
         });
 
         res.on('end', async () => {
+          // The in-stream { error } path calls settle() synchronously (via
+          // handleRecord) before 'end' fires, so `settled` already covers it —
+          // no separate streamError check is needed here.
+          if (settled) return;
+          // A final NDJSON record without a trailing newline stays in the buffer.
+          // If that trailing line is an { error } record, an HTTP-200 end would
+          // otherwise resolve success even though the pull failed - so parse it
+          // and treat a trailing error exactly like the in-stream error path.
+          const trailing = buffer.trim();
+          if (trailing) {
+            let json = null;
+            try { json = JSON.parse(trailing); } catch (_) { /* not JSON */ }
+            if (json && json.error) {
+              sendDebugLog(`Pull error: ${json.error}`);
+              trackEvent('setup_failed', { step: 'ollama_and_model' });
+              settle({ success: false, error: 'Failed to download AI model', details: json.error });
+              return;
+            }
+          }
           if (res.statusCode === 200) {
             sendDebugLog('AI model download completed successfully');
             try {
@@ -5897,24 +5997,24 @@ ipcMain.handle('setup-ollama-and-model', async () => {
               // Non-fatal -- config reset is best-effort
             }
             trackEvent('setup_completed', { step: 'ollama_and_model' });
-            resolve({ success: true, message: 'Ollama and AI model ready' });
+            settle({ success: true, message: 'Ollama and AI model ready' });
           } else {
             sendDebugLog(`AI model download failed with status: ${res.statusCode}`);
             trackEvent('setup_failed', { step: 'ollama_and_model' });
-            resolve({ success: false, error: 'Failed to download AI model', details: `HTTP ${res.statusCode}` });
+            settle({ success: false, error: 'Failed to download AI model', details: `HTTP ${res.statusCode}` });
           }
         });
       });
 
       req.on('error', (error) => {
         sendDebugLog(`Pull request error: ${error.message}`);
-        resolve({ success: false, error: 'Failed to download AI model', details: error.message });
+        settle({ success: false, error: 'Failed to download AI model', details: error.message });
       });
 
       req.on('timeout', () => {
         req.destroy();
         sendDebugLog('Model pull timed out after 10 minutes');
-        resolve({ success: false, error: 'Model download timed out' });
+        settle({ success: false, error: 'Model download timed out' });
       });
 
       req.write(postData);
