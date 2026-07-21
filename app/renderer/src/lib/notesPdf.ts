@@ -151,7 +151,9 @@ ${listItems(input.actionItems)}
   .brand { display: flex; align-items: center; gap: 9px; }
   .brand img { width: 26px; height: 26px; display: block; }
   .brand .wordmark { font-family: 'Ovo', Georgia, serif; font-size: 17pt; letter-spacing: 0.01em; line-height: 1; }
+  .masthead-meta { text-align: right; }
   .masthead .kicker { font-size: 7.5pt; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-500); }
+  .masthead .site { margin-top: 3px; font-size: 8pt; letter-spacing: 0.02em; color: var(--ink-900); }
   .title-block { margin: 26px 0; }
   h1 {
     font-family: 'Ovo', Georgia, serif; font-size: 24pt; font-weight: 400;
@@ -184,10 +186,8 @@ ${listItems(input.actionItems)}
   }
   footer {
     margin-top: 30px; padding-top: 10px; border-top: 1px solid var(--rule);
-    display: flex; justify-content: space-between; align-items: baseline;
     font-size: 8pt; color: var(--ink-500); letter-spacing: 0.02em;
   }
-  footer .site { color: var(--ink-900); }
 </style>
 </head>
 <body>
@@ -196,7 +196,10 @@ ${listItems(input.actionItems)}
       <img src="data:image/svg+xml;base64,${STENO_LOGO_SVG_BASE64}" alt="Steno">
       <span class="wordmark">steno</span>
     </div>
-    <div class="kicker">Meeting Notes</div>
+    <div class="masthead-meta">
+      <div class="kicker">Meeting Notes</div>
+      <div class="site">www.stenoai.co</div>
+    </div>
   </div>
   <div class="title-block">
     <h1>${escapeHtml(title)}</h1>
@@ -204,8 +207,7 @@ ${metaLine}
   </div>
 ${sections.join('\n')}
   <footer>
-    <span>Captured and summarised on-device with Steno &mdash; no audio or transcript left this machine.</span>
-    <span class="site">www.stenoai.co</span>
+    <span>Steno is the privacy-first AI notepad for highly sensitive conversations.</span>
   </footer>
 </body>
 </html>`;
