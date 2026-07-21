@@ -155,11 +155,6 @@ ${listItems(input.actionItems)}
   .masthead .kicker { font-size: 7.5pt; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-500); }
   .masthead .site { margin-top: 3px; font-size: 8pt; letter-spacing: 0.02em; color: var(--ink-900); }
   .title-block { margin: 26px 0; }
-  /* Running text finishes a bit short of the full-width rules and section fills,
-     so the ink rules and paper tint overflow past where sentences end rather than
-     terminating flush with them. Left edges stay aligned with the masthead; only
-     the right measure is inset. */
-  .title-block, section > p, section > ul { padding-right: 9mm; }
   h1 {
     font-family: 'Ovo', Georgia, serif; font-size: 24pt; font-weight: 400;
     line-height: 1.18; letter-spacing: -0.005em; margin: 0 0 10px; max-width: 30ch;
