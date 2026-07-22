@@ -157,6 +157,9 @@ _AUTO_NAMED_PATTERN = re.compile(
 # tags specifically (not any HTML-like tag) so unrelated inline markup in the
 # model's output can't be mistaken for a reasoning block and get a spurious
 # section break inserted ahead of it.
+#   Mirrored in app/main.js as REASONING_TAG_HEADER_PATTERN /
+#   normalizeMarkdownForParsing (the detail-page parser). The two MUST stay
+#   equivalent — see #346. Any edit here has to land there too.
 _REASONING_TAG_HEADER_PATTERN = re.compile(r'(</(?:think|thought|thinking|reasoning)>)\s*(#{1,6}\s)', re.IGNORECASE)
 
 def _normalize_markdown_for_parsing(md_text: str) -> str:
@@ -2484,7 +2487,14 @@ def test():
 
 
 def _parse_meeting_markdown(md_path):
-    """Parse a .md meeting file into the standard meeting dict."""
+    """Parse a .md meeting file into the standard meeting dict.
+
+    Mirrored by parseMeetingMarkdown in app/main.js (the detail-page /
+    get-meeting parser, which reads the .md directly to avoid a Python
+    round-trip). The two MUST surface the same session_info / meeting-dict
+    contract — they drift silently otherwise (see #346, and #313 for a prior
+    drift). Any change here has to land there too.
+    """
     content = md_path.read_text(encoding='utf-8')
 
     # Split frontmatter
