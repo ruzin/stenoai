@@ -1,4 +1,18 @@
-const { app, BrowserWindow, ipcMain, dialog, shell, systemPreferences, globalShortcut, safeStorage, Tray, Menu, nativeImage, powerMonitor, net, session, desktopCapturer } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, systemPreferences, globalShortcut, Tray, Menu, nativeImage, powerMonitor, net, session, desktopCapturer } = require('electron');
+
+// safeStorage is accessed lazily via getSafeStorage(), NOT destructured from the
+// require above. On macOS, merely retrieving the safeStorage binding at load
+// time used to register an app-ready observer that eagerly initialized OSCrypt
+// and touched the login Keychain — popping the "<app> Safe Storage" permission
+// dialog on every launch even for users who had no stored secret at all
+// (Electron 42.0.0 regression, made lazy again in 42.4.1). Keeping the binding
+// out of the top-level destructure means loading main.js can never trigger that
+// access; the first Keychain touch happens only when a credential helper below
+// actually runs (saving a cloud key, org sign-in, calendar connect). require()
+// is cached, so getSafeStorage() is cheap.
+function getSafeStorage() {
+  return require('electron').safeStorage;
+}
 
 // Prevent EPIPE crashes when stdout/stderr pipe is broken (e.g. launching terminal closed)
 process.stdout?.on('error', () => {});
@@ -7428,7 +7442,7 @@ function saveCloudApiKey(key) {
     if (!fs.existsSync(keyDir)) {
       fs.mkdirSync(keyDir, { recursive: true });
     }
-    const encrypted = safeStorage.encryptString(key);
+    const encrypted = getSafeStorage().encryptString(key);
     fs.writeFileSync(getCloudKeyPath(), encrypted);
     return true;
   } catch (error) {
@@ -7443,7 +7457,7 @@ function loadCloudApiKey() {
     migrateLegacyCredentialFile(keyPath, '.cloud-api-key');
     if (!fs.existsSync(keyPath)) return null;
     const encrypted = fs.readFileSync(keyPath);
-    return safeStorage.decryptString(encrypted);
+    return getSafeStorage().decryptString(encrypted);
   } catch (error) {
     console.error('Failed to load cloud API key:', error.message);
     return null;
@@ -8657,7 +8671,7 @@ function saveGoogleTokens(tokens) {
     if (!fs.existsSync(tokenDir)) {
       fs.mkdirSync(tokenDir, { recursive: true });
     }
-    const encrypted = safeStorage.encryptString(JSON.stringify(tokens));
+    const encrypted = getSafeStorage().encryptString(JSON.stringify(tokens));
     fs.writeFileSync(getTokenFilePath(), encrypted);
     console.log('Google tokens saved');
   } catch (error) {
@@ -8671,7 +8685,7 @@ function loadGoogleTokens() {
     migrateLegacyCredentialFile(tokenPath, '.google-tokens');
     if (!fs.existsSync(tokenPath)) return null;
     const encrypted = fs.readFileSync(tokenPath);
-    const decrypted = safeStorage.decryptString(encrypted);
+    const decrypted = getSafeStorage().decryptString(encrypted);
     return JSON.parse(decrypted);
   } catch (error) {
     console.error('Failed to load Google tokens:', error.message);
@@ -8705,7 +8719,7 @@ function saveOutlookTokens(tokens) {
     if (!fs.existsSync(tokenDir)) {
       fs.mkdirSync(tokenDir, { recursive: true });
     }
-    const encrypted = safeStorage.encryptString(JSON.stringify(tokens));
+    const encrypted = getSafeStorage().encryptString(JSON.stringify(tokens));
     fs.writeFileSync(getOutlookTokenFilePath(), encrypted);
     console.log('Outlook tokens saved');
   } catch (error) {
@@ -8719,7 +8733,7 @@ function loadOutlookTokens() {
     migrateLegacyCredentialFile(tokenPath, '.outlook-tokens');
     if (!fs.existsSync(tokenPath)) return null;
     const encrypted = fs.readFileSync(tokenPath);
-    const decrypted = safeStorage.decryptString(encrypted);
+    const decrypted = getSafeStorage().decryptString(encrypted);
     return JSON.parse(decrypted);
   } catch (error) {
     console.error('Failed to load Outlook tokens:', error.message);
@@ -10372,7 +10386,7 @@ function saveOrgSession(session) {
   try {
     const dir = path.dirname(getOrgSessionPath());
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    const encrypted = safeStorage.encryptString(JSON.stringify(session));
+    const encrypted = getSafeStorage().encryptString(JSON.stringify(session));
     fs.writeFileSync(getOrgSessionPath(), encrypted);
     orgSessionGeneration++;
     return true;
@@ -10386,7 +10400,7 @@ function saveOrgSession(session) {
 //   file missing        → { session: null, exists: false, decryptFailed: false }
 //   present, unreadable → { session: null, exists: true,  decryptFailed: true  }
 //   present, readable   → { session,      exists: true,  decryptFailed: false }
-// The middle state matters: safeStorage.decryptString throws while the
+// The middle state matters: getSafeStorage().decryptString throws while the
 // keychain is locked (right after wake / login, or a denied prompt after an
 // app re-sign) — treating that like "signed out" is exactly what used to
 // downgrade signed-in users to local AI via the stale-adapter recovery.
@@ -10402,7 +10416,7 @@ function loadOrgSessionEx() {
     // reset it moments before the decrypt throws, and the catch below
     // would restamp it to now on every call, so the grace window could
     // never elapse and the org lock would stay fail-closed forever.
-    const session = JSON.parse(safeStorage.decryptString(encrypted));
+    const session = JSON.parse(getSafeStorage().decryptString(encrypted));
     orgSessionDecryptFailingSince = null;
     return { session, exists: true, decryptFailed: false };
   } catch (e) {
