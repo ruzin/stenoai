@@ -3,6 +3,19 @@ title: "Changelog"
 description: "What's new in Steno -- recent releases and notable changes."
 ---
 
+<Update label="v0.6.3" description="July 22, 2026">
+**New**
+- **Save notes as PDF** — export a meeting's notes (summary, key topics, key points, action items, participants) as a branded, print-ready PDF from the note's ⋯ menu. It's rendered on-device, so nothing leaves your machine.
+- A one-time privacy notice on first launch explains that Steno records, transcribes, and summarises entirely on your device.
+
+**Improved**
+- The setup wizard now shows model-download progress instead of an indeterminate spinner, so you can see how far along a download is.
+
+**Fixed**
+- Fixed Amazon Bedrock connections failing for inference-profile models by fully percent-encoding the profile ARN in the request URL.
+- Live transcript partials now keep pace on slower Apple Silicon instead of drifting behind the speaker.
+</Update>
+
 <Update label="v0.6.2" description="July 19, 2026">
 **Improved**
 - Redesigned Settings with a persistent left navigation rail and grouped sections (Preferences, AI, Templates, Workspace, System), replacing the old row of tabs.
