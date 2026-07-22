@@ -126,9 +126,19 @@ test('a seeded Google token carrying an email surfaces it via status', async ({
 }) => {
   const { app, page } = await launchApp();
 
+  // Seeding needs safeStorage. Skip LOUDLY where it's unavailable rather
+  // than emit a silent green — see the sibling test above.
   const encryptionAvailable = await app.evaluate(({ safeStorage }) =>
     safeStorage.isEncryptionAvailable(),
   );
+  if (!encryptionAvailable) {
+    // eslint-disable-next-line no-console
+    console.warn('[t2] SKIPPED calendar token seed: safeStorage unavailable on this runner.');
+    test.info().annotations.push({
+      type: 'skip-reason',
+      description: 'safeStorage unavailable; cannot seed/encrypt a calendar token',
+    });
+  }
   test.skip(!encryptionAvailable, 'safeStorage unavailable on this runner');
 
   // Mirrors what the app itself writes after decoding the OAuth id_token at

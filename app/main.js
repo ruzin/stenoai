@@ -484,7 +484,10 @@ const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 // Outlook Calendar OAuth2 configuration (PKCE public client — no client secret)
 const OUTLOOK_CLIENT_ID = '53a8ba1f-3a2e-4fc9-afb1-b9b8ff13de19';
 // See GOOGLE_SCOPES comment — openid/email here for the same id_token decode.
-const OUTLOOK_SCOPES = 'Calendars.Read offline_access openid email';
+// `profile` is required for the `preferred_username` claim to be populated
+// (Microsoft's id_token claims reference) — the fallback we use when a
+// work/school account has no `email` claim.
+const OUTLOOK_SCOPES = 'Calendars.Read offline_access openid email profile';
 const OUTLOOK_AUTH_URL = 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize';
 const OUTLOOK_TOKEN_URL = 'https://login.microsoftonline.com/common/oauth2/v2.0/token';
 
@@ -9385,11 +9388,18 @@ async function getValidOutlookAccessToken() {
 
 function refreshOutlookAccessToken(refreshToken) {
   return new Promise((resolve, reject) => {
+    // No `scope` param: Microsoft defaults a refresh to whatever the
+    // refresh_token was originally granted. Sending OUTLOOK_SCOPES here
+    // would ask pre-existing connections (granted before openid/email were
+    // added) for scope they never consented to, and Microsoft rejects
+    // that — breaking their calendar connection the next time the access
+    // token expires. New connections still get the full scope, since it's
+    // requested at initial authorization (startOutlookAuth) and a refresh
+    // without `scope` inherits it.
     const postData = new URLSearchParams({
       client_id: OUTLOOK_CLIENT_ID,
       refresh_token: refreshToken,
-      grant_type: 'refresh_token',
-      scope: OUTLOOK_SCOPES
+      grant_type: 'refresh_token'
     }).toString();
 
     const tokenUrl = new URL(OUTLOOK_TOKEN_URL);
