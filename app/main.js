@@ -11158,33 +11158,62 @@ ipcMain.handle('org-try-auto-backup', async (_event, payload) => {
     const session = loadOrgSession();
     if (!session) return { attempted: false, reason: 'not-signed-in' };
 
-    // Close the sign-in seeding race (cubic P1): the sign-in handler seeds
-    // the auto-backup default fire-and-forget, so a recording that finishes
-    // right after sign-in could reach this gate before the org's
-    // auto_share_default has been written — and the read below treats an
-    // unset pref as enabled (!== false), which would auto-share against an
-    // org policy of auto_share_default=false. seedOrgAutoBackupDefault is
-    // idempotent (writes only when no pref exists, swallows its own errors),
-    // so awaiting it here deterministically materialises the policy default
-    // before we decide. The adapter is necessarily reachable on the path
-    // that actually uploads, so this fetch is the same reachability the
-    // share itself needs.
-    await seedOrgAutoBackupDefault();
-
+    // Read the stored preference first. get-org-auto-backup reports whether a
+    // preference actually exists (org_auto_backup_preference_set), which lets
+    // us skip the /policy fetch + seed subprocess entirely once one does —
+    // steady-state backups only need the stored value (issue #192).
+    //
     // Fail closed: any error / unparseable output treats the toggle as
     // disabled. A privacy + sharing setting should never default ON via a
-    // transient read failure — if the user enabled it, they can do so
-    // again explicitly. The regex match guards against stray Python
-    // stderr/stdout noise around the JSON payload.
-    let enabled = false;
-    try {
+    // transient read failure — if the user enabled it, they can do so again
+    // explicitly. The regex match guards against stray Python stderr/stdout
+    // noise around the JSON payload.
+    const readAutoBackup = async () => {
       const cfg = await runPythonScript('simple_recorder.py', ['get-org-auto-backup']);
       const jsonMatch = cfg.match(/\{.*\}/s);
-      enabled = jsonMatch
-        ? JSON.parse(jsonMatch[0])?.org_auto_backup_enabled !== false
-        : false;
+      const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : null;
+      return {
+        enabled: parsed ? parsed.org_auto_backup_enabled !== false : false,
+        isSet: parsed ? parsed.org_auto_backup_preference_set === true : false,
+      };
+    };
+
+    let enabled = false;
+    let isSet = false;
+    try {
+      ({ enabled, isSet } = await readAutoBackup());
     } catch (_) {
       sendDebugLog('org-try-auto-backup: failed to read auto-backup pref, treating as disabled');
+      return { attempted: false, reason: 'disabled' };
+    }
+
+    // Only when the preference is genuinely unset do we close the sign-in
+    // seeding race (cubic P1): the sign-in handler seeds the auto-backup
+    // default fire-and-forget, so a recording that finishes right after
+    // sign-in could reach this gate before the org's auto_share_default has
+    // been written — and an unset pref reads as enabled (!== false), which
+    // would auto-share against an org policy of auto_share_default=false.
+    // seedOrgAutoBackupDefault is idempotent (writes only when no pref exists,
+    // swallows its own errors), so awaiting it here deterministically
+    // materialises the policy default before we re-read and decide. The
+    // adapter is necessarily reachable on the path that actually uploads, so
+    // this fetch is the same reachability the share itself needs. Once a
+    // preference exists we skip this entirely.
+    if (!isSet) {
+      await seedOrgAutoBackupDefault();
+      try {
+        ({ enabled, isSet } = await readAutoBackup());
+      } catch (_) {
+        sendDebugLog('org-try-auto-backup: failed to read auto-backup pref, treating as disabled');
+        return { attempted: false, reason: 'disabled' };
+      }
+      // If the seed didn't actually materialise a preference — adapter
+      // unreachable, seed subprocess failure, or a failed config write —
+      // the pref is still unset and `enabled` is only the historical default
+      // (true). Fail closed rather than auto-share against an org policy of
+      // auto_share_default=false that we couldn't read/persist. The user can
+      // re-enable explicitly, and the next recording re-attempts the seed.
+      if (!isSet) return { attempted: false, reason: 'disabled' };
     }
     if (!enabled) return { attempted: false, reason: 'disabled' };
 

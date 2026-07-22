@@ -4059,7 +4059,10 @@ def get_org_auto_backup():
     from src.config import get_config
 
     config = get_config()
-    print(json.dumps({"org_auto_backup_enabled": config.get_org_auto_backup_enabled()}))
+    print(json.dumps({
+        "org_auto_backup_enabled": config.get_org_auto_backup_enabled(),
+        "org_auto_backup_preference_set": config.has_org_auto_backup_preference(),
+    }))
 
 
 @cli.command()

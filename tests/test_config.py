@@ -408,6 +408,29 @@ class ConfigOrgAutoBackupTests(unittest.TestCase):
             self.assertTrue(config.seed_org_auto_backup_default(False))
             self.assertTrue(config.get_org_auto_backup_enabled())
 
+    def test_has_preference_distinguishes_unset_from_explicit_false(self):
+        """The gate skips the /policy fetch + seed once a preference exists, so
+        'unset' must be distinguishable from an explicit False (issue #192)."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "config.json"
+            config = Config(config_path=path)
+            # Fresh config: no stored preference (get still defaults to True).
+            self.assertFalse(config.has_org_auto_backup_preference())
+            self.assertTrue(config.get_org_auto_backup_enabled())
+            # An explicit False is a real preference, not "unset".
+            self.assertTrue(config.set_org_auto_backup_enabled(False))
+            self.assertTrue(config.has_org_auto_backup_preference())
+            self.assertTrue(Config(config_path=path).has_org_auto_backup_preference())
+
+    def test_has_preference_true_after_seed(self):
+        """Seeding the org default materialises a preference, so subsequent
+        backups can skip the seed."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config = Config(config_path=Path(tmp_dir) / "config.json")
+            self.assertFalse(config.has_org_auto_backup_preference())
+            config.seed_org_auto_backup_default(True)
+            self.assertTrue(config.has_org_auto_backup_preference())
+
 
 class ConfigKeepRecordingsTests(unittest.TestCase):
     def test_default_keep_recordings_is_false(self):

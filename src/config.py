@@ -993,6 +993,13 @@ class Config:
         self._config["org_auto_backup_enabled"] = enabled
         return self._save()
 
+    def has_org_auto_backup_preference(self) -> bool:
+        """Whether a stored auto-backup preference exists yet. Distinguishes
+        an unset pref (no key) from an explicit False, so the desktop can skip
+        the sign-in `/policy` fetch + seed once a preference exists and only
+        pays it in the genuinely-unset sign-in window (see issue #192)."""
+        return "org_auto_backup_enabled" in self._config
+
     def seed_org_auto_backup_default(self, default: bool) -> bool:
         """Seed the auto-backup preference from the enterprise adapter's
         `auto_share_default` policy, but ONLY if the user has no stored
