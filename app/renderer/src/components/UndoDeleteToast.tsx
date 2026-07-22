@@ -32,18 +32,33 @@ function UndoDeleteToastItem({
     onExpireRef.current = onExpire;
   });
 
-  const [progress, setProgress] = React.useState(1);
+  // Remaining window is relative to when the note was actually deleted
+  // (entry.createdAt), NOT this component's mount. AppShell is rendered per-route
+  // (FACT B), so navigation remounts this toast — a mount-relative timer would
+  // reset the 8s window on every navigate. Anchoring to createdAt makes a
+  // remount RESUME the countdown instead.
+  const remainingAtMount = React.useMemo(
+    () => Math.max(0, UNDO_WINDOW_MS - (Date.now() - entry.createdAt)),
+    [entry.createdAt],
+  );
+
+  const [progress, setProgress] = React.useState(remainingAtMount / UNDO_WINDOW_MS);
 
   React.useEffect(() => {
-    const timer = setTimeout(() => onExpireRef.current(), UNDO_WINDOW_MS);
+    if (remainingAtMount <= 0) {
+      // Window already elapsed before this mount — expire immediately.
+      onExpireRef.current();
+      return;
+    }
+    const timer = setTimeout(() => onExpireRef.current(), remainingAtMount);
     // Kick the countdown bar off on the next frame so the CSS width transition
-    // actually animates from full to empty.
+    // animates from the elapsed fraction down to empty over the remaining time.
     const raf = requestAnimationFrame(() => setProgress(0));
     return () => {
       clearTimeout(timer);
       cancelAnimationFrame(raf);
     };
-  }, []);
+  }, [remainingAtMount]);
 
   const name = entry.meeting?.session_info?.name?.trim();
 
@@ -96,7 +111,7 @@ function UndoDeleteToastItem({
           width: `${progress * 100}%`,
           background: 'var(--fg-2)',
           opacity: 0.35,
-          transition: `width ${UNDO_WINDOW_MS}ms linear`,
+          transition: `width ${remainingAtMount}ms linear`,
         }}
       />
     </div>

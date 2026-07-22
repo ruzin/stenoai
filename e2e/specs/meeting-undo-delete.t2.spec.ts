@@ -1,6 +1,6 @@
 import { test, expect } from '../fixtures/electron';
 import { realUserDataDir, fileSig } from '../fixtures/real-user-data';
-import { mkdirSync, writeFileSync, existsSync, readdirSync } from 'fs';
+import { mkdirSync, writeFileSync, existsSync, readdirSync, rmSync } from 'fs';
 import path from 'path';
 
 /**
@@ -111,9 +111,11 @@ test('delete moves note files to .trash and restore puts them back', async ({
 
   const trashDir = path.join(userDataDir, '.trash', trashId);
   expect(existsSync(trashDir)).toBe(true);
-  // Each moved file sits under the trash dir by basename, plus a manifest.
+  // Each moved file sits under the trash dir under an index-prefixed name
+  // (`<i>__<basename>`, collision-proof), plus a manifest.
+  const stored = readdirSync(trashDir).filter((n) => n !== 'manifest.json');
   for (const f of files) {
-    expect(existsSync(path.join(trashDir, path.basename(f)))).toBe(true);
+    expect(stored.some((n) => n.endsWith(`__${path.basename(f)}`))).toBe(true);
   }
   expect(existsSync(path.join(trashDir, 'manifest.json'))).toBe(true);
 
@@ -129,6 +131,178 @@ test('delete moves note files to .trash and restore puts them back', async ({
   expect(existsSync(trashDir)).toBe(false);
 
   // Keystone: the real user-data dir is byte-for-byte untouched.
+  expect(fileSig(realUserDataDir())).toBe(realDirBefore);
+});
+
+/**
+ * FACT-A regression (#234 core): a REAL .md note's session_info carries ONLY
+ * summary_file — no transcript_file / audio_file. The delete handler must derive
+ * the transcript (`<stem>_transcript.txt`) and the RECORDING (`<stem>.wav`) from
+ * the summary stem, or they'd be orphaned (audio lost) — defeating soft-delete.
+ * Seeds a summary-only note with its transcript + audio present by convention
+ * and asserts delete moves ALL of them and restore brings them ALL back.
+ */
+function seedSummaryOnlyNote(userDataDir: string, stem: string, name: string) {
+  const outputDir = path.join(userDataDir, 'output');
+  const recordingsDir = path.join(userDataDir, 'recordings');
+  const transcriptsDir = path.join(userDataDir, 'transcripts');
+  mkdirSync(outputDir, { recursive: true });
+  mkdirSync(recordingsDir, { recursive: true });
+  mkdirSync(transcriptsDir, { recursive: true });
+
+  // Backend naming: output/<stem>_summary.md, transcripts/<stem>_transcript.txt,
+  // recordings/<stem>.wav, output/<stem>_reports.json.
+  const summaryFile = path.join(outputDir, `${stem}_summary.md`);
+  const reportsSidecar = path.join(outputDir, `${stem}_reports.json`);
+  const transcriptFile = path.join(transcriptsDir, `${stem}_transcript.txt`);
+  const audioFile = path.join(recordingsDir, `${stem}.wav`);
+
+  writeFileSync(summaryFile, `# ${name}\n\nSummary body.`);
+  writeFileSync(reportsSidecar, JSON.stringify({ reports: [], active_report: null }));
+  writeFileSync(transcriptFile, `transcript for ${name}`);
+  writeFileSync(audioFile, Buffer.from('RIFFstub-wav-bytes'));
+
+  // Mirrors _parse_meeting_markdown: session_info carries ONLY summary_file.
+  const meeting: Meeting = { session_info: { name, summary_file: summaryFile } };
+  return { meeting, summaryFile, reportsSidecar, transcriptFile, audioFile };
+}
+
+test('summary-only note: delete derives + moves transcript & audio, restore brings all back', async ({
+  launchApp,
+  userDataDir,
+}) => {
+  const realDirBefore = fileSig(realUserDataDir());
+  const seed = seedSummaryOnlyNote(userDataDir, 'undo-gamma', 'Undo Gamma');
+  const files = [seed.summaryFile, seed.reportsSidecar, seed.transcriptFile, seed.audioFile];
+
+  const { page } = await launchApp();
+
+  const del = await page.evaluate(
+    (m) => (window as StenoWindow).stenoai.meetings.delete(m),
+    seed.meeting,
+  );
+  expect(del.success).toBe(true);
+  expect(del.trashId).toBeTruthy();
+  const trashId = del.trashId!;
+  const trashDir = path.join(userDataDir, '.trash', trashId);
+
+  // ALL four files (incl. the derived transcript + recording) moved out.
+  for (const f of files) expect(existsSync(f)).toBe(false);
+  const stored = readdirSync(trashDir).filter((n) => n !== 'manifest.json');
+  expect(stored.length).toBe(files.length);
+  // The recording is in trash — the whole point of #234.
+  expect(stored.some((n) => n.endsWith(`__${path.basename(seed.audioFile)}`))).toBe(true);
+  expect(stored.some((n) => n.endsWith(`__${path.basename(seed.transcriptFile)}`))).toBe(true);
+
+  const res = await page.evaluate(
+    (id) => (window as StenoWindow).stenoai.meetings.restore(id),
+    trashId,
+  );
+  expect(res.success).toBe(true);
+  for (const f of files) expect(existsSync(f)).toBe(true);
+  expect(existsSync(trashDir)).toBe(false);
+
+  expect(fileSig(realUserDataDir())).toBe(realDirBefore);
+});
+
+test('restore & purge reject a traversal / invalid trashId and touch nothing', async ({
+  launchApp,
+  userDataDir,
+}) => {
+  const realDirBefore = fileSig(realUserDataDir());
+  // Seed a real note so there's on-disk state a bad call could disturb.
+  const seed = seedNote(userDataDir, 'undo-delta', 'Undo Delta');
+  const files = allFiles(seed);
+
+  const { page } = await launchApp();
+
+  const badIds = ['../evil', 'a/b', '', '..', 'foo/../bar'];
+  for (const id of badIds) {
+    const r = await page.evaluate(
+      (bad) => (window as StenoWindow).stenoai.meetings.restore(bad),
+      id,
+    );
+    expect(r.success).toBe(false);
+    const p = await page.evaluate(
+      (bad) => (window as StenoWindow).stenoai.meetings.purgeTrashed(bad),
+      id,
+    );
+    expect(p.success).toBe(false);
+  }
+
+  // The seeded note is completely untouched by the rejected calls.
+  for (const f of files) expect(existsSync(f)).toBe(true);
+  expect(fileSig(realUserDataDir())).toBe(realDirBefore);
+});
+
+test('audio_file pointing at a directory is skipped; delete still succeeds for real files', async ({
+  launchApp,
+  userDataDir,
+}) => {
+  const realDirBefore = fileSig(realUserDataDir());
+  const seed = seedNote(userDataDir, 'undo-epsilon', 'Undo Epsilon');
+
+  // Point audio_file at a DIRECTORY (Codex C2): the handler must skip it (never
+  // move a whole dir into trash where purge would rm -rf it), yet still trash
+  // the real regular files.
+  const evilDir = path.join(userDataDir, 'recordings', 'undo-epsilon-dir');
+  mkdirSync(evilDir, { recursive: true });
+  writeFileSync(path.join(evilDir, 'canary.txt'), 'must survive');
+  seed.meeting.session_info.audio_file = evilDir;
+
+  const { page } = await launchApp();
+
+  const del = await page.evaluate(
+    (m) => (window as StenoWindow).stenoai.meetings.delete(m),
+    seed.meeting,
+  );
+  expect(del.success).toBe(true);
+  const trashId = del.trashId!;
+  const trashDir = path.join(userDataDir, '.trash', trashId);
+
+  // The directory (and its canary) survived — not moved into trash.
+  expect(existsSync(evilDir)).toBe(true);
+  expect(existsSync(path.join(evilDir, 'canary.txt'))).toBe(true);
+  const stored = readdirSync(trashDir).filter((n) => n !== 'manifest.json');
+  expect(stored.some((n) => n.endsWith('__undo-epsilon-dir'))).toBe(false);
+  // The real regular files were still trashed (summary, reports, transcript).
+  expect(existsSync(seed.summaryFile)).toBe(false);
+  expect(existsSync(seed.reportsSidecar)).toBe(false);
+  expect(existsSync(seed.transcriptFile)).toBe(false);
+
+  expect(fileSig(realUserDataDir())).toBe(realDirBefore);
+});
+
+test('restore keeps the trash dir when a stored file cannot be restored (partial failure)', async ({
+  launchApp,
+  userDataDir,
+}) => {
+  const realDirBefore = fileSig(realUserDataDir());
+  const seed = seedNote(userDataDir, 'undo-zeta', 'Undo Zeta');
+
+  const { page } = await launchApp();
+
+  const del = await page.evaluate(
+    (m) => (window as StenoWindow).stenoai.meetings.delete(m),
+    seed.meeting,
+  );
+  expect(del.success).toBe(true);
+  const trashId = del.trashId!;
+  const trashDir = path.join(userDataDir, '.trash', trashId);
+
+  // Remove one stored file so its restore fails — the trash dir must be KEPT
+  // (never destroy the remaining, un-restored user files).
+  const stored = readdirSync(trashDir).filter((n) => n !== 'manifest.json');
+  rmSync(path.join(trashDir, stored[0]));
+
+  const res = await page.evaluate(
+    (id) => (window as StenoWindow).stenoai.meetings.restore(id),
+    trashId,
+  );
+  expect(res.success).toBe(false);
+  // Trash dir preserved with the still-unrestored files inside.
+  expect(existsSync(trashDir)).toBe(true);
+
   expect(fileSig(realUserDataDir())).toBe(realDirBefore);
 });
 
