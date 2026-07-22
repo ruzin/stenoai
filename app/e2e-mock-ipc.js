@@ -636,6 +636,9 @@ function install({ ipcMain }) {
       success: true,
       current_model: 'gemma4:e2b-it-qat',
       provider: 'local',
+      // A 16 GB Mac: enough for the small models but not gemma4:12b / gpt-oss:20b,
+      // which drives the "May exceed memory" badge (see model-memory.ts, #248).
+      total_ram_gb: 16,
       supported_models: {
         'gemma4:e2b-it-qat': {
           name: 'Gemma 4 E2B (QAT)',
