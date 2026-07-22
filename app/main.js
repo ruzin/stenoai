@@ -1163,6 +1163,23 @@ function isSafeTrashId(trashId) {
   );
 }
 
+// The trash ROOT must never be a symlink. If `.trash` were symlinked to an
+// allowed dir (e.g. <userData> itself), a renderer could pass a real basename
+// there — trashId "output" or "config.json" — and have restore/purge rmSync an
+// arbitrary target: the child path would resolve inside an allowed base and
+// slip past validateSafeFilePath. The startup sweep already refuses a symlinked
+// root (isDirectory() is false for a symlink under lstat); restore + purge
+// mirror that guard here. A MISSING root is fine (nothing to traverse — the
+// per-entry existsSync handles it), so only an existing-but-not-real-directory
+// root (symlink or file) is rejected.
+function isTrashRootSafe() {
+  try {
+    return fs.lstatSync(getTrashRoot()).isDirectory();
+  } catch (_) {
+    return true; // No trash root yet — no escape vector.
+  }
+}
+
 // A trashable meeting file must live directly in an allowed base's output/,
 // recordings/, or transcripts/ folder — NOT just anywhere under the broad
 // allowed roots. This rejects a crafted meeting whose audio_file points at,
@@ -3941,7 +3958,22 @@ ipcMain.handle('delete-meeting', async (event, meetingData) => {
         // Summary lives in <base>/output/, so <base> is its grandparent dir.
         const dataRoot = path.dirname(path.dirname(summaryAbs));
         absolutePaths.push(path.join(dataRoot, 'transcripts', `${stem}_transcript.txt`));
-        absolutePaths.push(path.join(dataRoot, 'recordings', `${stem}.wav`));
+        // The recording keeps its ORIGINAL extension (Codex C5): imports stay
+        // .m4a/.mp3/…, system-audio is .webm, only native recordings are .wav —
+        // so hard-coding <stem>.wav orphans the rest. Include every recordings/
+        // entry whose stem matches (<stem>.<ext>, i.e. path.parse(name).name ===
+        // stem). These candidates still pass the existsSync + isFile +
+        // isAllowedMeetingSource gates below, so there's no security regression.
+        const recordingsDir = path.join(dataRoot, 'recordings');
+        try {
+          for (const name of fs.readdirSync(recordingsDir)) {
+            if (path.parse(name).name === stem) {
+              absolutePaths.push(path.join(recordingsDir, name));
+            }
+          }
+        } catch (_) {
+          // recordings/ may not exist (summary-only note) — nothing to add.
+        }
       }
     }
 
@@ -4039,16 +4071,28 @@ ipcMain.handle('delete-meeting', async (event, meetingData) => {
       fs.writeFileSync(path.join(trashDir, 'manifest.json'), JSON.stringify(manifest, null, 2), 'utf8');
     } catch (err) {
       console.error('Could not write trash manifest — rolling back moved files:', err.message);
+      let allRolledBack = true;
       for (const mf of movedFiles) {
         try {
           moveFileWithFallback(path.join(trashDir, mf.stored), mf.from);
         } catch (rbErr) {
+          allRolledBack = false;
           console.error(`Rollback failed for ${mf.stored} -> ${mf.from}:`, rbErr.message);
         }
       }
-      try {
-        fs.rmSync(trashDir, { recursive: true, force: true });
-      } catch (_) {}
+      // Only remove the trash dir if EVERY file made it back to its origin
+      // (Codex C3). If any rollback move failed, the file still lives inside the
+      // trash dir — KEEP it (accountable, unmanifested → the startup sweep won't
+      // touch it) rather than rmSync it into oblivion.
+      if (allRolledBack) {
+        try {
+          fs.rmSync(trashDir, { recursive: true, force: true });
+        } catch (_) {}
+      } else {
+        console.error(
+          `Preserving trash dir (rollback incomplete, files still inside): ${trashDir}`,
+        );
+      }
       return { success: false, error: `Failed to write trash manifest: ${err.message}` };
     }
 
@@ -4069,6 +4113,11 @@ ipcMain.handle('restore-meeting', async (event, trashId) => {
   try {
     if (!isSafeTrashId(trashId)) {
       return { success: false, error: 'Invalid trash id' };
+    }
+    // Reject a symlinked/non-directory trash root before joining trashId onto it
+    // (shared guard — see isTrashRootSafe).
+    if (!isTrashRootSafe()) {
+      return { success: false, error: 'Invalid trash root' };
     }
     const allowedBaseDirs = getAllowedBaseDirs();
     const trashDir = path.join(getTrashRoot(), trashId);
@@ -4101,22 +4150,42 @@ ipcMain.handle('restore-meeting', async (event, trashId) => {
       realTrashDir = path.resolve(trashDir);
     }
 
-    // Restore is all-or-nothing for cleanup: if ANY entry fails to restore, we
-    // KEEP the trash dir so no un-restored user file is destroyed (Codex C4/M1).
-    let failed = 0;
-    for (const entry of manifest.files || []) {
+    // A missing/empty/non-array files list is a MALFORMED manifest (Codex M2),
+    // NOT a successful zero-file restore. Fail WITHOUT removing the dir so the
+    // trashed files (if any) are never silently orphaned.
+    if (!Array.isArray(manifest.files) || manifest.files.length === 0) {
+      return {
+        success: false,
+        error: 'Empty or malformed trash manifest',
+        meeting: manifest.meeting,
+      };
+    }
+
+    // Two-phase restore (Codex C4). PASS 1 VALIDATES every entry and moves
+    // nothing; if any entry fails, we return early having touched no user file,
+    // so the failure is clean and fully retryable (the trash dir is intact).
+    // PASS 2 performs the moves only once all entries have validated.
+    const plan = [];
+    for (const entry of manifest.files) {
       const storedName = entry && entry.stored;
-      // `stored` must be a plain basename living inside the trash dir — reject a
-      // path separator, `..`, or anything that isn't its own basename.
+      // `stored` must be a plain basename living inside the trash dir. The
+      // basename-equality check already forbids any path separator, and the
+      // realpath-in-trashDir check below forbids traversal, so a substring `..`
+      // is harmless — reject ONLY the exact `.`/`..` names (Codex M1), keeping
+      // legit filenames like `0__Q1..final.m4a`.
       if (
         typeof storedName !== 'string' ||
         storedName.length === 0 ||
-        storedName.includes('..') ||
+        storedName === '.' ||
+        storedName === '..' ||
         storedName !== path.basename(storedName)
       ) {
         console.error(`Security: Blocked restore of invalid stored name: ${JSON.stringify(storedName)}`);
-        failed++;
-        continue;
+        return {
+          success: false,
+          error: 'Invalid stored name in trash manifest',
+          meeting: manifest.meeting,
+        };
       }
       const stored = path.join(trashDir, storedName);
       // Confirm the stored source really resolves inside the trash dir (a
@@ -4129,42 +4198,55 @@ ipcMain.handle('restore-meeting', async (event, trashId) => {
       }
       if (realStored !== realTrashDir && !realStored.startsWith(realTrashDir + path.sep)) {
         console.error(`Security: Blocked restore from outside trash dir: ${stored}`);
-        failed++;
-        continue;
+        return {
+          success: false,
+          error: 'Trash entry resolves outside trash dir',
+          meeting: manifest.meeting,
+        };
+      }
+      if (!fs.existsSync(stored)) {
+        console.error(`Restore: stored file missing, cannot restore: ${stored}`);
+        return {
+          success: false,
+          error: 'Trashed file missing, cannot restore',
+          meeting: manifest.meeting,
+        };
       }
       const dest = entry.from;
       // Re-create the original parent dir first (so realpath in
       // validateSafeFilePath can canonicalize it) and validate the restore
-      // target is still within an allowed base.
+      // target is still within an allowed base. Creating an empty parent dir is
+      // the only disk side effect of PASS 1 and is not a move.
       try {
         fs.mkdirSync(path.dirname(dest), { recursive: true });
       } catch (_) {}
       if (!validateSafeFilePath(dest, allowedBaseDirs)) {
         console.error(`Security: Blocked restore to path outside allowed directories: ${dest}`);
-        failed++;
-        continue;
+        return {
+          success: false,
+          error: 'Restore target outside allowed directories',
+          meeting: manifest.meeting,
+        };
       }
-      if (!fs.existsSync(stored)) {
-        console.error(`Restore: stored file missing, cannot restore: ${stored}`);
-        failed++;
-        continue;
-      }
+      plan.push({ stored, dest });
+    }
+
+    // PASS 2: every entry validated — move them all. A throw here is a genuine
+    // mid-move I/O fault (rare); stop and KEEP the trash dir. RESIDUAL: unlike
+    // PASS 1, a fault partway through PASS 2 can leave a PARTIAL restore (some
+    // files back at their origin, some still in trash). We keep the dir so the
+    // manifest still accounts for the remainder and nothing is destroyed.
+    for (const { stored, dest } of plan) {
       try {
         moveFileWithFallback(stored, dest);
       } catch (err) {
-        console.error(`Restore: failed to move ${stored} -> ${dest}:`, err.message);
-        failed++;
+        console.error(`Restore: I/O fault moving ${stored} -> ${dest}:`, err.message);
+        return {
+          success: false,
+          error: `Restore failed mid-move: ${err.message}`,
+          meeting: manifest.meeting,
+        };
       }
-    }
-
-    if (failed > 0) {
-      // Preserve the trash dir with its remaining files — better an accountable,
-      // manifested leftover (swept only if complete) than a destroyed recording.
-      return {
-        success: false,
-        error: `Restore incomplete (${failed} file(s) not restored)`,
-        meeting: manifest.meeting,
-      };
     }
 
     // Every entry restored cleanly — the trash entry is now just the manifest.
@@ -4184,6 +4266,13 @@ ipcMain.handle('purge-trashed-meeting', async (event, trashId) => {
     if (!isSafeTrashId(trashId)) {
       return { success: false, error: 'Invalid trash id' };
     }
+    // Reject a symlinked/non-directory trash root before joining trashId onto it
+    // (shared guard — see isTrashRootSafe). Without this, a `.trash` symlinked to
+    // an allowed dir would let trashId "config.json" resolve to a real file that
+    // passes validateSafeFilePath and gets rmSync'd.
+    if (!isTrashRootSafe()) {
+      return { success: false, error: 'Invalid trash root' };
+    }
     const allowedBaseDirs = getAllowedBaseDirs();
     const trashDir = path.join(getTrashRoot(), trashId);
     // Idempotent: a missing trash dir is a success (nothing to hard-delete).
@@ -4194,6 +4283,14 @@ ipcMain.handle('purge-trashed-meeting', async (event, trashId) => {
     // so realpath can canonicalize it for the containment check.
     if (!validateSafeFilePath(trashDir, allowedBaseDirs)) {
       return { success: false, error: 'Invalid trash path' };
+    }
+    // Only hard-delete an ACCOUNTABLE trash entry — a dir carrying a
+    // manifest.json (mirrors the startup sweep). A dir without one is not a real
+    // trash entry we created, so leave it untouched and report idempotent
+    // success rather than rmSync an unaccountable directory.
+    if (!fs.existsSync(path.join(trashDir, 'manifest.json'))) {
+      console.warn(`Purge: skipping unmanifested trash entry (preserved): ${trashDir}`);
+      return { success: true };
     }
     fs.rmSync(trashDir, { recursive: true, force: true });
     return { success: true };

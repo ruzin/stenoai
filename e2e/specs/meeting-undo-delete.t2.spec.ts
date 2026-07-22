@@ -1,6 +1,14 @@
 import { test, expect } from '../fixtures/electron';
 import { realUserDataDir, fileSig } from '../fixtures/real-user-data';
-import { mkdirSync, writeFileSync, existsSync, readdirSync, rmSync } from 'fs';
+import {
+  mkdirSync,
+  writeFileSync,
+  readFileSync,
+  existsSync,
+  readdirSync,
+  rmSync,
+  symlinkSync,
+} from 'fs';
 import path from 'path';
 
 /**
@@ -339,5 +347,197 @@ test('purgeTrashed hard-deletes a trashed note', async ({ launchApp, userDataDir
   expect(purgeAgain.success).toBe(true);
 
   // Keystone: the real user-data dir is byte-for-byte untouched.
+  expect(fileSig(realUserDataDir())).toBe(realDirBefore);
+});
+
+/**
+ * Codex C5: the recording keeps its ORIGINAL extension — imports stay
+ * .m4a/.mp3/…, system-audio is .webm, only native captures are .wav. Deriving
+ * the recording as a hard-coded `<stem>.wav` orphaned all of those. A
+ * summary-only note must derive the recording by stem + ANY extension.
+ */
+test('summary-only note: delete derives a non-.wav recording by stem and restore brings it back', async ({
+  launchApp,
+  userDataDir,
+}) => {
+  const realDirBefore = fileSig(realUserDataDir());
+  const outputDir = path.join(userDataDir, 'output');
+  const recordingsDir = path.join(userDataDir, 'recordings');
+  const transcriptsDir = path.join(userDataDir, 'transcripts');
+  mkdirSync(outputDir, { recursive: true });
+  mkdirSync(recordingsDir, { recursive: true });
+  mkdirSync(transcriptsDir, { recursive: true });
+
+  const stem = 'undo-eta';
+  const summaryFile = path.join(outputDir, `${stem}_summary.md`);
+  const transcriptFile = path.join(transcriptsDir, `${stem}_transcript.txt`);
+  // Neither of these is .wav — an imported .m4a and a system-audio .webm.
+  const m4aFile = path.join(recordingsDir, `${stem}.m4a`);
+  const webmFile = path.join(recordingsDir, `${stem}.webm`);
+  writeFileSync(summaryFile, `# Eta\n\nSummary body.`);
+  writeFileSync(transcriptFile, 'transcript for eta');
+  writeFileSync(m4aFile, Buffer.from('m4a-stub-bytes'));
+  writeFileSync(webmFile, Buffer.from('webm-stub-bytes'));
+
+  // Mirrors a real .md note: session_info carries ONLY summary_file.
+  const meeting: Meeting = { session_info: { name: 'Undo Eta', summary_file: summaryFile } };
+  const files = [summaryFile, transcriptFile, m4aFile, webmFile];
+
+  const { page } = await launchApp();
+
+  const del = await page.evaluate(
+    (m) => (window as StenoWindow).stenoai.meetings.delete(m),
+    meeting,
+  );
+  expect(del.success).toBe(true);
+  const trashId = del.trashId!;
+  const trashDir = path.join(userDataDir, '.trash', trashId);
+
+  // Both non-.wav recordings were derived by stem and moved to trash.
+  for (const f of files) expect(existsSync(f)).toBe(false);
+  const stored = readdirSync(trashDir).filter((n) => n !== 'manifest.json');
+  expect(stored.some((n) => n.endsWith(`__${stem}.m4a`))).toBe(true);
+  expect(stored.some((n) => n.endsWith(`__${stem}.webm`))).toBe(true);
+
+  const res = await page.evaluate(
+    (id) => (window as StenoWindow).stenoai.meetings.restore(id),
+    trashId,
+  );
+  expect(res.success).toBe(true);
+  for (const f of files) expect(existsSync(f)).toBe(true);
+  expect(existsSync(trashDir)).toBe(false);
+
+  expect(fileSig(realUserDataDir())).toBe(realDirBefore);
+});
+
+/**
+ * Codex M1: a legit filename may contain a literal ".." (e.g. "Q1..final.m4a").
+ * The stored name then becomes "<i>__undo-theta..final_summary.json". The old
+ * restore guard rejected any name containing ".."; the basename-equality +
+ * realpath-in-trashDir checks already forbid traversal, so such a name must now
+ * round-trip through delete -> restore.
+ */
+test('a stored filename containing ".." round-trips through delete -> restore', async ({
+  launchApp,
+  userDataDir,
+}) => {
+  const realDirBefore = fileSig(realUserDataDir());
+  const seed = seedNote(userDataDir, 'undo-theta..final', 'Undo Theta');
+  const files = allFiles(seed);
+
+  const { page } = await launchApp();
+
+  const del = await page.evaluate(
+    (m) => (window as StenoWindow).stenoai.meetings.delete(m),
+    seed.meeting,
+  );
+  expect(del.success).toBe(true);
+  const trashId = del.trashId!;
+  const trashDir = path.join(userDataDir, '.trash', trashId);
+
+  // At least one stored name carries the literal "..".
+  const stored = readdirSync(trashDir).filter((n) => n !== 'manifest.json');
+  expect(stored.some((n) => n.includes('..'))).toBe(true);
+  for (const f of files) expect(existsSync(f)).toBe(false);
+
+  const res = await page.evaluate(
+    (id) => (window as StenoWindow).stenoai.meetings.restore(id),
+    trashId,
+  );
+  expect(res.success).toBe(true);
+  for (const f of files) expect(existsSync(f)).toBe(true);
+  expect(existsSync(trashDir)).toBe(false);
+
+  expect(fileSig(realUserDataDir())).toBe(realDirBefore);
+});
+
+/**
+ * Codex M2: a manifest with an empty (or malformed) `files` list must NOT be
+ * treated as a successful zero-file restore — it fails and KEEPS the dir so the
+ * trashed files are never silently orphaned.
+ */
+test('restore of a trash dir with an empty manifest files list fails and keeps the dir', async ({
+  launchApp,
+  userDataDir,
+}) => {
+  const realDirBefore = fileSig(realUserDataDir());
+  const seed = seedNote(userDataDir, 'undo-iota', 'Undo Iota');
+
+  const { page } = await launchApp();
+
+  const del = await page.evaluate(
+    (m) => (window as StenoWindow).stenoai.meetings.delete(m),
+    seed.meeting,
+  );
+  expect(del.success).toBe(true);
+  const trashId = del.trashId!;
+  const trashDir = path.join(userDataDir, '.trash', trashId);
+
+  // Corrupt the manifest to an empty files list.
+  const manifestPath = path.join(trashDir, 'manifest.json');
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+  manifest.files = [];
+  writeFileSync(manifestPath, JSON.stringify(manifest));
+
+  const res = await page.evaluate(
+    (id) => (window as StenoWindow).stenoai.meetings.restore(id),
+    trashId,
+  );
+  expect(res.success).toBe(false);
+  expect(res.error).toContain('malformed');
+  // The dir is preserved with the trashed files still inside.
+  expect(existsSync(trashDir)).toBe(true);
+  const stillStored = readdirSync(trashDir).filter((n) => n !== 'manifest.json');
+  expect(stillStored.length).toBeGreaterThan(0);
+
+  expect(fileSig(realUserDataDir())).toBe(realDirBefore);
+});
+
+/**
+ * New critical: a symlinked `.trash` ROOT is an escape vector — pointed at an
+ * allowed dir, a real basename (trashId "config.json") resolves to a genuine
+ * file that would pass the containment check and get rmSync'd. Both restore and
+ * purge must reject a symlinked root outright and never delete the target.
+ * Symlink creation needs a privilege on Windows, so skip there if unavailable.
+ */
+test('restore/purge reject a symlinked .trash root and never delete the target', async ({
+  launchApp,
+  userDataDir,
+}) => {
+  const realDirBefore = fileSig(realUserDataDir());
+  const decoyRoot = path.join(userDataDir, 'decoy-root');
+  mkdirSync(decoyRoot, { recursive: true });
+  const target = path.join(decoyRoot, 'config.json');
+  writeFileSync(target, '{"keep":"me"}');
+
+  const trashRoot = path.join(userDataDir, '.trash');
+  let symlinked = false;
+  try {
+    symlinkSync(decoyRoot, trashRoot, 'dir');
+    symlinked = true;
+  } catch {
+    // Windows without symlink privilege — the guard is still covered on macOS.
+  }
+  test.skip(!symlinked, 'symlink creation unavailable on this platform');
+
+  const { page } = await launchApp();
+
+  const res = await page.evaluate(
+    (id) => (window as StenoWindow).stenoai.meetings.restore(id),
+    'config.json',
+  );
+  expect(res.success).toBe(false);
+  expect(res.error).toContain('Invalid trash root');
+
+  const purge = await page.evaluate(
+    (id) => (window as StenoWindow).stenoai.meetings.purgeTrashed(id),
+    'config.json',
+  );
+  expect(purge.success).toBe(false);
+  expect(purge.error).toContain('Invalid trash root');
+
+  // The decoy target survived — never rmSync'd through the symlinked root.
+  expect(existsSync(target)).toBe(true);
+
   expect(fileSig(realUserDataDir())).toBe(realDirBefore);
 });
