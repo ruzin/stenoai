@@ -1022,6 +1022,9 @@ class Config:
     # person evidence, not just an in-pass "already assigned" guard.
     VALID_RECORDING_TYPES = {"in_person", "remote", "imported", "unknown"}
     VALID_PROTOTYPE_SOURCES = {"user_confirmed", "user_corrected", "manual_enrollment"}
+    # Channels a prototype's cluster can come from -- mirrors the sidecar's
+    # per-channel structure (src.speaker_suggestions.write_speakers_sidecar).
+    VALID_PROTOTYPE_CHANNELS = {"mic", "system"}
 
     def _normalize_person_profiles(self) -> None:
         """Coerce persisted person-profile state into a list of dicts on
@@ -1126,6 +1129,7 @@ class Config:
         speech_duration_seconds: float,
         segment_count: int,
         created_from: str,
+        channel: Optional[str] = None,
         negative: bool = False,
     ) -> Optional[dict]:
         """Append a `SpeakerPrototype` to a person's positive `prototypes`
@@ -1134,7 +1138,18 @@ class Config:
         averages into a running centroid — each confirmation is kept as its
         own context-tagged prototype so a same-room-contaminated in-person
         sample never blends into a clean remote-audio sample for the same
-        person (see module comment above `VALID_RECORDING_TYPES`)."""
+        person (see module comment above `VALID_RECORDING_TYPES`).
+
+        `channel` is which sidecar channel ("mic"/"system") the cluster came
+        from. It must be stored, not just known at confirm time: mic and
+        system channels number their diarizer clusters independently (a mic
+        "SPEAKER_0" and a system "SPEAKER_0" are unrelated), so a
+        `(meeting_id, diarization_speaker_id)` pair alone is ambiguous and
+        cross-channel id collisions once produced hard negatives derived
+        from the wrong channel's clusters. `None` is allowed only for
+        legacy/enrollment paths with no channel to record — matchers fall
+        back to `recording_type` as a channel proxy for those (see
+        src.speaker_suggestions.prototype_channel_matches)."""
         profile = self.get_person_profile(person_id)
         if profile is None:
             return None
@@ -1142,6 +1157,8 @@ class Config:
             raise ValueError(f"Invalid recording_type: {recording_type}")
         if created_from not in self.VALID_PROTOTYPE_SOURCES:
             raise ValueError(f"Invalid created_from: {created_from}")
+        if channel is not None and channel not in self.VALID_PROTOTYPE_CHANNELS:
+            raise ValueError(f"Invalid channel: {channel}")
 
         prototype = {
             "prototype_id": str(uuid.uuid4()),
@@ -1157,11 +1174,109 @@ class Config:
             "created_from": created_from,
             "created_at": time.time(),
         }
+        if channel is not None:
+            prototype["channel"] = channel
         key = "hard_negatives" if negative else "prototypes"
         profile.setdefault(key, []).append(prototype)
         profile["updated_at"] = time.time()
         self._save()
         return dict(prototype)
+
+    def remove_speaker_evidence(
+        self,
+        person_id: str,
+        *,
+        meeting_id: str,
+        channel: Optional[str],
+        channel_recording_type: Optional[str],
+        sids: Optional[set] = None,
+        negative: bool = False,
+    ) -> int:
+        """Remove a person's positive prototypes (or hard negatives, with
+        `negative=True`) belonging to one meeting+channel, optionally
+        restricted to specific diarization_speaker_ids. Returns the number
+        of entries removed (0 when the person doesn't exist or nothing
+        matched; saves only when something was removed).
+
+        This is the mutation half of the correction path: confirming a
+        cluster that someone ELSE was previously confirmed as (the review
+        UI's "Change" flow re-confirms with a different person) must remove
+        the superseded evidence, or the wrong person keeps a prototype of a
+        voice that isn't theirs and min-distance matching stays poisoned
+        forever. Channel matching uses the same channel-or-recording_type
+        fallback rule as everything else
+        (src.speaker_suggestions.prototype_channel_matches), so legacy
+        entries without a channel field are covered too.
+        """
+        from src.speaker_suggestions import prototype_channel_matches
+
+        profile = self.get_person_profile(person_id)
+        if profile is None:
+            return 0
+        key = "hard_negatives" if negative else "prototypes"
+        entries = profile.get(key) or []
+        kept = [
+            entry for entry in entries
+            if not (
+                entry.get("meeting_id") == meeting_id
+                and prototype_channel_matches(entry, channel, channel_recording_type)
+                and (sids is None or entry.get("diarization_speaker_id") in sids)
+            )
+        ]
+        removed = len(entries) - len(kept)
+        if removed:
+            profile[key] = kept
+            profile["updated_at"] = time.time()
+            self._save()
+        return removed
+
+    def remove_speaker_evidence_by_ids(
+        self, person_id: str, entry_ids: set, *, negative: bool = False,
+    ) -> int:
+        """Remove specific prototypes/hard-negatives by their
+        `prototype_id`. The precision counterpart to
+        `remove_speaker_evidence`'s meeting+channel matching -- used by the
+        repair CLI, which decides exactly which entries to drop during its
+        dry-run analysis and must then remove exactly those. Returns the
+        count removed; saves only when something was."""
+        profile = self.get_person_profile(person_id)
+        if profile is None or not entry_ids:
+            return 0
+        key = "hard_negatives" if negative else "prototypes"
+        entries = profile.get(key) or []
+        kept = [e for e in entries if e.get("prototype_id") not in entry_ids]
+        removed = len(entries) - len(kept)
+        if removed:
+            profile[key] = kept
+            profile["updated_at"] = time.time()
+            self._save()
+        return removed
+
+    def set_speaker_evidence_channels(
+        self, person_id: str, channels_by_entry_id: dict, *, negative: bool = False,
+    ) -> int:
+        """Backfill the `channel` field onto existing prototypes/hard-
+        negatives (`{prototype_id: "mic" | "system"}`) -- for entries
+        written before `add_speaker_prototype` recorded channels, whose
+        channel the repair CLI recovered from their meeting's sidecar.
+        Returns how many entries were updated; saves only when any were."""
+        profile = self.get_person_profile(person_id)
+        if profile is None or not channels_by_entry_id:
+            return 0
+        for channel in channels_by_entry_id.values():
+            if channel not in self.VALID_PROTOTYPE_CHANNELS:
+                raise ValueError(f"Invalid channel: {channel}")
+        key = "hard_negatives" if negative else "prototypes"
+        updated = 0
+        for entry in profile.get(key) or []:
+            channel = channels_by_entry_id.get(entry.get("prototype_id"))
+            if channel is not None and entry.get("channel") != channel:
+                entry["channel"] = channel
+                updated += 1
+        if updated:
+            profile["updated_at"] = time.time()
+            self._save()
+        return updated
 
     def get_model_info(self, model_name: str) -> Optional[Dict[str, str]]:
         """

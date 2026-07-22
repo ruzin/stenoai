@@ -433,6 +433,10 @@ export interface SpeakerCandidate {
   display_name: string;
   distance: number;
   hard_negative_conflict: boolean;
+  /** Distance to this person's nearest stored hard-negative, or null when
+   *  they have none -- explains hard_negative_conflict (suppression is
+   *  relative: negative evidence must rival the positive to suppress). */
+  negative_distance: number | null;
 }
 export interface SpeakerSuggestion {
   status: 'confirmed' | 'possible' | 'none';
@@ -484,6 +488,10 @@ export type ConfirmSpeakerResponse = Result<{
   resolved_diarization_speaker_id: string;
   merged_from: string[];
   hard_negatives_added_against: string[];
+  /** Display names of people whose previous confirmation of this SAME
+   *  cluster was superseded by this confirm (the "Change" flow) -- their
+   *  stale prototype and derived hard negatives were removed. */
+  reassigned_from: string[];
   relabeled_lines: number;
 }>;
 

@@ -25,6 +25,7 @@ type ConfirmSpeakerResult = {
   person_id?: string;
   display_name?: string;
   relabeled_lines?: number;
+  reassigned_from?: string[];
 };
 
 type StenoWindow = Window & {
@@ -122,49 +123,61 @@ test('confirm-speaker --relabel-transcript persists a PersonProfile and relabels
   );
   expect(readFileSync(transcriptFile, 'utf8')).toContain('[00:20] [You] hi back');
 
-  // A second confirm of the SAME cluster (simulating a "Change" correction)
-  // re-labels idempotently rather than duplicating lines.
+  // A second confirm of the SAME cluster (the review UI's "Change"
+  // correction) REASSIGNS it: the transcript re-labels idempotently rather
+  // than duplicating lines, and Julian's superseded prototype is removed
+  // so the mis-confirm can't keep poisoning cross-meeting matching.
   const secondResult = await page.evaluate(
     (params) => (window as StenoWindow).stenoai.speakers.confirm(params),
     { meetingStem: stem, channel: 'system', diarizationSpeakerId: 'SPEAKER_0', newPersonName: 'Max' },
   );
   expect(secondResult.success).toBe(true);
+  expect(secondResult.reassigned_from).toEqual(['Julian']);
   await expect.poll(() => readFileSync(transcriptFile, 'utf8')).toEqual(
     expect.stringContaining('[00:05] [Max] hello there'),
   );
   expect(readFileSync(transcriptFile, 'utf8')).not.toContain('[Julian]');
 
-  // Re-running suggest-speakers reflects the confirmation. Status is
+  // On disk: Julian keeps his (now evidence-less) profile, Max owns the
+  // cluster with a prototype marked as a correction.
+  await expect.poll(() => {
+    const cfg = readJson(configPath);
+    const profiles = (cfg.person_profiles ?? []) as Array<{
+      display_name: string;
+      prototypes: Array<{ created_from: string; channel?: string }>;
+    }>;
+    const julian = profiles.find((p) => p.display_name === 'Julian');
+    const max = profiles.find((p) => p.display_name === 'Max');
+    return {
+      julianPrototypes: julian?.prototypes.length,
+      maxCreatedFrom: max?.prototypes[0]?.created_from,
+      maxChannel: max?.prototypes[0]?.channel,
+    };
+  }).toEqual({ julianPrototypes: 0, maxCreatedFrom: 'user_corrected', maxChannel: 'system' });
+
+  // Re-running suggest-speakers reflects the corrected state. Status is
   // "possible", not "confirmed" -- SUGGESTION_MIN_CONFIRMED_MEETINGS (=2)
   // caps any person with evidence from only ONE meeting there, and Max
-  // (like Julian above) only has this single meeting confirmed so far.
-  // suggested_name is still set at "possible" tier (see suggest_speaker).
-  //
-  // The top candidate is "Julian", not "Max": both were confirmed from the
-  // literal SAME cluster in this test (an artificial setup to exercise the
-  // relabel-idempotency path above), so both have a prototype at EXACTLY
-  // distance 0 from SPEAKER_0's embedding -- a genuine tie. score_candidates'
-  // sort is stable, so Julian (confirmed first) legitimately wins the tie
-  // over Max. This isn't what this assertion is really about -- the relabel
-  // idempotency is already proven by the transcript-content checks above --
-  // it's just confirming suggest-speakers returns a coherent top candidate
-  // at all after two confirms on one cluster.
+  // only has this single meeting confirmed so far. suggested_name is
+  // still set at "possible" tier (see suggest_speaker). Julian has no
+  // prototypes left, so he can't out-rank Max the way his stale
+  // same-cluster prototype used to before the reassignment fix.
   const suggestions = await page.evaluate(
     (meetingStem) => (window as StenoWindow).stenoai.speakers.suggestForMeeting(meetingStem),
     stem,
   );
   expect(suggestions.success).toBe(true);
   expect(suggestions.channels.system.SPEAKER_0.status).toBe('possible');
-  expect(suggestions.channels.system.SPEAKER_0.suggested_name).toBe('Julian');
+  expect(suggestions.channels.system.SPEAKER_0.suggested_name).toBe('Max');
   // The identification anchor (where to go listen) computed end-to-end by
   // the real backend from the sidecar's seeded segment ({start: 5.0}).
   expect(suggestions.channels.system.SPEAKER_0.first_timestamp).toBe('00:05');
   // confirmed_by_user is real, persisted evidence (a matching
   // SpeakerPrototype), not the transient panel-only feedback line -- it
   // survives a completely fresh process (this IS a fresh suggest-speakers
-  // call, not a cached value). Same tie-break as suggested_name above:
-  // Julian's prototype was created first, so it's the one found.
-  expect(suggestions.channels.system.SPEAKER_0.confirmed_by_user).toBe('Julian');
+  // call, not a cached value). After the reassignment it names Max --
+  // Julian's superseded prototype no longer exists to be found.
+  expect(suggestions.channels.system.SPEAKER_0.confirmed_by_user).toBe('Max');
 
   // Keystone: the real user-data dir is byte-for-byte untouched.
   expect(fileSig(realUserDataDir())).toBe(realDirBefore);

@@ -242,7 +242,7 @@ function install({ ipcMain }) {
             SPEAKER_0: {
               status: 'confirmed', suggested_person_id: 'p-julian', suggested_name: 'Julian',
               merged_from: [],
-              candidates: [{ person_id: 'p-julian', display_name: 'Julian', distance: 0.05, hard_negative_conflict: false }],
+              candidates: [{ person_id: 'p-julian', display_name: 'Julian', distance: 0.05, hard_negative_conflict: false, negative_distance: null }],
               reasons: [],
               speech_duration_seconds: 245, segment_count: 60, first_timestamp: '02:10',
               sample_text: 'I think we should ship this on Friday',
@@ -255,7 +255,7 @@ function install({ ipcMain }) {
             SPEAKER_1: {
               status: 'possible', suggested_person_id: 'p-christian', suggested_name: 'Christian Weyer',
               merged_from: [],
-              candidates: [{ person_id: 'p-christian', display_name: 'Christian Weyer', distance: 0.28, hard_negative_conflict: false }],
+              candidates: [{ person_id: 'p-christian', display_name: 'Christian Weyer', distance: 0.28, hard_negative_conflict: false, negative_distance: null }],
               reasons: [],
               speech_duration_seconds: 80, segment_count: 20, first_timestamp: '05:45',
               sample_text: 'let me check the numbers again',
@@ -268,7 +268,7 @@ function install({ ipcMain }) {
             SPEAKER_2: {
               status: 'none', suggested_person_id: null, suggested_name: null,
               merged_from: [],
-              candidates: [{ person_id: 'p-julian', display_name: 'Julian', distance: 0.55, hard_negative_conflict: false }],
+              candidates: [{ person_id: 'p-julian', display_name: 'Julian', distance: 0.55, hard_negative_conflict: false, negative_distance: null }],
               reasons: [],
               speech_duration_seconds: 30, segment_count: 8, first_timestamp: '00:42',
               sample_text: null,
@@ -288,7 +288,7 @@ function install({ ipcMain }) {
             SPEAKER_4: {
               status: 'possible', suggested_person_id: 'p-christian', suggested_name: 'Christian Weyer',
               merged_from: [],
-              candidates: [{ person_id: 'p-christian', display_name: 'Christian Weyer', distance: 0.35, hard_negative_conflict: false }],
+              candidates: [{ person_id: 'p-christian', display_name: 'Christian Weyer', distance: 0.35, hard_negative_conflict: false, negative_distance: null }],
               reasons: [],
               speech_duration_seconds: 12, segment_count: 20, first_timestamp: '08:03',
               sample_text: null,
@@ -744,7 +744,7 @@ function install({ ipcMain }) {
         ...previous,
         status: 'confirmed', suggested_person_id: person.person_id, suggested_name: person.display_name,
         merged_from: [],
-        candidates: [{ person_id: person.person_id, display_name: person.display_name, distance: 0, hard_negative_conflict: false }],
+        candidates: [{ person_id: person.person_id, display_name: person.display_name, distance: 0, hard_negative_conflict: false, negative_distance: null }],
         reasons: [],
         // Real persisted evidence now exists for this cluster -- mirrors the
         // real backend's confirmed_by_user derivation (a matching
@@ -761,6 +761,7 @@ function install({ ipcMain }) {
         resolved_diarization_speaker_id: diarizationSpeakerId,
         merged_from: [],
         hard_negatives_added_against: [],
+        reassigned_from: [],
         relabeled_lines: 0,
       };
     },

@@ -63,10 +63,17 @@ SUGGESTION_DISTANCE_THRESHOLD = 0.40
 # or the suggestion is withheld even if the best candidate clears the
 # threshold on its own — same rationale as VOICEPRINT_CONFIDENCE_MARGIN.
 SUGGESTION_CONFIDENCE_MARGIN = 0.10
-# A candidate whose embedding is this close (or closer) to one of that same
-# person's stored hard-negatives is suppressed outright, regardless of its
-# distance to the person's real prototypes — same threshold, reused as "is
-# this suspiciously similar to something we already know isn't them."
+# Hard-negative suppression is RELATIVE, not a bare cutoff: a candidate is
+# suppressed only when its embedding is meaningfully close to one of that
+# person's stored hard-negatives (this absolute gate, same scale as
+# SUGGESTION_DISTANCE_THRESHOLD) AND that negative evidence is comparable
+# to or stronger than the positive evidence (negative distance within
+# SUGGESTION_CONFIDENCE_MARGIN of, or below, the best prototype distance).
+# An earlier absolute-only rule suppressed genuinely strong matches — a
+# candidate at distance 0.15 to its real prototype was discarded because
+# some negative sat at 0.39 — which punished exactly the people confirmed
+# most often, since every confirmation of a colleague adds negatives that
+# sit at ordinary cross-speaker distances (~0.4) from everyone else.
 HARD_NEGATIVE_DISTANCE_THRESHOLD = 0.40
 # Stability gate: a cluster must clear all three before a suggestion is
 # trusted enough to auto-fill as "confirmed" rather than a soft "might be X".
@@ -124,6 +131,30 @@ def determine_recording_type(channel: str, has_audio: bool) -> str:
     if not has_audio:
         return "unknown"
     return "in_person" if channel == "mic" else "remote"
+
+
+def prototype_channel_matches(prototype: dict, channel_name: str, channel_recording_type) -> bool:
+    """Does a stored prototype/hard-negative belong to this sidecar channel?
+
+    Channel identity matters because mic and system channels number their
+    diarizer clusters independently -- a `(meeting_id, diarization_speaker_id)`
+    pair alone is ambiguous, and matching on it without the channel once
+    recorded hard negatives derived from the wrong channel's clusters
+    (the cross-channel id-collision bug this helper exists to prevent).
+
+    Prototypes written since the `channel` field exists match on it exactly.
+    Legacy prototypes (no `channel` key) fall back to `recording_type` as a
+    channel proxy -- the same mic->in_person / system->remote mapping
+    `determine_recording_type` derives, and the check the codebase already
+    used where channel scoping mattered. The proxy can't distinguish two
+    channels that both recorded as "unknown"; the repair CLI backfills
+    `channel` onto legacy entries from their meeting's sidecar so this
+    fallback path shrinks over time.
+    """
+    channel = prototype.get("channel")
+    if channel is not None:
+        return channel == channel_name
+    return prototype.get("recording_type") == channel_recording_type
 
 
 def build_clusters_from_diarization(segments: list, embeddings: dict) -> dict:
@@ -189,6 +220,11 @@ class Candidate:
     # compute `distance` (the pool _prototype_pool returned) -- see
     # SUGGESTION_MIN_CONFIRMED_MEETINGS.
     confirmed_meeting_count: int = 0
+    # Distance to this person's single nearest stored hard-negative, or
+    # None when they have none -- the other half of the relative
+    # suppression rule (see HARD_NEGATIVE_DISTANCE_THRESHOLD), surfaced so
+    # reports/UI can show WHY a candidate was or wasn't suppressed.
+    negative_distance: Optional[float] = None
 
 
 @dataclass
@@ -224,11 +260,16 @@ def score_candidates(embedding: list, context: ClusterContext, profiles: list) -
             continue
         distance = min(cosine_distance(embedding, p["embedding_mean"]) for p in pool)
 
-        hard_negative_conflict = False
-        for negative in person.get("hard_negatives") or []:
-            if cosine_distance(embedding, negative["embedding_mean"]) <= HARD_NEGATIVE_DISTANCE_THRESHOLD:
-                hard_negative_conflict = True
-                break
+        negatives = person.get("hard_negatives") or []
+        negative_distance = (
+            min(cosine_distance(embedding, n["embedding_mean"]) for n in negatives)
+            if negatives else None
+        )
+        hard_negative_conflict = (
+            negative_distance is not None
+            and negative_distance <= HARD_NEGATIVE_DISTANCE_THRESHOLD
+            and negative_distance < distance + SUGGESTION_CONFIDENCE_MARGIN
+        )
 
         candidates.append(Candidate(
             person_id=person["person_id"],
@@ -236,6 +277,7 @@ def score_candidates(embedding: list, context: ClusterContext, profiles: list) -
             distance=distance,
             hard_negative_conflict=hard_negative_conflict,
             confirmed_meeting_count=len({p.get("meeting_id") for p in pool if p.get("meeting_id")}),
+            negative_distance=negative_distance,
         ))
     candidates.sort(key=lambda c: c.distance)
     return candidates
@@ -263,7 +305,10 @@ def suggest_speaker(embedding: list, context: ClusterContext, profiles: list) ->
         reasons.append(f"runner-up {second.display_name!r} at distance {second.distance:.4f} (margin {margin:.4f})")
 
     if best.hard_negative_conflict:
-        reasons.append("suppressed: best candidate has a hard-negative conflict")
+        reasons.append(
+            f"suppressed: hard-negative at distance {best.negative_distance:.4f} "
+            f"rivals the positive evidence at {best.distance:.4f}"
+        )
         return SuggestionResult(
             diarization_speaker_id=context.diarization_speaker_id,
             status="none", suggested_person_id=None, suggested_name=None,
@@ -319,28 +364,51 @@ def suggest_speaker(embedding: list, context: ClusterContext, profiles: list) ->
 
 
 def suggest_speakers_for_meeting(
-    clusters: dict, profiles: list,
+    channel_clusters: dict, profiles: list,
 ) -> dict:
-    """Suggest names for every diarized cluster in one meeting at once,
-    enforcing used-name exclusivity across them — the same real person
-    can't be suggested for two different clusters in the same meeting (port
-    of the removed auto-matcher's usedNames tracking, SpeakerMatcher.
-    matchVerbose). Processes clusters in a stable (sorted) order so a
-    higher-scoring later cluster doesn't get an earlier cluster's rightful
-    match.
+    """Suggest names for every diarized cluster of a whole meeting at once,
+    enforcing used-name exclusivity ACROSS ALL CHANNELS — one real person
+    speaks from one side of a recording, so the same person cannot be the
+    confirmed suggestion for a mic cluster and a system cluster of the same
+    meeting (a cross-channel double match is echo/bleed, not two people).
+    Port of the removed auto-matcher's usedNames tracking (SpeakerMatcher.
+    matchVerbose), extended meeting-wide.
 
-    `clusters` is `{diarization_speaker_id: (embedding, ClusterContext)}`.
-    Returns `{diarization_speaker_id: SuggestionResult}`.
+    Clusters are assigned in ascending best-candidate-distance order, so
+    the cluster with the strongest evidence for a person claims them —
+    an earlier version processed each channel independently in sorted-id
+    order, which let a worse-matching, earlier-numbered cluster take a
+    person away from the cluster that actually matched them best. Only
+    "confirmed" results consume a person; "possible" ones don't (they are
+    surfaced as hints for a human, who resolves any duplicates).
+
+    `channel_clusters` is `{channel_name: {diarization_speaker_id:
+    (embedding, ClusterContext)}}` — per channel, exactly what
+    `clusters_from_sidecar_channel` (+ `merge_same_channel_fragments`)
+    produces. Returns `{channel_name: {diarization_speaker_id:
+    SuggestionResult}}` covering every input cluster.
     """
-    results: dict = {}
+    flat = [
+        (channel, sid, embedding, context)
+        for channel, clusters in channel_clusters.items()
+        for sid, (embedding, context) in clusters.items()
+    ]
+
+    def _best_distance(entry) -> float:
+        _, _, embedding, context = entry
+        candidates = score_candidates(embedding, context, profiles)
+        return candidates[0].distance if candidates else float("inf")
+
+    flat.sort(key=lambda e: (_best_distance(e), e[0], e[1]))
+
+    results: dict = {channel: {} for channel in channel_clusters}
     used_person_ids: set = set()
-    for sid in sorted(clusters):
-        embedding, context = clusters[sid]
+    for channel, sid, embedding, context in flat:
         available = [p for p in profiles if p["person_id"] not in used_person_ids]
         result = suggest_speaker(embedding, context, available)
         if result.status == "confirmed" and result.suggested_person_id:
             used_person_ids.add(result.suggested_person_id)
-        results[sid] = result
+        results[channel][sid] = result
     return results
 
 
@@ -501,8 +569,8 @@ def read_speakers_sidecar(output_dir: Path, meeting_stem: str) -> Optional[dict]
 
 def clusters_from_sidecar_channel(meeting_id: str, channel: dict) -> dict:
     """Build the `{diarization_speaker_id: (embedding, ClusterContext)}`
-    shape `suggest_speakers_for_meeting` expects from one channel's sidecar
-    entry (see `write_speakers_sidecar`)."""
+    shape `suggest_speakers_for_meeting` expects as each channel's inner
+    dict from one channel's sidecar entry (see `write_speakers_sidecar`)."""
     recording_type = channel.get("recording_type", "unknown")
     out = {}
     for sid, cluster in (channel.get("clusters") or {}).items():

@@ -66,6 +66,8 @@ class ConfirmSpeakerCliTests(unittest.TestCase):
             self.assertEqual(profile["prototypes"][0]["embedding_mean"], [1.0, 0.0])
             self.assertEqual(profile["prototypes"][0]["recording_type"], "in_person")
             self.assertEqual(profile["prototypes"][0]["diarization_speaker_id"], "SPEAKER_00")
+            self.assertEqual(profile["prototypes"][0]["channel"], "mic")
+            self.assertEqual(profile["prototypes"][0]["created_from"], "user_confirmed")
 
     def test_existing_person_id_adds_second_prototype(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -167,6 +169,119 @@ class ConfirmSpeakerCliTests(unittest.TestCase):
             # as confirmed-different (mic vs. system isn't reliable
             # cross-channel negative evidence, e.g. echo/feedback bleed).
             self.assertEqual(data2["hard_negatives_added_against"], [])
+
+    def test_cross_channel_id_collision_does_not_create_hard_negatives(self):
+        # The real collision shape: the OTHER channel's confirmed sid
+        # (system SPEAKER_00) also exists as a DIFFERENT cluster id in the
+        # channel being confirmed (mic SPEAKER_00, an unrelated voice).
+        # Without channel scoping, confirming mic SPEAKER_01 would mistake
+        # Alice (system SPEAKER_00) for a same-channel confirmation and
+        # record negatives built from mic SPEAKER_00's embedding.
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir = Path(tmp) / "output"
+            output_dir.mkdir(parents=True, exist_ok=True)
+            write_speakers_sidecar(output_dir, "mtg001", {
+                "mic": {
+                    "recording_type": "in_person",
+                    "clusters": {
+                        # distance 0.4 apart -- far enough not to merge.
+                        "SPEAKER_00": {"embedding": [1.0, 0.0], "speech_duration_seconds": 30.0, "segment_count": 5},
+                        "SPEAKER_01": {"embedding": [0.6, 0.8], "speech_duration_seconds": 25.0, "segment_count": 4},
+                    },
+                },
+                "system": {
+                    "recording_type": "remote",
+                    "clusters": {"SPEAKER_00": {"embedding": [0.0, 1.0], "speech_duration_seconds": 30.0, "segment_count": 5}},
+                },
+            })
+            cfg = Config(config_path=Path(tmp) / "config.json")
+            result1, cfg = self._run(["mtg001", "system", "SPEAKER_00", "--new-person", "Alice"], tmp, cfg=cfg)
+            alice_id = _last_json(result1.output)["person_id"]
+            result2, cfg = self._run(["mtg001", "mic", "SPEAKER_01", "--new-person", "Bob"], tmp, cfg=cfg)
+            data2 = _last_json(result2.output)
+            self.assertEqual(data2["hard_negatives_added_against"], [])
+            self.assertEqual(cfg.get_person_profile(alice_id)["hard_negatives"], [])
+            self.assertEqual(cfg.get_person_profile(data2["person_id"])["hard_negatives"], [])
+
+    def test_legacy_prototype_without_channel_still_matches_via_recording_type(self):
+        # A prototype confirmed before the channel field existed must still
+        # count as a same-channel confirmation via the recording_type proxy.
+        with tempfile.TemporaryDirectory() as tmp:
+            self._seed_sidecar(tmp)
+            cfg = Config(config_path=Path(tmp) / "config.json")
+            alice = cfg.create_person_profile("Alice")
+            cfg.add_speaker_prototype(
+                alice["person_id"], [1.0, 0.0],
+                recording_type="in_person", meeting_id="mtg001",
+                diarization_speaker_id="SPEAKER_00",
+                speech_duration_seconds=30.0, segment_count=5,
+                created_from="user_confirmed",  # no channel -- legacy shape
+            )
+            result, cfg = self._run(["mtg001", "mic", "SPEAKER_01", "--new-person", "Bob"], tmp, cfg=cfg)
+            data = _last_json(result.output)
+            self.assertEqual(data["hard_negatives_added_against"], ["Alice"])
+
+    def test_reconfirming_cluster_as_different_person_reassigns(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._seed_sidecar(tmp)
+            cfg = Config(config_path=Path(tmp) / "config.json")
+            result1, cfg = self._run(["mtg001", "mic", "SPEAKER_00", "--new-person", "Alice"], tmp, cfg=cfg)
+            alice_id = _last_json(result1.output)["person_id"]
+
+            result2, cfg = self._run(["mtg001", "mic", "SPEAKER_00", "--new-person", "Bob"], tmp, cfg=cfg)
+            data2 = _last_json(result2.output)
+            self.assertEqual(data2["reassigned_from"], ["Alice"])
+            self.assertEqual(data2["participants_updated"], ["Bob"])
+
+            # Alice's wrong prototype is gone -- not kept alongside Bob's.
+            self.assertEqual(cfg.get_person_profile(alice_id)["prototypes"], [])
+            bob = cfg.get_person_profile(data2["person_id"])
+            self.assertEqual(len(bob["prototypes"]), 1)
+            self.assertEqual(bob["prototypes"][0]["created_from"], "user_corrected")
+
+    def test_reconfirming_same_person_replaces_instead_of_duplicating(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._seed_sidecar(tmp)
+            cfg = Config(config_path=Path(tmp) / "config.json")
+            result1, cfg = self._run(["mtg001", "mic", "SPEAKER_00", "--new-person", "Alice"], tmp, cfg=cfg)
+            alice_id = _last_json(result1.output)["person_id"]
+            result2, cfg = self._run(["mtg001", "mic", "SPEAKER_00", "--person-id", alice_id], tmp, cfg=cfg)
+            data2 = _last_json(result2.output)
+            self.assertTrue(data2["success"])
+            self.assertEqual(data2["reassigned_from"], [])
+            profile = cfg.get_person_profile(alice_id)
+            self.assertEqual(len(profile["prototypes"]), 1)
+            # A plain re-confirm is not a correction.
+            self.assertEqual(profile["prototypes"][0]["created_from"], "user_confirmed")
+
+    def test_reassignment_cleans_stale_hard_negatives_and_rebuilds(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._seed_sidecar(tmp)
+            cfg = Config(config_path=Path(tmp) / "config.json")
+            result1, cfg = self._run(["mtg001", "mic", "SPEAKER_00", "--new-person", "Alice"], tmp, cfg=cfg)
+            alice_id = _last_json(result1.output)["person_id"]
+            result2, cfg = self._run(["mtg001", "mic", "SPEAKER_01", "--new-person", "Bob"], tmp, cfg=cfg)
+            bob_id = _last_json(result2.output)["person_id"]
+
+            # Wrong call discovered: SPEAKER_00 was actually Carol.
+            result3, cfg = self._run(["mtg001", "mic", "SPEAKER_00", "--new-person", "Carol"], tmp, cfg=cfg)
+            data3 = _last_json(result3.output)
+            self.assertEqual(data3["reassigned_from"], ["Alice"])
+            self.assertEqual(data3["hard_negatives_added_against"], ["Bob"])
+
+            alice = cfg.get_person_profile(alice_id)
+            bob = cfg.get_person_profile(bob_id)
+            carol = cfg.get_person_profile(data3["person_id"])
+            # Alice was never in this meeting: no positives, no negatives.
+            self.assertEqual(alice["prototypes"], [])
+            self.assertEqual(alice["hard_negatives"], [])
+            # Bob's negative citing SPEAKER_00 was rebuilt (once, not
+            # stacked on the stale one from Alice's wrongful confirm).
+            self.assertEqual(len(bob["hard_negatives"]), 1)
+            self.assertEqual(bob["hard_negatives"][0]["embedding_mean"], [1.0, 0.0])
+            self.assertEqual(len(carol["hard_negatives"]), 1)
+            self.assertEqual(carol["hard_negatives"][0]["embedding_mean"], [0.0, 1.0])
+            self.assertEqual(carol["prototypes"][0]["created_from"], "user_corrected")
 
     def test_relabel_transcript_flag_rewrites_saved_transcript(self):
         with tempfile.TemporaryDirectory() as tmp:

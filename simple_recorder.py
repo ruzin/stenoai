@@ -4640,6 +4640,13 @@ def confirm_speaker(meeting_stem, channel, diarization_speaker_id, person_id, ne
     modes rather than one fuzzy name-lookup, so a typo can never silently
     create a duplicate person instead of matching an existing one.
 
+    Re-confirming a cluster REASSIGNS it: any previous confirmation of the
+    same cluster (same meeting+channel, including merged fragments) is
+    removed first -- the stale person loses that positive prototype and the
+    hard negatives the wrongful confirm created, and the new prototype is
+    recorded as created_from="user_corrected". Re-confirming the same
+    person replaces their prototype instead of duplicating it.
+
     By default does NOT touch the meeting's saved transcript -- this keeps
     the plain CLI/backfill-validation workflow's existing behavior
     unchanged. Pass --relabel-transcript (what the approval UI always
@@ -4653,6 +4660,7 @@ def confirm_speaker(meeting_stem, channel, diarization_speaker_id, person_id, ne
         clusters_from_sidecar_channel,
         confirmed_participant_names,
         merge_same_channel_fragments,
+        prototype_channel_matches,
         read_speakers_sidecar,
         relabel_transcript_exact,
         relabel_transcript_speaker,
@@ -4702,13 +4710,52 @@ def confirm_speaker(meeting_stem, channel, diarization_speaker_id, person_id, ne
             sys.exit(1)
 
     embedding, context = clusters[resolved_id]
+    fragment_ids = {resolved_id, *context.merged_from}
+    channel_recording_type = channel_data.get("recording_type")
+
+    # Reassignment: if this exact cluster (or one of its merged fragments)
+    # was already confirmed as someone, this confirm supersedes that -- the
+    # review UI's "Change" flow is literally a re-confirm with a different
+    # person. Remove the stale positive prototype(s); for a DIFFERENT
+    # person, also remove the hard negatives that wrongful confirmation
+    # created (theirs from this meeting+channel, and every profile's
+    # negatives citing this cluster), since they were only recorded because
+    # that person was believed present here. The mutual-negative loop below
+    # rebuilds correct negatives against the people still confirmed in this
+    # channel. A same-person re-confirm just replaces the prototype instead
+    # of appending a duplicate.
+    reassigned_from = []
+    for existing_person in config.get_person_profiles():
+        removed = config.remove_speaker_evidence(
+            existing_person["person_id"], meeting_id=meeting_stem,
+            channel=channel, channel_recording_type=channel_recording_type,
+            sids=fragment_ids,
+        )
+        if not removed or existing_person["person_id"] == person["person_id"]:
+            continue
+        reassigned_from.append(existing_person["display_name"])
+        config.remove_speaker_evidence(
+            existing_person["person_id"], meeting_id=meeting_stem,
+            channel=channel, channel_recording_type=channel_recording_type,
+            negative=True,
+        )
+        for other in config.get_person_profiles():
+            if other["person_id"] == existing_person["person_id"]:
+                continue
+            config.remove_speaker_evidence(
+                other["person_id"], meeting_id=meeting_stem,
+                channel=channel, channel_recording_type=channel_recording_type,
+                sids=fragment_ids, negative=True,
+            )
+
     prototype = config.add_speaker_prototype(
         person["person_id"], embedding,
         recording_type=context.recording_type, meeting_id=meeting_stem,
         diarization_speaker_id=resolved_id,
         speech_duration_seconds=context.speech_duration_seconds,
         segment_count=context.segment_count,
-        created_from="user_confirmed",
+        created_from="user_corrected" if reassigned_from else "user_confirmed",
+        channel=channel,
     )
 
     # Mutual hard negatives against any OTHER speaker already confirmed in
@@ -4716,6 +4763,11 @@ def confirm_speaker(meeting_stem, channel, diarization_speaker_id, person_id, ne
     # cross-channel): a hybrid meeting's mic and system speakers aren't
     # necessarily confirmed-different (e.g. echo/feedback bleed), so only
     # within-channel confirmations are trustworthy negative evidence.
+    # prototype_channel_matches is what actually enforces the channel scope:
+    # a (meeting_id, diarization_speaker_id) pair alone is ambiguous because
+    # both channels number clusters from SPEAKER_0 independently, and
+    # matching without it recorded hard negatives built from the wrong
+    # channel's clusters whenever the ids happened to collide.
     other_sids = [sid for sid in clusters if sid != resolved_id]
     hard_negatives_added = []
     for other_person in config.get_person_profiles():
@@ -4723,7 +4775,9 @@ def confirm_speaker(meeting_stem, channel, diarization_speaker_id, person_id, ne
             continue
         match = next(
             (p for p in (other_person.get("prototypes") or [])
-             if p.get("meeting_id") == meeting_stem and p.get("diarization_speaker_id") in other_sids),
+             if p.get("meeting_id") == meeting_stem
+             and p.get("diarization_speaker_id") in other_sids
+             and prototype_channel_matches(p, channel, channel_recording_type)),
             None,
         )
         if match is None:
@@ -4737,6 +4791,7 @@ def confirm_speaker(meeting_stem, channel, diarization_speaker_id, person_id, ne
             speech_duration_seconds=other_context.speech_duration_seconds,
             segment_count=other_context.segment_count,
             created_from="user_confirmed", negative=True,
+            channel=channel,
         )
         config.add_speaker_prototype(
             other_person["person_id"], embedding,
@@ -4745,6 +4800,7 @@ def confirm_speaker(meeting_stem, channel, diarization_speaker_id, person_id, ne
             speech_duration_seconds=context.speech_duration_seconds,
             segment_count=context.segment_count,
             created_from="user_confirmed", negative=True,
+            channel=channel,
         )
         hard_negatives_added.append(other_person["display_name"])
 
@@ -4784,6 +4840,7 @@ def confirm_speaker(meeting_stem, channel, diarization_speaker_id, person_id, ne
         "merged_from": context.merged_from,
         "relabeled_lines": relabeled_lines,
         "hard_negatives_added_against": hard_negatives_added,
+        "reassigned_from": reassigned_from,
         "participants_updated": participant_names,
     }))
 
@@ -4846,6 +4903,7 @@ def suggest_speakers(meeting_stem):
         clusters_from_sidecar_channel,
         extract_sample_text,
         merge_same_channel_fragments,
+        prototype_channel_matches,
         read_speakers_sidecar,
         suggest_speakers_for_meeting,
     )
@@ -4871,14 +4929,23 @@ def suggest_speakers(meeting_stem):
     transcript_path = dirs["transcripts"] / f"{meeting_stem}_transcript.txt"
 
     profiles = get_config().get_person_profiles()
-    channels_out = {}
+    # Merge fragments per channel first, then suggest for ALL channels in
+    # one call -- used-person exclusivity is meeting-wide (a person can't
+    # be the confirmed suggestion on both mic and system), so suggestion
+    # must see every channel's clusters together.
+    merged_by_channel = {}
     for channel_name, channel in (sidecar.get("channels") or {}).items():
         raw_clusters = clusters_from_sidecar_channel(meeting_stem, channel)
         # Same-recording diarizer fragments of one voice (see the plan
         # doc's Phase 3.6) collapse before scoring, so they're suggested as
         # one cluster instead of several partial-duration ones.
-        clusters, _ = merge_same_channel_fragments(raw_clusters)
-        results = suggest_speakers_for_meeting(clusters, profiles)
+        merged_by_channel[channel_name], _ = merge_same_channel_fragments(raw_clusters)
+    results_by_channel = suggest_speakers_for_meeting(merged_by_channel, profiles)
+
+    channels_out = {}
+    for channel_name, channel in (sidecar.get("channels") or {}).items():
+        clusters = merged_by_channel[channel_name]
+        results = results_by_channel[channel_name]
         raw_clusters_by_id = channel.get("clusters") or {}
         recording_type = channel.get("recording_type")
         cluster_out = {}
@@ -4906,7 +4973,7 @@ def suggest_speakers(meeting_stem):
                 if any(
                     p.get("meeting_id") == meeting_stem
                     and p.get("diarization_speaker_id") in fragment_ids
-                    and p.get("recording_type") == recording_type
+                    and prototype_channel_matches(p, channel_name, recording_type)
                     for p in (person.get("prototypes") or [])
                 ):
                     confirmed_by_user = person["display_name"]
@@ -4918,7 +4985,10 @@ def suggest_speakers(meeting_stem):
                 "merged_from": context.merged_from,
                 "candidates": [
                     {"person_id": c.person_id, "display_name": c.display_name,
-                     "distance": round(c.distance, 4), "hard_negative_conflict": c.hard_negative_conflict}
+                     "distance": round(c.distance, 4), "hard_negative_conflict": c.hard_negative_conflict,
+                     "negative_distance": (
+                         round(c.negative_distance, 4) if c.negative_distance is not None else None
+                     )}
                     for c in r.candidates
                 ],
                 "reasons": r.reasons,
@@ -5323,6 +5393,7 @@ def backfill_participants(relabel_transcripts):
         clusters_from_sidecar_channel,
         confirmed_participant_names,
         merge_same_channel_fragments,
+        prototype_channel_matches,
         read_speakers_sidecar,
         relabel_transcript_exact,
         relabel_transcript_multi,
@@ -5374,7 +5445,9 @@ def backfill_participants(relabel_transcripts):
             recording_type = channel_data.get("recording_type")
             for person in profiles:
                 for prototype in (person.get("prototypes") or []):
-                    if prototype.get("meeting_id") != meeting_id or prototype.get("recording_type") != recording_type:
+                    if prototype.get("meeting_id") != meeting_id or not prototype_channel_matches(
+                        prototype, channel_name, recording_type,
+                    ):
                         continue
                     sid = prototype.get("diarization_speaker_id")
                     if sid not in id_resolution:
@@ -5446,7 +5519,8 @@ def speaker_suggestion_report():
     )
 
     output_dir = get_data_dirs()["output"]
-    profiles = get_config().get_person_profiles()
+    config = get_config()
+    profiles = config.get_person_profiles()
     if not profiles:
         print("No person profiles stored yet -- nothing to suggest against.")
         print("Create one with: simple_recorder.py create-person-profile <name>")
@@ -5459,6 +5533,9 @@ def speaker_suggestion_report():
 
     total_clusters = 0
     status_counts = {"confirmed": 0, "possible": 0, "none": 0}
+    # (meeting, sid, embedding, context) per merged MIC cluster, for the
+    # self-match diagnostics section below.
+    self_rows = []
 
     for sidecar_file in sidecar_files:
         stem = sidecar_file.stem.replace("_speakers", "")
@@ -5469,16 +5546,21 @@ def speaker_suggestion_report():
             continue
 
         print(f"=== {stem} ===")
+        merged_by_channel = {}
         for channel_name, channel in (sidecar.get("channels") or {}).items():
             raw_clusters = clusters_from_sidecar_channel(stem, channel)
             # Same-recording diarizer fragments of one voice (see the plan
             # doc's Phase 3.6) collapse before scoring/reporting.
-            clusters, _ = merge_same_channel_fragments(raw_clusters)
-            for sid, (_, context) in clusters.items():
+            merged_by_channel[channel_name], _ = merge_same_channel_fragments(raw_clusters)
+            for sid, (embedding, context) in merged_by_channel[channel_name].items():
                 if context.merged_from:
                     print(f"  [{channel_name}] merged: {sid}, {', '.join(context.merged_from)} "
                           "(same-recording fragments of one voice)")
-            results = suggest_speakers_for_meeting(clusters, profiles)
+                if channel_name == "mic":
+                    self_rows.append((stem, sid, embedding, context))
+        results_by_channel = suggest_speakers_for_meeting(merged_by_channel, profiles)
+        for channel_name in merged_by_channel:
+            results = results_by_channel[channel_name]
             for sid in sorted(results):
                 result = results[sid]
                 total_clusters += 1
@@ -5492,6 +5574,204 @@ def speaker_suggestion_report():
     print(f"=== {total_clusters} clusters across {len(sidecar_files)} meetings ===")
     for status, count in status_counts.items():
         print(f"  {status}: {count}")
+
+    # --- Self ("You") match diagnostics --------------------------------
+    # The self path is separate from person-profile suggestions: it matches
+    # mic-channel clusters against the enrolled self voiceprint
+    # (src.transcriber._apply_voiceprint_matches) and fails SILENTLY --
+    # labels just fall back to the dominant-duration guess, so a user whose
+    # own voice never matches sees nothing except "it doesn't say You".
+    # Print where every mic cluster actually lands relative to the
+    # threshold, split by anchor (long-term centroid vs recent-samples
+    # FIFO), so a failing self-match can be diagnosed with numbers instead
+    # of guesses: re-enroll, re-tune, or accept.
+    from src.transcriber import VOICEPRINT_DISTANCE_THRESHOLD, _voiceprint_distance
+    from src.voiceprint import cosine_distance
+
+    print()
+    self_vp = next((v for v in config.get_voiceprints() if v.get("is_self")), None)
+    if self_vp is None:
+        print("=== self-match: NO self voiceprint enrolled ===")
+        print('  The "You" label is never voice-matched without one -- enroll with:')
+        print("  simple_recorder.py enroll-voiceprint <name> <audio_file> --is-self")
+        return
+    if not self_rows:
+        print("=== self-match: no mic clusters found in any sidecar ===")
+        return
+
+    print(f"=== self-match: {len(self_rows)} mic clusters vs self voiceprint "
+          f"{self_vp.get('name')!r} (threshold {VOICEPRINT_DISTANCE_THRESHOLD}) ===")
+    sweep_thresholds = (VOICEPRINT_DISTANCE_THRESHOLD, 0.45, 0.50)
+    sweep_counts = {t: 0 for t in sweep_thresholds}
+    for stem, sid, embedding, context in self_rows:
+        overall = _voiceprint_distance(embedding, self_vp)
+        centroid = self_vp.get("centroid")
+        centroid_desc = f"{cosine_distance(embedding, centroid):.4f}" if centroid else "n/a"
+        fifo = list(self_vp.get("embeddings") or [])
+        fifo_desc = (
+            f"{min(cosine_distance(embedding, a) for a in fifo):.4f}" if fifo else "n/a"
+        )
+        for t in sweep_thresholds:
+            if overall < t:
+                sweep_counts[t] += 1
+        verdict = "MATCH" if overall < VOICEPRINT_DISTANCE_THRESHOLD else "no match"
+        print(f"  {stem} [{sid}]: distance={overall:.4f} ({verdict}) "
+              f"centroid={centroid_desc} recent-best={fifo_desc} "
+              f"duration={context.speech_duration_seconds:.0f}s "
+              f"segments={context.segment_count}")
+    print("  -- would match: "
+          + ", ".join(f"{sweep_counts[t]} under {t:.2f}" for t in sweep_thresholds))
+    print("  note: live matching only runs when a mic channel has 2+ clusters, "
+          "and only the single closest cluster per meeting gets the label.")
+
+
+@cli.command(name='repair-speaker-profiles')
+@click.option(
+    '--apply', 'apply_changes', is_flag=True, default=False,
+    help="Write the repairs. Without this flag: dry run -- print the full report, change nothing.",
+)
+def repair_speaker_profiles(apply_changes):
+    """One-time cleanup of stored person-profile evidence, for libraries
+    built before the cross-channel confirm fix. Dry run by default; pass
+    --apply to write. Three passes:
+
+    A) Drop hard negatives created by the (since fixed) cross-channel id
+       collision: mic and system channels number clusters independently, so
+       confirm-speaker used to mistake "same meeting, same SPEAKER_N" on the
+       OTHER channel for a same-channel confirmation and record negatives
+       built from the wrong channel's clusters. Detectable after the fact:
+       the negative's recording_type doesn't match the recording_type of the
+       positive prototype it was derived from (both known, not "unknown").
+
+    B) Dedupe entries sharing (meeting_id, diarization_speaker_id, channel)
+       within one person's prototypes or hard_negatives -- re-confirms used
+       to append instead of replace. Keeps the oldest.
+
+    C) Backfill the channel field onto legacy entries from their meeting's
+       sidecar (unique cluster-id ownership, disambiguated by recording_type
+       when both channels share the id), so the recording_type fallback in
+       prototype_channel_matches shrinks to entries whose sidecar is gone.
+    """
+    from src.config import get_config, get_data_dirs
+    from src.speaker_suggestions import read_speakers_sidecar
+
+    config = get_config()
+    profiles = config.get_person_profiles()
+    output_dir = get_data_dirs()["output"]
+
+    # (person_id, negative?) -> set of prototype_ids to drop / {id: channel}
+    drops: dict = {}
+    backfills: dict = {}
+    per_person: dict = {}
+    details = []
+
+    def _stats(person):
+        return per_person.setdefault(person["display_name"], {
+            "collision_negatives_dropped": 0, "duplicates_removed": 0, "channels_backfilled": 0,
+        })
+
+    # Pass A -- collision-created hard negatives.
+    for person in profiles:
+        for negative in (person.get("hard_negatives") or []):
+            n_meeting = negative.get("meeting_id")
+            n_sid = negative.get("diarization_speaker_id")
+            n_rt = negative.get("recording_type")
+            if not negative.get("prototype_id") or not n_meeting or not n_sid or n_rt in (None, "unknown"):
+                continue
+            owner_rts = {
+                p.get("recording_type")
+                for other in profiles if other["person_id"] != person["person_id"]
+                for p in (other.get("prototypes") or [])
+                if p.get("meeting_id") == n_meeting and p.get("diarization_speaker_id") == n_sid
+            }
+            owner_rts.discard(None)
+            owner_rts.discard("unknown")
+            if owner_rts and n_rt not in owner_rts:
+                drops.setdefault((person["person_id"], True), set()).add(negative.get("prototype_id"))
+                _stats(person)["collision_negatives_dropped"] += 1
+                details.append(
+                    f"{person['display_name']}: drop hard-negative from {n_meeting}/{n_sid} "
+                    f"({n_rt} vs confirmed {'/'.join(sorted(owner_rts))}) -- cross-channel collision"
+                )
+
+    # Pass B -- duplicates within one person's list (oldest kept). The key
+    # includes channel (recording_type for legacy entries): the same
+    # SPEAKER_N on mic and system are different clusters, not duplicates.
+    for person in profiles:
+        for negative_flag, key_name in ((False, "prototypes"), (True, "hard_negatives")):
+            seen = set()
+            entries = sorted(
+                person.get(key_name) or [], key=lambda e: e.get("created_at") or 0,
+            )
+            already_dropped = drops.get((person["person_id"], negative_flag), set())
+            for entry in entries:
+                if not entry.get("prototype_id") or entry.get("prototype_id") in already_dropped:
+                    continue
+                meeting_id = entry.get("meeting_id")
+                sid = entry.get("diarization_speaker_id")
+                if not meeting_id or not sid:
+                    continue
+                dedupe_key = (meeting_id, sid, entry.get("channel") or entry.get("recording_type"))
+                if dedupe_key in seen:
+                    drops.setdefault((person["person_id"], negative_flag), set()).add(entry.get("prototype_id"))
+                    _stats(person)["duplicates_removed"] += 1
+                    details.append(
+                        f"{person['display_name']}: drop duplicate "
+                        f"{'hard-negative' if negative_flag else 'prototype'} from {meeting_id}/{sid}"
+                    )
+                else:
+                    seen.add(dedupe_key)
+
+    # Pass C -- backfill channel from the meeting's sidecar.
+    sidecar_cache: dict = {}
+    for person in profiles:
+        for negative_flag, key_name in ((False, "prototypes"), (True, "hard_negatives")):
+            already_dropped = drops.get((person["person_id"], negative_flag), set())
+            for entry in person.get(key_name) or []:
+                if (
+                    not entry.get("prototype_id")
+                    or entry.get("channel") is not None
+                    or entry.get("prototype_id") in already_dropped
+                ):
+                    continue
+                meeting_id = entry.get("meeting_id")
+                sid = entry.get("diarization_speaker_id")
+                if not meeting_id or not sid:
+                    continue
+                if meeting_id not in sidecar_cache:
+                    sidecar_cache[meeting_id] = read_speakers_sidecar(output_dir, meeting_id)
+                sidecar = sidecar_cache[meeting_id]
+                if sidecar is None:
+                    continue
+                owners = [
+                    name for name, ch in (sidecar.get("channels") or {}).items()
+                    if sid in (ch.get("clusters") or {})
+                ]
+                if len(owners) > 1:
+                    owners = [
+                        name for name in owners
+                        if (sidecar["channels"][name].get("recording_type")) == entry.get("recording_type")
+                    ]
+                if len(owners) != 1 or owners[0] not in ("mic", "system"):
+                    continue
+                backfills.setdefault((person["person_id"], negative_flag), {})[entry["prototype_id"]] = owners[0]
+                _stats(person)["channels_backfilled"] += 1
+
+    if apply_changes:
+        for (person_id, negative_flag), entry_ids in drops.items():
+            config.remove_speaker_evidence_by_ids(person_id, entry_ids, negative=negative_flag)
+        for (person_id, negative_flag), channels_by_id in backfills.items():
+            config.set_speaker_evidence_channels(person_id, channels_by_id, negative=negative_flag)
+
+    print(json.dumps({
+        "success": True,
+        "applied": apply_changes,
+        "collision_negatives_dropped": sum(s["collision_negatives_dropped"] for s in per_person.values()),
+        "duplicates_removed": sum(s["duplicates_removed"] for s in per_person.values()),
+        "channels_backfilled": sum(s["channels_backfilled"] for s in per_person.values()),
+        "people": per_person,
+        "details": details,
+    }, indent=2))
 
 
 @cli.command()

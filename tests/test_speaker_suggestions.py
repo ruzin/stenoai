@@ -21,6 +21,7 @@ from src.speaker_suggestions import (
     extract_speaker_sample_audio,
     longest_segment,
     merge_same_channel_fragments,
+    prototype_channel_matches,
     read_speakers_sidecar,
     relabel_transcript_exact,
     relabel_transcript_multi,
@@ -173,6 +174,47 @@ class ScoreCandidatesTests(unittest.TestCase):
         candidates = score_candidates([1.0, 0.0], _stable_context(), profiles)
         self.assertFalse(candidates[0].hard_negative_conflict)
 
+    def test_no_conflict_when_positive_clearly_beats_negative(self):
+        # Suppression is relative: a negative at ~0.3 must not kill an
+        # exact-match positive (distance 0) -- that negative just sits at
+        # an ordinary cross-speaker distance, which every colleague's
+        # confirm adds. The old absolute rule suppressed exactly these.
+        profiles = [_profile(
+            "p1", "Max",
+            prototypes=[_prototype([1.0, 0.0])],
+            hard_negatives=[_prototype([0.7, 0.714])],  # distance ~0.3 from query
+        )]
+        candidates = score_candidates([1.0, 0.0], _stable_context(), profiles)
+        self.assertFalse(candidates[0].hard_negative_conflict)
+        self.assertAlmostEqual(candidates[0].negative_distance, 0.3, places=2)
+
+    def test_conflict_when_negative_within_margin_of_positive(self):
+        # Positive at ~0.25, negative at ~0.3: the negative evidence rivals
+        # the positive (within SUGGESTION_CONFIDENCE_MARGIN), so suppress.
+        profiles = [_profile(
+            "p1", "Max",
+            prototypes=[_prototype([0.75, 0.661])],   # distance ~0.25 from query
+            hard_negatives=[_prototype([0.7, 0.714])],  # distance ~0.3 from query
+        )]
+        candidates = score_candidates([1.0, 0.0], _stable_context(), profiles)
+        self.assertTrue(candidates[0].hard_negative_conflict)
+
+    def test_no_conflict_when_negative_beyond_absolute_threshold(self):
+        # A negative past HARD_NEGATIVE_DISTANCE_THRESHOLD is not
+        # meaningful evidence at all, however weak the positive is.
+        profiles = [_profile(
+            "p1", "Max",
+            prototypes=[_prototype([0.75, 0.661])],  # distance ~0.25
+            hard_negatives=[_prototype([0.5, 0.866])],  # distance ~0.5, beyond 0.40
+        )]
+        candidates = score_candidates([1.0, 0.0], _stable_context(), profiles)
+        self.assertFalse(candidates[0].hard_negative_conflict)
+
+    def test_negative_distance_is_none_without_negatives(self):
+        profiles = [_profile("p1", "Max", prototypes=[_prototype([1.0, 0.0])])]
+        candidates = score_candidates([1.0, 0.0], _stable_context(), profiles)
+        self.assertIsNone(candidates[0].negative_distance)
+
     def test_results_sorted_ascending_by_distance(self):
         profiles = [
             _profile("p1", "Far", prototypes=[_prototype([0.0, 1.0])]),
@@ -239,6 +281,19 @@ class SuggestSpeakerTests(unittest.TestCase):
         result = suggest_speaker([1.0, 0.0], _stable_context(), profiles)
         self.assertEqual(result.status, "none")
         self.assertIsNone(result.suggested_name)
+
+    def test_strong_match_survives_a_moderate_hard_negative(self):
+        # The relative rule's recall half: an exact-match cluster stays
+        # "confirmed" even though a stored negative sits at ~0.3 (an
+        # ordinary cross-speaker distance).
+        profiles = [_profile(
+            "p1", "Max",
+            prototypes=_multi_meeting_prototypes([1.0, 0.0], [0.98, 0.01]),
+            hard_negatives=[_prototype([0.7, 0.714])],  # distance ~0.3 from query
+        )]
+        result = suggest_speaker([1.0, 0.0], _stable_context(), profiles)
+        self.assertEqual(result.status, "confirmed")
+        self.assertEqual(result.suggested_name, "Max")
 
     def test_never_raises_on_malformed_profile(self):
         # Missing "prototypes" key entirely shouldn't crash scoring.
@@ -311,17 +366,34 @@ class SuggestSpeakerTests(unittest.TestCase):
         self.assertEqual(result.status, "confirmed")
 
 
+class PrototypeChannelMatchesTests(unittest.TestCase):
+    def test_channel_field_matches_exactly(self):
+        self.assertTrue(prototype_channel_matches({"channel": "mic"}, "mic", "in_person"))
+        self.assertFalse(prototype_channel_matches({"channel": "system"}, "mic", "in_person"))
+
+    def test_channel_field_wins_over_recording_type(self):
+        # A prototype WITH a channel never falls back -- even when the
+        # recording_type proxy would have said otherwise.
+        prototype = {"channel": "system", "recording_type": "in_person"}
+        self.assertFalse(prototype_channel_matches(prototype, "mic", "in_person"))
+
+    def test_legacy_prototype_falls_back_to_recording_type(self):
+        legacy = {"recording_type": "in_person"}
+        self.assertTrue(prototype_channel_matches(legacy, "mic", "in_person"))
+        self.assertFalse(prototype_channel_matches(legacy, "system", "remote"))
+
+
 class SuggestSpeakersForMeetingTests(unittest.TestCase):
     def test_same_person_not_suggested_for_two_clusters(self):
         # Two clusters both plausibly Max; only the closer one should claim
         # the confirmed match — port of the removed auto-matcher's
         # usedNames behaviour.
         profiles = [_profile("p1", "Max", prototypes=_multi_meeting_prototypes([1.0, 0.0], [0.97, 0.03]))]
-        clusters = {
+        channel_clusters = {"mic": {
             "SPEAKER_0": ([1.0, 0.0], _stable_context(sid="SPEAKER_0")),  # exact match
             "SPEAKER_1": ([0.95, 0.05], _stable_context(sid="SPEAKER_1")),  # also plausible
-        }
-        results = suggest_speakers_for_meeting(clusters, profiles)
+        }}
+        results = suggest_speakers_for_meeting(channel_clusters, profiles)["mic"]
         statuses = {sid: r.status for sid, r in results.items()}
         names = {sid: r.suggested_name for sid, r in results.items()}
         self.assertEqual(statuses["SPEAKER_0"], "confirmed")
@@ -334,13 +406,52 @@ class SuggestSpeakersForMeetingTests(unittest.TestCase):
             _profile("p1", "Max", prototypes=[_prototype([1.0, 0.0])]),
             _profile("p2", "Sarah", prototypes=[_prototype([0.0, 1.0])]),
         ]
-        clusters = {
+        channel_clusters = {"mic": {
             "SPEAKER_0": ([1.0, 0.0], _stable_context(sid="SPEAKER_0")),
             "SPEAKER_1": ([0.0, 1.0], _stable_context(sid="SPEAKER_1")),
-        }
-        results = suggest_speakers_for_meeting(clusters, profiles)
+        }}
+        results = suggest_speakers_for_meeting(channel_clusters, profiles)["mic"]
         self.assertEqual(results["SPEAKER_0"].suggested_name, "Max")
         self.assertEqual(results["SPEAKER_1"].suggested_name, "Sarah")
+
+    def test_person_cannot_be_confirmed_on_both_channels(self):
+        # Exclusivity is meeting-wide, not per-channel: a cross-channel
+        # double match is echo/bleed, not the same person twice. The closer
+        # (system) cluster claims Max; the mic one must not also get him.
+        profiles = [_profile("p1", "Max", prototypes=_multi_meeting_prototypes([1.0, 0.0], [0.97, 0.03]))]
+        channel_clusters = {
+            "mic": {"SPEAKER_0": ([0.95, 0.05], _stable_context(sid="SPEAKER_0"))},
+            "system": {"SPEAKER_0": ([1.0, 0.0], _stable_context(sid="SPEAKER_0", recording_type="remote"))},
+        }
+        results = suggest_speakers_for_meeting(channel_clusters, profiles)
+        self.assertEqual(results["system"]["SPEAKER_0"].status, "confirmed")
+        self.assertEqual(results["system"]["SPEAKER_0"].suggested_name, "Max")
+        self.assertNotEqual(results["mic"]["SPEAKER_0"].suggested_name, "Max")
+
+    def test_better_matching_later_cluster_wins_the_person(self):
+        # Clusters are assigned in best-distance order, not sorted-id
+        # order: SPEAKER_1 matches Max exactly, so a merely-plausible
+        # SPEAKER_0 must not claim him first just by sorting earlier
+        # (the old per-channel sorted-sid behaviour).
+        profiles = [_profile("p1", "Max", prototypes=_multi_meeting_prototypes([1.0, 0.0], [0.97, 0.03]))]
+        channel_clusters = {"mic": {
+            "SPEAKER_0": ([0.8, 0.6], _stable_context(sid="SPEAKER_0")),  # distance ~0.2, would confirm alone
+            "SPEAKER_1": ([1.0, 0.0], _stable_context(sid="SPEAKER_1")),  # exact match
+        }}
+        results = suggest_speakers_for_meeting(channel_clusters, profiles)["mic"]
+        self.assertEqual(results["SPEAKER_1"].status, "confirmed")
+        self.assertEqual(results["SPEAKER_1"].suggested_name, "Max")
+        self.assertNotEqual(results["SPEAKER_0"].suggested_name, "Max")
+
+    def test_every_input_cluster_appears_in_results(self):
+        channel_clusters = {
+            "mic": {"SPEAKER_0": ([1.0, 0.0], _stable_context(sid="SPEAKER_0"))},
+            "system": {},
+        }
+        results = suggest_speakers_for_meeting(channel_clusters, [])
+        self.assertEqual(set(results), {"mic", "system"})
+        self.assertEqual(results["mic"]["SPEAKER_0"].status, "none")
+        self.assertEqual(results["system"], {})
 
 
 def _ctx(sid, duration, segments=5):
