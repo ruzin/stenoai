@@ -96,6 +96,30 @@ export function Processing() {
   // hard-crash copy.
   const [nothingRecorded, setNothingRecorded] = React.useState(false);
 
+  // Reset per-session UI state when a NEW session takes over this still-mounted
+  // route (back-to-back recordings swap activeSession in place — see above —
+  // without a remount). Without this, a user looking at "Nothing to process"
+  // who starts another recording would stay stuck on that panel even after the
+  // new job queues fine. Done during render (React's documented "adjust state
+  // when a value changes" pattern, like the setActiveSession above) so the new
+  // session paints fresh with no flash of the prior error state. The watchdog's
+  // ref + interval re-arm lives in an effect below (refs can't be reset during
+  // render); the 8-tick threshold, isQueueSuccess gate, and hidden-window guard
+  // all still apply, so this can't reintroduce a false trip.
+  const [uiSession, setUiSession] = React.useState<string | null>(activeSession);
+  if (activeSession !== uiSession) {
+    setUiSession(activeSession);
+    if (activeSession) {
+      setStage('transcribing');
+      setNothingRecorded(false);
+      setStreamText('');
+      setStreamedTitle(null);
+      setChunkProgress(null);
+      setRetryAudioFile(null);
+      setRetryError(null);
+    }
+  }
+
   // Buffer streamed chunks and flush at most every 50ms (~20fps). At a
   // typical token rate of 30-60 tokens/sec, this batches ~3 tokens per
   // commit which keeps the UI smooth without re-parsing the entire markdown
@@ -215,6 +239,24 @@ export function Processing() {
     return () => setGaveUp(false);
   }, [setGaveUp]);
 
+  // Re-arm the watchdog for a NEW session WITHOUT a remount (see the UI-state
+  // reset above for the why). Refs can't be reset during render, so the
+  // watchdog's latched signals + the shared "gave up" flag are cleared here on a
+  // genuine session transition; the interval effect below re-arms on
+  // activeSession too, resetting its consecutive-tick counter. sawActivityRef is
+  // the important one — it latches true in the error state and would otherwise
+  // keep the re-armed interval permanently disarmed for the new session.
+  const prevSessionRef = React.useRef<string | null>(activeSession);
+  React.useEffect(() => {
+    if (activeSession === prevSessionRef.current) return;
+    prevSessionRef.current = activeSession;
+    if (!activeSession) return;
+    pendingChunkRef.current = '';
+    sawActivityRef.current = false;
+    idleEmptyRef.current = false;
+    setGaveUp(false);
+  }, [activeSession, setGaveUp]);
+
   React.useEffect(() => {
     let idleTicks = 0;
     const id = setInterval(() => {
@@ -244,7 +286,9 @@ export function Processing() {
       }
     }, WATCHDOG_TICK_MS);
     return () => clearInterval(id);
-  }, [setGaveUp]);
+    // activeSession is a dep so the interval re-arms (resetting its local
+    // idleTicks counter) for a new session started without a remount.
+  }, [activeSession, setGaveUp]);
 
   // Actually re-run the failed job: re-queue the preserved source audio via the
   // same import pipeline a stopped recording uses. Its copy-then-queue semantics

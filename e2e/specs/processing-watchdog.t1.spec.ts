@@ -27,6 +27,9 @@ import { test, expect } from '../fixtures/electron';
 // Queue-status shapes the mock merges over its idle defaults.
 const PROCESSING = { isProcessing: true, currentJob: 'Watchdog Note', sessionName: 'Watchdog Note' };
 const IDLE_EMPTY = { isProcessing: false, queueSize: 0, hasRecording: false };
+// A DIFFERENT session — its distinct sessionName is what makes Processing.tsx
+// swap activeSession in place (no remount), the case the recovery spec drives.
+const PROCESSING_2 = { isProcessing: true, currentJob: 'Second Note', sessionName: 'Second Note' };
 
 function makeStateFile(initial: object): string {
   const dir = mkdtempSync(path.join(tmpdir(), 'stenoai-queue-'));
@@ -62,6 +65,38 @@ test('idle+empty that persists past the handoff trips the watchdog', async ({ la
   // "Processing" chip is gone — nothing is actually processing.
   await expect(page.getByRole('button', { name: 'Try again' })).toBeDisabled();
   await expect(page.getByTestId('processing-chip')).toHaveCount(0);
+
+  rmSync(path.dirname(stateFile), { recursive: true, force: true });
+});
+
+test('a new session after "Nothing to process" recovers without a remount', async ({
+  launchApp,
+}) => {
+  test.setTimeout(45_000);
+  // Trip the watchdog first (idle+empty past threshold)…
+  const stateFile = makeStateFile(PROCESSING);
+  const { page } = await launchApp({
+    mockIpc: true,
+    env: { STENOAI_E2E_MOCK_PARAKEET_INSTALLED: '1', STENOAI_E2E_QUEUE_STATE_PATH: stateFile },
+  });
+  await page.evaluate(() => {
+    window.location.hash = '#/meetings/processing';
+  });
+  writeFileSync(stateFile, JSON.stringify(IDLE_EMPTY), 'utf-8');
+  await expect(page.getByText('Nothing to process', { exact: true })).toBeVisible({
+    timeout: 22_000,
+  });
+
+  // …then the user starts ANOTHER recording on the same (still-mounted) route.
+  // Its distinct sessionName swaps activeSession in place; the screen must leave
+  // the "Nothing to process" panel and show the spinner for the new session
+  // rather than staying stuck.
+  writeFileSync(stateFile, JSON.stringify(PROCESSING_2), 'utf-8');
+  await expect(page.getByText('Nothing to process', { exact: true })).toHaveCount(0, {
+    timeout: 10_000,
+  });
+  await expect(page.getByText('Analyzing transcript')).toBeVisible();
+  await expect(page.getByTestId('processing-chip')).toBeVisible();
 
   rmSync(path.dirname(stateFile), { recursive: true, force: true });
 });
