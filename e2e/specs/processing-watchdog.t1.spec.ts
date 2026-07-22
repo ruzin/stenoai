@@ -30,6 +30,10 @@ const IDLE_EMPTY = { isProcessing: false, queueSize: 0, hasRecording: false };
 // A DIFFERENT session — its distinct sessionName is what makes Processing.tsx
 // swap activeSession in place (no remount), the case the recovery spec drives.
 const PROCESSING_2 = { isProcessing: true, currentJob: 'Second Note', sessionName: 'Second Note' };
+// A SAME-name second recording actively recording — status transitions into
+// 'recording' with the SAME display name, so activeSession never changes; only
+// the name-independent generation bump can recover the screen.
+const RECORDING_SAME = { hasRecording: true, isProcessing: false, sessionName: 'Watchdog Note' };
 
 function makeStateFile(initial: object): string {
   const dir = mkdtempSync(path.join(tmpdir(), 'stenoai-queue-'));
@@ -97,6 +101,42 @@ test('a new session after "Nothing to process" recovers without a remount', asyn
   });
   await expect(page.getByText('Analyzing transcript')).toBeVisible();
   await expect(page.getByTestId('processing-chip')).toBeVisible();
+
+  rmSync(path.dirname(stateFile), { recursive: true, force: true });
+});
+
+test('a SAME-name new recording after "Nothing to process" recovers', async ({ launchApp }) => {
+  test.setTimeout(45_000);
+  // Session identity is only a collidable display name, so recovery must not
+  // hinge on the name changing. Trip the watchdog, then start a NEW recording
+  // reusing the SAME sessionName — activeSession never changes, so only the
+  // name-independent status→'recording' generation bump can rescue the screen.
+  const stateFile = makeStateFile(PROCESSING);
+  const { page } = await launchApp({
+    mockIpc: true,
+    env: { STENOAI_E2E_MOCK_PARAKEET_INSTALLED: '1', STENOAI_E2E_QUEUE_STATE_PATH: stateFile },
+  });
+  await page.evaluate(() => {
+    window.location.hash = '#/meetings/processing';
+  });
+  writeFileSync(stateFile, JSON.stringify(IDLE_EMPTY), 'utf-8');
+  await expect(page.getByText('Nothing to process', { exact: true })).toBeVisible({
+    timeout: 22_000,
+  });
+
+  // Same-name recording begins (status → 'recording', identical name)…
+  writeFileSync(stateFile, JSON.stringify(RECORDING_SAME), 'utf-8');
+  await expect(page.getByText('Nothing to process', { exact: true })).toHaveCount(0, {
+    timeout: 10_000,
+  });
+  await expect(page.getByText('Analyzing transcript')).toBeVisible();
+  await expect(page.getByTestId('processing-chip')).toBeVisible();
+
+  // …and then it stops into processing (same name) — still recovered, no relapse.
+  writeFileSync(stateFile, JSON.stringify(PROCESSING), 'utf-8');
+  await page.waitForTimeout(2000);
+  await expect(page.getByText('Nothing to process', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('Analyzing transcript')).toBeVisible();
 
   rmSync(path.dirname(stateFile), { recursive: true, force: true });
 });
