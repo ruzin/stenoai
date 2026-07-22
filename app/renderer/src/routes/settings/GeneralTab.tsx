@@ -98,6 +98,18 @@ export function GeneralTab() {
   })();
   const autoDetect = useAutoDetectMeetingsSetting();
   const setAutoDetect = useSetAutoDetectMeetings();
+  // Auto-detect is gated to macOS 14+ (mic-monitor only has a reliable per-app
+  // signal there — see #116). Derive support from the system-audio probe's
+  // platform + osVersion so the toggle reflects the same gate main.js enforces.
+  // Only claim unsupported once we know the OS is darwin < 14; while the probe
+  // is loading (data undefined) we don't disable, matching the existing rows.
+  const autoDetectSupported = (() => {
+    const data = systemAudioSupport.data;
+    if (!data || data.platform !== 'darwin') return true;
+    const major = parseInt(String(data.osVersion).split('.')[0], 10);
+    if (!Number.isFinite(major)) return true; // permissive on parse failure
+    return major >= 14;
+  })();
   const launchOnLogin = useLaunchOnLoginSetting();
   const setLaunchOnLogin = useSetLaunchOnLogin();
   const silenceAutoStop = useSilenceAutoStopSetting();
@@ -360,12 +372,18 @@ export function GeneralTab() {
 
       <SettingRow
         label="Auto-detected meetings"
-        description="Watch for other apps using your microphone and notify you when a call starts, with a one-click button to record."
+        description={
+          autoDetectSupported
+            ? 'Watch for other apps using your microphone and notify you when a call starts, with a one-click button to record.'
+            : `Watch for other apps using your microphone and notify you when a call starts. Requires macOS 14 (Sonoma) or later${
+                systemAudioSupport.data?.osVersion ? `, you're on ${systemAudioSupport.data.osVersion}` : ''
+              }.`
+        }
       >
         <Switch
-          checked={autoDetect.data ?? true}
+          checked={autoDetectSupported && (autoDetect.data ?? true)}
           onCheckedChange={(v) => setAutoDetect.mutate(v)}
-          disabled={autoDetect.data === undefined}
+          disabled={autoDetect.data === undefined || !autoDetectSupported}
         />
       </SettingRow>
 

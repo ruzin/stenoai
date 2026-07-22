@@ -1,7 +1,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert');
 
-const { isMeetingApp, allowsDeviceLevelFallback } = require('./meeting-detect');
+const { isMeetingApp, allowsDeviceLevelFallback, isMacos14Plus } = require('./meeting-detect');
 
 test('isMeetingApp accepts a known meeting app bundle id', () => {
   assert.strictEqual(isMeetingApp({ app_id: 'us.zoom.xos' }), true);
@@ -63,4 +63,29 @@ test('allowsDeviceLevelFallback is false off macOS', () => {
 test('allowsDeviceLevelFallback is false for an unparseable version (fail safe)', () => {
   assert.strictEqual(allowsDeviceLevelFallback('darwin', ''), false);
   assert.strictEqual(allowsDeviceLevelFallback('darwin', undefined), false);
+});
+
+test('isMacos14Plus is true on macOS 14+', () => {
+  assert.strictEqual(isMacos14Plus('darwin', '14.0'), true);
+  assert.strictEqual(isMacos14Plus('darwin', '14.5'), true);
+  assert.strictEqual(isMacos14Plus('darwin', '15.0'), true);
+  assert.strictEqual(isMacos14Plus('darwin', '26.1'), true);
+});
+
+test('isMacos14Plus is false on legacy macOS 12/13', () => {
+  assert.strictEqual(isMacos14Plus('darwin', '13.6.1'), false);
+  assert.strictEqual(isMacos14Plus('darwin', '12.0'), false);
+});
+
+test('isMacos14Plus is false off macOS (macOS-only feature)', () => {
+  assert.strictEqual(isMacos14Plus('win32', '10.0.22631'), false);
+  assert.strictEqual(isMacos14Plus('linux', '6.1'), false);
+});
+
+test('isMacos14Plus is permissive (true) for an unparseable version on darwin', () => {
+  // Auto-detect is opt-in and the <14 path is what we're removing, so a parse
+  // hiccup must NOT silently disable a working 14+ user's feature — see #116.
+  assert.strictEqual(isMacos14Plus('darwin', ''), true);
+  assert.strictEqual(isMacos14Plus('darwin', undefined), true);
+  assert.strictEqual(isMacos14Plus('darwin', 'garbage'), true);
 });
