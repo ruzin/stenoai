@@ -24,6 +24,19 @@ const STAGE_LABEL: Record<ProcessingStage, string> = {
   error: 'Couldn’t process this recording.',
 };
 
+// Queue-state watchdog (issue #343). Stopping a recording navigates here
+// unconditionally, but a processing job is only queued when the capture
+// actually produced a file. A stop that produced nothing (e.g. Stop hit while
+// getUserMedia was still pending, or system-audio capture returned no file)
+// emits no processing-complete, so without this the screen spins forever. We
+// watch for a genuinely idle-and-empty queue rather than a wall clock — long
+// transcriptions have quiet stretches that a time-based timeout would
+// false-trip. A tick cadence independent of the queue poll keeps the arithmetic
+// simple; 3 consecutive idle ticks (~4.5s) comfortably covers the brief
+// stop→enqueue gap so a normal recording never trips it.
+const WATCHDOG_TICK_MS = 1500;
+const WATCHDOG_IDLE_TICKS = 3;
+
 export function Processing() {
   const navigate = useNavigate();
   const recording = useRecording();
@@ -56,6 +69,10 @@ export function Processing() {
   const [retryAudioFile, setRetryAudioFile] = React.useState<string | null>(null);
   const [retrying, setRetrying] = React.useState(false);
   const [retryError, setRetryError] = React.useState<string | null>(null);
+  // Set by the watchdog below when it concludes nothing was ever captured, so
+  // the error panel shows a calm "nothing to process" message instead of the
+  // hard-crash copy.
+  const [nothingRecorded, setNothingRecorded] = React.useState(false);
 
   // Buffer streamed chunks and flush at most every 50ms (~20fps). At a
   // typical token rate of 30-60 tokens/sec, this batches ~3 tokens per
@@ -132,6 +149,47 @@ export function Processing() {
     ];
     return () => offs.forEach((fn) => fn());
   }, [activeSession, updateMeeting]);
+
+  // Watchdog. Any real processing activity — a streamed chunk, chunk progress,
+  // a stage move past 'transcribing' (summaryComplete/processingComplete) —
+  // permanently disarms it for this screen visit.
+  const sawActivity =
+    stage !== 'transcribing' || streamText !== '' || chunkProgress !== null;
+  // "The queue is genuinely idle and empty, and we've seen nothing yet."
+  const idleEmpty =
+    !sawActivity && recording.status === 'idle' && recording.queueSize === 0;
+  // Mirror the freshest signals into refs so the interval below can read them
+  // without becoming a dependency that would tear itself down and restart (and
+  // reset the consecutive-tick counter) on every queue poll.
+  const sawActivityRef = React.useRef(false);
+  const idleEmptyRef = React.useRef(false);
+  React.useEffect(() => {
+    if (sawActivity) sawActivityRef.current = true;
+    idleEmptyRef.current = idleEmpty;
+  });
+
+  React.useEffect(() => {
+    let idleTicks = 0;
+    const id = setInterval(() => {
+      if (sawActivityRef.current) {
+        clearInterval(id);
+        return;
+      }
+      if (idleEmptyRef.current) {
+        idleTicks += 1;
+        if (idleTicks >= WATCHDOG_IDLE_TICKS) {
+          clearInterval(id);
+          setNothingRecorded(true);
+          setStage('error');
+        }
+      } else {
+        // Not idle right now (a job exists, or we're still in the stop→enqueue
+        // gap) — reset so only *consecutive* idle ticks count.
+        idleTicks = 0;
+      }
+    }, WATCHDOG_TICK_MS);
+    return () => clearInterval(id);
+  }, []);
 
   // Actually re-run the failed job: re-queue the preserved source audio via the
   // same import pipeline a stopped recording uses. Its copy-then-queue semantics
@@ -213,6 +271,7 @@ export function Processing() {
             canRetry={Boolean(retryAudioFile && activeSession)}
             retrying={retrying}
             error={retryError}
+            nothingRecorded={nothingRecorded}
           />
         ) : (
           <StageCard stage={stage} streamText={streamText} chunkProgress={chunkProgress} />
@@ -354,27 +413,35 @@ function ErrorPanel({
   canRetry,
   retrying,
   error,
+  nothingRecorded,
 }: {
   onRetry: () => void;
   canRetry: boolean;
   retrying: boolean;
   error: string | null;
+  nothingRecorded: boolean;
 }) {
+  // The watchdog case is not a failure — nothing was lost because nothing was
+  // captured — so it gets a calmer heading and copy than the hard-crash path.
+  const heading = nothingRecorded ? 'Nothing to process' : STAGE_LABEL.error;
+  const detail = nothingRecorded
+    ? 'This recording didn’t capture any audio, so there’s nothing to process. Nothing was lost. Head back to Home to start a new note.'
+    : canRetry
+      ? 'Try again to re-run processing on this recording.'
+      : 'This recording couldn’t be recovered automatically. Try importing the audio file again from Home.';
   return (
     <div className="py-3">
       <p
         className="text-[17px]"
         style={{ color: 'var(--fg-1)', fontFamily: 'var(--font-sans)' }}
       >
-        {STAGE_LABEL.error}
+        {heading}
       </p>
       <p
         className="mt-1 text-[14px]"
         style={{ color: 'var(--fg-2)' }}
       >
-        {canRetry
-          ? 'Try again to re-run processing on this recording.'
-          : 'This recording couldn’t be recovered automatically. Try importing the audio file again from Home.'}
+        {detail}
       </p>
       {error && (
         <p
