@@ -5,6 +5,7 @@ import { unwrap } from '@/lib/result';
 import { useRecording } from '@/hooks/useRecording';
 import { useLiveDraftStore } from '@/hooks/liveDraftStore';
 import { meetingsKeys } from '@/hooks/meetingKeys';
+import { useUndoDeleteStore } from '@/hooks/undoDeleteStore';
 
 export { meetingsKeys };
 
@@ -184,7 +185,7 @@ export function useDeleteMeeting() {
     // update from this single write too. Removing on success (not optimistically
     // in onMutate) means a failed delete simply leaves the row in place — no
     // snapshot/rollback, so concurrent deletes can't clobber each other.
-    onSuccess: async (_data, meeting) => {
+    onSuccess: async (data, meeting) => {
       // Cancel again here: the onMutate cancel only covers refetches already
       // running at mutation start, but a fresh list refetch can be triggered
       // *during* the (fast) delete IPC and would land after the write below.
@@ -197,16 +198,67 @@ export function useDeleteMeeting() {
       // row with a falsy summary_file rather than the one deleted. summary_file
       // is the list's primary key so this shouldn't happen, but the predicate
       // must not silently nuke the list if a malformed row slips through.
-      if (!deletedFile) return;
-      qc.setQueryData<Meeting[]>(meetingsKeys.list(), (prev) =>
-        prev?.filter((m) => m.session_info.summary_file !== deletedFile),
-      );
-      // Drop the lazy-loaded detail cache for this meeting too. The list filter
-      // above only touches the list query; without this, the deleted meeting's
-      // detail payload (transcript etc.) stays served from cache if the detail
-      // route is revisited.
-      qc.removeQueries({ queryKey: meetingsKeys.detail(deletedFile) });
+      if (deletedFile) {
+        qc.setQueryData<Meeting[]>(meetingsKeys.list(), (prev) =>
+          prev?.filter((m) => m.session_info.summary_file !== deletedFile),
+        );
+        // Drop the lazy-loaded detail cache for this meeting too. The list filter
+        // above only touches the list query; without this, the deleted meeting's
+        // detail payload (transcript etc.) stays served from cache if the detail
+        // route is revisited.
+        qc.removeQueries({ queryKey: meetingsKeys.detail(deletedFile) });
+      }
+      // The delete was a soft-delete (files moved to trash): surface an Undo
+      // toast so the user can restore for a few seconds (#234). Skipped only if
+      // the backend didn't return a trashId (older shape / nothing moved).
+      if (data?.trashId) {
+        useUndoDeleteStore.getState().add({
+          trashId: data.trashId,
+          meeting,
+          createdAt: Date.now(),
+        });
+      }
     },
+  });
+}
+
+/**
+ * Undo a soft-delete (#234): restore the trashed note's files and re-insert its
+ * list row. The returned meeting comes from the trash manifest, so the row
+ * reappears without a full backend re-scan; the detail cache is invalidated so a
+ * revisit re-reads the restored transcript.
+ */
+export function useRestoreMeeting() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (trashId: string) => unwrap(await ipc().meetings.restore(trashId)),
+    onSuccess: (data) => {
+      const meeting = data.meeting;
+      const file = meeting?.session_info?.summary_file;
+      if (!file) {
+        // Malformed manifest — fall back to a full re-scan so the row returns.
+        qc.invalidateQueries({ queryKey: meetingsKeys.list() });
+        return;
+      }
+      qc.setQueryData<Meeting[]>(meetingsKeys.list(), (prev) => {
+        if (!prev) return prev;
+        // Guard against a double-restore re-inserting a duplicate row.
+        if (prev.some((m) => m.session_info.summary_file === file)) return prev;
+        return [meeting, ...prev];
+      });
+      qc.invalidateQueries({ queryKey: meetingsKeys.detail(file) });
+    },
+  });
+}
+
+/**
+ * Hard-delete a trashed note (#234) once the undo window expires or the toast is
+ * dismissed. Idempotent on the backend; no cache changes (the row is already
+ * gone from the list).
+ */
+export function usePurgeTrashedMeeting() {
+  return useMutation({
+    mutationFn: async (trashId: string) => unwrap(await ipc().meetings.purgeTrashed(trashId)),
   });
 }
 

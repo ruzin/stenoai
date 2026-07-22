@@ -261,7 +261,10 @@ export function MeetingsShell({
               <>No recordings or transcripts will be deleted.</>
             )
           ) : (
-            <>This will delete the transcript, summary, and all associated files.</>
+            <>
+              This removes the transcript, summary, and all associated files. You can undo this for
+              a few seconds after deleting.
+            </>
           )
         }
         confirmLabel="Delete"

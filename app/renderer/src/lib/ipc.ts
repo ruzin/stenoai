@@ -378,7 +378,7 @@ export type RecordingsDirResponse = Result<{ path: string }>;
 export type ListMeetingsResponse = Result<{ meetings: Meeting[] }>;
 export type GetMeetingResponse = Result<{ meeting: Meeting }>;
 export type UpdateMeetingResponse = Result<{ message: string; updatedData: Meeting }>;
-export type DeleteMeetingResponse = Result<{ message: string }>;
+export type DeleteMeetingResponse = Result<{ message: string; trashId?: string }>;
 export type SaveMeetingNotesResponse = Result<{ path: string }>;
 
 export type QueryResponse = Result<{ answer: string }>;
@@ -870,6 +870,8 @@ export interface StenoaiBridge {
     update: RequestFn<[summaryFile: string, patch: UpdateMeetingPatch], UpdateMeetingResponse>;
     revealFolder: RequestFn<[filePath: string], Result<Record<string, never>>>;
     delete: RequestFn<[meeting: Meeting], DeleteMeetingResponse>;
+    restore: RequestFn<[trashId: string], Result<{ meeting: Meeting }>>;
+    purgeTrashed: RequestFn<[trashId: string], Result<Record<string, never>>>;
     reprocess: RequestFn<
       [summaryFile: string, regenTitle: boolean, name: string],
       Result<{ message: string }>
