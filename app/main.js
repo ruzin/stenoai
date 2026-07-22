@@ -41,6 +41,7 @@ const { spawn, killProcessTree, createBackendCli } = require('./backend-cli');
 const { createDebugLog } = require('./debug-log');
 const { createTeardownRegistry } = require('./teardown');
 const { registerFoldersIpc } = require('./folders-ipc');
+const { registerSettingsIpc } = require('./settings-ipc');
 const processingLog = require('./processing-log');
 const { isMeetingApp, allowsDeviceLevelFallback } = require('./meeting-detect');
 const { sweepOrphanedLiveSnapshots } = require('./live-snapshot-sweep');
@@ -6744,67 +6745,14 @@ ipcMain.handle('pull-parakeet-model', async (event, modelId) => {
   }
 });
 
-ipcMain.handle('get-keep-recordings', async () => {
-  try {
-    const result = await runPythonScript('simple_recorder.py', ['get-keep-recordings'], true);
-    const jsonData = JSON.parse(result.trim());
-    return { success: true, ...jsonData };
-  } catch (e) { return { success: false, error: e.message }; }
-});
-
-ipcMain.handle('set-keep-recordings', async (event, enabled) => {
-  try {
-    const result = await runPythonScript('simple_recorder.py', ['set-keep-recordings', enabled.toString()]);
-    const jsonData = JSON.parse(result.trim());
-    return { success: true, ...jsonData };
-  } catch (e) { return { success: false, error: e.message }; }
-});
-
-ipcMain.handle('get-auto-summarize', async () => {
-  try {
-    const result = await runPythonScript('simple_recorder.py', ['get-auto-summarize'], true);
-    const jsonData = JSON.parse(result.trim());
-    return { success: true, ...jsonData };
-  } catch (e) { return { success: false, error: e.message }; }
-});
-
-ipcMain.handle('set-auto-summarize', async (event, enabled) => {
-  try {
-    const result = await runPythonScript('simple_recorder.py', ['set-auto-summarize', enabled.toString()]);
-    const jsonData = JSON.parse(result.trim());
-    return { success: true, ...jsonData };
-  } catch (e) { return { success: false, error: e.message }; }
-});
-
-ipcMain.handle('get-silence-auto-stop', async () => {
-  try {
-    const result = await runPythonScript('simple_recorder.py', ['get-silence-auto-stop'], true);
-    const jsonData = JSON.parse(result.trim());
-    return { success: true, ...jsonData };
-  } catch (e) { return { success: false, error: e.message }; }
-});
-
-ipcMain.handle('set-silence-auto-stop-enabled', async (_event, enabled) => {
-  try {
-    const result = await runPythonScript(
-      'simple_recorder.py',
-      ['set-silence-auto-stop-enabled', enabled ? 'True' : 'False']
-    );
-    const jsonData = JSON.parse(result.trim());
-    return jsonData;
-  } catch (e) { return { success: false, error: e.message }; }
-});
-
-ipcMain.handle('set-silence-auto-stop-minutes', async (_event, minutes) => {
-  try {
-    const result = await runPythonScript(
-      'simple_recorder.py',
-      ['set-silence-auto-stop-minutes', String(minutes)]
-    );
-    const jsonData = JSON.parse(result.trim());
-    return jsonData;
-  } catch (e) { return { success: false, error: e.message }; }
-});
+// Settings-toggle IPC handlers (RFC #327 Phase 2.2) — the self-contained config
+// get/set toggles (keep-recordings, auto-summarize, silence-auto-stop,
+// system-audio, language, microphone, user-name, privacy-notice-seen) extracted
+// to ./settings-ipc and registered here in place, so registration timing +
+// behavior are identical to the inline handlers this replaces. Settings-shaped
+// handlers coupled to another domain (telemetry, models, mic-monitor, calendar,
+// tray) deliberately stay in main.js until that domain's own extraction.
+registerSettingsIpc({ ipcMain, runPythonScript, sendDebugLog });
 
 // Fired by the renderer's silence detector. The renderer has already
 // asked main to stop the recording via pause/stop; this just surfaces
@@ -6965,31 +6913,6 @@ ipcMain.handle('get-telemetry', async () => {
   }
 });
 
-ipcMain.handle('get-privacy-notice-seen', async () => {
-  try {
-    const result = await runPythonScript('simple_recorder.py', ['get-privacy-notice-seen']);
-    const jsonData = JSON.parse(result);
-    return {
-      success: true,
-      privacy_notice_seen: jsonData.privacy_notice_seen
-    };
-  } catch (error) {
-    sendDebugLog(`Error getting privacy notice state: ${error.message}`);
-    return { success: false, error: error.message };
-  }
-});
-
-ipcMain.handle('set-privacy-notice-seen', async () => {
-  try {
-    const result = await runPythonScript('simple_recorder.py', ['set-privacy-notice-seen']);
-    const jsonData = JSON.parse(result);
-    return jsonData;
-  } catch (error) {
-    sendDebugLog(`Error marking privacy notice seen: ${error.message}`);
-    return { success: false, error: error.message };
-  }
-});
-
 // Where the telemetry toggle was flipped -- 'setup' names the Setup.tsx
 // screen and 'consent' names the one-time privacy notice modal. 'setup' is
 // also reachable later via "run setup wizard" from Settings (see
@@ -7143,32 +7066,6 @@ ipcMain.handle('set-menu-bar-icon', async (event, enabled) => {
 });
 
 // System audio capture IPC handlers
-ipcMain.handle('get-system-audio', async () => {
-  try {
-    const result = await runPythonScript('simple_recorder.py', ['get-system-audio'], true);
-    const jsonData = JSON.parse(result);
-    return { success: true, ...jsonData };
-  } catch (error) {
-    sendDebugLog(`Error getting system audio setting: ${error.message}`);
-    return { success: false, error: error.message };
-  }
-});
-
-ipcMain.handle('set-system-audio', async (event, enabled) => {
-  try {
-    sendDebugLog(`Setting system audio to: ${enabled}`);
-    const result = await runPythonScript('simple_recorder.py', ['set-system-audio', enabled ? 'True' : 'False']);
-    const jsonMatch = result.match(/\{.*\}/s);
-    if (jsonMatch) {
-      return JSON.parse(jsonMatch[0]);
-    }
-    return { success: true, system_audio_enabled: enabled };
-  } catch (error) {
-    sendDebugLog(`Error setting system audio: ${error.message}`);
-    return { success: false, error: error.message };
-  }
-});
-
 ipcMain.handle('get-auto-detect-meetings', async () => {
   try {
     const result = await runPythonScript('simple_recorder.py', ['get-auto-detect-meetings'], true);
@@ -7272,90 +7169,6 @@ ipcMain.handle('set-launch-on-login', async (_event, enabled) => {
 });
 
 // Language IPC handlers
-ipcMain.handle('get-language', async () => {
-  try {
-    const result = await runPythonScript('simple_recorder.py', ['get-language'], true);
-    const jsonData = JSON.parse(result);
-    return { success: true, ...jsonData };
-  } catch (error) {
-    sendDebugLog(`Error getting language setting: ${error.message}`);
-    return { success: false, error: error.message };
-  }
-});
-
-ipcMain.handle('set-language', async (event, languageCode) => {
-  try {
-    sendDebugLog(`Setting language to: ${languageCode}`);
-    const result = await runPythonScript('simple_recorder.py', ['set-language', languageCode]);
-    const jsonMatch = result.match(/\{.*\}/s);
-    if (jsonMatch) {
-      return JSON.parse(jsonMatch[0]);
-    }
-    return { success: true, language: languageCode };
-  } catch (error) {
-    sendDebugLog(`Error setting language: ${error.message}`);
-    return { success: false, error: error.message };
-  }
-});
-
-// Microphone selection IPC handlers
-ipcMain.handle('get-microphone', async () => {
-  try {
-    const result = await runPythonScript('simple_recorder.py', ['get-microphone'], true);
-    const jsonData = JSON.parse(result);
-    return { success: true, ...jsonData };
-  } catch (error) {
-    sendDebugLog(`Error getting microphone setting: ${error.message}`);
-    return { success: false, error: error.message };
-  }
-});
-
-ipcMain.handle('set-microphone', async (event, deviceId, label) => {
-  try {
-    sendDebugLog(`Setting microphone to: ${deviceId ?? 'default'}`);
-    // '--' ends Click's option parsing: without it, a device label starting
-    // with '--' (e.g. "--help") is parsed as a flag, the subcommand prints
-    // help and exits 0 without saving, and the fallback below would then
-    // report a false success.
-    const result = await runPythonScript('simple_recorder.py', [
-      'set-microphone',
-      '--',
-      deviceId ?? '',
-      label ?? '',
-    ]);
-    const jsonMatch = result.match(/\{.*\}/s);
-    if (jsonMatch) {
-      return JSON.parse(jsonMatch[0]);
-    }
-    const normalizedId = deviceId && deviceId !== 'default' ? deviceId : null;
-    return { success: true, device_id: normalizedId, label: normalizedId ? label ?? null : null };
-  } catch (error) {
-    sendDebugLog(`Error setting microphone: ${error.message}`);
-    return { success: false, error: error.message };
-  }
-});
-
-ipcMain.handle('get-user-name', async () => {
-  try {
-    const result = await runPythonScript('simple_recorder.py', ['get-user-name'], true);
-    const jsonData = JSON.parse(result.trim());
-    return { success: true, ...jsonData };
-  } catch (error) {
-    return { success: false, error: error.message };
-  }
-});
-
-ipcMain.handle('set-user-name', async (event, name) => {
-  try {
-    const result = await runPythonScript('simple_recorder.py', ['set-user-name', String(name ?? '')]);
-    const jsonMatch = result.match(/\{.*\}/s);
-    if (jsonMatch) return JSON.parse(jsonMatch[0]);
-    return { success: true, user_name: String(name ?? '').trim() };
-  } catch (error) {
-    return { success: false, error: error.message };
-  }
-});
-
 // AI Provider IPC handlers
 
 // One-time forward-migration of an app-managed credential from its pre-fix
