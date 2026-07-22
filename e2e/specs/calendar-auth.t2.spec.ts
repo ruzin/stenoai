@@ -13,7 +13,7 @@ import path from 'path';
  * isolation fix (tokens must land in the temp dir, never the real one).
  */
 
-type StatusResult = { success: boolean; connected: boolean };
+type StatusResult = { success: boolean; connected: boolean; email?: string | null };
 type AutoDetect = { success: boolean; auto_detect_meetings_enabled?: boolean };
 
 type StenoWindow = Window & {
@@ -40,10 +40,12 @@ test('clean profile is disconnected; auto-detect-meetings toggle round-trips; re
   expect(await page.evaluate(() => (window as StenoWindow).stenoai.calendar.google.status())).toEqual({
     success: true,
     connected: false,
+    email: null,
   });
   expect(await page.evaluate(() => (window as StenoWindow).stenoai.calendar.outlook.status())).toEqual({
     success: true,
     connected: false,
+    email: null,
   });
 
   // Auto-detect toggle: default on -> set off -> persisted + reflected.
@@ -96,9 +98,13 @@ test('a seeded Google token reads as connected (in the temp dir) and disconnect 
   const tokenPath = path.join(userDataDir, '.google-tokens');
   writeFileSync(tokenPath, Buffer.from(encBytes));
 
-  expect(
-    (await page.evaluate(() => (window as StenoWindow).stenoai.calendar.google.status())).connected,
-  ).toBe(true);
+  const statusAfterSeed = await page.evaluate(() =>
+    (window as StenoWindow).stenoai.calendar.google.status(),
+  );
+  expect(statusAfterSeed.connected).toBe(true);
+  // No `email` in the seeded token (pre-existing connections predating the
+  // email-capture change) -> status falls back to null, not a crash.
+  expect(statusAfterSeed.email).toBeNull();
 
   // Disconnect removes the token and reports disconnected again.
   const disc = await page.evaluate(() =>
@@ -112,4 +118,33 @@ test('a seeded Google token reads as connected (in the temp dir) and disconnect 
 
   // Keystone: the seeded token + disconnect stayed entirely in the temp dir.
   expect(fileSig(realUserDataDir())).toBe(realDirBefore);
+});
+
+test('a seeded Google token carrying an email surfaces it via status', async ({
+  launchApp,
+  userDataDir,
+}) => {
+  const { app, page } = await launchApp();
+
+  const encryptionAvailable = await app.evaluate(({ safeStorage }) =>
+    safeStorage.isEncryptionAvailable(),
+  );
+  test.skip(!encryptionAvailable, 'safeStorage unavailable on this runner');
+
+  // Mirrors what the app itself writes after decoding the OAuth id_token at
+  // connect time (see decodeJwtPayload in main.js) — status reads it back
+  // from the local token file with no network call.
+  const encBytes = await app.evaluate(({ safeStorage }) =>
+    Array.from(
+      safeStorage.encryptString(
+        JSON.stringify({ refresh_token: 'fake-refresh', email: 'person@example.com' }),
+      ),
+    ),
+  );
+  const tokenPath = path.join(userDataDir, '.google-tokens');
+  writeFileSync(tokenPath, Buffer.from(encBytes));
+
+  const status = await page.evaluate(() => (window as StenoWindow).stenoai.calendar.google.status());
+  expect(status.connected).toBe(true);
+  expect(status.email).toBe('person@example.com');
 });
