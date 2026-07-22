@@ -54,7 +54,7 @@ export function PrimaryDock({ showAskBar }: { showAskBar: boolean }) {
   return (
     <div
       data-testid="primary-dock-row"
-      className={cn('flex items-end gap-3', !showAskBar && 'justify-center')}
+      className={cn('flex items-center gap-3', !showAskBar && 'justify-center')}
     >
       {recordingActive ? (
         <div className="shrink-0">

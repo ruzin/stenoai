@@ -16,6 +16,7 @@ import { navigate, rememberNonSettingsRoute, toggleSettings } from '@/lib/router
 import { cn, shortcut } from '@/lib/utils';
 import { ipc } from '@/lib/ipc';
 import { LucideIcon, IconPicker } from '@/components/IconPicker';
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { useUpdateFolderIcon } from '@/hooks/useFolders';
 import { useOrgLogout, useOrgSession, useSharedNotesGate } from '@/hooks/useOrg';
 import { useCommandPalette } from '@/components/CommandPalette';
@@ -409,15 +410,20 @@ export function Sidebar({
                 <ChevronDown className={cn('size-3 transition-transform', !foldersOpen && '-rotate-90')} />
                 <span>Folders</span>
               </span>
-              <button
-                type="button"
-                className="inline-flex size-5 items-center justify-center rounded opacity-0 transition-opacity hover:bg-[color:var(--surface-active)] [.sb-group-head:hover_&]:opacity-100"
-                onClick={(e) => { e.stopPropagation(); onNewFolder(); }}
-                aria-label="New folder"
-                style={{ color: 'var(--fg-2)' }}
-              >
-                <Plus className="size-3" />
-              </button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    className="inline-flex size-5 items-center justify-center rounded opacity-0 transition-opacity hover:bg-[color:var(--surface-active)] [.sb-group-head:hover_&]:opacity-100"
+                    onClick={(e) => { e.stopPropagation(); onNewFolder(); }}
+                    aria-label="New folder"
+                    style={{ color: 'var(--fg-2)' }}
+                  >
+                    <Plus className="size-3" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top">Create folder</TooltipContent>
+              </Tooltip>
             </div>
 
             {foldersOpen &&
@@ -501,7 +507,7 @@ export function Sidebar({
                 rememberNonSettingsRoute(currentRoute);
                 navigate('/settings?tab=organisation');
               }}
-              className="inline-flex h-[26px] min-w-0 items-center gap-1.5 rounded-md px-2 text-[12px] transition-colors hover:bg-[color:var(--surface-hover)]"
+              className="inline-flex h-[26px] min-w-0 items-center gap-1.5 rounded-md px-2 text-[12px] transition-colors hover:bg-[color:var(--surface-active)]"
               style={{ color: 'var(--fg-1)' }}
               title="Sign in to share notes with your organisation"
             >
@@ -516,33 +522,41 @@ export function Sidebar({
               on the right) doesn't treat Help as a third independent side and
               spread it away from the Settings cog. */}
           <div className="flex items-center gap-1">
-          <button
-            type="button"
-            onClick={() => void ipc().shell.openExternal('https://docs.stenoai.co')}
-            aria-label="Help"
-            title="Help"
-            className="inline-flex h-[26px] w-7 items-center justify-center rounded-md transition-colors hover:bg-[color:var(--surface-hover)] hover:text-[color:var(--fg-1)]"
-            style={{ color: 'var(--fg-2)' }}
-          >
-            <HelpCircle className="size-[15px]" />
-          </button>
-          <button
-            type="button"
-            onClick={() => toggleSettings(currentRoute)}
-            aria-label="Settings"
-            title="Settings"
-            // startsWith so the cog still reads "active" on deep-link routes
-            // like /settings?tab=organisation, not just bare /settings.
-            aria-pressed={currentRoute.startsWith('/settings')}
-            className={cn(
-              'inline-flex h-[26px] w-7 items-center justify-center rounded-md transition-colors hover:bg-[color:var(--surface-hover)] hover:text-[color:var(--fg-1)]',
-              currentRoute.startsWith('/settings')
-                ? 'bg-[color:var(--surface-active)] text-[color:var(--fg-1)]'
-                : 'text-[color:var(--fg-2)]',
-            )}
-          >
-            <SettingsIcon className="size-[15px]" />
-          </button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={() => void ipc().shell.openExternal('https://docs.stenoai.co')}
+                aria-label="Help"
+                className="inline-flex h-[26px] w-7 items-center justify-center rounded-md transition-colors hover:bg-[color:var(--surface-active)] hover:text-[color:var(--fg-1)]"
+                style={{ color: 'var(--fg-2)' }}
+              >
+                <HelpCircle className="size-[15px]" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="top">Documentation</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={() => toggleSettings(currentRoute)}
+                aria-label="Settings"
+                // startsWith so the cog still reads "active" on deep-link routes
+                // like /settings?tab=organisation, not just bare /settings.
+                aria-pressed={currentRoute.startsWith('/settings')}
+                className={cn(
+                  'inline-flex h-[26px] w-7 items-center justify-center rounded-md transition-colors hover:bg-[color:var(--surface-active)] hover:text-[color:var(--fg-1)]',
+                  currentRoute.startsWith('/settings')
+                    ? 'bg-[color:var(--surface-active)] text-[color:var(--fg-1)]'
+                    : 'text-[color:var(--fg-2)]',
+                )}
+              >
+                <SettingsIcon className="size-[15px]" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="top">Settings</TooltipContent>
+          </Tooltip>
           </div>
         </div>
 
@@ -613,7 +627,7 @@ function ProfileChip({ email, name, orgId, onSignOut }: ProfileChipProps) {
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-2 rounded-md px-1.5 py-1 transition-colors hover:bg-[color:var(--surface-hover)]"
+        className="flex items-center gap-2 rounded-md px-1.5 py-1 transition-colors hover:bg-[color:var(--surface-active)]"
         title={`${name || email} · ${orgId}`}
         aria-haspopup="menu"
         aria-expanded={open}

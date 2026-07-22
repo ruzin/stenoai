@@ -1,8 +1,9 @@
 import * as React from 'react';
-import { Check, ChevronDown, Copy, Play, Search as SearchIcon, Square } from 'lucide-react';
+import { Check, ChevronDown, Copy, Languages, Play, Search as SearchIcon, Square } from 'lucide-react';
 import { AudioWave } from '@/components/AudioWave';
 import { Input } from '@/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { useLiveTranscript } from '@/hooks/useLiveTranscript';
 import { useRecording } from '@/hooks/useRecording';
@@ -133,15 +134,19 @@ export function LiveTranscriptBar() {
             <span />
           </span>
           <span className="mv-transcript-label">Transcript</span>
-          <button
-            type="button"
-            className="mv-chat-tool"
-            onClick={() => void copyAll()}
-            aria-label="Copy transcript"
-            title="Copy transcript"
-          >
-            {copied ? <Check size={13} /> : <Copy size={13} />}
-          </button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                className="mv-chat-tool"
+                onClick={() => void copyAll()}
+                aria-label="Copy transcript"
+              >
+                {copied ? <Check size={13} /> : <Copy size={13} />}
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">{copied ? 'Copied!' : 'Copy transcript'}</TooltipContent>
+          </Tooltip>
           <button
             type="button"
             className="mv-chat-tool"
@@ -217,7 +222,7 @@ export function LiveTranscriptBar() {
               onClick={onStop}
               aria-label="Stop recording"
               title="Stop recording"
-              className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-full border-0 px-3 text-[13px] font-medium transition-opacity"
+              className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-full border-0 px-3 text-[13px] font-medium transition-opacity hover:opacity-90"
               style={{ background: 'var(--recording)', color: '#FFFFFF' }}
             >
               <Square size={12} fill="currentColor" stroke="currentColor" />
@@ -394,21 +399,26 @@ function LanguageSelector() {
 
   return (
     <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
-      <PopoverTrigger asChild>
-        <button
-          type="button"
-          className={cn(
-            'inline-flex items-center gap-1 rounded-md px-2 py-1 text-[12px] font-medium',
-            'cursor-pointer transition-colors hover:bg-[color:var(--surface-hover)]'
-          )}
-          style={{ color: 'var(--fg-2)' }}
-          aria-label={`Language: ${display}`}
-          title="Change transcript language"
-        >
-          <span style={{ color: 'var(--fg-1)' }}>{display}</span>
-          <ChevronDown size={12} />
-        </button>
-      </PopoverTrigger>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <PopoverTrigger asChild>
+            <button
+              type="button"
+              className={cn(
+                'inline-flex items-center gap-1 rounded-md px-2 py-1 text-[12px] font-medium',
+                'cursor-pointer transition-colors hover:bg-[color:var(--surface-hover)]'
+              )}
+              style={{ color: 'var(--fg-2)' }}
+              aria-label={`Language: ${display}`}
+            >
+              <Languages size={12} />
+              <span style={{ color: 'var(--fg-1)' }}>{display}</span>
+              <ChevronDown size={12} />
+            </button>
+          </PopoverTrigger>
+        </TooltipTrigger>
+        <TooltipContent side="top">Transcript language</TooltipContent>
+      </Tooltip>
       <PopoverContent align="end" sideOffset={8} className="w-56 p-1">
         {LANGUAGE_OPTIONS.map((opt) => {
           const active = opt.code === current;

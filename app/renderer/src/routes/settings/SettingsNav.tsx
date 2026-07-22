@@ -106,7 +106,7 @@ export function SettingsNav({ activeTab, onSelect, onBack, version }: SettingsNa
           type="button"
           onClick={onBack}
           aria-label="Back"
-          className="flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-[6px] border-0 bg-transparent transition-colors hover:bg-[color:var(--surface-hover)] hover:text-[color:var(--fg-1)]"
+          className="flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-[6px] border-0 bg-transparent transition-colors hover:bg-[color:var(--surface-active)] hover:text-[color:var(--fg-1)]"
           style={{ color: 'var(--fg-2)' }}
         >
           <ArrowLeft size={14} />
