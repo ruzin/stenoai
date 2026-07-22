@@ -382,6 +382,22 @@ function install({ ipcMain }) {
       return { success: true, path: seamPath };
     },
 
+    // Mirror the real export-note-pdf handler's seam. The mock has no Chromium
+    // to rasterise HTML, so instead of a PDF it writes the renderer-built HTML
+    // verbatim to STENOAI_E2E_EXPORT_PATH — that lets a T1 spec assert the exact
+    // document the renderer produced (the HTML→PDF render is covered by the T2
+    // spec against the real handler). Without the seam there's no dialog here,
+    // so report a cancel.
+    'export-note-pdf': async (_event, _defaultFilename, html) => {
+      if (typeof html !== 'string' || html.length === 0) {
+        return { success: false, error: 'No notes content to export.' };
+      }
+      const seamPath = process.env.STENOAI_E2E_EXPORT_PATH;
+      if (!seamPath) return { success: false, error: EXPORT_CANCELED };
+      fs.writeFileSync(seamPath, html, 'utf-8');
+      return { success: true, path: seamPath };
+    },
+
     // Mirror the real save-diagnostics handler's seam: with
     // STENOAI_E2E_DIAGNOSTICS_PATH set, write the renderer-built (redacted)
     // bundle there so a T1 spec can read back exactly what Save passed. Without

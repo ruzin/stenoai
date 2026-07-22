@@ -3146,6 +3146,119 @@ ipcMain.handle('export-transcript', async (event, defaultFilename, content) => {
   }
 });
 
+// Render a self-contained HTML string to a PDF Buffer in an offscreen window.
+// The renderer builds the branded HTML (app/renderer/src/lib/notesPdf.ts); here
+// we only rasterise it. The window is hardened (no node integration, no
+// preload) and torn down in a finally so a render failure can't leak a hidden
+// window. printBackground keeps the paper fill/ink; preferCSSPageSize honors the
+// document's own `@page { size: A4; margin: … }` so page geometry lives with the
+// template, not here. Cross-platform: printToPDF is Chromium, identical on both.
+const PDF_RENDER_TIMEOUT_MS = 15000;
+
+async function renderHtmlToPdf(html) {
+  const win = new BrowserWindow({
+    show: false,
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true,
+      // No preload / IPC surface: this window only ever renders a static,
+      // renderer-supplied document to PDF.
+    },
+  });
+  try {
+    const render = (async () => {
+      // Load the HTML directly as a data URL (self-contained: CSS, font, and
+      // logo are inlined), so there is no temp .html file to manage or clean up.
+      await win.loadURL('data:text/html;charset=UTF-8,' + encodeURIComponent(html));
+      // loadURL resolves on did-finish-load, but @font-face decoding (the
+      // embedded Ovo woff2) is async and may not be done yet — printing now can
+      // rasterise with the Georgia fallback, defeating the branded look. Wait
+      // for the fonts to settle first. executeJavaScript runs in the render
+      // window out-of-band (not subject to the document CSP), so this is safe
+      // even with scripts disabled by the page's own CSP.
+      await win.webContents.executeJavaScript('document.fonts.ready.then(() => true)');
+      return win.webContents.printToPDF({
+        printBackground: true,
+        preferCSSPageSize: true,
+      });
+    })();
+
+    // Bound the whole render. If Chromium stalls (a known intermittent
+    // printToPDF failure mode under GPU/compositor trouble), the awaited promise
+    // would never settle — hanging the IPC call and stranding the hidden window.
+    // On timeout we reject; the caller converts that to a clean {success:false}
+    // and the outer finally still tears the window down (which also unblocks the
+    // orphaned render promise).
+    let timer;
+    const timeout = new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error('PDF render timed out')), PDF_RENDER_TIMEOUT_MS);
+    });
+    try {
+      return await Promise.race([render, timeout]);
+    } finally {
+      clearTimeout(timer);
+    }
+  } finally {
+    if (!win.isDestroyed()) win.destroy();
+  }
+}
+
+// Notes export as a branded PDF. Mirrors export-transcript's file-write contract
+// (basename-only defaultPath, atomic tmp+rename, IS_E2E-gated env seam,
+// EXPORT_CANCELED on dialog dismiss) but rasterises the renderer-built HTML to a
+// PDF first. The renderer owns the document (styling, section selection, HTML
+// escaping); this handler owns the render + the write.
+ipcMain.handle('export-note-pdf', async (event, defaultFilename, html) => {
+  try {
+    if (typeof html !== 'string' || html.length === 0) {
+      return { success: false, error: 'No notes content to export.' };
+    }
+
+    // Test-only seam: only honor it under e2e, so a stray env var in a real
+    // launch can't silently redirect a user's export to an arbitrary path.
+    const seamPath = IS_E2E ? process.env.STENOAI_E2E_EXPORT_PATH : undefined;
+    let targetPath = seamPath;
+
+    if (!targetPath) {
+      // Suggested name only; reduce to a bare filename so a malformed value
+      // can't steer defaultPath with an absolute path or traversal components.
+      const suggested =
+        typeof defaultFilename === 'string' && defaultFilename.trim()
+          ? path.basename(defaultFilename).slice(0, 200)
+          : 'notes.pdf';
+      const result = await dialog.showSaveDialog(mainWindow, {
+        defaultPath: suggested,
+        filters: [{ name: 'PDF', extensions: ['pdf'] }],
+      });
+      if (result.canceled || !result.filePath) {
+        return { success: false, error: EXPORT_CANCELED };
+      }
+      targetPath = result.filePath;
+    }
+
+    // Rasterise BEFORE touching the destination, so a render failure surfaces
+    // without having created or truncated any file.
+    const pdf = await renderHtmlToPdf(html);
+
+    // Atomic write: tmp file in the SAME directory, then rename into place, so a
+    // failed write can't truncate a pre-existing file. Mirrors export-transcript.
+    const dir = path.dirname(targetPath);
+    const base = path.basename(targetPath);
+    const tmpPath = path.join(dir, `.${base}.${require('crypto').randomBytes(6).toString('hex')}.tmp`);
+    try {
+      await fs.promises.writeFile(tmpPath, pdf);
+      await fs.promises.rename(tmpPath, targetPath);
+    } catch (writeErr) {
+      try { await fs.promises.unlink(tmpPath); } catch (_) {}
+      throw writeErr;
+    }
+    return { success: true, path: targetPath };
+  } catch (err) {
+    return { success: false, error: String(err && err.message ? err.message : err) };
+  }
+});
+
 // Save the (already redacted, renderer-built) diagnostics bundle to a file the
 // user picks. Mirrors export-transcript: basename-only defaultPath, atomic
 // tmp+rename, and the e2e save-path seam. The renderer owns redaction + the env

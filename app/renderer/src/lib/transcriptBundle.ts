@@ -43,8 +43,13 @@ export function buildTranscriptBundle(meeting: Meeting | null | undefined): stri
   return lines.join('\n');
 }
 
-// e.g. "2026-06-19-epsilon-planning.md"
-export function defaultExportFilename(meeting: Meeting | null | undefined): string {
+// e.g. "2026-06-19-epsilon-planning.md" (or ".pdf" for the notes export).
+// `ext` is the bare extension without a dot; defaults to 'md' so existing
+// callers are unchanged.
+export function defaultExportFilename(
+  meeting: Meeting | null | undefined,
+  ext = 'md',
+): string {
   const info = meeting?.session_info;
   const date = meetingDate(info) ?? isoToDate(new Date().toISOString())!;
   const slug =
@@ -53,10 +58,10 @@ export function defaultExportFilename(meeting: Meeting | null | undefined): stri
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-+|-+$/g, '')
       // Cap the slug so a very long title can't push the filename past the
-      // ~255-byte filesystem limit (date prefix + ".md" leave headroom).
+      // ~255-byte filesystem limit (date prefix + extension leave headroom).
       .slice(0, 80)
       .replace(/-+$/g, '') || 'transcript';
-  return `${date}-${slug}.md`;
+  return `${date}-${slug}.${ext}`;
 }
 
 // Map the common non-ASCII characters (esp. German umlauts/ß) to ASCII before
