@@ -270,6 +270,12 @@ export function useRecording() {
      *  Set rather than array so consumers can do O(1) membership checks
      *  inside the meetings list map. */
     reprocessingSummaryFiles: reprocessingSummaryFiles,
+    /** True once the queue poll has resolved successfully at least once. The
+     *  processing-screen watchdog must not count "idle+empty" ticks before real
+     *  data has arrived — absent query data defaults to status:'idle' /
+     *  queueSize:0, so a slow first IPC would otherwise look like a no-job
+     *  dead-end (issue #343). */
+    isQueueSuccess: queue.isSuccess,
     startRecording,
     stopRecording,
     pauseRecording,

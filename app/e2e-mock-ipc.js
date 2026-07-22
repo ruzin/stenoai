@@ -229,20 +229,50 @@ function install({ ipcMain }) {
       }
       return { success: true };
     },
-    'get-queue-status': async () => ({
-      success: true,
-      isProcessing: rec.processing,
-      queueSize: 0,
-      currentJob: rec.processing ? rec.sessionName : null,
-      currentReprocesses: [],
-      hasRecording: rec.active,
-      isPaused: rec.paused,
-      elapsedSeconds: rec.active
-        ? Math.floor(((rec.paused ? rec.pausedAt : Date.now()) - rec.startedAt) / 1000)
-        : 0,
-      sessionName: rec.active || rec.processing ? rec.sessionName : null,
-      recordingSummaryFile: rec.active ? rec.appendTo : null,
-    }),
+    // Scripted-sequence seam for the processing-watchdog T1: when
+    // STENOAI_E2E_QUEUE_STATE_PATH points at a JSON file, each poll returns that
+    // file's contents (merged over the idle defaults) so a spec can drive the
+    // real stop→enqueue state SEQUENCE over time (optimistic processing → a
+    // legitimate idle+empty handoff gap → late enqueue) by rewriting the file
+    // between polls. Falls through to the rec-based machine if the file is
+    // absent/unreadable (e.g. not yet written on the first poll).
+    'get-queue-status': async () => {
+      const statePath = process.env.STENOAI_E2E_QUEUE_STATE_PATH;
+      if (statePath) {
+        try {
+          const override = JSON.parse(fs.readFileSync(statePath, 'utf-8'));
+          return {
+            success: true,
+            isProcessing: false,
+            queueSize: 0,
+            currentJob: null,
+            currentReprocesses: [],
+            hasRecording: false,
+            isPaused: false,
+            elapsedSeconds: 0,
+            sessionName: null,
+            recordingSummaryFile: null,
+            ...override,
+          };
+        } catch {
+          /* file not ready yet — fall through to the rec-based default below */
+        }
+      }
+      return {
+        success: true,
+        isProcessing: rec.processing,
+        queueSize: 0,
+        currentJob: rec.processing ? rec.sessionName : null,
+        currentReprocesses: [],
+        hasRecording: rec.active,
+        isPaused: rec.paused,
+        elapsedSeconds: rec.active
+          ? Math.floor(((rec.paused ? rec.pausedAt : Date.now()) - rec.startedAt) / 1000)
+          : 0,
+        sessionName: rec.active || rec.processing ? rec.sessionName : null,
+        recordingSummaryFile: rec.active ? rec.appendTo : null,
+      };
+    },
 
     // Live transcript backfill. Real main.js populates liveTranscriptState from
     // the ASR sidecar (a model) — unreachable in T1 — so we seed it here. With

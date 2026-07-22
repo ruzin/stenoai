@@ -7,6 +7,7 @@ import {
   PencilLine,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
+import { create } from 'zustand';
 import { MeetingsShell } from '@/components/MeetingsShell';
 import { useNavigate } from '@/lib/router';
 import { useRecording } from '@/hooks/useRecording';
@@ -16,6 +17,19 @@ import { ipc } from '@/lib/ipc';
 import { stripReasoning } from '@/lib/markdown';
 
 type ProcessingStage = 'transcribing' | 'summarizing' | 'finalizing' | 'error';
+
+// Shared flag so the sibling ProcessingDock (the bottom "Processing" chip,
+// rendered by App while on this route) can hide once the watchdog concludes
+// nothing was captured — otherwise the dock keeps animating "Processing" under
+// a "Nothing to process" panel. Set by the Processing screen, read by the dock;
+// reset on each screen visit.
+const useProcessingWatchdogStore = create<{
+  gaveUp: boolean;
+  setGaveUp: (v: boolean) => void;
+}>((set) => ({
+  gaveUp: false,
+  setGaveUp: (gaveUp) => set({ gaveUp }),
+}));
 
 const STAGE_LABEL: Record<ProcessingStage, string> = {
   transcribing: 'Analyzing transcript',
@@ -27,15 +41,23 @@ const STAGE_LABEL: Record<ProcessingStage, string> = {
 // Queue-state watchdog (issue #343). Stopping a recording navigates here
 // unconditionally, but a processing job is only queued when the capture
 // actually produced a file. A stop that produced nothing (e.g. Stop hit while
-// getUserMedia was still pending, or system-audio capture returned no file)
-// emits no processing-complete, so without this the screen spins forever. We
-// watch for a genuinely idle-and-empty queue rather than a wall clock — long
-// transcriptions have quiet stretches that a time-based timeout would
-// false-trip. A tick cadence independent of the queue poll keeps the arithmetic
-// simple; 3 consecutive idle ticks (~4.5s) comfortably covers the brief
-// stop→enqueue gap so a normal recording never trips it.
+// getUserMedia was still pending → stopCapture early-returns with no blob, or
+// processSystemAudio resolves {success:false}) emits no processing-complete, so
+// without this the screen spins forever. We watch for a genuinely idle-and-empty
+// queue rather than a wall clock — long transcriptions have quiet stretches that
+// a time-based timeout would false-trip.
+//
+// The threshold must clear the NORMAL stop→enqueue handoff, which is not
+// instant: main flushes the recorder + closes the file, then
+// process-system-audio-recording waits up to ~8s for the live-transcript
+// sidecar to drain (app/main.js) BEFORE addToProcessingQueue runs. During that
+// window main has already cleared the recording state but not yet enqueued, so
+// a queue poll legitimately returns idle+empty for a recording that really has
+// speech. Requiring 8 consecutive idle ticks at a 1500ms cadence (~12s) clears
+// that bounded ~8s drain with comfortable margin; a genuine no-job dead-end
+// stays idle+empty indefinitely, so it still trips (just a few seconds later).
 const WATCHDOG_TICK_MS = 1500;
-const WATCHDOG_IDLE_TICKS = 3;
+const WATCHDOG_IDLE_TICKS = 8;
 
 export function Processing() {
   const navigate = useNavigate();
@@ -96,6 +118,12 @@ export function Processing() {
     };
     const offs = [
       ipc().on.summaryChunk((e) => {
+        // This screen shows the fresh-recording queue job, which emits bare
+        // (no-summaryFile) chunks. A concurrent reprocess/report of a DIFFERENT
+        // meeting emits summaryFile-scoped chunks — ignore those so an unrelated
+        // reprocess can't move this screen's stage and latch the watchdog's
+        // "saw activity" flag (which would hide a real no-job dead-end).
+        if (e.summaryFile) return;
         if (activeSession && e.sessionName !== activeSession) return;
         pendingChunkRef.current += e.chunk;
         setStage((s) => (s === 'transcribing' ? 'summarizing' : s));
@@ -108,6 +136,10 @@ export function Processing() {
         setStreamedTitle(e.title);
       }),
       ipc().on.summaryComplete((e) => {
+        // Same reprocess guard as summaryChunk above — a summaryFile-scoped
+        // completion belongs to another meeting's reprocess, not this
+        // fresh-recording job.
+        if (e.summaryFile) return;
         if (activeSession && e.sessionName !== activeSession) return;
         setStage((s) => (s === 'error' ? s : 'finalizing'));
       }),
@@ -155,9 +187,15 @@ export function Processing() {
   // permanently disarms it for this screen visit.
   const sawActivity =
     stage !== 'transcribing' || streamText !== '' || chunkProgress !== null;
-  // "The queue is genuinely idle and empty, and we've seen nothing yet."
+  // "The queue has resolved real data at least once AND it is genuinely idle and
+  // empty AND we've seen nothing yet." The isQueueSuccess gate matters because
+  // absent query data defaults to status:'idle'/queueSize:0 — without it a slow
+  // first IPC would look like a no-job dead-end.
   const idleEmpty =
-    !sawActivity && recording.status === 'idle' && recording.queueSize === 0;
+    !sawActivity &&
+    recording.isQueueSuccess &&
+    recording.status === 'idle' &&
+    recording.queueSize === 0;
   // Mirror the freshest signals into refs so the interval below can read them
   // without becoming a dependency that would tear itself down and restart (and
   // reset the consecutive-tick counter) on every queue poll.
@@ -168,6 +206,15 @@ export function Processing() {
     idleEmptyRef.current = idleEmpty;
   });
 
+  const setGaveUp = useProcessingWatchdogStore((s) => s.setGaveUp);
+  // Reset the shared "gave up" flag at the start of each screen visit (and clear
+  // it on leave) so a fresh recording's dock never inherits a prior visit's
+  // watchdog conclusion.
+  React.useEffect(() => {
+    setGaveUp(false);
+    return () => setGaveUp(false);
+  }, [setGaveUp]);
+
   React.useEffect(() => {
     let idleTicks = 0;
     const id = setInterval(() => {
@@ -175,21 +222,29 @@ export function Processing() {
         clearInterval(id);
         return;
       }
-      if (idleEmptyRef.current) {
+      // Don't count while the window is hidden: the queue poll cadence drops to
+      // 10s and react-query lets the cache go stale, so a job enqueued during a
+      // hidden stretch could be missed. Reading document.visibilityState live
+      // (not a render-synced ref) avoids any staleness window.
+      const hidden =
+        typeof document !== 'undefined' && document.visibilityState === 'hidden';
+      if (idleEmptyRef.current && !hidden) {
         idleTicks += 1;
         if (idleTicks >= WATCHDOG_IDLE_TICKS) {
           clearInterval(id);
           setNothingRecorded(true);
           setStage('error');
+          setGaveUp(true);
         }
       } else {
-        // Not idle right now (a job exists, or we're still in the stop→enqueue
-        // gap) — reset so only *consecutive* idle ticks count.
+        // Not counting right now (a job exists, still in the stop→enqueue
+        // handoff, the queue hasn't loaded, or the window is hidden) — reset so
+        // only *consecutive* idle ticks count.
         idleTicks = 0;
       }
     }, WATCHDOG_TICK_MS);
     return () => clearInterval(id);
-  }, []);
+  }, [setGaveUp]);
 
   // Actually re-run the failed job: re-queue the preserved source audio via the
   // same import pipeline a stopped recording uses. Its copy-then-queue semantics
@@ -261,7 +316,10 @@ export function Processing() {
             <Chip icon={<Clock size={11} />}>
               <ElapsedTimer startedAt={startedAt} fallbackElapsed={recording.elapsed} />
             </Chip>
-            <ProcessingChip />
+            {/* Hide the animated "Processing" chip once we've stopped: an error
+                (crash or the watchdog's "nothing to process") means nothing is
+                actively processing, so the chip would mislead. */}
+            {stage !== 'error' && <ProcessingChip />}
           </div>
         </header>
 
@@ -472,6 +530,7 @@ function ErrorPanel({
 function ProcessingChip() {
   return (
     <span
+      data-testid="processing-chip"
       className="inline-flex items-center gap-1.5 px-2 py-1 text-[12px]"
       style={{
         color: 'var(--fg-2)',
@@ -520,6 +579,10 @@ export function ProcessingDock() {
   );
   const startedAt = draft ? new Date(draft.startedAtMs) : null;
 
+  // Once the watchdog concluded nothing was captured, the screen shows a
+  // "Nothing to process" panel — don't keep animating "Processing" beneath it.
+  const gaveUp = useProcessingWatchdogStore((s) => s.gaveUp);
+  if (gaveUp) return null;
 
   return (
     <div className="flex justify-center pointer-events-none">
