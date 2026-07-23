@@ -4043,6 +4043,38 @@ def set_notifications(enabled):
 
 
 @cli.command()
+def get_record_hotkey():
+    """Get the current global record shortcut preference"""
+    from src.config import get_config
+
+    config = get_config()
+    enabled = config.get_record_hotkey_enabled()
+
+    result = {
+        "record_hotkey_enabled": enabled
+    }
+
+    print(json.dumps(result, indent=2))
+
+
+@cli.command()
+@click.argument('enabled', type=bool)
+def set_record_hotkey(enabled):
+    """Set global record shortcut preference (True/False)"""
+    from src.config import get_config
+
+    config = get_config()
+    success = config.set_record_hotkey_enabled(enabled)
+
+    if success:
+        print(f"SUCCESS: Record shortcut {'enabled' if enabled else 'disabled'}")
+        print(json.dumps({"success": True, "record_hotkey_enabled": enabled}))
+    else:
+        print("ERROR: Failed to save record shortcut preference")
+        print(json.dumps({"success": False, "error": "Failed to save config"}))
+
+
+@cli.command()
 def get_dock_icon():
     """Get the current hide-dock-icon preference"""
     from src.config import get_config

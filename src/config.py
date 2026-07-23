@@ -673,6 +673,11 @@ class Config:
             # item and suppresses the first window show on a login launch.
             # Users opt out in Settings.
             "launch_on_login": True,
+            # Default ON — the global (system-wide) record shortcut
+            # (CommandOrControl+Shift+R) is registered at startup so recording
+            # can be toggled from anywhere. Users turn it off in Settings when
+            # it conflicts with another app (e.g. a browser's hard-reload).
+            "record_hotkey_enabled": True,
             # "auto" so _resolve_output_language() picks the transcript's
             # detected language instead of silently defaulting every
             # unconfigured install to English summaries (#281).
@@ -902,6 +907,28 @@ class Config:
             True if saved successfully, False otherwise
         """
         self._config["notifications_enabled"] = enabled
+        return self._save()
+
+    def get_record_hotkey_enabled(self) -> bool:
+        """Get whether the global record shortcut is registered at startup.
+
+        Absence of the key = ON (back-compat). Only a literal ``False`` disables
+        it, matching the Electron-side ``record_hotkey_enabled !== false`` gate,
+        so a malformed non-boolean value doesn't diverge between the two reads.
+        """
+        return self._config.get("record_hotkey_enabled", True) is not False
+
+    def set_record_hotkey_enabled(self, enabled: bool) -> bool:
+        """
+        Set whether the global record shortcut is enabled.
+
+        Args:
+            enabled: True to register the shortcut, False to disable it
+
+        Returns:
+            True if saved successfully, False otherwise
+        """
+        self._config["record_hotkey_enabled"] = enabled
         return self._save()
 
     def get_premeeting_notifications_enabled(self) -> bool:

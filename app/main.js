@@ -95,6 +95,58 @@ if (process.env.STENOAI_USER_DATA_DIR) {
 }
 const IS_E2E = process.env.STENOAI_E2E === '1';
 const IS_E2E_MOCK_IPC = process.env.STENOAI_E2E_MOCK_IPC === '1';
+
+// Global (system-wide) accelerator to toggle recording. CommandOrControl
+// resolves to Cmd on macOS and Ctrl on Windows/Linux, so no manual
+// process.platform split is needed. The env override lets the e2e T2 spec
+// register a low-collision accelerator that can't clash with whatever the
+// real host already occupies (see e2e/specs/record-hotkey.t2.spec.ts).
+const RECORD_HOTKEY_ACCEL = process.env.STENOAI_E2E_RECORD_ACCEL || 'CommandOrControl+Shift+R';
+
+// Shared toggle-recording handler for the global shortcut — reused by the
+// startup registration and the live-apply set-record-hotkey IPC handler so
+// both bind the exact same behaviour.
+function handleRecordHotkey() {
+  console.log('Global hotkey triggered: toggle recording');
+  if (mainWindow) {
+    mainWindow.webContents.send('toggle-recording-hotkey');
+  }
+}
+
+// Direct config.json read (no Python subprocess) for the startup registration
+// gate — mirrors the launch-on-login / notifications snapshot reads. The
+// startup backend call is skipped under IS_E2E, so a subprocess gate would be
+// untestable in T2. Absence of the key = ON (back-compat: the shortcut was
+// unconditionally registered before this setting existed).
+function recordHotkeyEnabledFromDisk() {
+  try {
+    const cfgPath = path.join(getUserDataDir(), 'config.json');
+    if (fs.existsSync(cfgPath)) {
+      const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf-8'));
+      return cfg.record_hotkey_enabled !== false;
+    }
+  } catch (e) {
+    console.warn('Failed to read record_hotkey_enabled from config:', e?.message);
+  }
+  return true;
+}
+
+// Idempotently drive the global record hotkey to `enabled` and report the
+// resulting registration. globalShortcut.register() returns false when the
+// accelerator is ALREADY registered (including by us), so a bare register on a
+// repeat-enable — or an enable that races the startup registration — would
+// report a spurious failure while isRegistered() is actually true. Guarding on
+// isRegistered() keeps both call sites idempotent and the return value honest.
+function applyRecordHotkey(enabled) {
+  if (enabled) {
+    if (!globalShortcut.isRegistered(RECORD_HOTKEY_ACCEL)) {
+      globalShortcut.register(RECORD_HOTKEY_ACCEL, handleRecordHotkey);
+    }
+  } else if (globalShortcut.isRegistered(RECORD_HOTKEY_ACCEL)) {
+    globalShortcut.unregister(RECORD_HOTKEY_ACCEL);
+  }
+  return globalShortcut.isRegistered(RECORD_HOTKEY_ACCEL);
+}
 if (IS_E2E_MOCK_IPC) {
   require('./e2e-mock-ipc').install({ ipcMain, BrowserWindow });
 }
@@ -1597,19 +1649,18 @@ if (!gotSingleInstanceLock) {
     // critical path so the per-note frontmatter scan never delays first paint.
     setImmediate(sweepStuckProcessingFlags);
 
-    // Register global hotkey for toggle recording (Cmd+Shift+R on macOS, Ctrl+Shift+R on Windows/Linux)
-    const hotkeyModifier = process.platform === 'darwin' ? 'Command+Shift+R' : 'Ctrl+Shift+R';
-    const registered = globalShortcut.register(hotkeyModifier, () => {
-      console.log('Global hotkey triggered: toggle recording');
-      if (mainWindow) {
-        mainWindow.webContents.send('toggle-recording-hotkey');
+    // Register the global hotkey for toggle recording, unless the user turned
+    // it off in Settings. CommandOrControl resolves per-platform (Cmd on
+    // macOS, Ctrl on Windows/Linux). Gate on the persisted preference read
+    // directly from config.json — absence of the key = ON (back-compat).
+    if (recordHotkeyEnabledFromDisk()) {
+      if (applyRecordHotkey(true)) {
+        console.log(`Global hotkey registered: ${RECORD_HOTKEY_ACCEL}`);
+      } else {
+        console.error(`Failed to register global hotkey: ${RECORD_HOTKEY_ACCEL}`);
       }
-    });
-
-    if (registered) {
-      console.log(`Global hotkey registered: ${hotkeyModifier}`);
     } else {
-      console.error(`Failed to register global hotkey: ${hotkeyModifier}`);
+      console.log('Global record hotkey disabled by preference — not registering');
     }
 
     if (pendingShortcutUrls.length > 0) {
@@ -6953,6 +7004,47 @@ ipcMain.handle('set-notifications', async (event, enabled) => {
     return { success: true, notifications_enabled: enabled };
   } catch (error) {
     sendDebugLog(`Error setting notifications: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+});
+
+// Both the persisted preference AND the live registration state — the UI needs
+// to know if the shortcut is enabled but failed to register (another app owns
+// the accelerator) so it can surface a hint.
+ipcMain.handle('get-record-hotkey', () => ({
+  success: true,
+  enabled: recordHotkeyEnabledFromDisk(),
+  registered: globalShortcut.isRegistered(RECORD_HOTKEY_ACCEL),
+}));
+
+ipcMain.handle('set-record-hotkey', async (event, enabled) => {
+  try {
+    sendDebugLog(`Setting record hotkey to: ${enabled}`);
+    const result = await runPythonScript('simple_recorder.py', ['set-record-hotkey', enabled ? 'True' : 'False']);
+
+    // Surface a persist failure rather than silently applying the shortcut.
+    const jsonMatch = result.match(/\{.*\}/s);
+    if (jsonMatch) {
+      const persisted = JSON.parse(jsonMatch[0]);
+      if (persisted.success === false) {
+        return {
+          success: false,
+          error: persisted.error || 'Failed to save record shortcut preference',
+        };
+      }
+    }
+
+    // Live-apply so the change takes effect without a relaunch. Idempotent and
+    // never unregisterAll() — see applyRecordHotkey (guards on isRegistered() so
+    // a repeat-enable can't report a spurious failure, and only ever touches
+    // this specific accelerator).
+    const registered = applyRecordHotkey(enabled);
+    if (enabled && !registered) {
+      console.error(`Failed to register global hotkey: ${RECORD_HOTKEY_ACCEL}`);
+    }
+    return { success: true, enabled, registered };
+  } catch (error) {
+    sendDebugLog(`Error setting record hotkey: ${error.message}`);
     return { success: false, error: error.message };
   }
 });

@@ -330,6 +330,15 @@ function install({ ipcMain }) {
       return { success: true };
     },
 
+    // Mirrors main.js's set-record-hotkey shape (enabled + live registered
+    // flag). Stateless under mock IPC — the real registration is asserted by
+    // the T2 spec; here it just keeps the toggle mutation from erroring.
+    'set-record-hotkey': async (_event, enabled) => ({
+      success: true,
+      enabled,
+      registered: !!enabled,
+    }),
+
     // The detail route loads via get-meeting (the lazy per-meeting fetch), not
     // by filtering list-meetings — answer it with the same seeded meeting so the
     // transcript-export detail route resolves and renders the transcript actions.
@@ -584,6 +593,10 @@ function install({ ipcMain }) {
     // switches permanently disabled under mock IPC.
     'get-menu-bar-icon': { success: true, show_menu_bar_icon: true },
     'get-premeeting-notifications': { success: true, premeeting_notifications_enabled: true },
+    // Global record shortcut toggle (GeneralTab's "Global record shortcut"
+    // row + the hero copy). Default enabled + registered so T1 renderer specs
+    // render the ON state without a real globalShortcut registration.
+    'get-record-hotkey': { success: true, enabled: true, registered: true },
     // parakeet-status lives in MOCKS (env-gated installed flag).
     // Transcribe tab reads this on first paint. (The engine itself moved to
     // MOCKS so STENOAI_E2E_MOCK_ENGINE can override it; default parakeet keeps

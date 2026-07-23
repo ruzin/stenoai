@@ -229,6 +229,8 @@ const stenoai = {
   settings: {
     getNotifications: () => invoke('get-notifications'),
     setNotifications: (v) => invoke('set-notifications', v),
+    getRecordHotkey: () => invoke('get-record-hotkey'),
+    setRecordHotkey: (v) => invoke('set-record-hotkey', v),
     getTelemetry: () => invoke('get-telemetry'),
     setTelemetry: (v, source) => invoke('set-telemetry', v, source),
     getDockIcon: () => invoke('get-dock-icon'),
