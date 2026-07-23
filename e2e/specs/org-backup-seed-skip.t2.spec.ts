@@ -162,6 +162,13 @@ test('org auto_share_default=false is honored: gate stays fail-closed and nothin
       })
       .toBe(false);
 
+    // Baseline /policy fetches after the sign-in seed has settled, so we can
+    // prove the DISABLED path also skips the fetch (not just the enabled path
+    // in the first test) — a regression that re-fetched /policy but still read
+    // the cached disabled value would pass the fail-closed assertions below yet
+    // reintroduce the HTTP call #192 eliminates.
+    const policyFetchesBefore = adapter.policyFetches();
+
     const summaryFile = path.join(userDataDir, 'output', 'policy-false-note_summary.json');
     const result = await page.evaluate(
       (sf) =>
@@ -177,6 +184,9 @@ test('org auto_share_default=false is honored: gate stays fail-closed and nothin
     expect(result.attempted).toBe(false);
     if (!result.attempted) expect(result.reason).toBe('disabled');
     expect(adapter.s3Puts()).toBe(0); // nothing was auto-shared against the policy
+    // ...and the disabled path did NOT re-fetch /policy: the stored preference
+    // was read first and the seed skipped entirely (the whole point of #192).
+    expect(adapter.policyFetches()).toBe(policyFetchesBefore);
   } finally {
     await adapter.close();
   }
