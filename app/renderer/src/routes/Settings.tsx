@@ -84,6 +84,16 @@ export function Settings() {
     return 'general';
   }, []); // Intentional — only consume the URL param on first mount.
   const [tab, setTab] = React.useState<SettingsTabId>(initialTab);
+  // Keep the visible tab in sync when the `?tab=` param changes AFTER mount —
+  // e.g. the ⌘K settings search navigates to /settings?tab=<id> while Settings
+  // is already open. initialTab (above) only consumes the param on first mount,
+  // so without this the hash would update but the tab wouldn't switch.
+  React.useEffect(() => {
+    const requested = getRouteParam(route, 'tab');
+    if (requested && (DEEP_LINK_IDS as readonly string[]).includes(requested)) {
+      setTab(resolveTab(requested as DeepLinkId));
+    }
+  }, [route]);
   const version = useAppVersion();
   // Templates' own editor is a full-page takeover with its own header/back
   // button — while it's open, the outer "Templates" title/description/divider
