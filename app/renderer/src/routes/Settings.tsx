@@ -99,6 +99,13 @@ export function Settings() {
   // button — while it's open, the outer "Templates" title/description/divider
   // would just be a leftover from the list view carried over on top of it.
   const [templateEditorOpen, setTemplateEditorOpen] = React.useState(false);
+  // Leaving the Templates tab (via the nav rail OR the ⌘K settings search)
+  // unmounts TemplatesTab, but its editor-open flag lived on here — a stale
+  // `true` would suppress the page header when Templates is reopened. Reset it
+  // whenever the active tab isn't Templates.
+  React.useEffect(() => {
+    if (tab !== 'templates' && templateEditorOpen) setTemplateEditorOpen(false);
+  }, [tab, templateEditorOpen]);
   const showPageHeader = !(tab === 'templates' && templateEditorOpen);
 
   // Supplies AppShell's recordingStatus/onToggleRecording props directly —

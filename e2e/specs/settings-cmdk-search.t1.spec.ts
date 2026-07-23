@@ -39,6 +39,12 @@ test('⌘K in Settings searches settings, not notes', async ({ launchApp }) => {
   await page.locator(input).fill('provider');
   await expect(page.locator(result)).toHaveCount(1);
   await expect(page.locator(result).nth(0)).toContainText('AI provider');
+
+  // Query is trimmed, and the index title matches the real settings label
+  // ("Post meeting notifications", no hyphen) so searching the visible label
+  // works even with surrounding whitespace.
+  await page.locator(input).fill('  post meeting  ');
+  await expect(page.locator(result).filter({ hasText: 'Post meeting notifications' })).toHaveCount(1);
 });
 
 test('selecting a setting navigates to its tab and switches the visible tab', async ({

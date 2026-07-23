@@ -46,14 +46,15 @@ interface SettingsEntry {
 const SETTINGS_INDEX: SettingsEntry[] = [
   { id: 'general-name', tab: 'general', title: 'Your name', sub: 'In-app greeting' },
   { id: 'general-theme', tab: 'general', title: 'Appearance', sub: 'Light, dark, or system theme' },
-  { id: 'general-calendar', tab: 'general', title: 'Connect calendar', sub: 'Google, Outlook, scheduled meetings' },
+  { id: 'general-calendar', tab: 'general', title: 'Connect calendar', sub: 'Google, Outlook' },
+  { id: 'general-scheduled', tab: 'general', title: 'Scheduled meetings', sub: 'Upcoming calendar events' },
   { id: 'general-autodetect', tab: 'general', title: 'Auto-detected meetings', sub: 'Notify when another app uses the microphone' },
-  { id: 'general-notifications', tab: 'general', title: 'Post-meeting notifications', sub: 'Desktop notifications' },
+  { id: 'general-notifications', tab: 'general', title: 'Post meeting notifications', sub: 'Desktop notifications when notes are ready' },
   { id: 'general-mic', tab: 'general', title: 'Microphone', sub: 'Input device' },
   { id: 'general-system-audio', tab: 'general', title: 'Record system audio', sub: 'Capture other participants' },
   { id: 'general-silence', tab: 'general', title: 'Auto-stop on silence', sub: 'End a recording when it goes quiet' },
   { id: 'general-launch', tab: 'general', title: 'Launch on login', sub: 'Start Steno automatically' },
-  { id: 'general-dock', tab: 'general', title: 'Hide dock icon', sub: 'Run from the menu bar only' },
+  { id: 'general-dock', tab: 'general', title: 'Hide dock icon', sub: 'Menu bar / tray icon only' },
   { id: 'ai-language', tab: 'ai', title: 'Language', sub: 'Transcription and summary language' },
   { id: 'ai-transcription', tab: 'ai', title: 'Transcription model', sub: 'Parakeet or Whisper' },
   { id: 'ai-save-recordings', tab: 'ai', title: 'Save recordings', sub: 'Keep the audio files after transcription' },
@@ -61,6 +62,7 @@ const SETTINGS_INDEX: SettingsEntry[] = [
   { id: 'ai-provider', tab: 'ai', title: 'AI provider', sub: 'Local, private server, cloud, or organisation' },
   { id: 'templates', tab: 'templates', title: 'Templates', sub: 'Custom note formats' },
   { id: 'org', tab: 'organisation', title: 'Organisation', sub: 'Sign in and back up notes to your org' },
+  { id: 'advanced-storage', tab: 'advanced', title: 'Storage location', sub: 'Where notes and recordings are saved' },
   { id: 'advanced-setup', tab: 'advanced', title: 'Setup wizard', sub: 'Re-run first-time setup' },
   { id: 'advanced-clear', tab: 'advanced', title: 'Clear recording state', sub: 'Reset a stuck recording' },
   { id: 'advanced-analytics', tab: 'advanced', title: 'Anonymous usage analytics', sub: 'Opt in or out' },
@@ -121,7 +123,7 @@ function CommandPalette({ onClose }: { onClose: () => void }) {
   const settingsResults = React.useMemo<SettingsEntry[]>(() => {
     if (!isSettingsMode) return [];
     if (!query.trim()) return SETTINGS_INDEX;
-    const q = query.toLowerCase();
+    const q = query.trim().toLowerCase();
     return SETTINGS_INDEX.filter(
       (s) => s.title.toLowerCase().includes(q) || s.sub.toLowerCase().includes(q),
     );
@@ -184,7 +186,13 @@ function CommandPalette({ onClose }: { onClose: () => void }) {
     }
   };
 
-  const activeId = resultCount > 0 ? `cmdk-opt-${selected}` : undefined;
+  // Guard against `selected` briefly pointing past the list right after it
+  // shrinks (before the clamp effect runs) — only expose activedescendant when
+  // an option actually exists at that index, so aria never references a
+  // nonexistent id.
+  const activeId = (isSettingsMode ? settingsResults[selected] : noteResults[selected])
+    ? `cmdk-opt-${selected}`
+    : undefined;
 
   return (
     <div
