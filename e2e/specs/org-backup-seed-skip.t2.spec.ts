@@ -78,9 +78,14 @@ test('steady-state auto-backup skips the /policy fetch + seed once a preference 
     // preference has actually materialised so the backup below is a genuine
     // steady-state read, not the one-time unset window.
     await expect
-      .poll(async () =>
-        (await page.evaluate(() => (window as StenoWindow).stenoai.org.getAutoBackup()))
-          .org_auto_backup_preference_set,
+      .poll(
+        async () =>
+          (await page.evaluate(() => (window as StenoWindow).stenoai.org.getAutoBackup()))
+            .org_auto_backup_preference_set,
+        // The sign-in seed is fire-and-forget (a /policy fetch + a seed
+        // subprocess); on a loaded CI runner it can exceed the default poll
+        // window, so give it a generous timeout rather than flaking.
+        { timeout: 30_000 },
       )
       .toBe(true);
 
@@ -154,12 +159,17 @@ test('org auto_share_default=false is honored: gate stays fail-closed and nothin
     // (return null until preference_set flips true, so the poll doesn't match
     // the pre-seed unset state), then assert the seeded value is disabled.
     await expect
-      .poll(async () => {
-        const ab = await page.evaluate(() =>
-          (window as StenoWindow).stenoai.org.getAutoBackup(),
-        );
-        return ab.org_auto_backup_preference_set === true ? ab.org_auto_backup_enabled : null;
-      })
+      .poll(
+        async () => {
+          const ab = await page.evaluate(() =>
+            (window as StenoWindow).stenoai.org.getAutoBackup(),
+          );
+          return ab.org_auto_backup_preference_set === true ? ab.org_auto_backup_enabled : null;
+        },
+        // Fire-and-forget sign-in seed — generous timeout so a slow CI runner
+        // doesn't flake this (see the first test).
+        { timeout: 30_000 },
+      )
       .toBe(false);
 
     // Baseline /policy fetches after the sign-in seed has settled, so we can
