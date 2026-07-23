@@ -232,7 +232,19 @@ export function useRestoreMeeting() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (trashId: string) => unwrap(await ipc().meetings.restore(trashId)),
-    onSuccess: (data) => {
+    // Resolve the undo-store entry from HOOK-LEVEL callbacks (keyed on the
+    // mutation variable, the trashId), NOT per-call `mutate(id, {onSuccess})`
+    // callbacks in the toast component. All toasts share this single mutation
+    // instance, and per-call callbacks are dropped if the calling component
+    // unmounts (AppShell is per-route, so a navigate mid-restore unmounts the
+    // toast) or is superseded by another concurrent Undo — a dropped callback
+    // would strand the entry stuck `restoring` (timer suspended) forever, so it
+    // never re-arms and gets purged at the next launch = silent data loss.
+    // Hook-level callbacks fire regardless of which component (or none) is
+    // mounted, closing that gap (#234).
+    onSuccess: (data, trashId) => {
+      // Restore succeeded — drop the undo toast entry.
+      useUndoDeleteStore.getState().remove(trashId);
       const meeting = data.meeting;
       const file = meeting?.session_info?.summary_file;
       if (!file) {
@@ -247,6 +259,12 @@ export function useRestoreMeeting() {
         return [meeting, ...prev];
       });
       qc.invalidateQueries({ queryKey: meetingsKeys.detail(file) });
+    },
+    onError: (_err, trashId) => {
+      // Restore failed — re-arm the entry (clears `restoring`, flags the failure,
+      // restarts the undo window) so a retryable toast stays on screen instead of
+      // being stranded still-trashed for the startup sweep to purge.
+      useUndoDeleteStore.getState().rearm(trashId);
     },
   });
 }

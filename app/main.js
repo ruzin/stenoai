@@ -1137,10 +1137,18 @@ function getTrashRoot() {
 // with EXDEV — fall back to copy+unlink so we still never lose a user's audio.
 function moveFileWithFallback(src, dest) {
   try {
+    // Rename can't be made no-clobber atomically, but PASS 1's existsSync check
+    // plus the fact that PASS 1 and PASS 2 run synchronously in one handler (no
+    // await between them) makes the rename-path TOCTOU effectively unreachable
+    // for a single-user desktop, so we leave rename as is (residual only).
     fs.renameSync(src, dest);
   } catch (err) {
     if (err && err.code === 'EXDEV') {
-      fs.copyFileSync(src, dest);
+      // No-clobber on the copy path: COPYFILE_EXCL makes copyFileSync throw
+      // EEXIST rather than OVERWRITE an existing dest, so a copy-move never
+      // clobbers a file already at the target. On EEXIST nothing was written,
+      // so do NOT unlink the source — just let it propagate as a failed move.
+      fs.copyFileSync(src, dest, fs.constants.COPYFILE_EXCL);
       try {
         fs.unlinkSync(src);
       } catch (unlinkErr) {
@@ -1264,11 +1272,19 @@ function purgeAllTrashOnLaunch() {
       // that crashed mid-write could leave a partial/corrupt manifest.json, and
       // purging off `existsSync` alone would then hard-delete a dir whose files
       // can no longer be accounted for. Only purge when the manifest parses to
-      // an object carrying a `files` array; otherwise PRESERVE it (skip + log).
+      // an object carrying a NON-EMPTY `files` array; otherwise PRESERVE it
+      // (skip + log). The non-empty requirement must MATCH restore-meeting's
+      // validity check (an empty/non-array `files` is MALFORMED there and the
+      // dir is preserved) — otherwise a dir that restore refuses to touch could
+      // be hard-deleted by the very next launch = data loss.
       let manifestValid = false;
       try {
         const parsed = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-        manifestValid = !!parsed && typeof parsed === 'object' && Array.isArray(parsed.files);
+        manifestValid =
+          !!parsed &&
+          typeof parsed === 'object' &&
+          Array.isArray(parsed.files) &&
+          parsed.files.length > 0;
       } catch (_) {
         manifestValid = false;
       }
@@ -4277,6 +4293,28 @@ ipcMain.handle('restore-meeting', async (event, trashId) => {
       const stored = path.join(trashDir, storedName);
       const dest = entry.from;
 
+      // Validate the restore TARGET up front for EVERY entry — including the
+      // already-restored SKIP and the conflict/lost branches below — not just the
+      // normal-move path. A tampered manifest whose `from` escapes the allowed
+      // base must be rejected even when we would otherwise only skip it, so the
+      // containment check can't be bypassed by pre-seeding a file at `dest`.
+      // Re-create the original parent dir first so realpath in
+      // validateSafeFilePath can canonicalize it (an empty parent dir is the only
+      // disk side effect of PASS 1 and is not a move). A validated source whose
+      // dest fails validation is a real anomaly, not a deliberate skip, so FAIL
+      // the restore (keep the dir) rather than continue past it.
+      try {
+        fs.mkdirSync(path.dirname(dest), { recursive: true });
+      } catch (_) {}
+      if (!validateSafeFilePath(dest, allowedBaseDirs)) {
+        console.error(`Security: Blocked restore to path outside allowed directories: ${dest}`);
+        return {
+          success: false,
+          error: 'Restore target outside allowed directories',
+          meeting: manifest.meeting,
+        };
+      }
+
       const storedExists = fs.existsSync(stored);
       const destExists = fs.existsSync(dest);
 
@@ -4324,21 +4362,8 @@ ipcMain.handle('restore-meeting', async (event, trashId) => {
           meeting: manifest.meeting,
         };
       }
-      // Re-create the original parent dir first (so realpath in
-      // validateSafeFilePath can canonicalize it) and validate the restore
-      // target is still within an allowed base. Creating an empty parent dir is
-      // the only disk side effect of PASS 1 and is not a move.
-      try {
-        fs.mkdirSync(path.dirname(dest), { recursive: true });
-      } catch (_) {}
-      if (!validateSafeFilePath(dest, allowedBaseDirs)) {
-        console.error(`Security: Blocked restore to path outside allowed directories: ${dest}`);
-        return {
-          success: false,
-          error: 'Restore target outside allowed directories',
-          meeting: manifest.meeting,
-        };
-      }
+      // Dest containment was already validated up front for every entry (its
+      // parent dir created there too), so a NORMAL entry just needs planning.
       plan.push({ stored, dest });
     }
 

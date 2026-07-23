@@ -112,8 +112,12 @@ function UndoDeleteToastItem({
         <button
           type="button"
           onClick={onExpire}
+          // Disable dismiss while a restore is in flight — the note must be
+          // unpurgeable from the UI until the restore settles (#234). handleExpire
+          // also no-ops for a restoring entry as a belt-and-braces guard.
+          disabled={entry.restoring}
           aria-label="Dismiss and delete permanently"
-          className="inline-flex cursor-pointer items-center justify-center rounded-full border-0 bg-transparent p-1"
+          className="inline-flex cursor-pointer items-center justify-center rounded-full border-0 bg-transparent p-1 disabled:cursor-default disabled:opacity-60"
           style={{ color: 'var(--fg-2)' }}
         >
           <X size={12} />
@@ -138,7 +142,6 @@ export function UndoDeleteToast() {
   const entries = useUndoDeleteStore((s) => s.entries);
   const remove = useUndoDeleteStore((s) => s.remove);
   const markRestoring = useUndoDeleteStore((s) => s.markRestoring);
-  const rearm = useUndoDeleteStore((s) => s.rearm);
   const restore = useRestoreMeeting();
   const purge = usePurgeTrashedMeeting();
 
@@ -148,22 +151,22 @@ export function UndoDeleteToast() {
   const handleUndo = (entry: UndoDeleteEntry) => {
     // Do NOT remove the entry up front. Mark it "restoring" so its expiry timer
     // is SUSPENDED while the restore IPC is in flight — an expiring countdown
-    // must never purge a note that's mid-restore (#234). Only a successful
-    // restore removes the toast; a failed one re-arms it so the user can retry.
+    // must never purge a note that's mid-restore (#234). The restore's
+    // resolution (remove on success / re-arm on failure) is handled by
+    // useRestoreMeeting's HOOK-LEVEL callbacks keyed on trashId, NOT per-call
+    // callbacks here — those would be dropped if this component unmounts (a
+    // navigate mid-restore) or is superseded by another Undo, stranding the
+    // entry stuck `restoring` forever (never re-armed → purged next launch).
     if (entry.restoring) return; // Guard against a double click while in flight.
     markRestoring(entry.trashId);
-    restore.mutate(entry.trashId, {
-      onSuccess: () => remove(entry.trashId),
-      onError: () => {
-        // Restore failed — clear "restoring", flag the failure, and restart the
-        // undo window so a retryable toast stays on screen. Removing it here
-        // would strand the still-trashed note for the startup sweep to purge.
-        rearm(entry.trashId);
-      },
-    });
+    restore.mutate(entry.trashId);
   };
 
   const handleExpire = (entry: UndoDeleteEntry) => {
+    // A restore in flight must be unpurgeable from the UI: dismissing here would
+    // purge the trash out from under an in-flight restore, and a subsequent
+    // restore failure would then have nothing left to restore = data loss (#234).
+    if (entry.restoring) return;
     remove(entry.trashId);
     purge.mutate(entry.trashId);
   };

@@ -1,4 +1,3 @@
-import * as React from 'react';
 import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, fireEvent, waitFor, act } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -15,17 +14,18 @@ import { useUndoDeleteStore } from '@/hooks/undoDeleteStore';
  * The contract asserted here: a failed restore must NOT remove the entry — it
  * stays on screen (re-armed + flagged failed) so the user can retry Undo; a
  * successful restore removes it. jsdom + real zustand store; only ipc()/recording
- * are mocked, so the component's mutate-level onSuccess/onError run for real.
+ * are mocked, so useRestoreMeeting's HOOK-LEVEL onSuccess/onError run for real.
  */
 
-const restoreMock = vi.fn<[string], Promise<{ success: boolean; error?: string; meeting?: Meeting }>>();
+const restoreMock =
+  vi.fn<(id: string) => Promise<{ success: boolean; error?: string; meeting?: Meeting }>>();
 const purgeMock = vi.fn(async () => ({ success: true }));
 
 vi.mock('@/lib/ipc', () => ({
   ipc: () => ({
     meetings: {
       restore: (id: string) => restoreMock(id),
-      purgeTrashed: (id: string) => purgeMock(),
+      purgeTrashed: () => purgeMock(),
     },
   }),
 }));
