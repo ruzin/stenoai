@@ -3709,7 +3709,7 @@ function spawnLiveTranscribe(sessionName) {
     liveTranscribeSessionName = null;
     liveTranscribeStdoutBuf = '';
   }
-  const aiEnv = getAiEnv();
+  const aiEnv = { ...getAiEnv(), ...getTranscriptionEnv() };
   const env = Object.keys(aiEnv).length > 0
     ? { ...require('process').env, ...aiEnv }
     : undefined;
@@ -3983,7 +3983,8 @@ function loadTranscriptionEngine() {
     if (!fs.existsSync(cfgPath)) return 'parakeet';
     const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf-8'));
     const engine = cfg.transcription_engine;
-    return engine === 'whisper' ? 'whisper' : 'parakeet';
+    if (engine === 'whisper' || engine === 'openai-asr') return engine;
+    return 'parakeet';
   } catch (_) {
     return 'parakeet';
   }
@@ -4000,12 +4001,21 @@ function loadTranscriptionContext() {
       return { engine: 'parakeet', model: 'parakeet', language: 'auto' };
     }
     const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf-8'));
-    const engine = cfg.transcription_engine === 'whisper' ? 'whisper' : 'parakeet';
-    return {
-      engine,
+    const rawEngine = cfg.transcription_engine;
+    const engine = (rawEngine === 'whisper' || rawEngine === 'openai-asr') ? rawEngine : 'parakeet';
+    let model;
+    if (engine === 'whisper') {
+      model = sanitizeModelForAnalytics(cfg.whisper_model);
+    } else if (engine === 'openai-asr') {
+      model = sanitizeModelForAnalytics(cfg.openai_asr_model) || 'whisper-1';
+    } else {
       // Parakeet has no separate user-selectable model today (single bundled
       // default) -- report the engine name rather than guess a variant id.
-      model: engine === 'whisper' ? sanitizeModelForAnalytics(cfg.whisper_model) : 'parakeet',
+      model = 'parakeet';
+    }
+    return {
+      engine,
+      model,
       language: cfg.language || 'auto',
     };
   } catch (_) {
@@ -4364,7 +4374,9 @@ async function processNextInQueue() {
   let transcriptionEndedAtMs = null;
 
   try {
-    const queueAiEnv = getAiEnv();
+    // process-streaming does BOTH transcription (needs the ASR key) and
+    // summarization (needs the AI env), so merge both.
+    const queueAiEnv = { ...getAiEnv(), ...getTranscriptionEnv() };
     const queueEnv = Object.keys(queueAiEnv).length > 0 ? { ...require('process').env, ...queueAiEnv } : undefined;
     const processArgs = ['process-streaming', currentProcessingJob.audioFile, '--name', currentProcessingJob.sessionName];
     if (currentProcessingJob.notesFile && fs.existsSync(currentProcessingJob.notesFile)) {
@@ -6511,6 +6523,49 @@ ipcMain.handle('set-transcription-engine', async (event, engine) => {
   } catch (e) { return { success: false, error: e.message }; }
 });
 
+// OpenAI-compatible ASR: the NON-SECRET config (url/model) shells to the CLI
+// like set-cloud-api-url does. api_key_set is always overridden with the
+// safeStorage truth (hasOpenAiAsrKey) — the CLI only sees the env-var key,
+// which isn't injected on these calls, so its own api_key_set is unreliable.
+ipcMain.handle('get-openai-asr-config', async () => {
+  try {
+    const result = await runPythonScript('simple_recorder.py', ['get-openai-asr-config'], true);
+    const jsonData = JSON.parse(result.trim());
+    jsonData.api_key_set = hasOpenAiAsrKey();
+    return jsonData;
+  } catch (e) { return { success: false, error: e.message }; }
+});
+
+ipcMain.handle('set-openai-asr-config', async (_event, cfg) => {
+  try {
+    const args = ['set-openai-asr-config'];
+    if (cfg && cfg.api_url !== undefined) { args.push('--api-url', cfg.api_url); }
+    if (cfg && cfg.model !== undefined) { args.push('--model', cfg.model); }
+    const result = await runPythonScript('simple_recorder.py', args, true);
+    const jsonData = JSON.parse(result.trim());
+    jsonData.api_key_set = hasOpenAiAsrKey();
+    return jsonData;
+  } catch (e) { return { success: false, error: e.message }; }
+});
+
+// The SECRET key: stored encrypted via safeStorage (never argv, never
+// config.json), mirroring set-cloud-api-key. Passing an empty string clears it
+// (deletes the file).
+ipcMain.handle('set-openai-asr-key', async (_event, key) => {
+  try {
+    if (!key) {
+      try {
+        if (fs.existsSync(getOpenAiAsrKeyPath())) fs.unlinkSync(getOpenAiAsrKeyPath());
+      } catch (e) {
+        return { success: false, error: e.message };
+      }
+      return { success: true, api_key_set: false };
+    }
+    const saved = saveOpenAiAsrKey(key);
+    return { success: saved, api_key_set: saved && hasOpenAiAsrKey() };
+  } catch (e) { return { success: false, error: e.message }; }
+});
+
 ipcMain.handle('list-parakeet-models', async () => {
   try {
     const result = await runPythonScript('simple_recorder.py', ['list-parakeet-models'], true);
@@ -7432,6 +7487,48 @@ function hasCloudApiKey() {
   return fs.existsSync(getCloudKeyPath());
 }
 
+// --- OpenAI-compatible ASR (transcription) API key -------------------------
+// Mirrors the cloud summariser key exactly: encrypted-at-rest via safeStorage,
+// stored under getUserDataDir() (honours STENOAI_USER_DATA_DIR test isolation),
+// never written to config.json, and injected into the TRANSCRIPTION subprocess
+// env as STENOAI_OAI_API_KEY. This is the security-critical difference from the
+// upstream PR, which persisted the key in plaintext config.json.
+function getOpenAiAsrKeyPath() {
+  return path.join(getUserDataDir(), '.openai-asr-api-key');
+}
+
+function saveOpenAiAsrKey(key) {
+  try {
+    const keyDir = path.dirname(getOpenAiAsrKeyPath());
+    if (!fs.existsSync(keyDir)) {
+      fs.mkdirSync(keyDir, { recursive: true });
+    }
+    const encrypted = safeStorage.encryptString(key);
+    fs.writeFileSync(getOpenAiAsrKeyPath(), encrypted);
+    return true;
+  } catch (error) {
+    console.error('Failed to save OpenAI ASR API key:', error.message);
+    return false;
+  }
+}
+
+function loadOpenAiAsrKey() {
+  try {
+    const keyPath = getOpenAiAsrKeyPath();
+    migrateLegacyCredentialFile(keyPath, '.openai-asr-api-key');
+    if (!fs.existsSync(keyPath)) return null;
+    const encrypted = fs.readFileSync(keyPath);
+    return safeStorage.decryptString(encrypted);
+  } catch (error) {
+    console.error('Failed to load OpenAI ASR API key:', error.message);
+    return null;
+  }
+}
+
+function hasOpenAiAsrKey() {
+  return fs.existsSync(getOpenAiAsrKeyPath());
+}
+
 // Build the env additions a Python AI-driven subprocess needs. Merges
 // the encrypted-on-disk cloud key (decrypted only here, never written
 // to the env if absent) AND the org adapter URL+JWT when a session
@@ -7447,6 +7544,17 @@ function getAiEnv() {
     env.STENOAI_ADAPTER_URL = session.adapterUrl;
     env.STENOAI_ADAPTER_TOKEN = session.token;
   }
+  return env;
+}
+
+// Env additions a transcription subprocess needs. The OpenAI-compatible ASR
+// key (decrypted from safeStorage only here) is surfaced as STENOAI_OAI_API_KEY
+// so the Python transcriber's get_openai_asr_api_key() can read it. Empty when
+// no key is set / the engine isn't openai-asr — the Python side no-ops on it.
+function getTranscriptionEnv() {
+  const env = {};
+  const oaiKey = loadOpenAiAsrKey();
+  if (oaiKey) env.STENOAI_OAI_API_KEY = oaiKey;
   return env;
 }
 
