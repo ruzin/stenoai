@@ -47,53 +47,50 @@ const summary = (
   })?.trim() || ''
 ).replace(/^(?:steno\s+)?v?\d+\.\d+\.\d+\s*[—:-]\s*/i, '').trim();
 
-// 2. Headline features. Preferred shape is "- **Name** — desc" bullets (skipping
-//    the Upgrade / Thanks sections). If a release's notes instead use a
-//    "### Feature\n- description" shape (section header IS the feature), we fall
-//    back to synthesising one feature per content section — so the announcement
-//    never silently loses its features section over a formatting slip.
+// 2. Headline features — a single pass that supports BOTH note shapes, even
+//    mixed in one release (skipping the Upgrade / Thanks sections):
+//     - "- **Name** — desc" bullets each become a feature (works with or
+//       without an enclosing "### Section").
+//     - a "### Feature\n- description" section (the header IS the feature, with
+//       only plain bullets) becomes one feature: title = name, bullet text = desc.
+//    A section that has any bold bullet uses those and ignores its plain bullets,
+//    so the two shapes never double-count the same section.
 const featureBullets = [];
-let section = '';
+let sectionTitle = ''; // '' when outside a named content section
+let excluded = false; // current section is Upgrade / Thanks (not a feature)
+let sectionHasBold = false;
+let plainDesc = [];
+const flushSection = () => {
+  if (sectionTitle && !excluded && !sectionHasBold && plainDesc.length) {
+    featureBullets.push(
+      `• **${sectionTitle}** — ${truncate(plainDesc.join(' ').replace(/\s+/g, ' '), 140)}`,
+    );
+  }
+  sectionHasBold = false;
+  plainDesc = [];
+};
 for (const line of lines) {
   const h = line.match(/^###\s+(.*)$/);
   if (h) {
-    section = h[1].trim().toLowerCase();
+    flushSection();
+    const t = h[1].trim();
+    excluded = /upgrade|contributor/i.test(t);
+    sectionTitle = excluded ? '' : t;
     continue;
   }
-  if (section.includes('upgrade') || section.includes('contributor')) continue;
-  const m = line.match(/^-\s+\*\*(.+?)\*\*\s*(?:[—-]\s*(.*))?$/);
-  if (m) {
-    const name = m[1].trim();
-    const desc = (m[2] || '').trim().replace(/\s+/g, ' ');
+  if (excluded) continue;
+  const bold = line.match(/^-\s+\*\*(.+?)\*\*\s*(?:[—-]\s*(.*))?$/);
+  if (bold) {
+    sectionHasBold = true;
+    const name = bold[1].trim();
+    const desc = (bold[2] || '').trim().replace(/\s+/g, ' ');
     featureBullets.push(desc ? `• **${name}** — ${truncate(desc, 140)}` : `• **${name}**`);
+    continue;
   }
+  const plain = line.match(/^-\s+(.*)$/);
+  if (plain && sectionTitle) plainDesc.push(plain[1].trim());
 }
-if (featureBullets.length === 0) {
-  // Fallback: section title = feature name, its bullet text = description.
-  let sec = '';
-  let desc = [];
-  const flush = () => {
-    if (sec && desc.length) {
-      featureBullets.push(`• **${sec}** — ${truncate(desc.join(' ').replace(/\s+/g, ' '), 140)}`);
-    }
-    sec = '';
-    desc = [];
-  };
-  for (const line of lines) {
-    const h = line.match(/^###\s+(.*)$/);
-    if (h) {
-      flush();
-      const t = h[1].trim();
-      sec = /upgrade|contributor/i.test(t) ? '' : t;
-      continue;
-    }
-    if (sec) {
-      const b = line.match(/^-\s+(.*)$/);
-      if (b) desc.push(b[1].trim());
-    }
-  }
-  flush();
-}
+flushSection();
 const features = featureBullets.slice(0, 4);
 
 // 3. Contributors = the paragraph under the "Thanks to our contributors" heading.
