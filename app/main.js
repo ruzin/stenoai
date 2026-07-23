@@ -1296,20 +1296,42 @@ function commitPendingDelete(id) {
     clearTimeout(entry.timer);
     entry.timer = null;
   }
+  // Returns true if the file is gone after this call (unlinked or already
+  // absent), false if it survived every retry (e.g. a permanently locked file).
   const unlinkBestEffort = (p) => {
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
         fs.unlinkSync(p);
-        return;
+        return true;
       } catch (err) {
-        if (err && err.code === 'ENOENT') return; // already gone — done.
+        if (err && err.code === 'ENOENT') return true; // already gone — done.
         // Transient (EBUSY/EPERM on Windows): retry a couple of times, else give
         // up (best-effort — a residual file is recovered/cleaned on next launch).
       }
     }
+    return false;
   };
-  unlinkBestEffort(entry.hiddenSummaryPath);
-  for (const p of entry.ancillaryPaths) unlinkBestEffort(p);
+  // The hidden summary IS the note. If it can't be permanently removed (e.g. a
+  // locked file), do NOT drop the pending record, remove the scaffold, or delete
+  // the ancillaries: leaving the hidden summary under .pending-delete/<id>/ lets
+  // startup recovery rename it back so the note REAPPEARS intact (fail-safe — the
+  // note un-deletes rather than half-committing with its transcript/recording
+  // already gone). Bailing before the ancillary unlinks keeps a full restore
+  // possible. A later quit-time sweep / next launch retries the commit.
+  if (!unlinkBestEffort(entry.hiddenSummaryPath)) {
+    console.warn(
+      `Commit: hidden summary unremovable, leaving for startup recovery: ${entry.hiddenSummaryPath}`,
+    );
+    return;
+  }
+  // Ancillary files (transcript / recording(s) / reports sidecar) are hygiene,
+  // not the note itself: a rare permanently-locked orphan is accepted (fail-safe
+  // direction — never risk the note over a stray file). Log any that survived.
+  for (const p of entry.ancillaryPaths) {
+    if (!unlinkBestEffort(p)) {
+      console.warn(`Commit: orphaned ancillary file (could not remove): ${p}`);
+    }
+  }
   removeHiddenScaffold(entry.hiddenDir);
   pendingDeletes.delete(id);
   if (pendingDeleteBySummary.get(entry.canonicalSummary) === id) {
@@ -1803,17 +1825,6 @@ if (!gotSingleInstanceLock) {
       console.warn('processing-log init failed (non-fatal):', e?.message);
     }
 
-    // Recover any soft-deleted notes whose undo window was cut short by a crash
-    // (#234): a hidden summary still under output/.pending-delete/ is renamed back
-    // so the note REAPPEARS (fail-safe — a lost window never vanishes a note).
-    // Best-effort — a failure here must never block launch. Cross-platform;
-    // getUserDataDir() honors STENOAI_USER_DATA_DIR so tests/e2e stay isolated.
-    try {
-      recoverPendingDeletesOnLaunch();
-    } catch (e) {
-      console.warn('pending-delete recovery on launch failed (non-fatal):', e?.message);
-    }
-
     // Application menu. macOS uses the global menu bar with mac-only roles
     // (services/hide/unhide). Windows/Linux get a slimmer, platform-correct
     // menu — kept (editing accelerators, Settings, Help) but hidden by default
@@ -2032,6 +2043,22 @@ if (!gotSingleInstanceLock) {
       } catch (e) {
         // Non-fatal - custom path just won't be cached
       }
+    }
+
+    // Recover any soft-deleted notes whose undo window was cut short by a crash
+    // (#234): a hidden summary still under output/.pending-delete/ is renamed back
+    // so the note REAPPEARS (fail-safe — a lost window never vanishes a note).
+    // Best-effort — a failure here must never block launch. Cross-platform;
+    // getUserDataDir() honors STENOAI_USER_DATA_DIR so tests/e2e stay isolated.
+    // MUST run AFTER the custom storage path load above: recovery scans every
+    // getAllowedBaseDirs() output/ dir, and that list only includes the custom
+    // storage path once _cachedCustomStoragePath is set — sweeping earlier would
+    // miss a custom-storage user's hidden summaries, leaving a crash-orphaned
+    // note invisible (effectively lost) instead of restoring it.
+    try {
+      recoverPendingDeletesOnLaunch();
+    } catch (e) {
+      console.warn('pending-delete recovery on launch failed (non-fatal):', e?.message);
     }
 
     // Clear any .import reservation markers orphaned by a crash mid-import. No

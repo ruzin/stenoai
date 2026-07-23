@@ -122,13 +122,18 @@ test('delete hides only the summary (note vanishes from the backend); transcript
   // The note is visible to the real backend before delete.
   expect(await listedFiles(page)).toContain(seed.summaryFile);
 
+  const beforeDelete = Date.now();
   const del = await page.evaluate(
     (m) => (window as StenoWindow).stenoai.meetings.delete(m),
     seed.meeting,
   );
   expect(del.success).toBe(true);
   expect(del.id).toBeTruthy();
+  // A real FUTURE deadline, not NaN/0: the undo window opens after we issued the
+  // delete, so it must be a finite timestamp strictly after that point.
   expect(typeof del.deadline).toBe('number');
+  expect(Number.isFinite(del.deadline)).toBe(true);
+  expect(del.deadline!).toBeGreaterThan(beforeDelete);
 
   // The summary moved out of output/ into .pending-delete/<id>/ ...
   expect(existsSync(seed.summaryFile)).toBe(false);
@@ -150,9 +155,13 @@ test('delete hides only the summary (note vanishes from the backend); transcript
     (window as StenoWindow).stenoai.meetings.listPendingDeletes(),
   );
   expect(pending.success).toBe(true);
-  expect(pending.pending?.some((p) => p.id === del.id && p.summaryFile === seed.summaryFile)).toBe(
-    true,
-  );
+  const pendingEntry = pending.pending?.find((p) => p.id === del.id);
+  expect(pendingEntry).toBeTruthy();
+  expect(pendingEntry!.summaryFile).toBe(seed.summaryFile);
+  // Cross-validate: the deadline main reports back on delete matches the one it
+  // persists in the pending list — one authoritative future timestamp, not two.
+  expect(pendingEntry!.deadline).toBe(del.deadline);
+  expect(pendingEntry!.deadline).toBeGreaterThan(beforeDelete);
 
   expect(fileSig(realUserDataDir())).toBe(realDirBefore);
 });

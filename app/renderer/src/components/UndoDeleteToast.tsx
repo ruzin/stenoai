@@ -20,8 +20,14 @@ import { useUndoDeleteMeeting, useCommitDeleteMeeting } from '@/hooks/useMeeting
 // One-shot rehydration guard. AppShell is per-route (FACT B) so this component
 // remounts on navigation; the module-level flag makes the list-pending-deletes
 // rehydration run exactly once per app session, before any in-session delete, so
-// it can never clobber an entry added after mount.
+// it can never clobber an entry added after mount. `rehydratedPendingDeletes` is
+// set ONLY after a SUCCESSFUL response — a transient failure must not permanently
+// suppress rehydration (an already-pending delete would then have no Undo UI
+// before main commits it), so a failed call leaves the flag false and the next
+// mount retries. `rehydratePendingDeletesInFlight` prevents a second concurrent
+// call while one is outstanding.
 let rehydratedPendingDeletes = false;
+let rehydratePendingDeletesInFlight = false;
 
 function UndoDeleteToastItem({
   entry,
@@ -135,12 +141,12 @@ export function UndoDeleteToast() {
   // One-shot rehydration: load main's in-flight soft-deletes so a renderer reload
   // during a window restores the toast(s) with main's authoritative deadline.
   React.useEffect(() => {
-    if (rehydratedPendingDeletes) return;
-    rehydratedPendingDeletes = true;
+    if (rehydratedPendingDeletes || rehydratePendingDeletesInFlight) return;
+    rehydratePendingDeletesInFlight = true;
     ipc()
       .meetings.listPendingDeletes()
       .then((res) => {
-        if (!res.success) return;
+        if (!res.success) return; // leaves the flag false → next mount retries
         useUndoDeleteStore.getState().hydrate(
           res.pending.map((p) => ({
             id: p.id,
@@ -149,9 +155,16 @@ export function UndoDeleteToast() {
             deadline: p.deadline,
           })),
         );
+        // Mark done ONLY on a successful response so a transient failure can't
+        // permanently suppress rehydration for the session.
+        rehydratedPendingDeletes = true;
       })
       .catch(() => {
-        /* best-effort — a failed rehydrate just means no toasts to restore */
+        /* best-effort — a failed rehydrate just means no toasts to restore;
+           the flag stays false so the next AppShell mount retries. */
+      })
+      .finally(() => {
+        rehydratePendingDeletesInFlight = false;
       });
   }, []);
 
