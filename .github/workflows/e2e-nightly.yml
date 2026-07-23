@@ -187,9 +187,17 @@ jobs:
       # Playwright exits 0 when --grep matches no tests. Assert the tagged spec is
       # actually selected so a future rename / dropped @summarize-real tag can't
       # silently run zero tests and pass.
+      # Assert the tagged spec is selected (Playwright exits 0 on a zero-match
+      # --grep). Capture first, then grep — piping straight into `grep -q` lets
+      # grep close the pipe on first match (EPIPE to the node writer) and can
+      # mask a failed/incomplete listing behind grep's exit code. Mirrors the
+      # @long-meeting guard.
       - name: Guard — @summarize-real test is selected
+        shell: bash
         working-directory: app
-        run: npm run test:e2e -- --project=t2 --grep @summarize-real --list | grep -q '@summarize-real'
+        run: |
+          out=$(npm run test:e2e -- --project=t2 --grep @summarize-real --list)
+          echo "$out" | grep -q '@summarize-real'
 
       - name: Run T2 real-summarize (llama3.2:1b)
         working-directory: app
