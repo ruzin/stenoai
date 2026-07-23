@@ -1,6 +1,6 @@
 import { test, expect } from '../fixtures/electron';
 import { realUserDataDir, fileSig } from '../fixtures/real-user-data';
-import { mkdirSync, writeFileSync, existsSync, readdirSync } from 'fs';
+import { mkdirSync, writeFileSync, existsSync, readdirSync, symlinkSync } from 'fs';
 import path from 'path';
 
 /**
@@ -334,6 +334,135 @@ test('startup recovery restores a hidden summary left by a crash mid-window', as
   expect(fileSig(realUserDataDir())).toBe(realDirBefore);
 });
 
+test('ancillaries are bound to the summary stem — an unrelated file named in the meeting object survives', async ({
+  launchApp,
+  userDataDir,
+}) => {
+  const realDirBefore = fileSig(realUserDataDir());
+  const seed = seedNote(userDataDir, 'bind-alpha', 'Bind Alpha');
+  // A second, unrelated note whose files a crafted delete of bind-alpha tries to
+  // name as ITS transcript/audio. The handler must derive ancillaries from
+  // bind-alpha's own stem only and never touch the victim's files.
+  const victim = seedNote(userDataDir, 'bind-victim', 'Bind Victim');
+
+  // Renderer-supplied (arbitrary) transcript_file/audio_file pointing at the
+  // victim — exactly the cross-note-destruction the fix closes.
+  const crafted: Meeting = {
+    session_info: {
+      name: 'Bind Alpha',
+      summary_file: seed.summaryFile,
+      transcript_file: victim.transcriptFile,
+      audio_file: victim.audioFile,
+    },
+  };
+
+  const { page } = await launchApp();
+
+  const del = await page.evaluate(
+    (m) => (window as StenoWindow).stenoai.meetings.delete(m),
+    crafted,
+  );
+  expect(del.success).toBe(true);
+  const commit = await page.evaluate(
+    (id) => (window as StenoWindow).stenoai.meetings.commitDelete(id),
+    del.id!,
+  );
+  expect(commit.success).toBe(true);
+
+  // bind-alpha's OWN stem-derived ancillaries are permanently gone ...
+  expect(existsSync(seed.summaryFile)).toBe(false);
+  expect(existsSync(seed.transcriptFile)).toBe(false);
+  expect(existsSync(seed.audioFile)).toBe(false);
+  // ... but the victim's files (named in the meeting object) are UNTOUCHED.
+  expect(existsSync(victim.summaryFile)).toBe(true);
+  expect(existsSync(victim.transcriptFile)).toBe(true);
+  expect(existsSync(victim.audioFile)).toBe(true);
+
+  expect(fileSig(realUserDataDir())).toBe(realDirBefore);
+});
+
+test('delete hides BOTH summary variants (.json + .md) for the stem; undo restores BOTH', async ({
+  launchApp,
+  userDataDir,
+}) => {
+  const realDirBefore = fileSig(realUserDataDir());
+  const seed = seedNote(userDataDir, 'twin-alpha', 'Twin Alpha');
+  // Seed the .md twin alongside the .json summary (same stem). Either variant
+  // alone keeps the note visible to the `output/*_summary.{json,md}` glob, so a
+  // delete must hide BOTH.
+  const mdTwin = path.join(seed.outputDir, 'twin-alpha_summary.md');
+  writeFileSync(mdTwin, '# Twin Alpha\n\nMarkdown summary');
+
+  const { page } = await launchApp();
+
+  const del = await page.evaluate(
+    (m) => (window as StenoWindow).stenoai.meetings.delete(m),
+    seed.meeting,
+  );
+  expect(del.success).toBe(true);
+
+  // BOTH variants moved into the single .pending-delete/<id>/ dir ...
+  expect(existsSync(seed.summaryFile)).toBe(false);
+  expect(existsSync(mdTwin)).toBe(false);
+  expect(hiddenSummaryPaths(seed.outputDir).length).toBe(2);
+  // ... so the note is gone from the backend scan (neither twin keeps it alive).
+  expect(await listedFiles(page)).not.toContain(seed.summaryFile);
+
+  const undo = await page.evaluate(
+    (id) => (window as StenoWindow).stenoai.meetings.undoDelete(id),
+    del.id!,
+  );
+  expect(undo.success).toBe(true);
+
+  // Undo restores BOTH originals and cleans the scaffold.
+  expect(existsSync(seed.summaryFile)).toBe(true);
+  expect(existsSync(mdTwin)).toBe(true);
+  expect(existsSync(path.join(seed.outputDir, '.pending-delete'))).toBe(false);
+  expect(await listedFiles(page)).toContain(seed.summaryFile);
+
+  expect(fileSig(realUserDataDir())).toBe(realDirBefore);
+});
+
+test('delete refuses when the .pending-delete root is a symlink (fail-closed, nothing moved)', async ({
+  launchApp,
+  userDataDir,
+}) => {
+  const realDirBefore = fileSig(realUserDataDir());
+  const seed = seedNote(userDataDir, 'symlink-alpha', 'Symlink Alpha');
+
+  // Pre-plant a SYMLINK where .pending-delete would be. mkdirSync(recursive)
+  // would follow it and move the summary OUT of the sandbox; the handler must
+  // refuse (lstat sees a non-directory) and touch nothing.
+  const pendingRoot = path.join(seed.outputDir, '.pending-delete');
+  const escapeTarget = path.join(userDataDir, 'escape-target');
+  mkdirSync(escapeTarget, { recursive: true });
+  let symlinkOk = true;
+  try {
+    symlinkSync(escapeTarget, pendingRoot);
+  } catch {
+    symlinkOk = false;
+  }
+  test.skip(!symlinkOk, 'symlink creation not permitted on this OS/user');
+
+  const { page } = await launchApp();
+
+  const del = await page.evaluate(
+    (m) => (window as StenoWindow).stenoai.meetings.delete(m),
+    seed.meeting,
+  );
+  expect(del.success).toBe(false);
+  expect(del.error).toContain('invalid pending-delete root');
+
+  // Nothing moved: the summary + ancillaries stay put, and the escape target is
+  // empty (the summary was never renamed through the symlink).
+  expect(existsSync(seed.summaryFile)).toBe(true);
+  expect(existsSync(seed.transcriptFile)).toBe(true);
+  expect(existsSync(seed.audioFile)).toBe(true);
+  expect(readdirSync(escapeTarget).length).toBe(0);
+
+  expect(fileSig(realUserDataDir())).toBe(realDirBefore);
+});
+
 /**
  * NOTE — delete-while-busy guard (recording/queued/processing/reprocessing): main
  * refuses the delete with `note is busy (recording/processing)` when the note's
@@ -343,4 +472,10 @@ test('startup recovery restores a hidden summary left by a crash mid-window', as
  * is out of scope for this model-free T2 lane. The guard is pure identity logic
  * (isSummaryBusy) exercised in code review; the on-disk safety it protects is
  * covered by the delete/commit tests above.
+ *
+ * The `regen-meeting-title` handler now registers its summaryFile in
+ * activeReprocessJobs for the job's duration (like reprocess/generate-report), so
+ * isSummaryBusy() blocks a delete during a title-regen model wait too. That
+ * registration is model-bearing to drive end-to-end, so it's covered by the
+ * source-level guard in app/regen-title-busy-guard.test.js instead.
  */

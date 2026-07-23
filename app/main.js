@@ -1137,10 +1137,13 @@ function validateSafeFilePath(filepath, allowedBaseDirs) {
 // canonical original summary path -> id for dedup.
 const PENDING_DELETE_DIRNAME = '.pending-delete';
 const DELETE_WINDOW_MS = 8000;
-// id -> { id, meeting, summaryFileKey, originalSummaryPath, hiddenSummaryPath,
-//         canonicalSummary, ancillaryPaths, deadline, state, timer }
+// id -> { id, meeting, summaryFileKey, hiddenDir,
+//         hiddenSummaries: [{ original, hidden, canonical }],
+//         canonicalSummaries, ancillaryPaths, deadline, state, timer }
 const pendingDeletes = new Map();
-// canonical(originalSummaryPath) -> id.
+// canonical(each summary variant's original path) -> id. Both the primary
+// summary AND its other-extension twin are indexed, so a second delete of
+// EITHER twin is rejected.
 const pendingDeleteBySummary = new Map();
 
 // Canonicalize a path via realpath, falling back to a parent-realpath + basename
@@ -1230,8 +1233,7 @@ function isAllowedMeetingSource(src, allowedBaseDirs) {
 // Remove a hidden summary's `.pending-delete/<id>/` scaffold, then best-effort
 // remove the now-empty `.pending-delete/` parent (rmdir fails, harmlessly, if
 // another pending delete still occupies it). Keeps output/ tidy between windows.
-function removeHiddenScaffold(hiddenSummaryPath) {
-  const idDir = path.dirname(hiddenSummaryPath);
+function removeHiddenScaffold(idDir) {
   try {
     fs.rmSync(idDir, { recursive: true, force: true });
   } catch (_) {}
@@ -1267,12 +1269,14 @@ function commitPendingDelete(id) {
       }
     }
   };
-  unlinkBestEffort(entry.hiddenSummaryPath);
+  for (const s of entry.hiddenSummaries) unlinkBestEffort(s.hidden);
   for (const p of entry.ancillaryPaths) unlinkBestEffort(p);
-  removeHiddenScaffold(entry.hiddenSummaryPath);
+  removeHiddenScaffold(entry.hiddenDir);
   pendingDeletes.delete(id);
-  if (pendingDeleteBySummary.get(entry.canonicalSummary) === id) {
-    pendingDeleteBySummary.delete(entry.canonicalSummary);
+  for (const canon of entry.canonicalSummaries) {
+    if (pendingDeleteBySummary.get(canon) === id) {
+      pendingDeleteBySummary.delete(canon);
+    }
   }
 }
 
@@ -1328,6 +1332,9 @@ function recoverPendingDeletesOnLaunch() {
           // Only recover regular files (the only thing we ever hide is a summary).
           if (!fs.lstatSync(hidden).isFile()) continue;
           const original = path.join(outputDir, name);
+          // No-clobber. The residual TOCTOU between this existsSync and the
+          // renameSync is accepted: single-user desktop, synchronous handler,
+          // sub-ms window; Node has no atomic rename-no-replace.
           if (fs.existsSync(original)) {
             console.warn(`Recovery: original occupied, leaving hidden copy: ${hidden}`);
             continue;
@@ -3054,6 +3061,13 @@ ipcMain.handle('regen-meeting-title', async (event, summaryFile, sessionName) =>
     }
     const { realPath } = validated;
 
+    // Register this job so isSummaryBusy() sees it: regen-title rewrites the
+    // ORIGINAL summary path after a model wait, so a delete during that wait would
+    // let the regen resurrect the summary while commit unlinks the hidden copy +
+    // ancillaries = a resurrected note with lost audio. Keyed on the original
+    // summaryFile (isSummaryBusy canonicalizes keys); cleared in the finally.
+    activeReprocessJobs.set(summaryFile, { summaryFile, sessionName: sessionName || null });
+
     const aiEnv = getAiEnv();
     const regenEnv = Object.keys(aiEnv).length > 0 ? { ...require('process').env, ...aiEnv } : undefined;
 
@@ -3091,6 +3105,8 @@ ipcMain.handle('regen-meeting-title', async (event, summaryFile, sessionName) =>
     return { success: true };
   } catch (error) {
     return { success: false, error: error.message };
+  } finally {
+    activeReprocessJobs.delete(summaryFile);
   }
 });
 
@@ -3998,9 +4014,19 @@ ipcMain.handle('delete-meeting', async (event, meetingData) => {
     const allowedBaseDirs = getAllowedBaseDirs();
 
     const summaryFile = meeting?.session_info?.summary_file;
-    const transcriptFile = meeting?.session_info?.transcript_file;
-    const audioFile = meeting?.session_info?.audio_file;
     const sessionName = meeting?.session_info?.name;
+    // (#234) We deliberately IGNORE meeting.session_info.transcript_file /
+    // audio_file: those are renderer-supplied and arbitrary, so trusting them
+    // would let a crafted delete of note A name note B's files as ancillaries and
+    // permanently unlink them at commit. ALL ancillaries are derived from the
+    // validated summary's own STEM below — the real transcript/recording of a note
+    // ARE the stem-derived paths, so nothing legitimate is lost and the
+    // cross-note-destruction surface is closed.
+    //
+    // SCOPE (#234): gating/unsharing an org upload on delete is a separate
+    // follow-up, out of scope here — org upload sends renderer-supplied content
+    // strings (not live file reads), and the busy-guard already refuses a delete
+    // while the note is locally recording/processing/reprocessing.
 
     if (!summaryFile) {
       // Without a summary there's nothing for a backend scan to key off — no note
@@ -4011,6 +4037,17 @@ ipcMain.handle('delete-meeting', async (event, meetingData) => {
     const toAbs = (p) => (path.isAbsolute(p) ? p : path.join(projectRoot, p));
     const summaryPath = toAbs(summaryFile);
     const outputDir = path.dirname(summaryPath);
+
+    // Derive the note's stem from its summary basename (<stem>_summary.{json,md}).
+    // Every ancillary AND the twin summary variant are bound to this stem.
+    const summaryBase = path.basename(summaryPath);
+    let stem = null;
+    for (const suf of ['_summary.md', '_summary.json']) {
+      if (summaryBase.endsWith(suf)) {
+        stem = summaryBase.slice(0, -suf.length);
+        break;
+      }
+    }
 
     // Refuse a delete for a note that's currently active (recording into /
     // queued / processing / reprocessing): a finishing job would rewrite
@@ -4026,29 +4063,27 @@ ipcMain.handle('delete-meeting', async (event, meetingData) => {
       return { success: false, error: 'delete already pending' };
     }
 
-    // --- Enumerate the ANCILLARY file set (unlinked only at commit): explicit
-    // transcript/audio, <safeName>_notes.txt, the <stem>_reports.json sidecar,
-    // and the stem-derived transcript + recording(s). Only the SUMMARY is hidden.
+    // --- Enumerate the ANCILLARY file set (unlinked only at commit), bound to
+    // this note's STEM ONLY (never the renderer-supplied transcript_file /
+    // audio_file): <safeName>_notes.txt, the <stem>_reports.json sidecar, and the
+    // stem-derived transcript + recording(s). Only the SUMMARY variants are hidden.
     const ancillaryCandidates = [];
-    if (transcriptFile) ancillaryCandidates.push(toAbs(transcriptFile));
-    if (audioFile) ancillaryCandidates.push(toAbs(audioFile));
     if (sessionName) {
       const safeName = sessionName.replace(/[^a-zA-Z0-9_-]/g, '_');
       ancillaryCandidates.push(path.join(outputDir, `${safeName}_notes.txt`));
     }
     // Reports sidecar: <stem>_summary.{md,json} -> <stem>_reports.json.
     {
-      const base = path.basename(summaryPath);
       let sidecarBase = null;
       for (const suf of ['_summary.md', '_summary.json']) {
-        if (base.endsWith(suf)) {
-          sidecarBase = base.slice(0, -suf.length) + '_reports.json';
+        if (summaryBase.endsWith(suf)) {
+          sidecarBase = summaryBase.slice(0, -suf.length) + '_reports.json';
           break;
         }
       }
       if (!sidecarBase) {
-        const ext = path.extname(base);
-        sidecarBase = base.slice(0, base.length - ext.length) + '_reports.json';
+        const ext = path.extname(summaryBase);
+        sidecarBase = summaryBase.slice(0, summaryBase.length - ext.length) + '_reports.json';
       }
       ancillaryCandidates.push(path.join(outputDir, sidecarBase));
     }
@@ -4058,28 +4093,18 @@ ipcMain.handle('delete-meeting', async (event, meetingData) => {
     // audio). Naming mirrors the backend: <base>/transcripts/<stem>_transcript.txt
     // and <base>/recordings/<stem>.<ext> (any extension — imports stay .m4a/.mp3,
     // system-audio is .webm, native captures are .wav; Codex C5).
-    {
-      const summaryBase = path.basename(summaryPath);
-      let stem = null;
-      for (const suf of ['_summary.md', '_summary.json']) {
-        if (summaryBase.endsWith(suf)) {
-          stem = summaryBase.slice(0, -suf.length);
-          break;
-        }
-      }
-      if (stem) {
-        const dataRoot = path.dirname(outputDir); // summary is in <base>/output/
-        ancillaryCandidates.push(path.join(dataRoot, 'transcripts', `${stem}_transcript.txt`));
-        const recordingsDir = path.join(dataRoot, 'recordings');
-        try {
-          for (const name of fs.readdirSync(recordingsDir)) {
-            if (path.parse(name).name === stem) {
-              ancillaryCandidates.push(path.join(recordingsDir, name));
-            }
+    if (stem) {
+      const dataRoot = path.dirname(outputDir); // summary is in <base>/output/
+      ancillaryCandidates.push(path.join(dataRoot, 'transcripts', `${stem}_transcript.txt`));
+      const recordingsDir = path.join(dataRoot, 'recordings');
+      try {
+        for (const name of fs.readdirSync(recordingsDir)) {
+          if (path.parse(name).name === stem) {
+            ancillaryCandidates.push(path.join(recordingsDir, name));
           }
-        } catch (_) {
-          // recordings/ may not exist (summary-only note) — nothing to add.
         }
+      } catch (_) {
+        // recordings/ may not exist (summary-only note) — nothing to add.
       }
     }
 
@@ -4106,10 +4131,44 @@ ipcMain.handle('delete-meeting', async (event, meetingData) => {
       return { success: false, error: 'Summary is not a regular file' };
     }
 
+    // --- Summary VARIANTS to hide: the primary summary PLUS its other-extension
+    // twin (both <stem>_summary.json AND <stem>_summary.md). list_meetings /
+    // global chat glob `output/*_summary.{json,md}`, so a same-stem twin left on
+    // disk would keep the note visible after the primary is hidden. We hide BOTH.
+    // Each twin must EXIST, be a real regular file, and pass the same security
+    // gates; a missing/invalid twin is simply skipped (usually there's only one).
+    const summaryVariants = [{ original: summaryPath, canonical: canonicalSummary }];
+    if (stem) {
+      for (const ext of ['json', 'md']) {
+        const twin = path.join(outputDir, `${stem}_summary.${ext}`);
+        if (twin === summaryPath) continue;
+        if (!validateSafeFilePath(twin, allowedBaseDirs)) continue;
+        if (!isAllowedMeetingSource(twin, allowedBaseDirs)) continue;
+        let tst;
+        try {
+          tst = fs.lstatSync(twin);
+        } catch (_) {
+          continue; // Twin doesn't exist — nothing to hide.
+        }
+        if (!tst.isFile()) continue;
+        summaryVariants.push({ original: twin, canonical: canonicalPathForCompare(twin) });
+      }
+    }
+
+    // Dedup across ALL variants: a second delete of EITHER twin is rejected (a
+    // stale caller view must not silently supersede an in-flight window).
+    for (const v of summaryVariants) {
+      if (pendingDeleteBySummary.has(v.canonical)) {
+        return { success: false, error: 'delete already pending' };
+      }
+    }
+
     // Filter ancillaries to the ones that EXIST, are regular files, and live in
     // an allowed meeting folder — the only paths we'll unlink at commit. A bad
-    // one (missing, symlink, dir, out-of-folder) is skipped, never fatal.
-    const uniqueAncillary = [...new Set(ancillaryCandidates)].filter((p) => p !== summaryPath);
+    // one (missing, symlink, dir, out-of-folder) is skipped, never fatal. Exclude
+    // ANY summary variant (those are hidden, not unlinked as an ancillary).
+    const variantOriginals = new Set(summaryVariants.map((v) => v.original));
+    const uniqueAncillary = [...new Set(ancillaryCandidates)].filter((p) => !variantOriginals.has(p));
     const ancillaryPaths = [];
     for (const p of uniqueAncillary) {
       if (!validateSafeFilePath(p, allowedBaseDirs)) {
@@ -4133,32 +4192,62 @@ ipcMain.handle('delete-meeting', async (event, meetingData) => {
       ancillaryPaths.push(p);
     }
 
-    // --- Atomically HIDE the summary. `.pending-delete/<id>/` is a sibling of
-    // the summary under output/, so renameSync is atomic on the same filesystem
-    // (no EXDEV). Create the hidden dir first, then validate the destination.
+    // --- Atomically HIDE each summary variant. `.pending-delete/<id>/` is a
+    // sibling of the summary under output/, so renameSync is atomic on the same
+    // filesystem (no EXDEV).
     const id = `${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
     const pendingRoot = path.join(outputDir, PENDING_DELETE_DIRNAME);
+
+    // Fail-closed if the `.pending-delete` root exists but is NOT a real directory
+    // (a symlink/file). mkdirSync would follow a symlinked root and move the
+    // summary OUT of the sandbox, and startup recovery skips a non-dir root — the
+    // note would be stranded/lost. A missing root is fine (mkdir creates it). This
+    // matches the same guard in recoverPendingDeletesOnLaunch().
+    try {
+      const rootStat = fs.lstatSync(pendingRoot);
+      if (!rootStat.isDirectory()) {
+        return { success: false, error: 'invalid pending-delete root' };
+      }
+    } catch (_) {
+      // Missing — mkdir will create it below. Nothing to reject.
+    }
+
     const hiddenDir = path.join(pendingRoot, id);
-    const hiddenSummaryPath = path.join(hiddenDir, path.basename(summaryPath));
     try {
       fs.mkdirSync(hiddenDir, { recursive: true });
     } catch (err) {
       // e.g. output/ is read-only (fail-closed): nothing moved, originals intact.
       return { success: false, error: `Failed to prepare pending-delete: ${err.message}` };
     }
-    if (!validateSafeFilePath(hiddenSummaryPath, allowedBaseDirs)) {
+
+    // Hide each variant in turn, tracking those already moved. On ANY failure
+    // (dest fails validation / rename throws), roll the moved ones back to their
+    // originals and remove the scaffold, so a partial delete never strands a
+    // summary — originals intact, nothing pending.
+    const hiddenSummaries = [];
+    const rollbackAndClean = () => {
+      for (const done of hiddenSummaries) {
+        try {
+          fs.renameSync(done.hidden, done.original);
+        } catch (_) {}
+      }
       try {
         fs.rmSync(hiddenDir, { recursive: true, force: true });
       } catch (_) {}
-      return { success: false, error: 'Blocked delete due to security validation' };
-    }
-    try {
-      fs.renameSync(summaryPath, hiddenSummaryPath);
-    } catch (err) {
+    };
+    for (const v of summaryVariants) {
+      const hidden = path.join(hiddenDir, path.basename(v.original));
+      if (!validateSafeFilePath(hidden, allowedBaseDirs)) {
+        rollbackAndClean();
+        return { success: false, error: 'Blocked delete due to security validation' };
+      }
       try {
-        fs.rmSync(hiddenDir, { recursive: true, force: true });
-      } catch (_) {}
-      return { success: false, error: `Failed to hide summary: ${err.message}` };
+        fs.renameSync(v.original, hidden);
+      } catch (err) {
+        rollbackAndClean();
+        return { success: false, error: `Failed to hide summary: ${err.message}` };
+      }
+      hiddenSummaries.push({ original: v.original, hidden, canonical: v.canonical });
     }
 
     // Record the pending delete + start MAIN's deadline timer.
@@ -4169,9 +4258,9 @@ ipcMain.handle('delete-meeting', async (event, meetingData) => {
       // The exact `summary_file` string the renderer's list is keyed on, so a
       // rehydrating renderer can match this note.
       summaryFileKey: summaryFile,
-      originalSummaryPath: summaryPath,
-      hiddenSummaryPath,
-      canonicalSummary,
+      hiddenDir,
+      hiddenSummaries,
+      canonicalSummaries: hiddenSummaries.map((s) => s.canonical),
       ancillaryPaths,
       deadline,
       state: 'pending',
@@ -4183,7 +4272,9 @@ ipcMain.handle('delete-meeting', async (event, meetingData) => {
       } catch (_) {}
     }, DELETE_WINDOW_MS);
     pendingDeletes.set(id, entry);
-    pendingDeleteBySummary.set(canonicalSummary, id);
+    for (const canon of entry.canonicalSummaries) {
+      pendingDeleteBySummary.set(canon, id);
+    }
 
     return { success: true, id, deadline };
   } catch (error) {
@@ -4205,27 +4296,44 @@ ipcMain.handle('undo-delete-meeting', async (event, id) => {
       // Missing or already committing — Undo loses once the commit starts.
       return { success: false, error: 'nothing to undo' };
     }
-    // No-clobber: if something now occupies the original path (e.g. the user
-    // re-recorded the same-stem note during the window), refuse rather than
-    // overwrite it. The hidden copy stays put; the window keeps running.
-    if (fs.existsSync(entry.originalSummaryPath)) {
-      console.error(`Undo: original path occupied, refusing to clobber: ${entry.originalSummaryPath}`);
-      return { success: false, error: 'restore target already exists' };
+    // No-clobber: if ANY original path is now occupied (e.g. the user re-recorded
+    // the same-stem note during the window), refuse and restore NONE — keep the
+    // tombstone intact. The residual TOCTOU between this existsSync and the
+    // renameSync below is accepted: single-user desktop, synchronous handler,
+    // sub-ms window; Node has no atomic rename-no-replace.
+    for (const s of entry.hiddenSummaries) {
+      if (fs.existsSync(s.original)) {
+        console.error(`Undo: original path occupied, refusing to clobber: ${s.original}`);
+        return { success: false, error: 'restore target already exists' };
+      }
     }
-    try {
-      fs.renameSync(entry.hiddenSummaryPath, entry.originalSummaryPath);
-    } catch (err) {
-      return { success: false, error: `Undo failed: ${err.message}` };
+    // Restore each variant; if a rename throws mid-way, roll the already-restored
+    // ones back into the scaffold so the tombstone stays intact (all-or-nothing).
+    const restored = [];
+    for (const s of entry.hiddenSummaries) {
+      try {
+        fs.renameSync(s.hidden, s.original);
+        restored.push(s);
+      } catch (err) {
+        for (const r of restored) {
+          try {
+            fs.renameSync(r.original, r.hidden);
+          } catch (_) {}
+        }
+        return { success: false, error: `Undo failed: ${err.message}` };
+      }
     }
     // Success — clear the timer, drop the entry + its scaffold dir.
     if (entry.timer) {
       clearTimeout(entry.timer);
       entry.timer = null;
     }
-    removeHiddenScaffold(entry.hiddenSummaryPath);
+    removeHiddenScaffold(entry.hiddenDir);
     pendingDeletes.delete(id);
-    if (pendingDeleteBySummary.get(entry.canonicalSummary) === id) {
-      pendingDeleteBySummary.delete(entry.canonicalSummary);
+    for (const canon of entry.canonicalSummaries) {
+      if (pendingDeleteBySummary.get(canon) === id) {
+        pendingDeleteBySummary.delete(canon);
+      }
     }
     return { success: true, meeting: entry.meeting };
   } catch (error) {
