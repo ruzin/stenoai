@@ -147,10 +147,11 @@ function isAutoDetectSupported() {
   try {
     return isMacos14Plus(process.platform, process.getSystemVersion());
   } catch (_) {
-    // A getSystemVersion() throw is treated like an unparseable version:
-    // permissive (true) so a real 14+ user never loses the feature over a
-    // probe hiccup — mirrors isMacos14Plus's parse-failure direction.
-    return true;
+    // A getSystemVersion() throw is treated like an unparseable version, but
+    // only PERMISSIVELY on darwin (a real 14+ Mac must never lose the feature
+    // over a probe hiccup). On non-darwin the feature is unsupported regardless,
+    // so a throw there stays false — consistent with isMacos14Plus.
+    return process.platform === 'darwin';
   }
 }
 
