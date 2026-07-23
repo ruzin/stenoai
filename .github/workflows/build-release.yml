@@ -204,10 +204,19 @@ jobs:
         if [ -z "$MSG" ]; then
           MSG=$(git for-each-ref --format='%(contents:subject)' "refs/tags/${{ github.ref_name }}")
         fi
+        # Full contents (subject + body) for the Discord announcer: the tag
+        # SUBJECT is the release's one-line summary, and %(contents:body) drops
+        # it — which left the announcement with a generic fallback summary. The
+        # GitHub Release body still uses `text` (body only); the announcer uses
+        # `text_full` so its summary line survives.
+        FULL=$(git for-each-ref --format='%(contents)' "refs/tags/${{ github.ref_name }}")
         {
           echo 'text<<STENO_RELEASE_EOF'
           echo "$MSG"
           echo 'STENO_RELEASE_EOF'
+          echo 'text_full<<STENO_RELEASE_FULL_EOF'
+          echo "$FULL"
+          echo 'STENO_RELEASE_FULL_EOF'
         } >> "$GITHUB_OUTPUT"
 
     - name: Download all build artifacts
@@ -293,5 +302,5 @@ jobs:
         DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         VERSION: ${{ github.event.inputs.version || steps.package_version.outputs.version }}
         RELEASE_URL: https://github.com/${{ github.repository }}/releases/tag/v${{ github.event.inputs.version || steps.package_version.outputs.version }}
-        RELEASE_NOTES: ${{ steps.tag_body.outputs.text }}
+        RELEASE_NOTES: ${{ steps.tag_body.outputs.text_full }}
       run: node scripts/discord-release-announce.mjs

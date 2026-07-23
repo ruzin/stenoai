@@ -36,14 +36,22 @@ if (!webhook) {
 const lines = notes.split('\n').map((l) => l.replace(/\r$/, ''));
 
 // 1. Summary = the first non-empty line that isn't a heading or a bullet.
-const summary =
+//    A leading "v1.2.3 — " / "Steno v1.2.3 — " prefix is dropped so the summary
+//    doesn't just repeat the version already in the greeting + embed title. If
+//    the notes carry no prose summary line at all, we omit it rather than print
+//    a redundant "Steno vX is out." (the greeting already says that).
+const summary = (
   lines.find((l) => {
     const t = l.trim();
     return t && !t.startsWith('#') && !t.startsWith('-') && !t.startsWith('>');
-  })?.trim() || `Steno v${version} is out.`;
+  })?.trim() || ''
+).replace(/^(?:steno\s+)?v?\d+\.\d+\.\d+\s*[—:-]\s*/i, '').trim();
 
-// 2. Headline features = the first few "- **Name** — desc" bullets, skipping the
-//    "Upgrade notes" and "Thanks to our contributors" sections (not features).
+// 2. Headline features. Preferred shape is "- **Name** — desc" bullets (skipping
+//    the Upgrade / Thanks sections). If a release's notes instead use a
+//    "### Feature\n- description" shape (section header IS the feature), we fall
+//    back to synthesising one feature per content section — so the announcement
+//    never silently loses its features section over a formatting slip.
 const featureBullets = [];
 let section = '';
 for (const line of lines) {
@@ -59,6 +67,32 @@ for (const line of lines) {
     const desc = (m[2] || '').trim().replace(/\s+/g, ' ');
     featureBullets.push(desc ? `• **${name}** — ${truncate(desc, 140)}` : `• **${name}**`);
   }
+}
+if (featureBullets.length === 0) {
+  // Fallback: section title = feature name, its bullet text = description.
+  let sec = '';
+  let desc = [];
+  const flush = () => {
+    if (sec && desc.length) {
+      featureBullets.push(`• **${sec}** — ${truncate(desc.join(' ').replace(/\s+/g, ' '), 140)}`);
+    }
+    sec = '';
+    desc = [];
+  };
+  for (const line of lines) {
+    const h = line.match(/^###\s+(.*)$/);
+    if (h) {
+      flush();
+      const t = h[1].trim();
+      sec = /upgrade|contributor/i.test(t) ? '' : t;
+      continue;
+    }
+    if (sec) {
+      const b = line.match(/^-\s+(.*)$/);
+      if (b) desc.push(b[1].trim());
+    }
+  }
+  flush();
 }
 const features = featureBullets.slice(0, 4);
 
@@ -85,7 +119,8 @@ const greeting = `🚀 Hey @here — **Steno v${version}** is out!`;
 
 // The embed carries the substance: summary, headline features, contributor
 // thanks, and a link to the full notes.
-const parts = [truncate(summary, 300)];
+const parts = [];
+if (summary) parts.push(truncate(summary, 300));
 if (features.length) parts.push(`**A bunch of great features:**\n${features.join('\n')}`);
 if (contributors) parts.push(contributors);
 parts.push(`[Full release notes →](${releaseUrl})`);
