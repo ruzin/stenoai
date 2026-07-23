@@ -203,14 +203,30 @@ Releases are automated via `.github/workflows/build-release.yml`. Never create r
    - Each bullet should read as one clear clause on first pass. If in doubt, read it aloud.
 4. **Bump version** in `app/package.json`.
 5. **Commit and merge** the README + changelog + version bump to `main` (or push directly if explicitly authorised).
-6. **Draft release notes** as markdown — they become the GitHub Release body verbatim:
-   - One-line summary at the top.
-   - Headline features grouped under `### Section` headers (e.g., "System audio", "UX polish", "Under the hood", "Fixes").
-   - Migration/upgrade notes if anything changed paths, identifiers, defaults, or requires user action.
-   - A `### Thanks to our contributors` section crediting everyone with a merged PR since the last tag — derive the list with `git shortlog -sne v<previous>..HEAD`, resolve each to their GitHub @handle (`gh pr list --state merged --json number,author,mergedAt`), and @-mention them so they're linked and notified in the release body. Credit the external contributors (the maintainer running the release need not self-credit).
+6. **Draft release notes** as markdown — they become the GitHub Release body verbatim. Keep the house style: friendly and flat, **no `### Section` headers**. The shape is always:
+   1. **First line: `Steno v<version>`** (the release title).
+   2. **A short summary** — one or two sentences naming the headline theme, so a reader gets the gist without reading the bullets.
+   3. **A line reading `A bunch of great features:`**, then **`•` bullets** — one per notable user-facing change, each written as **`<Feature> — <one-sentence description>`**. Lead with the biggest features; keep each bullet to a single clause (a trailing `…` is fine if a description runs long).
+   4. **Migration/upgrade notes** only when something changed paths, identifiers, defaults, or requires user action — a short line after the bullets.
+   5. **One closing contributor line**, e.g. `This release includes work from @X, @Y, and @Z. 🙏` — derive the list with `git shortlog -sne v<previous>..HEAD`, resolve each to their GitHub @handle (`gh pr list --state merged --json number,author,mergedAt`), and @-mention them so they're linked and notified. Credit the external contributors (the maintainer running the release need not self-credit).
    - Apply the same copy-review pass as step 3 — these notes are public-facing too.
+
+   Example:
+   ```
+   Steno v0.6.0
+   Recording that gets out of your way — a docked transcription pill, instant stop,
+   continue-recording, and a My notes tab — plus microphone selection and launch-on-login.
+
+   A bunch of great features:
+   • Transcription pill dock — Recording now coexists with the app instead of taking over. A compact pill docks beside the Ask bar while you keep browsing your notes.
+   • Instant stop — Hitting Stop lands you on the note immediately, built from the live transcript; the batch transcript and AI summary upgrade it in the background.
+   • Continue recording — Resume recording into an existing note and the new segment appends to it; regenerate the summary on demand.
+   • My notes tab — A dedicated, always-editable notes layer that lives alongside the AI summary and is folded into it.
+
+   This release includes work from @Optic00, @WilliamDrewett, @Vassista, @luchfilip, and @valentinweyer. 🙏
+   ```
 7. **Run the release gate (blocks the tag).** Push a `release/v<version>` branch — `git push origin main:refs/heads/release/v0.3.0` — to trigger `.github/workflows/e2e-release-gate.yml`, which runs the full e2e matrix (T1 + macOS/Windows T2 + `@pipeline` + the `@long-meeting` T3 smoke). **Do not create the tag until this run is green.** The gate runs on the branch, before the immutable tag exists, so a failure is fixed-and-re-pushed rather than leaving a half-released tag. (You can also dry-run it via `workflow_dispatch`.) `build-release.yml` additionally runs a fast T1 backstop smoke (`gate-smoke`) before signing, but that is defense-in-depth — the branch gate is the real signal.
-8. **Create an annotated tag** on `main` with the release notes as the tag message. **Always pass `--cleanup=whitespace`** — without it, `git tag -F` strips every line starting with `#`, which silently deletes Markdown `### Section` headers from the release body:
+8. **Create an annotated tag** on `main` with the release notes as the tag message. **Always pass `--cleanup=whitespace`** — without it, `git tag -F` strips every line starting with `#`, silently deleting any `#`-prefixed line from the release body (e.g. a Markdown heading, or a bullet a contributor wrote with `#`). The house format uses `•` bullets and no `###` headers, so this is defence-in-depth — but keep the flag unconditionally:
    ```
    git tag -a v0.3.0 --cleanup=whitespace -F /path/to/notes.md
    git push origin v0.3.0
