@@ -474,13 +474,20 @@ const POSTHOG_HOST = 'https://us.i.posthog.com';
 // Google Calendar OAuth2 configuration
 const GOOGLE_CLIENT_ID = '281073275073-20da4u5t9luk2366vd5ai0a2r55d5pf5.apps.googleusercontent.com';
 const GOOGLE_CLIENT_SECRET = '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';
-const GOOGLE_SCOPES = 'https://www.googleapis.com/auth/calendar.readonly';
+// `openid` + the email scope get an `id_token` back in the token exchange
+// response, which we decode locally to read the connected account's email —
+// no extra userinfo API call needed.
+const GOOGLE_SCOPES = 'openid https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/userinfo.email';
 const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 
 // Outlook Calendar OAuth2 configuration (PKCE public client — no client secret)
 const OUTLOOK_CLIENT_ID = '53a8ba1f-3a2e-4fc9-afb1-b9b8ff13de19';
-const OUTLOOK_SCOPES = 'Calendars.Read offline_access';
+// See GOOGLE_SCOPES comment — openid/email here for the same id_token decode.
+// `profile` is required for the `preferred_username` claim to be populated
+// (Microsoft's id_token claims reference) — the fallback we use when a
+// work/school account has no `email` claim.
+const OUTLOOK_SCOPES = 'Calendars.Read offline_access openid email profile';
 const OUTLOOK_AUTH_URL = 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize';
 const OUTLOOK_TOKEN_URL = 'https://login.microsoftonline.com/common/oauth2/v2.0/token';
 
@@ -8601,6 +8608,16 @@ ipcMain.handle('open-external', async (event, url) => {
     return { success: false, error: error.message };
   }
 });
+// Decodes the payload of a JWT (e.g. an OAuth id_token) without verifying
+// its signature — safe here because the token came straight from the
+// provider's own token endpoint over TLS, not from an untrusted party.
+// Used only to read the `email`/`preferred_username` claim; best-effort,
+// callers must not let a decode failure block the OAuth flow.
+function decodeJwtPayload(jwt) {
+  const payload = jwt.split('.')[1];
+  return JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+}
+
 // ── Google Calendar: Token Storage ──────────────────────────────────────
 
 function getTokenFilePath() {
@@ -8787,6 +8804,14 @@ function startGoogleAuth() {
           res.end('<html><body style="font-family: -apple-system, sans-serif; text-align: center; padding: 60px;"><h2>Cancelled</h2><p>You can close this tab.</p></body></html>');
           return;
         }
+        if (tokens.id_token) {
+          try {
+            const claims = decodeJwtPayload(tokens.id_token);
+            if (claims && claims.email) tokens.email = claims.email;
+          } catch (e) {
+            console.error('Failed to decode Google id_token:', e.message);
+          }
+        }
         saveGoogleTokens(tokens);
 
         res.writeHead(200, { 'Content-Type': 'text/html' });
@@ -8938,6 +8963,11 @@ async function getValidAccessToken() {
     // Preserve the refresh token (Google may not return it again)
     newTokens.refresh_token = newTokens.refresh_token || tokens.refresh_token;
     newTokens.expires_at = Date.now() + (newTokens.expires_in * 1000);
+    // Preserve the email captured at connect time — a refresh response
+    // doesn't reliably carry a fresh id_token, and even if it did, a
+    // refresh grant can't upgrade a pre-existing connection to scopes it
+    // wasn't originally consented to.
+    newTokens.email = newTokens.email || tokens.email;
     saveGoogleTokens(newTokens);
     return newTokens.access_token;
   } catch (error) {
@@ -9187,6 +9217,17 @@ function startOutlookAuth() {
           res.end('<html><body style="font-family: -apple-system, sans-serif; text-align: center; padding: 60px;"><h2>Cancelled</h2><p>You can close this tab.</p></body></html>');
           return;
         }
+        if (tokens.id_token) {
+          try {
+            const claims = decodeJwtPayload(tokens.id_token);
+            // Work/school accounts often have a null `email` claim but a
+            // usable `preferred_username` (the UPN, which is email-shaped).
+            const email = claims && (claims.email || claims.preferred_username);
+            if (email) tokens.email = email;
+          } catch (e) {
+            console.error('Failed to decode Outlook id_token:', e.message);
+          }
+        }
         saveOutlookTokens(tokens);
 
         res.writeHead(200, { 'Content-Type': 'text/html' });
@@ -9326,6 +9367,9 @@ async function getValidOutlookAccessToken() {
     const newTokens = await refreshOutlookAccessToken(tokens.refresh_token);
     newTokens.refresh_token = newTokens.refresh_token || tokens.refresh_token;
     newTokens.expires_at = Date.now() + (newTokens.expires_in * 1000);
+    // See the Google counterpart — preserve the email captured at connect
+    // time rather than relying on the refresh response to carry it again.
+    newTokens.email = newTokens.email || tokens.email;
     saveOutlookTokens(newTokens);
     return newTokens.access_token;
   } catch (error) {
@@ -9344,11 +9388,18 @@ async function getValidOutlookAccessToken() {
 
 function refreshOutlookAccessToken(refreshToken) {
   return new Promise((resolve, reject) => {
+    // No `scope` param: Microsoft defaults a refresh to whatever the
+    // refresh_token was originally granted. Sending OUTLOOK_SCOPES here
+    // would ask pre-existing connections (granted before openid/email were
+    // added) for scope they never consented to, and Microsoft rejects
+    // that — breaking their calendar connection the next time the access
+    // token expires. New connections still get the full scope, since it's
+    // requested at initial authorization (startOutlookAuth) and a refresh
+    // without `scope` inherits it.
     const postData = new URLSearchParams({
       client_id: OUTLOOK_CLIENT_ID,
       refresh_token: refreshToken,
-      grant_type: 'refresh_token',
-      scope: OUTLOOK_SCOPES
+      grant_type: 'refresh_token'
     }).toString();
 
     const tokenUrl = new URL(OUTLOOK_TOKEN_URL);
@@ -9600,7 +9651,7 @@ ipcMain.handle('google-auth-start', async () => {
 ipcMain.handle('google-auth-status', async () => {
   try {
     const tokens = loadGoogleTokens();
-    return { success: true, connected: !!tokens };
+    return { success: true, connected: !!tokens, email: tokens?.email ?? null };
   } catch (error) {
     return { success: false, connected: false };
   }
@@ -10239,7 +10290,7 @@ ipcMain.handle('outlook-auth-start', async () => {
 ipcMain.handle('outlook-auth-status', async () => {
   try {
     const tokens = loadOutlookTokens();
-    return { success: true, connected: !!tokens };
+    return { success: true, connected: !!tokens, email: tokens?.email ?? null };
   } catch (error) {
     return { success: false, connected: false };
   }

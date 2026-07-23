@@ -543,7 +543,7 @@ export type GetAiProviderResponse = Result<{
   bedrock_supported_models: string[];
 }>;
 
-export type AuthStatusResponse = Result<{ connected: boolean }>;
+export type AuthStatusResponse = Result<{ connected: boolean; email?: string | null }>;
 export type GetCalendarEventsResponse =
   | { success: true; events: CalendarEvent[] }
   | { success: false; needsAuth: true }

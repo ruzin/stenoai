@@ -154,6 +154,13 @@ export function GeneralTab() {
     : outlook.status.data?.connected
       ? 'Outlook'
       : null;
+  // Only populated for connections made after the email-capture change —
+  // pre-existing connections fall back to the provider name below.
+  const calendarEmail = google.status.data?.connected
+    ? google.status.data.email
+    : outlook.status.data?.connected
+      ? outlook.status.data.email
+      : null;
 
   const [oauth, setOauth] = React.useState<
     | {
@@ -293,7 +300,7 @@ export function GeneralTab() {
         label="Connect calendar"
         description={
           calendarConnected
-            ? `Connected to ${calendarProvider}`
+            ? `Connected to ${calendarEmail || calendarProvider}`
             : 'Show upcoming meetings on the home screen'
         }
         noBorder
