@@ -36,30 +36,61 @@ if (!webhook) {
 const lines = notes.split('\n').map((l) => l.replace(/\r$/, ''));
 
 // 1. Summary = the first non-empty line that isn't a heading or a bullet.
-const summary =
+//    A leading "v1.2.3 — " / "Steno v1.2.3 — " prefix is dropped so the summary
+//    doesn't just repeat the version already in the greeting + embed title. If
+//    the notes carry no prose summary line at all, we omit it rather than print
+//    a redundant "Steno vX is out." (the greeting already says that).
+const summary = (
   lines.find((l) => {
     const t = l.trim();
     return t && !t.startsWith('#') && !t.startsWith('-') && !t.startsWith('>');
-  })?.trim() || `Steno v${version} is out.`;
+  })?.trim() || ''
+).replace(/^(?:steno\s+)?v?\d+\.\d+\.\d+\s*[—:-]\s*/i, '').trim();
 
-// 2. Headline features = the first few "- **Name** — desc" bullets, skipping the
-//    "Upgrade notes" and "Thanks to our contributors" sections (not features).
+// 2. Headline features — a single pass that supports BOTH note shapes, even
+//    mixed in one release (skipping the Upgrade / Thanks sections):
+//     - "- **Name** — desc" bullets each become a feature (works with or
+//       without an enclosing "### Section").
+//     - a "### Feature\n- description" section (the header IS the feature, with
+//       only plain bullets) becomes one feature: title = name, bullet text = desc.
+//    A section that has any bold bullet uses those and ignores its plain bullets,
+//    so the two shapes never double-count the same section.
 const featureBullets = [];
-let section = '';
+let sectionTitle = ''; // '' when outside a named content section
+let excluded = false; // current section is Upgrade / Thanks (not a feature)
+let sectionHasBold = false;
+let plainDesc = [];
+const flushSection = () => {
+  if (sectionTitle && !excluded && !sectionHasBold && plainDesc.length) {
+    featureBullets.push(
+      `• **${sectionTitle}** — ${truncate(plainDesc.join(' ').replace(/\s+/g, ' '), 140)}`,
+    );
+  }
+  sectionHasBold = false;
+  plainDesc = [];
+};
 for (const line of lines) {
   const h = line.match(/^###\s+(.*)$/);
   if (h) {
-    section = h[1].trim().toLowerCase();
+    flushSection();
+    const t = h[1].trim();
+    excluded = /upgrade|contributor/i.test(t);
+    sectionTitle = excluded ? '' : t;
     continue;
   }
-  if (section.includes('upgrade') || section.includes('contributor')) continue;
-  const m = line.match(/^-\s+\*\*(.+?)\*\*\s*(?:[—-]\s*(.*))?$/);
-  if (m) {
-    const name = m[1].trim();
-    const desc = (m[2] || '').trim().replace(/\s+/g, ' ');
+  if (excluded) continue;
+  const bold = line.match(/^-\s+\*\*(.+?)\*\*\s*(?:[—-]\s*(.*))?$/);
+  if (bold) {
+    sectionHasBold = true;
+    const name = bold[1].trim();
+    const desc = (bold[2] || '').trim().replace(/\s+/g, ' ');
     featureBullets.push(desc ? `• **${name}** — ${truncate(desc, 140)}` : `• **${name}**`);
+    continue;
   }
+  const plain = line.match(/^-\s+(.*)$/);
+  if (plain && sectionTitle) plainDesc.push(plain[1].trim());
 }
+flushSection();
 const features = featureBullets.slice(0, 4);
 
 // 3. Contributors = the paragraph under the "Thanks to our contributors" heading.
@@ -85,7 +116,8 @@ const greeting = `🚀 Hey @here — **Steno v${version}** is out!`;
 
 // The embed carries the substance: summary, headline features, contributor
 // thanks, and a link to the full notes.
-const parts = [truncate(summary, 300)];
+const parts = [];
+if (summary) parts.push(truncate(summary, 300));
 if (features.length) parts.push(`**A bunch of great features:**\n${features.join('\n')}`);
 if (contributors) parts.push(contributors);
 parts.push(`[Full release notes →](${releaseUrl})`);
