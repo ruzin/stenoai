@@ -30,5 +30,6 @@ describe('notificationIconMeta', () => {
     // @ts-expect-error - intentionally exercising an out-of-contract value
     const meta = notificationIconMeta('bogus');
     expect(meta?.Icon).toBe(Info);
+    expect(meta?.className).toContain('gray');
   });
 });

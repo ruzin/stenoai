@@ -276,6 +276,11 @@ class Notification extends EventEmitter {
     });
     notificationWindow = win;
     win._activeCustomNotification = this;
+    // Also pin the window to the notification instance so a handler bound to
+    // THIS notif (e.g. the pre-meeting 'close' dismissal-telemetry handler) can
+    // read its OWN window's flags rather than the module-level `notificationWindow`,
+    // which a superseding toast reassigns out from under a not-yet-fired 'close'.
+    this._window = win;
     // Set true by close-notification-window / the action+body IPC handlers.
     // Scoped to this window instance (not a module-level flag) so a superseding
     // toast can't leak interaction state across windows. Only the pre-meeting
@@ -10247,8 +10252,15 @@ async function firePreMeetingNotification(event) {
   // _analyticsInteracted via close-notification-window — so skip it here to
   // avoid double-counting. This is the same split the old createNotificationWindow
   // used, preserved verbatim.
+  //
+  // Read THIS notif's own window (notif._window), never the module-level
+  // `notificationWindow`: when this toast is superseded, the successor reassigns
+  // `notificationWindow` (and resets its `_analyticsInteracted` to false) before
+  // this 'close' fires, so reading the module-level var would attribute this
+  // toast's dismissal to the NEXT toast's interaction flag — dropping or
+  // duplicating the dismiss. The per-instance window keeps the flag correct.
   notif.on('close', () => {
-    if (!notificationWindow || !notificationWindow._analyticsInteracted) {
+    if (!notif._window || !notif._window._analyticsInteracted) {
       trackEvent('notification_dismissed', { type: 'premeeting' });
     }
   });
