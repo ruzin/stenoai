@@ -4481,6 +4481,87 @@ def enroll_voiceprint(name, audio_file, is_self):
     }))
 
 
+@cli.command(name='enroll-self-from-person')
+@click.argument('person')
+def enroll_self_from_person(person):
+    """Build the self ("You") voiceprint from an already-confirmed
+    PersonProfile's evidence, instead of a fresh audio clip.
+
+    The named-person store (PersonProfile/SpeakerPrototype, see
+    src.config.add_speaker_prototype) and the self voiceprint
+    (Config.save_voiceprint, is_self=True) are two separate systems --
+    someone who confirmed themselves as a named person via confirm-speaker
+    (e.g. because they were a guest in someone else's recording before
+    becoming the device owner, or just used "New person" for themselves)
+    had no way to power self-matching from that evidence. This bridges
+    them: PERSON's positive prototypes (never hard_negatives) are fed
+    through the existing save_voiceprint running-centroid + recent-samples
+    machinery unchanged -- same math enroll-voiceprint uses, just sourced
+    from whole-meeting, overlap-excluded, multi-chunk-averaged embeddings
+    already sitting in the profile instead of a fresh solo clip.
+
+    PERSON is a person_id or, failing that, a case/whitespace-insensitive
+    display name (same resolution order as confirm-speaker's --person-id,
+    but as a single positional argument since there's no --new-person
+    ambiguity to guard against here).
+
+    Prefers mic-channel prototypes -- self-match only ever runs on the mic
+    channel (src.transcriber._apply_voiceprint_matches), so mic evidence is
+    what the resulting voiceprint will actually be compared against. Falls
+    back to every positive prototype if the person has none on mic.
+    Prototypes are applied oldest-first so centroid_sample_count and the
+    recent-samples FIFO end up exactly as if each had been confirmed via
+    enroll-voiceprint in that original order.
+    """
+    from src.config import get_config
+    from src.speaker_suggestions import prototype_channel_matches
+
+    config = get_config()
+    profiles = config.get_person_profiles()
+    profile = next((p for p in profiles if p.get("person_id") == person), None)
+    if profile is None:
+        normalized = person.strip().casefold()
+        matches = [p for p in profiles if (p.get("display_name") or "").strip().casefold() == normalized]
+        if len(matches) == 1:
+            profile = matches[0]
+        elif len(matches) > 1:
+            print(json.dumps({
+                "success": False,
+                "error": f"Multiple people named {person!r} -- use their person_id instead",
+            }))
+            sys.exit(1)
+    if profile is None:
+        print(json.dumps({"success": False, "error": f"No person found matching {person!r}"}))
+        sys.exit(1)
+
+    prototypes = profile.get("prototypes") or []
+    mic_prototypes = [p for p in prototypes if prototype_channel_matches(p, "mic", "in_person")]
+    mic_only = bool(mic_prototypes)
+    pool = mic_prototypes if mic_only else prototypes
+    if not pool:
+        print(json.dumps({
+            "success": False,
+            "error": f"{profile['display_name']!r} has no confirmed prototypes to enroll from",
+        }))
+        sys.exit(1)
+
+    pool = sorted(pool, key=lambda p: p.get("created_at") or 0)
+    saved = None
+    for prototype in pool:
+        saved = config.save_voiceprint(
+            profile["display_name"], prototype["embedding_mean"], is_self=True,
+            duration=prototype.get("speech_duration_seconds"),
+        )
+
+    print(json.dumps({
+        "success": True,
+        "name": saved["name"],
+        "prototypes_used": len(pool),
+        "mic_only": mic_only,
+        "centroid_sample_count": saved["centroid_sample_count"],
+    }))
+
+
 @cli.command(name='list-voiceprints')
 def list_voiceprints():
     """List stored voiceprints (name, centroid sample count, recent-sample
