@@ -211,6 +211,26 @@ def _emit_progress(step: int, total: int) -> None:
     sys.stdout.flush()
 
 
+def _find_recording_for_stem(recordings_dir, stem: str):
+    """Return the source recording whose filename stem matches ``stem``, else None.
+
+    The recording filename stem equals the note stem (``<stem>_summary.md`` →
+    ``<stem>``), with an arbitrary extension (native ``.wav``, system-audio
+    ``.webm``, imported ``.m4a`` / ``.mp3``). Iterating and comparing stems keeps
+    the match extension-agnostic and avoids treating ``stem`` as a glob pattern.
+    Used by re-transcribe (#266) to locate the audio to re-run ASR on; returns
+    None when keep-recordings was off and the source is gone (the MVP audio-gate).
+    """
+    from pathlib import Path
+    try:
+        for entry in Path(recordings_dir).iterdir():
+            if entry.is_file() and Path(entry.name).stem == stem:
+                return entry
+    except (FileNotFoundError, NotADirectoryError):
+        return None
+    return None
+
+
 def _render_frontmatter(meta: dict) -> list[str]:
     """Render a meeting .md YAML frontmatter block (including the enclosing
     ``---`` fences) from a flat dict, with the type-specific scalar
@@ -2728,7 +2748,10 @@ def list_meetings():
 @cli.command()
 @click.argument('summary_file', required=True)
 @click.option('--regenerate-title', is_flag=True, default=False, help='Also regenerate the meeting title')
-def reprocess(summary_file, regenerate_title):
+@click.option('--retranscribe', is_flag=True, default=False,
+              help='Re-run transcription on the source recording (requires the audio to '
+                   'still exist) with the current settings before re-summarising')
+def reprocess(summary_file, regenerate_title, retranscribe):
     """Reprocess a failed summary by re-running Ollama analysis on existing transcript"""
     import json
     from pathlib import Path
@@ -2749,6 +2772,82 @@ def reprocess(summary_file, regenerate_title):
         else:
             with open(summary_path, 'r') as f:
                 existing_data = json.load(f)
+
+        # Re-transcribe (#266): re-run ASR on the ORIGINAL recording with the
+        # CURRENT global engine/model/language settings, then fall through into
+        # the normal summarise+rewrite path below so the rewritten note carries a
+        # fresh transcript AND a fresh summary (the #249 standard-backup still
+        # runs). MVP gate: only possible when the source audio still exists on
+        # disk (keep-recordings was on); if it's gone, fail cleanly and touch
+        # nothing. The non-retranscribe path is unchanged (flag defaults false).
+        if retranscribe:
+            import asyncio
+            session_name = existing_data.get('session_info', {}).get('name', 'Reprocessed')
+            stem = summary_path.stem
+            if stem.endswith('_summary'):
+                stem = stem[:-len('_summary')]
+            recording = _find_recording_for_stem(recorder.recordings_dir, stem)
+            if recording is None:
+                # Distinct marker so the renderer surfaces "recording no longer
+                # available" rather than a generic failure — nothing is written.
+                print("STREAM_ERROR:RETRANSCRIBE_NO_AUDIO", flush=True)
+                sys.exit(1)
+
+            print(f"Re-transcribing recording: {recording.name}", flush=True)
+            # Keep the Electron inactivity watchdog alive across ASR using the
+            # backend's REAL per-chunk progress signal — the same mechanism
+            # process-streaming uses (not the capped summary heartbeat, which
+            # stops after ~30 beats and could let the 8-min watchdog kill a
+            # genuinely long transcription, e.g. a multi-hour meeting on CPU).
+            # A heartbeat must never break transcription — if the registry can't
+            # even import, transcribe without one.
+            try:
+                from src.parakeet import set_chunk_heartbeat
+            except Exception:
+                def set_chunk_heartbeat(_cb):
+                    pass
+
+            def _transcribe_heartbeat(done, total):
+                sys.stdout.write(f"HEARTBEAT:transcribe:{done}/{total}\n")
+                sys.stdout.flush()
+
+            print("HEARTBEAT:transcribe:start", flush=True)
+            set_chunk_heartbeat(_transcribe_heartbeat)
+            try:
+                transcribe_result = asyncio.run(
+                    recorder.transcribe_audio(str(recording), session_name)
+                )
+            finally:
+                set_chunk_heartbeat(None)
+
+            if transcribe_result.get("transcription_failed"):
+                err_msg = str(
+                    transcribe_result.get("error") or "transcription failed"
+                ).replace('\n', ' ').replace('\r', ' ')
+                print(f"STREAM_ERROR:{err_msg}", flush=True)
+                sys.exit(1)
+
+            # Mirror process_streaming's `## Transcript` content exactly:
+            # diarised text when diarisation ran, else the flat transcript.
+            fresh_transcript = (
+                transcribe_result.get("diarised_text")
+                or transcribe_result.get("transcript_text")
+                or ""
+            )
+            existing_data['transcript'] = fresh_transcript
+            existing_data['is_diarised'] = transcribe_result.get("is_diarised", False)
+            existing_data['diarised_text'] = transcribe_result.get("diarised_text")
+            # Refresh language provenance from the NEW transcribe result — the
+            # transcript changed, so the persisted configured/detected/output
+            # values no longer describe it. resolve_persisted_output_language
+            # (below) then trusts this fresh, pin/engine-backed output_language.
+            _si = existing_data.setdefault('session_info', {})
+            _si['configured_language'] = transcribe_result.get("configured_language")
+            _si['detected_language'] = transcribe_result.get("detected_language")
+            _si['output_language'] = transcribe_result.get("output_language")
+            # A full re-transcribe replaces any live-sourced transcript, so the
+            # live-transcript flag (#207) no longer applies to this note.
+            _si.pop('is_live_transcript', None)
 
         # Get transcript from the data
         transcript = existing_data.get('transcript', '')

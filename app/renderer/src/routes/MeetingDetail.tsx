@@ -14,6 +14,7 @@ import {
   Folder as FolderIcon,
   Globe,
   MoreHorizontal,
+  Mic,
   PencilLine,
   RefreshCw,
   Trash2,
@@ -27,6 +28,8 @@ import { Select, SelectContent, SelectItem, SelectSeparator } from '@/components
 import {
   useMeeting,
   useReprocessMeeting,
+  useRetranscribeMeeting,
+  useRecordingAvailable,
   useDeleteMeeting,
   useGenerateReport,
   useSetActiveReport,
@@ -151,6 +154,11 @@ function DetailContent({
   const [deleteOpen, setDeleteOpen] = React.useState(false);
   const deleteMeeting = useDeleteMeeting();
   const reprocess = useReprocessMeeting();
+  const retranscribe = useRetranscribeMeeting();
+  // Re-transcribe (#266) is only offered when the source recording still exists
+  // on disk (keep-recordings was on) — otherwise re-running ASR is impossible.
+  const recordingAvailable = useRecordingAvailable(summaryFile);
+  const [retranscribeOpen, setRetranscribeOpen] = React.useState(false);
   const generateReport = useGenerateReport();
   const setActiveReport = useSetActiveReport();
   const deleteReport = useDeleteReport();
@@ -433,6 +441,45 @@ function DetailContent({
         // could fire to roll the UI back — without this the analyzing/streaming
         // state would be stuck forever with no way to retry (mirrors
         // onGenerateReport's onError below).
+        onError: () => {
+          setStreamPhase('idle');
+          setStreamText('');
+          setChunkProgress(null);
+          streamCache.delete(summaryFile);
+          setReprocessFailed(true);
+        },
+      }
+    );
+  };
+
+  // Re-transcribe (#266): re-run ASR on the source recording with the current
+  // settings, then re-summarise. Reuses the SAME streaming UI as reprocess —
+  // the backend drives summary-chunk/-complete keyed by summaryFile — so we only
+  // swap which mutation fires. Transcription is silent (no CHUNK), so the view
+  // stays in "analyzing" until summarisation streams, matching reprocess's
+  // pre-first-chunk state. Mirrors startReprocess's re-entrancy guard + onError.
+  const startRetranscribe = () => {
+    const cached = streamCache.get(summaryFile);
+    if (
+      retranscribe.isPending ||
+      reprocess.isPending ||
+      streamPhase !== 'idle' ||
+      cached?.phase === 'analyzing' ||
+      cached?.phase === 'generating'
+    ) {
+      return;
+    }
+    setStreamText('');
+    setStreamPhase('analyzing');
+    setChunkProgress(null);
+    setReprocessFailed(false);
+    streamCache.set(summaryFile, { text: '', phase: 'analyzing' });
+    retranscribe.mutate(
+      { summaryFile, name: info.name },
+      {
+        // A rejection means the IPC/backend failed (e.g. RETRANSCRIBE_NO_AUDIO,
+        // or ASR crashed) BEFORE a summary-complete could roll the UI back —
+        // surface the shared reprocess failure affordance. Same as startReprocess.
         onError: () => {
           setStreamPhase('idle');
           setStreamText('');
@@ -777,6 +824,27 @@ function DetailContent({
                   <FileDown className="size-[13px] shrink-0" style={{ color: 'var(--fg-2)' }} />
                   Save notes as PDF…
                 </button>
+                {/* Re-transcribe (#266): only when the source recording still
+                    exists (keep-recordings was on). Disabled while a stream is on
+                    screen or a recording is live on this note. */}
+                {recordingAvailable.data === true && (
+                  <button
+                    type="button"
+                    className="flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-sm transition-colors hover:bg-[color:var(--surface-hover)] disabled:opacity-50"
+                    style={{ color: 'var(--fg-1)' }}
+                    data-testid="retranscribe-action"
+                    onClick={() => setRetranscribeOpen(true)}
+                    disabled={
+                      reprocess.isPending ||
+                      retranscribe.isPending ||
+                      streamPhase !== 'idle' ||
+                      isRecordingThisNote
+                    }
+                  >
+                    <Mic className="size-[13px] shrink-0" style={{ color: 'var(--fg-2)' }} />
+                    Re-transcribe recording
+                  </button>
+                )}
                 {orgSession.data?.signedIn &&
                   (isShared ? (
                     <button
@@ -1215,6 +1283,19 @@ function DetailContent({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ConfirmDialog
+        open={retranscribeOpen}
+        onOpenChange={setRetranscribeOpen}
+        title="Re-transcribe this recording?"
+        description="This re-runs transcription with your current transcription settings, replacing the transcript and regenerating the summary."
+        confirmLabel="Re-transcribe"
+        isPending={retranscribe.isPending}
+        onConfirm={() => {
+          setRetranscribeOpen(false);
+          startRetranscribe();
+        }}
+      />
     </article>
   );
 }

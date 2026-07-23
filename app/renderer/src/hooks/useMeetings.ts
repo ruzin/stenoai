@@ -219,6 +219,29 @@ export function useReprocessMeeting() {
   });
 }
 
+export function useRetranscribeMeeting() {
+  const qc = useQueryClient();
+  return useMutation({
+    // Re-run ASR on the source recording (#266) then re-summarise. Mirrors
+    // useReprocessMeeting's success invalidation so the rewritten note (fresh
+    // transcript + summary) refreshes across list + detail.
+    mutationFn: async (args: { summaryFile: string; name: string }) =>
+      unwrap(await ipc().meetings.retranscribe(args.summaryFile, args.name)),
+    onSuccess: () => qc.invalidateQueries({ queryKey: meetingsKeys.all }),
+  });
+}
+
+/** Whether the source recording for a note still exists on disk, so the UI can
+ *  offer "Re-transcribe" only when re-running ASR is possible (#266). */
+export function useRecordingAvailable(summaryFile: string | null | undefined) {
+  return useQuery({
+    queryKey: [...meetingsKeys.detail(summaryFile ?? ''), 'recording-available'],
+    queryFn: async () =>
+      unwrap(await ipc().meetings.recordingAvailable(summaryFile as string)).available,
+    enabled: Boolean(summaryFile),
+  });
+}
+
 export function useGenerateReport() {
   const qc = useQueryClient();
   return useMutation({

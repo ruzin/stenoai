@@ -153,6 +153,10 @@ const stenoai = {
     revealFolder: (filePath) => invoke('reveal-meeting-folder', filePath),
     delete: (meeting) => invoke('delete-meeting', meeting),
     reprocess: (summaryFile, regenTitle, name) => invoke('reprocess-meeting', summaryFile, regenTitle, name),
+    // Re-transcribe (#266): re-run ASR on the source recording then re-summarise
+    // (regenTitle false; the retranscribe flag is the trailing arg).
+    retranscribe: (summaryFile, name) => invoke('reprocess-meeting', summaryFile, false, name, true),
+    recordingAvailable: (summaryFile) => invoke('recording-available', summaryFile),
     regenTitle: (summaryFile, name) => invoke('regen-meeting-title', summaryFile, name),
     saveNotes: (name, notes) => invoke('save-meeting-notes', name, notes),
     generateReport: (summaryFile, templateId) => invoke('generate-report-meeting', summaryFile, templateId),

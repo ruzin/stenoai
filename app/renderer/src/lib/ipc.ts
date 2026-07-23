@@ -871,6 +871,12 @@ export interface StenoaiBridge {
       [summaryFile: string, regenTitle: boolean, name: string],
       Result<{ message: string }>
     >;
+    /** Re-run transcription on the source recording (#266) with the current
+     *  settings, then re-summarise. Only wired when `recordingAvailable` is true. */
+    retranscribe: RequestFn<[summaryFile: string, name: string], Result<{ message: string }>>;
+    /** Whether the source recording for a note still exists on disk, gating the
+     *  re-transcribe action (available only when keep-recordings was on). */
+    recordingAvailable: RequestFn<[summaryFile: string], Result<{ available: boolean }>>;
     saveNotes: RequestFn<[name: string, notes: string], SaveMeetingNotesResponse>;
     exportTranscript: RequestFn<
       [defaultFilename: string, content: string],
