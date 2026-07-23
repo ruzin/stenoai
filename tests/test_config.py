@@ -143,6 +143,40 @@ class ConfigWhisperModelTests(unittest.TestCase):
             self.assertEqual(config.get_whisper_model(), "large-v3-turbo")
 
 
+class ConfigOpenAiAsrTests(unittest.TestCase):
+    def test_defaults_on_fresh_config(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config = Config(config_path=Path(tmp_dir) / "config.json")
+            self.assertEqual(config.get_openai_asr_api_url(), "https://api.openai.com/v1")
+            self.assertEqual(config.get_openai_asr_model(), "whisper-1")
+
+    def test_set_api_url_persists_and_strips(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "config.json"
+            config = Config(config_path=path)
+            self.assertTrue(config.set_openai_asr_api_url("  https://api.groq.example/openai/v1  "))
+            self.assertEqual(config.get_openai_asr_api_url(), "https://api.groq.example/openai/v1")
+            reloaded = Config(config_path=path)
+            self.assertEqual(reloaded.get_openai_asr_api_url(), "https://api.groq.example/openai/v1")
+
+    def test_set_api_url_rejects_blank_and_keeps_prior(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config = Config(config_path=Path(tmp_dir) / "config.json")
+            self.assertTrue(config.set_openai_asr_api_url("https://custom.example/v1"))
+            # A blank / whitespace-only URL is rejected; the prior value stays.
+            self.assertFalse(config.set_openai_asr_api_url(""))
+            self.assertFalse(config.set_openai_asr_api_url("   "))
+            self.assertEqual(config.get_openai_asr_api_url(), "https://custom.example/v1")
+
+    def test_set_model_rejects_blank_and_keeps_prior(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config = Config(config_path=Path(tmp_dir) / "config.json")
+            self.assertTrue(config.set_openai_asr_model("whisper-large-v3"))
+            self.assertFalse(config.set_openai_asr_model(""))
+            self.assertFalse(config.set_openai_asr_model("   "))
+            self.assertEqual(config.get_openai_asr_model(), "whisper-large-v3")
+
+
 class ConfigSummaryModelTests(unittest.TestCase):
     def test_default_model_is_gemma4_e2b(self):
         self.assertEqual(Config.DEFAULT_MODEL, "gemma4:e2b-it-qat")
