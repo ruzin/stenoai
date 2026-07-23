@@ -1130,10 +1130,16 @@ export interface StenoaiBridge {
     trayOpenSettings: Subscribe<void>;
     showQuitDialog: Subscribe<{ type: 'recording' | 'processing'; jobCount?: number }>;
     showNotification: Subscribe<{
+      id?: string;
       title: string;
-      time: string;
+      body?: string;
+      time?: string;
       meeting_url?: string;
       attendees?: string;
+      premeeting?: boolean;
+      iconType?: 'app' | 'alert' | 'success' | 'recording';
+      color?: string;
+      actions?: { id: string; text: string; type?: 'primary' | 'secondary' }[];
     }>;
   };
 
@@ -1163,6 +1169,8 @@ export interface StenoaiBridge {
 
   notification: {
     close: RequestFn<[], void>;
+    actionClicked: SendFn<[actionId: string, notifId?: string]>;
+    bodyClicked: SendFn<[notifId?: string]>;
   };
 
   subscribeQueryStream: (
