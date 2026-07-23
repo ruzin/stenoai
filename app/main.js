@@ -1260,8 +1260,12 @@ function pathIsOccupied(p) {
   try {
     fs.lstatSync(p);
     return true;
-  } catch (_) {
-    return false;
+  } catch (err) {
+    // Only a genuine "not found" proves the path is free. A transient lstat
+    // error (EIO / EACCES / ...) must fail SAFE — treat the path as occupied so
+    // we never renameSync over something we couldn't inspect.
+    if (err && err.code === 'ENOENT') return false;
+    return true;
   }
 }
 
@@ -1278,7 +1282,7 @@ function removeHiddenScaffold(idDir) {
 }
 
 // Commit a pending delete: PERMANENTLY unlink the hidden summary + every
-// ancillary file (transcript / recording(s) / notes / reports sidecar), then the
+// ancillary file (transcript / recording(s) / reports sidecar), then the
 // `.pending-delete/<id>` scaffold. This is the FINAL delete — no rollback.
 // Called when the undo window elapses, on an explicit dismiss
 // (commit-delete-meeting), and synchronously for every entry at clean quit.
@@ -4073,7 +4077,7 @@ ipcMain.handle('delete-meeting', async (event, meetingData) => {
     const outputDir = path.dirname(summaryPath);
 
     // Derive the note's stem from its summary basename (<stem>_summary.{json,md}).
-    // Every ancillary AND the twin summary variant are bound to this stem.
+    // Every ancillary is bound to this stem (never taken raw from the meeting obj).
     const summaryBase = path.basename(summaryPath);
     let stem = null;
     for (const suf of ['_summary.md', '_summary.json']) {
