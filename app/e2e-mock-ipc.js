@@ -271,6 +271,22 @@ function install({ ipcMain }) {
       engine: process.env.STENOAI_E2E_MOCK_ENGINE || 'parakeet',
     }),
 
+    // OpenAI-compatible ASR config. Shape-only for first paint; the real
+    // set/get round-trip + key storage is covered by cloud-asr-config.t2.
+    'get-openai-asr-config': async () => ({
+      success: true,
+      api_url: 'https://api.openai.com/v1',
+      api_key_set: false,
+      model: 'whisper-1',
+    }),
+    'set-openai-asr-config': async () => ({
+      success: true,
+      api_url: 'https://api.openai.com/v1',
+      api_key_set: false,
+      model: 'whisper-1',
+    }),
+    'set-openai-asr-key': async () => ({ success: true, api_key_set: true }),
+
     // Default not-installed keeps most T1 specs on their routes; the pill-dock
     // T1 sets STENOAI_E2E_MOCK_PARAKEET_INSTALLED=1 so App.tsx's first-run
     // setup gate doesn't redirect it to /setup before it can hit Record.
