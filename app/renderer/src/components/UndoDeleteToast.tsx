@@ -1,19 +1,27 @@
 import * as React from 'react';
 import { createPortal } from 'react-dom';
 import { Trash2, X } from 'lucide-react';
+import { ipc } from '@/lib/ipc';
 import { useUndoDeleteStore, type UndoDeleteEntry } from '@/hooks/undoDeleteStore';
-import { useRestoreMeeting, usePurgeTrashedMeeting } from '@/hooks/useMeetings';
+import { useUndoDeleteMeeting, useCommitDeleteMeeting } from '@/hooks/useMeetings';
 
 /**
  * Bottom-right "Note deleted — Undo?" toast stack (#234). Deletion is a
- * soft-delete: the note's files are moved to a trash dir and an entry is pushed
- * to the undo store. This component (mounted once at shell level so it survives
- * MeetingDetail's post-delete navigate) renders one toast per entry.
+ * soft-delete: main hides only the note's summary (an atomic rename) and pushes
+ * an entry to the undo store. This component (mounted once at shell level so it
+ * survives MeetingDetail's post-delete navigate) renders one toast per entry.
  *
- * Undo restores the files; letting the ~8s window elapse (or dismissing) hard-
- * deletes them. Mirrors UpdateToast's CSS-var theming + a11y.
+ * Undo renames the summary back (near-infallible); letting the window elapse (or
+ * dismissing) commits the permanent delete. The countdown is DISPLAY-ONLY — main
+ * owns the real deadline (entry.deadline), so a slightly-off renderer countdown
+ * is fine and a reload can't drift or lose the window (it rehydrates from main).
  */
-const UNDO_WINDOW_MS = 8000;
+
+// One-shot rehydration guard. AppShell is per-route (FACT B) so this component
+// remounts on navigation; the module-level flag makes the list-pending-deletes
+// rehydration run exactly once per app session, before any in-session delete, so
+// it can never clobber an entry added after mount.
+let rehydratedPendingDeletes = false;
 
 function UndoDeleteToastItem({
   entry,
@@ -24,34 +32,27 @@ function UndoDeleteToastItem({
   onUndo: () => void;
   onExpire: () => void;
 }) {
-  // Keep the callbacks in a ref so the auto-dismiss timer runs exactly once and
-  // isn't reset by re-renders (it must expire relative to when the note was
-  // deleted, not the last render).
+  // Keep the expire callback in a ref so the auto-dismiss timer runs exactly once
+  // and isn't reset by re-renders (it must expire relative to main's deadline,
+  // not the last render).
   const onExpireRef = React.useRef(onExpire);
   React.useEffect(() => {
     onExpireRef.current = onExpire;
   });
 
-  // Remaining window is relative to when the note was actually deleted
-  // (entry.createdAt), NOT this component's mount. AppShell is rendered per-route
-  // (FACT B), so navigation remounts this toast — a mount-relative timer would
-  // reset the 8s window on every navigate. Anchoring to createdAt makes a
-  // remount RESUME the countdown instead.
+  // Remaining window is anchored to MAIN's deadline (entry.deadline), NOT this
+  // component's mount. AppShell is rendered per-route (FACT B), so navigation
+  // remounts this toast — a mount-relative timer would reset the window on every
+  // navigate. Anchoring to the deadline makes a remount RESUME the countdown, and
+  // keeps the renderer's display honest against main's authoritative timer.
   const remainingAtMount = React.useMemo(
-    () => Math.max(0, UNDO_WINDOW_MS - (Date.now() - entry.createdAt)),
-    [entry.createdAt],
+    () => Math.max(0, entry.deadline - Date.now()),
+    [entry.deadline],
   );
 
-  const [progress, setProgress] = React.useState(remainingAtMount / UNDO_WINDOW_MS);
+  const [progress, setProgress] = React.useState(remainingAtMount > 0 ? 1 : 0);
 
   React.useEffect(() => {
-    // SUSPEND the expiry timer while a restore is in flight — an expiring
-    // countdown must never purge a note that's mid-restore (#234). When the
-    // restore settles the entry is either removed (success) or re-armed (failure,
-    // which bumps createdAt → this effect re-runs with a fresh window).
-    if (entry.restoring) {
-      return;
-    }
     if (remainingAtMount <= 0) {
       // Window already elapsed before this mount — expire immediately.
       onExpireRef.current();
@@ -59,13 +60,13 @@ function UndoDeleteToastItem({
     }
     const timer = setTimeout(() => onExpireRef.current(), remainingAtMount);
     // Kick the countdown bar off on the next frame so the CSS width transition
-    // animates from the elapsed fraction down to empty over the remaining time.
+    // animates down to empty over the remaining time.
     const raf = requestAnimationFrame(() => setProgress(0));
     return () => {
       clearTimeout(timer);
       cancelAnimationFrame(raf);
     };
-  }, [remainingAtMount, entry.restoring]);
+  }, [remainingAtMount]);
 
   const name = entry.meeting?.session_info?.name?.trim();
 
@@ -85,39 +86,26 @@ function UndoDeleteToastItem({
       <div className="flex items-center gap-2.5 px-3 py-2.5">
         <Trash2 size={14} style={{ color: 'var(--fg-2)', flexShrink: 0 }} />
         <div className="min-w-0 flex-1">
-          <div className="text-[13px] font-medium">
-            {entry.restoreFailed ? 'Restore failed' : 'Note deleted'}
-          </div>
-          {entry.restoreFailed ? (
+          <div className="text-[13px] font-medium">Note deleted</div>
+          {name && (
             <div className="truncate text-[12px]" style={{ color: 'var(--fg-2)' }}>
-              Couldn&rsquo;t restore{name ? ` “${name}”` : ''} — try Undo again.
+              {name}
             </div>
-          ) : (
-            name && (
-              <div className="truncate text-[12px]" style={{ color: 'var(--fg-2)' }}>
-                {name}
-              </div>
-            )
           )}
         </div>
         <button
           type="button"
           onClick={onUndo}
-          disabled={entry.restoring}
-          className="cursor-pointer rounded-full border-0 px-2.5 py-1 text-[12px] font-medium disabled:cursor-default disabled:opacity-60"
+          className="cursor-pointer rounded-full border-0 px-2.5 py-1 text-[12px] font-medium"
           style={{ background: 'var(--fg-1)', color: 'var(--fg-inverse)' }}
         >
-          {entry.restoring ? 'Restoring…' : 'Undo'}
+          Undo
         </button>
         <button
           type="button"
           onClick={onExpire}
-          // Disable dismiss while a restore is in flight — the note must be
-          // unpurgeable from the UI until the restore settles (#234). handleExpire
-          // also no-ops for a restoring entry as a belt-and-braces guard.
-          disabled={entry.restoring}
           aria-label="Dismiss and delete permanently"
-          className="inline-flex cursor-pointer items-center justify-center rounded-full border-0 bg-transparent p-1 disabled:cursor-default disabled:opacity-60"
+          className="inline-flex cursor-pointer items-center justify-center rounded-full border-0 bg-transparent p-1"
           style={{ color: 'var(--fg-2)' }}
         >
           <X size={12} />
@@ -131,7 +119,7 @@ function UndoDeleteToastItem({
           width: `${progress * 100}%`,
           background: 'var(--fg-2)',
           opacity: 0.35,
-          transition: `width ${remainingAtMount}ms linear`,
+          transition: `width ${Math.max(1, remainingAtMount)}ms linear`,
         }}
       />
     </div>
@@ -141,45 +129,54 @@ function UndoDeleteToastItem({
 export function UndoDeleteToast() {
   const entries = useUndoDeleteStore((s) => s.entries);
   const remove = useUndoDeleteStore((s) => s.remove);
-  const markRestoring = useUndoDeleteStore((s) => s.markRestoring);
-  const restore = useRestoreMeeting();
-  const purge = usePurgeTrashedMeeting();
+  const undo = useUndoDeleteMeeting();
+  const commit = useCommitDeleteMeeting();
+
+  // One-shot rehydration: load main's in-flight soft-deletes so a renderer reload
+  // during a window restores the toast(s) with main's authoritative deadline.
+  React.useEffect(() => {
+    if (rehydratedPendingDeletes) return;
+    rehydratedPendingDeletes = true;
+    ipc()
+      .meetings.listPendingDeletes()
+      .then((res) => {
+        if (!res.success) return;
+        useUndoDeleteStore.getState().hydrate(
+          res.pending.map((p) => ({
+            id: p.id,
+            meeting: p.meeting,
+            summaryFile: p.summaryFile,
+            deadline: p.deadline,
+          })),
+        );
+      })
+      .catch(() => {
+        /* best-effort — a failed rehydrate just means no toasts to restore */
+      });
+  }, []);
 
   const host = typeof document !== 'undefined' ? document.getElementById('toast-host') : null;
   if (!host || entries.length === 0) return null;
 
   const handleUndo = (entry: UndoDeleteEntry) => {
-    // Do NOT remove the entry up front. Mark it "restoring" so its expiry timer
-    // is SUSPENDED while the restore IPC is in flight — an expiring countdown
-    // must never purge a note that's mid-restore (#234). The restore's
-    // resolution (remove on success / re-arm on failure) is handled by
-    // useRestoreMeeting's HOOK-LEVEL callbacks keyed on trashId, NOT per-call
-    // callbacks here — those would be dropped if this component unmounts (a
-    // navigate mid-restore) or is superseded by another Undo, stranding the
-    // entry stuck `restoring` forever (never re-armed → purged next launch).
-    if (entry.restoring) return; // Guard against a double click while in flight.
-    markRestoring(entry.trashId);
-    restore.mutate(entry.trashId);
+    // Fire the undo. On success the hook re-inserts the row + drops the store
+    // entry; on failure the toast stays up and main's timer is the backstop.
+    undo.mutate(entry.id);
   };
 
   const handleExpire = (entry: UndoDeleteEntry) => {
-    // A restore in flight must be unpurgeable from the UI: dismissing here would
-    // purge the trash out from under an in-flight restore, and a subsequent
-    // restore failure would then have nothing left to restore = data loss (#234).
-    if (entry.restoring) return;
-    remove(entry.trashId);
-    purge.mutate(entry.trashId);
+    // Dismiss / window elapsed: drop the toast and commit the permanent delete.
+    // The list row was already removed from the cache on delete (and can't be
+    // re-introduced — the summary is hidden on disk), so no cache surgery here.
+    // Main's own timer is an idempotent backstop if this never fires (reload).
+    remove(entry.id);
+    commit.mutate(entry.id);
   };
 
   return createPortal(
     entries.map((entry) => (
       <UndoDeleteToastItem
-        // Include createdAt in the key so a re-arm (failed restore bumps
-        // createdAt) REMOUNTS the item, resetting its countdown + progress bar to
-        // a fresh window cleanly — no in-effect setState. A plain markRestoring
-        // (createdAt unchanged) keeps the same key, so the item stays mounted and
-        // just suspends its timer.
-        key={`${entry.trashId}:${entry.createdAt}`}
+        key={entry.id}
         entry={entry}
         onUndo={() => handleUndo(entry)}
         onExpire={() => handleExpire(entry)}

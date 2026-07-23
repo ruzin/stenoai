@@ -208,14 +208,15 @@ export function useDeleteMeeting() {
         // route is revisited.
         qc.removeQueries({ queryKey: meetingsKeys.detail(deletedFile) });
       }
-      // The delete was a soft-delete (files moved to trash): surface an Undo
-      // toast so the user can restore for a few seconds (#234). Skipped only if
-      // the backend didn't return a trashId (older shape / nothing moved).
-      if (data?.trashId) {
+      // The delete was a soft-delete (only the summary is hidden): surface an
+      // Undo toast so the user can undo for a few seconds (#234). Skipped only if
+      // the backend didn't return an id (nothing to delete / older shape).
+      if (data?.id) {
         useUndoDeleteStore.getState().add({
-          trashId: data.trashId,
+          id: data.id,
           meeting,
-          createdAt: Date.now(),
+          summaryFile: meeting.session_info.summary_file,
+          deadline: data.deadline ?? Date.now() + 8000,
         });
       }
     },
@@ -223,60 +224,45 @@ export function useDeleteMeeting() {
 }
 
 /**
- * Undo a soft-delete (#234): restore the trashed note's files and re-insert its
- * list row. The returned meeting comes from the trash manifest, so the row
- * reappears without a full backend re-scan; the detail cache is invalidated so a
- * revisit re-reads the restored transcript.
+ * Undo a soft-delete (#234): main renames the hidden summary back, so the note
+ * reappears in every backend scan. Re-insert the returned meeting into the list
+ * cache (dedup) so the row returns without a re-scan — covering both the
+ * still-cached row (delete removed it) and a mid-window refetch that dropped it.
+ * The detail cache is invalidated so a revisit re-reads the note.
  */
-export function useRestoreMeeting() {
+export function useUndoDeleteMeeting() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (trashId: string) => unwrap(await ipc().meetings.restore(trashId)),
-    // Resolve the undo-store entry from HOOK-LEVEL callbacks (keyed on the
-    // mutation variable, the trashId), NOT per-call `mutate(id, {onSuccess})`
-    // callbacks in the toast component. All toasts share this single mutation
-    // instance, and per-call callbacks are dropped if the calling component
-    // unmounts (AppShell is per-route, so a navigate mid-restore unmounts the
-    // toast) or is superseded by another concurrent Undo — a dropped callback
-    // would strand the entry stuck `restoring` (timer suspended) forever, so it
-    // never re-arms and gets purged at the next launch = silent data loss.
-    // Hook-level callbacks fire regardless of which component (or none) is
-    // mounted, closing that gap (#234).
-    onSuccess: (data, trashId) => {
-      // Restore succeeded — drop the undo toast entry.
-      useUndoDeleteStore.getState().remove(trashId);
+    mutationFn: async (id: string) => unwrap(await ipc().meetings.undoDelete(id)),
+    onSuccess: (data, id) => {
       const meeting = data.meeting;
       const file = meeting?.session_info?.summary_file;
-      if (!file) {
-        // Malformed manifest — fall back to a full re-scan so the row returns.
+      if (file) {
+        qc.setQueryData<Meeting[]>(meetingsKeys.list(), (prev) => {
+          if (!prev) return prev;
+          // Guard against a double-undo re-inserting a duplicate row.
+          if (prev.some((m) => m.session_info.summary_file === file)) return prev;
+          return [meeting, ...prev];
+        });
+        qc.invalidateQueries({ queryKey: meetingsKeys.detail(file) });
+      } else {
         qc.invalidateQueries({ queryKey: meetingsKeys.list() });
-        return;
       }
-      qc.setQueryData<Meeting[]>(meetingsKeys.list(), (prev) => {
-        if (!prev) return prev;
-        // Guard against a double-restore re-inserting a duplicate row.
-        if (prev.some((m) => m.session_info.summary_file === file)) return prev;
-        return [meeting, ...prev];
-      });
-      qc.invalidateQueries({ queryKey: meetingsKeys.detail(file) });
+      useUndoDeleteStore.getState().remove(id);
     },
-    onError: (_err, trashId) => {
-      // Restore failed — re-arm the entry (clears `restoring`, flags the failure,
-      // restarts the undo window) so a retryable toast stays on screen instead of
-      // being stranded still-trashed for the startup sweep to purge.
-      useUndoDeleteStore.getState().rearm(trashId);
-    },
+    // On failure (rare no-clobber) leave the toast up; MAIN's timer is the
+    // backstop and there's nothing to reconcile in the cache.
   });
 }
 
 /**
- * Hard-delete a trashed note (#234) once the undo window expires or the toast is
- * dismissed. Idempotent on the backend; no cache changes (the row is already
- * gone from the list).
+ * Commit a soft-delete (#234): the toast was dismissed or its window elapsed.
+ * Main permanently unlinks the note's files. Idempotent on the backend; the
+ * store entry + the (possibly still-cached) list row are cleaned up in the toast.
  */
-export function usePurgeTrashedMeeting() {
+export function useCommitDeleteMeeting() {
   return useMutation({
-    mutationFn: async (trashId: string) => unwrap(await ipc().meetings.purgeTrashed(trashId)),
+    mutationFn: async (id: string) => unwrap(await ipc().meetings.commitDelete(id)),
   });
 }
 

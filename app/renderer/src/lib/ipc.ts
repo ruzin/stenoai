@@ -378,7 +378,21 @@ export type RecordingsDirResponse = Result<{ path: string }>;
 export type ListMeetingsResponse = Result<{ meetings: Meeting[] }>;
 export type GetMeetingResponse = Result<{ meeting: Meeting }>;
 export type UpdateMeetingResponse = Result<{ message: string; updatedData: Meeting }>;
-export type DeleteMeetingResponse = Result<{ message: string; trashId?: string }>;
+// Soft-delete (#234): main hides only the summary and returns an `id` + a
+// MAIN-owned `deadline` (epoch ms) so the renderer can offer Undo. `message` is
+// set instead when there was nothing to delete (no summary / already gone).
+export type DeleteMeetingResponse = Result<{ message?: string; id?: string; deadline?: number }>;
+
+/** A note with an in-flight soft-delete window (#234), from list-pending-deletes. */
+export interface PendingDelete {
+  id: string;
+  /** The exact `summary_file` string the note is listed under. */
+  summaryFile: string;
+  /** MAIN-owned deadline (epoch ms) — the countdown is display-only. */
+  deadline: number;
+  meeting: Meeting;
+}
+export type ListPendingDeletesResponse = Result<{ pending: PendingDelete[] }>;
 export type SaveMeetingNotesResponse = Result<{ path: string }>;
 
 export type QueryResponse = Result<{ answer: string }>;
@@ -870,8 +884,9 @@ export interface StenoaiBridge {
     update: RequestFn<[summaryFile: string, patch: UpdateMeetingPatch], UpdateMeetingResponse>;
     revealFolder: RequestFn<[filePath: string], Result<Record<string, never>>>;
     delete: RequestFn<[meeting: Meeting], DeleteMeetingResponse>;
-    restore: RequestFn<[trashId: string], Result<{ meeting: Meeting }>>;
-    purgeTrashed: RequestFn<[trashId: string], Result<Record<string, never>>>;
+    undoDelete: RequestFn<[id: string], Result<{ meeting: Meeting }>>;
+    commitDelete: RequestFn<[id: string], Result<Record<string, never>>>;
+    listPendingDeletes: RequestFn<[], ListPendingDeletesResponse>;
     reprocess: RequestFn<
       [summaryFile: string, regenTitle: boolean, name: string],
       Result<{ message: string }>

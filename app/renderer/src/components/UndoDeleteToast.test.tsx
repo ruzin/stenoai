@@ -6,26 +6,30 @@ import { UndoDeleteToast } from '@/components/UndoDeleteToast';
 import { useUndoDeleteStore } from '@/hooks/undoDeleteStore';
 
 /**
- * Data-safety regression for the Undo toast (#234, cubic #1). Clicking Undo used
- * to remove the entry up front and fire restore with no error handling — so a
- * FAILED restore removed the toast, and the startup sweep then hard-deleted the
- * still-trashed note next launch = silent data loss.
- *
- * The contract asserted here: a failed restore must NOT remove the entry — it
- * stays on screen (re-armed + flagged failed) so the user can retry Undo; a
- * successful restore removes it. jsdom + real zustand store; only ipc()/recording
- * are mocked, so useRestoreMeeting's HOOK-LEVEL onSuccess/onError run for real.
+ * Renderer flow for the simplified soft-delete Undo toast (#234, tombstone
+ * pivot). Deletion hides only the summary (an atomic rename in main), so Undo is
+ * a near-infallible rename-back — the old restoring/restoreFailed/rearm machinery
+ * is gone. The contract asserted here:
+ *   - Undo calls undoDelete(id) and, on success, removes the toast entry.
+ *   - Undo failure (rare no-clobber) LEAVES the toast up (main's timer backstops).
+ *   - Dismiss (X) removes the entry and commits the permanent delete.
+ * jsdom + real zustand store; only ipc() + the transitive useMeetings deps are
+ * mocked, so useUndoDeleteMeeting/useCommitDeleteMeeting run for real.
  */
 
-const restoreMock =
+const undoMock =
   vi.fn<(id: string) => Promise<{ success: boolean; error?: string; meeting?: Meeting }>>();
-const purgeMock = vi.fn(async () => ({ success: true }));
+const commitMock = vi.fn(async () => ({ success: true }));
+// Rehydration runs once (module guard) on the first mount; keep it empty so it
+// never clobbers the entries a test adds.
+const listPendingMock = vi.fn(async () => ({ success: true as const, pending: [] }));
 
 vi.mock('@/lib/ipc', () => ({
   ipc: () => ({
     meetings: {
-      restore: (id: string) => restoreMock(id),
-      purgeTrashed: () => purgeMock(),
+      undoDelete: (id: string) => undoMock(id),
+      commitDelete: () => commitMock(),
+      listPendingDeletes: () => listPendingMock(),
     },
   }),
 }));
@@ -57,11 +61,18 @@ function renderToast() {
 
 const entries = () => useUndoDeleteStore.getState().entries;
 
-describe('UndoDeleteToast — failed restore keeps the entry', () => {
+const mkEntry = (id: string, summaryFile: string, name: string) => ({
+  id,
+  meeting: mkMeeting(summaryFile, name),
+  summaryFile,
+  deadline: Date.now() + 8000,
+});
+
+describe('UndoDeleteToast — tombstone Undo flow', () => {
   beforeEach(() => {
-    restoreMock.mockReset();
-    purgeMock.mockClear();
-    // The toast renders into #toast-host via a portal.
+    undoMock.mockReset();
+    commitMock.mockClear();
+    listPendingMock.mockClear();
     const host = document.createElement('div');
     host.id = 'toast-host';
     document.body.appendChild(host);
@@ -73,44 +84,42 @@ describe('UndoDeleteToast — failed restore keeps the entry', () => {
     useUndoDeleteStore.setState({ entries: [] });
   });
 
-  test('a FAILED restore does not remove the entry — it stays retryable', async () => {
-    restoreMock.mockResolvedValue({ success: false, error: 'restore target already exists' });
-    useUndoDeleteStore.getState().add({
-      trashId: 't-fail',
-      meeting: mkMeeting('a.json', 'Alpha'),
-      createdAt: Date.now(),
-    });
+  test('a SUCCESSFUL undo removes the entry', async () => {
+    undoMock.mockResolvedValue({ success: true, meeting: mkMeeting('a.json', 'Alpha') });
+    useUndoDeleteStore.getState().add(mkEntry('d-ok', 'a.json', 'Alpha'));
 
     const { getByRole } = renderToast();
-    // Click Undo.
     await act(async () => {
       fireEvent.click(getByRole('button', { name: /undo/i }));
     });
 
-    await waitFor(() => expect(restoreMock).toHaveBeenCalledWith('t-fail'));
-    // The entry is STILL present (not stranded for the sweep), re-armed + flagged.
-    await waitFor(() => {
-      const e = entries().find((x) => x.trashId === 't-fail');
-      expect(e).toBeTruthy();
-      expect(e?.restoring).toBe(false);
-      expect(e?.restoreFailed).toBe(true);
-    });
+    await waitFor(() => expect(undoMock).toHaveBeenCalledWith('d-ok'));
+    await waitFor(() => expect(entries().find((x) => x.id === 'd-ok')).toBeUndefined());
   });
 
-  test('a SUCCESSFUL restore removes the entry', async () => {
-    restoreMock.mockResolvedValue({ success: true, meeting: mkMeeting('a.json', 'Alpha') });
-    useUndoDeleteStore.getState().add({
-      trashId: 't-ok',
-      meeting: mkMeeting('a.json', 'Alpha'),
-      createdAt: Date.now(),
-    });
+  test('a FAILED undo leaves the entry on screen (main timer backstops)', async () => {
+    undoMock.mockResolvedValue({ success: false, error: 'restore target already exists' });
+    useUndoDeleteStore.getState().add(mkEntry('d-fail', 'a.json', 'Alpha'));
 
     const { getByRole } = renderToast();
     await act(async () => {
       fireEvent.click(getByRole('button', { name: /undo/i }));
     });
 
-    await waitFor(() => expect(restoreMock).toHaveBeenCalledWith('t-ok'));
-    await waitFor(() => expect(entries().find((x) => x.trashId === 't-ok')).toBeUndefined());
+    await waitFor(() => expect(undoMock).toHaveBeenCalledWith('d-fail'));
+    // The entry is STILL present — not removed on a failed undo.
+    await waitFor(() => expect(entries().find((x) => x.id === 'd-fail')).toBeTruthy());
+  });
+
+  test('dismiss (X) removes the entry and commits the permanent delete', async () => {
+    useUndoDeleteStore.getState().add(mkEntry('d-dismiss', 'a.json', 'Alpha'));
+
+    const { getByRole } = renderToast();
+    await act(async () => {
+      fireEvent.click(getByRole('button', { name: /dismiss and delete permanently/i }));
+    });
+
+    await waitFor(() => expect(commitMock).toHaveBeenCalled());
+    await waitFor(() => expect(entries().find((x) => x.id === 'd-dismiss')).toBeUndefined());
   });
 });

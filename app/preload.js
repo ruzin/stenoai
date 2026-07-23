@@ -152,8 +152,9 @@ const stenoai = {
     update: (summaryFile, patch) => invoke('update-meeting', summaryFile, patch),
     revealFolder: (filePath) => invoke('reveal-meeting-folder', filePath),
     delete: (meeting) => invoke('delete-meeting', meeting),
-    restore: (trashId) => invoke('restore-meeting', trashId),
-    purgeTrashed: (trashId) => invoke('purge-trashed-meeting', trashId),
+    undoDelete: (id) => invoke('undo-delete-meeting', id),
+    commitDelete: (id) => invoke('commit-delete-meeting', id),
+    listPendingDeletes: () => invoke('list-pending-deletes'),
     reprocess: (summaryFile, regenTitle, name) => invoke('reprocess-meeting', summaryFile, regenTitle, name),
     // Re-transcribe (#266): re-run ASR on the source recording then re-summarise
     // (regenTitle false; the retranscribe flag is the trailing arg).
