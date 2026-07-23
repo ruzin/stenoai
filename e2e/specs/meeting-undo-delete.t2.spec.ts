@@ -381,17 +381,66 @@ test('ancillaries are bound to the summary stem — an unrelated file named in t
   expect(fileSig(realUserDataDir())).toBe(realDirBefore);
 });
 
-test('delete hides BOTH summary variants (.json + .md) for the stem; undo restores BOTH', async ({
+test('the anomalous .json+.md twin edge FAILS SAFE — only the named summary is hidden, nothing is lost', async ({
   launchApp,
   userDataDir,
 }) => {
   const realDirBefore = fileSig(realUserDataDir());
+  // A note names EXACTLY ONE summary_file; the tombstone hides only that file.
+  // If a stem somehow has BOTH variants (anomalous — the app's own writers only
+  // ever produce <stem>_summary.md), hiding the named one leaves the other, so
+  // the note stays VISIBLE (under-hides) — it NEVER over-deletes. That fail-safe
+  // direction (a summary can only ever REAPPEAR, never vanish) is the whole point
+  // of reverting the multi-file twin handling for user AUDIO.
   const seed = seedNote(userDataDir, 'twin-alpha', 'Twin Alpha');
-  // Seed the .md twin alongside the .json summary (same stem). Either variant
-  // alone keeps the note visible to the `output/*_summary.{json,md}` glob, so a
-  // delete must hide BOTH.
   const mdTwin = path.join(seed.outputDir, 'twin-alpha_summary.md');
   writeFileSync(mdTwin, '# Twin Alpha\n\nMarkdown summary');
+
+  const { page } = await launchApp();
+
+  const del = await page.evaluate(
+    (m) => (window as StenoWindow).stenoai.meetings.delete(m),
+    seed.meeting, // names the .json summary
+  );
+  expect(del.success).toBe(true);
+
+  // ONLY the named .json is hidden (one file under .pending-delete/<id>/); the
+  // .md twin stays put — nothing was destroyed.
+  expect(existsSync(seed.summaryFile)).toBe(false);
+  expect(existsSync(mdTwin)).toBe(true);
+  expect(hiddenSummaryPaths(seed.outputDir).length).toBe(1);
+  // The surviving twin keeps the note VISIBLE to the backend scan (fail-safe:
+  // under-hide, never over-delete).
+  expect(await listedFiles(page)).toContain(mdTwin);
+
+  // Undo restores the hidden .json; both variants are present and the scaffold
+  // is cleaned. (No data was ever at risk.)
+  const undo = await page.evaluate(
+    (id) => (window as StenoWindow).stenoai.meetings.undoDelete(id),
+    del.id!,
+  );
+  expect(undo.success).toBe(true);
+  expect(existsSync(seed.summaryFile)).toBe(true);
+  expect(existsSync(mdTwin)).toBe(true);
+  expect(existsSync(path.join(seed.outputDir, '.pending-delete'))).toBe(false);
+
+  expect(fileSig(realUserDataDir())).toBe(realDirBefore);
+});
+
+test('committing a delete does NOT unlink a same-titled OTHER note draft (_notes.txt is excluded from the delete set)', async ({
+  launchApp,
+  userDataDir,
+}) => {
+  const realDirBefore = fileSig(realUserDataDir());
+  // Two notes share a display TITLE. Draft notes are stored as
+  // `<safeTitle>_notes.txt` — named from the (renderer-controlled) title, NOT the
+  // stem, so both notes would resolve to the SAME _notes.txt. It is therefore NOT
+  // bound to the delete set: committing one note's delete must never unlink the
+  // shared draft (that would silently destroy the OTHER note's notes).
+  const seed = seedNote(userDataDir, 'notes-alpha', 'Shared Title');
+  const safeTitle = 'Shared_Title'; // sessionName.replace(/[^a-zA-Z0-9_-]/g,'_')
+  const sharedNotes = path.join(seed.outputDir, `${safeTitle}_notes.txt`);
+  writeFileSync(sharedNotes, 'draft notes belonging to a same-titled note');
 
   const { page } = await launchApp();
 
@@ -400,25 +449,18 @@ test('delete hides BOTH summary variants (.json + .md) for the stem; undo restor
     seed.meeting,
   );
   expect(del.success).toBe(true);
-
-  // BOTH variants moved into the single .pending-delete/<id>/ dir ...
-  expect(existsSync(seed.summaryFile)).toBe(false);
-  expect(existsSync(mdTwin)).toBe(false);
-  expect(hiddenSummaryPaths(seed.outputDir).length).toBe(2);
-  // ... so the note is gone from the backend scan (neither twin keeps it alive).
-  expect(await listedFiles(page)).not.toContain(seed.summaryFile);
-
-  const undo = await page.evaluate(
-    (id) => (window as StenoWindow).stenoai.meetings.undoDelete(id),
+  const commit = await page.evaluate(
+    (id) => (window as StenoWindow).stenoai.meetings.commitDelete(id),
     del.id!,
   );
-  expect(undo.success).toBe(true);
+  expect(commit.success).toBe(true);
 
-  // Undo restores BOTH originals and cleans the scaffold.
-  expect(existsSync(seed.summaryFile)).toBe(true);
-  expect(existsSync(mdTwin)).toBe(true);
-  expect(existsSync(path.join(seed.outputDir, '.pending-delete'))).toBe(false);
-  expect(await listedFiles(page)).toContain(seed.summaryFile);
+  // The deleted note's own stem-derived files are gone ...
+  expect(existsSync(seed.summaryFile)).toBe(false);
+  expect(existsSync(seed.transcriptFile)).toBe(false);
+  expect(existsSync(seed.audioFile)).toBe(false);
+  // ... but the title-named draft notes SURVIVE (fail-safe: orphaned, not lost).
+  expect(existsSync(sharedNotes)).toBe(true);
 
   expect(fileSig(realUserDataDir())).toBe(realDirBefore);
 });
