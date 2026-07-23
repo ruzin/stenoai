@@ -262,8 +262,8 @@ export function MeetingsShell({
             )
           ) : (
             <>
-              This removes the transcript, summary, and all associated files. You can undo this for
-              a few seconds after deleting.
+              This will remove the transcript, summary, and all associated files. You can undo this
+              for a few seconds after deleting.
             </>
           )
         }

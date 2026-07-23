@@ -7,6 +7,8 @@ import {
   existsSync,
   readdirSync,
   rmSync,
+  renameSync,
+  chmodSync,
   symlinkSync,
 } from 'fs';
 import path from 'path';
@@ -489,6 +491,156 @@ test('restore of a trash dir with an empty manifest files list fails and keeps t
   expect(existsSync(trashDir)).toBe(true);
   const stillStored = readdirSync(trashDir).filter((n) => n !== 'manifest.json');
   expect(stillStored.length).toBeGreaterThan(0);
+
+  expect(fileSig(realUserDataDir())).toBe(realDirBefore);
+});
+
+/**
+ * cubic #3 — NO-CLOBBER: if a file already sits at a restore target (e.g. the
+ * user re-recorded a note with the same stem while the delete's undo window was
+ * open), restore must refuse and overwrite NOTHING — keeping the trash dir so
+ * neither the trashed copy nor the pre-existing file is lost.
+ */
+test('restore refuses to clobber a pre-existing file at a restore target and keeps the trash dir', async ({
+  launchApp,
+  userDataDir,
+}) => {
+  const realDirBefore = fileSig(realUserDataDir());
+  const seed = seedNote(userDataDir, 'undo-kappa', 'Undo Kappa');
+
+  const { page } = await launchApp();
+
+  const del = await page.evaluate(
+    (m) => (window as StenoWindow).stenoai.meetings.delete(m),
+    seed.meeting,
+  );
+  expect(del.success).toBe(true);
+  const trashId = del.trashId!;
+  const trashDir = path.join(userDataDir, '.trash', trashId);
+
+  // A new file now occupies the summary's original path (the delete moved the
+  // original into trash; this is a DIFFERENT file the restore must not clobber).
+  const sentinel = 'DO-NOT-CLOBBER';
+  writeFileSync(seed.summaryFile, sentinel);
+
+  const res = await page.evaluate(
+    (id) => (window as StenoWindow).stenoai.meetings.restore(id),
+    trashId,
+  );
+  expect(res.success).toBe(false);
+  expect(res.error).toContain('already exists');
+
+  // The pre-existing file is byte-for-byte untouched.
+  expect(readFileSync(seed.summaryFile, 'utf8')).toBe(sentinel);
+  // The trash dir is KEPT with every trashed file still inside (nothing moved).
+  expect(existsSync(trashDir)).toBe(true);
+  const stored = readdirSync(trashDir).filter((n) => n !== 'manifest.json');
+  expect(stored.length).toBeGreaterThan(0);
+  // The other trashed files were NOT restored (PASS 1 returned before any move).
+  expect(existsSync(seed.audioFile)).toBe(false);
+  expect(existsSync(seed.transcriptFile)).toBe(false);
+
+  expect(fileSig(realUserDataDir())).toBe(realDirBefore);
+});
+
+/**
+ * cubic #4 — IDEMPOTENT RETRY: a restore that faulted partway through PASS 2
+ * leaves a PARTIAL restore (some files back at their origin, some still in
+ * trash). Re-running restore must complete: skip the already-restored entries
+ * and move the remainder, then remove the trash dir. Simulated by manually
+ * moving one stored file to its destination before calling restore once.
+ */
+test('restore is idempotent after a partial restore — skips already-restored files and completes', async ({
+  launchApp,
+  userDataDir,
+}) => {
+  const realDirBefore = fileSig(realUserDataDir());
+  const seed = seedNote(userDataDir, 'undo-lambda', 'Undo Lambda');
+  const files = allFiles(seed);
+
+  const { page } = await launchApp();
+
+  const del = await page.evaluate(
+    (m) => (window as StenoWindow).stenoai.meetings.delete(m),
+    seed.meeting,
+  );
+  expect(del.success).toBe(true);
+  const trashId = del.trashId!;
+  const trashDir = path.join(userDataDir, '.trash', trashId);
+
+  // Simulate a prior partial restore: move ONE stored file back to its original
+  // path by hand, leaving the manifest and the rest in trash.
+  const manifest = JSON.parse(readFileSync(path.join(trashDir, 'manifest.json'), 'utf8'));
+  const partial = manifest.files[0] as { from: string; stored: string };
+  mkdirSync(path.dirname(partial.from), { recursive: true });
+  renameSync(path.join(trashDir, partial.stored), partial.from);
+  // Precondition: the moved-back file is at its dest, gone from trash.
+  expect(existsSync(partial.from)).toBe(true);
+  expect(existsSync(path.join(trashDir, partial.stored))).toBe(false);
+
+  // Restore must SKIP the already-restored entry and move the remainder.
+  const res = await page.evaluate(
+    (id) => (window as StenoWindow).stenoai.meetings.restore(id),
+    trashId,
+  );
+  expect(res.success).toBe(true);
+
+  // Every original file is back, and the trash dir is removed.
+  for (const f of files) expect(existsSync(f)).toBe(true);
+  expect(existsSync(trashDir)).toBe(false);
+
+  expect(fileSig(realUserDataDir())).toBe(realDirBefore);
+});
+
+/**
+ * cubic #2 — DELETE ROLLBACK / fail-closed: a genuine move failure on a VALIDATED
+ * source must fail the delete (success:false) and leave the originals in place,
+ * never report success while files are half-moved (which a later purge would
+ * orphan). We inject the failure model-free by making the trash ROOT read-only,
+ * so the handler's lazy `mkdirSync(trashDir)` throws on the first validated move.
+ * Skipped where the OS doesn't enforce dir read-only perms (Windows / root).
+ */
+test('delete fails closed (success:false, originals intact) when a validated source cannot be moved', async ({
+  launchApp,
+  userDataDir,
+}) => {
+  const realDirBefore = fileSig(realUserDataDir());
+  const seed = seedNote(userDataDir, 'undo-mu', 'Undo Mu');
+  const files = allFiles(seed);
+
+  // Pre-create the trash root read-only so the handler can't create <id>/ inside
+  // it. Probe enforcement from this (same-uid) process — if we can still write,
+  // the OS ignores the perm bit and the injection wouldn't fire.
+  const trashRoot = path.join(userDataDir, '.trash');
+  mkdirSync(trashRoot, { recursive: true });
+  chmodSync(trashRoot, 0o500);
+  let enforced = true;
+  try {
+    const probe = path.join(trashRoot, '.probe');
+    writeFileSync(probe, 'x');
+    rmSync(probe);
+    enforced = false;
+  } catch {
+    enforced = true;
+  }
+  test.skip(!enforced, 'read-only directory perms not enforced on this platform');
+
+  const { page } = await launchApp();
+
+  const del = await page.evaluate(
+    (m) => (window as StenoWindow).stenoai.meetings.delete(m),
+    seed.meeting,
+  );
+  // Fail-closed: no success, no trashId.
+  expect(del.success).toBe(false);
+  expect(del.trashId).toBeFalsy();
+
+  // Every original file is untouched — nothing was half-moved.
+  for (const f of files) expect(existsSync(f)).toBe(true);
+  // No orphaned trash entry was left behind under the (read-only) root.
+  chmodSync(trashRoot, 0o700); // restore perms so we can inspect + teardown
+  const leftover = readdirSync(trashRoot);
+  expect(leftover.filter((n) => !n.startsWith('.')).length).toBe(0);
 
   expect(fileSig(realUserDataDir())).toBe(realDirBefore);
 });

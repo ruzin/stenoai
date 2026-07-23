@@ -45,6 +45,13 @@ function UndoDeleteToastItem({
   const [progress, setProgress] = React.useState(remainingAtMount / UNDO_WINDOW_MS);
 
   React.useEffect(() => {
+    // SUSPEND the expiry timer while a restore is in flight — an expiring
+    // countdown must never purge a note that's mid-restore (#234). When the
+    // restore settles the entry is either removed (success) or re-armed (failure,
+    // which bumps createdAt → this effect re-runs with a fresh window).
+    if (entry.restoring) {
+      return;
+    }
     if (remainingAtMount <= 0) {
       // Window already elapsed before this mount — expire immediately.
       onExpireRef.current();
@@ -58,7 +65,7 @@ function UndoDeleteToastItem({
       clearTimeout(timer);
       cancelAnimationFrame(raf);
     };
-  }, [remainingAtMount]);
+  }, [remainingAtMount, entry.restoring]);
 
   const name = entry.meeting?.session_info?.name?.trim();
 
@@ -78,20 +85,29 @@ function UndoDeleteToastItem({
       <div className="flex items-center gap-2.5 px-3 py-2.5">
         <Trash2 size={14} style={{ color: 'var(--fg-2)', flexShrink: 0 }} />
         <div className="min-w-0 flex-1">
-          <div className="text-[13px] font-medium">Note deleted</div>
-          {name && (
+          <div className="text-[13px] font-medium">
+            {entry.restoreFailed ? 'Restore failed' : 'Note deleted'}
+          </div>
+          {entry.restoreFailed ? (
             <div className="truncate text-[12px]" style={{ color: 'var(--fg-2)' }}>
-              {name}
+              Couldn&rsquo;t restore{name ? ` “${name}”` : ''} — try Undo again.
             </div>
+          ) : (
+            name && (
+              <div className="truncate text-[12px]" style={{ color: 'var(--fg-2)' }}>
+                {name}
+              </div>
+            )
           )}
         </div>
         <button
           type="button"
           onClick={onUndo}
-          className="cursor-pointer rounded-full border-0 px-2.5 py-1 text-[12px] font-medium"
+          disabled={entry.restoring}
+          className="cursor-pointer rounded-full border-0 px-2.5 py-1 text-[12px] font-medium disabled:cursor-default disabled:opacity-60"
           style={{ background: 'var(--fg-1)', color: 'var(--fg-inverse)' }}
         >
-          Undo
+          {entry.restoring ? 'Restoring…' : 'Undo'}
         </button>
         <button
           type="button"
@@ -121,6 +137,8 @@ function UndoDeleteToastItem({
 export function UndoDeleteToast() {
   const entries = useUndoDeleteStore((s) => s.entries);
   const remove = useUndoDeleteStore((s) => s.remove);
+  const markRestoring = useUndoDeleteStore((s) => s.markRestoring);
+  const rearm = useUndoDeleteStore((s) => s.rearm);
   const restore = useRestoreMeeting();
   const purge = usePurgeTrashedMeeting();
 
@@ -128,10 +146,21 @@ export function UndoDeleteToast() {
   if (!host || entries.length === 0) return null;
 
   const handleUndo = (entry: UndoDeleteEntry) => {
-    // Remove first (unmounts the item, cancelling its expiry timer) so a late
-    // timer can't purge the files we're about to restore.
-    remove(entry.trashId);
-    restore.mutate(entry.trashId);
+    // Do NOT remove the entry up front. Mark it "restoring" so its expiry timer
+    // is SUSPENDED while the restore IPC is in flight — an expiring countdown
+    // must never purge a note that's mid-restore (#234). Only a successful
+    // restore removes the toast; a failed one re-arms it so the user can retry.
+    if (entry.restoring) return; // Guard against a double click while in flight.
+    markRestoring(entry.trashId);
+    restore.mutate(entry.trashId, {
+      onSuccess: () => remove(entry.trashId),
+      onError: () => {
+        // Restore failed — clear "restoring", flag the failure, and restart the
+        // undo window so a retryable toast stays on screen. Removing it here
+        // would strand the still-trashed note for the startup sweep to purge.
+        rearm(entry.trashId);
+      },
+    });
   };
 
   const handleExpire = (entry: UndoDeleteEntry) => {
@@ -142,7 +171,12 @@ export function UndoDeleteToast() {
   return createPortal(
     entries.map((entry) => (
       <UndoDeleteToastItem
-        key={entry.trashId}
+        // Include createdAt in the key so a re-arm (failed restore bumps
+        // createdAt) REMOUNTS the item, resetting its countdown + progress bar to
+        // a fresh window cleanly — no in-effect setState. A plain markRestoring
+        // (createdAt unchanged) keeps the same key, so the item stays mounted and
+        // just suspends its timer.
+        key={`${entry.trashId}:${entry.createdAt}`}
         entry={entry}
         onUndo={() => handleUndo(entry)}
         onExpire={() => handleExpire(entry)}

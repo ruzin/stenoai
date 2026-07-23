@@ -1141,7 +1141,19 @@ function moveFileWithFallback(src, dest) {
   } catch (err) {
     if (err && err.code === 'EXDEV') {
       fs.copyFileSync(src, dest);
-      fs.unlinkSync(src);
+      try {
+        fs.unlinkSync(src);
+      } catch (unlinkErr) {
+        // The copy succeeded but the source couldn't be removed. Leaving `dest`
+        // in place would create an untracked duplicate (two copies of the same
+        // user file) — remove the copy best-effort so the source stays the
+        // single source of truth, then rethrow so the caller treats this as a
+        // failed move.
+        try {
+          fs.unlinkSync(dest);
+        } catch (_) {}
+        throw unlinkErr;
+      }
     } else {
       throw err;
     }
@@ -1243,8 +1255,25 @@ function purgeAllTrashOnLaunch() {
         console.warn(`Skipping non-directory trash entry (preserved): ${entryPath}`);
         continue;
       }
-      if (!fs.existsSync(path.join(entryPath, 'manifest.json'))) {
+      const manifestPath = path.join(entryPath, 'manifest.json');
+      if (!fs.existsSync(manifestPath)) {
         console.warn(`Skipping unmanifested trash entry (preserved): ${entryPath}`);
+        continue;
+      }
+      // Validate the manifest CONTENT, not just its presence (Codex): a delete
+      // that crashed mid-write could leave a partial/corrupt manifest.json, and
+      // purging off `existsSync` alone would then hard-delete a dir whose files
+      // can no longer be accounted for. Only purge when the manifest parses to
+      // an object carrying a `files` array; otherwise PRESERVE it (skip + log).
+      let manifestValid = false;
+      try {
+        const parsed = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+        manifestValid = !!parsed && typeof parsed === 'object' && Array.isArray(parsed.files);
+      } catch (_) {
+        manifestValid = false;
+      }
+      if (!manifestValid) {
+        console.warn(`Skipping trash entry with invalid manifest (preserved): ${entryPath}`);
         continue;
       }
       fs.rmSync(entryPath, { recursive: true, force: true });
@@ -4002,36 +4031,72 @@ ipcMain.handle('delete-meeting', async (event, meetingData) => {
     const trashId = `${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
     const trashDir = path.join(trashRoot, trashId);
 
+    // Reject a symlinked/non-directory trash root BEFORE moving anything (Codex —
+    // shared guard, see isTrashRootSafe). restore + purge already guard this;
+    // delete must too, or a `.trash` symlinked at an allowed dir could redirect
+    // the moves out of the sandbox. Fail before touching any user file.
+    if (!isTrashRootSafe()) {
+      return { success: false, error: 'Invalid trash root' };
+    }
+
     console.log('Moving meeting files to trash:', uniquePaths);
 
     const movedFiles = [];
-    for (const file of uniquePaths) {
-      try {
-        if (!fs.existsSync(file)) {
-          console.log(`File not found (already deleted?): ${file}`);
-          continue;
-        }
-        // Reject non-regular-file sources (Codex C2 — dir/symlink escalation).
-        // A symlink's lstat().isFile() is false, so this rejects BOTH a
-        // directory and a symlink: a crafted meeting must not move a whole dir
-        // (or a link to one) into trash where purge would rm -rf it.
-        let srcStat;
+
+    // Roll every already-moved file back to its origin (best-effort). Returns
+    // true only if EVERY file made it home; if any rollback move fails, that
+    // file still lives inside trashDir, so the dir must be PRESERVED
+    // (accountable + unmanifested → the startup sweep won't touch it) rather
+    // than rmSync'd into oblivion.
+    const rollbackMoves = () => {
+      let allRolledBack = true;
+      for (const mf of movedFiles) {
         try {
-          srcStat = fs.lstatSync(file);
-        } catch (_) {
-          continue; // Raced away between existsSync and lstat — nothing to move.
+          moveFileWithFallback(path.join(trashDir, mf.stored), mf.from);
+        } catch (rbErr) {
+          allRolledBack = false;
+          console.error(`Rollback failed for ${mf.stored} -> ${mf.from}:`, rbErr.message);
         }
-        if (!srcStat.isFile()) {
-          console.warn(`Skipping non-regular-file source (not moved): ${file}`);
-          continue;
-        }
-        // Containment (Codex C2): the source must live in an allowed base's
-        // output/recordings/transcripts folder, not just anywhere under the
-        // broad allowed roots — rejects e.g. audio_file: <userData>/config.json.
-        if (!isAllowedMeetingSource(file, allowedBaseDirs)) {
-          console.warn(`Skipping source outside allowed meeting folders (not moved): ${file}`);
-          continue;
-        }
+      }
+      return allRolledBack;
+    };
+
+    for (const file of uniquePaths) {
+      // --- Deliberate SKIPS (not failures): a missing / non-regular / symlinked
+      // / out-of-folder source is left in place and the delete continues. These
+      // are intentional `continue`s covered by existing tests — never a rollback.
+      if (!fs.existsSync(file)) {
+        console.log(`File not found (already deleted?): ${file}`);
+        continue;
+      }
+      // Reject non-regular-file sources (Codex C2 — dir/symlink escalation).
+      // A symlink's lstat().isFile() is false, so this rejects BOTH a
+      // directory and a symlink: a crafted meeting must not move a whole dir
+      // (or a link to one) into trash where purge would rm -rf it.
+      let srcStat;
+      try {
+        srcStat = fs.lstatSync(file);
+      } catch (_) {
+        continue; // Raced away between existsSync and lstat — nothing to move.
+      }
+      if (!srcStat.isFile()) {
+        console.warn(`Skipping non-regular-file source (not moved): ${file}`);
+        continue;
+      }
+      // Containment (Codex C2): the source must live in an allowed base's
+      // output/recordings/transcripts folder, not just anywhere under the
+      // broad allowed roots — rejects e.g. audio_file: <userData>/config.json.
+      if (!isAllowedMeetingSource(file, allowedBaseDirs)) {
+        console.warn(`Skipping source outside allowed meeting folders (not moved): ${file}`);
+        continue;
+      }
+
+      // --- Past the skips: this is a VALIDATED source we intend to move. A
+      // throw during the move (or its setup) is a REAL failure (cubic #2), NOT a
+      // skip: roll back everything already moved and fail the whole delete, so a
+      // later purge can never orphan the un-moved remainder while success was
+      // (wrongly) reported. Mirrors the manifest-write rollback below.
+      try {
         // Create the trash dir lazily on the first existing file, so a delete
         // that finds nothing on disk doesn't leave an empty trash dir behind.
         // It must exist BEFORE we validate `dest` — validateSafeFilePath
@@ -4043,6 +4108,8 @@ ipcMain.handle('delete-meeting', async (event, meetingData) => {
         const stored = `${movedFiles.length}__${path.basename(file)}`;
         const dest = path.join(trashDir, stored);
         if (!validateSafeFilePath(dest, allowedBaseDirs)) {
+          // A trash destination outside the allowed dirs is a pre-move safety
+          // reject, not a move fault — skip this source (matches prior behavior).
           console.error(`Security: Blocked trash destination outside allowed directories: ${dest}`);
           continue;
         }
@@ -4050,7 +4117,18 @@ ipcMain.handle('delete-meeting', async (event, meetingData) => {
         movedFiles.push({ from: file, stored });
         console.log(`Trashed: ${file} -> ${dest}`);
       } catch (err) {
-        console.warn(`Could not trash ${file}:`, err.message);
+        console.error(`Move failed for a validated source — rolling back: ${file}:`, err.message);
+        const allRolledBack = rollbackMoves();
+        if (allRolledBack) {
+          try {
+            fs.rmSync(trashDir, { recursive: true, force: true });
+          } catch (_) {}
+        } else {
+          console.error(
+            `Preserving trash dir (rollback incomplete, files still inside): ${trashDir}`,
+          );
+        }
+        return { success: false, error: `Failed to move file to trash: ${err.message}` };
       }
     }
 
@@ -4068,22 +4146,21 @@ ipcMain.handle('delete-meeting', async (event, meetingData) => {
     // return a trashId whose files can't be restored.
     try {
       const manifest = { trashId, deletedAt: Date.now(), meeting, files: movedFiles };
-      fs.writeFileSync(path.join(trashDir, 'manifest.json'), JSON.stringify(manifest, null, 2), 'utf8');
+      // Write ATOMICALLY (Codex): serialize to a temp file, then renameSync into
+      // place. A rename is atomic on the same filesystem (temp + final both live
+      // in trashDir), so the startup sweep can never observe a half-written
+      // manifest.json and hard-delete the dir off a partial write.
+      const manifestPath = path.join(trashDir, 'manifest.json');
+      const manifestTmp = path.join(trashDir, `manifest.json.tmp-${crypto.randomBytes(4).toString('hex')}`);
+      fs.writeFileSync(manifestTmp, JSON.stringify(manifest, null, 2), 'utf8');
+      fs.renameSync(manifestTmp, manifestPath);
     } catch (err) {
       console.error('Could not write trash manifest — rolling back moved files:', err.message);
-      let allRolledBack = true;
-      for (const mf of movedFiles) {
-        try {
-          moveFileWithFallback(path.join(trashDir, mf.stored), mf.from);
-        } catch (rbErr) {
-          allRolledBack = false;
-          console.error(`Rollback failed for ${mf.stored} -> ${mf.from}:`, rbErr.message);
-        }
-      }
       // Only remove the trash dir if EVERY file made it back to its origin
       // (Codex C3). If any rollback move failed, the file still lives inside the
       // trash dir — KEEP it (accountable, unmanifested → the startup sweep won't
       // touch it) rather than rmSync it into oblivion.
+      const allRolledBack = rollbackMoves();
       if (allRolledBack) {
         try {
           fs.rmSync(trashDir, { recursive: true, force: true });
@@ -4161,11 +4238,21 @@ ipcMain.handle('restore-meeting', async (event, trashId) => {
       };
     }
 
-    // Two-phase restore (Codex C4). PASS 1 VALIDATES every entry and moves
-    // nothing; if any entry fails, we return early having touched no user file,
-    // so the failure is clean and fully retryable (the trash dir is intact).
-    // PASS 2 performs the moves only once all entries have validated.
+    // Two-phase restore (Codex C4). PASS 1 VALIDATES + CLASSIFIES every entry and
+    // moves nothing; if any entry fails, we return early having touched no user
+    // file, so the failure is clean and the trash dir is intact. PASS 2 performs
+    // the planned moves only once all entries have been classified.
+    //
+    // No-clobber + idempotent retry (cubic #3/#4): classify each entry by whether
+    // its trashed source (`stored`) and its restore target (`dest`) exist:
+    //   stored + no dest  -> normal restore (plan it)
+    //   stored + dest     -> CONFLICT: refuse, keep the dir, overwrite NOTHING
+    //   no stored + dest  -> already restored by a prior partial attempt: SKIP,
+    //                        which is what makes a retry after a mid-PASS-2 fault
+    //                        idempotent and able to complete
+    //   no stored + no dest -> genuinely lost: fail, keep the dir
     const plan = [];
+    let skippedAlreadyRestored = 0;
     for (const entry of manifest.files) {
       const storedName = entry && entry.stored;
       // `stored` must be a plain basename living inside the trash dir. The
@@ -4188,8 +4275,41 @@ ipcMain.handle('restore-meeting', async (event, trashId) => {
         };
       }
       const stored = path.join(trashDir, storedName);
-      // Confirm the stored source really resolves inside the trash dir (a
-      // symlinked entry would resolve out and must be rejected).
+      const dest = entry.from;
+
+      const storedExists = fs.existsSync(stored);
+      const destExists = fs.existsSync(dest);
+
+      // CONFLICT: a file already sits at the restore target. Never clobber it —
+      // move nothing and keep the trash dir so neither copy is lost (cubic #3).
+      if (storedExists && destExists) {
+        console.error(`Restore: target already exists, refusing to clobber: ${dest}`);
+        return {
+          success: false,
+          error: 'restore target already exists',
+          meeting: manifest.meeting,
+        };
+      }
+      // ALREADY-RESTORED: a prior partial attempt moved this one out of trash and
+      // into place. Skip it so a retry is idempotent and can finish (cubic #4).
+      if (!storedExists && destExists) {
+        console.warn(`Restore: entry already at destination (prior partial restore), skipping: ${dest}`);
+        skippedAlreadyRestored++;
+        continue;
+      }
+      // GENUINELY LOST: neither in trash nor restored. Fail, keep the dir.
+      if (!storedExists && !destExists) {
+        console.error(`Restore: trashed file missing, cannot restore: ${stored}`);
+        return {
+          success: false,
+          error: 'trashed file missing',
+          meeting: manifest.meeting,
+        };
+      }
+
+      // NORMAL (storedExists && !destExists): the security checks are only
+      // meaningful for a present source. Confirm `stored` really resolves inside
+      // the trash dir (a symlinked entry would resolve out and must be rejected).
       let realStored;
       try {
         realStored = fs.realpathSync(stored);
@@ -4204,15 +4324,6 @@ ipcMain.handle('restore-meeting', async (event, trashId) => {
           meeting: manifest.meeting,
         };
       }
-      if (!fs.existsSync(stored)) {
-        console.error(`Restore: stored file missing, cannot restore: ${stored}`);
-        return {
-          success: false,
-          error: 'Trashed file missing, cannot restore',
-          meeting: manifest.meeting,
-        };
-      }
-      const dest = entry.from;
       // Re-create the original parent dir first (so realpath in
       // validateSafeFilePath can canonicalize it) and validate the restore
       // target is still within an allowed base. Creating an empty parent dir is
@@ -4231,11 +4342,12 @@ ipcMain.handle('restore-meeting', async (event, trashId) => {
       plan.push({ stored, dest });
     }
 
-    // PASS 2: every entry validated — move them all. A throw here is a genuine
-    // mid-move I/O fault (rare); stop and KEEP the trash dir. RESIDUAL: unlike
-    // PASS 1, a fault partway through PASS 2 can leave a PARTIAL restore (some
-    // files back at their origin, some still in trash). We keep the dir so the
-    // manifest still accounts for the remainder and nothing is destroyed.
+    // PASS 2: every entry classified — move the planned ones. A throw here is a
+    // genuine mid-move I/O fault (rare); stop and KEEP the trash dir. Unlike a
+    // prior version this is now RETRYABLE: a fault partway through leaves a
+    // PARTIAL restore (some files back, some still in trash), and re-running
+    // restore re-classifies the already-moved ones as "already restored" (SKIP)
+    // and moves the remainder — so a retry completes instead of erroring.
     for (const { stored, dest } of plan) {
       try {
         moveFileWithFallback(stored, dest);
@@ -4249,7 +4361,12 @@ ipcMain.handle('restore-meeting', async (event, trashId) => {
       }
     }
 
-    // Every entry restored cleanly — the trash entry is now just the manifest.
+    // Every entry is accounted for — those planned were just moved, and any
+    // already-restored ones were skipped. The trash entry is now just the
+    // manifest (plus any leftover), so remove it.
+    console.log(
+      `Restore complete: ${plan.length} moved, ${skippedAlreadyRestored} already restored.`,
+    );
     fs.rmSync(trashDir, { recursive: true, force: true });
 
     return { success: true, meeting: manifest.meeting };
