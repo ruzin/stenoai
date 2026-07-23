@@ -111,6 +111,26 @@ class TranscribeDiarisedTimestampTests(unittest.TestCase):
         self.assertFalse(result["is_diarised"])
         self.assertIsNone(result["diarised_text"])
 
+    def test_textonly_fallback_has_no_fabricated_timestamps(self):
+        # An OpenAI-compatible text-only endpoint yields no per-segment
+        # timestamps; each channel returns a single whole-channel segment at
+        # start=end=0. Sorting those by start would collapse both channels to
+        # time 0 and always emit [You] before [Others]. Instead we keep the
+        # speaker labels but omit the fabricated [00:00] timestamp so we don't
+        # silently imply a chronology we don't actually have.
+        self.transcriber.transcribe_audio = Mock(side_effect=[
+            {"text": "Hi from me.", "segments": [{"text": "Hi from me.", "start": 0.0, "end": 0.0}]},
+            {"text": "And from them.", "segments": [{"text": "And from them.", "start": 0.0, "end": 0.0}]},
+        ])
+        result = self.transcriber.transcribe_diarised(self.audio_path)
+        self.assertTrue(result["is_diarised"])
+        self.assertEqual(
+            result["diarised_text"],
+            "[You] Hi from me.\n\n[Others] And from them.",
+        )
+        # No fabricated [MM:SS] marker anywhere in the diarised text.
+        self.assertNotIn("[00:00]", result["diarised_text"])
+
 
 class TokenJaccardTests(unittest.TestCase):
     def test_identical_strings_score_one(self):

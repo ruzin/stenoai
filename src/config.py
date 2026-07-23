@@ -1072,8 +1072,10 @@ class Config:
 
 
     def get_transcription_engine(self) -> str:
-        """Return the active ASR engine ('parakeet' or 'whisper').
+        """Return the active ASR engine.
 
+        One of VALID_TRANSCRIPTION_ENGINES: 'parakeet' or 'whisper' (both
+        on-device) or 'openai-asr' (an OpenAI-compatible cloud endpoint).
         Falls back to 'parakeet' for unknown values. The renderer's
         Settings → Transcribe tab writes this; the live VAD pipeline reads
         it to pick which transcribe_samples() implementation to import.
@@ -1131,8 +1133,18 @@ class Config:
         return self._config.get("openai_asr_api_url", "https://api.openai.com/v1")
 
     def set_openai_asr_api_url(self, url: str) -> bool:
-        """Set the base URL for the OpenAI-compatible STT endpoint."""
-        self._config["openai_asr_api_url"] = (url or "").strip()
+        """Set the base URL for the OpenAI-compatible STT endpoint.
+
+        Rejects a blank/whitespace-only URL (mirrors set_openai_asr_model): an
+        empty base URL can't form a valid ``/audio/transcriptions`` request, so
+        persisting it would leave the endpoint unusable. Returns False and keeps
+        the prior value instead. The renderer treats a cleared field as
+        "reset to default" and sends the default URL explicitly.
+        """
+        if not url or not url.strip():
+            logger.error("openai_asr_api_url must not be empty")
+            return False
+        self._config["openai_asr_api_url"] = url.strip()
         return self._save()
 
     def get_openai_asr_api_key(self) -> str:

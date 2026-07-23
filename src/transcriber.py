@@ -455,20 +455,15 @@ class WhisperTranscriber:
     """
 
     def __init__(self, model_size: str = "large-v3-turbo"):
-        if not (PARAKEET_AVAILABLE or WHISPER_CPP_AVAILABLE):
-            raise ImportError(
-                "No ASR backend available. Need parakeet-mlx (Apple Silicon) "
-                "or pywhispercpp (cross-platform). Rebuild the PyInstaller "
-                "bundle or `pip install` the relevant package."
-            )
-        # Kept on the instance so existing callers / logs that read
-        # ``model_size`` and ``backend`` don't change. Backend selection
+        # ``model_size`` / ``backend`` are kept on the instance so existing
+        # callers / logs that read them don't change. Backend selection
         # respects the user-selected engine from Settings → Transcribe
         # (Config.get_transcription_engine). Without this, an arm64 user
         # who picked Whisper would still get Parakeet on the post-stop
         # pass — live and final would silently use different engines
         # and the diarised transcript wouldn't match what they previewed
-        # live. Fallback order when the requested engine isn't installed:
+        # live. Fallback order when the requested on-device engine isn't
+        # installed:
         #   * engine='whisper' but pywhispercpp missing → use Parakeet
         #   * engine='parakeet' but parakeet-mlx missing (x64 Macs) →
         #     fall back to whisper.cpp as before
@@ -484,6 +479,13 @@ class WhisperTranscriber:
             _cfg = None
 
         if requested == "openai-asr":
+            # Cloud ASR is a pure-Python (urllib) REST call and needs NO
+            # bundled local model. The PARAKEET_AVAILABLE / WHISPER_CPP_AVAILABLE
+            # guard below is therefore deliberately NOT applied here: a user who
+            # selected + configured the cloud endpoint must be able to
+            # transcribe even on an install where local ASR can't import
+            # (missing dylib, pruned bundle). The guard runs only for the
+            # on-device engines.
             self.backend = "openai-asr"
             # Read endpoint config once and cache on the instance so the batch
             # transcriber doesn't re-read config on every call. The API key is
@@ -499,19 +501,28 @@ class WhisperTranscriber:
                 self._openai_asr_api_url = "https://api.openai.com/v1"
                 self._openai_asr_api_key = ""
                 self._openai_asr_model = "whisper-1"
-        elif requested == "whisper" and WHISPER_CPP_AVAILABLE:
-            self.backend = "whisper.cpp"
-            self._load_whisper_cpp()
-        elif PARAKEET_AVAILABLE:
-            self.backend = "parakeet-tdt-v3"
+            logger.info("ASR engine selected: requested=openai-asr using=openai-asr")
         else:
-            self.backend = "whisper.cpp"
-            self._load_whisper_cpp()
-        fallback = (self.backend == "whisper.cpp") != (requested == "whisper")
-        logger.info(
-            "ASR engine selected: requested=%s using=%s fallback=%s",
-            requested, self.backend, fallback,
-        )
+            # On-device engines require a bundled ASR backend to be importable.
+            if not (PARAKEET_AVAILABLE or WHISPER_CPP_AVAILABLE):
+                raise ImportError(
+                    "No ASR backend available. Need parakeet-mlx (Apple Silicon) "
+                    "or pywhispercpp (cross-platform). Rebuild the PyInstaller "
+                    "bundle or `pip install` the relevant package."
+                )
+            if requested == "whisper" and WHISPER_CPP_AVAILABLE:
+                self.backend = "whisper.cpp"
+                self._load_whisper_cpp()
+            elif PARAKEET_AVAILABLE:
+                self.backend = "parakeet-tdt-v3"
+            else:
+                self.backend = "whisper.cpp"
+                self._load_whisper_cpp()
+            fallback = (self.backend == "whisper.cpp") != (requested == "whisper")
+            logger.info(
+                "ASR engine selected: requested=%s using=%s fallback=%s",
+                requested, self.backend, fallback,
+            )
         self._ensure_ffmpeg_in_path()
 
     def _load_whisper_cpp(self) -> None:
@@ -1469,16 +1480,46 @@ class WhisperTranscriber:
             # Chronologically interleave segments from both channels and
             # collapse runs of consecutive same-speaker segments into a
             # single labelled turn.
-            tagged: list[tuple[float, str, str]] = []
+            #
+            # Real ASR backends (parakeet / whisper.cpp / the openai-asr
+            # verbose_json pass) emit per-segment timestamps, so sorting by
+            # ``start`` orders speakers by who actually spoke first. But the
+            # openai-asr TEXT-ONLY fallback (an endpoint that doesn't support
+            # verbose_json) has no timestamps and synthesises a single
+            # whole-channel segment at start=end=0. Sorting THOSE by start would
+            # be meaningless: both channels sit at 0, so a stable sort would
+            # always emit [You] before [Others] regardless of order — and in a
+            # mixed case a timeless (0.0) channel would leapfrog a real-timed
+            # one to the front. So: only sort when a channel carries real
+            # timing, and keep timeless segments in insertion order after any
+            # timed content rather than fabricating a chronology (and, below,
+            # omit the misleading [00:00] timestamp for those turns).
+            def _has_real_timing(segs) -> bool:
+                # A real segment always advances past 0 (nonzero start or end);
+                # the text-only fallback's synthetic segment is start=end=0.
+                return any(
+                    (float(s.get("start") or 0.0) > 0.0)
+                    or (float(s.get("end") or 0.0) > 0.0)
+                    for s in segs
+                )
+
+            mic_timed = _has_real_timing(mic_segments)
+            sys_timed = _has_real_timing(system_segments)
+
+            tagged: list[tuple[float, str, str, bool]] = []
             for s in mic_segments:
                 text = (s.get("text") or "").strip()
                 if text:
-                    tagged.append((float(s.get("start") or 0.0), "You", text))
+                    tagged.append((float(s.get("start") or 0.0), "You", text, mic_timed))
             for s in system_segments:
                 text = (s.get("text") or "").strip()
                 if text:
-                    tagged.append((float(s.get("start") or 0.0), "Others", text))
-            tagged.sort(key=lambda t: t[0])
+                    tagged.append((float(s.get("start") or 0.0), "Others", text, sys_timed))
+            if mic_timed or sys_timed:
+                # Timed segments sort by start; timeless (synthetic 0.0)
+                # segments sort to the end (not the front), stable within each
+                # group. ``not timed`` → False(0) before True(1).
+                tagged.sort(key=lambda t: (not t[3], t[0]))
 
             # Each turn carries the start offset of its FIRST segment so the
             # diarised transcript can be timestamped. Only diarised_text is
@@ -1488,21 +1529,27 @@ class WhisperTranscriber:
             # or transcript_text), so the summariser strips these [MM:SS] markers
             # back out on the way in (summarizer._strip_leading_timestamps) —
             # summarisation is unaffected by this display feature.
-            turns: list[tuple[float, str, list[str]]] = []
-            for start, speaker, text in tagged:
+            turns: list[tuple[float, str, list[str], bool]] = []
+            for start, speaker, text, timed in tagged:
                 if turns and turns[-1][1] == speaker:
                     turns[-1][2].append(text)
                 else:
-                    turns.append((start, speaker, [text]))
+                    turns.append((start, speaker, [text], timed))
 
-            plain_parts = [' '.join(parts) for _start, _speaker, parts in turns]
+            plain_parts = [' '.join(parts) for _start, _speaker, parts, _timed in turns]
             plain_text = "\n\n".join(plain_parts) if plain_parts else SILENCE_SENTINEL
 
             is_diarised = bool(mic_segments) and bool(system_segments)
             if is_diarised:
+                # Emit the [MM:SS] prefix only for turns whose channel carried
+                # real timing. A timeless turn (text-only endpoint) gets the
+                # speaker label but no fabricated timestamp — the renderer's
+                # parser already handles timestamp-less diarised lines.
                 labelled_parts = [
-                    f"[{_format_timestamp(start)}] [{speaker}] {' '.join(parts)}"
-                    for start, speaker, parts in turns
+                    (f"[{_format_timestamp(start)}] [{speaker}] {' '.join(parts)}"
+                     if timed
+                     else f"[{speaker}] {' '.join(parts)}")
+                    for start, speaker, parts, timed in turns
                 ]
                 diarised_text = "\n\n".join(labelled_parts)
             else:

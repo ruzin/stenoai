@@ -349,6 +349,12 @@ function TranscriptionModelList() {
   );
 }
 
+// Registry defaults, mirrored from src/config.py's _get_default_config. Clearing
+// a field resets to these rather than persisting a blank value (the backend
+// rejects a blank URL/model — see set_openai_asr_api_url / set_openai_asr_model).
+const DEFAULT_OPENAI_ASR_URL = 'https://api.openai.com/v1';
+const DEFAULT_OPENAI_ASR_MODEL = 'whisper-1';
+
 /**
  * Config sub-panel shown when the OpenAI-compatible cloud ASR engine is
  * active. The API URL + model round-trip through config.json; the API key is
@@ -390,7 +396,14 @@ function OpenAiAsrConfig() {
           value={apiUrl}
           onChange={(e) => setApiUrl(e.target.value)}
           placeholder="https://api.openai.com/v1"
-          onBlur={() => apiUrl && setConfig.mutate({ api_url: apiUrl })}
+          onBlur={() => {
+            // A cleared (or whitespace-only) field resets to the default URL
+            // rather than trying to persist a blank the backend would reject —
+            // otherwise the stale value would return on the next refresh.
+            const next = apiUrl.trim() || DEFAULT_OPENAI_ASR_URL;
+            if (next !== apiUrl) setApiUrl(next);
+            setConfig.mutate({ api_url: next });
+          }}
           className={COMPACT_INPUT}
         />
       </div>
@@ -405,7 +418,13 @@ function OpenAiAsrConfig() {
           value={model}
           onChange={(e) => setModel(e.target.value)}
           placeholder="whisper-1"
-          onBlur={() => model && setConfig.mutate({ model })}
+          onBlur={() => {
+            // Same as the URL: a cleared field resets to the default model
+            // rather than persisting a blank (which the backend rejects).
+            const next = model.trim() || DEFAULT_OPENAI_ASR_MODEL;
+            if (next !== model) setModel(next);
+            setConfig.mutate({ model: next });
+          }}
           className={COMPACT_INPUT}
         />
       </div>
