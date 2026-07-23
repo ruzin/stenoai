@@ -1447,6 +1447,56 @@ def parakeet_status_cmd():
     }))
 
 
+@cli.command(name='get-openai-asr-config')
+def get_openai_asr_config_cmd():
+    """Return the current OpenAI-compatible ASR endpoint config (non-secret)."""
+    from src.config import get_config
+    config = get_config()
+    print(json.dumps({
+        "success": True,
+        "api_url": config.get_openai_asr_api_url(),
+        # Never return the actual key. This reflects only whether the env-var
+        # key is present in THIS process; the Electron main process overrides
+        # it with its safeStorage-backed hasOpenAiAsrKey() check, which is the
+        # authoritative source of truth.
+        "api_key_set": bool(config.get_openai_asr_api_key()),
+        "model": config.get_openai_asr_model(),
+    }))
+
+
+@cli.command(name='set-openai-asr-config')
+@click.option('--api-url', default=None, help='Base URL of the OpenAI-compatible STT endpoint')
+@click.option('--model', default=None, help='Model name (e.g. whisper-1)')
+def set_openai_asr_config_cmd(api_url, model):
+    """Persist OpenAI-compatible ASR endpoint settings (url/model only).
+
+    The API key is intentionally NOT accepted here -- it is a credential and
+    is stored encrypted by the Electron main process (safeStorage), never
+    passed through argv or written to config.json. Omit an option to leave it
+    unchanged.
+    """
+    from src.config import get_config
+    config = get_config()
+    errors = []
+
+    if api_url is not None:
+        if not config.set_openai_asr_api_url(api_url):
+            errors.append("Failed to save api_url")
+    if model is not None:
+        if not config.set_openai_asr_model(model):
+            errors.append("Failed to save model")
+
+    if errors:
+        print(json.dumps({"success": False, "error": "; ".join(errors)}))
+    else:
+        print(json.dumps({
+            "success": True,
+            "api_url": config.get_openai_asr_api_url(),
+            "api_key_set": bool(config.get_openai_asr_api_key()),
+            "model": config.get_openai_asr_model(),
+        }))
+
+
 @cli.command(name='onnx-selftest')
 def onnx_selftest_cmd():
     """Prove ONNX Runtime's native libraries load + run inside the bundle.

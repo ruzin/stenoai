@@ -477,11 +477,29 @@ class WhisperTranscriber:
 
         try:
             from src.config import get_config
-            requested = get_config().get_transcription_engine()
+            _cfg = get_config()
+            requested = _cfg.get_transcription_engine()
         except Exception:
             requested = "parakeet"
+            _cfg = None
 
-        if requested == "whisper" and WHISPER_CPP_AVAILABLE:
+        if requested == "openai-asr":
+            self.backend = "openai-asr"
+            # Read endpoint config once and cache on the instance so the batch
+            # transcriber doesn't re-read config on every call. The API key is
+            # env-only (STENOAI_OAI_API_KEY, injected by Electron via
+            # safeStorage) -- never read from config.json. Fall back to empty
+            # strings; _run_openai_asr surfaces a useful error if unset.
+            try:
+                self._openai_asr_api_url = _cfg.get_openai_asr_api_url() if _cfg else "https://api.openai.com/v1"
+                self._openai_asr_api_key = _cfg.get_openai_asr_api_key() if _cfg else ""
+                self._openai_asr_model = _cfg.get_openai_asr_model() if _cfg else "whisper-1"
+            except Exception as e:
+                logger.warning("Could not read openai-asr config: %s", e)
+                self._openai_asr_api_url = "https://api.openai.com/v1"
+                self._openai_asr_api_key = ""
+                self._openai_asr_model = "whisper-1"
+        elif requested == "whisper" and WHISPER_CPP_AVAILABLE:
             self.backend = "whisper.cpp"
             self._load_whisper_cpp()
         elif PARAKEET_AVAILABLE:
@@ -664,9 +682,212 @@ class WhisperTranscriber:
 
     def _run_backend(self, audio_filepath: Path, language: str) -> dict:
         """Dispatch to whichever ASR backend is active for this instance."""
+        if self.backend == "openai-asr":
+            return self._run_openai_asr(audio_filepath, language)
         if self.backend == "parakeet-tdt-v3":
             return self._run_parakeet(audio_filepath, language)
         return self._run_whisper_cpp(audio_filepath, language)
+
+    # ------------------------------------------------------------------
+    # OpenAI-compatible Speech-to-Text REST backend
+    # ------------------------------------------------------------------
+
+    def _run_openai_asr(self, audio_filepath: Path, language: str) -> dict:
+        """POST audio to an OpenAI-compatible /audio/transcriptions endpoint.
+
+        Uses only Python stdlib (urllib + email) -- no new runtime dependency.
+
+        Return shape is identical to ``_run_parakeet`` / ``_run_whisper_cpp``
+        so the rest of the pipeline is unchanged.
+
+        Two-pass strategy:
+        1. Try ``response_format=verbose_json`` to get per-segment timestamps.
+        2. If the endpoint returns a non-200 or malformed response, fall back
+           to ``response_format=text`` and synthesise a single full-text
+           segment with no timestamps.
+
+        Errors surface as a raised exception so ``transcribe_audio``'s outer
+        try/except records them as ``transcription_failed`` (audio preserved,
+        reprocessable) rather than silently returning an empty meeting.
+        """
+        import json as _json
+        import mimetypes
+        import os
+        import urllib.error
+        import urllib.parse
+        import urllib.request
+        import uuid
+
+        api_url = (getattr(self, "_openai_asr_api_url", "") or "https://api.openai.com/v1").rstrip("/")
+        api_key = getattr(self, "_openai_asr_api_key", "")
+        model = getattr(self, "_openai_asr_model", "") or "whisper-1"
+
+        if "/audio/transcriptions" not in api_url:
+            if "?" in api_url:
+                parts = urllib.parse.urlsplit(api_url)
+                new_path = parts.path.rstrip("/") + "/audio/transcriptions"
+                endpoint = urllib.parse.urlunsplit((parts.scheme, parts.netloc, new_path, parts.query, parts.fragment))
+            else:
+                endpoint = f"{api_url}/audio/transcriptions"
+        else:
+            endpoint = api_url
+
+        logger.info(
+            "openai-asr: POST %s  model=%s  file=%s",
+            endpoint, model, audio_filepath.name,
+        )
+
+        if not api_key:
+            raise RuntimeError(
+                "openai-asr: No API key configured. "
+                "Set it in Settings > Transcription > OpenAI-compatible ASR."
+            )
+
+        boundary = uuid.uuid4().hex
+        mime_type = mimetypes.guess_type(str(audio_filepath))[0] or "audio/wav"
+
+        def _field(name: str, value: str) -> bytes:
+            return (
+                f"--{boundary}\r\n"
+                f'Content-Disposition: form-data; name="{name}"\r\n\r\n'
+                f"{value}\r\n"
+            ).encode()
+
+        def _file_field_header(name: str, filename: str, ctype: str) -> bytes:
+            return (
+                f"--{boundary}\r\n"
+                f'Content-Disposition: form-data; name="{name}"; filename="{filename}"\r\n'
+                f"Content-Type: {ctype}\r\n\r\n"
+            ).encode()
+
+        class _MultipartStream:
+            def __init__(self, response_format: str):
+                self.prefix_parts = [
+                    _field("model", model),
+                    _field("response_format", response_format),
+                ]
+                if language and language != "auto":
+                    self.prefix_parts.append(_field("language", language))
+                self.prefix_parts.append(_file_field_header("file", audio_filepath.name, mime_type))
+
+                self.prefix_bytes = b"".join(self.prefix_parts)
+                self.suffix_bytes = f"\r\n--{boundary}--\r\n".encode()
+
+                self.file_size = os.path.getsize(audio_filepath)
+                self.total_size = len(self.prefix_bytes) + self.file_size + len(self.suffix_bytes)
+
+            def __iter__(self):
+                yield self.prefix_bytes
+                with open(audio_filepath, "rb") as fh:
+                    while True:
+                        chunk = fh.read(8192 * 8)
+                        if not chunk:
+                            break
+                        yield chunk
+                yield self.suffix_bytes
+
+            def __len__(self):
+                return self.total_size
+
+        headers = {
+            "Content-Type": f"multipart/form-data; boundary={boundary}",
+            "Authorization": f"Bearer {api_key}",
+        }
+
+        # Prevent credential leak to cross-origin redirect targets.
+        class NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+            def redirect_request(self, req, fp, code, msg, hdrs, newurl):
+                old_url = urllib.parse.urlsplit(req.full_url)
+                target_url = urllib.parse.urlsplit(newurl)
+                if (old_url.scheme, old_url.netloc) == (target_url.scheme, target_url.netloc):
+                    # Same-origin redirect. Replay the original POST with its
+                    # body + headers, avoiding urllib's default of dropping
+                    # POST bodies on redirect.
+                    return urllib.request.Request(
+                        newurl,
+                        data=req.data,
+                        headers=req.headers,
+                        method=req.method,
+                        origin_req_host=req.origin_req_host,
+                        unverifiable=True,
+                    )
+                raise urllib.error.HTTPError(
+                    req.full_url, code, f"Cross-origin redirect to {newurl} denied", hdrs, fp
+                )
+        opener = urllib.request.build_opener(NoRedirectHandler)
+
+        def _do_request(response_format: str) -> bytes:
+            stream = _MultipartStream(response_format)
+            req = urllib.request.Request(
+                endpoint,
+                data=stream,
+                headers={**headers, "Content-Length": str(len(stream))},
+                method="POST",
+            )
+            try:
+                with opener.open(req, timeout=300) as resp:
+                    return resp.read()
+            except urllib.error.HTTPError as e:
+                err_body = e.read().decode(errors="replace")[:500]
+                raise RuntimeError(
+                    f"openai-asr HTTP {e.code}: {err_body}"
+                ) from e
+
+        # --- Pass 1: verbose_json (segments + timestamps) ---------------
+        try:
+            raw = _do_request("verbose_json")
+            data = _json.loads(raw.decode())
+            # verbose_json shape: {"text": "...", "segments": [...], ...}
+            raw_text = (data.get("text") or "").strip()
+            raw_segs = data.get("segments") or []
+            detected_lang = data.get("language") or (None if language == "auto" else language)
+            segments = [
+                {
+                    "text": s.get("text", "").strip(),
+                    "start": float(s.get("start") or 0.0),
+                    "end": float(s.get("end") or 0.0),
+                }
+                for s in raw_segs
+                if s.get("text", "").strip()
+            ]
+            logger.info(
+                "openai-asr verbose_json: %d chars, %d segments",
+                len(raw_text), len(segments),
+            )
+            return {
+                "text": raw_text or None,
+                "segments": segments,
+                "duration_seconds": float(data.get("duration") or 0) or None,
+                "detected_language": detected_lang,
+                "detected_language_probability": None,
+            }
+        except Exception as primary_err:
+            fallback = False
+            if isinstance(primary_err, _json.JSONDecodeError):
+                fallback = True
+            elif isinstance(primary_err, RuntimeError) and getattr(primary_err.__cause__, "code", None) in (400, 422, 501):
+                fallback = True
+
+            if not fallback:
+                raise
+
+            logger.warning(
+                "openai-asr verbose_json failed (%s); falling back to text format",
+                primary_err,
+            )
+
+        # --- Pass 2: plain text fallback --------------------------------
+        raw = _do_request("text")
+        text = raw.decode(errors="replace").strip()
+        detected_lang = None if language == "auto" else language
+        logger.info("openai-asr text fallback: %d chars", len(text))
+        return {
+            "text": text or None,
+            "segments": [{"text": text, "start": 0.0, "end": 0.0}] if text else [],
+            "duration_seconds": None,
+            "detected_language": detected_lang,
+            "detected_language_probability": None,
+        }
 
     def _run_parakeet(self, audio_filepath: Path, language: str) -> dict:
         """Call into ``src.parakeet`` and normalise the result shape.
