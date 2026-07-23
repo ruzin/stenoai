@@ -343,6 +343,8 @@ const stenoai = {
 
   notification: {
     close: () => invoke('close-notification-window'),
+    actionClicked: (actionId, notifId) => send('notification-action-clicked', { actionId, notifId }),
+    bodyClicked: (notifId) => send('notification-body-clicked', { notifId }),
   },
 
   // All main-driven events. Every subscribe returns an unsubscribe fn.

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell, systemPreferences, globalShortcut, safeStorage, Tray, Menu, nativeImage, Notification, powerMonitor, net, session, desktopCapturer } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, systemPreferences, globalShortcut, safeStorage, Tray, Menu, nativeImage, powerMonitor, net, session, desktopCapturer } = require('electron');
 
 // Prevent EPIPE crashes when stdout/stderr pipe is broken (e.g. launching terminal closed)
 process.stdout?.on('error', () => {});
@@ -185,6 +185,149 @@ function getOutputDir() {
 
 let mainWindow;
 let notificationWindow;
+
+// ── Custom notification toast ────────────────────────────────────────────────
+// Drop-in replacement for Electron's `Notification` that renders our OWN
+// frameless BrowserWindow toast (renderer route `/notification` →
+// NotificationToast.tsx) instead of an OS banner, so every notification is
+// visually consistent and theme-aware on macOS AND Windows. It mirrors the
+// slice of Electron's Notification API the app relies on:
+//   new Notification({ title, body, actions, iconType })
+//   .show() / .close() / .on('click'|'action'|'close') / static isSupported()
+// Being API-compatible means every existing call site — and
+// trackNotificationLifecycle — keeps working unchanged; they just render a
+// custom UI. See app/renderer/src/components/NotificationToast.tsx for the view.
+//
+// Events (kept identical to Electron's Notification so trackNotificationLifecycle
+// still tells an interaction from a passive dismiss):
+//   'click'  — the toast body was tapped        (renderer → notification-body-clicked)
+//   'action' — an action button was tapped      (renderer → notification-action-clicked, index arg)
+//   'close'  — the toast went away by ANY means (body/action click-through, the
+//              X button, the 15s auto-close, or being superseded)
+//
+// Single-toast semantics: only one toast window exists at a time; showing a new
+// one supersedes (closes) the current one — matching the pre-existing
+// pre-meeting toast.
+//
+// Cross-platform: the window options (transparent, alwaysOnTop, skipTaskbar,
+// focusable:false, hasShadow:false, positioned top-right via workArea) and the
+// setVisibleOnAllWorkspaces/setAlwaysOnTop calls are all valid on macOS AND
+// Windows — the `visibleOnFullScreen` option and the `'screen-saver'` level are
+// macOS-only but are harmlessly ignored on Windows. This is the exact window
+// config the pre-meeting toast already shipped with on both platforms, so
+// there's no new platform-specific surface to gate.
+const { EventEmitter } = require('events');
+
+class Notification extends EventEmitter {
+  constructor(options = {}) {
+    super();
+    this.options = options;
+    this.payload = {
+      id: `n_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
+      title: options.title || '',
+      body: options.body || options.subtitle || '',
+      actions: (options.actions || []).map((a) => ({
+        // Electron actions have no id; key by text (the app's actions are all
+        // single-button with a unique label, so this is stable).
+        id: a.text,
+        text: a.text,
+        type: a.type,
+      })),
+    };
+    if (options.iconType) this.payload.iconType = options.iconType;
+  }
+
+  show() {
+    // Supersede any current toast (single-toast semantics).
+    if (notificationWindow && !notificationWindow.isDestroyed()) {
+      notificationWindow.close();
+    }
+
+    const { screen } = require('electron');
+    const primaryDisplay = screen.getPrimaryDisplay();
+    const { width } = primaryDisplay.workAreaSize;
+    const { x, y } = primaryDisplay.workArea;
+
+    // Capture the window in a local `win` so the ready-to-show / closed
+    // closures below always reference THIS toast's window — never a later one
+    // that superseded it via the module-level `notificationWindow`. Reading the
+    // module-level var inside those closures was the original closure bug: a
+    // fast-following toast reassigned it, and the earlier toast's timers/handlers
+    // then acted on the wrong window (closing the new toast, leaking the old).
+    const win = new BrowserWindow({
+      width: 400,
+      height: 70,
+      x: x + width - 425,
+      y: y + 1,
+      frame: false,
+      transparent: true,
+      alwaysOnTop: true,
+      resizable: false,
+      skipTaskbar: true,
+      focusable: false,
+      hasShadow: false,
+      backgroundColor: '#00000000',
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true,
+        sandbox: true,
+        preload: path.join(__dirname, 'preload.js'),
+      },
+    });
+    notificationWindow = win;
+    win._activeCustomNotification = this;
+    // Set true by close-notification-window / the action+body IPC handlers.
+    // Scoped to this window instance (not a module-level flag) so a superseding
+    // toast can't leak interaction state across windows. Only the pre-meeting
+    // path reads it (to avoid double-counting a renderer-tracked dismiss against
+    // the main-side auto-close dismiss); the other notifications rely on
+    // trackNotificationLifecycle's own click/dismiss bookkeeping.
+    win._analyticsInteracted = false;
+
+    const rendererDist = path.join(__dirname, 'renderer', 'dist', 'index.html');
+    win.loadFile(rendererDist, { hash: '/notification' });
+
+    let autoCloseTimer;
+    // Registered immediately (not inside ready-to-show) so a toast superseded
+    // BEFORE it finishes loading still emits 'close' and clears the module-level
+    // ref — the auto-close timer simply hasn't been armed yet in that case.
+    win.on('closed', () => {
+      if (autoCloseTimer) clearTimeout(autoCloseTimer);
+      this.emit('close');
+      if (notificationWindow === win) notificationWindow = null;
+    });
+
+    win.once('ready-to-show', () => {
+      win.showInactive();
+      win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+      win.setAlwaysOnTop(true, 'screen-saver', 1);
+
+      // Keep the 15s auto-close (matches the pre-existing pre-meeting toast).
+      autoCloseTimer = setTimeout(() => {
+        if (!win.isDestroyed()) win.close();
+      }, 15000);
+
+      win.webContents.send('show-notification', this.payload);
+    });
+  }
+
+  close() {
+    // Only act if we're still the active toast — a superseded toast's window is
+    // already gone, so this is a harmless no-op in that case.
+    if (
+      notificationWindow &&
+      notificationWindow._activeCustomNotification === this &&
+      !notificationWindow.isDestroyed()
+    ) {
+      notificationWindow.close();
+    }
+  }
+
+  static isSupported() {
+    return true;
+  }
+}
+
 let pythonProcess;
 let tray = null;
 let isQuitting = false;
@@ -5084,8 +5227,9 @@ function showSleepPausedNotification() {
   const notif = new Notification({
     title: 'Recording paused',
     body: 'Paused while your computer was asleep. Resume to keep capturing.',
-    // `actions` renders on macOS only; the click handler below covers
-    // Windows, where the whole notification is the affordance.
+    iconType: 'alert',
+    // The Resume action button is always rendered by the custom toast (both
+    // platforms); the click handler below covers a body tap as well.
     actions: [{ type: 'button', text: 'Resume' }],
   });
   const resume = () => {
@@ -6837,6 +6981,7 @@ ipcMain.handle('show-silence-auto-stop-notification', async (_event, payload) =>
     const notif = new Notification({
       title: 'Recording stopped',
       body,
+      iconType: 'recording',
     });
     notif.on('click', () => {
       if (mainWindow && !mainWindow.isDestroyed()) {
@@ -6866,6 +7011,7 @@ ipcMain.handle('show-system-audio-mic-only-notification', async () => {
     const notif = new Notification({
       title: 'Recording mic-only',
       body: 'Screen Recording permission is needed to capture both sides of the call. Click to fix this in Settings.',
+      iconType: 'alert',
     });
     notif.on('click', () => {
       if (mainWindow && !mainWindow.isDestroyed()) {
@@ -6916,6 +7062,7 @@ ipcMain.handle('show-note-ready-notification', async (_event, payload) => {
         : failed
           ? 'Your recording was preserved — open the note for details.'
           : (title || 'Your note has finished processing'),
+      iconType: (hardFailure || failed) ? 'alert' : 'success',
     });
     notif.on('click', () => {
       if (mainWindow && !mainWindow.isDestroyed()) {
@@ -8066,6 +8213,7 @@ function showRecordingFailedNotification(body) {
     new Notification({
       title: 'Steno',
       body: body || "Recording couldn't start.",
+      iconType: 'alert',
     }).show();
   } catch (error) {
     console.error('Failed to show recording-failed notification:', error.message);
@@ -10080,7 +10228,31 @@ async function firePreMeetingNotification(event) {
     return false;
   }
 
-  createNotificationWindow(event);
+  const notif = new Notification({ title: event.title || 'Meeting starting' });
+  // The pre-meeting toast carries a richer payload (time / meeting URL /
+  // attendees) and keeps its legacy renderer-side handlers (Join & take notes,
+  // focus-on-body-tap) plus its own click/dismiss analytics. `premeeting: true`
+  // tells NotificationToast to use that path instead of the generic
+  // action/body-click bridge the other notifications use.
+  notif.payload.premeeting = true;
+  notif.payload.time = event.start
+    ? new Date(event.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    : '';
+  notif.payload.meeting_url = event.meeting_url;
+  notif.payload.attendees = event.attendees
+    ? event.attendees.map((a) => a.name || a.email).join(', ')
+    : '';
+  // Only count a PASSIVE dismiss here (15s auto-close or being superseded). An
+  // active click/X-dismiss is tracked by the renderer, which also flags
+  // _analyticsInteracted via close-notification-window — so skip it here to
+  // avoid double-counting. This is the same split the old createNotificationWindow
+  // used, preserved verbatim.
+  notif.on('close', () => {
+    if (!notificationWindow || !notificationWindow._analyticsInteracted) {
+      trackEvent('notification_dismissed', { type: 'premeeting' });
+    }
+  });
+  notif.show();
   trackEvent('notification_shown', { type: 'premeeting' });
 
   // Mark fired only after we've actually shown it, so an unshowable notif
@@ -10089,86 +10261,42 @@ async function firePreMeetingNotification(event) {
   return true;
 }
 
-function createNotificationWindow(event) {
-  if (notificationWindow && !notificationWindow.isDestroyed()) {
-    notificationWindow.close();
-  }
-
-  const { screen } = require('electron');
-  const primaryDisplay = screen.getPrimaryDisplay();
-  const { width } = primaryDisplay.workAreaSize;
-  const { x, y } = primaryDisplay.workArea;
-
-  notificationWindow = new BrowserWindow({
-    width: 400,
-    height: 70,
-    x: x + width - 425,
-    y: y + 1,
-    frame: false,
-    transparent: true,
-    alwaysOnTop: true,
-    resizable: false,
-    skipTaskbar: true,
-    focusable: false,
-    hasShadow: false,
-    backgroundColor: '#00000000',
-    webPreferences: {
-      nodeIntegration: false,
-      contextIsolation: true,
-      sandbox: true,
-      preload: path.join(__dirname, 'preload.js'),
-    },
-  });
-
-  const rendererDist = path.join(__dirname, 'renderer', 'dist', 'index.html');
-  notificationWindow.loadFile(rendererDist, { hash: '/notification' });
-
-  const win = notificationWindow;
-  // Set true by close-notification-window (the renderer's Join/Focus/Close
-  // handlers all route through it, and each already tracks its own
-  // notification_clicked/_dismissed via the analytics bridge before calling
-  // it). Scoped to this window instance -- not a module-level flag -- so a
-  // new notification superseding an unactioned old one can't leak state
-  // across windows. Stays false only when the window closes via the 15s
-  // auto-close timer with no interaction at all, which is the passive-
-  // dismiss path the native Notification lifecycle already tracks but this
-  // custom BrowserWindow-based notification previously didn't.
-  win._analyticsInteracted = false;
-  let autoCloseTimer;
-  win.once('ready-to-show', () => {
-    win.showInactive();
-    win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-    win.setAlwaysOnTop(true, 'screen-saver', 1);
-
-    autoCloseTimer = setTimeout(() => {
-      if (!win.isDestroyed()) {
-        win.close();
-      }
-    }, 15000);
-
-    win.on('closed', () => {
-      if (autoCloseTimer) clearTimeout(autoCloseTimer);
-      if (!win._analyticsInteracted) {
-        trackEvent('notification_dismissed', { type: 'premeeting' });
-      }
-      if (notificationWindow === win) {
-        notificationWindow = null;
-      }
-    });
-
-    win.webContents.send('show-notification', {
-      title: event.title || 'Meeting starting',
-      time: event.start ? new Date(event.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
-      meeting_url: event.meeting_url,
-      attendees: event.attendees ? event.attendees.map(a => a.name || a.email).join(', ') : '',
-    });
-  });
-}
-
+// Renderer → main: the active toast was closed by an explicit user action (a
+// Join/body tap, an action button, or the X). Flags _analyticsInteracted so the
+// pre-meeting path doesn't ALSO count a passive dismiss for the same toast, then
+// closes the window (which fires the notification's 'close' event).
 ipcMain.handle('close-notification-window', () => {
   if (notificationWindow && !notificationWindow.isDestroyed()) {
     notificationWindow._analyticsInteracted = true;
     notificationWindow.close();
+  }
+});
+
+// Renderer → main: an action button was tapped on the generic (non-pre-meeting)
+// toast. Re-emit as the notification's 'action' event (with the button index,
+// matching Electron's Notification 'action' signature) so the call site's
+// existing `.on('action', ...)` handler + trackNotificationLifecycle both fire.
+ipcMain.on('notification-action-clicked', (_event, { actionId, notifId } = {}) => {
+  if (notificationWindow && !notificationWindow.isDestroyed()) {
+    const notif = notificationWindow._activeCustomNotification;
+    if (notif && notif.payload.id === notifId) {
+      notificationWindow._analyticsInteracted = true;
+      const index = notif.payload.actions.findIndex((a) => a.id === actionId);
+      notif.emit('action', {}, index);
+    }
+  }
+});
+
+// Renderer → main: the body of the generic toast was tapped. Re-emit as the
+// notification's 'click' event so the call site's `.on('click', ...)` handler +
+// trackNotificationLifecycle both fire.
+ipcMain.on('notification-body-clicked', (_event, { notifId } = {}) => {
+  if (notificationWindow && !notificationWindow.isDestroyed()) {
+    const notif = notificationWindow._activeCustomNotification;
+    if (notif && notif.payload.id === notifId) {
+      notificationWindow._analyticsInteracted = true;
+      notif.emit('click');
+    }
   }
 });
 
