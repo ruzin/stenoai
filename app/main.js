@@ -1128,12 +1128,15 @@ function validateSafeFilePath(filepath, allowedBaseDirs) {
 // from the bundled renderer. Deny window.open outright, and cancel any full-page
 // navigation — the SPA uses in-app routing, so a will-navigate here is a
 // foreign/injected navigation, never a real route change. Interactive windows still
-// let a genuine http(s)/mailto link (a target=_blank "Report an issue", or a link
+// let a genuine http(s) link (a target=_blank "Report an issue", or a link
 // inside a note) open in the user's browser instead of silently dying.
 function hardenWindow(win, { allowExternalLinks = false } = {}) {
   const wc = win.webContents;
   wc.setWindowOpenHandler(({ url }) => {
-    if (allowExternalLinks && /^(https?|mailto):/i.test(url)) {
+    // HTTP(S) only — matches the will-navigate branch below and the established
+    // `open-external` IPC policy (no mailto/other schemes; nothing legitimate in
+    // the renderer opens a non-http(s) popup). #377 review.
+    if (allowExternalLinks && /^https?:/i.test(url)) {
       shell.openExternal(url);
     }
     return { action: 'deny' };
