@@ -220,14 +220,33 @@ def _find_recording_for_stem(recordings_dir, stem: str):
     the match extension-agnostic and avoids treating ``stem`` as a glob pattern.
     Used by re-transcribe (#266) to locate the audio to re-run ASR on; returns
     None when keep-recordings was off and the source is gone (the MVP audio-gate).
+
+    Deterministic + safe when the stem is not unique: collect ALL stem-matching
+    regular files and return one only when there is EXACTLY ONE. If several files
+    share the stem (e.g. a retained ``.wav`` next to an imported ``.m4a``),
+    decline (return None) rather than guess the wrong source — the caller already
+    surfaces ``RETRANSCRIBE_NO_AUDIO``. Symlinks are rejected (``is_symlink()``)
+    to match the JS ``recording-available`` handler's ``Dirent.isFile()`` posture
+    and to never re-transcribe through a symlinked recording. The app enforces
+    stem uniqueness, so the ambiguity guard is defensive.
     """
     from pathlib import Path
+    matches = []
     try:
         for entry in Path(recordings_dir).iterdir():
-            if entry.is_file() and Path(entry.name).stem == stem:
-                return entry
+            # is_file() follows symlinks; also reject symlinks so both sides agree
+            # (the JS handler's Dirent.isFile() does not follow symlinks).
+            if entry.is_file() and not entry.is_symlink() and Path(entry.name).stem == stem:
+                matches.append(entry)
     except (FileNotFoundError, NotADirectoryError):
         return None
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        logger.warning(
+            "Re-transcribe: %d recordings share stem %r in %s; declining as ambiguous",
+            len(matches), stem, recordings_dir,
+        )
     return None
 
 

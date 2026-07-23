@@ -341,7 +341,17 @@ function DetailContent({
       }
     });
     const offProcessing = ipc().on.processingComplete((e) => {
-      if (e.sessionName !== sessionName) return;
+      // Scope on summaryFile (unique) when the event carries one — the display
+      // name is shareable, so two same-named notes would otherwise clear each
+      // other's stream state mid-run (re-transcribe lengthens the job, widening
+      // the race). Fall back to the sessionName match only when the event has no
+      // summaryFile (the plain recording pipeline may emit none). Mirrors how the
+      // chunk/progress handlers above guard on summaryFile.
+      if (e.summaryFile) {
+        if (e.summaryFile !== summaryFile) return;
+      } else if (e.sessionName !== sessionName) {
+        return;
+      }
       setChunkProgress(null);
       if (!e.success) {
         setStreamPhase('idle');
