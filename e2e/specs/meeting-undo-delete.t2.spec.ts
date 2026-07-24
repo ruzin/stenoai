@@ -1,6 +1,6 @@
 import { test, expect } from '../fixtures/electron';
 import { realUserDataDir, fileSig } from '../fixtures/real-user-data';
-import { mkdirSync, writeFileSync, existsSync, readdirSync, symlinkSync } from 'fs';
+import { mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, symlinkSync } from 'fs';
 import path from 'path';
 
 /**
@@ -203,6 +203,59 @@ test('undo renames the summary back — the note reappears and the scaffold is c
     (window as StenoWindow).stenoai.meetings.listPendingDeletes(),
   );
   expect(pending.pending?.length).toBe(0);
+
+  expect(fileSig(realUserDataDir())).toBe(realDirBefore);
+});
+
+test('undo REFUSES when the original path was re-occupied — tombstone kept, the new note NOT clobbered (#234 P0)', async ({
+  launchApp,
+  userDataDir,
+}) => {
+  const realDirBefore = fileSig(realUserDataDir());
+  const seed = seedNote(userDataDir, 'undo-collide', 'Undo Collide');
+
+  const { page } = await launchApp();
+
+  const del = await page.evaluate(
+    (m) => (window as StenoWindow).stenoai.meetings.delete(m),
+    seed.meeting,
+  );
+  expect(del.success).toBe(true);
+  expect(existsSync(seed.summaryFile)).toBe(false);
+  // The summary is hidden under .pending-delete/<id>/ (the tombstone).
+  expect(hiddenSummaryPaths(seed.outputDir).length).toBe(1);
+
+  // During the undo window a NEW note lands at the SAME original summary path
+  // (the user re-recorded / re-processed to the same stem). Undo must refuse
+  // rather than rename the hidden summary back OVER it — that would silently
+  // destroy the new note. This is the exact P0 the no-clobber lstat guard closes.
+  const newNoteBody = JSON.stringify({
+    session_info: {
+      name: 'Fresh Note',
+      summary_file: seed.summaryFile,
+      processed_at: '2025-05-05T00:00:00Z',
+    },
+    summary: 'A different, newer note now living at the original path',
+  });
+  writeFileSync(seed.summaryFile, newNoteBody);
+
+  const undo = await page.evaluate(
+    (id) => (window as StenoWindow).stenoai.meetings.undoDelete(id),
+    del.id!,
+  );
+  expect(undo.success).toBe(false);
+  expect(undo.error).toContain('restore target already exists');
+
+  // The NEW note at the original path is byte-for-byte intact (never clobbered).
+  expect(readFileSync(seed.summaryFile, 'utf8')).toBe(newNoteBody);
+  // The tombstone is KEPT — the hidden summary still sits under .pending-delete,
+  // so nothing was lost (undo can be retried once the collision is resolved, and
+  // commit still owns final cleanup).
+  expect(hiddenSummaryPaths(seed.outputDir).length).toBe(1);
+  const pending = await page.evaluate(() =>
+    (window as StenoWindow).stenoai.meetings.listPendingDeletes(),
+  );
+  expect(pending.pending?.some((p) => p.id === del.id)).toBe(true);
 
   expect(fileSig(realUserDataDir())).toBe(realDirBefore);
 });
