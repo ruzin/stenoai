@@ -221,12 +221,12 @@ jobs:
         working-directory: app
         run: npm run build:renderer
 
-      # Exclude @pipeline — the transcription smoke needs the Parakeet model and
-      # runs in its own model-bearing job (t2-pipeline-macos) so this job stays
-      # fast and model-free.
+      # Exclude @pipeline AND @summarize-real — both need a real model and run in
+      # their own model-bearing jobs (t2-pipeline-macos / the nightly
+      # summarize-real-macos) so this job stays fast and model-free.
       - name: Run T2 (org-lock, model-free)
         working-directory: app
-        run: npm run test:e2e -- --project=t2 --grep-invert @pipeline
+        run: npm run test:e2e -- --project=t2 --grep-invert '@pipeline|@summarize-real'
 
       - name: Upload report on failure
         if: failure()
@@ -415,11 +415,12 @@ jobs:
         working-directory: app
         run: npm run build:renderer
 
-      # Quote '@pipeline': the default Windows shell is pwsh, which treats a bare
+      # Quote the grep: the default Windows shell is pwsh, which treats a bare
       # @word as splatting ($pipeline) and errors. Single quotes make it literal.
+      # Exclude @summarize-real too — it's the nightly real-model summary smoke.
       - name: Run T2 (org-lock, model-free)
         working-directory: app
-        run: npm run test:e2e -- --project=t2 --grep-invert '@pipeline'
+        run: npm run test:e2e -- --project=t2 --grep-invert '@pipeline|@summarize-real'
 
       - name: Upload report on failure
         if: failure()
