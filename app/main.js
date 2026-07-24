@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell, systemPreferences, globalShortcut, safeStorage, Tray, Menu, nativeImage, powerMonitor, net, session, desktopCapturer } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, systemPreferences, globalShortcut, safeStorage, Tray, Menu, nativeImage, powerMonitor, net, session } = require('electron');
 
 // Prevent EPIPE crashes when stdout/stderr pipe is broken (e.g. launching terminal closed)
 process.stdout?.on('error', () => {});
@@ -117,6 +117,29 @@ if (!app.isPackaged) {
 // Windows that's irrelevant (Chromium uses WASAPI loopback) and passing it is
 // at best a no-op, so we don't.
 initMain({ forceCoreAudioTap: process.platform === 'darwin' });
+
+/*
+ * electron-audio-loopback's enable handler obtains a real screen source for
+ * the video track, which unnecessarily couples system-audio recording to the
+ * macOS Screen Recording permission. The renderer still requests video:true,
+ * so the callback must include request.frame: an audio-only response throws
+ * after consuming the one-shot callback. Electron also invokes the display
+ * media handler without awaiting it, so callback failures must be caught here
+ * to avoid an unhandled rejection crashing the main process.
+ *
+ * Keep this override platform-neutral: audio:'loopback' retains the package's
+ * semantics on Windows while avoiding the same callback crash landmine.
+ */
+ipcMain.removeHandler('enable-loopback-audio');
+ipcMain.handle('enable-loopback-audio', () => {
+  session.defaultSession.setDisplayMediaRequestHandler((request, callback) => {
+    try {
+      callback({ video: request.frame, audio: 'loopback' });
+    } catch (err) {
+      console.error('[loopback] display media callback failed:', err);
+    }
+  });
+});
 
 // Windows taskbar identity. Without an explicit AppUserModelID matching the
 // installer's, the taskbar shows a default/Electron icon (and groups the window
@@ -360,13 +383,6 @@ let shortcutQueue = [];
 let pendingShortcutUrls = [];
 let rendererShortcutReady = false;
 let launchedByShortcut = false;
-// Screen Recording permission as of process launch, frozen once at startup.
-// macOS doesn't apply a mid-session grant to the running process — only a
-// relaunch picks it up — so gates that decide "is loopback usable this
-// session" must read this, not the live systemPreferences status, or a
-// mid-session grant re-enables a code path (electron-audio-loopback's
-// setDisplayMediaRequestHandler) that's still broken until the app restarts.
-let screenPermissionAtLaunch = 'granted';
 // true when this launch was triggered by the OS login item (auto-launch).
 // Set once at startup (before the app_opened event). On a login launch we
 // suppress the first window show so Steno starts hidden in the tray/menu bar,
@@ -1471,9 +1487,6 @@ if (!gotSingleInstanceLock) {
   });
 
   app.whenReady().then(async () => {
-    if (process.platform === 'darwin') {
-      try { screenPermissionAtLaunch = systemPreferences.getMediaAccessStatus('screen'); } catch (_) {}
-    }
     // Resolve whether this launch was an OS login-item auto-launch BEFORE the
     // app_opened event and the first window show below. macOS reports it via
     // wasOpenedAtLogin (the deprecated openAsHidden no longer works on 13+);
@@ -1939,11 +1952,9 @@ ipcMain.handle('get-system-audio-support', async () => {
     // Windows loopback works but is pending hardware verification, so the UI
     // labels it experimental and ships it opt-in (default off).
     const experimental = process.platform === 'win32';
-    let screenPermission = 'unknown';
     let osVersion = '';
     if (process.platform === 'darwin') {
       try { osVersion = process.getSystemVersion(); } catch (_) {}
-      try { screenPermission = systemPreferences.getMediaAccessStatus('screen'); } catch (_) {}
     } else {
       try { osVersion = process.getSystemVersion(); } catch (_) {}
     }
@@ -1953,69 +1964,10 @@ ipcMain.handle('get-system-audio-support', async () => {
       experimental,
       platform: process.platform,
       osVersion,
-      screenPermission,
-      screenPermissionAtLaunch,
     };
   } catch (error) {
     return { success: false, error: error.message };
   }
-});
-
-// Safely triggers macOS's native Screen Recording permission prompt for a
-// 'not-determined' user, by calling desktopCapturer.getSources() directly in
-// a plain try/caught async handler. Deliberately NOT the same code path as
-// the recording capture flow: electron-audio-loopback's own request handler
-// makes this same call inside an async function passed straight to
-// session.setDisplayMediaRequestHandler, which Electron invokes without
-// awaiting/catching — a failure there becomes an unhandled rejection that
-// used to crash the whole app (see useSystemAudioCapture.ts's
-// screenPermissionOk gate). Calling it here, in an ordinary ipcMain.handle,
-// has no such landmine: a rejection is just a normal rejected promise this
-// handler catches like any other. Only meaningful on macOS — 'not-determined'
-// only exists there.
-ipcMain.handle('request-screen-recording-permission', async () => {
-  if (process.platform !== 'darwin') {
-    return { success: true, screenPermission: 'granted' };
-  }
-  try {
-    await desktopCapturer.getSources({ types: ['screen'] });
-  } catch (error) {
-    sendDebugLog(`[loopback] screen recording permission request failed: ${error.message}`);
-  }
-  let screenPermission = 'unknown';
-  try { screenPermission = systemPreferences.getMediaAccessStatus('screen'); } catch (_) {}
-  return { success: true, screenPermission };
-});
-
-// Once denied/restricted, macOS will not re-prompt — the user has to flip it
-// in System Settings themselves. Deep-links straight to the Screen Recording
-// pane. The URL is a fixed literal (not renderer-supplied), so this is safe
-// despite the generic 'open-external' handler restricting to http/https only.
-ipcMain.handle('open-screen-recording-settings', async () => {
-  if (process.platform !== 'darwin') {
-    return { success: false, error: 'macOS only' };
-  }
-  try {
-    await shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture');
-    return { success: true };
-  } catch (error) {
-    return { success: false, error: error.message };
-  }
-});
-
-// Screen Recording permission changes don't take effect for an already-running
-// process (unlike mic/camera) — macOS requires a full relaunch. Offered as a
-// one-click follow-up after granting so the user doesn't have to know that.
-ipcMain.handle('relaunch-app', async () => {
-  if (process.platform !== 'darwin') {
-    return { success: false, error: 'macOS only' };
-  }
-  // app.quit() (not app.exit()) so before-quit/will-quit still run: the
-  // recording-in-progress confirmation, WebM finalization, Ollama pid-tree
-  // kill, and telemetry flush all live there.
-  app.relaunch();
-  app.quit();
-  return { success: true };
 });
 
 // Debug functionality handled by side panel now
@@ -7050,19 +7002,17 @@ ipcMain.handle('show-silence-auto-stop-notification', async (_event, payload) =>
   }
 });
 
-// Fired by useSystemAudioCapture.ts at the start of a recording whenever it's
-// about to fall back to mic-only specifically because Screen Recording
-// permission isn't granted (not when the user has the "Record system audio"
-// toggle off, and not on unsupported macOS versions — those are the user's
-// own choice / a hardware limit, not a surprise). Clicking it opens Settings
-// via the same tray-open-settings event the tray menu uses, so the user lands
-// on the row with the Grant Access / Open Settings actions.
+// Fired by useSystemAudioCapture.ts when an enabled loopback acquisition
+// genuinely fails (for example, System Audio Recording permission is denied).
+// It is not fired when the user turns system audio off or the OS is unsupported.
+// Clicking it opens Settings via the same tray-open-settings event the tray
+// menu uses.
 ipcMain.handle('show-system-audio-mic-only-notification', async () => {
   try {
     if (!(await notificationsEnabled())) return { success: true, shown: false };
     const notif = new Notification({
       title: 'Recording mic-only',
-      body: 'Screen Recording permission is needed to capture both sides of the call. Click to fix this in Settings.',
+      body: 'System audio could not be captured. Check Steno’s Screen & System Audio Recording access in System Settings.',
       iconType: 'alert',
     });
     notif.on('click', () => {

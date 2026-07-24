@@ -122,6 +122,24 @@ test('main.js has no duplicate ipcMain registrations (Electron throws on the 2nd
   assert.deepStrictEqual(dups, [], `duplicate ipcMain registration(s): ${dups.join(', ')}`);
 });
 
+test('custom loopback handler avoids screen capture and catches callback failures', () => {
+  const initMainAt = MAIN.indexOf("initMain({ forceCoreAudioTap: process.platform === 'darwin' });");
+  const removePackageHandlerAt = MAIN.indexOf("ipcMain.removeHandler('enable-loopback-audio');");
+  const windowsSetupAt = MAIN.indexOf('// Windows taskbar identity.');
+  assert.ok(initMainAt >= 0, 'expected electron-audio-loopback initMain call');
+  assert.ok(
+    removePackageHandlerAt > initMainAt && removePackageHandlerAt < windowsSetupAt,
+    'custom enable-loopback-audio handler must replace the package handler immediately after initMain',
+  );
+
+  const handler = MAIN.slice(removePackageHandlerAt, windowsSetupAt);
+  assert.match(handler, /ipcMain\.handle\('enable-loopback-audio',\s*\(\)\s*=>\s*{/);
+  assert.match(handler, /setDisplayMediaRequestHandler\(\(request,\s*callback\)\s*=>\s*{/);
+  assert.match(handler, /try\s*{\s*callback\(\{\s*video:\s*request\.frame,\s*audio:\s*'loopback'\s*}\);/s);
+  assert.match(handler, /catch\s*\(err\)\s*{\s*console\.error\(/s);
+  assert.doesNotMatch(handler, /desktopCapturer|getSources/);
+});
+
 test('every renderer-callable channel (preload invoke/send) is registered in main.js', () => {
   const registered = new Set(mainRegistrations());
   const missing = [...preloadInvokeChannels()].filter(
