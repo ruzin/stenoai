@@ -246,6 +246,12 @@ export function useRecording() {
   return {
     status,
     elapsed: queue.data?.elapsedSeconds ?? 0,
+    /** Number of jobs waiting in the processing queue. Combined with `status`
+     *  it tells the processing screen whether a job actually exists — a
+     *  post-stop screen with `status==='idle' && queueSize===0` means the stop
+     *  produced no job (nothing was captured), which the watchdog uses to
+     *  break out of an otherwise-forever spinner (issue #343). */
+    queueSize: queue.data?.queueSize ?? 0,
     // Fall back to currentJob (the in-flight processing session) when no
     // recording is active. Keeps `sessionName` populated through the full
     // recording → processing → done lifecycle so the synthetic in-progress
@@ -264,6 +270,12 @@ export function useRecording() {
      *  Set rather than array so consumers can do O(1) membership checks
      *  inside the meetings list map. */
     reprocessingSummaryFiles: reprocessingSummaryFiles,
+    /** True once the queue poll has resolved successfully at least once. The
+     *  processing-screen watchdog must not count "idle+empty" ticks before real
+     *  data has arrived — absent query data defaults to status:'idle' /
+     *  queueSize:0, so a slow first IPC would otherwise look like a no-job
+     *  dead-end (issue #343). */
+    isQueueSuccess: queue.isSuccess,
     startRecording,
     stopRecording,
     pauseRecording,
