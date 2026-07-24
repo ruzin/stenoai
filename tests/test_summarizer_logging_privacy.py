@@ -15,7 +15,11 @@ from src.summarizer import OllamaSummarizer
 
 
 def _make_summarizer(model_name="llama3.2:3b", ai_provider="local"):
-    return OllamaSummarizer(model_name=model_name, ai_provider=ai_provider, config=Config())
+    # Patch out the Ollama readiness/start check during construction — these are
+    # unit tests for log-line privacy and must not depend on a live Ollama
+    # server (they mock the chat calls themselves). Keeps the suite hermetic in CI.
+    with mock.patch.object(OllamaSummarizer, "_ensure_ollama_ready"):
+        return OllamaSummarizer(model_name=model_name, ai_provider=ai_provider, config=Config())
 
 
 class TitleLoggingPrivacyTests(unittest.TestCase):
