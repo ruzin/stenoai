@@ -20,6 +20,26 @@ import type { StructuredNoteSections } from '@/lib/notesCopy';
 // pre-formatted "date · duration"-style line, omitted when empty.
 export type NotesPdfInput = StructuredNoteSections;
 
+/**
+ * A generated template report, ready to drop into the branded shell.
+ *
+ * `contentHtml` is PRE-RENDERED by the caller, deliberately: a report is
+ * free-form markdown, and the only way to guarantee the PDF matches what the
+ * detail view shows is to serialise the very same renderer (react-markdown)
+ * rather than grow a second markdown implementation here that would drift.
+ * Keeping the markdown out of this module also keeps it pure and React-free.
+ *
+ * That means this one value is injected WITHOUT escaping, so its provenance
+ * matters: react-markdown does not emit raw HTML from its input unless
+ * rehype-raw is enabled (it is not), so note content cannot inject markup
+ * through it. The document's CSP (`default-src 'none'`) is the second line of
+ * defence. Never pass a hand-built or otherwise untrusted string here.
+ */
+export interface NotesPdfReport {
+  templateName: string;
+  contentHtml: string;
+}
+
 // Escape the five characters that are unsafe in HTML text/attribute context, so
 // note content (a title with "&", an action item with "<", etc.) can never
 // inject markup into the rendered document. Every dynamic value routes through
@@ -50,13 +70,30 @@ function listItems(items: string[]): string {
   return items.map((i) => `      <li>${escapeHtml(i)}</li>`).join('\n');
 }
 
-export function buildNotesHtml(input: NotesPdfInput): string {
-  if (!hasNotesContent(input)) return '';
+export function buildNotesHtml(input: NotesPdfInput, activeReport?: NotesPdfReport | null): string {
+  // A report carries its own content, so it is exportable even when the
+  // Standard note is empty (a transcript-only note can still have one).
+  const reportHtml = activeReport?.contentHtml?.trim();
+  if (!reportHtml && !hasNotesContent(input)) return '';
 
   const title = (input.name ?? '').trim() || 'Untitled note';
   const summary = input.summary?.trim();
 
   const sections: string[] = [];
+
+  // When a report is open it REPLACES the Standard sections — the PDF must show
+  // what's on screen, not both (matches buildNotesCopyText's short-circuit).
+  if (reportHtml) {
+    const label = escapeHtml((activeReport?.templateName || 'Report').trim());
+    return renderDocument(title, input.meta, [
+      `  <section>
+    <h2>${label}</h2>
+    <div class="report">
+${reportHtml}
+    </div>
+  </section>`,
+    ]);
+  }
 
   if (summary) {
     sections.push(`  <section>
@@ -108,8 +145,17 @@ ${listItems(input.actionItems)}
   </section>`);
   }
 
-  const metaLine = input.meta?.trim()
-    ? `  <div class="meta">${escapeHtml(input.meta.trim())}</div>`
+  return renderDocument(title, input.meta, sections);
+}
+
+/**
+ * The branded shell: masthead, title block, whatever sections it is handed, and
+ * the footer. Shared by both paths (Standard note and open report) so the two
+ * can never drift apart on chrome, fonts or layout.
+ */
+function renderDocument(title: string, meta: string | undefined, sections: string[]): string {
+  const metaLine = meta?.trim()
+    ? `  <div class="meta">${escapeHtml(meta.trim())}</div>`
     : '';
 
   return `<!doctype html>
@@ -192,6 +238,50 @@ ${listItems(input.actionItems)}
     border-radius: 1px; top: 0.55em; width: 5px; height: 5px;
     background: none; border: 1.2px solid var(--ink-900);
   }
+  /* An open template report is free-form markdown (react-markdown output), so
+     it brings element types the structured note never emits — headings inside
+     the body, ordered lists, emphasis, code, quotes, tables. Style them here;
+     without this they would inherit the structured note's list rules and lose
+     their numbering and hierarchy. */
+  .report { padding: 0 var(--inset); }
+  .report > :first-child { margin-top: 0; }
+  .report h1, .report h2, .report h3, .report h4 {
+    font-family: 'Ovo', Georgia, serif; font-weight: 400; color: var(--ink-900);
+    letter-spacing: 0; text-transform: none; border-bottom: none;
+    margin: 16px 0 7px; padding: 0; break-after: avoid;
+  }
+  .report h1 { font-size: 15pt; }
+  .report h2 { font-size: 13pt; }
+  .report h3 { font-size: 11.5pt; }
+  .report h4 { font-size: 10.5pt; font-weight: 600; }
+  .report p { margin: 0 0 9px; }
+  .report ul, .report ol { margin: 0 0 10px; padding-left: 18px; }
+  .report ul { list-style: disc; }
+  .report ol { list-style: decimal; }
+  .report li { padding-left: 0; margin-bottom: 5px; }
+  .report li::before { content: none; }
+  .report li::marker { color: var(--ink-900); }
+  .report strong { font-weight: 600; }
+  .report blockquote {
+    margin: 0 0 10px; padding-left: 12px;
+    border-left: 2px solid var(--rule); color: var(--ink-500);
+  }
+  .report code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 9pt;
+    background: var(--paper-1); padding: 1px 4px; border-radius: 3px;
+  }
+  .report pre {
+    margin: 0 0 10px; padding: 10px; background: var(--paper-1);
+    border: 1px solid var(--rule); border-radius: 6px; overflow-wrap: break-word;
+    white-space: pre-wrap; break-inside: avoid;
+  }
+  .report pre code { background: none; padding: 0; }
+  .report table { width: 100%; border-collapse: collapse; margin: 0 0 10px; font-size: 9.5pt; }
+  .report th, .report td {
+    border: 1px solid var(--rule); padding: 5px 7px; text-align: left; vertical-align: top;
+  }
+  .report th { background: var(--paper-1); font-weight: 600; }
+  .report hr { border: none; border-top: 1px solid var(--rule); margin: 14px 0; }
   footer {
     margin-top: 30px; padding: 10px var(--inset) 0; border-top: 1px solid var(--rule);
     font-size: 8pt; color: var(--ink-500); letter-spacing: 0.02em;
