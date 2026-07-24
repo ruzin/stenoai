@@ -148,7 +148,8 @@ function install({ ipcMain }) {
   // handlers persist to disk. Mutated by the org-login / org-logout / set-ai
   // mocks so a test can assert the UI reacts to its own actions.
   const state = {
-    provider: 'local', // 'local' | 'remote' | 'cloud' | 'adapter'
+    provider: 'local', // 'local' | 'local_cli' | 'remote' | 'cloud' | 'adapter'
+    localCliProvider: 'codex',
     orgSession: null, // { adapterUrl, email, name, orgId, exp } when signed in
     everSignedIn: false,
     model: 'gemma4:e2b-it-qat', // local/remote Ollama model (config.model)
@@ -283,6 +284,7 @@ function install({ ipcMain }) {
     'get-ai-provider': async () => ({
       success: true,
       ai_provider: state.provider,
+      local_cli_provider: state.localCliProvider,
       cloud_provider: state.cloudProvider,
       cloud_model: state.cloudModel,
       model: state.model,
@@ -298,6 +300,11 @@ function install({ ipcMain }) {
       }
       state.provider = provider;
       return { success: true, ai_provider: provider };
+    },
+
+    'set-local-cli-provider': async (_event, provider) => {
+      state.localCliProvider = provider;
+      return { success: true, local_cli_provider: provider };
     },
 
     // Seed meetings for the specs that need them, gated per env so the

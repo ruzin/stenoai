@@ -279,6 +279,7 @@ const stenoai = {
   ai: {
     getProvider: () => invoke('get-ai-provider'),
     setProvider: (p) => invoke('set-ai-provider', p),
+    setLocalCliProvider: (p) => invoke('set-local-cli-provider', p),
     setRemoteOllamaUrl: (url) => invoke('set-remote-ollama-url', url),
     testRemoteOllama: (url) => invoke('test-remote-ollama', url),
     setCloudApiUrl: (url) => invoke('set-cloud-api-url', url),

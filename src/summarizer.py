@@ -12,6 +12,7 @@ import time
 from typing import Optional, Dict, Any
 from .models import MeetingTranscript, ActionItem, Decision
 from .config import Config, resolve_runtime_tag, BEDROCK_REGION_RE
+from .local_cli import run_local_cli
 from . import ollama_manager
 
 logger = logging.getLogger(__name__)
@@ -134,11 +135,11 @@ class OllamaSummarizer:
     def __init__(self, model_name: Optional[str] = None, ai_provider: Optional[str] = None, config: Optional['Config'] = None):
         """
         Initialize the summarizer with automatic service management.
-        Supports local Ollama, remote Ollama, and cloud API providers.
+        Supports local/remote Ollama, local AI CLIs, and cloud API providers.
 
         Args:
             model_name: Name of the model to use. If None, loads from config.
-            ai_provider: AI provider type (local, remote, cloud, adapter). If None, loads from config.
+            ai_provider: AI provider type. If None, loads from config.
             config: Config object. If None, loads from get_config().
         """
         from .config import get_config
@@ -156,8 +157,16 @@ class OllamaSummarizer:
         self.bedrock_api_key: Optional[str] = None
         self.bedrock_region: str = ""
         self.bedrock_inference_profile: str = ""
+        self.local_cli_provider: Optional[str] = None
 
-        if self.ai_provider == "adapter":
+        if self.ai_provider == "local_cli":
+            self.local_cli_provider = config.get_local_cli_provider()
+            self.model_name = (
+                "Codex CLI" if self.local_cli_provider == "codex" else "Claude CLI"
+            )
+            logger.info("Local CLI provider initialized: %s", self.local_cli_provider)
+
+        elif self.ai_provider == "adapter":
             # Adapter mode: route every AI request through the customer's
             # org adapter, which holds the Anthropic key server-side. The
             # desktop never sees the provider key. URL + JWT come from
@@ -777,6 +786,16 @@ class OllamaSummarizer:
             return self._bedrock_chat(prompt, timeout_seconds)
         return self._openai_chat(prompt, timeout_seconds)
 
+    def _local_cli_chat(self, prompt: str, timeout_seconds: int = 300) -> str:
+        """Send one prompt through the configured non-interactive local CLI."""
+        if not self.local_cli_provider:
+            raise ValueError("Local CLI provider is not configured.")
+        return run_local_cli(
+            self.local_cli_provider,
+            prompt,
+            timeout_seconds=timeout_seconds,
+        )
+
     def _openai_chat(self, prompt: str, timeout_seconds: int = 300) -> str:
         """Send a chat request via the OpenAI-compatible cloud API."""
         max_retries = 3
@@ -1196,6 +1215,8 @@ Return ONLY the response in this exact JSON format:
                 response_text = self._adapter_chat(prompt, timeout_seconds)
             elif self.ai_provider == "cloud":
                 response_text = self._cloud_chat(prompt, timeout_seconds)
+            elif self.ai_provider == "local_cli":
+                response_text = self._local_cli_chat(prompt, timeout_seconds)
             else:
                 # Retry logic for Ollama API calls (local or remote)
                 max_retries = 3
@@ -1486,6 +1507,10 @@ TRANSCRIPT:
             yield from self._adapter_stream(prompt, timeout_seconds=7200)
             return
 
+        if self.ai_provider == "local_cli":
+            yield self._local_cli_chat(prompt, timeout_seconds=7200)
+            return
+
         if self.ai_provider == "cloud":
             if self.cloud_provider == "anthropic":
                 try:
@@ -1723,6 +1748,8 @@ TITLE:"""
                 response_text = self._adapter_chat(prompt, 30)
             elif self.ai_provider == "cloud":
                 response_text = self._cloud_chat(prompt, 30)
+            elif self.ai_provider == "local_cli":
+                response_text = self._local_cli_chat(prompt, 90)
             else:
                 # HTTP-level timeout must account for model cold-start (~10s Metal init)
                 title_client = ollama.Client(
@@ -1830,6 +1857,9 @@ ANSWER:"""
                 # for the summarisation-grade ceiling.
                 yield from self._adapter_stream(prompt, timeout_seconds=300)
                 return
+            if self.ai_provider == "local_cli":
+                yield self._local_cli_chat(prompt, timeout_seconds=300)
+                return
             if self.ai_provider == "cloud":
                 if self.cloud_provider == "anthropic":
                     with self.anthropic_client.messages.stream(
@@ -1908,6 +1938,8 @@ ANSWER:"""
                 response_text = self._adapter_chat(prompt, 120)
             elif self.ai_provider == "cloud":
                 response_text = self._cloud_chat(prompt, 120)
+            elif self.ai_provider == "local_cli":
+                response_text = self._local_cli_chat(prompt, 120)
             else:
                 # Retry logic for Ollama API calls (local or remote)
                 max_retries = 2

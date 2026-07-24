@@ -1,26 +1,12 @@
 import * as React from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import {
-  ArrowLeft,
-  ArrowUp,
-  ChevronDown,
-  Square,
-} from 'lucide-react';
+import { ArrowLeft, ArrowUp, ChevronDown, Square } from 'lucide-react';
 import { FolderScopePicker, ORG_SHARED_SCOPE } from '@/components/FolderScopePicker';
 import { ChatHistoryRow } from '@/components/ChatHistoryRow';
 import { MeetingsShell } from '@/components/MeetingsShell';
-import {
-  Popover,
-  PopoverAnchor,
-  PopoverContent,
-  PopoverTrigger,
-} from '@/components/ui/popover';
+import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { PRESETS, PresetGlyph } from '@/lib/chatPresets';
-import {
-  useAllChatSessions,
-  useChatSessions,
-  type ChatMessage,
-} from '@/hooks/useChatSessions';
+import { useAllChatSessions, useChatSessions, type ChatMessage } from '@/hooks/useChatSessions';
 
 // Stable empty-array sentinel so `messages` keeps the same reference when
 // session is null/loading — otherwise the useMemo around it would produce
@@ -64,7 +50,9 @@ export function ChatConversation({ sessionId }: ChatConversationProps) {
   const scrollRef = React.useRef<HTMLDivElement>(null);
 
   const isLocalEngine =
-    provider.data?.ai_provider === 'local' || provider.data?.ai_provider === 'remote';
+    provider.data?.ai_provider === 'local' ||
+    provider.data?.ai_provider === 'local_cli' ||
+    provider.data?.ai_provider === 'remote';
   // Shared cloud/local/remote readiness; local/remote answer over a
   // context-capped, most-recent slice (see hint).
   const providerReady = chatProviderReady(provider.data);
@@ -137,9 +125,7 @@ export function ChatConversation({ sessionId }: ChatConversationProps) {
     if (!persistId) return;
     const content =
       stream.text.trim() ||
-      (stream.status === 'error'
-        ? `Error: ${stream.error ?? 'query failed'}`
-        : '(empty response)');
+      (stream.status === 'error' ? `Error: ${stream.error ?? 'query failed'}` : '(empty response)');
     const message: ChatMessage = {
       role: 'assistant',
       content,
@@ -161,13 +147,8 @@ export function ChatConversation({ sessionId }: ChatConversationProps) {
   // `isStreaming`, derived at render time rather than cloned into a new
   // array — cloning per token was O(messages) work on every streaming
   // update, which defeated the virtualization.
-  const messages = React.useMemo(
-    () => session?.messages ?? EMPTY_MESSAGES,
-    [session?.messages],
-  );
-  const streamingContent = isStreaming
-    ? activeStream?.text || 'Thinking…'
-    : null;
+  const messages = React.useMemo(() => session?.messages ?? EMPTY_MESSAGES, [session?.messages]);
+  const streamingContent = isStreaming ? activeStream?.text || 'Thinking…' : null;
   const totalItems = messages.length + (streamingContent !== null ? 1 : 0);
 
   const rowVirtualizer = useVirtualizer({
@@ -311,47 +292,45 @@ export function ChatConversation({ sessionId }: ChatConversationProps) {
                     {/* Few chats → flat list, no group headers (less visual
                         noise). Many chats → grouped by time bucket so old
                         ones are findable. */}
-                    {otherSessions.length <= 5 ? (
-                      otherSessions.map((s) => (
-                        <ChatHistoryRow
-                          key={s.id}
-                          session={s}
-                          activeId={sessionId}
-                          onSelect={() => setHistoryOpen(false)}
-                          onRename={(name) => void chat.renameSession(s.id, name)}
-                          onDelete={async () => {
-                            const wasActive = s.id === sessionId;
-                            await chat.deleteSession(s.id);
-                            if (wasActive) navigate('/chat');
-                          }}
-                        />
-                      ))
-                    ) : (
-                      groupedSessions.map((group) => (
-                        <div key={group.key} className="mb-1.5 last:mb-0">
-                          <div
-                            className="px-2 pb-0.5 pt-1 text-[11px] font-medium"
-                            style={{ color: 'var(--fg-muted)' }}
-                          >
-                            {group.label}
+                    {otherSessions.length <= 5
+                      ? otherSessions.map((s) => (
+                          <ChatHistoryRow
+                            key={s.id}
+                            session={s}
+                            activeId={sessionId}
+                            onSelect={() => setHistoryOpen(false)}
+                            onRename={(name) => void chat.renameSession(s.id, name)}
+                            onDelete={async () => {
+                              const wasActive = s.id === sessionId;
+                              await chat.deleteSession(s.id);
+                              if (wasActive) navigate('/chat');
+                            }}
+                          />
+                        ))
+                      : groupedSessions.map((group) => (
+                          <div key={group.key} className="mb-1.5 last:mb-0">
+                            <div
+                              className="px-2 pb-0.5 pt-1 text-[11px] font-medium"
+                              style={{ color: 'var(--fg-muted)' }}
+                            >
+                              {group.label}
+                            </div>
+                            {group.sessions.map((s) => (
+                              <ChatHistoryRow
+                                key={s.id}
+                                session={s}
+                                activeId={sessionId}
+                                onSelect={() => setHistoryOpen(false)}
+                                onRename={(name) => void chat.renameSession(s.id, name)}
+                                onDelete={async () => {
+                                  const wasActive = s.id === sessionId;
+                                  await chat.deleteSession(s.id);
+                                  if (wasActive) navigate('/chat');
+                                }}
+                              />
+                            ))}
                           </div>
-                          {group.sessions.map((s) => (
-                            <ChatHistoryRow
-                              key={s.id}
-                              session={s}
-                              activeId={sessionId}
-                              onSelect={() => setHistoryOpen(false)}
-                              onRename={(name) => void chat.renameSession(s.id, name)}
-                              onDelete={async () => {
-                                const wasActive = s.id === sessionId;
-                                await chat.deleteSession(s.id);
-                                if (wasActive) navigate('/chat');
-                              }}
-                            />
-                          ))}
-                        </div>
-                      ))
-                    )}
+                        ))}
                   </div>
                 )}
               </PopoverContent>
@@ -379,17 +358,10 @@ export function ChatConversation({ sessionId }: ChatConversationProps) {
               }}
             >
               {rowVirtualizer.getVirtualItems().map((virtualRow) => {
-                const isStreamingBubble =
-                  virtualRow.index >= messages.length;
-                const msg = isStreamingBubble
-                  ? null
-                  : messages[virtualRow.index];
-                const role: 'user' | 'assistant' = isStreamingBubble
-                  ? 'assistant'
-                  : msg!.role;
-                const content = isStreamingBubble
-                  ? (streamingContent ?? '')
-                  : msg!.content;
+                const isStreamingBubble = virtualRow.index >= messages.length;
+                const msg = isStreamingBubble ? null : messages[virtualRow.index];
+                const role: 'user' | 'assistant' = isStreamingBubble ? 'assistant' : msg!.role;
+                const content = isStreamingBubble ? (streamingContent ?? '') : msg!.content;
                 return (
                   <div
                     key={virtualRow.key}
@@ -408,11 +380,7 @@ export function ChatConversation({ sessionId }: ChatConversationProps) {
                     // room above the composer.
                     className="pb-5"
                   >
-                    <Bubble
-                      role={role}
-                      content={content}
-                      live={isStreamingBubble}
-                    />
+                    <Bubble role={role} content={content} live={isStreamingBubble} />
                   </div>
                 );
               })}
@@ -438,83 +406,83 @@ export function ChatConversation({ sessionId }: ChatConversationProps) {
           )}
           <Popover open={presetsOpen} onOpenChange={setPresetsOpen}>
             <PopoverAnchor asChild>
-          <form
-            onSubmit={onSubmit}
-            className="rounded-2xl border p-3 transition-shadow focus-within:shadow-[var(--shadow-md)]"
-            style={{
-              borderColor: 'var(--border-subtle)',
-              background: 'var(--surface-raised)',
-            }}
-          >
-          <input
-            ref={inputRef}
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              // Same '/' shortcut as the entry page — opens the preset
-              // picker when the input is empty so a literal slash typed
-              // mid-sentence doesn't surprise the user.
-              if (e.key === '/' && input === '' && ready && !isStreaming) {
-                e.preventDefault();
-                setPresetsOpen(true);
-                return;
-              }
-              if (e.key === 'Enter' && !e.shiftKey && !isStreaming) {
-                e.preventDefault();
-                void submit(input);
-              }
-            }}
-            disabled={!ready || isStreaming}
-            placeholder="Ask anything  /"
-            className="block w-full bg-transparent px-2 pb-3 pt-1 outline-none disabled:cursor-not-allowed"
-            style={{ fontSize: 15, color: 'var(--fg-1)', fontFamily: 'var(--font-sans)' }}
-          />
-          <div className="flex items-center justify-between gap-2 px-1">
-            <div className="flex items-center gap-1">
-              <FolderScopePicker value={scopeFolderId} onChange={setScopeFolderId} />
-              <span
-                data-testid="chat-model-indicator"
-                className="text-[12px]"
-                style={{ color: 'var(--fg-muted)' }}
+              <form
+                onSubmit={onSubmit}
+                className="rounded-2xl border p-3 transition-shadow focus-within:shadow-[var(--shadow-md)]"
+                style={{
+                  borderColor: 'var(--border-subtle)',
+                  background: 'var(--surface-raised)',
+                }}
               >
-                {formatActiveModel(provider.data)}
-              </span>
-              {isLocalEngine && (
-                <span
-                  data-testid="chat-local-scope-hint"
-                  className="text-[12px]"
-                  style={{ color: 'var(--fg-muted)' }}
-                >
-                  · may omit older notes
-                </span>
-              )}
-            </div>
-            <div className="flex items-center gap-1">
-              {isStreaming ? (
-                <button
-                  type="button"
-                  onClick={stop}
-                  className="inline-flex size-7 items-center justify-center rounded-full transition-colors hover:bg-[color:var(--surface-hover)]"
-                  style={{ color: 'var(--fg-1)' }}
-                  aria-label="Stop"
-                >
-                  <Square className="size-[12px]" fill="currentColor" />
-                </button>
-              ) : (
-                <button
-                  type="submit"
-                  disabled={!input.trim() || !ready}
-                  className="inline-flex size-7 items-center justify-center rounded-full transition-colors hover:bg-[color:var(--surface-hover)] disabled:opacity-40"
-                  style={{ color: 'var(--fg-1)' }}
-                  aria-label="Send"
-                >
-                  <ArrowUp className="size-[14px]" />
-                </button>
-              )}
-            </div>
-          </div>
-          </form>
+                <input
+                  ref={inputRef}
+                  type="text"
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    // Same '/' shortcut as the entry page — opens the preset
+                    // picker when the input is empty so a literal slash typed
+                    // mid-sentence doesn't surprise the user.
+                    if (e.key === '/' && input === '' && ready && !isStreaming) {
+                      e.preventDefault();
+                      setPresetsOpen(true);
+                      return;
+                    }
+                    if (e.key === 'Enter' && !e.shiftKey && !isStreaming) {
+                      e.preventDefault();
+                      void submit(input);
+                    }
+                  }}
+                  disabled={!ready || isStreaming}
+                  placeholder="Ask anything  /"
+                  className="block w-full bg-transparent px-2 pb-3 pt-1 outline-none disabled:cursor-not-allowed"
+                  style={{ fontSize: 15, color: 'var(--fg-1)', fontFamily: 'var(--font-sans)' }}
+                />
+                <div className="flex items-center justify-between gap-2 px-1">
+                  <div className="flex items-center gap-1">
+                    <FolderScopePicker value={scopeFolderId} onChange={setScopeFolderId} />
+                    <span
+                      data-testid="chat-model-indicator"
+                      className="text-[12px]"
+                      style={{ color: 'var(--fg-muted)' }}
+                    >
+                      {formatActiveModel(provider.data)}
+                    </span>
+                    {isLocalEngine && (
+                      <span
+                        data-testid="chat-local-scope-hint"
+                        className="text-[12px]"
+                        style={{ color: 'var(--fg-muted)' }}
+                      >
+                        · may omit older notes
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1">
+                    {isStreaming ? (
+                      <button
+                        type="button"
+                        onClick={stop}
+                        className="inline-flex size-7 items-center justify-center rounded-full transition-colors hover:bg-[color:var(--surface-hover)]"
+                        style={{ color: 'var(--fg-1)' }}
+                        aria-label="Stop"
+                      >
+                        <Square className="size-[12px]" fill="currentColor" />
+                      </button>
+                    ) : (
+                      <button
+                        type="submit"
+                        disabled={!input.trim() || !ready}
+                        className="inline-flex size-7 items-center justify-center rounded-full transition-colors hover:bg-[color:var(--surface-hover)] disabled:opacity-40"
+                        style={{ color: 'var(--fg-1)' }}
+                        aria-label="Send"
+                      >
+                        <ArrowUp className="size-[14px]" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </form>
             </PopoverAnchor>
             <PopoverContent
               align="start"
@@ -561,7 +529,6 @@ export function ChatConversation({ sessionId }: ChatConversationProps) {
     </MeetingsShell>
   );
 }
-
 
 function Bubble({
   role,

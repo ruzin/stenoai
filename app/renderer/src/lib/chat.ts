@@ -1,6 +1,6 @@
 // Shared helpers for the Chat tab + conversation view.
 
-import type { AiProvider, CloudProvider } from '@/lib/ipc';
+import type { AiProvider, CloudProvider, LocalCliProvider } from '@/lib/ipc';
 
 /** The AI-provider config fields the active-model label reads. */
 type ActiveModelFields = {
@@ -8,6 +8,7 @@ type ActiveModelFields = {
   cloud_provider: CloudProvider;
   cloud_model: string;
   model: string;
+  local_cli_provider: LocalCliProvider;
 };
 
 /** Provider-readiness fields the chat composer gates on. */
@@ -27,6 +28,7 @@ export function chatProviderReady(p: ChatProviderFields | undefined): boolean {
   if (!p) return false;
   switch (p.ai_provider) {
     case 'local':
+    case 'local_cli':
       return true;
     case 'remote':
       return !!p.remote_ollama_url;
@@ -57,6 +59,8 @@ export function formatActiveModel(p: ActiveModelFields | undefined): string {
     case 'adapter':
       // The org adapter brokers the model server-side; the desktop has no id.
       return 'Organisation';
+    case 'local_cli':
+      return p.local_cli_provider === 'claude' ? 'Claude CLI' : 'Codex CLI';
     case 'local':
     default:
       return p.model ? `Ollama · ${p.model}` : 'Ollama';
@@ -97,10 +101,7 @@ export function bucketKey(ts: number, now: number = Date.now()): string {
   if (ts >= dayBefore(7)) return 'this-week';
   if (ts >= dayBefore(14)) return 'last-2-weeks';
   // Same calendar month
-  if (
-    d.getFullYear() === today.getFullYear() &&
-    d.getMonth() === today.getMonth()
-  ) {
+  if (d.getFullYear() === today.getFullYear() && d.getMonth() === today.getMonth()) {
     return 'this-month';
   }
   // Same calendar year — return month name as the key

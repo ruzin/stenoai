@@ -6022,11 +6022,16 @@ function forwardDiagnosticStdout(line, source) { // eslint-disable-line no-unuse
 
 ipcMain.handle('setup-ollama-and-model', async () => {
   try {
-    // Check AI provider -- skip local Ollama setup for remote/cloud
+    // Check AI provider -- skip bundled Ollama setup whenever it is not active.
     try {
       const providerResult = await runPythonScript('simple_recorder.py', ['get-ai-provider'], true);
       const providerConfig = JSON.parse(providerResult.trim());
-      if (providerConfig.ai_provider === 'remote' || providerConfig.ai_provider === 'cloud') {
+      if (
+        providerConfig.ai_provider === 'remote' ||
+        providerConfig.ai_provider === 'cloud' ||
+        providerConfig.ai_provider === 'local_cli' ||
+        providerConfig.ai_provider === 'adapter'
+      ) {
         sendDebugLog(`AI provider is "${providerConfig.ai_provider}" -- skipping local Ollama setup`);
         return { success: true, skipped: true };
       }
@@ -7845,6 +7850,20 @@ ipcMain.handle('set-ai-provider', async (event, provider) => {
     return result;
   } catch (error) {
     sendDebugLog(`Error setting AI provider: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('set-local-cli-provider', async (_event, provider) => {
+  try {
+    const result = await runPythonScript(
+      'simple_recorder.py',
+      ['set-local-cli-provider', provider],
+    );
+    const jsonMatch = result.match(/\{.*\}/s);
+    if (jsonMatch) return JSON.parse(jsonMatch[0]);
+    return { success: true, local_cli_provider: provider };
+  } catch (error) {
     return { success: false, error: error.message };
   }
 });
