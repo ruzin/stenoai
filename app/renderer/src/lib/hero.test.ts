@@ -34,6 +34,7 @@ function state(overrides: Partial<HeroState> = {}): HeroState {
     tomorrowPreview: null,
     calendarConnected: false,
     now: NOW,
+    hotkeyEnabled: true,
     ...overrides,
   };
 }
@@ -107,5 +108,28 @@ describe('heroSubtitle', () => {
 
   test('idle with no events falls back to the recording hint', () => {
     expect(heroSubtitle(state())).toContain('Start recording');
+  });
+
+  test('disabled global shortcut drops every record-shortcut mention from the copy', () => {
+    // Platform-neutral assertions: under jsdom the shortcut util renders
+    // 'Ctrl+Shift+R' (not the mac glyph), so we assert on the enabled-only
+    // phrases that surround the shortcut, which are the real signal.
+    const off = { hotkeyEnabled: false };
+    // Idle fallback: no "from anywhere with …" clause.
+    const idle = heroSubtitle(state(off));
+    expect(idle).toBe('Start recording from the top-right.');
+    expect(idle).not.toContain('anywhere');
+    // Recording: no "· … to stop" tail — just the session/title.
+    const rec = heroSubtitle(state({ ...off, status: 'recording', sessionName: 'Q3 Roadmap' }));
+    expect(rec).toBe('Q3 Roadmap');
+    expect(rec).not.toContain('to stop');
+    // In-a-meeting-now: click-only phrasing, no "Press … to start recording".
+    const inMeeting = heroSubtitle(state({ ...off, inProgressEvent: ev(-5 * MIN, 25 * MIN) }));
+    expect(inMeeting).toBe('Tap a meeting card below to start recording.');
+    expect(inMeeting).not.toContain('Press');
+    // Upcoming-soon: names the meeting + time but no "when you're ready" tail.
+    const soon = heroSubtitle(state({ ...off, nextSoonEvent: ev(20 * MIN, 50 * MIN, { title: 'Design Review' }) }));
+    expect(soon).toContain('Design Review');
+    expect(soon).not.toContain("when you're ready");
   });
 });

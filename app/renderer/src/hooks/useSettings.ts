@@ -5,6 +5,7 @@ import { unwrap } from '@/lib/result';
 export const settingsKeys = {
   all: ['settings'] as const,
   notifications: () => [...settingsKeys.all, 'notifications'] as const,
+  recordHotkey: () => [...settingsKeys.all, 'recordHotkey'] as const,
   telemetry: () => [...settingsKeys.all, 'telemetry'] as const,
   privacyNoticeSeen: () => [...settingsKeys.all, 'privacyNoticeSeen'] as const,
   dockIcon: () => [...settingsKeys.all, 'dockIcon'] as const,
@@ -34,6 +35,27 @@ export function useSetNotifications() {
   return useMutation({
     mutationFn: async (v: boolean) => unwrap(await ipc().settings.setNotifications(v)),
     onSuccess: () => qc.invalidateQueries({ queryKey: settingsKeys.notifications() }),
+  });
+}
+
+/** The global record shortcut toggle. Returns both the persisted `enabled`
+ *  preference and the live `registered` state so the Settings row can warn
+ *  when the shortcut is on but another app already owns the accelerator. */
+export function useRecordHotkeySetting() {
+  return useQuery({
+    queryKey: settingsKeys.recordHotkey(),
+    queryFn: async () => {
+      const res = unwrap(await ipc().settings.getRecordHotkey());
+      return { enabled: res.enabled, registered: res.registered };
+    },
+  });
+}
+
+export function useSetRecordHotkey() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (v: boolean) => unwrap(await ipc().settings.setRecordHotkey(v)),
+    onSuccess: () => qc.invalidateQueries({ queryKey: settingsKeys.recordHotkey() }),
   });
 }
 

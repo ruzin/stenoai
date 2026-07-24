@@ -55,6 +55,7 @@ If you're looking for a hosted desktop recording API, consider checking out [Rec
 - **Auto start/stop meetings** — Steno notices when a meeting starts and offers to take notes, then offers to summarise when it ends. Granola-style frictionless capture.
 - **System audio capture** — Record both sides of virtual meetings, headphones on, no extra setup or virtual cable. Native Core Audio Tap on macOS 14.4+, with selectable microphone input.
 - **Recording that coexists** — A compact transcription pill docks beside the app instead of taking over; Stop lands you on the note instantly and you can resume recording into an existing note (it appends and re-generates on demand).
+- **Global record shortcut** — Start or stop recording from anywhere with `⌘⇧R` (`Ctrl+Shift+R` on Windows). Toggle it off in Settings if it clashes with another app. On macOS, power users can additionally bind any key of their own via the `stenoai://record/start` / `record/stop` deep links (Shortcuts app).
 - **In-app note-taking** — Jot notes while you record, or keep a dedicated **My notes** tab that stays editable alongside the AI summary; your notes are folded straight into the summary.
 - **Ask your meetings** — Natural-language Q&A across a single note *or* your entire library via the Chat tab. Pulls from summary, key topics, and the full transcript.
 - **Multi-language (25 live, 99 total)** — Parakeet covers 25 European languages with live transcription; Whisper handles 99 languages including Chinese, Japanese, Arabic, and Hindi post-stop.

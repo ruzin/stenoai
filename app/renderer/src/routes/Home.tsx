@@ -15,6 +15,7 @@ import {
   useOutlookCalendarAuth,
 } from '@/hooks/useCalendarEvents';
 import { useFolders } from '@/hooks/useFolders';
+import { useRecordHotkeySetting } from '@/hooks/useSettings';
 import { ipc, type CalendarEvent, type Meeting } from '@/lib/ipc';
 import { pickInProgressEvent } from '@/lib/calendar';
 import { heroHeadline, heroSubtitle } from '@/lib/hero';
@@ -30,6 +31,14 @@ export function Home({ mode }: HomeProps) {
   const folders = useFolders();
   const calendar = useCalendarEvents();
   const recording = useRecording();
+  // Default ON while loading / on error so the hero copy doesn't flicker the
+  // ⌘⇧R hint off then on (back-compat: the shortcut ships enabled). Also
+  // require registered !== false: when another app owns the accelerator the
+  // shortcut doesn't actually work, so advertising it would strand the user
+  // on dead instructions — fall back to the click-based copy instead.
+  const recordHotkey = useRecordHotkeySetting();
+  const hotkeyEnabled =
+    (recordHotkey.data?.enabled ?? true) && recordHotkey.data?.registered !== false;
 
   const emptyState = !meetings.data?.length;
   const isRecording = recording.status === 'recording' || recording.status === 'paused';
@@ -444,6 +453,7 @@ export function Home({ mode }: HomeProps) {
       tomorrowPreview,
       calendarConnected,
       now: upcomingTickMs,
+      hotkeyEnabled,
     }),
     [
       recording.status,
@@ -453,6 +463,7 @@ export function Home({ mode }: HomeProps) {
       tomorrowPreview,
       calendarConnected,
       upcomingTickMs,
+      hotkeyEnabled,
     ],
   );
   const greeting = heroHeadline(heroState);
@@ -506,16 +517,18 @@ export function Home({ mode }: HomeProps) {
               {isRecording ? <Square className="size-4" /> : <PencilLine className="size-4" />}
               {isRecording ? 'Stop recording' : 'New note'}
             </Button>
-            <p
-              className="flex items-center gap-1.5 text-xs"
-              style={{ color: 'var(--fg-muted)' }}
-            >
-              <span>Quick start:</span>
-              <KbdKey>{isMac ? '⌘' : 'Ctrl'}</KbdKey>
-              <KbdKey>{isMac ? '⇧' : 'Shift'}</KbdKey>
-              <KbdKey>R</KbdKey>
-              <span>from anywhere</span>
-            </p>
+            {hotkeyEnabled && (
+              <p
+                className="flex items-center gap-1.5 text-xs"
+                style={{ color: 'var(--fg-muted)' }}
+              >
+                <span>Quick start:</span>
+                <KbdKey>{isMac ? '⌘' : 'Ctrl'}</KbdKey>
+                <KbdKey>{isMac ? '⇧' : 'Shift'}</KbdKey>
+                <KbdKey>R</KbdKey>
+                <span>from anywhere</span>
+              </p>
+            )}
           </div>
           {emptyStateCalendarNudge && (
             <div className="pt-8">{emptyStateCalendarNudge}</div>

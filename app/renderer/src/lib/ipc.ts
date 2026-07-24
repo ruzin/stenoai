@@ -486,6 +486,11 @@ export type GetTranscriptionEngineResponse = Result<{
 }>;
 
 export type GetNotificationsResponse = Result<{ notifications_enabled: boolean }>;
+// `enabled` is the persisted preference; `registered` is the live global-
+// shortcut registration state (false when enabled but another app owns the
+// accelerator). The setter returns the same two fields.
+export type GetRecordHotkeyResponse = Result<{ enabled: boolean; registered: boolean }>;
+export type SetRecordHotkeyResponse = Result<{ enabled: boolean; registered: boolean }>;
 export type GetTelemetryResponse = Result<{
   telemetry_enabled: boolean;
   anonymous_id?: string;
@@ -960,6 +965,8 @@ export interface StenoaiBridge {
   settings: {
     getNotifications: RequestFn<[], GetNotificationsResponse>;
     setNotifications: RequestFn<[v: boolean], Result<Record<string, never>>>;
+    getRecordHotkey: RequestFn<[], GetRecordHotkeyResponse>;
+    setRecordHotkey: RequestFn<[v: boolean], SetRecordHotkeyResponse>;
     getTelemetry: RequestFn<[], GetTelemetryResponse>;
     setTelemetry: RequestFn<
       [v: boolean, source: TelemetryToggleSource],
