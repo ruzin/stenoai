@@ -766,7 +766,7 @@ export function Setup() {
 
         <div className="mt-8 text-center text-xs text-muted-foreground">
           <a
-            href="https://github.com/ruzin/stenoai/issues"
+            href="https://github.com/stenolabs/stenoai/issues"
             target="_blank"
             rel="noreferrer"
             className="hover:text-foreground"

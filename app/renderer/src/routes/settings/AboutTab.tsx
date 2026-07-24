@@ -29,7 +29,7 @@ function ExternalLinkAction({ label, onClick }: { label: string; onClick: () => 
 // handler) for the contextual "View release" button below.
 const CHANGELOG_URL = 'https://docs.stenoai.co/changelog';
 const DISCORD_URL = 'https://discord.gg/DZ6vcQnxxu';
-const GITHUB_URL = 'https://github.com/ruzin/stenoai';
+const GITHUB_URL = 'https://github.com/stenolabs/stenoai';
 const TERMS_URL = 'https://stenoai.co/terms.html';
 const PRIVACY_URL = 'https://stenoai.co/privacy.html';
 

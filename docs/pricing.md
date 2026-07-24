@@ -14,7 +14,7 @@ organization-specific features, for teams that want that on top of the free app.
 ## Free — for everyone, including enterprise use
 - Price: $0
 - License: MIT (open source) -- no usage restrictions, including for commercial or enterprise deployments
-- Source code: https://github.com/ruzin/stenoai
+- Source code: https://github.com/stenolabs/stenoai
 - Account required: no
 - Includes: recording (system audio + microphone), on-device transcription (Parakeet and
   Whisper engines), on-device summarization (local models via Ollama), live transcription,

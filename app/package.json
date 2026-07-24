@@ -3,10 +3,10 @@
   "version": "0.6.5",
   "description": "AI powered intelligence layer for confidential workflows",
   "main": "main.js",
-  "homepage": "https://github.com/ruzin/stenoai",
+  "homepage": "https://github.com/stenolabs/stenoai",
   "repository": {
     "type": "git",
-    "url": "https://github.com/ruzin/stenoai.git"
+    "url": "https://github.com/stenolabs/stenoai.git"
   },
   "scripts": {
     "postinstall": "node scripts/patch-electron-dev.js",
@@ -228,7 +228,7 @@
     },
     "publish": {
       "provider": "github",
-      "owner": "ruzin",
+      "owner": "stenolabs",
       "repo": "stenoai"
     }
   }

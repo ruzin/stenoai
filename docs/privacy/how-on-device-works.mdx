@@ -34,7 +34,7 @@ Steno bundles [Ollama](https://ollama.com), which manages and runs small languag
 | Request | When | Why |
 |---------|------|-----|
 | Model download | First launch / setup only | Downloads transcription and Ollama model weights |
-| Update check | On app launch, then periodically | Checks `github.com/ruzin/stenoai` for new releases |
+| Update check | On app launch, then periodically | Checks `github.com/stenolabs/stenoai` for new releases |
 | Anonymous usage analytics | On events like recording start/stop, transcription/summarization completion, and errors | Anonymous product-usage telemetry (event names and counts only -- never meeting content); on by default, can be turned off in **Settings → Advanced** |
 
 None of these requests include your audio, transcript, or summary content. To verify this yourself, you can monitor network traffic with [Little Snitch](https://www.obdev.at/products/littlesnitch/) or macOS's built-in `nettop` while Steno is processing a recording.

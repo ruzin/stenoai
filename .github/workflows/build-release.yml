@@ -348,7 +348,7 @@ jobs:
           - Microphone access permissions
 
           ### Intel Mac users
-          Steno is **Apple Silicon only** (since v0.4.0). Intel users should stay on [v0.3.8](https://github.com/ruzin/stenoai/releases/tag/v0.3.8), the last release supporting Intel Macs. Auto-update on existing Intel installs is gated and will not offer newer versions to those machines.
+          Steno is **Apple Silicon only** (since v0.4.0). Intel users should stay on [v0.3.8](https://github.com/stenolabs/stenoai/releases/tag/v0.3.8), the last release supporting Intel Macs. Auto-update on existing Intel installs is gated and will not offer newer versions to those machines.
         files: |
           release/*.dmg
           release/*.zip
