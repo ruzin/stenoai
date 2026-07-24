@@ -8502,68 +8502,101 @@ async function findOllamaExecutable() {
   return null;
 }
 
-// Update checking functionality
+// Where the manual "Check for updates" reads the latest release from. Kept as a
+// named constant so the repo path has a single source of truth (and is the one
+// line to change if the repo is renamed/transferred — though the redirect
+// following below means an old build keeps working through GitHub's 301 too).
+const UPDATE_CHECK_URL = 'https://api.github.com/repos/ruzin/stenoai/releases/latest';
+
+// Update checking functionality. Follows HTTP redirects (301/302/307/308):
+// GitHub's REST API returns a 301 to the new owner/repo path when a repo is
+// renamed or transferred, and Node's https.request does NOT follow redirects on
+// its own — so without this, a transfer would silently break the manual update
+// check for every already-installed app.
 async function checkForUpdates() {
-  return new Promise((resolve) => {
-    const options = {
-      hostname: 'api.github.com',
-      path: '/repos/ruzin/stenoai/releases/latest',
-      method: 'GET',
-      headers: {
-        'User-Agent': 'Steno-Updater'
+  const MAX_REDIRECTS = 5;
+
+  function fetchLatest(urlStr, redirectsLeft) {
+    return new Promise((resolve) => {
+      let url;
+      try {
+        url = new URL(urlStr);
+      } catch (e) {
+        resolve({ success: false, error: 'Invalid update URL' });
+        return;
       }
-    };
+      const options = {
+        hostname: url.hostname,
+        path: url.pathname + url.search,
+        method: 'GET',
+        headers: { 'User-Agent': 'Steno-Updater' },
+      };
 
-    const req = https.request(options, (res) => {
-      let data = '';
-
-      res.on('data', (chunk) => {
-        data += chunk;
-      });
-
-      res.on('end', () => {
-        try {
-          const release = JSON.parse(data);
-          const latestVersion = release.tag_name.replace(/^v/, ''); // Remove 'v' prefix if present
-
-          // Get current version from package.json
-          const packagePath = path.join(__dirname, 'package.json');
-          const packageContent = JSON.parse(fs.readFileSync(packagePath, 'utf8'));
-          const currentVersion = packageContent.version;
-
-          console.log(`Current version: ${currentVersion}, Latest version: ${latestVersion}`);
-
-          // Simple version comparison (works for semantic versioning)
-          const isUpdateAvailable = compareVersions(currentVersion, latestVersion) < 0;
-
-          resolve({
-            success: true,
-            updateAvailable: isUpdateAvailable,
-            currentVersion: currentVersion,
-            latestVersion: latestVersion,
-            releaseUrl: release.html_url,
-            releaseName: release.name || `Version ${latestVersion}`,
-            downloadUrl: getDownloadUrl(release.assets)
-          });
-        } catch (error) {
-          console.error('Error parsing GitHub API response:', error);
-          resolve({ success: false, error: 'Failed to parse update data' });
+      const req = https.request(options, (res) => {
+        // Follow a redirect (repo rename/transfer → 301 to the new path).
+        if ([301, 302, 307, 308].includes(res.statusCode) && res.headers.location) {
+          res.resume(); // drain the response so the socket can be reused/freed
+          if (redirectsLeft <= 0) {
+            resolve({ success: false, error: 'Too many redirects' });
+            return;
+          }
+          // location may be relative; resolve it against the current URL.
+          const next = new URL(res.headers.location, urlStr).toString();
+          resolve(fetchLatest(next, redirectsLeft - 1));
+          return;
         }
+
+        let data = '';
+        res.on('data', (chunk) => {
+          data += chunk;
+        });
+
+        res.on('end', () => {
+          try {
+            const release = JSON.parse(data);
+            const latestVersion = release.tag_name.replace(/^v/, ''); // Remove 'v' prefix if present
+
+            // Get current version from package.json
+            const packagePath = path.join(__dirname, 'package.json');
+            const packageContent = JSON.parse(fs.readFileSync(packagePath, 'utf8'));
+            const currentVersion = packageContent.version;
+
+            console.log(`Current version: ${currentVersion}, Latest version: ${latestVersion}`);
+
+            // Simple version comparison (works for semantic versioning)
+            const isUpdateAvailable = compareVersions(currentVersion, latestVersion) < 0;
+
+            resolve({
+              success: true,
+              updateAvailable: isUpdateAvailable,
+              currentVersion: currentVersion,
+              latestVersion: latestVersion,
+              releaseUrl: release.html_url,
+              releaseName: release.name || `Version ${latestVersion}`,
+              downloadUrl: getDownloadUrl(release.assets)
+            });
+          } catch (error) {
+            console.error('Error parsing GitHub API response:', error);
+            resolve({ success: false, error: 'Failed to parse update data' });
+          }
+        });
       });
-    });
 
-    req.on('error', (error) => {
-      console.error('Error checking for updates:', error);
-      resolve({ success: false, error: error.message });
-    });
+      req.on('error', (error) => {
+        console.error('Error checking for updates:', error);
+        resolve({ success: false, error: error.message });
+      });
 
-    req.setTimeout(10000, () => {
-      req.destroy();
-      resolve({ success: false, error: 'Update check timeout' });
-    });
+      req.setTimeout(10000, () => {
+        req.destroy();
+        resolve({ success: false, error: 'Update check timeout' });
+      });
 
-    req.end();
-  });
+      req.end();
+    });
+  }
+
+  return fetchLatest(UPDATE_CHECK_URL, MAX_REDIRECTS);
 }
 
 function compareVersions(current, latest) {
