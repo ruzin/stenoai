@@ -292,6 +292,10 @@ class Notification extends EventEmitter {
       },
     });
     notificationWindow = win;
+    // Deny window.open + block foreign navigation on the toast window too, so the
+    // security guards cover EVERY BrowserWindow (#377). allowExternalLinks lets a
+    // Join/meeting link route out via shell.openExternal.
+    hardenWindow(win, { allowExternalLinks: true });
     win._activeCustomNotification = this;
     // Also pin the window to the notification instance so a handler bound to
     // THIS notif (e.g. the pre-meeting 'close' dismissal-telemetry handler) can
@@ -1118,6 +1122,38 @@ function validateSafeFilePath(filepath, allowedBaseDirs) {
   }
 }
 
+// #377 — harden every BrowserWindow against untrusted navigation. The renderer
+// routes all real external links through the `open-external` IPC (shell.openExternal),
+// so nothing legitimately relies on window.open or on navigating the window away
+// from the bundled renderer. Deny window.open outright, and cancel any full-page
+// navigation — the SPA uses in-app routing, so a will-navigate here is a
+// foreign/injected navigation, never a real route change. Interactive windows still
+// let a genuine http(s) link (a target=_blank "Report an issue", or a link
+// inside a note) open in the user's browser instead of silently dying.
+function hardenWindow(win, { allowExternalLinks = false } = {}) {
+  const wc = win.webContents;
+  wc.setWindowOpenHandler(({ url }) => {
+    // HTTP(S) only — matches the will-navigate branch below and the established
+    // `open-external` IPC policy (no mailto/other schemes; nothing legitimate in
+    // the renderer opens a non-http(s) popup). #377 review.
+    if (allowExternalLinks && /^https?:/i.test(url)) {
+      shell.openExternal(url);
+    }
+    return { action: 'deny' };
+  });
+  wc.on('will-navigate', (event) => {
+    // Electron 42: read the target off the event (the positional `url` arg is
+    // deprecated). will-navigate only fires on a real document navigation — the
+    // SPA's hash routing never reaches here, so anything that does is foreign.
+    const url = event.url;
+    if (url === wc.getURL()) return; // reload of the exact trusted document is fine
+    event.preventDefault();
+    if (allowExternalLinks && /^https?:/i.test(url)) {
+      shell.openExternal(url);
+    }
+  });
+}
+
 function createWindow(options = {}) {
   rendererShortcutReady = false;
 
@@ -1163,6 +1199,7 @@ function createWindow(options = {}) {
   }
 
   mainWindow = new BrowserWindow(windowOpts);
+  hardenWindow(mainWindow, { allowExternalLinks: true });
 
   const rendererDist = path.join(__dirname, 'renderer', 'dist', 'index.html');
   const hash = process.env.STENOAI_RENDERER_HASH;
@@ -3408,6 +3445,10 @@ async function renderHtmlToPdf(html) {
       // renderer-supplied document to PDF.
     },
   });
+  // Background render of renderer-supplied HTML: deny any popup and block any
+  // navigation the document might attempt (no openExternal — this is not an
+  // interactive window and must never spawn a browser tab on its own).
+  hardenWindow(win);
   try {
     const render = (async () => {
       // Load the HTML directly as a data URL (self-contained: CSS, font, and
