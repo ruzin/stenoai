@@ -3,6 +3,7 @@ import { Search } from 'lucide-react';
 import { useMeetings, LIVE_SUMMARY_PREFIX } from '@/hooks/useMeetings';
 import { searchNotes, snippet } from '@/lib/noteSearch';
 import { navigate, useRoute } from '@/lib/router';
+import { isMac } from '@/lib/utils';
 import type { Meeting } from '@/lib/ipc';
 
 interface PaletteContextValue {
@@ -37,12 +38,21 @@ interface SettingsEntry {
   tab: string;
   title: string;
   sub: string;
+  /** Settings that only render on macOS (behind `isMac` in GeneralTab):
+   *  "Record system audio" and "Hide dock icon". On Windows those rows don't
+   *  exist, so indexing them would jump to a tab where nothing's there —
+   *  filtered out below when not on mac (#405). */
+  macOnly?: boolean;
 }
 
 // Searchable index of the app's settings, mapped to the tab each one lives on
 // today (post-v0.6.2 nav rail). Selecting a result opens that tab. Transcription
 // settings now live on the AI tab, so they map to `ai`. Adapted from @Vassista's
 // PR #349 and retargeted to the current tab layout.
+//
+// Keep titles in sync with the rendered setting labels (GeneralTab/AiTab/
+// AboutTab etc.) — the T1 spec asserts a few titles still match, to catch the
+// index drifting out from under a renamed control.
 const SETTINGS_INDEX: SettingsEntry[] = [
   { id: 'general-name', tab: 'general', title: 'Your name', sub: 'In-app greeting' },
   { id: 'general-theme', tab: 'general', title: 'Appearance', sub: 'Light, dark, or system theme' },
@@ -51,10 +61,19 @@ const SETTINGS_INDEX: SettingsEntry[] = [
   { id: 'general-autodetect', tab: 'general', title: 'Auto-detected meetings', sub: 'Notify when another app uses the microphone' },
   { id: 'general-notifications', tab: 'general', title: 'Post meeting notifications', sub: 'Desktop notifications when notes are ready' },
   { id: 'general-mic', tab: 'general', title: 'Microphone', sub: 'Input device' },
-  { id: 'general-system-audio', tab: 'general', title: 'Record system audio', sub: 'Capture other participants' },
+  { id: 'general-system-audio', tab: 'general', title: 'Record system audio', sub: 'Capture other participants', macOnly: true },
   { id: 'general-silence', tab: 'general', title: 'Auto-stop on silence', sub: 'End a recording when it goes quiet' },
   { id: 'general-launch', tab: 'general', title: 'Launch on login', sub: 'Start Steno automatically' },
-  { id: 'general-dock', tab: 'general', title: 'Hide dock icon', sub: 'Menu bar / tray icon only' },
+  // Cross-platform row (Electron's Tray covers the macOS menu bar and the
+  // Windows system tray); its rendered label switches on platform, so mirror
+  // that here so the title matches whatever GeneralTab shows.
+  {
+    id: 'general-menubar',
+    tab: 'general',
+    title: isMac ? 'Show in menu bar' : 'Show in system tray',
+    sub: 'Quick-access icon in the menu bar or system tray',
+  },
+  { id: 'general-dock', tab: 'general', title: 'Hide dock icon', sub: 'Menu bar / tray icon only', macOnly: true },
   { id: 'ai-language', tab: 'ai', title: 'Language', sub: 'Transcription and summary language' },
   { id: 'ai-transcription', tab: 'ai', title: 'Transcription model', sub: 'Parakeet or Whisper' },
   { id: 'ai-save-recordings', tab: 'ai', title: 'Save recordings', sub: 'Keep the audio files after transcription' },
@@ -68,7 +87,14 @@ const SETTINGS_INDEX: SettingsEntry[] = [
   { id: 'advanced-analytics', tab: 'advanced', title: 'Anonymous usage analytics', sub: 'Opt in or out' },
   { id: 'developer', tab: 'developer', title: 'Developer', sub: 'Diagnostics and logs' },
   { id: 'about', tab: 'about', title: 'About', sub: 'Version, release notes, check for updates' },
+  { id: 'about-discord', tab: 'about', title: 'Discord', sub: 'Join the community, ask questions, share feedback' },
 ];
+
+// Only the settings that actually render on this platform. macOS-only rows
+// ("Record system audio", "Hide dock icon") don't exist on Windows/Linux, so
+// they're dropped from the index there — otherwise selecting one would jump to
+// a tab where the row isn't shown (#405).
+const AVAILABLE_SETTINGS = SETTINGS_INDEX.filter((s) => !s.macOnly || isMac);
 
 /**
  * Global ⌘K search. Provides `open()` to descendants (the sidebar trigger) and
@@ -122,9 +148,9 @@ function CommandPalette({ onClose }: { onClose: () => void }) {
 
   const settingsResults = React.useMemo<SettingsEntry[]>(() => {
     if (!isSettingsMode) return [];
-    if (!query.trim()) return SETTINGS_INDEX;
+    if (!query.trim()) return AVAILABLE_SETTINGS;
     const q = query.trim().toLowerCase();
-    return SETTINGS_INDEX.filter(
+    return AVAILABLE_SETTINGS.filter(
       (s) => s.title.toLowerCase().includes(q) || s.sub.toLowerCase().includes(q),
     );
   }, [isSettingsMode, query]);
