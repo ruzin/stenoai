@@ -346,7 +346,7 @@ Summary output language: {config.get_language_name(output_language)}
                     if text:
                         logger.info(f"Loaded user notes ({len(text)} chars)")
                         return text
-                except Exception:
+                except (OSError, UnicodeDecodeError):
                     pass
                 break
         return None
@@ -563,7 +563,7 @@ Summary output language: {config.get_language_name(output_language)}
         if state_file.exists():
             try:
                 state_file.unlink()
-            except Exception:
+            except OSError:
                 pass
 
         return {
@@ -649,7 +649,7 @@ Summary output language: {config.get_language_name(output_language)}
             if not gate_config.get_keep_recordings():
                 try:
                     audio_path.unlink()
-                except Exception:
+                except OSError:
                     pass
             print("SUMMARY_SKIPPED", flush=True)
             print(f"SAVED:{summary_path}", flush=True)
@@ -746,14 +746,14 @@ Summary output language: {config.get_language_name(output_language)}
             try:
                 audio_path.unlink()
                 print(f"🗑️ Cleaned up audio file: {audio_path}")
-            except Exception:
+            except OSError:
                 pass
 
         state_file = Path("recorder_state.json")
         if state_file.exists():
             try:
                 state_file.unlink()
-            except Exception:
+            except OSError:
                 pass
 
         print(f"✅ Complete processing saved: {summary_path}")
@@ -911,7 +911,7 @@ def _read_existing_user_notes(summary_path: Path):
         if not summary_path.exists():
             return None
         content = summary_path.read_text(encoding='utf-8')
-    except Exception:
+    except (OSError, UnicodeDecodeError):
         return None
     idx = content.find('\n## User Notes')
     if idx == -1:
@@ -1135,7 +1135,7 @@ def process_streaming(audio_file, name, notes, live_transcript, append_to):
             if not is_live_transcript and not _get_config().get_keep_recordings():
                 try:
                     audio_path.unlink()
-                except Exception:
+                except OSError:
                     pass
             print("SUMMARY_SKIPPED", flush=True)
             print(f"SAVED:{append_to}", flush=True)
@@ -1188,7 +1188,7 @@ def process_streaming(audio_file, name, notes, live_transcript, append_to):
             if not is_live_transcript and not gate_config.get_keep_recordings():
                 try:
                     audio_path.unlink()
-                except Exception:
+                except OSError:
                     pass
 
             print("SUMMARY_SKIPPED", flush=True)
@@ -1306,7 +1306,7 @@ def process_streaming(audio_file, name, notes, live_transcript, append_to):
         if not is_live_transcript and not get_config().get_keep_recordings():
             try:
                 audio_path.unlink()
-            except Exception:
+            except OSError:
                 pass
 
         print(f"SAVED:{summary_path}", flush=True)
@@ -3400,6 +3400,8 @@ def chat_global_streaming(question, folder):
             summaries.append((f, data))
             seen.add(f.stem.replace('_summary', ''))
         except Exception:
+            # Best-effort listing: a single malformed/legacy note must never
+            # break the whole meeting list — skip it and keep scanning.
             continue
     for f in sorted(output_dir.glob("*_summary.json")):
         if f.stem.replace('_summary', '') in seen:
@@ -3407,7 +3409,7 @@ def chat_global_streaming(question, folder):
         try:
             with open(f, 'r', encoding='utf-8') as fh:
                 summaries.append((f, json.load(fh)))
-        except Exception:
+        except (OSError, ValueError):
             continue
 
     # Folder scoping. Each meeting record carries a 'folders' array of IDs;
@@ -3855,6 +3857,9 @@ def list_models():
             import ollama as ollama_pkg
             installed_names = {getattr(m, 'model', '') for m in (getattr(ollama_pkg.list(), 'models', []) or [])}
         except Exception:
+            # Best-effort: Ollama may be absent, not running, or unreachable
+            # (import or HTTP/connection errors) — treat nothing as installed
+            # rather than failing the model-status listing.
             installed_names = set()
         from src.config import is_apple_silicon, Config
         apple_silicon = provider == "local" and is_apple_silicon()
@@ -4732,6 +4737,8 @@ def test_cloud_api():
                 try:
                     detail = he.read().decode("utf-8", errors="replace")[:300]
                 except Exception:
+                    # Best-effort error-detail extraction; must never mask the
+                    # HTTPError we're about to report to the user.
                     pass
                 print(json.dumps({
                     "success": False,
