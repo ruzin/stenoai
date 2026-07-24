@@ -136,7 +136,12 @@ export function Settings() {
       sidebar={
         <SettingsNav
           activeTab={tab}
-          onSelect={setTab}
+          // The route is the single source of truth for the visible tab: a nav
+          // click navigates `?tab=<id>` and the route→tab effect below switches
+          // the tab. Calling setTab directly instead would leave the URL's
+          // `?tab=` stale, so a later ⌘K search to that same tab would bail on
+          // router's unchanged-hash early-return and silently do nothing (#405).
+          onSelect={(id) => navigate(`/settings?tab=${id}`)}
           onBack={() => navigate(getLastNonSettingsRoute() || '/')}
           version={version.data?.version}
         />
