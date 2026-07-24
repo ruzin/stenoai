@@ -17,14 +17,24 @@ import { writeMeetingMarkdown } from '../fixtures/user-config';
  * Model-free: pure markdown parse, no ASR / Ollama.
  */
 
+type SessionInfo = {
+  summary_file: string;
+  notes_stale?: boolean;
+  processing?: boolean;
+  is_live_transcript?: boolean;
+  notes_generated?: boolean;
+  [key: string]: unknown;
+};
 type Meeting = {
-  session_info: {
-    summary_file: string;
-    notes_stale?: boolean;
-    processing?: boolean;
-    is_live_transcript?: boolean;
-    notes_generated?: boolean;
-  };
+  session_info: SessionInfo;
+  summary?: string;
+  participants?: string[];
+  discussion_areas?: Array<{ title: string; analysis: string }>;
+  key_points?: string[];
+  action_items?: string[];
+  is_diarised?: boolean;
+  user_notes?: string | null;
+  folders?: string[];
   transcript?: string;
 };
 type GetResult = { success: boolean; meeting?: Meeting; error?: string };
@@ -154,4 +164,90 @@ test('LIST (Python parser) and DETAIL (JS parser) agree on the session_info mark
   });
   // ...and must agree with each other (drift guard).
   expect(detailMarkers).toEqual(markers(listed!.session_info));
+});
+
+test('LIST and DETAIL agree on the FULL parsed contract, incl. reasoning-tag normalization (#346)', async ({
+  launchApp,
+  userDataDir,
+}) => {
+  // The stronger drift guard. The marker-only test above missed Instance 2: the
+  // Python parser normalizes an inline reasoning-close tag (`</think>## Summary`
+  // on one line) onto its own line before section-splitting, the JS parser did
+  // not — so the summary split in LIST but vanished in DETAIL. Seed a note whose
+  // summary body starts with that inline tag and assert both parsers surface the
+  // SAME contract (summary text + markers + every field both surface), not just
+  // the three flags.
+  const file = writeMeetingMarkdown(userDataDir, 'reasoning', {
+    name: 'Reasoning Note',
+    // Inline reasoning-close tag glued to the first header — the normalization
+    // trigger. Without the JS port the `## Summary` header is not at line start,
+    // so DETAIL drops the summary entirely while LIST keeps it.
+    summaryMarkdown: [
+      '</think>## Summary',
+      'The team confirmed the reasoning-model path renders correctly.',
+      '',
+      '## Participants',
+      'Alice, Bob',
+      '',
+      '## Key Points',
+      '- Ship the parser parity fix',
+      '- Keep both parsers in sync',
+      '',
+      '## Action Items',
+      '- [ ] Land the JS normalization port',
+    ].join('\n'),
+    transcript: 'Full transcript of the reasoning-model discussion.',
+    frontmatter: { notes_stale: true, is_live_transcript: true, notes_generated: false },
+  });
+
+  const { page } = await launchApp();
+
+  const detail = await getMeeting(page, file);
+  expect(detail.success, detail.error).toBe(true);
+
+  const listed = (await listMeetings(page)).meetings.find(
+    (m) => m.session_info.summary_file === file,
+  );
+  expect(listed, 'seeded note present in list').toBeTruthy();
+
+  // Restrict to the fields both parsers surface. list-meetings strips the
+  // transcript (fetched lazily by get-meeting) and adds has_transcript, and the
+  // Python session_info carries configured_language/detected_language that the JS
+  // side does not — those are out of scope here, so compare the intersection.
+  const contract = (m: Meeting) => {
+    const si = m.session_info;
+    return {
+      // Every session_info field the JS parser surfaces (the intersection).
+      session_info: {
+        name: si.name,
+        processed_at: si.processed_at,
+        duration_seconds: si.duration_seconds,
+        // Compare by basename only: the two IPC surfaces legitimately attach the
+        // path in different forms (get-meeting resolves the realpath, e.g.
+        // /var -> /private/var on macOS or the 8.3-short vs long name on Windows;
+        // list-meetings echoes the glob path). That path-plumbing difference is
+        // not the #346 parse-contract drift, and it is not OS-portable to
+        // normalize, so key identity on the filename the parsers surface.
+        summary_file: String(si.summary_file).split(/[\\/]/).pop(),
+        output_language: si.output_language ?? null,
+        notes_stale: si.notes_stale ?? false,
+        is_live_transcript: si.is_live_transcript ?? false,
+        notes_generated: si.notes_generated ?? true,
+      },
+      summary: m.summary ?? '',
+      participants: m.participants ?? [],
+      discussion_areas: m.discussion_areas ?? [],
+      key_points: m.key_points ?? [],
+      action_items: m.action_items ?? [],
+      is_diarised: m.is_diarised ?? false,
+      user_notes: m.user_notes ?? null,
+      folders: m.folders ?? [],
+    };
+  };
+
+  const detailContract = contract(detail.meeting!);
+  // Sanity: the normalization actually fired — the summary survived the inline tag.
+  expect(detailContract.summary).toContain('renders correctly');
+  // Full-contract parity: LIST (Python) and DETAIL (JS) must agree byte-for-byte.
+  expect(detailContract).toEqual(contract(listed!));
 });

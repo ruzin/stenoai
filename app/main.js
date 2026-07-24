@@ -2185,6 +2185,30 @@ async function readReportsSidecar(meetingPath, allowedOutputDirs) {
   }
 }
 
+// Port of simple_recorder._REASONING_TAG_HEADER_PATTERN / _normalize_markdown_for_parsing.
+// A reasoning-model summary can emit its closing think tag inline with the first
+// header (e.g. `</thought>## Summary`); without a break the section-splitter never
+// sees the `## ` at line start and drops the whole summary. This pushes the header
+// onto its own line before splitting. Scoped to think/thought/thinking/reasoning so
+// unrelated inline markup can't trigger a spurious break.
+//   Kept equivalent to the Python side for the ASCII tags + whitespace that
+//   actually occur in model output (same tag set: `i` = Python re.IGNORECASE,
+//   `g` = re.sub replaces all occurrences, `\s` spans the space/newline between
+//   tag and header). JS and Python `\s`/IGNORECASE differ only on exotic Unicode
+//   whitespace and non-ASCII case folds, which don't appear here. Any edit MUST
+//   be mirrored in simple_recorder._normalize_markdown_for_parsing (see #346).
+const REASONING_TAG_HEADER_PATTERN = /(<\/(?:think|thought|thinking|reasoning)>)\s*(#{1,6}\s)/gi;
+
+function normalizeMarkdownForParsing(mdText) {
+  // Ensure headers immediately following a reasoning tag start on a new line.
+  return mdText.replace(REASONING_TAG_HEADER_PATTERN, '$1\n$2');
+}
+
+// Mirrors simple_recorder._parse_meeting_markdown so the detail page (get-meeting)
+// can render .md meetings without a Python round-trip. The two parsers MUST stay
+// byte-for-byte equivalent on everything they surface into session_info / the
+// meeting dict — they drift silently otherwise (see #346, and #313 for a prior
+// drift). Any change here has to land in _parse_meeting_markdown too.
 function parseMeetingMarkdown(content, mdPath) {
   // Split frontmatter
   const meta = {};
@@ -2222,6 +2246,8 @@ function parseMeetingMarkdown(content, mdPath) {
       }
     }
   }
+
+  body = normalizeMarkdownForParsing(body);
 
   // Parse markdown body into sections keyed by lowercased `## ` heading.
   const sections = {};
