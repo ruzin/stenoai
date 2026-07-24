@@ -58,6 +58,7 @@ import {
 import { useOrgSession } from '@/hooks/useOrg';
 import { COMPACT_BTN, COMPACT_INPUT, COMPACT_TRIGGER, SectionHeading, SettingRow } from './primitives';
 import { ModelCard, formatModelSize, isDefaultModel, parsePullPercent } from './model-card';
+import { modelMayExceedMemory } from './model-memory';
 import { LANGUAGES_PARAKEET, LANGUAGES_WHISPER } from './languages';
 
 export function AiTab() {
@@ -890,6 +891,11 @@ function ModelList() {
   }
 
   const isRemote = models.data.provider === 'remote';
+  // The RAM-suitability badge only makes sense for the bundled local Ollama:
+  // for remote-Ollama or any cloud provider the model runs off-machine, so
+  // this Mac's memory is irrelevant. Gate strictly on 'local'.
+  const isLocal = models.data.provider === 'local';
+  const totalRamGb = models.data.totalRamGb;
   const sorted = [...models.data.models].sort(
     (a, b) => (a.deprecated ? 1 : 0) - (b.deprecated ? 1 : 0),
   );
@@ -935,6 +941,7 @@ function ModelList() {
     // size is what's really on disk.
     const showMlxSize = m.mlxTag && m.mlxSizeGb !== undefined && (m.mlxInstalled || !m.ggufInstalled);
     const sizeLabel = formatModelSize(showMlxSize ? m.mlxSizeGb : m.size_gb);
+    const memoryWarning = isLocal && modelMayExceedMemory(m.size_gb, totalRamGb);
     const fasterBuildBlocked =
       Boolean(fasterBuild.activeTag) &&
       !isFasterBuildActive &&
@@ -976,6 +983,7 @@ function ModelList() {
         isCurrent={isCurrent}
         isDefault={isDefault}
         deprecated={Boolean(m.deprecated)}
+        memoryWarning={memoryWarning}
         isDownloading={isDownloading}
         downloadProgress={downloadProgress}
         downloadBytesPerSecond={pull.bytesPerSecond[pullTarget]}

@@ -42,7 +42,12 @@ function parseSizeGb(size?: string): number | undefined {
 export function useModels() {
   return useQuery({
     queryKey: modelsKeys.list(),
-    queryFn: async (): Promise<{ models: ListedModel[]; current: string; provider: string }> => {
+    queryFn: async (): Promise<{
+      models: ListedModel[];
+      current: string;
+      provider: string;
+      totalRamGb?: number;
+    }> => {
       const raw = unwrap(await ipc().models.list());
       const models: ListedModel[] = Object.entries(raw.supported_models).map(([id, info]) => ({
         name: id,
@@ -59,7 +64,7 @@ export function useModels() {
         mlxSizeGb: parseSizeGb(info.mlx_size),
         ggufInstalled: info.gguf_installed,
       }));
-      return { models, current: raw.current_model, provider: raw.provider };
+      return { models, current: raw.current_model, provider: raw.provider, totalRamGb: raw.total_ram_gb };
     },
   });
 }

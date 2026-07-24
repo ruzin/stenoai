@@ -439,6 +439,9 @@ export type ListModelsResponse = Result<{
   supported_models: Record<string, RawSupportedModel>;
   current_model: string;
   provider: string;
+  // Machine RAM in GB (main.js attaches os.totalmem()); used to flag local
+  // models that may exceed available memory. Absent -> never warn.
+  total_ram_gb?: number;
 }>;
 export type GetCurrentModelResponse = Result<{ model: string }>;
 

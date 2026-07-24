@@ -6549,6 +6549,15 @@ ipcMain.handle('list-models', async () => {
     const result = await runPythonScript('simple_recorder.py', ['list-models']);
     const jsonData = JSON.parse(result);
 
+    // Machine RAM (GB), used by the renderer to flag local models that may
+    // exceed available memory. macOS-only: the heuristic + the "your Mac" copy
+    // are calibrated for Apple Silicon unified memory; on Windows the field is
+    // omitted so no badge shows (Windows VRAM/DirectML detection is out of
+    // scope — #248). Computed once per Settings-open list() call.
+    if (process.platform === 'darwin') {
+      jsonData.total_ram_gb = os.totalmem() / (1024 ** 3);
+    }
+
     return {
       success: true,
       ...jsonData

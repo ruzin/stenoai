@@ -163,6 +163,11 @@ interface ModelCardProps {
   fasterBuildBlocked?: boolean;
   onSwitchToFasterBuild?: () => void;
   onCancelFasterBuild?: () => void;
+  // Non-blocking caution: the model's footprint likely exceeds this Mac's
+  // usable memory, so summarising with it may run slowly or fail. Only set for
+  // local Ollama models (the RAM check is meaningless for remote/cloud). Shows
+  // a subtle badge next to the name — never disables selection (see #248).
+  memoryWarning?: boolean;
 }
 
 export function ModelCard({
@@ -189,6 +194,7 @@ export function ModelCard({
   fasterBuildBlocked = false,
   onSwitchToFasterBuild,
   onCancelFasterBuild,
+  memoryWarning = false,
 }: ModelCardProps) {
   return (
     <div
@@ -273,6 +279,19 @@ export function ModelCard({
               }}
             >
               MLX model
+            </span>
+          )}
+          {memoryWarning && (
+            <span
+              className="rounded-[3px] px-1.5 py-px text-[11px]"
+              title="This model may exceed your Mac's available memory and could run slowly or fail."
+              style={{
+                background: 'var(--danger-bg)',
+                color: 'var(--danger)',
+                border: '1px solid var(--danger)',
+              }}
+            >
+              May exceed memory
             </span>
           )}
         </div>
