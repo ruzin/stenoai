@@ -42,10 +42,10 @@
 If you're looking for a hosted desktop recording API, consider checking out [Recall.ai](https://www.recall.ai/product/desktop-recording-sdk?utm_source=github&utm_medium=sponsorship&utm_campaign=ruzin-stenoai), an API that records Zoom, Google Meet, Microsoft Teams, in-person meetings, and more.
 
 ## 📢 What's New
-- **2026-07-24** ☁️ Cloud transcription — transcribe with any OpenAI-compatible speech-to-text endpoint alongside on-device Parakeet and Whisper; your API key is stored encrypted on-device.
 - **2026-07-24** 🔎 Settings search — press ⌘K on the Settings screen to search every setting and jump straight to the right tab.
 - **2026-07-24** 🔔 Cleaner notifications — meeting and note alerts now show as Steno's own in-app toast instead of native OS notifications.
-- **2026-07-24** ✨ Meeting-list polish — notes show a letter avatar instead of a generic file icon, and Calendar settings show your connected account.
+- **2026-07-24** ✨ Letter avatars — notes in the Previous list show their initial instead of a generic file icon.
+- **2026-07-24** 📅 Connected calendar — Calendar settings now show the account you've connected.
 
 
 ## Features
