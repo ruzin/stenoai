@@ -322,7 +322,6 @@ export type SetupCheckResponse = Result<{
 
 export type MicPermissionResponse = Result<{ status: MicPermissionStatus }>;
 export type MicPermissionGrantResponse = Result<{ granted: boolean }>;
-export type ScreenRecordingPermissionResponse = Result<{ screenPermission: string }>;
 
 /** Mirrors RECORDING_TRIGGERS in main.js -- what UI action started the
  *  recording, so PostHog can tell whether the meeting-detected nudge
@@ -755,10 +754,6 @@ export interface StenoaiBridge {
 
   app: {
     getVersion: RequestFn<[], AppVersionResponse>;
-    /** Screen Recording permission changes don't apply to an already-running
-     *  process on macOS — this is the one-click "apply it now" follow-up.
-     *  Never actually resolves (the process exits first). */
-    relaunch: RequestFn<[], void>;
   };
 
   window: { focus: SendFn<[]>; readyToShow: SendFn<[]> };
@@ -795,14 +790,6 @@ export interface StenoaiBridge {
   perm: {
     checkMicrophone: RequestFn<[], MicPermissionResponse>;
     requestMicrophone: RequestFn<[], MicPermissionGrantResponse>;
-    /** macOS only: safely triggers the native prompt for a 'not-determined'
-     *  user by calling desktopCapturer.getSources() in an ordinary, properly
-     *  try/caught main-process handler — deliberately NOT the same code path
-     *  recording capture uses (see main.js for why that one can't do this). */
-    requestScreenRecording: RequestFn<[], ScreenRecordingPermissionResponse>;
-    /** Deep-links to System Settings > Screen Recording — macOS won't
-     *  re-prompt once denied/restricted, so this is the only way back. */
-    openScreenRecordingSettings: RequestFn<[], Result<Record<string, never>>>;
   };
 
   recording: {
@@ -827,12 +814,6 @@ export interface StenoaiBridge {
       Result<{
         supported: boolean;
         osVersion: string;
-        screenPermission: string;
-        // Screen Recording permission as of process launch (macOS only;
-        // frozen at startup — a mid-session grant only takes effect after a
-        // relaunch, so consumers gating loopback usability must read this,
-        // not the live `screenPermission`).
-        screenPermissionAtLaunch: string;
         experimental?: boolean;
         platform?: string;
       }>
@@ -999,9 +980,8 @@ export interface StenoaiBridge {
       [payload: { minutes: number; sessionName: string | null }],
       Result<Record<string, never>>
     >;
-    /** Fired at recording start when loopback is skipped specifically because
-     *  Screen Recording permission isn't granted (see main.js — not fired for
-     *  the toggle-off or OS-unsupported cases, which aren't a surprise). */
+    /** Fired when an enabled loopback acquisition genuinely fails; not fired
+     *  for the toggle-off or OS-unsupported cases. */
     showSystemAudioMicOnlyNotification: RequestFn<[], Result<Record<string, never>>>;
     showNoteReadyNotification: RequestFn<
       [

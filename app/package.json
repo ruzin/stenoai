@@ -165,8 +165,7 @@
       "extendInfo": {
         "NSMicrophoneUsageDescription": "Steno needs microphone access to record and transcribe meetings.",
         "NSAudioCaptureUsageDescription": "Steno needs audio capture access to record system audio from virtual meetings.",
-        "NSScreenCaptureUsageDescription": "Steno needs screen capture access for the loopback-audio feature detection on macOS.",
-        "LSMinimumSystemVersion": "12.3.0"
+        "LSMinimumSystemVersion": "14.4.0"
       }
     },
     "win": {

@@ -66,30 +66,13 @@ export function useSystemAudioCapture() {
   // When the support query is still loading we assume supported so a fast user
   // who records before the IPC resolves still gets loopback.
   const loopbackSupported = systemAudioSupport.data?.supported ?? true;
-  // macOS also needs Screen Recording permission for the CoreAudio Process Tap
-  // (desktopCapturer.getSources() needs it) — 'granted' required; anything
-  // else (denied/not-determined/restricted) means getDisplayMedia() would
-  // fail at the OS level in a way that crashes the WHOLE APP rather than
-  // rejecting cleanly (electron-audio-loopback's internal request handler
-  // re-throws inside an async callback Electron never awaits/catches, so a
-  // getSources() failure becomes an unhandled rejection in the main process).
-  // Unlike loopbackSupported above, this must NOT default optimistically
-  // while loading: a wrong "true" assumption here reaches that broken crash
-  // path, whereas loopbackSupported's wrong-default failure mode is just a
-  // silent/broken system-audio channel (non-fatal). A wrong "false" here
-  // only costs a fast user their very first recording's system-audio side
-  // right after a cold launch — self-correcting on the next recording once
-  // this near-instant local IPC call resolves.
-  // Gates on screenPermissionAtLaunch (frozen main-side at process start),
-  // not the live screenPermission: macOS doesn't apply a mid-session grant
-  // to the already-running process, so treating a live 'granted' as usable
-  // here would re-enable loopback (and the broken getSources() code path
-  // above) before the relaunch that's actually required for it to work.
-  const screenPermissionOk = isMac
-    ? systemAudioSupport.data?.screenPermissionAtLaunch === 'granted'
-    : true;
+  // main.js replaces electron-audio-loopback's display-media handler with one
+  // that supplies the requesting frame as the required video track and catches
+  // callback failures. That keeps the CoreAudio Process Tap independent of
+  // Screen Recording permission; this renderer gate only needs the user's
+  // setting and the OS support check.
   const loopbackEnabled = isMac
-    ? (systemAudio.data ?? true) && loopbackSupported && screenPermissionOk
+    ? (systemAudio.data ?? true) && loopbackSupported
     : loopbackSupported;
   // Read into a ref so startCapture (closed over once) sees the current value
   // without the capture effect depending on it — toggling mid-recording must
@@ -98,26 +81,6 @@ export function useSystemAudioCapture() {
   React.useEffect(() => {
     loopbackEnabledRef.current = loopbackEnabled;
   }, [loopbackEnabled]);
-
-  // True specifically when we KNOW (systemAudioSupport.data has loaded — not
-  // merely "screenPermissionOk is false," which is also true while loading,
-  // per its conservative default above) that the user wants system audio,
-  // the OS supports it, and Screen Recording permission is the actual
-  // blocker — as opposed to the toggle being off, the OS being too old, or
-  // the query simply not having resolved yet, none of which is a surprise
-  // worth interrupting a recording start for. Drives the one-shot "Recording
-  // mic-only" notification below (Settings also surfaces the same state
-  // passively via GeneralTab's Record-system-audio row).
-  const screenPermissionBlocked =
-    isMac &&
-    !!systemAudioSupport.data &&
-    systemAudioSupport.data.screenPermissionAtLaunch !== 'granted' &&
-    (systemAudio.data ?? true) &&
-    loopbackSupported;
-  const screenPermissionBlockedRef = React.useRef(screenPermissionBlocked);
-  React.useEffect(() => {
-    screenPermissionBlockedRef.current = screenPermissionBlocked;
-  }, [screenPermissionBlocked]);
 
   // The pinned microphone device (Settings > Microphone). Kept mounted here
   // (App-level, per this hook's own docstring) purely to warm react-query's
@@ -287,9 +250,9 @@ export function useSystemAudioCapture() {
         // 2. System audio loopback — OPTIONAL + BEST-EFFORT. Skipped entirely
         //    when loopback is disabled (macOS toggle off) or the OS doesn't
         //    support it; otherwise attempted via getDisplayMedia (intercepted by
-        //    electron-audio-loopback's setDisplayMediaRequestHandler and served
-        //    via CoreAudio Process Taps when `forceCoreAudioTap` is set). video:
-        //    true is required by the API; we drop the track immediately.
+        //    main.js's setDisplayMediaRequestHandler and served via CoreAudio
+        //    Process Taps when `forceCoreAudioTap` is set). video:true is
+        //    required by the API; we drop the requesting-frame track immediately.
         //
         //    If loopback is disabled OR unavailable (permission denied, no tap,
         //    no audio track) we record MIC-ONLY rather than failing: sysStream
@@ -298,12 +261,6 @@ export function useSystemAudioCapture() {
         //    failure above still aborts.
         try {
           if (!loopbackEnabledRef.current) {
-            // Surface it right when it actually affects THIS recording,
-            // rather than only passively in Settings — fire-and-forget, the
-            // main-process handler itself gates on notifications_enabled.
-            if (screenPermissionBlockedRef.current) {
-              void bridge.settings.showSystemAudioMicOnlyNotification();
-            }
             throw new Error('loopback disabled');
           }
           await bridge.recording.enableLoopbackAudio();
@@ -326,6 +283,12 @@ export function useSystemAudioCapture() {
           // mic-only case — don't log it as a failure; only a genuine
           // unavailability warrants a warning.
           if (loopbackEnabledRef.current) {
+            // Acquisition was requested and genuinely failed (for example,
+            // System Audio Recording access was denied). Surface the mic-only
+            // fallback fire-and-forget; main gates on notifications_enabled.
+            // macOS only: the notification copy points at macOS System
+            // Settings, and Windows never fired it before this change.
+            if (isMac) void bridge.settings.showSystemAudioMicOnlyNotification();
             // eslint-disable-next-line no-console
             console.warn('[systemAudioCapture] loopback unavailable, continuing mic-only', loopbackErr);
           }
