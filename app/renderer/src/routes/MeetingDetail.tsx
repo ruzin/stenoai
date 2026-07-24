@@ -1241,8 +1241,8 @@ function DetailContent({
           <DialogHeader>
             <DialogTitle>Delete this note?</DialogTitle>
             <DialogDescription>
-              This will permanently delete the recording, transcript, and summary. This can't be
-              undone.
+              This removes the recording, transcript, and summary. You can undo this for a few
+              seconds after deleting.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
