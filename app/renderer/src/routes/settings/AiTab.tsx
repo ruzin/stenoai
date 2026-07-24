@@ -1,5 +1,16 @@
 import * as React from 'react';
-import { Building2, Check, ChevronDown, ChevronRight, Cloud, Laptop, Loader2, Server, X } from 'lucide-react';
+import {
+  Building2,
+  Check,
+  ChevronDown,
+  ChevronRight,
+  Cloud,
+  Laptop,
+  Loader2,
+  Server,
+  SquareTerminal,
+  X,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Input } from '@/components/ui/input';
@@ -19,7 +30,7 @@ import { GoogleIcon } from '@/components/ui/google-icon';
 import { MetaIcon } from '@/components/ui/meta-icon';
 import { QwenIcon } from '@/components/ui/qwen-icon';
 import { cn } from '@/lib/utils';
-import type { AiProvider, CloudProvider } from '@/lib/ipc';
+import type { AiProvider, CloudProvider, LocalCliProvider } from '@/lib/ipc';
 import {
   useAiProvider,
   useSetAiProvider,
@@ -29,6 +40,7 @@ import {
   useSetCloudApiUrl,
   useSetCloudModel,
   useSetCloudProvider,
+  useSetLocalCliProvider,
   useSetRemoteOllamaUrl,
   useTestCloudApi,
   useTestRemoteOllama,
@@ -56,7 +68,13 @@ import {
   useSetLanguage,
 } from '@/hooks/useSettings';
 import { useOrgSession } from '@/hooks/useOrg';
-import { COMPACT_BTN, COMPACT_INPUT, COMPACT_TRIGGER, SectionHeading, SettingRow } from './primitives';
+import {
+  COMPACT_BTN,
+  COMPACT_INPUT,
+  COMPACT_TRIGGER,
+  SectionHeading,
+  SettingRow,
+} from './primitives';
 import { ModelCard, formatModelSize, isDefaultModel, parsePullPercent } from './model-card';
 import { modelMayExceedMemory } from './model-memory';
 import { LANGUAGES_PARAKEET, LANGUAGES_WHISPER } from './languages';
@@ -65,23 +83,16 @@ export function AiTab() {
   return (
     <section data-settings-tab="ai">
       <SectionHeading>Transcription</SectionHeading>
-      <p
-        className="text-[13px] leading-[1.5]"
-        style={{ color: 'var(--fg-2)', marginBottom: 4 }}
-      >
-        Speech-to-text always runs on your device — your audio never leaves
-        your computer.
+      <p className="text-[13px] leading-[1.5]" style={{ color: 'var(--fg-2)', marginBottom: 4 }}>
+        Speech-to-text always runs on your device — your audio never leaves your computer.
       </p>
       <TranscriptionSection />
 
       <SectionHeading>Summarisation &amp; Chat</SectionHeading>
-      <p
-        className="text-[13px] leading-[1.5]"
-        style={{ color: 'var(--fg-2)', marginBottom: 4 }}
-      >
-        Turns your transcript into notes and answers your questions. This is
-        the one step that can run locally or in the cloud — if you choose a
-        cloud provider, only the text transcript is sent, never audio.
+      <p className="text-[13px] leading-[1.5]" style={{ color: 'var(--fg-2)', marginBottom: 4 }}>
+        Turns your transcript into notes and answers your questions. This is the one step that can
+        run locally or in the cloud — if you choose a cloud provider, only the text transcript is
+        sent, never audio.
       </p>
       <SummarisationSection />
     </section>
@@ -110,10 +121,7 @@ function TranscriptionSection() {
     // Retains the pre-merge data-settings-tab="transcription" identity as a
     // nested wrapper (the page-level section is now data-settings-tab="ai").
     <div data-settings-tab="transcription">
-      <SettingRow
-        label="Language"
-        description="Auto-detects by default. Pick one to pin it."
-      >
+      <SettingRow label="Language" description="Auto-detects by default. Pick one to pin it.">
         <Select
           value={displayValue}
           onValueChange={(v) => setLanguage.mutate(v)}
@@ -216,7 +224,10 @@ function TranscriptionModelList() {
         description="Which speech-to-text model transcribes your recordings."
         noBorder
       >
-        <div className={cn(COMPACT_TRIGGER, 'w-[190px] flex items-center')} style={{ color: 'var(--fg-2)' }}>
+        <div
+          className={cn(COMPACT_TRIGGER, 'w-[190px] flex items-center')}
+          style={{ color: 'var(--fg-2)' }}
+        >
           <span className="truncate">Could not load models.</span>
         </div>
       </SettingRow>
@@ -234,7 +245,11 @@ function TranscriptionModelList() {
   // first progress event arrives.
   const parakeetDownloading = pullParakeet.isPending;
   const whisperDownloading = pullWhisper.isPending;
-  const downloadingEngine = parakeetDownloading ? 'parakeet' : whisperDownloading ? 'whisper' : null;
+  const downloadingEngine = parakeetDownloading
+    ? 'parakeet'
+    : whisperDownloading
+      ? 'whisper'
+      : null;
   const isDownloading = downloadingEngine !== null;
   const value = downloadingEngine ?? activeEngine;
 
@@ -248,7 +263,9 @@ function TranscriptionModelList() {
   ];
   const current = options.find((o) => o.engine === value)!;
   const whisperPercent =
-    downloadingEngine === 'whisper' ? parsePullPercent(pullWhisper.progress[whisperModel.name]) : null;
+    downloadingEngine === 'whisper'
+      ? parsePullPercent(pullWhisper.progress[whisperModel.name])
+      : null;
 
   const onValueChange = (next: string) => {
     if (next === activeEngine) return;
@@ -286,11 +303,17 @@ function TranscriptionModelList() {
             <span className="truncate">{current.model.displayName ?? current.model.name}</span>
             {isDownloading &&
               (whisperPercent !== null ? (
-                <span className="shrink-0 text-[11px] tabular-nums" style={{ color: 'var(--fg-muted)' }}>
+                <span
+                  className="shrink-0 text-[11px] tabular-nums"
+                  style={{ color: 'var(--fg-muted)' }}
+                >
                   {whisperPercent}%
                 </span>
               ) : (
-                <Loader2 className="size-3 shrink-0 animate-spin" style={{ color: 'var(--fg-muted)' }} />
+                <Loader2
+                  className="size-3 shrink-0 animate-spin"
+                  style={{ color: 'var(--fg-muted)' }}
+                />
               ))}
           </div>
         </SelectTrigger>
@@ -336,13 +359,15 @@ function SummarisationSection() {
         description={
           orgSignedIn
             ? "Managed by your organisation while you're signed in. Sign out under Settings > Organisation to change it."
-            : 'Where models run. Local keeps all data on your device.'
+            : 'How Steno reaches the model. Built-in Local keeps all data on your device.'
         }
         // The Model section right below (local provider) has no divider of
         // its own — Remote/Cloud/Adapter's config blocks do (their own
         // bottom border), so they still want this row's divider to separate
         // from it.
-        noBorder={current !== 'cloud' && current !== 'adapter' && !orgSignedIn}
+        noBorder={
+          current !== 'cloud' && current !== 'local_cli' && current !== 'adapter' && !orgSignedIn
+        }
       >
         <Select
           value={current}
@@ -362,6 +387,13 @@ function SummarisationSection() {
               description="Runs entirely on your device. Private and free, no internet required."
             >
               Local (on-device)
+            </SelectItem>
+            <SelectItem
+              value="local_cli"
+              icon={<SquareTerminal className="size-4" />}
+              description="Use an installed Codex or Claude CLI with its current login and model."
+            >
+              Local CLI (on-device)
             </SelectItem>
             <SelectItem
               value="remote"
@@ -393,6 +425,7 @@ function SummarisationSection() {
         </Select>
       </SettingRow>
 
+      {current === 'local_cli' && <LocalCliProviderConfig />}
       {current === 'remote' && <RemoteProviderConfig />}
       {current === 'cloud' && <CloudProviderConfig />}
       {current === 'adapter' && <AdapterProviderInfo signedIn={orgSignedIn} />}
@@ -405,18 +438,58 @@ function SummarisationSection() {
           part of Summarisation & Chat, just a row whose control is a list
           of cards instead of a single trigger, so SectionHeading's
           top-level weight read as its own section on the page. */}
-      {current !== 'cloud' && current !== 'adapter' && !orgSignedIn && (
+      {(current === 'local' || current === 'remote') && !orgSignedIn && (
         <div style={{ marginTop: '20px' }}>
-          <div className="text-[14px] font-normal" style={{ color: 'var(--fg-1)', marginBottom: 2 }}>
+          <div
+            className="text-[14px] font-normal"
+            style={{ color: 'var(--fg-1)', marginBottom: 2 }}
+          >
             Model
           </div>
-          <p className="text-[13px] leading-[1.5]" style={{ color: 'var(--fg-2)', marginBottom: 8 }}>
+          <p
+            className="text-[13px] leading-[1.5]"
+            style={{ color: 'var(--fg-2)', marginBottom: 8 }}
+          >
             Which model generates your summaries, titles, and chat answers.
           </p>
           <ModelList />
         </div>
       )}
     </>
+  );
+}
+
+function LocalCliProviderConfig() {
+  const provider = useAiProvider();
+  const setLocalCliProvider = useSetLocalCliProvider();
+  const current = provider.data?.local_cli_provider ?? 'codex';
+
+  return (
+    <SettingRow
+      label="CLI"
+      description="Uses the CLI's current login and default model. Meeting text is sent to that CLI's service; Steno does not save an agent session."
+    >
+      <Select
+        value={current}
+        onValueChange={(value) => setLocalCliProvider.mutate(value as LocalCliProvider)}
+        disabled={!provider.data || setLocalCliProvider.isPending}
+      >
+        <SelectTrigger
+          className={cn(COMPACT_TRIGGER, 'min-w-[180px]')}
+          data-testid="local-cli-provider-select"
+        >
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="codex" icon={<OpenAiIcon className="size-4" />}>
+            Codex CLI
+          </SelectItem>
+          <SelectItem value="claude" icon={<AnthropicIcon className="size-4" />}>
+            Claude CLI
+          </SelectItem>
+        </SelectContent>
+      </Select>
+    </SettingRow>
   );
 }
 
@@ -432,15 +505,14 @@ function AdapterProviderInfo({ signedIn }: { signedIn: boolean }) {
     >
       {signedIn ? (
         <p>
-          Summaries, titles, and chat are routed through your organisation's
-          adapter. The model and API key are configured by your organisation
-          — no setup needed here.
+          Summaries, titles, and chat are routed through your organisation's adapter. The model and
+          API key are configured by your organisation — no setup needed here.
         </p>
       ) : (
         <p style={{ color: 'var(--accent-danger, var(--fg-1))' }}>
           You are not signed in to an organisation. Sign in under{' '}
-          <strong>Settings &gt; Organisation</strong>, or switch this provider
-          back to Local / Private Server / Cloud API.
+          <strong>Settings &gt; Organisation</strong>, or switch this provider back to Local /
+          Private Server / Cloud API.
         </p>
       )}
     </div>
@@ -460,10 +532,7 @@ function RemoteProviderConfig() {
   }, [provider.data?.remote_ollama_url]);
 
   return (
-    <div
-      className="space-y-3 py-4"
-      style={{ borderBottom: '1px solid var(--border-subtle)' }}
-    >
+    <div className="space-y-3 py-4" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
       <div>
         <label
           className="mb-1 block text-[12px] font-medium uppercase"
@@ -490,7 +559,13 @@ function RemoteProviderConfig() {
           {testConnection.isPending ? 'Testing…' : 'Test connection'}
         </Button>
         <ConnectionStatus
-          ok={testConnection.isSuccess ? testConnection.data?.ok ?? true : testConnection.isError ? false : undefined}
+          ok={
+            testConnection.isSuccess
+              ? (testConnection.data?.ok ?? true)
+              : testConnection.isError
+                ? false
+                : undefined
+          }
           message={
             testConnection.isError
               ? testConnection.error instanceof Error
@@ -562,9 +637,7 @@ function CloudProviderConfig() {
   // dropdown the user just picked from.
   React.useEffect(() => {
     if (provider.data) {
-      setModelListFor((prev) =>
-        prev === provider.data!.cloud_provider ? prev : null,
-      );
+      setModelListFor((prev) => (prev === provider.data!.cloud_provider ? prev : null));
       setCustomModelMode(false);
       testConnection.reset();
     }
@@ -583,7 +656,7 @@ function CloudProviderConfig() {
     cloudProvider === 'bedrock'
       ? bedrockModels
       : modelListFor === cloudProvider && testConnection.isSuccess
-        ? testConnection.data?.models ?? []
+        ? (testConnection.data?.models ?? [])
         : [];
   const showModelDropdown = availableModels.length > 0 && !customModelMode;
   // Persist the selected model immediately on change (Select doesn't fire
@@ -598,10 +671,7 @@ function CloudProviderConfig() {
   };
 
   return (
-    <div
-      className="space-y-3 py-4"
-      style={{ borderBottom: '1px solid var(--border-subtle)' }}
-    >
+    <div className="space-y-3 py-4" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
       <div>
         <label
           className="mb-1 block text-[12px] font-medium uppercase"
@@ -652,9 +722,7 @@ function CloudProviderConfig() {
               value={bedrockRegion}
               onChange={(e) => setBedrockRegionState(e.target.value)}
               placeholder="us-east-1"
-              onBlur={() =>
-                bedrockRegion && setBedrockRegion.mutate(bedrockRegion)
-              }
+              onBlur={() => bedrockRegion && setBedrockRegion.mutate(bedrockRegion)}
               className={COMPACT_INPUT}
             />
           </div>
@@ -800,20 +868,13 @@ function CloudProviderConfig() {
         />
       </div>
       <div className="text-[12px]" style={{ color: 'var(--fg-2)' }}>
-        Transcripts will be sent to a third-party cloud service. No audio files
-        leave your device.
+        Transcripts will be sent to a third-party cloud service. No audio files leave your device.
       </div>
     </div>
   );
 }
 
-function ConnectionStatus({
-  ok,
-  message,
-}: {
-  ok: boolean | undefined;
-  message?: string;
-}) {
+function ConnectionStatus({ ok, message }: { ok: boolean | undefined; message?: string }) {
   if (ok === undefined) return null;
   return (
     <span
@@ -850,9 +911,10 @@ function ModelList() {
   // GGUF build, and the manual "delete this model to free up disk space"
   // action. Only one delete can be in flight/confirmed at a time in this UI,
   // so a single piece of state covers both.
-  const [deleteCandidate, setDeleteCandidate] = React.useState<{ tags: string[]; description: string } | null>(
-    null,
-  );
+  const [deleteCandidate, setDeleteCandidate] = React.useState<{
+    tags: string[];
+    description: string;
+  } | null>(null);
   const deleteModel = useDeleteModel();
   const fasterBuild = useSwitchToFasterBuild((mlxTag) => {
     const match = models.data?.models.find((m) => m.mlxTag === mlxTag);
@@ -866,10 +928,7 @@ function ModelList() {
 
   if (models.isLoading) {
     return (
-      <div
-        className="flex items-center gap-2 text-[13px]"
-        style={{ color: 'var(--fg-2)' }}
-      >
+      <div className="flex items-center gap-2 text-[13px]" style={{ color: 'var(--fg-2)' }}>
         <Loader2 className="size-3.5 animate-spin" />
         Loading models…
       </div>
@@ -897,7 +956,7 @@ function ModelList() {
   const isLocal = models.data.provider === 'local';
   const totalRamGb = models.data.totalRamGb;
   const sorted = [...models.data.models].sort(
-    (a, b) => (a.deprecated ? 1 : 0) - (b.deprecated ? 1 : 0),
+    (a, b) => (a.deprecated ? 1 : 0) - (b.deprecated ? 1 : 0)
   );
   const active = sorted.filter((m) => !m.deprecated);
   const deprecated = sorted.filter((m) => m.deprecated);
@@ -939,13 +998,16 @@ function ModelList() {
     // installed, or (nothing installed yet) what "Select" will actually
     // pull on Apple Silicon. Otherwise (GGUF installed, no NVFP4) the GGUF
     // size is what's really on disk.
-    const showMlxSize = m.mlxTag && m.mlxSizeGb !== undefined && (m.mlxInstalled || !m.ggufInstalled);
+    const showMlxSize =
+      m.mlxTag && m.mlxSizeGb !== undefined && (m.mlxInstalled || !m.ggufInstalled);
     const sizeLabel = formatModelSize(showMlxSize ? m.mlxSizeGb : m.size_gb);
     const memoryWarning = isLocal && modelMayExceedMemory(m.size_gb, totalRamGb);
     const fasterBuildBlocked =
       Boolean(fasterBuild.activeTag) &&
       !isFasterBuildActive &&
-      (fasterBuild.state === 'pulling' || fasterBuild.state === 'verifying' || fasterBuild.state === 'done');
+      (fasterBuild.state === 'pulling' ||
+        fasterBuild.state === 'verifying' ||
+        fasterBuild.state === 'done');
 
     const onSelect = () => {
       if (m.installed) {
@@ -1019,17 +1081,11 @@ function ModelList() {
             className="mt-4 flex cursor-pointer items-center gap-1.5 border-0 bg-transparent p-0 text-[13px]"
             style={{ color: 'var(--fg-muted)' }}
           >
-            {showDeprecated ? (
-              <ChevronDown size={12} />
-            ) : (
-              <ChevronRight size={12} />
-            )}
+            {showDeprecated ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
             {showDeprecated ? 'Hide' : 'Show'} deprecated models
           </button>
 
-          {showDeprecated && (
-            <div className="mt-2">{deprecated.map(renderCard)}</div>
-          )}
+          {showDeprecated && <div className="mt-2">{deprecated.map(renderCard)}</div>}
         </>
       )}
 
@@ -1057,12 +1113,17 @@ function ModelList() {
             // dialog doesn't close while a sibling delete is still pending.
             try {
               const results = await Promise.allSettled(
-                deleteCandidate.tags.map((tag) => deleteModel.mutateAsync(tag)),
+                deleteCandidate.tags.map((tag) => deleteModel.mutateAsync(tag))
               );
-              const failed = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
+              const failed = results.filter(
+                (r): r is PromiseRejectedResult => r.status === 'rejected'
+              );
               if (failed.length > 0) {
                 // eslint-disable-next-line no-console -- no toast/error-surface system exists yet; at least don't fail silently.
-                console.error('Failed to delete some model tags:', failed.map((f) => f.reason));
+                console.error(
+                  'Failed to delete some model tags:',
+                  failed.map((f) => f.reason)
+                );
               }
             } finally {
               setDeleteCandidate(null);

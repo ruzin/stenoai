@@ -1,31 +1,32 @@
 import * as React from 'react';
-import {
-  ArrowUp,
-  ChevronRight,
-  History,
-  Sparkles,
-} from 'lucide-react';
+import { ArrowUp, ChevronRight, History, Sparkles } from 'lucide-react';
 import { ChatHistoryRow } from '@/components/ChatHistoryRow';
 import { FolderScopePicker, ORG_SHARED_SCOPE } from '@/components/FolderScopePicker';
-import {
-  Popover,
-  PopoverAnchor,
-  PopoverContent,
-} from '@/components/ui/popover';
+import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover';
 import { MeetingsShell } from '@/components/MeetingsShell';
-import {
-  useAllChatSessions,
-  useChatSessions,
-} from '@/hooks/useChatSessions';
+import { useAllChatSessions, useChatSessions } from '@/hooks/useChatSessions';
 import { useGlobalStreaming } from '@/hooks/useStreamingQuery';
 import { useAiProvider } from '@/hooks/useAi';
 import { useUserName } from '@/hooks/useSettings';
 import { useOrgSession } from '@/hooks/useOrg';
 import { navigate } from '@/lib/router';
-import { GLOBAL_SCOPE, bucketKey, deriveSessionName, toBucketLabel, formatActiveModel, chatProviderReady } from '@/lib/chat';
+import {
+  GLOBAL_SCOPE,
+  bucketKey,
+  deriveSessionName,
+  toBucketLabel,
+  formatActiveModel,
+  chatProviderReady,
+} from '@/lib/chat';
 import { PRESETS, PresetGlyph, PRESET_COLORS } from '@/lib/chatPresets';
 
-function TypewriterPlaceholder({ index, setIndex }: { index: number, setIndex: React.Dispatch<React.SetStateAction<number>> }) {
+function TypewriterPlaceholder({
+  index,
+  setIndex,
+}: {
+  index: number;
+  setIndex: React.Dispatch<React.SetStateAction<number>>;
+}) {
   const [text, setText] = React.useState('');
   const [isDeleting, setIsDeleting] = React.useState(false);
   const prefersReducedMotion = React.useSyncExternalStore(
@@ -87,7 +88,7 @@ function TypewriterPlaceholder({ index, setIndex }: { index: number, setIndex: R
               className="font-medium ml-[1px]"
               style={{
                 color: 'var(--fg-1)',
-                animation: 'cursor-blink 1s step-end infinite'
+                animation: 'cursor-blink 1s step-end infinite',
               }}
             >
               |
@@ -130,15 +131,16 @@ export function Chat() {
 
   const isAdapter = provider.data?.ai_provider === 'adapter';
   const isLocalEngine =
-    provider.data?.ai_provider === 'local' || provider.data?.ai_provider === 'remote';
+    provider.data?.ai_provider === 'local' ||
+    provider.data?.ai_provider === 'local_cli' ||
+    provider.data?.ai_provider === 'remote';
   // Cloud/local/remote readiness is the shared core (chatProviderReady); adapter
   // adds an active-org-session requirement here (a signed-out adapter user would
   // otherwise get an opaque submit failure). Local/remote answer over a
   // context-capped, most-recent slice (the backend sizes the corpus to the
   // model's window) — see the hint below.
   const orgSignedIn = orgSession.data?.signedIn === true;
-  const providerReady =
-    chatProviderReady(provider.data) || (isAdapter && orgSignedIn);
+  const providerReady = chatProviderReady(provider.data) || (isAdapter && orgSignedIn);
   const orgScopeActive = scopeFolderId === ORG_SHARED_SCOPE;
   const ready = providerReady || orgScopeActive;
 
@@ -241,242 +243,267 @@ export function Chat() {
 
         <div className="w-full">
           <h1
-          className="mb-8 text-center"
-          style={{
-            fontFamily: 'var(--font-serif)',
-            fontSize: 36,
-            lineHeight: 1.1,
-            letterSpacing: '-0.03em',
-            color: 'var(--fg-1)',
-          }}
-        >
-          {greetingName ? (
-            <>
-              Hi <span style={{ fontStyle: 'italic', fontWeight: 500 }}>{greetingName}</span>, ask anything
-            </>
-          ) : (
-            'Ask anything'
-          )}
-        </h1>
-
-        {!providerReady && !orgScopeActive && provider.isFetched && <ProviderRequiredBanner />}
-        {submitError && (
-          <div
-            role="alert"
-            className="mb-4 rounded-md border px-3 py-2 text-[13px]"
+            className="mb-8 text-center"
             style={{
-              borderColor: 'var(--border-subtle)',
-              background: 'var(--danger-bg)',
-              color: 'var(--danger)',
+              fontFamily: 'var(--font-serif)',
+              fontSize: 36,
+              lineHeight: 1.1,
+              letterSpacing: '-0.03em',
+              color: 'var(--fg-1)',
             }}
           >
-            {submitError}
-          </div>
-        )}
+            {greetingName ? (
+              <>
+                Hi <span style={{ fontStyle: 'italic', fontWeight: 500 }}>{greetingName}</span>, ask
+                anything
+              </>
+            ) : (
+              'Ask anything'
+            )}
+          </h1>
 
-        <Popover open={presetsOpen} onOpenChange={setPresetsOpen}>
-          <PopoverAnchor asChild>
-            <form
-              onSubmit={onSubmit}
-              className="glass-input-wrapper mb-12 p-3 relative"
-              style={{
-                opacity: ready ? 1 : 0.6,
-              }}
-            >
-              <div className="relative">
-                {ready && !input && !presetsOpen && !isFocused && <TypewriterPlaceholder index={suggestedIndex} setIndex={setSuggestedIndex} />}
-                <input
-                  ref={inputRef}
-                  type="text"
-                  value={input}
-                  onFocus={() => setIsFocused(true)}
-                  onBlur={() => setIsFocused(false)}
-                  onChange={(e) => {
-                    setInput(e.target.value);
-                    if (e.target.value !== '') setPresetsOpen(false);
-                  }}
-                  onKeyDown={(e) => {
-                    if (presetsOpen) {
-                      if (e.key === 'ArrowDown') {
-                        e.preventDefault();
-                        setSelectedPresetIndex((prev) => (prev + 1) % PRESETS.length);
-                        return;
-                      }
-                      if (e.key === 'ArrowUp') {
-                        e.preventDefault();
-                        setSelectedPresetIndex((prev) => (prev - 1 + PRESETS.length) % PRESETS.length);
-                        return;
-                      }
-                      if (e.key === 'Enter' && input === '') {
-                        e.preventDefault();
-                        onPickPreset(PRESETS[selectedPresetIndex].prompt);
-                        return;
-                      }
-                    }
-                    if (e.key === 'Tab' && input === '' && ready) {
-                      e.preventDefault();
-                      setInput(PRESETS[suggestedIndex].prompt);
-                      setPresetsOpen(false);
-                      return;
-                    }
-                    if (e.key === '/' && input === '' && ready) {
-                      e.preventDefault();
-                      setSelectedPresetIndex(0);
-                      setPresetsOpen(true);
-                      return;
-                    }
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault();
-                      void submit(input);
-                    }
-                  }}
-                  disabled={!ready}
-                  placeholder={ready ? (typeof navigator !== 'undefined' && navigator.webdriver ? 'Summarise my meetings this week  /' : (isFocused && !input ? `/ ${PRESETS[suggestedIndex].label}` : '')) : 'Set up an AI provider in Settings to ask across notes'}
-                  className="block w-full bg-transparent px-3 pb-4 pt-2.5 outline-none disabled:cursor-not-allowed placeholder:text-[color:var(--fg-muted)]"
-                  style={{ fontSize: 16, color: 'var(--fg-1)', fontFamily: 'var(--font-sans)', fontWeight: 400 }}
-                />
-              </div>
-          <div className="flex items-center justify-between gap-2 px-2 pb-1">
-            <div className="flex items-center gap-1">
-              <FolderScopePicker value={scopeFolderId} onChange={setScopeFolderId} />
-              <span
-                data-testid="chat-model-indicator"
-                className="text-[12px]"
-                style={{ color: 'var(--fg-muted)' }}
-              >
-                {formatActiveModel(provider.data)}
-              </span>
-              {isLocalEngine && (
-                // Local/remote windows are smaller than cloud, so the backend
-                // caps the corpus to the most-recent notes when it's over budget.
-                // "may omit" (not "omits") since a small library fits entirely.
-                // TODO: tie to the actual per-response cap (CHAT_SCOPE_CAPPED,
-                // descoped from WS3) so the hint only shows when truncation ran.
-                <span
-                  data-testid="chat-local-scope-hint"
-                  className="text-[12px]"
-                  style={{ color: 'var(--fg-muted)' }}
-                >
-                  · may omit older notes
-                </span>
-              )}
-            </div>
-            <div className="flex items-center gap-1">
-              <button
-                type="submit"
-                disabled={!input.trim() || !ready}
-                className="inline-flex size-7 items-center justify-center rounded-full transition-colors hover:bg-[color:var(--surface-hover)] disabled:opacity-40"
-                style={{ color: 'var(--fg-1)' }}
-                aria-label="Send"
-              >
-                <ArrowUp className="size-[14px]" />
-              </button>
-            </div>
-          </div>
-        </form>
-          </PopoverAnchor>
-          <PopoverContent
-            align="start"
-            sideOffset={8}
-            className="w-[var(--radix-popover-trigger-width)] max-w-none p-1"
-            // Don't yank focus from the input when the popover opens — the
-            // user is mid-typing and Enter/Esc need to keep working there.
-            onOpenAutoFocus={(e) => e.preventDefault()}
-          >
-            <div className="px-2 pb-1 pt-0.5 text-[11px] font-medium" style={{ color: 'var(--fg-muted)' }}>
-              Skills
-            </div>
-            <div className="flex flex-col">
-              {PRESETS.map((p, idx) => {
-                const presetColor = PRESET_COLORS[idx % PRESET_COLORS.length];
-                return (
-                <button
-                  key={p.label}
-                  type="button"
-                  onMouseEnter={() => setSelectedPresetIndex(idx)}
-                  onClick={() => onPickPreset(p.prompt)}
-                  className={`flex flex-col items-start gap-0.5 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-[color:var(--surface-hover)] ${idx === selectedPresetIndex ? 'bg-[color:var(--surface-hover)]' : ''}`}
-                >
-                  <div className="flex items-center gap-2 text-[13px]" style={{ color: 'var(--fg-1)' }}>
-                    <PresetGlyph color={presetColor} />
-                    {p.label}
-                  </div>
-                  <div className="pl-[26px] text-[12px]" style={{ color: 'var(--fg-2)' }}>
-                    {p.description}
-                  </div>
-                </button>
-              )})}
-            </div>
-          </PopoverContent>
-        </Popover>
-
-        <section className="mt-6 flex-1 w-full">
-          <SectionHead
-            title="Recents"
-            action={
-              canExpand ? (
-                <button
-                  type="button"
-                  onClick={() => setRecentsExpanded((v) => !v)}
-                  className="inline-flex items-center gap-0.5 text-[12px] transition-colors hover:text-[color:var(--fg-1)]"
-                  style={{ color: 'var(--fg-2)' }}
-                >
-                  {recentsExpanded ? 'Show less' : 'See all'}
-                  <ChevronRight
-                    className={`size-[12px] transition-transform ${recentsExpanded ? 'rotate-90' : ''}`}
-                  />
-                </button>
-              ) : undefined
-            }
-          />
-          {allRecents.length === 0 ? (
+          {!providerReady && !orgScopeActive && provider.isFetched && <ProviderRequiredBanner />}
+          {submitError && (
             <div
-              className="py-12 text-center text-[14px]"
+              role="alert"
+              className="mb-4 rounded-md border px-3 py-2 text-[13px]"
               style={{
-                color: 'var(--fg-muted)',
+                borderColor: 'var(--border-subtle)',
+                background: 'var(--danger-bg)',
+                color: 'var(--danger)',
               }}
             >
-              <div className="mb-3 flex justify-center">
-                <History className="size-4 text-muted-foreground" />
-              </div>
-              Your past chats will show up here.
-            </div>
-          ) : recentsExpanded && groupedRecents ? (
-            <div className="flex flex-col">
-              {groupedRecents.map((group) => (
-                <div key={group.key} className="mb-2 last:mb-0">
-                  <div
-                    className="px-1 pb-1 pt-2 text-[11px] font-medium"
-                    style={{ color: 'var(--fg-muted)' }}
-                  >
-                    {group.label}
-                  </div>
-                  {group.sessions.map((s) => (
-                    <ChatHistoryRow
-                      key={s.id}
-                      session={s}
-                      showTime
-                      onRename={(name) => void chat.renameSession(s.id, name)}
-                      onDelete={() => void chat.deleteSession(s.id)}
-                    />
-                  ))}
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="flex flex-col">
-              {recents.map((s) => (
-                <ChatHistoryRow
-                  key={s.id}
-                  session={s}
-                  showTime
-                  onRename={(name) => void chat.renameSession(s.id, name)}
-                  onDelete={() => void chat.deleteSession(s.id)}
-                />
-              ))}
+              {submitError}
             </div>
           )}
-        </section>
+
+          <Popover open={presetsOpen} onOpenChange={setPresetsOpen}>
+            <PopoverAnchor asChild>
+              <form
+                onSubmit={onSubmit}
+                className="glass-input-wrapper mb-12 p-3 relative"
+                style={{
+                  opacity: ready ? 1 : 0.6,
+                }}
+              >
+                <div className="relative">
+                  {ready && !input && !presetsOpen && !isFocused && (
+                    <TypewriterPlaceholder index={suggestedIndex} setIndex={setSuggestedIndex} />
+                  )}
+                  <input
+                    ref={inputRef}
+                    type="text"
+                    value={input}
+                    onFocus={() => setIsFocused(true)}
+                    onBlur={() => setIsFocused(false)}
+                    onChange={(e) => {
+                      setInput(e.target.value);
+                      if (e.target.value !== '') setPresetsOpen(false);
+                    }}
+                    onKeyDown={(e) => {
+                      if (presetsOpen) {
+                        if (e.key === 'ArrowDown') {
+                          e.preventDefault();
+                          setSelectedPresetIndex((prev) => (prev + 1) % PRESETS.length);
+                          return;
+                        }
+                        if (e.key === 'ArrowUp') {
+                          e.preventDefault();
+                          setSelectedPresetIndex(
+                            (prev) => (prev - 1 + PRESETS.length) % PRESETS.length
+                          );
+                          return;
+                        }
+                        if (e.key === 'Enter' && input === '') {
+                          e.preventDefault();
+                          onPickPreset(PRESETS[selectedPresetIndex].prompt);
+                          return;
+                        }
+                      }
+                      if (e.key === 'Tab' && input === '' && ready) {
+                        e.preventDefault();
+                        setInput(PRESETS[suggestedIndex].prompt);
+                        setPresetsOpen(false);
+                        return;
+                      }
+                      if (e.key === '/' && input === '' && ready) {
+                        e.preventDefault();
+                        setSelectedPresetIndex(0);
+                        setPresetsOpen(true);
+                        return;
+                      }
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        void submit(input);
+                      }
+                    }}
+                    disabled={!ready}
+                    placeholder={
+                      ready
+                        ? typeof navigator !== 'undefined' && navigator.webdriver
+                          ? 'Summarise my meetings this week  /'
+                          : isFocused && !input
+                            ? `/ ${PRESETS[suggestedIndex].label}`
+                            : ''
+                        : 'Set up an AI provider in Settings to ask across notes'
+                    }
+                    className="block w-full bg-transparent px-3 pb-4 pt-2.5 outline-none disabled:cursor-not-allowed placeholder:text-[color:var(--fg-muted)]"
+                    style={{
+                      fontSize: 16,
+                      color: 'var(--fg-1)',
+                      fontFamily: 'var(--font-sans)',
+                      fontWeight: 400,
+                    }}
+                  />
+                </div>
+                <div className="flex items-center justify-between gap-2 px-2 pb-1">
+                  <div className="flex items-center gap-1">
+                    <FolderScopePicker value={scopeFolderId} onChange={setScopeFolderId} />
+                    <span
+                      data-testid="chat-model-indicator"
+                      className="text-[12px]"
+                      style={{ color: 'var(--fg-muted)' }}
+                    >
+                      {formatActiveModel(provider.data)}
+                    </span>
+                    {isLocalEngine && (
+                      // Local/remote windows are smaller than cloud, so the backend
+                      // caps the corpus to the most-recent notes when it's over budget.
+                      // "may omit" (not "omits") since a small library fits entirely.
+                      // TODO: tie to the actual per-response cap (CHAT_SCOPE_CAPPED,
+                      // descoped from WS3) so the hint only shows when truncation ran.
+                      <span
+                        data-testid="chat-local-scope-hint"
+                        className="text-[12px]"
+                        style={{ color: 'var(--fg-muted)' }}
+                      >
+                        · may omit older notes
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="submit"
+                      disabled={!input.trim() || !ready}
+                      className="inline-flex size-7 items-center justify-center rounded-full transition-colors hover:bg-[color:var(--surface-hover)] disabled:opacity-40"
+                      style={{ color: 'var(--fg-1)' }}
+                      aria-label="Send"
+                    >
+                      <ArrowUp className="size-[14px]" />
+                    </button>
+                  </div>
+                </div>
+              </form>
+            </PopoverAnchor>
+            <PopoverContent
+              align="start"
+              sideOffset={8}
+              className="w-[var(--radix-popover-trigger-width)] max-w-none p-1"
+              // Don't yank focus from the input when the popover opens — the
+              // user is mid-typing and Enter/Esc need to keep working there.
+              onOpenAutoFocus={(e) => e.preventDefault()}
+            >
+              <div
+                className="px-2 pb-1 pt-0.5 text-[11px] font-medium"
+                style={{ color: 'var(--fg-muted)' }}
+              >
+                Skills
+              </div>
+              <div className="flex flex-col">
+                {PRESETS.map((p, idx) => {
+                  const presetColor = PRESET_COLORS[idx % PRESET_COLORS.length];
+                  return (
+                    <button
+                      key={p.label}
+                      type="button"
+                      onMouseEnter={() => setSelectedPresetIndex(idx)}
+                      onClick={() => onPickPreset(p.prompt)}
+                      className={`flex flex-col items-start gap-0.5 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-[color:var(--surface-hover)] ${idx === selectedPresetIndex ? 'bg-[color:var(--surface-hover)]' : ''}`}
+                    >
+                      <div
+                        className="flex items-center gap-2 text-[13px]"
+                        style={{ color: 'var(--fg-1)' }}
+                      >
+                        <PresetGlyph color={presetColor} />
+                        {p.label}
+                      </div>
+                      <div className="pl-[26px] text-[12px]" style={{ color: 'var(--fg-2)' }}>
+                        {p.description}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </PopoverContent>
+          </Popover>
+
+          <section className="mt-6 flex-1 w-full">
+            <SectionHead
+              title="Recents"
+              action={
+                canExpand ? (
+                  <button
+                    type="button"
+                    onClick={() => setRecentsExpanded((v) => !v)}
+                    className="inline-flex items-center gap-0.5 text-[12px] transition-colors hover:text-[color:var(--fg-1)]"
+                    style={{ color: 'var(--fg-2)' }}
+                  >
+                    {recentsExpanded ? 'Show less' : 'See all'}
+                    <ChevronRight
+                      className={`size-[12px] transition-transform ${recentsExpanded ? 'rotate-90' : ''}`}
+                    />
+                  </button>
+                ) : undefined
+              }
+            />
+            {allRecents.length === 0 ? (
+              <div
+                className="py-12 text-center text-[14px]"
+                style={{
+                  color: 'var(--fg-muted)',
+                }}
+              >
+                <div className="mb-3 flex justify-center">
+                  <History className="size-4 text-muted-foreground" />
+                </div>
+                Your past chats will show up here.
+              </div>
+            ) : recentsExpanded && groupedRecents ? (
+              <div className="flex flex-col">
+                {groupedRecents.map((group) => (
+                  <div key={group.key} className="mb-2 last:mb-0">
+                    <div
+                      className="px-1 pb-1 pt-2 text-[11px] font-medium"
+                      style={{ color: 'var(--fg-muted)' }}
+                    >
+                      {group.label}
+                    </div>
+                    {group.sessions.map((s) => (
+                      <ChatHistoryRow
+                        key={s.id}
+                        session={s}
+                        showTime
+                        onRename={(name) => void chat.renameSession(s.id, name)}
+                        onDelete={() => void chat.deleteSession(s.id)}
+                      />
+                    ))}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="flex flex-col">
+                {recents.map((s) => (
+                  <ChatHistoryRow
+                    key={s.id}
+                    session={s}
+                    showTime
+                    onRename={(name) => void chat.renameSession(s.id, name)}
+                    onDelete={() => void chat.deleteSession(s.id)}
+                  />
+                ))}
+              </div>
+            )}
+          </section>
         </div>
       </div>
     </MeetingsShell>
@@ -519,8 +546,8 @@ function ProviderRequiredBanner() {
     >
       <Sparkles className="mt-0.5 size-[14px] flex-shrink-0" style={{ color: 'var(--fg-2)' }} />
       <div className="flex-1">
-        Your AI provider isn't ready for chat yet — add a cloud API key, sign in
-        to your Organisation, or set your remote Ollama URL in{' '}
+        Your AI provider isn't ready for chat yet — add a cloud API key, sign in to your
+        Organisation, or set your remote Ollama URL in{' '}
         <button
           type="button"
           className="underline transition-colors hover:text-[color:var(--fg-1)]"
@@ -535,13 +562,7 @@ function ProviderRequiredBanner() {
   );
 }
 
-function SectionHead({
-  title,
-  action,
-}: {
-  title: string;
-  action?: React.ReactNode;
-}) {
+function SectionHead({ title, action }: { title: string; action?: React.ReactNode }) {
   return (
     <div className="mb-3 flex items-baseline justify-between">
       <h2 className="text-[13px] font-medium tracking-[-0.005em]" style={{ color: 'var(--fg-1)' }}>

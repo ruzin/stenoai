@@ -299,7 +299,8 @@ export type MicPermissionStatus =
   | 'not-determined'
   | 'unknown';
 
-export type AiProvider = 'local' | 'remote' | 'cloud' | 'adapter';
+export type AiProvider = 'local' | 'local_cli' | 'remote' | 'cloud' | 'adapter';
+export type LocalCliProvider = 'codex' | 'claude';
 export type CloudProvider = 'openai' | 'anthropic' | 'bedrock' | 'custom';
 
 // ---------- response envelopes ----------
@@ -531,6 +532,7 @@ export type GetAiPromptsResponse = Result<{ summarization: string }>;
 
 export type GetAiProviderResponse = Result<{
   ai_provider: AiProvider;
+  local_cli_provider: LocalCliProvider;
   remote_ollama_url: string;
   cloud_api_url: string;
   cloud_provider: CloudProvider;
@@ -885,10 +887,7 @@ export interface StenoaiBridge {
       [defaultFilename: string, content: string],
       Result<{ path: string }>
     >;
-    exportNotePdf: RequestFn<
-      [defaultFilename: string, html: string],
-      Result<{ path: string }>
-    >;
+    exportNotePdf: RequestFn<[defaultFilename: string, html: string], Result<{ path: string }>>;
     regenTitle: RequestFn<[summaryFile: string, name: string], Result<Record<string, never>>>;
     generateReport: RequestFn<
       [summaryFile: string, templateId: string],
@@ -1039,6 +1038,7 @@ export interface StenoaiBridge {
   ai: {
     getProvider: RequestFn<[], GetAiProviderResponse>;
     setProvider: RequestFn<[p: AiProvider], Result<Record<string, never>>>;
+    setLocalCliProvider: RequestFn<[p: LocalCliProvider], Result<Record<string, never>>>;
     setRemoteOllamaUrl: RequestFn<[url: string], Result<Record<string, never>>>;
     testRemoteOllama: RequestFn<[url: string], Result<{ ok: boolean; message?: string }>>;
     setCloudApiUrl: RequestFn<[url: string], Result<Record<string, never>>>;

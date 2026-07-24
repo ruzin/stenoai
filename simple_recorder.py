@@ -4626,6 +4626,7 @@ def get_ai_provider():
 
     result = {
         "ai_provider": config.get_ai_provider(),
+        "local_cli_provider": config.get_local_cli_provider(),
         "remote_ollama_url": config.get_remote_ollama_url(),
         "cloud_api_url": config.get_cloud_api_url(),
         "cloud_api_key_set": bool(config.get_cloud_api_key()),
@@ -4645,7 +4646,7 @@ def get_ai_provider():
 @cli.command()
 @click.argument('provider')
 def set_ai_provider(provider):
-    """Set the AI provider (local, remote, or cloud)"""
+    """Set the AI provider."""
     from src.config import get_config
     config = get_config()
 
@@ -4661,6 +4662,30 @@ def set_ai_provider(provider):
         print(json.dumps({"success": True, "ai_provider": provider}))
     else:
         print(json.dumps({"success": False, "error": "Failed to save AI provider setting"}))
+
+
+@cli.command()
+@click.argument('provider')
+def set_local_cli_provider(provider):
+    """Set the local AI CLI (codex or claude)."""
+    from src.config import get_config
+    config = get_config()
+
+    if provider not in config.VALID_LOCAL_CLI_PROVIDERS:
+        print(json.dumps({
+            "success": False,
+            "error": (
+                f"Invalid local CLI provider: {provider}. Must be one of: "
+                f"{', '.join(config.VALID_LOCAL_CLI_PROVIDERS)}"
+            )
+        }))
+        return
+
+    success = config.set_local_cli_provider(provider)
+    if success:
+        print(json.dumps({"success": True, "local_cli_provider": provider}))
+    else:
+        print(json.dumps({"success": False, "error": "Failed to save local CLI provider"}))
 
 
 @cli.command()

@@ -3,7 +3,7 @@ title: "Summarization models"
 description: "Steno generates meeting summaries using local Ollama models by default, with optional cloud model support. Choose a model based on your hardware, privacy requirements, and the quality of notes you need."
 ---
 
-After transcription, Steno passes the transcript to a language model to generate structured notes: a summary paragraph, key topics, and action items. By default, this uses a local model running via [Ollama](https://ollama.com) entirely on your Mac. You can optionally configure a cloud model (OpenAI, Anthropic, AWS Bedrock, or a custom endpoint) — see the section below.
+After transcription, Steno passes the transcript to a language model to generate structured notes: a summary paragraph, key topics, and action items. By default, this uses a local model running via [Ollama](https://ollama.com) entirely on your Mac. You can optionally use an installed Codex or Claude CLI, or configure a cloud model (OpenAI, Anthropic, AWS Bedrock, or a custom endpoint).
 
 ## Available models
 
@@ -45,6 +45,17 @@ To configure a cloud model:
 3. Choose the provider and enter your credentials
 
 Cloud models are off by default. If you work with confidential recordings, use a local model.
+
+## Using Codex CLI or Claude CLI
+
+Steno can use an existing [Codex CLI](https://learn.chatgpt.com/docs/non-interactive-mode) or [Claude CLI](https://code.claude.com/docs/en/headless) installation for summaries, titles, and chat:
+
+1. Install the CLI and run `codex` or `claude` once in Terminal to sign in
+2. Open **Settings → AI**
+3. Select **Local CLI (on-device)**
+4. Choose **Codex CLI** or **Claude CLI**
+
+Steno uses the CLI's current login and default model. It sends meeting text to the service used by that CLI, so this option is not offline in the way the built-in Ollama provider is. Prompts run non-interactively from an isolated temporary directory and are not saved as resumable agent sessions. Steno also ignores configured hooks, MCP servers, and other user or project automation for these one-shot requests. Claude's tools are disabled; Codex runs in its read-only sandbox because its built-in tool cannot be removed.
 
 ---
 

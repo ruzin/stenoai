@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ipc } from '@/lib/ipc';
 import { unwrap } from '@/lib/result';
-import type { AiProvider, CloudProvider } from '@/lib/ipc';
+import type { AiProvider, CloudProvider, LocalCliProvider } from '@/lib/ipc';
 import { modelsKeys } from '@/hooks/useModels';
 
 export const aiKeys = {
@@ -43,6 +43,14 @@ export function useSetRemoteOllamaUrl() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (url: string) => unwrap(await ipc().ai.setRemoteOllamaUrl(url)),
+    onSuccess: () => qc.invalidateQueries({ queryKey: aiKeys.provider() }),
+  });
+}
+
+export function useSetLocalCliProvider() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (p: LocalCliProvider) => unwrap(await ipc().ai.setLocalCliProvider(p)),
     onSuccess: () => qc.invalidateQueries({ queryKey: aiKeys.provider() }),
   });
 }

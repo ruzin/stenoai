@@ -678,6 +678,7 @@ class Config:
             # unconfigured install to English summaries (#281).
             "language": "auto",
             "ai_provider": "local",
+            "local_cli_provider": "codex",
             "remote_ollama_url": "",
             "cloud_api_url": "",
             "cloud_provider": "openai",
@@ -1211,7 +1212,8 @@ class Config:
 
     # --- AI provider settings ---
 
-    VALID_AI_PROVIDERS = ("local", "remote", "cloud", "adapter")
+    VALID_AI_PROVIDERS = ("local", "local_cli", "remote", "cloud", "adapter")
+    VALID_LOCAL_CLI_PROVIDERS = ("codex", "claude")
     VALID_CLOUD_PROVIDERS = ("openai", "anthropic", "bedrock", "custom")
 
     # AWS Bedrock has ~30 regions; we surface the common ones in the UI but
@@ -1234,11 +1236,12 @@ class Config:
     )
 
     def get_ai_provider(self) -> str:
-        """Get the configured AI provider ('local', 'remote', 'cloud', or
-        'adapter'). 'adapter' routes AI requests through a signed-in org's
-        adapter so the desktop never sees the provider key — see
-        get_adapter_url / get_adapter_token below for how the desktop's
-        Electron main passes the session into the Python subprocess."""
+        """Get the configured AI provider.
+
+        ``local_cli`` routes requests through an installed Codex or Claude CLI.
+        ``adapter`` routes requests through a signed-in org's adapter so the
+        desktop never sees the provider key.
+        """
         value = self._config.get("ai_provider", "local")
         return value if value in self.VALID_AI_PROVIDERS else "local"
 
@@ -1248,6 +1251,23 @@ class Config:
             logger.error(f"Invalid AI provider: {provider}. Must be one of {self.VALID_AI_PROVIDERS}")
             return False
         self._config["ai_provider"] = provider
+        return self._save()
+
+    def get_local_cli_provider(self) -> str:
+        """Get the selected local AI CLI (``codex`` or ``claude``)."""
+        value = self._config.get("local_cli_provider", "codex")
+        return value if value in self.VALID_LOCAL_CLI_PROVIDERS else "codex"
+
+    def set_local_cli_provider(self, provider: str) -> bool:
+        """Set the local AI CLI used when ``ai_provider == 'local_cli'``."""
+        if provider not in self.VALID_LOCAL_CLI_PROVIDERS:
+            logger.error(
+                "Invalid local CLI provider: %s. Must be one of %s",
+                provider,
+                self.VALID_LOCAL_CLI_PROVIDERS,
+            )
+            return False
+        self._config["local_cli_provider"] = provider
         return self._save()
 
     def get_remote_ollama_url(self) -> str:

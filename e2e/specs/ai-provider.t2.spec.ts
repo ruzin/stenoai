@@ -17,6 +17,7 @@ import path from 'path';
 type ProviderSnapshot = {
   success: boolean;
   ai_provider?: string;
+  local_cli_provider?: string;
   cloud_provider?: string;
   cloud_api_url?: string;
   cloud_model?: string;
@@ -33,6 +34,7 @@ type StenoWindow = Window & {
     ai: {
       getProvider: () => Promise<ProviderSnapshot>;
       setProvider: (p: string) => Promise<Result>;
+      setLocalCliProvider: (p: string) => Promise<Result>;
       setRemoteOllamaUrl: (url: string) => Promise<Result>;
       setCloudApiUrl: (url: string) => Promise<Result>;
       setCloudApiKey: (key: string) => Promise<Result>;
@@ -46,7 +48,6 @@ type StenoWindow = Window & {
 
 const getProvider = (page: import('@playwright/test').Page) =>
   page.evaluate(() => (window as StenoWindow).stenoai.ai.getProvider());
-
 
 test('provider switch + cloud/bedrock config persist and round-trip through get-ai-provider', async ({
   launchApp,
@@ -64,33 +65,57 @@ test('provider switch + cloud/bedrock config persist and round-trip through get-
   expect(initial.model).toBe('gemma4:e2b-it-qat');
 
   // Provider switches persist to config.ai_provider and reflect in the snapshot.
-  for (const provider of ['remote', 'cloud', 'local']) {
+  for (const provider of ['remote', 'cloud', 'local_cli', 'local']) {
     await page.evaluate(
       (p) => (window as StenoWindow).stenoai.ai.setProvider(p),
       provider,
     );
-    await expect.poll(() => readUserConfig(userDataDir).ai_provider).toBe(provider);
+    await expect
+      .poll(() => readUserConfig(userDataDir).ai_provider)
+      .toBe(provider);
     expect((await getProvider(page)).ai_provider).toBe(provider);
   }
 
+  // Local CLI choice persists independently of the active provider.
+  for (const cliProvider of ['claude', 'codex']) {
+    await page.evaluate(
+      (p) => (window as StenoWindow).stenoai.ai.setLocalCliProvider(p),
+      cliProvider,
+    );
+    await expect
+      .poll(() => readUserConfig(userDataDir).local_cli_provider)
+      .toBe(cliProvider);
+    expect((await getProvider(page)).local_cli_provider).toBe(cliProvider);
+  }
+
   // Cloud config: provider, url, model.
-  await page.evaluate(() => (window as StenoWindow).stenoai.ai.setCloudProvider('anthropic'));
   await page.evaluate(() =>
-    (window as StenoWindow).stenoai.ai.setCloudApiUrl('https://api.example.test/v1'),
+    (window as StenoWindow).stenoai.ai.setCloudProvider('anthropic'),
   );
   await page.evaluate(() =>
-    (window as StenoWindow).stenoai.ai.setCloudModel('claude-haiku-4-5-20251001'),
+    (window as StenoWindow).stenoai.ai.setCloudApiUrl(
+      'https://api.example.test/v1',
+    ),
+  );
+  await page.evaluate(() =>
+    (window as StenoWindow).stenoai.ai.setCloudModel(
+      'claude-haiku-4-5-20251001',
+    ),
   );
 
   // Bedrock config.
-  await page.evaluate(() => (window as StenoWindow).stenoai.ai.setBedrockRegion('us-west-2'));
+  await page.evaluate(() =>
+    (window as StenoWindow).stenoai.ai.setBedrockRegion('us-west-2'),
+  );
   await page.evaluate(() =>
     (window as StenoWindow).stenoai.ai.setBedrockInferenceProfile('my-profile'),
   );
 
   // Remote Ollama URL (no connectivity check — set only).
   await page.evaluate(() =>
-    (window as StenoWindow).stenoai.ai.setRemoteOllamaUrl('http://ollama.example.test:11434'),
+    (window as StenoWindow).stenoai.ai.setRemoteOllamaUrl(
+      'http://ollama.example.test:11434',
+    ),
   );
 
   await expect
@@ -132,10 +157,13 @@ test('cloud API key is stored encrypted (safeStorage) in the temp dir, not confi
   );
   if (!encryptionAvailable) {
     // eslint-disable-next-line no-console
-    console.warn('[t2] SKIPPED cloud-api-key: safeStorage unavailable on this runner.');
+    console.warn(
+      '[t2] SKIPPED cloud-api-key: safeStorage unavailable on this runner.',
+    );
     test.info().annotations.push({
       type: 'skip-reason',
-      description: 'safeStorage unavailable; cloud key cannot persist on this runner',
+      description:
+        'safeStorage unavailable; cloud key cannot persist on this runner',
     });
   }
   test.skip(!encryptionAvailable, 'safeStorage unavailable on this runner');
@@ -146,10 +174,16 @@ test('cloud API key is stored encrypted (safeStorage) in the temp dir, not confi
 
   // Encrypted blob lands in the temp dir...
   await expect
-    .poll(() => existsSync(path.join(userDataDir, '.cloud-api-key')), { timeout: 10_000 })
+    .poll(() => existsSync(path.join(userDataDir, '.cloud-api-key')), {
+      timeout: 10_000,
+    })
     .toBe(true);
   // ...the snapshot reports it set...
-  await expect.poll(async () => (await getProvider(page)).cloud_api_key_set).toBe(true);
+  await expect
+    .poll(async () => (await getProvider(page)).cloud_api_key_set)
+    .toBe(true);
   // ...and the plaintext key never appears in config.json.
-  expect(JSON.stringify(readUserConfig(userDataDir))).not.toContain('sk-e2e-secret-123');
+  expect(JSON.stringify(readUserConfig(userDataDir))).not.toContain(
+    'sk-e2e-secret-123',
+  );
 });
