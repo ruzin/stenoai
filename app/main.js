@@ -7012,7 +7012,7 @@ ipcMain.handle('show-system-audio-mic-only-notification', async () => {
     if (!(await notificationsEnabled())) return { success: true, shown: false };
     const notif = new Notification({
       title: 'Recording mic-only',
-      body: 'System audio could not be captured. Check Steno’s System Audio Recording access in System Settings.',
+      body: 'System audio could not be captured. Check Steno’s Screen & System Audio Recording access in System Settings.',
       iconType: 'alert',
     });
     notif.on('click', () => {

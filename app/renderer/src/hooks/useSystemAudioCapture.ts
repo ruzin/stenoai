@@ -283,12 +283,20 @@ export function useSystemAudioCapture() {
           // mic-only case — don't log it as a failure; only a genuine
           // unavailability warrants a warning.
           if (loopbackEnabledRef.current) {
-            // Acquisition was requested and genuinely failed (for example,
-            // System Audio Recording access was denied). Surface the mic-only
-            // fallback fire-and-forget; main gates on notifications_enabled.
-            // macOS only: the notification copy points at macOS System
-            // Settings, and Windows never fired it before this change.
-            if (isMac) void bridge.settings.showSystemAudioMicOnlyNotification();
+            // Only a genuine permission denial should surface the "grant Screen
+            // & System Audio Recording access" guidance. Everything else — the
+            // enableLoopbackAudio IPC call failing, an absent audio track, an
+            // unsupported host, or any unexpected error — falls back to mic-only
+            // SILENTLY; firing the permission toast for those would misdirect the
+            // user to a setting that isn't the cause. macOS raises a
+            // NotAllowedError from getDisplayMedia when Screen & System Audio
+            // Recording is denied. main gates the notification on
+            // notifications_enabled; it's macOS-only (Windows never fired it).
+            const accessDenied =
+              loopbackErr instanceof DOMException && loopbackErr.name === 'NotAllowedError';
+            if (accessDenied && isMac) {
+              void bridge.settings.showSystemAudioMicOnlyNotification();
+            }
             // eslint-disable-next-line no-console
             console.warn('[systemAudioCapture] loopback unavailable, continuing mic-only', loopbackErr);
           }
