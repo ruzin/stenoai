@@ -61,6 +61,17 @@ function resolveTab(id: DeepLinkId): SettingsTabId {
   return id === 'transcription' ? 'ai' : id;
 }
 
+// Resolve the `?tab=` param of a route to a nav tab, or null when absent or
+// not a known deep-link id. Single definition shared by the first-mount
+// initialTab and the route-reactive sync effect so the two can't drift.
+function tabFromRoute(route: string): SettingsTabId | null {
+  const requested = getRouteParam(route, 'tab');
+  if (requested && (DEEP_LINK_IDS as readonly string[]).includes(requested)) {
+    return resolveTab(requested as DeepLinkId);
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // Settings page — a full takeover of the main app chrome (Granola/Wispr
 // style): the folder/meeting sidebar is replaced entirely by SettingsNav
@@ -76,23 +87,23 @@ export function Settings() {
   // Used by the sidebar's "Sign in to organisation" CTA to land users
   // directly on the org sign-in form rather than the General tab.
   const route = useRoute();
-  const initialTab = React.useMemo<SettingsTabId>(() => {
-    const requested = getRouteParam(route, 'tab');
-    if (requested && (DEEP_LINK_IDS as readonly string[]).includes(requested)) {
-      return resolveTab(requested as DeepLinkId);
-    }
-    return 'general';
-  }, []); // Intentional — only consume the URL param on first mount.
+  const initialTab = React.useMemo<SettingsTabId>(
+    () => tabFromRoute(route) ?? 'general',
+    [], // Intentional — only consume the URL param on first mount.
+  );
   const [tab, setTab] = React.useState<SettingsTabId>(initialTab);
   // Keep the visible tab in sync when the `?tab=` param changes AFTER mount —
   // e.g. the ⌘K settings search navigates to /settings?tab=<id> while Settings
   // is already open. initialTab (above) only consumes the param on first mount,
   // so without this the hash would update but the tab wouldn't switch.
+  //
+  // A bare `/settings` (no param) resets to General — the same meaning the
+  // absent param has on first mount. This matters for browser Back: nav-rail
+  // clicks push `?tab=` entries onto the hash history (route is the single
+  // source of truth since #411), so Back can land on the bare route and must
+  // not leave a stale tab visible.
   React.useEffect(() => {
-    const requested = getRouteParam(route, 'tab');
-    if (requested && (DEEP_LINK_IDS as readonly string[]).includes(requested)) {
-      setTab(resolveTab(requested as DeepLinkId));
-    }
+    setTab(tabFromRoute(route) ?? 'general');
   }, [route]);
   const version = useAppVersion();
   // Templates' own editor is a full-page takeover with its own header/back
