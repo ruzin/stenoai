@@ -5,6 +5,7 @@ import { unwrap } from '@/lib/result';
 import { useRecording } from '@/hooks/useRecording';
 import { useLiveDraftStore } from '@/hooks/liveDraftStore';
 import { meetingsKeys } from '@/hooks/meetingKeys';
+import { useUndoDeleteStore } from '@/hooks/undoDeleteStore';
 
 export { meetingsKeys };
 
@@ -184,7 +185,7 @@ export function useDeleteMeeting() {
     // update from this single write too. Removing on success (not optimistically
     // in onMutate) means a failed delete simply leaves the row in place — no
     // snapshot/rollback, so concurrent deletes can't clobber each other.
-    onSuccess: async (_data, meeting) => {
+    onSuccess: async (data, meeting) => {
       // Cancel again here: the onMutate cancel only covers refetches already
       // running at mutation start, but a fresh list refetch can be triggered
       // *during* the (fast) delete IPC and would land after the write below.
@@ -197,16 +198,71 @@ export function useDeleteMeeting() {
       // row with a falsy summary_file rather than the one deleted. summary_file
       // is the list's primary key so this shouldn't happen, but the predicate
       // must not silently nuke the list if a malformed row slips through.
-      if (!deletedFile) return;
-      qc.setQueryData<Meeting[]>(meetingsKeys.list(), (prev) =>
-        prev?.filter((m) => m.session_info.summary_file !== deletedFile),
-      );
-      // Drop the lazy-loaded detail cache for this meeting too. The list filter
-      // above only touches the list query; without this, the deleted meeting's
-      // detail payload (transcript etc.) stays served from cache if the detail
-      // route is revisited.
-      qc.removeQueries({ queryKey: meetingsKeys.detail(deletedFile) });
+      if (deletedFile) {
+        qc.setQueryData<Meeting[]>(meetingsKeys.list(), (prev) =>
+          prev?.filter((m) => m.session_info.summary_file !== deletedFile),
+        );
+        // Drop the lazy-loaded detail cache for this meeting too. The list filter
+        // above only touches the list query; without this, the deleted meeting's
+        // detail payload (transcript etc.) stays served from cache if the detail
+        // route is revisited.
+        qc.removeQueries({ queryKey: meetingsKeys.detail(deletedFile) });
+      }
+      // The delete was a soft-delete (only the summary is hidden): surface an
+      // Undo toast so the user can undo for a few seconds (#234). Skipped only if
+      // the backend didn't return an id (nothing to delete / older shape).
+      if (data?.id) {
+        useUndoDeleteStore.getState().add({
+          id: data.id,
+          meeting,
+          summaryFile: meeting.session_info.summary_file,
+          deadline: data.deadline ?? Date.now() + 8000,
+        });
+      }
     },
+  });
+}
+
+/**
+ * Undo a soft-delete (#234): main renames the hidden summary back, so the note
+ * reappears in every backend scan. Re-insert the returned meeting into the list
+ * cache (dedup) so the row returns without a re-scan — covering both the
+ * still-cached row (delete removed it) and a mid-window refetch that dropped it.
+ * The detail cache is invalidated so a revisit re-reads the note.
+ */
+export function useUndoDeleteMeeting() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => unwrap(await ipc().meetings.undoDelete(id)),
+    onSuccess: (data, id) => {
+      const meeting = data.meeting;
+      const file = meeting?.session_info?.summary_file;
+      if (file) {
+        qc.setQueryData<Meeting[]>(meetingsKeys.list(), (prev) => {
+          if (!prev) return prev;
+          // Guard against a double-undo re-inserting a duplicate row.
+          if (prev.some((m) => m.session_info.summary_file === file)) return prev;
+          return [meeting, ...prev];
+        });
+        qc.invalidateQueries({ queryKey: meetingsKeys.detail(file) });
+      } else {
+        qc.invalidateQueries({ queryKey: meetingsKeys.list() });
+      }
+      useUndoDeleteStore.getState().remove(id);
+    },
+    // On failure (rare no-clobber) leave the toast up; MAIN's timer is the
+    // backstop and there's nothing to reconcile in the cache.
+  });
+}
+
+/**
+ * Commit a soft-delete (#234): the toast was dismissed or its window elapsed.
+ * Main permanently unlinks the note's files. Idempotent on the backend; the
+ * store entry + the (possibly still-cached) list row are cleaned up in the toast.
+ */
+export function useCommitDeleteMeeting() {
+  return useMutation({
+    mutationFn: async (id: string) => unwrap(await ipc().meetings.commitDelete(id)),
   });
 }
 
