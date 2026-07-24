@@ -82,11 +82,14 @@ export function MeetingsShell({
     { type: 'folder' | 'meeting'; id: string; current: string; itemRect: DOMRectReadOnly } | null
   >(null);
   const [context, setContext] = React.useState<SidebarContextAction | null>(null);
-  const [deleteTarget, setDeleteTarget] = React.useState<
-    | { type: 'folder'; id: string; name: string; meetingCount: number }
-    | { type: 'meeting'; id: string; name: string }
-    | null
-  >(null);
+  // Folders only: deleting a folder is NOT undoable, so it keeps a confirm step.
+  // Notes delete straight away and are caught by the Undo toast instead (#234).
+  const [deleteTarget, setDeleteTarget] = React.useState<{
+    type: 'folder';
+    id: string;
+    name: string;
+    meetingCount: number;
+  } | null>(null);
 
   // Sidebar shows only folder rows + counts. buildSidebar gives us folder
   // metadata (name + meeting count); the per-folder meetings array is unused.
@@ -159,7 +162,7 @@ export function MeetingsShell({
     }
   };
 
-  const openDeleteConfirm = () => {
+  const onDeleteAction = () => {
     if (!context) return;
     if (context.type === 'folder') {
       const folder = folders.data?.find((f) => f.id === context.id);
@@ -167,31 +170,31 @@ export function MeetingsShell({
       const meetingCount =
         meetings.data?.filter((m) => (m.folders ?? []).includes(context.id)).length ?? 0;
       setDeleteTarget({ type: 'folder', id: context.id, name: folder.name, meetingCount });
-    } else {
-      const target = meetings.data?.find((m) => m.session_info.summary_file === context.id);
-      if (!target) return setContext(null);
-      setDeleteTarget({
-        type: 'meeting',
-        id: context.id,
-        name: target.session_info.name || 'Untitled Meeting',
-      });
+      setContext(null);
+      return;
     }
+    // Notes: no confirm step — the soft-delete's Undo toast is the safety net,
+    // so asking first would just add a click to an already reversible action.
+    const target = meetings.data?.find((m) => m.session_info.summary_file === context.id);
     setContext(null);
+    if (!target) return;
+    const summaryFile = target.session_info.summary_file;
+    void deleteMeeting
+      .mutateAsync(target)
+      .then(() => {
+        if (activeSummaryFile === summaryFile) navigate('/');
+      })
+      .catch((err) => {
+        // A refused delete (main's busy-guard) leaves the row in place. Log it
+        // rather than throwing an unhandled rejection; the row staying put is
+        // the user-visible signal here, and MeetingDetail surfaces the reason.
+        console.error('Delete failed:', err);
+      });
   };
 
-  const handleConfirmDelete = async () => {
+  const handleConfirmDeleteFolder = async () => {
     if (!deleteTarget) return;
-    if (deleteTarget.type === 'folder') {
-      await deleteFolder.mutateAsync(deleteTarget.id);
-    } else {
-      const target = meetings.data?.find(
-        (m) => m.session_info.summary_file === deleteTarget.id,
-      );
-      if (target) {
-        await deleteMeeting.mutateAsync(target);
-        if (activeSummaryFile === deleteTarget.id) navigate('/');
-      }
-    }
+    await deleteFolder.mutateAsync(deleteTarget.id);
     setDeleteTarget(null);
   };
 
@@ -233,7 +236,7 @@ export function MeetingsShell({
           action={context}
           onClose={() => setContext(null)}
           onRename={(label) => openRename(context.type, context.id, label, context.itemRect)}
-          onDelete={openDeleteConfirm}
+          onDelete={onDeleteAction}
           folders={folders.data ?? []}
           meetings={meetings.data ?? []}
         />
@@ -242,35 +245,22 @@ export function MeetingsShell({
       <ConfirmDialog
         open={!!deleteTarget}
         onOpenChange={(o) => !o && setDeleteTarget(null)}
-        title={
-          deleteTarget?.type === 'folder'
-            ? `Delete folder "${deleteTarget.name}"?`
-            : deleteTarget
-              ? `Delete note "${deleteTarget.name}"?`
-              : ''
-        }
+        title={deleteTarget ? `Delete folder "${deleteTarget.name}"?` : ''}
         description={
-          deleteTarget?.type === 'folder' ? (
-            deleteTarget.meetingCount > 0 ? (
-              <>
-                {deleteTarget.meetingCount} meeting
-                {deleteTarget.meetingCount === 1 ? '' : 's'} will be moved back to All Notes. No
-                recordings or transcripts will be deleted.
-              </>
-            ) : (
-              <>No recordings or transcripts will be deleted.</>
-            )
-          ) : (
+          deleteTarget && deleteTarget.meetingCount > 0 ? (
             <>
-              This will remove the transcript, summary, and all associated files. You can undo this
-              for a few seconds after deleting.
+              {deleteTarget.meetingCount} meeting
+              {deleteTarget.meetingCount === 1 ? '' : 's'} will be moved back to All Notes. No
+              recordings or transcripts will be deleted.
             </>
+          ) : (
+            <>No recordings or transcripts will be deleted.</>
           )
         }
         confirmLabel="Delete"
         destructive
-        onConfirm={handleConfirmDelete}
-        isPending={deleteFolder.isPending || deleteMeeting.isPending}
+        onConfirm={handleConfirmDeleteFolder}
+        isPending={deleteFolder.isPending}
       />
 
       <Dialog open={newFolderOpen} onOpenChange={setNewFolderOpen}>
