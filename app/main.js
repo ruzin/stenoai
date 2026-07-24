@@ -2451,7 +2451,7 @@ ipcMain.handle('clear-state', async () => {
   }
 });
 
-ipcMain.handle('reprocess-meeting', async (event, summaryFile, regenerateTitle, sessionName) => {
+ipcMain.handle('reprocess-meeting', async (event, summaryFile, regenerateTitle, sessionName, retranscribe) => {
   try {
     // Security: symlink-safe containment-check the renderer-supplied summary path
     // before it reaches the backend CLI, and pass the canonical realPath (not the
@@ -2465,6 +2465,10 @@ ipcMain.handle('reprocess-meeting', async (event, summaryFile, regenerateTitle, 
 
     const args = ['reprocess', realPath];
     if (regenerateTitle) args.push('--regenerate-title');
+    // Re-transcribe (#266): re-run ASR on the source recording with the current
+    // settings before re-summarising. The backend emits HEARTBEAT:transcribe:*
+    // during ASR, which the same inactivity watchdog below already resets on.
+    if (retranscribe) args.push('--retranscribe');
 
     sendDebugLog(`🔄 Reprocessing meeting: ${summaryFile}`);
     sendDebugLog(`$ stenoai ${args.join(' ')}`);
@@ -2581,6 +2585,46 @@ ipcMain.handle('reprocess-meeting', async (event, summaryFile, regenerateTitle, 
     return { success: false, error: error.message };
   } finally {
     activeReprocessJobs.delete(summaryFile);
+  }
+});
+
+// Re-transcribe availability (#266): report whether the source recording for a
+// note still exists on disk, so the renderer can offer "Re-transcribe" only when
+// re-running ASR is actually possible (keep-recordings was on). Read-only.
+ipcMain.handle('recording-available', async (event, summaryFile) => {
+  try {
+    // Same containment check the reprocess path uses — the renderer is untrusted.
+    const validated = await validateMeetingFilePath(summaryFile);
+    if (validated.error) {
+      return { success: false, error: validated.error };
+    }
+    // Derive the recording stem from the note filename: <stem>_summary.{md,json}.
+    const base = path.basename(validated.realPath).replace(/\.(md|json)$/, '');
+    const stem = base.endsWith('_summary') ? base.slice(0, -'_summary'.length) : base;
+    // The recording keeps the note's stem with an arbitrary extension (native
+    // .wav, system-audio .webm, imported .m4a/.mp3), so match on stem, not glob.
+    const recordingsDir = resolveRecordingsDir();
+    let available = false;
+    try {
+      for (const dirent of fs.readdirSync(recordingsDir, { withFileTypes: true })) {
+        // Require a regular file — matches the Python _find_recording_for_stem
+        // is_file() check, so a directory named e.g. `<stem>.wav` doesn't offer
+        // a re-transcribe that then fails with RETRANSCRIBE_NO_AUDIO (#266).
+        if (!dirent.isFile()) continue;
+        const name = dirent.name;
+        const dot = name.lastIndexOf('.');
+        const nameStem = dot > 0 ? name.slice(0, dot) : name;
+        if (nameStem === stem) {
+          available = true;
+          break;
+        }
+      }
+    } catch {
+      available = false; // recordings dir may not exist yet
+    }
+    return { success: true, available };
+  } catch (error) {
+    return { success: false, error: error.message };
   }
 });
 
