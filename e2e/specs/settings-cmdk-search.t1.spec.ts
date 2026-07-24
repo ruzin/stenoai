@@ -106,6 +106,24 @@ test('search still works after a manual nav-rail tab switch (#405 regression)', 
   await expect(page.locator(settingsPage)).not.toContainText('Launch on login');
 });
 
+test('browser Back to bare /settings resets the visible tab to General (#405)', async ({
+  launchApp,
+}) => {
+  const { page } = await launchApp(launchOpts);
+  await openSettings(page); // bare /settings → General
+
+  // Nav to AI via the rail — pushes /settings?tab=ai onto the hash history.
+  await page.locator('[data-settings-nav="ai"]').click();
+  await expect(page.locator(settingsPage)).toContainText('AI provider');
+
+  // Browser Back returns to the bare route. The route→tab effect must treat
+  // the absent param like first mount (General), not leave the AI tab stale.
+  await page.goBack();
+  await expect.poll(() => page.evaluate(() => window.location.hash)).toBe('#/settings');
+  await expect(page.locator(settingsPage)).toContainText('Launch on login');
+  await expect(page.locator(settingsPage)).not.toContainText('AI provider');
+});
+
 // Drift guard: a few index titles must still match the labels their tabs
 // actually render, so a renamed control can't leave a stale search entry that
 // jumps to a tab where nothing matches. Uses only cross-platform settings.
