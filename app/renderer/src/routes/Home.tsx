@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Calendar, ChevronLeft, ChevronRight, PencilLine, RefreshCw, Search, Square, X } from 'lucide-react';
+import { Calendar, ChevronLeft, ChevronRight, Plus, RefreshCw, Search, Square, X } from 'lucide-react';
 import { cn, isMac } from '@/lib/utils';
 import { MeetingsShell } from '@/components/MeetingsShell';
 import { UpcomingCard } from '@/components/home/UpcomingCard';
@@ -503,7 +503,7 @@ export function Home({ mode }: HomeProps) {
               onClick={onToggleRecording}
               className="gap-2"
             >
-              {isRecording ? <Square className="size-4" /> : <PencilLine className="size-4" />}
+              {isRecording ? <Square className="size-4" /> : <Plus className="size-4" />}
               {isRecording ? 'Stop recording' : 'New note'}
             </Button>
             <p

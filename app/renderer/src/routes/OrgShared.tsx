@@ -171,7 +171,7 @@ export function OrgSharedDetail({ id }: { id: string }) {
       <button
         type="button"
         onClick={() => navigate('/org/shared')}
-        className="mb-5 inline-flex items-center gap-1.5 text-[12px] hover:text-[color:var(--fg-1)]"
+        className="mb-5 inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[12px] transition-colors hover:bg-[color:var(--surface-hover)] hover:text-[color:var(--fg-1)]"
         style={{ color: 'var(--fg-2)' }}
       >
         <ArrowLeft size={12} /> Shared notes

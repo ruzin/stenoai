@@ -167,7 +167,9 @@ export function TranscriptToggle() {
       aria-label={transcriptOpen ? 'Hide transcript' : 'Show transcript'}
       aria-pressed={transcriptOpen}
       title="Transcript"
-      className="pointer-events-auto inline-flex h-11 shrink-0 cursor-pointer items-center justify-center gap-0.5 rounded-full border-0 px-3 transition-colors"
+      // mb-[3px] optically centers the 44px toggle against the 50px composer
+      // row it sits beside (PrimaryDock aligns the row items-end; see there).
+      className="pointer-events-auto mb-[3px] inline-flex h-11 shrink-0 cursor-pointer items-center justify-center gap-0.5 rounded-full border-0 px-3 transition-colors"
       style={{
         background: transcriptOpen ? 'var(--surface-active)' : 'var(--surface-raised)',
         border: '1px solid var(--border-subtle)',

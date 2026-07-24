@@ -54,10 +54,17 @@ export function PrimaryDock({ showAskBar }: { showAskBar: boolean }) {
   return (
     <div
       data-testid="primary-dock-row"
+      // items-end, not items-center: the AskBar column grows upward in-flow
+      // (chat panel maxHeight 360, suggestion chips), so centering against it
+      // would float the left control mid-column when a chat is expanded. The
+      // left controls instead carry a small mb-* that optically centers them
+      // against the 50px composer row only.
       className={cn('flex items-end gap-3', !showAskBar && 'justify-center')}
     >
       {recordingActive ? (
-        <div className="shrink-0">
+        // mb-1 only beside the composer - standalone (justify-center) the
+        // pill has nothing to align with.
+        <div className={cn('shrink-0', showAskBar && 'mb-1')}>
           <LiveDock />
         </div>
       ) : (

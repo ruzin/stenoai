@@ -348,16 +348,13 @@
     transition: background var(--dur-fast) var(--ease);
     line-height: 1.3;
   }
-  .sb-row:hover { background: var(--surface-hover); }
+  /* --surface-active, not --surface-hover: sb-row sits on the sidebar's
+     --surface-sunken background, which equals --surface-hover in light mode
+     (both --paper-1) — that hover would be invisible. */
+  .sb-row:hover { background: var(--surface-active); }
   .sb-row.active {
-    background: var(--surface-raised);
-    box-shadow: 0 1px 2px rgba(27,27,25,0.04), 0 0 0 1px var(--border-subtle);
+    background: var(--surface-active);
     font-weight: 500;
-  }
-  .dark .sb-row.active,
-  [data-theme="dark"] .sb-row.active {
-    background: var(--surface-raised);
-    box-shadow: 0 0 0 1px var(--border-subtle);
   }
   .sb-row svg { color: var(--fg-2); flex-shrink: 0; }
   .sb-row.active svg { color: var(--fg-1); }
@@ -591,6 +588,9 @@
     to   { opacity: 1; transform: translateY(0) scale(1); }
   }
 
+  /* Not itself clickable — only the copy/minimize buttons inside are, via
+     .mv-chat-tool's own hover. No cursor/hover here so the row doesn't imply
+     the whole header is a click target. */
   .mv-transcript-head {
     display: flex;
     align-items: center;
@@ -599,13 +599,10 @@
     width: 100%;
     background: transparent;
     border: 0;
-    cursor: pointer;
     font-family: var(--font-sans);
     text-align: left;
     color: var(--fg-1);
-    transition: background var(--dur-fast) var(--ease);
   }
-  .mv-transcript-head:hover { background: var(--surface-hover); }
 
   .mv-transcript-label {
     flex: 1;
