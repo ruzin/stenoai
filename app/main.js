@@ -1505,6 +1505,24 @@ if (!gotSingleInstanceLock) {
       spawnParakeetWarmup();
     }
 
+    // Register the global hotkey for toggle recording, unless the user turned
+    // it off in Settings. CommandOrControl resolves per-platform (Cmd on
+    // macOS, Ctrl on Windows/Linux). Gate on the persisted preference read
+    // directly from config.json — absence of the key = ON (back-compat).
+    // MUST run before createWindow(): the renderer queries get-record-hotkey
+    // on mount and caches { registered }, so registering only after the
+    // slow awaits below would report a transient registered:false as a
+    // registration failure ("couldn't register" hint, hidden shortcut copy).
+    if (recordHotkeyEnabledFromDisk()) {
+      if (applyRecordHotkey(true)) {
+        console.log(`Global hotkey registered: ${RECORD_HOTKEY_ACCEL}`);
+      } else {
+        console.error(`Failed to register global hotkey: ${RECORD_HOTKEY_ACCEL}`);
+      }
+    } else {
+      console.log('Global record hotkey disabled by preference — not registering');
+    }
+
     createWindow();
     if (!IS_E2E && loadShowMenuBarIconEnabled()) createTray();
     setupAutoUpdater();
@@ -1648,20 +1666,6 @@ if (!gotSingleInstanceLock) {
     // dir and misses a custom-storage user's notes entirely. Deferred off the
     // critical path so the per-note frontmatter scan never delays first paint.
     setImmediate(sweepStuckProcessingFlags);
-
-    // Register the global hotkey for toggle recording, unless the user turned
-    // it off in Settings. CommandOrControl resolves per-platform (Cmd on
-    // macOS, Ctrl on Windows/Linux). Gate on the persisted preference read
-    // directly from config.json — absence of the key = ON (back-compat).
-    if (recordHotkeyEnabledFromDisk()) {
-      if (applyRecordHotkey(true)) {
-        console.log(`Global hotkey registered: ${RECORD_HOTKEY_ACCEL}`);
-      } else {
-        console.error(`Failed to register global hotkey: ${RECORD_HOTKEY_ACCEL}`);
-      }
-    } else {
-      console.log('Global record hotkey disabled by preference — not registering');
-    }
 
     if (pendingShortcutUrls.length > 0) {
       const urlsToProcess = [...pendingShortcutUrls];

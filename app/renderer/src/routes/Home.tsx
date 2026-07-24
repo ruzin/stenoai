@@ -32,9 +32,13 @@ export function Home({ mode }: HomeProps) {
   const calendar = useCalendarEvents();
   const recording = useRecording();
   // Default ON while loading / on error so the hero copy doesn't flicker the
-  // ⌘⇧R hint off then on (back-compat: the shortcut ships enabled).
+  // ⌘⇧R hint off then on (back-compat: the shortcut ships enabled). Also
+  // require registered !== false: when another app owns the accelerator the
+  // shortcut doesn't actually work, so advertising it would strand the user
+  // on dead instructions — fall back to the click-based copy instead.
   const recordHotkey = useRecordHotkeySetting();
-  const hotkeyEnabled = recordHotkey.data?.enabled ?? true;
+  const hotkeyEnabled =
+    (recordHotkey.data?.enabled ?? true) && recordHotkey.data?.registered !== false;
 
   const emptyState = !meetings.data?.length;
   const isRecording = recording.status === 'recording' || recording.status === 'paused';
