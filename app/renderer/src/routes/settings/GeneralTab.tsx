@@ -98,6 +98,21 @@ export function GeneralTab() {
   })();
   const autoDetect = useAutoDetectMeetingsSetting();
   const setAutoDetect = useSetAutoDetectMeetings();
+  // Auto-detect is a macOS-14+ feature (the mic-monitor binary is macOS-only and
+  // only has a reliable per-app signal on 14+ — see #116). Mirror main's
+  // isAutoDetectSupported() exactly so the toggle isn't a no-op-but-enabled
+  // control: non-darwin is unsupported (main never spawns the watcher there), and
+  // darwin < 14 is unsupported. While the probe is loading (data undefined) we
+  // don't disable (matching the other rows); a darwin osVersion that won't parse
+  // stays permissive (a real 14+ user must never lose the feature over a hiccup).
+  const autoDetectSupported = (() => {
+    const data = systemAudioSupport.data;
+    if (!data) return true; // probe still loading — don't disable prematurely
+    if (data.platform !== 'darwin') return false; // macOS-only feature
+    const major = parseInt(String(data.osVersion).split('.')[0], 10);
+    if (!Number.isFinite(major)) return true; // permissive on parse failure
+    return major >= 14;
+  })();
   const launchOnLogin = useLaunchOnLoginSetting();
   const setLaunchOnLogin = useSetLaunchOnLogin();
   const silenceAutoStop = useSilenceAutoStopSetting();
@@ -367,12 +382,18 @@ export function GeneralTab() {
 
       <SettingRow
         label="Auto-detected meetings"
-        description="Watch for other apps using your microphone and notify you when a call starts, with a one-click button to record."
+        description={
+          autoDetectSupported
+            ? 'Watch for other apps using your microphone and notify you when a call starts, with a one-click button to record.'
+            : `Watch for other apps using your microphone and notify you when a call starts. Requires macOS 14 (Sonoma) or later${
+                systemAudioSupport.data?.osVersion ? `, you're on ${systemAudioSupport.data.osVersion}` : ''
+              }.`
+        }
       >
         <Switch
-          checked={autoDetect.data ?? true}
+          checked={autoDetectSupported && (autoDetect.data ?? true)}
           onCheckedChange={(v) => setAutoDetect.mutate(v)}
-          disabled={autoDetect.data === undefined}
+          disabled={autoDetect.data === undefined || !autoDetectSupported}
         />
       </SettingRow>
 

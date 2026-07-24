@@ -39,10 +39,28 @@ function allowsDeviceLevelFallback(platform, systemVersion) {
   return major < 14;
 }
 
+// Whether the auto-detect-meetings watcher may run on this OS. The mic-monitor
+// only has a reliable per-app signal on macOS 14+; on macOS 12/13 it falls back
+// to a coarse device-level ("an app") signal that misfires (see #116, #262), so
+// we gate the whole feature to macOS 14+ and never spawn the watcher below it.
+// Non-darwin returns false — auto-detect is a macOS-only feature.
+//
+// Parse direction on failure is PERMISSIVE: an unparseable version returns true.
+// Auto-detect is opt-in and the <14 device-level path is exactly what we're
+// removing, so a parse hiccup must not silently disable the feature for a real
+// 14+ user. The worst case — a genuinely old-but-unparseable system — is the
+// pre-existing coarse fallback, which the mic-monitor binary itself still guards.
+function isMacos14Plus(platform, systemVersion) {
+  if (platform !== 'darwin') return false;
+  const major = parseInt(String(systemVersion).split('.')[0], 10);
+  if (!Number.isFinite(major)) return true; // permissive on parse failure — see above
+  return major >= 14;
+}
+
 function isMeetingApp(evt, { allowDeviceLevelFallback = false } = {}) {
   if (!evt) return false;
   if (!evt.app_id) return allowDeviceLevelFallback;
   return MEETING_APP_ALLOWLIST.some((re) => re.test(evt.app_id));
 }
 
-module.exports = { MEETING_APP_ALLOWLIST, isMeetingApp, allowsDeviceLevelFallback };
+module.exports = { MEETING_APP_ALLOWLIST, isMeetingApp, allowsDeviceLevelFallback, isMacos14Plus };

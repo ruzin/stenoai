@@ -57,8 +57,17 @@ const h = vi.hoisted(() => {
       data: {
         supported: true,
         osVersion: '14.4',
+        platform: 'darwin',
         screenPermission: 'granted' as string,
         screenPermissionAtLaunch: 'granted' as string,
+      } as {
+        supported: boolean;
+        osVersion: string;
+        // Optional so the existing (platform-less) reassignments below and the
+        // new macOS-14-gate cases (which set platform) both typecheck (#116).
+        platform?: string;
+        screenPermission: string;
+        screenPermissionAtLaunch: string;
       },
       refetch: vi.fn(),
     },
@@ -525,5 +534,33 @@ describe('GeneralTab Record system audio — Screen Recording permission', () =>
     expect(screen.queryByRole('button', { name: 'Open Settings' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Check Again' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Relaunch' })).toBeNull();
+  });
+
+  test('auto-detect: shows a "Requires macOS 14" note on macOS < 14 (#116)', () => {
+    // The mic-monitor only has a reliable per-app signal on macOS 14+, so the
+    // Auto-detected meetings row is gated below that — see isMacos14Plus.
+    h.systemAudioSupport.data = {
+      supported: false,
+      osVersion: '13.6.1',
+      platform: 'darwin',
+      screenPermission: 'granted',
+      screenPermissionAtLaunch: 'granted',
+    };
+    render(<GeneralTab />);
+    expect(
+      screen.getByText(/Requires macOS 14 \(Sonoma\) or later, you're on 13\.6\.1\./),
+    ).toBeTruthy();
+  });
+
+  test('auto-detect: no macOS-14 note on macOS 14+', () => {
+    h.systemAudioSupport.data = {
+      supported: true,
+      osVersion: '14.4',
+      platform: 'darwin',
+      screenPermission: 'granted',
+      screenPermissionAtLaunch: 'granted',
+    };
+    render(<GeneralTab />);
+    expect(screen.queryByText(/Requires macOS 14 \(Sonoma\) or later/)).toBeNull();
   });
 });

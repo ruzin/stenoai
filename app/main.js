@@ -43,7 +43,7 @@ const { createTeardownRegistry } = require('./teardown');
 const { registerFoldersIpc } = require('./folders-ipc');
 const { registerSettingsIpc } = require('./settings-ipc');
 const processingLog = require('./processing-log');
-const { isMeetingApp, allowsDeviceLevelFallback } = require('./meeting-detect');
+const { isMeetingApp, allowsDeviceLevelFallback, isMacos14Plus } = require('./meeting-detect');
 const { sweepOrphanedLiveSnapshots } = require('./live-snapshot-sweep');
 const { userNotesFilePath } = require('./notes-file');
 const { makeLineReader } = require('./backend-stream');
@@ -137,6 +137,22 @@ function isCoreAudioTapSupported() {
     return maj > 14 || (maj === 14 && min >= 4);
   } catch (_) {
     return false;
+  }
+}
+
+// Whether the auto-detect-meetings watcher may run on this OS. Gated to
+// macOS 14+ because the mic-monitor only has a reliable per-app signal there;
+// on macOS 12/13 it falls back to a coarse device-level signal that misfires
+// (see #116). Pure version logic lives in ./meeting-detect (unit-tested).
+function isAutoDetectSupported() {
+  try {
+    return isMacos14Plus(process.platform, process.getSystemVersion());
+  } catch (_) {
+    // A getSystemVersion() throw is treated like an unparseable version, but
+    // only PERMISSIVELY on darwin (a real 14+ Mac must never lose the feature
+    // over a probe hiccup). On non-darwin the feature is unsupported regardless,
+    // so a throw there stays false — consistent with isMacos14Plus.
+    return process.platform === 'darwin';
   }
 }
 
@@ -5873,6 +5889,10 @@ function setupAutoMeetingDetector() {
     sendDebugLog('[auto-detect] disabled in settings; not starting');
     return;
   }
+  if (!isAutoDetectSupported()) {
+    sendDebugLog('[auto-detect] requires macOS 14 (Sonoma) or later; not starting');
+    return;
+  }
   startMicMonitor();
 }
 
@@ -7288,6 +7308,8 @@ ipcMain.handle('set-auto-detect-meetings', async (_event, enabled) => {
           sendDebugLog('[auto-detect] E2E mode; setting saved but watcher not started');
         } else if (!app.isPackaged && !process.env[AUTO_DETECT_ENV]) {
           sendDebugLog(`[auto-detect] dev mode without ${AUTO_DETECT_ENV}=1; setting saved but watcher not started`);
+        } else if (!isAutoDetectSupported()) {
+          sendDebugLog('[auto-detect] requires macOS 14 (Sonoma) or later; setting saved but watcher not started');
         } else {
           startMicMonitor();
         }
