@@ -1,4 +1,5 @@
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -616,6 +617,33 @@ class MlxTagResolutionTests(unittest.TestCase):
         for gguf_id, mlx_tag in Config._MLX_EQUIVALENTS.items():
             self.assertEqual(Config._MLX_TO_GGUF[mlx_tag], gguf_id)
         self.assertEqual(len(Config._MLX_TO_GGUF), len(Config._MLX_EQUIVALENTS))
+
+
+class CustomKeywordsConfigTests(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.mkdtemp()
+        os.environ["STENOAI_USER_DATA_DIR"] = self._tmp
+        self.cfg = Config()
+
+    def tearDown(self):
+        os.environ.pop("STENOAI_USER_DATA_DIR", None)
+
+    def test_default_empty(self):
+        self.assertEqual(self.cfg.get_custom_keywords(), [])
+
+    def test_set_get_roundtrip_and_persist(self):
+        ok = self.cfg.set_custom_keywords([{"preferred": "NexGen Suite", "aliases": ["NexGan Suite"]}])
+        self.assertTrue(ok)
+        self.assertEqual(
+            self.cfg.get_custom_keywords(),
+            [{"preferred": "NexGen Suite", "aliases": ["NexGan Suite"]}],
+        )
+        # persisted: a fresh Config reads it back
+        self.assertEqual(Config().get_custom_keywords()[0]["preferred"], "NexGen Suite")
+
+    def test_set_normalizes(self):
+        self.cfg.set_custom_keywords([{"preferred": "  ", "aliases": ["x"]}])
+        self.assertEqual(self.cfg.get_custom_keywords(), [])
 
 
 if __name__ == "__main__":
