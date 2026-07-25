@@ -16,9 +16,20 @@ const ALL_CLEAR = {
   queueLength: 0,
   liveActive: false,
   streaming: false,
+  otherJobsActive: false,
   idleSeconds: 700,
   idleThresholdSeconds: 600,
 };
+
+// The activity flags that must each be EXPLICITLY false to pass (fail closed).
+// Reused by the blocker + garbled-value tests below.
+const ACTIVITY_FLAGS = [
+  'isRecording',
+  'isProcessing',
+  'liveActive',
+  'streaming',
+  'otherJobsActive',
+];
 
 test('all-clear -> true', () => {
   assert.strictEqual(isSafeToAutoInstall(ALL_CLEAR), true);
@@ -44,6 +55,10 @@ test('in-flight AI stream blocks', () => {
   assert.strictEqual(isSafeToAutoInstall({ ...ALL_CLEAR, streaming: true }), false);
 });
 
+test('reprocess/report/regen-title job active blocks', () => {
+  assert.strictEqual(isSafeToAutoInstall({ ...ALL_CLEAR, otherJobsActive: true }), false);
+});
+
 test('idle below threshold blocks', () => {
   assert.strictEqual(isSafeToAutoInstall({ ...ALL_CLEAR, idleSeconds: 599 }), false);
 });
@@ -58,6 +73,29 @@ test('disabled by setting blocks', () => {
 
 test('no update staged (not ready) blocks', () => {
   assert.strictEqual(isSafeToAutoInstall({ ...ALL_CLEAR, updateReady: false }), false);
+});
+
+// FAIL CLOSED: a garbled / undefined / non-boolean activity flag (e.g. a failed
+// state read) must NOT be treated as "inactive" — it blocks the install. Prove
+// this for every activity flag against every non-false value, and that ONLY an
+// explicit `false` (not merely a falsy value like 0) is accepted.
+const NON_FALSE_VALUES = [undefined, null, true, 1, 0, '', 'false', {}, NaN];
+for (const flag of ACTIVITY_FLAGS) {
+  for (const bad of NON_FALSE_VALUES) {
+    test(`${flag} = ${JSON.stringify(bad)} (non-false) blocks — fail closed`, () => {
+      assert.strictEqual(isSafeToAutoInstall({ ...ALL_CLEAR, [flag]: bad }), false);
+    });
+  }
+  test(`${flag} passes only when explicitly false`, () => {
+    assert.strictEqual(isSafeToAutoInstall({ ...ALL_CLEAR, [flag]: false }), true);
+  });
+}
+
+// The enabling flags likewise require an explicit `true` — a truthy-but-not-true
+// value must not enable the install.
+test('enabled / updateReady require explicit true (truthy non-true blocks)', () => {
+  assert.strictEqual(isSafeToAutoInstall({ ...ALL_CLEAR, enabled: 1 }), false);
+  assert.strictEqual(isSafeToAutoInstall({ ...ALL_CLEAR, updateReady: 'yes' }), false);
 });
 
 // Defensive: a missing/garbled state object must never green-light an install.

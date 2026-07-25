@@ -69,7 +69,7 @@ test('every spread getter reads its own subcommand silently and spreads the pars
   }
 });
 
-test('set-keep-recordings / set-auto-summarize stringify the boolean into argv and wrap the result', async () => {
+test('set-keep-recordings / set-auto-summarize / set-auto-install-when-idle stringify the boolean into argv and wrap the result', async () => {
   const keep = harness({ pyResult: '{"keep_recordings": true}' });
   const rk = await keep.handlers['set-keep-recordings']({}, true);
   assert.deepStrictEqual(keep.calls.py[0].args, ['set-keep-recordings', 'true']);

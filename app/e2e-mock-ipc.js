@@ -155,6 +155,7 @@ function install({ ipcMain }) {
     cloudProvider: 'openai',
     cloudModel: 'gpt-4o',
     remoteUrl: '', // remote Ollama URL (empty = not configured)
+    autoInstallWhenIdle: true, // idle auto-install toggle (config default on)
   };
 
   // In-memory recording state machine for the pill-dock T1: start/pause/
@@ -304,6 +305,19 @@ function install({ ipcMain }) {
       }
       state.provider = provider;
       return { success: true, ai_provider: provider };
+    },
+
+    // Stateful idle auto-install toggle: set updates the in-memory value that
+    // get returns, like the other stateful setting mocks — so a T1 flip is
+    // observable on the next get (and the switch isn't stuck disabled). Lives
+    // in MOCKS (which shadows DEFAULTS) so this is the single source.
+    'get-auto-install-when-idle': async () => ({
+      success: true,
+      auto_install_when_idle: state.autoInstallWhenIdle,
+    }),
+    'set-auto-install-when-idle': async (_event, enabled) => {
+      state.autoInstallWhenIdle = !!enabled;
+      return { success: true, auto_install_when_idle: state.autoInstallWhenIdle };
     },
 
     // Seed meetings for the specs that need them, gated per env so the
@@ -617,10 +631,6 @@ function install({ ipcMain }) {
     // switches permanently disabled under mock IPC.
     'get-menu-bar-icon': { success: true, show_menu_bar_icon: true },
     'get-premeeting-notifications': { success: true, premeeting_notifications_enabled: true },
-    // Same reason as the two above: without a field here the toggle falls
-    // through to the permissive {success:true} default and GeneralTab's
-    // disabled={...data === undefined} leaves the switch permanently disabled.
-    'get-auto-install-when-idle': { success: true, auto_install_when_idle: true },
     // parakeet-status lives in MOCKS (env-gated installed flag).
     // Transcribe tab reads this on first paint. (The engine itself moved to
     // MOCKS so STENOAI_E2E_MOCK_ENGINE can override it; default parakeet keeps

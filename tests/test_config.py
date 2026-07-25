@@ -467,6 +467,8 @@ class ConfigAutoSummarizeTests(unittest.TestCase):
             self.assertTrue(reloaded.set_auto_summarize_enabled(True))
             self.assertTrue(reloaded.get_auto_summarize_enabled())
 
+
+class ConfigAutoInstallWhenIdleTests(unittest.TestCase):
     def test_default_auto_install_when_idle_is_true(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             config = Config(config_path=Path(tmp_dir) / "config.json")

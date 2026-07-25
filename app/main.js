@@ -6147,26 +6147,43 @@ const IDLE_AUTO_INSTALL_THRESHOLD_SECONDS = 600;
 // How often to re-evaluate the gate. Cheap (a config read + a few booleans).
 const IDLE_AUTO_INSTALL_CHECK_MS = 60 * 1000;
 
-// Gather the live in-flight state and, when the pure gate says it's safe,
-// relaunch into the downloaded update. Fires at most once (autoInstallFired)
-// and clears the interval after firing. No-op under E2E (never scheduled) and
-// before an update is staged.
-async function maybeAutoInstallWhenIdle() {
-  if (autoInstallFired) return;
-  const safe = isSafeToAutoInstall({
+// Snapshot every input the safety gate needs, read fresh at call time. Kept in
+// one place so the initial check and the post-settle re-check (below) can't
+// drift — they must gather identical state or the re-check is meaningless.
+//   - streaming: in-flight AI query/summary/chat streams register a killable
+//     proc in activeQueryProcs.
+//   - otherJobsActive: reprocess (re-summarize), report generation, and title
+//     regeneration all run OUTSIDE isProcessing/processingQueue; each handler
+//     registers its job in activeReprocessJobs for the duration, so a non-empty
+//     map means one of those is in flight and a relaunch would kill it.
+function gatherIdleInstallState() {
+  return {
     enabled: loadAutoInstallWhenIdleEnabled(),
     updateReady: updateDownloadedReady,
     isRecording: currentRecordingProcess !== null || systemAudioRecordingActive,
     isProcessing,
     queueLength: processingQueue.length,
     liveActive: liveTranscribeProcess != null,
-    // In-flight AI query/summary/chat streams register a killable proc here.
     streaming: activeQueryProcs.size > 0,
+    otherJobsActive: activeReprocessJobs.size > 0,
     idleSeconds: powerMonitor.getSystemIdleTime(),
     idleThresholdSeconds: IDLE_AUTO_INSTALL_THRESHOLD_SECONDS,
-  });
-  if (!safe) return;
+  };
+}
 
+// Gather the live in-flight state and, when the pure gate says it's safe,
+// relaunch into the downloaded update. Latches autoInstallFired to guarantee a
+// single quitAndInstall, clears the interval, and — critically — re-checks the
+// gate AFTER the autosave settle so a recording/job that started during that
+// window aborts the install (and re-arms the checker) instead of being killed.
+// No-op under E2E (never scheduled) and before an update is staged.
+async function maybeAutoInstallWhenIdle() {
+  if (autoInstallFired) return;
+  if (!isSafeToAutoInstall(gatherIdleInstallState())) return;
+
+  // Latch immediately (synchronously, before any await) so a second invocation
+  // — e.g. a powerMonitor resume firing during the settle — bails at the guard
+  // above and can't race us to a double quitAndInstall.
   autoInstallFired = true;
   if (idleAutoInstallInterval) {
     clearInterval(idleAutoInstallInterval);
@@ -6181,6 +6198,17 @@ async function maybeAutoInstallWhenIdle() {
   try {
     await new Promise((resolve) => setTimeout(resolve, 500));
   } catch (_) { /* best-effort only */ }
+
+  // Re-check after the await: work may have started during the 500ms settle
+  // (a recording, a queued/reprocess job, a chat stream). If it's no longer
+  // safe, ABORT rather than kill live work — reset the one-shot latch and
+  // re-arm the checker so a later idle window can retry.
+  if (!isSafeToAutoInstall(gatherIdleInstallState())) {
+    sendDebugLog('Auto-updater: work started during settle — aborting auto-install, will retry later.');
+    autoInstallFired = false;
+    startIdleAutoInstallChecker();
+    return;
+  }
 
   trackEvent('update_auto_installed', {
     version: pendingUpdateVersion || 'unknown',
