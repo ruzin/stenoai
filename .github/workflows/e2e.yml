@@ -125,6 +125,71 @@ jobs:
         working-directory: app
         run: npm run lint:renderer
 
+  # ---------------------------------------------------------------------------
+  # Deterministic backend/renderer gates (issue #376). These close the CI
+  # enforcement gap: the backend unittest suite and the renderer tsc typecheck
+  # previously ran only on the maintainer's machine, so a green PR page didn't
+  # mean the backend was green. Added NON-REQUIRED (advisory) — like the e2e
+  # tiers, they earn a green streak before any branch-protection promotion
+  # (a maintainer-only admin action, tracked separately). No behaviour change.
+  # A ruff gate is deferred on purpose: bare `ruff check .` has pre-existing
+  # violations on main (mostly in simple_recorder.py), so wiring it now would
+  # be red on day one. It needs a cleanup PR first — tracked as a follow-up.
+  # ---------------------------------------------------------------------------
+
+  # Runs on macos-latest (not ubuntu) on purpose: this is the platform the
+  # maintainer runs `python -m unittest discover tests` on, and it's the only
+  # runner where `pip install -r requirements.txt` is already proven green
+  # (build-backend-macos installs the identical set, incl. the darwin-only
+  # parakeet-mlx path). Bootstrap mirrors build-backend-macos minus the
+  # PyInstaller/binary-download steps the tests don't need. Environment-gated
+  # tests (e.g. the MLX-bundle wrapper) skip loudly when their artifact is absent.
+  python-tests:
+    name: Python (unittest)
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: requirements.txt
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run backend unit tests
+        run: python -m unittest discover tests
+
+  # tsc --noEmit over the renderer (the typecheck:renderer script already exists;
+  # CI just never called it). Mirrors the lint-renderer job's node bootstrap.
+  typecheck-renderer:
+    name: Typecheck (renderer)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install dependencies
+        working-directory: app
+        run: npm ci
+
+      - name: Typecheck renderer
+        working-directory: app
+        run: npm run typecheck:renderer
+
   build-backend-macos:
     name: Build backend bundle (macOS)
     runs-on: macos-latest
