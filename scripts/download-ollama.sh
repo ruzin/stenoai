@@ -5,7 +5,10 @@
 set -e
 
 OLLAMA_VERSION="v0.31.1"
-BIN_DIR="$(cd "$(dirname "$0")/.." && pwd)/bin"
+# Resolve both paths up front: the script cd's into $BIN_DIR further down, after
+# which a relative $0 no longer resolves.
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+BIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)/bin"
 
 # --- Download ffmpeg ---
 echo "=== Downloading ffmpeg ==="
@@ -129,6 +132,6 @@ echo "Ollama downloaded to $BIN_DIR"
 # the x86_64-only llama.cpp CPU runners for Intel Macs. The mac build is arm64-only
 # since v0.4.0, so strip both out before bundling (#427) — ~90 MB. No-op on
 # non-darwin hosts and on non-arm64 targets.
-"$(cd "$(dirname "$0")" && pwd)/thin-macos-bin.sh"
+"$SCRIPT_DIR/thin-macos-bin.sh"
 
 ls -la "$BIN_DIR"
