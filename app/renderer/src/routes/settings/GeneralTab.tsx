@@ -24,12 +24,14 @@ import { isMac } from '@/lib/utils';
 import { useTheme } from '@/hooks/useTheme';
 import {
   useAutoDetectMeetingsSetting,
+  useAutoInstallWhenIdleSetting,
   useDockIconSetting,
   useLaunchOnLoginSetting,
   useMicrophoneSetting,
   useNotificationsSetting,
   usePremeetingNotificationsSetting,
   useSetAutoDetectMeetings,
+  useSetAutoInstallWhenIdle,
   useSetDockIcon,
   useSetLaunchOnLogin,
   useSetMicrophone,
@@ -89,6 +91,8 @@ export function GeneralTab() {
   })();
   const launchOnLogin = useLaunchOnLoginSetting();
   const setLaunchOnLogin = useSetLaunchOnLogin();
+  const autoInstallWhenIdle = useAutoInstallWhenIdleSetting();
+  const setAutoInstallWhenIdle = useSetAutoInstallWhenIdle();
   const silenceAutoStop = useSilenceAutoStopSetting();
   const setSilenceAutoStopEnabled = useSetSilenceAutoStopEnabled();
   const setSilenceAutoStopMinutes = useSetSilenceAutoStopMinutes();
@@ -485,6 +489,17 @@ export function GeneralTab() {
           checked={launchOnLogin.data ?? true}
           onCheckedChange={(v) => setLaunchOnLogin.mutate(v)}
           disabled={launchOnLogin.data === undefined}
+        />
+      </SettingRow>
+
+      <SettingRow
+        label="Install updates automatically"
+        description="When the app is idle and not recording, download and install updates in the background, then restart. You'll still be notified when an update is available."
+      >
+        <Switch
+          checked={autoInstallWhenIdle.data ?? true}
+          onCheckedChange={(v) => setAutoInstallWhenIdle.mutate(v)}
+          disabled={autoInstallWhenIdle.data === undefined}
         />
       </SettingRow>
 

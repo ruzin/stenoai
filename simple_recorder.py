@@ -1638,6 +1638,26 @@ def set_keep_recordings_cmd(enabled: bool):
         print(json.dumps({"success": False, "error": "Failed to persist setting"}))
 
 
+@cli.command(name='get-auto-install-when-idle')
+def get_auto_install_when_idle_cmd():
+    """Get whether updates auto-install when the app is idle."""
+    from src.config import get_config
+    config = get_config()
+    print(json.dumps({"auto_install_when_idle": config.get_auto_install_when_idle()}))
+
+
+@cli.command(name='set-auto-install-when-idle')
+@click.argument('enabled', type=bool)
+def set_auto_install_when_idle_cmd(enabled: bool):
+    """Set whether updates auto-install when the app is idle."""
+    from src.config import get_config
+    config = get_config()
+    if config.set_auto_install_when_idle(enabled):
+        print(json.dumps({"success": True, "auto_install_when_idle": enabled}))
+    else:
+        print(json.dumps({"success": False, "error": "Failed to persist setting"}))
+
+
 @cli.command(name='get-auto-summarize')
 def get_auto_summarize_cmd():
     """Get whether notes are generated automatically after transcription."""

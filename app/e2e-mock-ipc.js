@@ -155,6 +155,7 @@ function install({ ipcMain }) {
     cloudProvider: 'openai',
     cloudModel: 'gpt-4o',
     remoteUrl: '', // remote Ollama URL (empty = not configured)
+    autoInstallWhenIdle: true, // idle auto-install toggle (config default on)
   };
 
   // In-memory recording state machine for the pill-dock T1: start/pause/
@@ -304,6 +305,19 @@ function install({ ipcMain }) {
       }
       state.provider = provider;
       return { success: true, ai_provider: provider };
+    },
+
+    // Stateful idle auto-install toggle: set updates the in-memory value that
+    // get returns, like the other stateful setting mocks — so a T1 flip is
+    // observable on the next get (and the switch isn't stuck disabled). Lives
+    // in MOCKS (which shadows DEFAULTS) so this is the single source.
+    'get-auto-install-when-idle': async () => ({
+      success: true,
+      auto_install_when_idle: state.autoInstallWhenIdle,
+    }),
+    'set-auto-install-when-idle': async (_event, enabled) => {
+      state.autoInstallWhenIdle = !!enabled;
+      return { success: true, auto_install_when_idle: state.autoInstallWhenIdle };
     },
 
     // Seed meetings for the specs that need them, gated per env so the

@@ -468,6 +468,24 @@ class ConfigAutoSummarizeTests(unittest.TestCase):
             self.assertTrue(reloaded.get_auto_summarize_enabled())
 
 
+class ConfigAutoInstallWhenIdleTests(unittest.TestCase):
+    def test_default_auto_install_when_idle_is_true(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config = Config(config_path=Path(tmp_dir) / "config.json")
+            self.assertTrue(config.get_auto_install_when_idle())
+
+    def test_auto_install_when_idle_round_trip(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "config.json"
+            config = Config(config_path=path)
+            self.assertTrue(config.set_auto_install_when_idle(False))
+            self.assertFalse(config.get_auto_install_when_idle())
+            reloaded = Config(config_path=path)
+            self.assertFalse(reloaded.get_auto_install_when_idle())
+            self.assertTrue(reloaded.set_auto_install_when_idle(True))
+            self.assertTrue(reloaded.get_auto_install_when_idle())
+
+
 class ConfigBedrockSettingsTests(unittest.TestCase):
     def test_default_bedrock_region_is_us_east_1(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

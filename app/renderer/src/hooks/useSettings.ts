@@ -326,6 +326,23 @@ export function useSetKeepRecordings() {
   });
 }
 
+export function useAutoInstallWhenIdleSetting() {
+  return useQuery({
+    queryKey: [...settingsKeys.all, 'autoInstallWhenIdle'] as const,
+    queryFn: async () =>
+      unwrap(await ipc().settings.getAutoInstallWhenIdle()).auto_install_when_idle,
+  });
+}
+
+export function useSetAutoInstallWhenIdle() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (v: boolean) => unwrap(await ipc().settings.setAutoInstallWhenIdle(v)),
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: [...settingsKeys.all, 'autoInstallWhenIdle'] }),
+  });
+}
+
 export function useAutoSummarizeSetting() {
   return useQuery({
     queryKey: [...settingsKeys.all, 'autoSummarize'] as const,

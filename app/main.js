@@ -56,6 +56,7 @@ const { createDebugLog } = require('./debug-log');
 const { createTeardownRegistry } = require('./teardown');
 const { registerFoldersIpc } = require('./folders-ipc');
 const { registerSettingsIpc } = require('./settings-ipc');
+const { isSafeToAutoInstall } = require('./update-idle-gate');
 const processingLog = require('./processing-log');
 const { isMeetingApp, allowsDeviceLevelFallback, isMacos14Plus } = require('./meeting-detect');
 const { sweepOrphanedLiveSnapshots } = require('./live-snapshot-sweep');
@@ -2007,6 +2008,15 @@ if (!gotSingleInstanceLock) {
     powerMonitor.on('suspend', freezeInactivityWatchdogsForSleep);
     powerMonitor.on('resume', promptResumeAfterWake);
     powerMonitor.on('resume', thawInactivityWatchdogsAfterWake);
+    // Re-evaluate the idle auto-install gate when the machine wakes or the
+    // screen unlocks — a downloaded update can then install the moment the
+    // user has stepped away, without waiting for the next 60s tick. Cheap and
+    // self-guarding (no-ops unless an update is staged). E2E-gated so the test
+    // suite never even wires it (belt-and-braces with the gate's own guards).
+    if (!IS_E2E) {
+      powerMonitor.on('lock-screen', () => { maybeAutoInstallWhenIdle().catch(() => {}); });
+      powerMonitor.on('resume', () => { maybeAutoInstallWhenIdle().catch(() => {}); });
+    }
     const protocolRegistered = registerShortcutProtocolClient();
     sendDebugLog(`Protocol handler registration (${SHORTCUT_PROTOCOL}): ${protocolRegistered}`);
 
@@ -4892,6 +4902,21 @@ function loadShowMenuBarIconEnabled() {
   }
 }
 
+// Sync read of the idle auto-install setting; default ON (matches the Python
+// config default). Read fresh on every gate tick so flipping the toggle in
+// Settings takes effect without a relaunch. Same no-subprocess JSON read as the
+// helpers above — the source of truth is the Python config.
+function loadAutoInstallWhenIdleEnabled() {
+  try {
+    const cfgPath = path.join(getUserDataDir(), 'config.json');
+    if (!fs.existsSync(cfgPath)) return true;
+    const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf-8'));
+    return cfg.auto_install_when_idle !== false;
+  } catch (_) {
+    return true;
+  }
+}
+
 // Global recording state management
 let systemAudioRecordingActive = false;  // Track system audio recording for tray/quit
 let currentRecordingProcess = null;
@@ -6108,6 +6133,109 @@ let pendingDownloadPercent = null;
 // starts (check / available / progress) or a download completes.
 let pendingUpdateError = null;
 
+// ── Idle auto-install ──
+// True once an update has finished downloading and is staged for install.
+// The safety gate (update-idle-gate.js) requires this before it will relaunch.
+let updateDownloadedReady = false;
+// The periodic idle checker's timer, and a one-shot latch so we call
+// quitAndInstall at most once even if a tick races the relaunch.
+let idleAutoInstallInterval = null;
+let autoInstallFired = false;
+// Idle threshold: the machine must have had no user input for this long before
+// we relaunch, so an auto-install never interrupts someone mid-task. 10 min.
+const IDLE_AUTO_INSTALL_THRESHOLD_SECONDS = 600;
+// How often to re-evaluate the gate. Cheap (a config read + a few booleans).
+const IDLE_AUTO_INSTALL_CHECK_MS = 60 * 1000;
+
+// Snapshot every input the safety gate needs, read fresh at call time. Kept in
+// one place so the initial check and the post-settle re-check (below) can't
+// drift — they must gather identical state or the re-check is meaningless.
+//   - streaming: in-flight AI query/summary/chat streams register a killable
+//     proc in activeQueryProcs.
+//   - otherJobsActive: reprocess (re-summarize), report generation, and title
+//     regeneration all run OUTSIDE isProcessing/processingQueue; each handler
+//     registers its job in activeReprocessJobs for the duration, so a non-empty
+//     map means one of those is in flight and a relaunch would kill it.
+function gatherIdleInstallState() {
+  return {
+    enabled: loadAutoInstallWhenIdleEnabled(),
+    updateReady: updateDownloadedReady,
+    isRecording: currentRecordingProcess !== null || systemAudioRecordingActive,
+    isProcessing,
+    queueLength: processingQueue.length,
+    liveActive: liveTranscribeProcess != null,
+    streaming: activeQueryProcs.size > 0,
+    otherJobsActive: activeReprocessJobs.size > 0,
+    idleSeconds: powerMonitor.getSystemIdleTime(),
+    idleThresholdSeconds: IDLE_AUTO_INSTALL_THRESHOLD_SECONDS,
+  };
+}
+
+// Gather the live in-flight state and, when the pure gate says it's safe,
+// relaunch into the downloaded update. Latches autoInstallFired to guarantee a
+// single quitAndInstall, clears the interval, and — critically — re-checks the
+// gate AFTER the autosave settle so a recording/job that started during that
+// window aborts the install (and re-arms the checker) instead of being killed.
+// No-op under E2E (never scheduled) and before an update is staged.
+async function maybeAutoInstallWhenIdle() {
+  if (autoInstallFired) return;
+  if (!isSafeToAutoInstall(gatherIdleInstallState())) return;
+
+  // Latch immediately (synchronously, before any await) so a second invocation
+  // — e.g. a powerMonitor resume firing during the settle — bails at the guard
+  // above and can't race us to a double quitAndInstall.
+  autoInstallFired = true;
+  if (idleAutoInstallInterval) {
+    clearInterval(idleAutoInstallInterval);
+    idleAutoInstallInterval = null;
+  }
+
+  sendDebugLog('Auto-updater: idle + nothing in flight — installing update and relaunching.');
+
+  // Best-effort: notes autosave in the renderer on every edit (there's no
+  // explicit flush IPC to await), so give any in-flight debounced autosave a
+  // short settle window before we relaunch. Never blocks the relaunch.
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  } catch (_) { /* best-effort only */ }
+
+  // Re-check after the await: work may have started during the 500ms settle
+  // (a recording, a queued/reprocess job, a chat stream). If it's no longer
+  // safe, ABORT rather than kill live work — reset the one-shot latch and
+  // re-arm the checker so a later idle window can retry.
+  if (!isSafeToAutoInstall(gatherIdleInstallState())) {
+    sendDebugLog('Auto-updater: work started during settle — aborting auto-install, will retry later.');
+    autoInstallFired = false;
+    startIdleAutoInstallChecker();
+    return;
+  }
+
+  trackEvent('update_auto_installed', {
+    version: pendingUpdateVersion || 'unknown',
+    idle_seconds: Math.round(powerMonitor.getSystemIdleTime()),
+  });
+
+  // Bypass the mainWindow 'close' handler's preventDefault+hide (same reason as
+  // the manual install-update path) so quitAndInstall actually quits + applies.
+  isQuitting = true;
+  // isSilent=true, isForceRunAfter=true — install without the wizard and
+  // relaunch the app afterwards.
+  autoUpdater.quitAndInstall(true, true);
+}
+
+// Start the periodic idle checker once an update is staged. Idempotent, and
+// inert under E2E (mirrors setupAutoUpdater's e2e no-op) so the suite never
+// schedules a timer or risks a quitAndInstall.
+function startIdleAutoInstallChecker() {
+  if (IS_E2E) return;
+  if (idleAutoInstallInterval || autoInstallFired) return;
+  idleAutoInstallInterval = setInterval(() => {
+    maybeAutoInstallWhenIdle().catch((e) => sendDebugLog(`Idle auto-install check failed: ${e.message}`));
+  }, IDLE_AUTO_INSTALL_CHECK_MS);
+  // Don't let this timer keep the event loop alive on its own.
+  if (idleAutoInstallInterval.unref) idleAutoInstallInterval.unref();
+}
+
 function setupAutoUpdater() {
   if (IS_E2E) {
     sendDebugLog('Auto-updater: skipped (E2E mode)');
@@ -6161,6 +6289,13 @@ function setupAutoUpdater() {
     if (mainWindow) {
       mainWindow.webContents.send('update-downloaded', { version: info.version });
     }
+    // The notification above is unchanged. Additionally, mark the update as
+    // staged and start the idle checker so it can install + relaunch on its
+    // own when the machine is idle and nothing is in flight. Try once right
+    // away in case the app is already idle (e.g. downloaded overnight).
+    updateDownloadedReady = true;
+    startIdleAutoInstallChecker();
+    maybeAutoInstallWhenIdle().catch(() => {});
   });
 
   autoUpdater.on('error', (err) => {

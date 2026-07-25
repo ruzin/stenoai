@@ -686,6 +686,12 @@ class Config:
             "storage_path": "",
             "keep_recordings": False,
             "auto_summarize_enabled": True,
+            # Default ON — when the app is idle and nothing is in flight, a
+            # downloaded update installs itself and relaunches so the user
+            # never has to click "Restart". The "update available/downloaded"
+            # notification is unchanged; this only removes the manual click,
+            # and main.js keeps autoInstallOnAppQuit as the safe fallback.
+            "auto_install_when_idle": True,
             "whisper_model": "large-v3-turbo",
             "transcription_engine": "parakeet",
             "version": "1.0"
@@ -1020,6 +1026,18 @@ class Config:
     def set_keep_recordings(self, enabled: bool) -> bool:
         """Set whether audio recordings should be kept after processing."""
         self._config["keep_recordings"] = enabled
+        return self._save()
+
+    def get_auto_install_when_idle(self) -> bool:
+        """Get whether a downloaded update auto-installs (and relaunches) when
+        the app is idle and nothing is in flight. Default on — removes the
+        manual "Restart" click; the download/notification behaviour and the
+        autoInstallOnAppQuit fallback are unaffected."""
+        return self._config.get("auto_install_when_idle", True)
+
+    def set_auto_install_when_idle(self, enabled: bool) -> bool:
+        """Set whether idle auto-install is enabled."""
+        self._config["auto_install_when_idle"] = enabled
         return self._save()
 
     def get_auto_summarize_enabled(self) -> bool:
