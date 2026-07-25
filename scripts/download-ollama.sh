@@ -6,8 +6,9 @@ set -e
 
 OLLAMA_VERSION="v0.31.1"
 # Resolve both paths up front: the script cd's into $BIN_DIR further down, after
-# which a relative $0 no longer resolves.
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# which a relative path no longer resolves. BASH_SOURCE rather than $0 so this
+# still points at the script when it is sourced instead of executed.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)/bin"
 
 # --- Download ffmpeg ---

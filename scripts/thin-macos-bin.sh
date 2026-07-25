@@ -79,6 +79,15 @@ collect() {
     fi
 }
 
+collect_following_symlinks() {
+    # Same, but -L descends into symlinked directories. `-L` has to precede the
+    # path, so this cannot just be another argument to collect().
+    if ! find -L "$BIN_DIR" "$@" -print0 > "$WORK_LIST"; then
+        echo "thin-macos-bin: scanning $BIN_DIR (following symlinks) failed." >&2
+        exit 1
+    fi
+}
+
 echo "=== Thinning $BIN_DIR to arm64 ==="
 
 thinned=0
@@ -105,7 +114,11 @@ while IFS= read -r -d '' file; do
 
         before=$(stat -f%z "$file")
         mode=$(stat -f%Lp "$file")
-        TMP_OUT="$(mktemp -t thin-macos-bin-slice)"
+        # Beside the destination, not in $TMPDIR: mv is only atomic within one
+        # filesystem. Across volumes macOS mv unlinks the destination first and
+        # then copies, so a failure mid-copy would leave neither the original
+        # nor the thinned binary.
+        TMP_OUT="$(mktemp "$(dirname "$file")/.thin-XXXXXXXX")"
         lipo -thin arm64 "$file" -output "$TMP_OUT"
         chmod "$mode" "$TMP_OUT"
         mv -f "$TMP_OUT" "$file"
@@ -141,11 +154,21 @@ echo "Thinned $thinned file(s), removed $removed file(s), saved $((saved / 10485
 # Guard: assert positively that every Mach-O reachable from bin/ is arm64-only.
 # Blacklisting known-bad arches would let an unexpected one (arm64e, x86_64h, a
 # symlink pointing outside bin/) through, so anything that is not exactly
-# "arm64" fails the build. `! -type d` includes symlinks; lipo follows them.
+# "arm64" fails the build.
+#
+# `find -L` follows symlinks, so a symlinked directory (bin/vendor -> /payload)
+# is descended into rather than inspected as one opaque entry. An unreadable
+# file is failed rather than skipped - "lipo could not look at it" must not read
+# as "it is fine".
 leftovers=0
-collect ! -type d
+collect_following_symlinks ! -type d
 while IFS= read -r -d '' entry; do
-    info="$(lipo -info "$entry" 2>/dev/null)" || continue
+    if [[ ! -r "$entry" ]]; then
+        echo "thin-macos-bin: cannot read ${entry#"$REPO_ROOT"/} - refusing to certify it." >&2
+        leftovers=$((leftovers + 1))
+        continue
+    fi
+    info="$(lipo -info "$entry" 2>/dev/null)" || continue  # not a Mach-O file
     if [[ "$info" != *"is architecture: arm64" ]]; then
         echo "thin-macos-bin: non-arm64 binary: ${entry#"$REPO_ROOT"/} ($info)" >&2
         leftovers=$((leftovers + 1))
