@@ -17,6 +17,7 @@ type SettingKind =
   | 'userName'
   | 'keepRecordings'
   | 'autoSummarize'
+  | 'autoInstallWhenIdle'
   | 'silenceEnabled'
   | 'silenceMinutes'
   | 'systemAudio'
@@ -33,6 +34,7 @@ type SettingsBridge = {
     setUserName: (v: string) => Promise<unknown>;
     setKeepRecordings: (v: boolean) => Promise<unknown>;
     setAutoSummarize: (v: boolean) => Promise<unknown>;
+    setAutoInstallWhenIdle: (v: boolean) => Promise<unknown>;
     setSilenceAutoStopEnabled: (v: boolean) => Promise<unknown>;
     setSilenceAutoStopMinutes: (v: number) => Promise<unknown>;
     setSystemAudio: (v: boolean) => Promise<unknown>;
@@ -63,6 +65,9 @@ const CASES: Case[] = [
   // false flips the default (true) so the assertion has teeth — a no-op setter
   // would leave the key unset/true and fail this case.
   { kind: 'autoSummarize', value: false, configKey: 'auto_summarize_enabled' },
+  // false flips the default (true) so the assertion has teeth — a no-op setter
+  // would leave the key unset/true and fail this case.
+  { kind: 'autoInstallWhenIdle', value: false, configKey: 'auto_install_when_idle' },
   { kind: 'silenceEnabled', value: false, configKey: 'silence_auto_stop_enabled' },
   { kind: 'silenceMinutes', value: 15, configKey: 'silence_auto_stop_minutes' },
   // false flips the macOS default (true) so this has teeth on the primary signed
@@ -98,6 +103,8 @@ function applySetting(
           return s.settings.setKeepRecordings(value as boolean);
         case 'autoSummarize':
           return s.settings.setAutoSummarize(value as boolean);
+        case 'autoInstallWhenIdle':
+          return s.settings.setAutoInstallWhenIdle(value as boolean);
         case 'silenceEnabled':
           return s.settings.setSilenceAutoStopEnabled(value as boolean);
         case 'silenceMinutes':

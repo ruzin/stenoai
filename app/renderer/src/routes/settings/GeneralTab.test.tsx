@@ -104,6 +104,8 @@ vi.mock('@/hooks/useSettings', () => {
     useSetAutoDetectMeetings: m,
     useLaunchOnLoginSetting: () => q(true),
     useSetLaunchOnLogin: m,
+    useAutoInstallWhenIdleSetting: () => q(true),
+    useSetAutoInstallWhenIdle: m,
     useSilenceAutoStopSetting: () =>
       q({ enabled: true, minutes: 15, supportedMinutes: [2, 5, 10, 15, 30] }),
     useSetSilenceAutoStopEnabled: m,
