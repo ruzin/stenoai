@@ -8515,6 +8515,10 @@ const UPDATE_CHECK_URL = 'https://api.github.com/repos/ruzin/stenoai/releases/la
 // check for every already-installed app.
 async function checkForUpdates() {
   const MAX_REDIRECTS = 5;
+  // One 10s budget shared across the whole redirect chain, so a slow chain of
+  // hops can't keep the check hanging for redirects × 10s (each hop used to
+  // reset its own timeout).
+  const deadline = Date.now() + 10000;
 
   function fetchLatest(urlStr, redirectsLeft) {
     return new Promise((resolve) => {
@@ -8540,8 +8544,17 @@ async function checkForUpdates() {
             resolve({ success: false, error: 'Too many redirects' });
             return;
           }
-          // location may be relative; resolve it against the current URL.
-          const next = new URL(res.headers.location, urlStr).toString();
+          // location may be relative; resolve it against the current URL. A
+          // malformed Location would make new URL() throw synchronously inside
+          // this callback (crashing the main process), so guard it and fail the
+          // check normally instead.
+          let next;
+          try {
+            next = new URL(res.headers.location, urlStr).toString();
+          } catch (e) {
+            resolve({ success: false, error: 'Invalid redirect URL' });
+            return;
+          }
           resolve(fetchLatest(next, redirectsLeft - 1));
           return;
         }
@@ -8587,7 +8600,9 @@ async function checkForUpdates() {
         resolve({ success: false, error: error.message });
       });
 
-      req.setTimeout(10000, () => {
+      // Share the single deadline across all hops (min 1ms so an already-expired
+      // budget still fires promptly rather than being treated as "no timeout").
+      req.setTimeout(Math.max(1, deadline - Date.now()), () => {
         req.destroy();
         resolve({ success: false, error: 'Update check timeout' });
       });
