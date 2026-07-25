@@ -55,6 +55,22 @@ function registerSettingsIpc({ ipcMain, runPythonScript, sendDebugLog }) {
     } catch (e) { return { success: false, error: e.message }; }
   });
 
+  ipcMain.handle('get-auto-install-when-idle', async () => {
+    try {
+      const result = await runPythonScript('simple_recorder.py', ['get-auto-install-when-idle'], true);
+      const jsonData = JSON.parse(result.trim());
+      return { success: true, ...jsonData };
+    } catch (e) { return { success: false, error: e.message }; }
+  });
+
+  ipcMain.handle('set-auto-install-when-idle', async (event, enabled) => {
+    try {
+      const result = await runPythonScript('simple_recorder.py', ['set-auto-install-when-idle', enabled.toString()]);
+      const jsonData = JSON.parse(result.trim());
+      return { success: true, ...jsonData };
+    } catch (e) { return { success: false, error: e.message }; }
+  });
+
   ipcMain.handle('get-silence-auto-stop', async () => {
     try {
       const result = await runPythonScript('simple_recorder.py', ['get-silence-auto-stop'], true);

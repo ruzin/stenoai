@@ -617,6 +617,10 @@ function install({ ipcMain }) {
     // switches permanently disabled under mock IPC.
     'get-menu-bar-icon': { success: true, show_menu_bar_icon: true },
     'get-premeeting-notifications': { success: true, premeeting_notifications_enabled: true },
+    // Same reason as the two above: without a field here the toggle falls
+    // through to the permissive {success:true} default and GeneralTab's
+    // disabled={...data === undefined} leaves the switch permanently disabled.
+    'get-auto-install-when-idle': { success: true, auto_install_when_idle: true },
     // parakeet-status lives in MOCKS (env-gated installed flag).
     // Transcribe tab reads this on first paint. (The engine itself moved to
     // MOCKS so STENOAI_E2E_MOCK_ENGINE can override it; default parakeet keeps

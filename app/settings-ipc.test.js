@@ -35,6 +35,7 @@ function harness(overrides = {}) {
 const CHANNELS = [
   'get-keep-recordings', 'set-keep-recordings',
   'get-auto-summarize', 'set-auto-summarize',
+  'get-auto-install-when-idle', 'set-auto-install-when-idle',
   'get-silence-auto-stop', 'set-silence-auto-stop-enabled', 'set-silence-auto-stop-minutes',
   'get-privacy-notice-seen', 'set-privacy-notice-seen',
   'get-system-audio', 'set-system-audio',
@@ -43,7 +44,7 @@ const CHANNELS = [
   'get-user-name', 'set-user-name',
 ];
 
-test('registers exactly the 17 settings-toggle handlers', () => {
+test('registers exactly the 19 settings-toggle handlers', () => {
   const { handlers } = harness();
   assert.deepStrictEqual(Object.keys(handlers).sort(), [...CHANNELS].sort());
 });
@@ -52,7 +53,8 @@ test('registers exactly the 17 settings-toggle handlers', () => {
 // { success:true, ...jsonData }. Covers all seven (privacy-notice-seen differs
 // and has its own test below).
 const SPREAD_GETTERS = [
-  'get-keep-recordings', 'get-auto-summarize', 'get-silence-auto-stop',
+  'get-keep-recordings', 'get-auto-summarize', 'get-auto-install-when-idle',
+  'get-silence-auto-stop',
   'get-user-name', 'get-system-audio', 'get-language', 'get-microphone',
 ];
 
@@ -78,6 +80,11 @@ test('set-keep-recordings / set-auto-summarize stringify the boolean into argv a
   const ra = await auto.handlers['set-auto-summarize']({}, false);
   assert.deepStrictEqual(auto.calls.py[0].args, ['set-auto-summarize', 'false']);
   assert.deepStrictEqual(ra, { success: true, auto_summarize: false });
+
+  const idle = harness({ pyResult: '{"auto_install_when_idle": false}' });
+  const ri = await idle.handlers['set-auto-install-when-idle']({}, false);
+  assert.deepStrictEqual(idle.calls.py[0].args, ['set-auto-install-when-idle', 'false']);
+  assert.deepStrictEqual(ri, { success: true, auto_install_when_idle: false });
 });
 
 test('silence-auto-stop setters map to Python True/False and String(minutes), returning the raw result', async () => {

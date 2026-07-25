@@ -520,6 +520,8 @@ export type GetKeepRecordingsResponse = Result<{ keep_recordings: boolean }>;
 
 export type GetAutoSummarizeResponse = Result<{ auto_summarize_enabled: boolean }>;
 
+export type GetAutoInstallWhenIdleResponse = Result<{ auto_install_when_idle: boolean }>;
+
 export type GetSilenceAutoStopResponse = Result<{
   silence_auto_stop_enabled: boolean;
   silence_auto_stop_minutes: number;
@@ -990,6 +992,8 @@ export interface StenoaiBridge {
     setKeepRecordings: RequestFn<[v: boolean], Result<Record<string, never>>>;
     getAutoSummarize: RequestFn<[], GetAutoSummarizeResponse>;
     setAutoSummarize: RequestFn<[v: boolean], Result<Record<string, never>>>;
+    getAutoInstallWhenIdle: RequestFn<[], GetAutoInstallWhenIdleResponse>;
+    setAutoInstallWhenIdle: RequestFn<[v: boolean], Result<Record<string, never>>>;
     getSilenceAutoStop: RequestFn<[], GetSilenceAutoStopResponse>;
     setSilenceAutoStopEnabled: RequestFn<[v: boolean], SetSilenceAutoStopEnabledResponse>;
     setSilenceAutoStopMinutes: RequestFn<[v: number], SetSilenceAutoStopMinutesResponse>;
