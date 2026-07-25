@@ -179,6 +179,12 @@ function install({ ipcMain }) {
   // tab in T1 (summaryFile → { user_notes }). The real handler persists to the
   // note file; the T1 seeds are consts, so we overlay here instead.
   const meetingOverlay = {};
+
+  // In-flight soft-deletes (#234), id → the deleted meeting. Mirrors main's
+  // pendingDelete map just far enough for undo to hand the row back.
+  const pendingDeletes = {};
+  let pendingDeleteSeq = 0;
+
   const applyOverlay = (m) => {
     if (!m || !m.session_info) return m;
     const o = meetingOverlay[m.session_info.summary_file];
@@ -355,6 +361,33 @@ function install({ ipcMain }) {
         ? { success: true, meeting: applyOverlay(m) }
         : { success: false, error: 'meeting not found' };
     },
+
+    // Soft-delete (#234). The permissive unknown-channel default would answer
+    // `{success:true}` with no `id`, and useDeleteMeeting skips the Undo toast
+    // without one — so the delete-UX T1 needs the real response shape here.
+    // State is per-launch: the id counter and store let undo/commit key off it
+    // the way main's pendingDelete map does.
+    'delete-meeting': async (_event, meeting) => {
+      const id = `e2e-delete-${++pendingDeleteSeq}`;
+      pendingDeletes[id] = meeting;
+      // Long enough that the window can't expire mid-assertion; the spec drives
+      // undo/dismiss explicitly rather than waiting this out.
+      return { success: true, id, deadline: Date.now() + 60_000 };
+    },
+    'undo-delete-meeting': async (_event, id) => {
+      const meeting = pendingDeletes[id];
+      if (!meeting) return { success: false, error: 'no pending delete' };
+      delete pendingDeletes[id];
+      return { success: true, meeting };
+    },
+    'commit-delete-meeting': async (_event, id) => {
+      delete pendingDeletes[id];
+      return { success: true };
+    },
+    // Nothing survives a mock launch, so there is never a window to restore —
+    // but answer with the real shape (`pending: []`) rather than letting the
+    // permissive default hand the toast an undefined array to map over.
+    'list-pending-deletes': async () => ({ success: true, pending: [] }),
 
     // My notes autosave: persist the overlay so a follow-up get-meeting sees
     // the edit (mirrors the real update-meeting body-section upsert).

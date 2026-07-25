@@ -151,7 +151,10 @@ function DetailContent({
   const date = formatDetailDate(info);
   const duration = formatDuration(info.duration_seconds);
   const [copied, setCopied] = React.useState(false);
-  const [deleteOpen, setDeleteOpen] = React.useState(false);
+  // Surfaces a refused delete (e.g. main's busy-guard while the note is
+  // recording/processing). Without the old confirm dialog there is no other
+  // place for that failure to show, so it must not stay silent.
+  const [deleteError, setDeleteError] = React.useState<string | null>(null);
   const deleteMeeting = useDeleteMeeting();
   const reprocess = useReprocessMeeting();
   const retranscribe = useRetranscribeMeeting();
@@ -889,11 +892,27 @@ function DetailContent({
                           : `Share with ${orgSession.data.orgId}`}
                     </button>
                   ))}
+                {/* Deletes straight away, no confirm step: the delete is a
+                    soft-delete and the Undo toast (#234) is the safety net.
+                    Asking first *and* offering undo made the flow feel heavy
+                    (maintainer feedback) — one or the other, not both. */}
                 <button
                   type="button"
-                  className="flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-sm transition-colors hover:bg-[color:var(--surface-hover)]"
+                  className="flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-sm transition-colors hover:bg-[color:var(--surface-hover)] disabled:opacity-50"
                   style={{ color: 'var(--danger)' }}
-                  onClick={() => setDeleteOpen(true)}
+                  disabled={deleteMeeting.isPending}
+                  onClick={async () => {
+                    setDeleteError(null);
+                    try {
+                      await deleteMeeting.mutateAsync(meeting);
+                    } catch (err) {
+                      setDeleteError(
+                        `Delete failed: ${err instanceof Error ? err.message : String(err)}`,
+                      );
+                      return;
+                    }
+                    navigate('/');
+                  }}
                 >
                   <Trash2 className="size-[13px] shrink-0" />
                   Delete note
@@ -906,6 +925,12 @@ function DetailContent({
         {exportError && (
           <p role="alert" className="text-[12.5px]" style={{ color: 'var(--danger)' }}>
             {exportError}
+          </p>
+        )}
+
+        {deleteError && (
+          <p role="alert" className="text-[12.5px]" style={{ color: 'var(--danger)' }}>
+            {deleteError}
           </p>
         )}
 
@@ -1235,33 +1260,6 @@ function DetailContent({
       {tab === 'notes' && (
         <MyNotesEditor summaryFile={routeSummaryFile} initialNotes={meeting.user_notes ?? ''} />
       )}
-
-      <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Delete this note?</DialogTitle>
-            <DialogDescription>
-              This removes the recording, transcript, and summary. You can undo this for a few
-              seconds after deleting.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <DialogClose asChild>
-              <Button variant="ghost">Cancel</Button>
-            </DialogClose>
-            <Button
-              variant="destructive"
-              disabled={deleteMeeting.isPending}
-              onClick={async () => {
-                await deleteMeeting.mutateAsync(meeting);
-                navigate('/');
-              }}
-            >
-              Delete
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       <Dialog open={unshareOpen} onOpenChange={setUnshareOpen}>
         <DialogContent className="max-w-sm">
