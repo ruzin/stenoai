@@ -124,4 +124,11 @@ fi
 rm "$OLLAMA_FILE"
 
 echo "Ollama downloaded to $BIN_DIR"
+
+# Ollama's darwin tarball is universal (x86_64 + arm64) and additionally carries
+# the x86_64-only llama.cpp CPU runners for Intel Macs. The mac build is arm64-only
+# since v0.4.0, so strip both out before bundling (#427) — ~90 MB. No-op on
+# non-darwin hosts and on non-arm64 targets.
+"$(cd "$(dirname "$0")" && pwd)/thin-macos-bin.sh"
+
 ls -la "$BIN_DIR"
