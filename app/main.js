@@ -57,6 +57,7 @@ const { createTeardownRegistry } = require('./teardown');
 const { registerFoldersIpc } = require('./folders-ipc');
 const { registerSettingsIpc } = require('./settings-ipc');
 const { isSafeToAutoInstall } = require('./update-idle-gate');
+const { describeUpdateError, updateErrorPhase } = require('./update-error-copy');
 const { isOSUpdateEligible, MIN_MACOS_FOR_AUTOUPDATE } = require('./update-os-gate');
 const processingLog = require('./processing-log');
 const { isMeetingApp, allowsDeviceLevelFallback, isMacos14Plus } = require('./meeting-detect');
@@ -6133,6 +6134,15 @@ let pendingDownloadPercent = null;
 // a failed background update would show nothing. Cleared when a new cycle
 // starts (check / available / progress) or a download completes.
 let pendingUpdateError = null;
+// Whether that error survives a later successful check. A dropped connection
+// is disproved by one; a full disk, a missing update feed or a permission
+// problem is not, and clearing those on an unrelated success would hide a
+// condition that is still true. See update-error-copy.js.
+let pendingUpdateErrorSticky = false;
+// True between calling quitAndInstall and the app actually going away, so an
+// error that fires in that window is reported as a failed install rather than
+// as a failed check.
+let installingUpdate = false;
 
 // ── Idle auto-install ──
 // True once an update has finished downloading and is staged for install.
@@ -6219,6 +6229,8 @@ async function maybeAutoInstallWhenIdle() {
   // Bypass the mainWindow 'close' handler's preventDefault+hide (same reason as
   // the manual install-update path) so quitAndInstall actually quits + applies.
   isQuitting = true;
+  // From here on, an updater error is an INSTALL failure, not a failed check.
+  installingUpdate = true;
   // isSilent=true, isForceRunAfter=true — install without the wizard and
   // relaunch the app afterwards.
   autoUpdater.quitAndInstall(true, true);
@@ -6278,11 +6290,31 @@ function setupAutoUpdater() {
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = true;
 
+  // Drop a stale non-sticky failure AND tell a mounted About tab, so the banner
+  // never outlives the state it describes. Sticky ones are left alone: a full
+  // disk, a permission problem or a missing feed is not disproved by starting or
+  // finding an update, only by bytes actually arriving (download-progress).
+  // Both callers need exactly this, and having it in one place is what stops the
+  // two from drifting apart — the earlier version cleared here but only emitted
+  // there, so the event never fired and About kept showing a settled failure
+  // next to a running download.
+  const clearNonStickyUpdateError = () => {
+    if (!pendingUpdateError || pendingUpdateErrorSticky) return;
+    pendingUpdateError = null;
+    if (mainWindow) mainWindow.webContents.send('update-error-cleared');
+  };
+
   autoUpdater.on('checking-for-update', () => {
     sendDebugLog('Auto-updater: checking for updates...');
     // Fresh cycle — clear any stale error from a previous failed check so a
     // rehydrating About tab doesn't show an error that's now being retried.
-    pendingUpdateError = null;
+    // Sticky ones stay: starting a check does not free disk space, grant write
+    // permission, or give this build an update feed, and those conditions are
+    // still true until something actually succeeds. They are cleared where that
+    // happens: a version found and fetched (update-available / download-progress
+    // / update-downloaded below), or a poll that comes back clean in the
+    // check-for-updates handler.
+    clearNonStickyUpdateError();
   });
 
   autoUpdater.on('update-available', (info) => {
@@ -6290,7 +6322,16 @@ function setupAutoUpdater() {
     // Matches the renderer's own `setDownloadPercent((p) => p ?? 0)` — marks
     // a download as started before the first real progress tick arrives.
     if (pendingDownloadPercent === null) pendingDownloadPercent = 0;
-    pendingUpdateError = null;
+    // Only the non-sticky ones. This event says a version was FOUND, i.e. the
+    // feed was readable — it does not say a single byte was written, so it
+    // cannot disprove a full disk or a permission problem. Those clear one
+    // event later, on the first download-progress tick, which does prove it.
+    // (Clearing them here made the banner vanish and come straight back when
+    // the unchanged condition failed the download again.)
+    //
+    // Usually a no-op, since checking-for-update already ran for this cycle —
+    // it covers a failure that arrived between the two events.
+    clearNonStickyUpdateError();
     if (mainWindow) {
       mainWindow.webContents.send('update-available', { version: info.version });
     }
@@ -6298,12 +6339,26 @@ function setupAutoUpdater() {
 
   autoUpdater.on('update-not-available', () => {
     sendDebugLog('Auto-updater: up to date');
+    // A completed cycle with nothing pending — clear even a sticky failure.
+    // This is the updater itself reporting success, unlike the GitHub poll in
+    // the check-for-updates handler (our own request, which proves nothing
+    // about whether the updater can read its feed or write to disk). Nothing is
+    // waiting to download or install any more, so a banner about a past attempt
+    // is describing a state that no longer exists — and a condition that really
+    // is still broken (no update feed) errors before ever reaching this event.
+    pendingUpdateError = null;
+    pendingUpdateErrorSticky = false;
+    // Tell a mounted About tab too — it keeps its own copy, and the events it
+    // already listens to (available/progress/downloaded) don't fire on a clean
+    // cycle, so without this the banner would sit there until a remount.
+    if (mainWindow) mainWindow.webContents.send('update-error-cleared');
   });
 
   autoUpdater.on('download-progress', (progress) => {
     sendDebugLog(`Auto-updater: downloading ${Math.round(progress.percent)}%`);
     pendingDownloadPercent = Math.round(progress.percent);
     pendingUpdateError = null;
+    pendingUpdateErrorSticky = false;
     if (mainWindow) {
       mainWindow.webContents.send('update-download-progress', { percent: Math.round(progress.percent) });
     }
@@ -6313,6 +6368,7 @@ function setupAutoUpdater() {
     sendDebugLog(`Auto-updater: v${info.version} ready to install`);
     pendingDownloadPercent = null;
     pendingUpdateError = null;
+    pendingUpdateErrorSticky = false;
     pendingUpdateVersion = info.version;
     if (mainWindow) {
       mainWindow.webContents.send('update-downloaded', { version: info.version });
@@ -6328,6 +6384,21 @@ function setupAutoUpdater() {
 
   autoUpdater.on('error', (err) => {
     const msg = (err && err.message) || String(err);
+    // Which phase failed, captured BEFORE the state is cleared below. Note it
+    // does NOT consider a staged update: a periodic check can fail long after a
+    // download succeeded, and calling that a failed download is the lie this
+    // whole path exists to stop telling.
+    //
+    // Known limit: electron-updater's error event does not say which attempt it
+    // belongs to, so a periodic check that fails WHILE a download is genuinely
+    // running is attributed to the download. That case was already reported as
+    // a download failure before this module existed, so the heuristic is not a
+    // regression — closing it needs per-attempt correlation the library does
+    // not expose.
+    const phase = updateErrorPhase({
+      downloadInFlight: pendingDownloadPercent !== null,
+      installing: installingUpdate,
+    });
     // Clear any in-flight download state regardless of which branch below
     // fires — otherwise a failure after 'update-available' (which seeds
     // pendingDownloadPercent to 0) leaves get-update-status reporting a
@@ -6343,12 +6414,19 @@ function setupAutoUpdater() {
       sendDebugLog('Auto-updater: no update feed published for this release yet — skipping.');
       return;
     }
+    // The raw text stays here, where it's useful for diagnosis. What reaches
+    // the About tab is one sentence naming the phase that failed and whether
+    // the user has to do anything — see update-error-copy.js.
     sendDebugLog(`Auto-updater error: ${msg}`);
+    const { message: userMessage, sticky } = describeUpdateError(msg, { phase });
+    // The install attempt (if any) is over — a later error is a fresh cycle.
+    installingUpdate = false;
     // Persist so a later About-tab mount can rehydrate it (the event below is
     // one-shot and only reaches an already-mounted listener).
-    pendingUpdateError = msg;
+    pendingUpdateError = userMessage;
+    pendingUpdateErrorSticky = sticky;
     if (mainWindow) {
-      mainWindow.webContents.send('update-error', { message: msg });
+      mainWindow.webContents.send('update-error', { message: userMessage });
     }
   });
 
@@ -6377,6 +6455,8 @@ ipcMain.on('install-update', () => {
   // quitAndInstall's window-close step actually quits the app. Without this
   // the app just minimises and Squirrel never gets to apply the update.
   isQuitting = true;
+  // From here on, an updater error is an INSTALL failure, not a failed check.
+  installingUpdate = true;
   autoUpdater.quitAndInstall(false, true);
 });
 
@@ -9437,6 +9517,19 @@ ipcMain.handle('check-for-updates', async () => {
   // Mac below the launch floor, which must not download a build it can't run (#432).
   if (!IS_E2E && app.isPackaged && osEligible) {
     autoUpdater.checkForUpdates().catch(() => {});
+  }
+  // A check that just succeeded and found nothing settles an earlier FAILED
+  // check — otherwise a stale banner sits under a fresh "You're on the latest
+  // version", two contradictory answers to one question. Cleared here, in the
+  // state the About tab rehydrates from, so it stays cleared across a remount
+  // rather than only until the user switches tabs.
+  //
+  // Only non-sticky errors: this poll is our own GitHub request, so it says
+  // nothing about whether the updater can write to /Applications or whether
+  // this build has an update feed at all. Those conditions are still true and
+  // stay on screen (see update-error-copy.js).
+  if (result.success && !result.updateAvailable && !pendingUpdateErrorSticky) {
+    pendingUpdateError = null;
   }
   // Surface eligibility so the About tab can explain why an "update available"
   // won't auto-install on an under-floor Mac, rather than offering a broken
