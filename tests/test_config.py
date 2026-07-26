@@ -64,6 +64,62 @@ class ConfigLanguageTests(unittest.TestCase):
             self.assertEqual(config.get_language(), "auto")
             self.assertEqual(config.get_language_name("auto"), "Auto (detect)")
 
+    def test_legacy_zh_migrates_to_simplified_on_load(self):
+        # Chinese used to be a single "zh" entry; it's now split into
+        # zh-Hans / zh-Hant. An existing "zh" config must migrate to
+        # Simplified (what whisper.cpp emitted for "zh" anyway) on load and
+        # persist so the Settings dropdown shows a valid selection.
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config_path = Path(tmp_dir) / "config.json"
+            config_path.write_text(json.dumps({"language": "zh"}))
+
+            config = Config(config_path=config_path)
+            self.assertEqual(config.get_language(), "zh-Hans")
+            # Migration is persisted to disk, not just in memory.
+            on_disk = json.loads(config_path.read_text())
+            self.assertEqual(on_disk["language"], "zh-Hans")
+
+    def test_set_language_accepts_both_chinese_variants(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config = Config(config_path=Path(tmp_dir) / "config.json")
+
+            self.assertTrue(config.set_language("zh-Hant"))
+            self.assertEqual(config.get_language(), "zh-Hant")
+            self.assertEqual(config.get_language_name("zh-Hant"), "Chinese (Traditional)")
+
+            self.assertTrue(config.set_language("zh-Hans"))
+            self.assertEqual(config.get_language(), "zh-Hans")
+            self.assertEqual(config.get_language_name("zh-Hans"), "Chinese (Simplified)")
+
+    def test_set_language_legacy_zh_normalises_to_simplified(self):
+        # Back-compat: a caller (or old deep link) passing bare "zh" is still
+        # accepted and normalised to Simplified rather than rejected.
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config = Config(config_path=Path(tmp_dir) / "config.json")
+            self.assertTrue(config.set_language("zh"))
+            self.assertEqual(config.get_language(), "zh-Hans")
+
+    def test_chinese_variants_map_to_zh_for_asr(self):
+        # whisper.cpp only knows "zh"; both variants must fold to it for the
+        # ASR call while the variant drives post-transcription conversion.
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config = Config(config_path=Path(tmp_dir) / "config.json")
+
+            config.set_language("zh-Hant")
+            self.assertEqual(config.get_whisper_language(), "zh")
+            self.assertEqual(config.get_chinese_variant(), "traditional")
+
+            config.set_language("zh-Hans")
+            self.assertEqual(config.get_whisper_language(), "zh")
+            self.assertEqual(config.get_chinese_variant(), "simplified")
+
+    def test_non_chinese_language_has_no_variant_and_passes_asr_code(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config = Config(config_path=Path(tmp_dir) / "config.json")
+            config.set_language("de")
+            self.assertIsNone(config.get_chinese_variant())
+            self.assertEqual(config.get_whisper_language(), "de")
+
 
 class ConfigMicrophoneTests(unittest.TestCase):
     def test_default_microphone_is_system_default(self):
