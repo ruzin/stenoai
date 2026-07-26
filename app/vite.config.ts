@@ -9,6 +9,10 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, 'renderer/src'),
+      // Single source of truth for both runtimes: the main process reads these
+      // same files from disk (app/i18n.js). Keeping one copy is why this points
+      // outside the Vite root instead of duplicating them under renderer/src.
+      '@locales': path.resolve(__dirname, 'locales'),
     },
   },
   build: {
@@ -22,5 +26,10 @@ export default defineConfig({
   server: {
     port: 5173,
     strictPort: true,
+    fs: {
+      // locales/ sits above the Vite root (renderer/), so the dev server needs
+      // explicit permission to serve it. `vite build` resolves it either way.
+      allow: [path.resolve(__dirname, 'renderer'), path.resolve(__dirname, 'locales')],
+    },
   },
 });

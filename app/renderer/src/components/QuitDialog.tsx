@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { createPortal } from 'react-dom';
+import { useTranslation } from 'react-i18next';
 import { CircleAlert } from 'lucide-react';
 import { ipc } from '@/lib/ipc';
 
@@ -9,6 +10,7 @@ interface DialogState {
 }
 
 export function QuitDialog() {
+  const { t } = useTranslation();
   const [mounted, setMounted] = React.useState(false);
   const [visible, setVisible] = React.useState(false);
   const [state, setState] = React.useState<DialogState>({ type: 'recording' });
@@ -48,12 +50,17 @@ export function QuitDialog() {
   if (!host) return null;
 
   const isRecording = state.type === 'recording';
-  const title = isRecording ? 'Recording in progress' : 'Processing in progress';
   const count = state.jobCount ?? 1;
+  // Each plural form is one whole sentence in the catalogue — the English copy
+  // switches the verb ("is"/"are") along with the noun, and other languages
+  // rearrange more than that.
+  const title = isRecording ? t('quit.recording.title') : t('quit.processing.title');
   const body = isRecording
-    ? 'Quitting will stop and save the current recording.'
-    : `${count} recording${count !== 1 ? 's are' : ' is'} still being processed. Quitting will cancel processing.`;
-  const confirmLabel = isRecording ? 'Stop & quit' : 'Quit anyway';
+    ? t('quit.recording.body')
+    : t('quit.processing.body', { count });
+  const confirmLabel = isRecording
+    ? t('quit.recording.confirm')
+    : t('quit.processing.confirm');
 
   return createPortal(
     <div
@@ -112,6 +119,7 @@ export function QuitDialog() {
 }
 
 function CancelButton({ onClick }: { onClick: () => void }) {
+  const { t } = useTranslation();
   const [hovered, setHovered] = React.useState(false);
   return (
     <button
@@ -133,7 +141,7 @@ function CancelButton({ onClick }: { onClick: () => void }) {
         transition: 'background 120ms cubic-bezier(0.2,0,0,1)',
       }}
     >
-      Cancel
+      {t('common.cancel')}
     </button>
   );
 }

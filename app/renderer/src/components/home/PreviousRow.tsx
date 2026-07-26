@@ -1,4 +1,6 @@
 import { Folder as FolderIcon, Loader2 } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import type { Meeting } from '@/lib/ipc';
 import { navigate } from '@/lib/router';
 import { useMeetingsList } from '@/lib/meetingsListContext';
@@ -10,9 +12,10 @@ interface PreviousRowProps {
 }
 
 export function PreviousRow({ meeting, folderName }: PreviousRowProps) {
+  const { t } = useTranslation();
   const info = meeting.session_info;
   const when = formatTime(info.processed_at ?? info.updated_at);
-  const duration = formatDuration(info.duration_seconds);
+  const duration = formatDuration(info.duration_seconds, t);
   const preview = previewText(meeting);
   const participants = Array.isArray(meeting.participants)
     ? meeting.participants.length
@@ -31,7 +34,7 @@ export function PreviousRow({ meeting, folderName }: PreviousRowProps) {
       ? '/meetings/processing'
       : `/meetings/${encodeURIComponent(info.summary_file)}`;
 
-  const title = info.name || 'Untitled note';
+  const title = info.name || t('home.previousRow.untitledNote');
 
   return (
     <div
@@ -98,7 +101,7 @@ export function PreviousRow({ meeting, folderName }: PreviousRowProps) {
               {participants > 0 && (
                 <>
                   <span>
-                    {participants} {participants === 1 ? 'person' : 'people'}
+                    {t('home.previousRow.participants', { count: participants })}
                   </span>
                   {showPreview && <span className="opacity-40">·</span>}
                 </>
@@ -115,7 +118,7 @@ export function PreviousRow({ meeting, folderName }: PreviousRowProps) {
         className="flex flex-col items-end gap-1.5 pl-4 text-[12.5px] tabular-nums"
         style={{ color: 'var(--fg-2)' }}
       >
-        <span>{isSynthetic ? 'Now' : (when ?? '')}</span>
+        <span>{isSynthetic ? t('home.relative.now') : (when ?? '')}</span>
         {duration && <span className="text-[11.5px] opacity-70">{duration}</span>}
       </div>
     </div>
@@ -123,6 +126,7 @@ export function PreviousRow({ meeting, folderName }: PreviousRowProps) {
 }
 
 function LiveBadge() {
+  const { t } = useTranslation();
   return (
     <span
       className="inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-medium"
@@ -136,12 +140,13 @@ function LiveBadge() {
         className="inline-block size-1.5 rounded-full bg-white"
         style={{ animation: 'pulse 1.4s ease-in-out infinite' }}
       />
-      Recording
+      {t('home.previousRow.recordingBadge')}
     </span>
   );
 }
 
 function ProcessingBadge() {
+  const { t } = useTranslation();
   return (
     <span
       className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium"
@@ -152,7 +157,7 @@ function ProcessingBadge() {
       }}
     >
       <Loader2 className="size-[10px] animate-spin" aria-hidden />
-      Processing
+      {t('home.previousRow.processingBadge')}
     </span>
   );
 }
@@ -165,14 +170,19 @@ function formatTime(iso?: string): string | undefined {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-function formatDuration(seconds?: number): string | undefined {
+function formatDuration(
+  seconds: number | undefined,
+  t: TFunction,
+): string | undefined {
   if (!seconds || seconds <= 0) return undefined;
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);
   const s = seconds % 60;
-  if (h > 0) return `${h}h ${m}m`;
-  if (m > 0) return `${m}m`;
-  return `${s}s`;
+  // Unit letters are language, not number format — German shortens to "Std."
+  // rather than "h" — so they go through the catalogue too.
+  if (h > 0) return t('home.duration.hoursMinutes', { hours: h, minutes: m });
+  if (m > 0) return t('home.duration.minutes', { minutes: m });
+  return t('home.duration.seconds', { seconds: s });
 }
 
 function previewText(meeting: Meeting): string | undefined {

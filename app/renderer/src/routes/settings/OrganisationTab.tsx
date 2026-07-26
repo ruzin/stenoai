@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
@@ -54,6 +55,7 @@ function GoogleGlyph({ size = 14 }: { size?: number }) {
 }
 
 export function OrganisationTab() {
+  const { t } = useTranslation();
   // useOrgSession + the login/logout mutations all share the same TanStack
   // Query key, so every other consumer (sidebar 'Shared notes' row, profile
   // chip, AskBar gating) reacts immediately to a sign-in or sign-out here.
@@ -141,10 +143,11 @@ export function OrganisationTab() {
           <div className="flex items-start justify-between gap-3">
             <div>
               <div className="text-[14px] font-medium" style={{ color: 'var(--fg-1)' }}>
-                Signed in as {status.name}
+                {t('settings.organisation.signedInAs', { name: status.name })}
               </div>
               <div className="mt-0.5 text-[12px]" style={{ color: 'var(--fg-2)' }}>
-                {status.email} · org <span style={{ fontFamily: 'var(--font-mono)' }}>{status.orgId}</span>
+                {status.email} · {t('settings.organisation.org')}{' '}
+                <span style={{ fontFamily: 'var(--font-mono)' }}>{status.orgId}</span>
               </div>
               <div
                 className="mt-2 text-[11px]"
@@ -160,7 +163,7 @@ export function OrganisationTab() {
               disabled={busy}
               className="h-[28px] px-3 text-[12px]"
             >
-              Sign out
+              {t('settings.organisation.signOut')}
             </Button>
           </div>
           <div
@@ -169,21 +172,20 @@ export function OrganisationTab() {
           >
             <div className="min-w-0">
               <div className="text-[13px] font-medium" style={{ color: 'var(--fg-1)' }}>
-                Auto-back up new notes
+                {t('settings.organisation.autoBackup.label')}
               </div>
               <div
                 className="mt-0.5 text-[12px] leading-[1.5]"
                 style={{ color: 'var(--fg-2)', maxWidth: '52ch' }}
               >
-                Push every new note to your org's S3 once summarisation finishes. You can still
-                unshare individual notes from the Shared notes view.
+                {t('settings.organisation.autoBackup.description')}
               </div>
             </div>
             <Switch
               checked={autoBackupQuery.data ?? true}
               onCheckedChange={(v) => setAutoBackup.mutate(v)}
               disabled={autoBackupQuery.data === undefined || setAutoBackup.isPending}
-              aria-label="Auto-back up new notes to org"
+              aria-label={t('settings.organisation.autoBackup.aria')}
             />
           </div>
         </div>
@@ -199,7 +201,7 @@ export function OrganisationTab() {
           <div className="flex flex-col gap-3">
             <div>
               <label className="mb-1 block text-[12px]" style={{ color: 'var(--fg-2)' }}>
-                Adapter URL
+                {t('settings.organisation.adapterUrl')}
               </label>
               <Input
                 value={adapterUrl}
@@ -222,17 +224,19 @@ export function OrganisationTab() {
                 className={cn(COMPACT_BTN, 'gap-2')}
               >
                 <GoogleGlyph />
-                {ssoGoogleMutation.isPending ? 'Waiting for browser…' : 'Sign in with Google'}
+                {ssoGoogleMutation.isPending
+                  ? t('settings.organisation.waitingForBrowser')
+                  : t('settings.organisation.signInWithGoogle')}
               </Button>
               <span className="text-[12px]" style={{ color: 'var(--fg-2)' }}>
-                Single sign-on via your organisation's Google Workspace.
+                {t('settings.organisation.ssoHint')}
               </span>
             </div>
 
             <div className="relative my-1 flex items-center gap-2">
               <span className="h-px flex-1" style={{ background: 'var(--border-subtle)' }} />
               <span className="text-[11px]" style={{ color: 'var(--fg-muted)' }}>
-                or
+                {t('settings.organisation.or')}
               </span>
               <span className="h-px flex-1" style={{ background: 'var(--border-subtle)' }} />
             </div>
@@ -240,7 +244,7 @@ export function OrganisationTab() {
             <div className="flex gap-3">
               <div className="flex-1">
                 <label className="mb-1 block text-[12px]" style={{ color: 'var(--fg-2)' }}>
-                  Email
+                  {t('settings.organisation.email')}
                 </label>
                 <Input
                   value={email}
@@ -253,7 +257,7 @@ export function OrganisationTab() {
               </div>
               <div className="flex-1">
                 <label className="mb-1 block text-[12px]" style={{ color: 'var(--fg-2)' }}>
-                  Password
+                  {t('settings.organisation.password')}
                 </label>
                 <Input
                   type="password"
@@ -287,7 +291,9 @@ export function OrganisationTab() {
                 variant="ghost"
                 className={COMPACT_BTN}
               >
-                {loginMutation.isPending ? 'Signing in…' : 'Sign in with password'}
+                {loginMutation.isPending
+                  ? t('settings.organisation.signingIn')
+                  : t('settings.organisation.signInWithPassword')}
               </Button>
               {error && (
                 <span className="text-[12px]" style={{ color: 'var(--danger, #b3261e)' }}>

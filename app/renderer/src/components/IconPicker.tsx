@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { useTranslation } from 'react-i18next';
 import * as ReactDOM from 'react-dom';
 import * as LucideIcons from 'lucide-react';
 import { Search, X } from 'lucide-react';
@@ -185,6 +186,7 @@ interface IconPickerProps {
 }
 
 export function IconPicker({ anchorRect, onSelect, onClose }: IconPickerProps) {
+  const { t } = useTranslation();
   const [query, setQuery] = React.useState('');
   const inputRef = React.useRef<HTMLInputElement>(null);
   const panelRef = React.useRef<HTMLDivElement>(null);
@@ -279,7 +281,7 @@ export function IconPicker({ anchorRect, onSelect, onClose }: IconPickerProps) {
             ref={inputRef}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search icons…"
+            placeholder={t('folders.searchIcons')}
             style={{
               flex: 1,
               background: 'transparent',
@@ -324,7 +326,7 @@ export function IconPicker({ anchorRect, onSelect, onClose }: IconPickerProps) {
               fontFamily: 'var(--font-sans)',
             }}
           >
-            No icons match "{query}"
+            {t('folders.noIconsMatch', { query })}
           </div>
         ) : (
           <div

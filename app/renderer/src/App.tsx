@@ -1,6 +1,7 @@
 import * as React from 'react';
 
 import { useTheme } from '@/hooks/useTheme';
+import { useUiLanguageSync } from '@/hooks/useUiLanguageSync';
 import { Sandbox } from '@/routes/Sandbox';
 import { Settings } from '@/routes/Settings';
 import { Setup } from '@/routes/Setup';
@@ -38,6 +39,7 @@ import { primeDebugLogs } from '@/lib/debugLogs';
 
 export function App() {
   useTheme();
+  useUiLanguageSync();
   const route = useRoute();
 
   // One-time privacy disclosure for upgraders. Show it only when the marker is

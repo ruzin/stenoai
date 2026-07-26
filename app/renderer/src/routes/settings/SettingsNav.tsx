@@ -9,6 +9,7 @@ import {
   Wrench,
   type LucideIcon,
 } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
 
 // The full set of nav rail destinations. Distinct from Settings.tsx's
@@ -24,44 +25,46 @@ export type SettingsTabId =
   | 'developer'
   | 'about';
 
+// Labels are translation KEYS, not literals — the rail is rendered inside a
+// component that has `t`, and Settings.tsx translates the lookup below itself.
 interface NavItem {
   id: SettingsTabId;
-  label: string;
+  labelKey: string;
   icon: LucideIcon;
 }
 
 interface NavGroup {
-  header?: string;
+  headerKey?: string;
   items: NavItem[];
 }
 
 const NAV_GROUPS: NavGroup[] = [
   {
     items: [
-      { id: 'general', label: 'Preferences', icon: Settings2 },
-      { id: 'ai', label: 'AI', icon: Sparkles },
-      { id: 'templates', label: 'Templates', icon: LayoutTemplate },
+      { id: 'general', labelKey: 'settings.nav.general', icon: Settings2 },
+      { id: 'ai', labelKey: 'settings.nav.ai', icon: Sparkles },
+      { id: 'templates', labelKey: 'settings.nav.templates', icon: LayoutTemplate },
     ],
   },
   {
-    header: 'Workspace',
-    items: [{ id: 'organisation', label: 'Organisation', icon: Building2 }],
+    headerKey: 'settings.nav.groupWorkspace',
+    items: [{ id: 'organisation', labelKey: 'settings.nav.organisation', icon: Building2 }],
   },
   {
-    header: 'System',
+    headerKey: 'settings.nav.groupSystem',
     items: [
-      { id: 'advanced', label: 'Advanced', icon: Wrench },
-      { id: 'developer', label: 'Developer', icon: Code2 },
-      { id: 'about', label: 'About', icon: Info },
+      { id: 'advanced', labelKey: 'settings.nav.advanced', icon: Wrench },
+      { id: 'developer', labelKey: 'settings.nav.developer', icon: Code2 },
+      { id: 'about', labelKey: 'settings.nav.about', icon: Info },
     ],
   },
 ];
 
-// Flat id -> label lookup so Settings.tsx can show the active tab's own name
-// as the page title (matches the Granola reference: the header names the
+// Flat id -> label KEY lookup so Settings.tsx can show the active tab's own
+// name as the page title (matches the Granola reference: the header names the
 // section, it isn't a static "Settings" caption).
-export const SETTINGS_TAB_LABELS: Record<SettingsTabId, string> = Object.fromEntries(
-  NAV_GROUPS.flatMap((g) => g.items).map((item) => [item.id, item.label]),
+export const SETTINGS_TAB_LABEL_KEYS: Record<SettingsTabId, string> = Object.fromEntries(
+  NAV_GROUPS.flatMap((g) => g.items).map((item) => [item.id, item.labelKey]),
 ) as Record<SettingsTabId, string>;
 
 interface SettingsNavProps {
@@ -72,6 +75,7 @@ interface SettingsNavProps {
 }
 
 export function SettingsNav({ activeTab, onSelect, onBack, version }: SettingsNavProps) {
+  const { t } = useTranslation();
   return (
     <nav
       // fixed, like the main Sidebar's <aside> (Sidebar.tsx) — AppShell
@@ -105,7 +109,7 @@ export function SettingsNav({ activeTab, onSelect, onBack, version }: SettingsNa
         <button
           type="button"
           onClick={onBack}
-          aria-label="Back"
+          aria-label={t('settings.nav.back')}
           className="flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-[6px] border-0 bg-transparent transition-colors hover:bg-[color:var(--surface-hover)] hover:text-[color:var(--fg-1)]"
           style={{ color: 'var(--fg-2)' }}
         >
@@ -115,18 +119,18 @@ export function SettingsNav({ activeTab, onSelect, onBack, version }: SettingsNa
           className="text-[13px] font-medium"
           style={{ color: 'var(--fg-1)' }}
         >
-          Settings
+          {t('settings.nav.title')}
         </span>
       </div>
 
       <div
         className="flex min-h-0 flex-1 flex-col gap-px overflow-auto px-2 pb-2"
         role="group"
-        aria-label="Settings sections"
+        aria-label={t('settings.nav.sections')}
       >
         {NAV_GROUPS.map((group, i) => (
-          <div key={group.header ?? `group-${i}`}>
-            {group.header && (
+          <div key={group.headerKey ?? `group-${i}`}>
+            {group.headerKey && (
               // Matches the main Sidebar's own group label (.sb-group-head on
               // the "Folders" header) exactly — sentence case, fg-2, no
               // uppercase/letter-spacing treatment — rather than reusing the
@@ -135,7 +139,7 @@ export function SettingsNav({ activeTab, onSelect, onBack, version }: SettingsNa
                 className="mt-3.5 px-2.5 py-1.5 text-[11.5px] font-medium tracking-[0.02em]"
                 style={{ color: 'var(--fg-2)' }}
               >
-                {group.header}
+                {t(group.headerKey)}
               </div>
             )}
             {group.items.map((item) => {
@@ -151,7 +155,7 @@ export function SettingsNav({ activeTab, onSelect, onBack, version }: SettingsNa
                   className={cn('sb-row', active && 'active')}
                 >
                   <Icon size={14} />
-                  <span className="flex-1 truncate">{item.label}</span>
+                  <span className="flex-1 truncate">{t(item.labelKey)}</span>
                 </button>
               );
             })}

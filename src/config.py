@@ -257,6 +257,11 @@ class Config:
 
     VALID_TRANSCRIPTION_ENGINES = ("parakeet", "whisper")
 
+    # Language of the app's own interface (chrome), independent of the
+    # "language" setting above, which is the transcription/summary language.
+    # "system" follows the OS locale; "en"/"de" pin it.
+    VALID_UI_LANGUAGES = ("system", "en", "de")
+
     def __init__(self, config_path: Optional[Path] = None):
         """
         Initialize configuration manager.
@@ -300,6 +305,7 @@ class Config:
         self._migrate_transcription_engine()
         self._migrate_language_zh()
         self._migrate_privacy_notice_seen()
+        self._migrate_ui_language()
         self._normalize_templates()
         self._seed_sample_template()
 
@@ -334,6 +340,24 @@ class Config:
         self._config["transcription_engine"] = (
             "whisper" if self._existed_at_load else "parakeet"
         )
+        self._save()
+
+    def _migrate_ui_language(self) -> None:
+        """Decide the interface language on first launch of a version that has
+        this field.
+
+        The two branches are deliberately different, and the asymmetry is the
+        point: a fresh install has no prior interface to change, so it follows
+        the OS ("system"). An existing config predates this key, and today's
+        behaviour for that user is an English interface; migrating them to
+        "system" would flip a German-OS user's app to German without them
+        asking. They stay on "en" until they pick something in Settings.
+        """
+        if self._load_failed:
+            return  # never persist defaults over a corrupt-but-recoverable file
+        if self._config.get("ui_language") in self.VALID_UI_LANGUAGES:
+            return
+        self._config["ui_language"] = "en" if self._existed_at_load else "system"
         self._save()
 
     def _migrate_privacy_notice_seen(self) -> None:
@@ -711,6 +735,10 @@ class Config:
             "auto_install_when_idle": True,
             "whisper_model": "large-v3-turbo",
             "transcription_engine": "parakeet",
+            # Interface language (app chrome), not the transcription language.
+            # "system" follows the OS locale on fresh installs; existing
+            # configs are migrated to "en" by _migrate_ui_language().
+            "ui_language": "system",
             "version": "1.0"
         }
 
@@ -1234,6 +1262,47 @@ class Config:
             return False
 
         self._config["language"] = language_code
+        return self._save()
+
+    def get_ui_language(self) -> str:
+        """Get the configured interface language.
+
+        Separate from get_language(), which is the transcription/summary
+        language. "system" means follow the OS locale; the caller resolves it.
+
+        The corrupt-file branch exists because _migrate_ui_language() refuses to
+        run when the load failed -- correctly, so defaults never get written over
+        a file a user might still recover. But refusing to *write* must not
+        change what we *read*: a file that exists, however broken, belongs to an
+        install that has been showing an English interface, so it reads as "en"
+        exactly like an existing config that predates the key.
+
+        Without this branch the in-memory default ("system") leaks out here, and
+        app/i18n.js -- which resolves the same corrupt file to "en" for the
+        startup read -- would disagree. The two would then diverge on the next
+        save, which persists the defaults and silently flips a German-OS user's
+        interface to German on the following launch. Change this and
+        readStoredUiLanguage() in app/i18n.js together.
+        """
+        if self._load_failed:
+            return "en"
+        return self._config.get("ui_language", "system")
+
+    def set_ui_language(self, ui_language: str) -> bool:
+        """
+        Set the language of the app interface.
+
+        Args:
+            ui_language: One of VALID_UI_LANGUAGES ("system", "en", "de")
+
+        Returns:
+            True if saved successfully, False otherwise
+        """
+        if ui_language not in self.VALID_UI_LANGUAGES:
+            logger.error(f"Unsupported UI language: {ui_language}")
+            return False
+
+        self._config["ui_language"] = ui_language
         return self._save()
 
     def get_language_name(self, language_code: Optional[str] = None) -> str:

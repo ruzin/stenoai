@@ -53,8 +53,24 @@ const subscribeQueryStream = (queryId, { onChunk, onDone, onError } = {}) => {
   };
 };
 
+/*
+ * The UI language main resolved for this window, delivered on process.argv via
+ * webPreferences.additionalArguments rather than fetched over IPC.
+ *
+ * It is a plain value, not a function, because the renderer needs it before its
+ * first paint: i18next is initialised at module scope in lib/i18n.ts, and any
+ * async hop there would either delay the ready-to-show signal or paint English
+ * first and then flip. Later changes arrive via events.uiLanguageChanged.
+ */
+const uiLanguageFromArgv = () => {
+  const prefix = '--stenoai-ui-language=';
+  const arg = process.argv.find((a) => a.startsWith(prefix));
+  return arg ? arg.slice(prefix.length) : 'en';
+};
+
 const stenoai = {
   version: VERSION,
+  uiLanguage: uiLanguageFromArgv(),
 
   app: {
     getVersion: () => invoke('get-app-version'),
@@ -264,8 +280,13 @@ const stenoai = {
     // Design-for-test seam: the production fire path is the main-side scheduler
     // timer; this lets e2e drive the gate + suppression deterministically.
     showPremeetingNotification: (payload) => invoke('show-premeeting-notification', payload),
+    // Transcription/content language — NOT the interface language. The pair
+    // below is the UI one; keeping both here makes the distinction visible at
+    // the only place a caller picks between them.
     getLanguage: () => invoke('get-language'),
     setLanguage: (code) => invoke('set-language', code),
+    getUiLanguage: () => invoke('get-ui-language'),
+    setUiLanguage: (code) => invoke('set-ui-language', code),
     getMicrophone: () => invoke('get-microphone'),
     setMicrophone: (deviceId, label) => invoke('set-microphone', deviceId, label),
     getUserName: () => invoke('get-user-name'),
@@ -356,6 +377,7 @@ const stenoai = {
   // All main-driven events. Every subscribe returns an unsubscribe fn.
   on: {
     debugLog: (cb) => subscribe('debug-log', cb),
+    uiLanguageChanged: (cb) => subscribe('ui-language-changed', cb),
     setupFlowTriggered: (cb) => subscribe('trigger-setup-flow', cb),
     toggleRecordingHotkey: (cb) => subscribe('toggle-recording-hotkey', cb),
     summaryChunk: (cb) => subscribe('summary-chunk', cb),

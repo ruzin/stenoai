@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell, systemPreferences, globalShortcut, Tray, Menu, nativeImage, powerMonitor, net, session } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, systemPreferences, globalShortcut, Tray, Menu, nativeImage, powerMonitor, net, session, webContents } = require('electron');
 
 // safeStorage is accessed lazily via getSafeStorage(), NOT destructured from the
 // require above. On macOS, merely retrieving the safeStorage binding at load
@@ -102,6 +102,7 @@ const { EXPORT_CANCELED } = require('./ipc-sentinels');
 const { PostHog } = require('posthog-node');
 const { initMain } = require('electron-audio-loopback');
 const { autoUpdater } = require('electron-updater');
+const i18n = require('./i18n');
 
 // E2E test-harness hooks. Set via env vars; production sees none of these.
 //   STENOAI_USER_DATA_DIR — per-test temp userData dir (must be set before app.whenReady)
@@ -328,6 +329,9 @@ class Notification extends EventEmitter {
         contextIsolation: true,
         sandbox: true,
         preload: path.join(__dirname, 'preload.js'),
+        // Same bootstrap as the main window — the toast is its own renderer and
+        // would otherwise start in English regardless of the chosen language.
+        additionalArguments: [`--stenoai-ui-language=${resolvedUiLanguage}`],
       },
     });
     notificationWindow = win;
@@ -574,7 +578,7 @@ async function showShortcutNotification(body) {
     }
 
     const notif = new Notification({
-      title: 'Steno Shortcuts',
+      title: i18n.t('notification.shortcuts.title'),
       body
     });
     trackNotificationLifecycle(notif, 'shortcut');
@@ -624,7 +628,7 @@ async function handleShortcutUrl(incomingUrl) {
 
   if (parsedAction.type === 'invalid') {
     sendDebugLog(`Ignored invalid shortcut URL (${parsedAction.reason}): ${safeShortcutUrl}`);
-    await showShortcutNotification('Invalid shortcut URL');
+    await showShortcutNotification(i18n.t('notification.shortcuts.invalidUrl'));
     launchedByShortcut = false;
     return;
   }
@@ -634,7 +638,7 @@ async function handleShortcutUrl(incomingUrl) {
 
   if (parsedAction.type === 'start') {
     if (recording) {
-      await showShortcutNotification('Recording already in progress');
+      await showShortcutNotification(i18n.t('notification.shortcuts.alreadyRecording'));
       launchedByShortcut = false;
       return;
     }
@@ -1511,6 +1515,12 @@ function createWindow(options = {}) {
       sandbox: true,
       preload: path.join(__dirname, 'preload.js'),
       scrollBounce: true,
+      // Hand the resolved UI language over as a launch argument rather than
+      // making the renderer ask for it. An async IPC round trip would land
+      // after the first paint, which is exactly the flash of English this
+      // avoids; process.argv is readable synchronously even in a sandboxed
+      // preload.
+      additionalArguments: [`--stenoai-ui-language=${resolvedUiLanguage}`],
     },
     // Windows/Linux render the Electron application menu as an in-window menu
     // bar (File/Edit/View/…); macOS puts it in the global bar. Hide it off-mac
@@ -1603,6 +1613,119 @@ function createWindow(options = {}) {
   });
 }
 
+// The concrete language tag in force ('en' | 'de'), as opposed to the stored
+// preference, which may be the 'system' sentinel. Resolved once at startup and
+// again on every switch; handed to each renderer as a launch argument.
+let resolvedUiLanguage = i18n.FALLBACK_UI_LANGUAGE;
+
+/*
+ * The live-switch sequence, in this order for a reason:
+ *
+ *   main changeLanguage → rebuild menu → rebuild tray → tell every renderer
+ *
+ * The two native menus are snapshots, so they need an explicit rebuild that
+ * changeLanguage() will not do for them. Renderers come last because they
+ * repaint fast and a stale menu next to a fresh UI is the more visible seam.
+ * Every open WebContents is notified, not just the main window — the
+ * notification toast lives in its own window and would otherwise keep the old
+ * language until it was next recreated.
+ *
+ * Persistence is the caller's job: it goes through the Python config so the
+ * atomic/locked write is not duplicated in JS.
+ */
+async function applyUiLanguage(storedPreference) {
+  // Takes the stored preference, not a concrete tag, so the 'system' sentinel
+  // is re-resolved against the OS here rather than by every caller.
+  resolvedUiLanguage = i18n.resolveUiLanguage(
+    storedPreference,
+    app.getPreferredSystemLanguages()
+  );
+  await i18n.changeMainLanguage(resolvedUiLanguage);
+  buildAppMenu();
+  updateTrayMenu();
+  if (tray) {
+    const isRecording = currentRecordingProcess !== null || systemAudioRecordingActive;
+    tray.setToolTip(isRecording ? i18n.t('tray.tooltipRecording') : i18n.t('tray.tooltip'));
+  }
+  for (const wc of webContents.getAllWebContents()) {
+    try {
+      if (!wc.isDestroyed()) wc.send('ui-language-changed', resolvedUiLanguage);
+    } catch (_) {
+      // A window torn down mid-broadcast is not an error worth surfacing.
+    }
+  }
+  return resolvedUiLanguage;
+}
+
+/*
+ * Application menu. macOS uses the global menu bar with mac-only roles
+ * (services/hide/unhide). Windows/Linux get a slimmer, platform-correct menu —
+ * kept (editing accelerators, Settings, Help) but hidden by default via
+ * autoHideMenuBar so it doesn't clash with the app's custom toolbar; Alt
+ * reveals it (standard Windows behaviour).
+ *
+ * A built menu is a snapshot, not a live view: changeLanguage() alone will not
+ * relabel it. So this is a function rather than the inline block it used to be,
+ * and applyUiLanguage() calls it again after a language switch. Role-based
+ * items are deliberately left on their roles — Electron supplies the
+ * platform-appropriate localised label for those itself, better than we could.
+ */
+function buildAppMenu() {
+  const settingsItem = {
+    label: i18n.t('menu.settings'),
+    accelerator: 'CmdOrCtrl+,',
+    click: () => {
+      showAndFocusWindow();
+      if (mainWindow) {
+        mainWindow.webContents.send('tray-open-settings');
+      }
+    }
+  };
+  const helpSubmenu = {
+    role: 'help',
+    submenu: [
+      { label: i18n.t('menu.learnMore'), click: () => shell.openExternal('https://github.com/ruzin/stenoai') },
+      { label: i18n.t('menu.reportBug'), click: () => shell.openExternal('https://discord.gg/DZ6vcQnxxu') }
+    ]
+  };
+  const appMenu = Menu.buildFromTemplate(
+    process.platform === 'darwin'
+      ? [
+          {
+            // Custom appMenu to add Settings… with the conventional ⌘,
+            // shortcut (the default `{ role: 'appMenu' }` omits Settings).
+            label: app.name,
+            submenu: [
+              { role: 'about' },
+              { type: 'separator' },
+              settingsItem,
+              { type: 'separator' },
+              { role: 'services' },
+              { type: 'separator' },
+              { role: 'hide' },
+              { role: 'hideOthers' },
+              { role: 'unhide' },
+              { type: 'separator' },
+              { role: 'quit' }
+            ]
+          },
+          { role: 'fileMenu' },
+          { role: 'editMenu' },
+          { role: 'viewMenu' },
+          { role: 'windowMenu' },
+          helpSubmenu
+        ]
+      : [
+          { label: i18n.t('menu.file'), submenu: [settingsItem, { type: 'separator' }, { role: 'quit' }] },
+          { role: 'editMenu' },
+          { role: 'viewMenu' },
+          { role: 'windowMenu' },
+          helpSubmenu
+        ]
+  );
+  Menu.setApplicationMenu(appMenu);
+}
+
 function getTrayIconPath(recording) {
   const iconName = recording ? 'trayIconRecordingTemplate' : 'trayIconTemplate';
   if (app.isPackaged) {
@@ -1615,7 +1738,7 @@ function createTray() {
   const icon = nativeImage.createFromPath(getTrayIconPath(false));
   icon.setTemplateImage(true);
   tray = new Tray(icon);
-  tray.setToolTip('Steno');
+  tray.setToolTip(i18n.t('tray.tooltip'));
 
   updateTrayMenu();
 }
@@ -1625,7 +1748,7 @@ function updateTrayIcon(recording) {
   const icon = nativeImage.createFromPath(getTrayIconPath(recording));
   icon.setTemplateImage(true);
   tray.setImage(icon);
-  tray.setToolTip(recording ? 'Steno - Recording' : 'Steno');
+  tray.setToolTip(recording ? i18n.t('tray.tooltipRecording') : i18n.t('tray.tooltip'));
   updateTrayMenu();
 }
 
@@ -1644,11 +1767,11 @@ function updateTrayMenu() {
 
   const contextMenu = Menu.buildFromTemplate([
     {
-      label: 'Open Steno',
+      label: i18n.t('tray.open'),
       click: showAndFocusWindow
     },
     {
-      label: isRecording ? 'Stop Recording' : 'Start Recording',
+      label: isRecording ? i18n.t('tray.stopRecording') : i18n.t('tray.startRecording'),
       click: () => {
         if (mainWindow) {
           mainWindow.webContents.send(isRecording ? 'tray-stop-recording' : 'tray-start-recording');
@@ -1656,7 +1779,7 @@ function updateTrayMenu() {
       }
     },
     {
-      label: 'Settings',
+      label: i18n.t('tray.settings'),
       click: () => {
         showAndFocusWindow();
         if (mainWindow) {
@@ -1665,25 +1788,25 @@ function updateTrayMenu() {
       }
     },
     {
-      label: 'Hide Steno',
+      label: i18n.t('tray.hide'),
       click: () => {
         if (mainWindow) mainWindow.hide();
       }
     },
     { type: 'separator' },
     {
-      label: `Steno v${appVersion}`,
+      label: i18n.t('tray.version', { version: appVersion }),
       enabled: false
     },
     {
-      label: 'Report a Bug',
+      label: i18n.t('tray.reportBug'),
       click: () => {
         shell.openExternal('https://discord.gg/DZ6vcQnxxu');
       }
     },
     { type: 'separator' },
     {
-      label: 'Quit Steno',
+      label: i18n.t('tray.quit'),
       click: () => {
         app.quit();
       }
@@ -1891,64 +2014,45 @@ if (!gotSingleInstanceLock) {
       console.warn('processing-log init failed (non-fatal):', e?.message);
     }
 
-    // Application menu. macOS uses the global menu bar with mac-only roles
-    // (services/hide/unhide). Windows/Linux get a slimmer, platform-correct
-    // menu — kept (editing accelerators, Settings, Help) but hidden by default
-    // via autoHideMenuBar so it doesn't clash with the app's custom toolbar;
-    // Alt reveals it (standard Windows behaviour).
-    const settingsItem = {
-      label: 'Settings…',
-      accelerator: 'CmdOrCtrl+,',
-      click: () => {
-        showAndFocusWindow();
-        if (mainWindow) {
-          mainWindow.webContents.send('tray-open-settings');
-        }
+    // Resolve the UI language before anything user-visible is built. The menu
+    // below and the tray are snapshots taken in whatever language is active at
+    // build time, and the window created further down carries the resolved tag
+    // to the renderer as a launch argument — so this has to happen first, or
+    // the first paint is English and then flips.
+    //
+    // getPreferredSystemLanguages() honours the user's *ordered* language list
+    // rather than a regional-format locale, and is only meaningful after ready.
+    try {
+      // E2E pins the whole suite to English: ~108 Playwright locators match on
+      // visible text, so a German run would fail most of them for reasons that
+      // have nothing to do with what they test. Gated on IS_E2E so it cannot be
+      // reached in production, and set via env rather than config.json so it
+      // does not fight the specs that deliberately seed their own config.
+      const stored =
+        IS_E2E && process.env.STENOAI_UI_LANGUAGE
+          ? process.env.STENOAI_UI_LANGUAGE
+          : i18n.readStoredUiLanguage(getUserDataDir());
+      resolvedUiLanguage = i18n.resolveUiLanguage(stored, app.getPreferredSystemLanguages());
+      await i18n.initMainI18n(resolvedUiLanguage);
+      processingLog.logLine('app', `ui-language stored=${stored} resolved=${resolvedUiLanguage}`);
+    } catch (e) {
+      // Only reachable if en.json itself is missing or unparseable — a broken
+      // de.json degrades to English inside loadResources() and never lands here.
+      //
+      // Launching beats not launching, but be honest about the state: with no
+      // resources loaded, t() returns the key, so the menu and tray render as
+      // "menu.settings" / "tray.open". That is a build defect, not a runtime
+      // condition — locale-completeness.test.js fails the suite before such a
+      // build could ship — so it is logged loudly rather than papered over.
+      console.error('ui i18n init failed — native chrome will show raw keys:', e?.message);
+      try {
+        processingLog.logLine('app', `ui-language init FAILED: ${e?.message}`);
+      } catch (_) {
+        /* the diagnostic log is best-effort */
       }
-    };
-    const helpSubmenu = {
-      role: 'help',
-      submenu: [
-        { label: 'Learn More', click: () => shell.openExternal('https://github.com/ruzin/stenoai') },
-        { label: 'Report a Bug', click: () => shell.openExternal('https://discord.gg/DZ6vcQnxxu') }
-      ]
-    };
-    const appMenu = Menu.buildFromTemplate(
-      process.platform === 'darwin'
-        ? [
-            {
-              // Custom appMenu to add Settings… with the conventional ⌘,
-              // shortcut (the default `{ role: 'appMenu' }` omits Settings).
-              label: app.name,
-              submenu: [
-                { role: 'about' },
-                { type: 'separator' },
-                settingsItem,
-                { type: 'separator' },
-                { role: 'services' },
-                { type: 'separator' },
-                { role: 'hide' },
-                { role: 'hideOthers' },
-                { role: 'unhide' },
-                { type: 'separator' },
-                { role: 'quit' }
-              ]
-            },
-            { role: 'fileMenu' },
-            { role: 'editMenu' },
-            { role: 'viewMenu' },
-            { role: 'windowMenu' },
-            helpSubmenu
-          ]
-        : [
-            { label: '&File', submenu: [settingsItem, { type: 'separator' }, { role: 'quit' }] },
-            { role: 'editMenu' },
-            { role: 'viewMenu' },
-            { role: 'windowMenu' },
-            helpSubmenu
-          ]
-    );
-    Menu.setApplicationMenu(appMenu);
+    }
+
+    buildAppMenu();
 
     if (process.platform === 'darwin') {
       try {
@@ -2484,7 +2588,7 @@ ipcMain.handle('select-audio-file', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
     properties: ['openFile'],
     filters: [
-      { name: 'Audio Files', extensions: IMPORT_AUDIO_EXTENSIONS }
+      { name: i18n.t('dialog.filter.audio'), extensions: IMPORT_AUDIO_EXTENSIONS }
     ]
   });
 
@@ -3700,8 +3804,8 @@ ipcMain.handle('export-transcript', async (event, defaultFilename, content) => {
       const result = await dialog.showSaveDialog(mainWindow, {
         defaultPath: suggested,
         filters: [
-          { name: 'Markdown', extensions: ['md'] },
-          { name: 'Text', extensions: ['txt'] },
+          { name: i18n.t('dialog.filter.markdown'), extensions: ['md'] },
+          { name: i18n.t('dialog.filter.text'), extensions: ['txt'] },
         ],
       });
       if (result.canceled || !result.filePath) {
@@ -3822,7 +3926,7 @@ ipcMain.handle('export-note-pdf', async (event, defaultFilename, html) => {
           : 'notes.pdf';
       const result = await dialog.showSaveDialog(mainWindow, {
         defaultPath: suggested,
-        filters: [{ name: 'PDF', extensions: ['pdf'] }],
+        filters: [{ name: i18n.t('dialog.filter.pdf'), extensions: ['pdf'] }],
       });
       if (result.canceled || !result.filePath) {
         return { success: false, error: EXPORT_CANCELED };
@@ -3877,7 +3981,7 @@ ipcMain.handle('save-diagnostics', async (event, defaultFilename, content) => {
           : 'stenoai-diagnostics.txt';
       const result = await dialog.showSaveDialog(mainWindow, {
         defaultPath: suggested,
-        filters: [{ name: 'Text', extensions: ['txt'] }],
+        filters: [{ name: i18n.t('dialog.filter.text'), extensions: ['txt'] }],
       });
       if (result.canceled || !result.filePath) {
         return { success: false, error: EXPORT_CANCELED };
@@ -5945,12 +6049,12 @@ function showSleepPausedNotification() {
   // convenience notifications (meeting detected, note ready), this one is
   // state-critical — the user believes they're capturing and they are not.
   const notif = new Notification({
-    title: 'Recording paused',
-    body: 'Paused while your computer was asleep. Resume to keep capturing.',
+    title: i18n.t('notification.sleepPaused.title'),
+    body: i18n.t('notification.sleepPaused.body'),
     iconType: 'alert',
     // The Resume action button is always rendered by the custom toast (both
     // platforms); the click handler below covers a body tap as well.
-    actions: [{ type: 'button', text: 'Resume' }],
+    actions: [{ type: 'button', text: i18n.t('notification.sleepPaused.action') }],
   });
   const resume = () => {
     sleepPausedNotif = null;
@@ -6612,9 +6716,9 @@ function showMeetingDetectedNotification(appName, originatingEvt, calEvent) {
   // dropdown instead of showing the action inline. Leaving closeButtonText
   // unset gives us Granola's layout — single inline button to the right.
   const notif = new Notification({
-    title: 'Meeting detected',
+    title: i18n.t('notification.meetingDetected.title'),
     body: calEvent?.title || appName,
-    actions: [{ type: 'button', text: 'Take Notes' }],
+    actions: [{ type: 'button', text: i18n.t('notification.meetingDetected.action') }],
   });
   const trigger = () => requestAutoRecord(appName, originatingEvt, calEvent);
   notif.on('action', (_evt, _index) => trigger()); // shown when banner style = Alerts
@@ -6625,9 +6729,9 @@ function showMeetingDetectedNotification(appName, originatingEvt, calEvent) {
 
 function showMeetingEndedNotification(appName) {
   const notif = new Notification({
-    title: 'Meeting ended',
+    title: i18n.t('notification.meetingEnded.title'),
     body: appName,
-    actions: [{ type: 'button', text: 'Summarise' }],
+    actions: [{ type: 'button', text: i18n.t('notification.meetingEnded.action') }],
   });
   // Only the explicit Summarise button commits — body click just opens
   // Steno so the user can decide (summarise / resume / leave paused) from
@@ -7781,7 +7885,13 @@ ipcMain.handle('pull-parakeet-model', async (event, modelId) => {
 // behavior are identical to the inline handlers this replaces. Settings-shaped
 // handlers coupled to another domain (telemetry, models, mic-monitor, calendar,
 // tray) deliberately stay in main.js until that domain's own extraction.
-registerSettingsIpc({ ipcMain, runPythonScript, sendDebugLog });
+registerSettingsIpc({
+  ipcMain,
+  runPythonScript,
+  sendDebugLog,
+  applyUiLanguage,
+  currentUiLanguage: () => resolvedUiLanguage,
+});
 
 // Fired by the renderer's silence detector. The renderer has already
 // asked main to stop the recording via pause/stop; this just surfaces
@@ -7802,10 +7912,10 @@ ipcMain.handle('show-silence-auto-stop-notification', async (_event, payload) =>
     const minutes = typeof payload === 'number' ? payload : payload?.minutes;
     const sessionName = typeof payload === 'object' ? payload?.sessionName : null;
     const body = sessionName
-      ? `${sessionName} — ${minutes} minutes of silence`
-      : `${minutes} minutes of silence — your note is being processed.`;
+      ? i18n.t('notification.silenceAutoStop.bodyNamed', { count: minutes, sessionName })
+      : i18n.t('notification.silenceAutoStop.body', { count: minutes });
     const notif = new Notification({
-      title: 'Recording stopped',
+      title: i18n.t('notification.silenceAutoStop.title'),
       body,
       iconType: 'recording',
     });
@@ -7833,8 +7943,8 @@ ipcMain.handle('show-system-audio-mic-only-notification', async () => {
   try {
     if (!(await notificationsEnabled())) return { success: true, shown: false };
     const notif = new Notification({
-      title: 'Recording mic-only',
-      body: 'System audio could not be captured. Check Steno’s Screen & System Audio Recording access in System Settings.',
+      title: i18n.t('notification.micOnly.title'),
+      body: i18n.t('notification.micOnly.body'),
       iconType: 'alert',
     });
     notif.on('click', () => {
@@ -7877,15 +7987,17 @@ ipcMain.handle('show-note-ready-notification', async (_event, payload) => {
     //  - otherwise: the note is genuinely ready.
     const notif = new Notification({
       title: hardFailure
-        ? 'Processing failed'
+        ? i18n.t('notification.noteReady.titleProcessingFailed')
         : failed
-          ? 'Transcription failed'
-          : 'Note ready',
+          ? i18n.t('notification.noteReady.titleTranscriptionFailed')
+          : i18n.t('notification.noteReady.title'),
       body: hardFailure
-        ? `Steno couldn't process ${title ? `"${title}"` : 'your note'}.`
+        ? (title
+            ? i18n.t('notification.noteReady.bodyFailedTitled', { title })
+            : i18n.t('notification.noteReady.bodyFailedUntitled'))
         : failed
-          ? 'Your recording was preserved — open the note for details.'
-          : (title || 'Your note has finished processing'),
+          ? i18n.t('notification.noteReady.bodyPreserved')
+          : (title || i18n.t('notification.noteReady.bodyDone')),
       iconType: (hardFailure || failed) ? 'alert' : 'success',
     });
     notif.on('click', () => {
@@ -8902,8 +9014,8 @@ function showRecordingFailedNotification(body) {
   try {
     if (!Notification.isSupported()) return;
     new Notification({
-      title: 'Steno',
-      body: body || "Recording couldn't start.",
+      title: i18n.t('notification.recordingFailed.title'),
+      body: body || i18n.t('notification.recordingFailed.body'),
       iconType: 'alert',
     }).show();
   } catch (error) {
@@ -8914,7 +9026,9 @@ function showRecordingFailedNotification(body) {
 ipcMain.on('recording-capture-error', (_event, message) => {
   sendDebugLog(`[sysaudio] capture error: ${message}`);
   showRecordingFailedNotification(
-    message ? `Recording couldn't start: ${message}` : "Recording couldn't start.",
+    message
+      ? i18n.t('notification.recordingFailed.bodyWithReason', { reason: message })
+      : i18n.t('notification.recordingFailed.body'),
   );
 });
 
@@ -10972,7 +11086,7 @@ async function firePreMeetingNotification(event) {
     return false;
   }
 
-  const notif = new Notification({ title: event.title || 'Meeting starting' });
+  const notif = new Notification({ title: event.title || i18n.t('notification.preMeeting.titleFallback') });
   // The pre-meeting toast carries a richer payload (time / meeting URL /
   // attendees) and keeps its legacy renderer-side handlers (Join & take notes,
   // focus-on-body-tap) plus its own click/dismiss analytics. `premeeting: true`

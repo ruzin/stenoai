@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { useTranslation } from 'react-i18next';
 import { AppShell } from '@/components/AppShell';
 import {
   Sidebar,
@@ -32,6 +33,7 @@ import {
 } from '@/hooks/useFolders';
 import { useRecording } from '@/hooks/useRecording';
 import { navigate, useRoute } from '@/lib/router';
+import i18n from '@/lib/i18n';
 import type { Meeting } from '@/lib/ipc';
 
 interface MeetingsShellProps {
@@ -60,6 +62,7 @@ export function MeetingsShell({
   bleed = false,
   children,
 }: MeetingsShellProps) {
+  const { t } = useTranslation();
   const meetings = useMeetings();
   const folders = useFolders();
   const recording = useRecording();
@@ -245,19 +248,13 @@ export function MeetingsShell({
       <ConfirmDialog
         open={!!deleteTarget}
         onOpenChange={(o) => !o && setDeleteTarget(null)}
-        title={deleteTarget ? `Delete folder "${deleteTarget.name}"?` : ''}
+        title={deleteTarget ? t('folders.deleteTitle', { name: deleteTarget.name }) : ''}
         description={
-          deleteTarget && deleteTarget.meetingCount > 0 ? (
-            <>
-              {deleteTarget.meetingCount} meeting
-              {deleteTarget.meetingCount === 1 ? '' : 's'} will be moved back to All Notes. No
-              recordings or transcripts will be deleted.
-            </>
-          ) : (
-            <>No recordings or transcripts will be deleted.</>
-          )
+          deleteTarget && deleteTarget.meetingCount > 0
+            ? t('folders.deleteWithMeetings', { count: deleteTarget.meetingCount })
+            : t('folders.deleteNoMeetings')
         }
-        confirmLabel="Delete"
+        confirmLabel={t('common.delete')}
         destructive
         onConfirm={handleConfirmDeleteFolder}
         isPending={deleteFolder.isPending}
@@ -266,15 +263,15 @@ export function MeetingsShell({
       <Dialog open={newFolderOpen} onOpenChange={setNewFolderOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>New folder</DialogTitle>
+            <DialogTitle>{t('folders.newFolder')}</DialogTitle>
             <DialogDescription>
-              Group related meetings together. Folder names are only visible to you.
+              {t('folders.newFolderDescription')}
             </DialogDescription>
           </DialogHeader>
           <Input
             value={newFolderName}
             onChange={(e) => setNewFolderName(e.target.value)}
-            placeholder="e.g. Acme Corp"
+            placeholder={t('folders.namePlaceholder')}
             autoFocus
             onKeyDown={(e) => {
               if (e.key === 'Enter') void handleCreateFolder();
@@ -282,9 +279,9 @@ export function MeetingsShell({
           />
           <DialogFooter>
             <DialogClose asChild>
-              <Button variant="outline">Cancel</Button>
+              <Button variant="outline">{t('common.cancel')}</Button>
             </DialogClose>
-            <Button onClick={() => void handleCreateFolder()}>Create folder</Button>
+            <Button onClick={() => void handleCreateFolder()}>{t('folders.create')}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -327,6 +324,7 @@ function ContextMenu({
   folders,
   meetings,
 }: ContextMenuProps) {
+  const { t } = useTranslation();
   const ref = React.useRef<HTMLDivElement>(null);
   React.useEffect(() => {
     const onDoc = (e: MouseEvent) => {
@@ -360,14 +358,14 @@ function ContextMenu({
         className="flex w-full items-center rounded px-2 py-1.5 text-left text-sm hover:bg-muted"
         onClick={() => onRename(currentLabel)}
       >
-        Rename
+        {t('app.rename')}
       </button>
       <button
         type="button"
         className="flex w-full items-center rounded px-2 py-1.5 text-left text-sm text-destructive hover:bg-destructive/10"
         onClick={onDelete}
       >
-        Delete
+        {t('common.delete')}
       </button>
     </div>
   );
@@ -498,14 +496,14 @@ export function formatDateLabel(info: Meeting['session_info']): string | undefin
     d.getFullYear() === now.getFullYear() &&
     d.getMonth() === now.getMonth() &&
     d.getDate() === now.getDate();
-  if (sameDay) return 'Today';
+  if (sameDay) return i18n.t('app.date.today');
   const yesterday = new Date(now);
   yesterday.setDate(now.getDate() - 1);
   const wasYesterday =
     d.getFullYear() === yesterday.getFullYear() &&
     d.getMonth() === yesterday.getMonth() &&
     d.getDate() === yesterday.getDate();
-  if (wasYesterday) return 'Yesterday';
+  if (wasYesterday) return i18n.t('app.date.yesterday');
   if (now.getTime() - d.getTime() < 7 * 24 * 60 * 60 * 1000) {
     return d.toLocaleDateString(undefined, { weekday: 'short' });
   }

@@ -20,9 +20,19 @@
  * them:
  *   - runPythonScript  the bundled-backend invoker (backend-cli seam)
  *   - sendDebugLog     the debug-panel log sink (debug-log seam)
+ *   - applyUiLanguage  the native-chrome relabel + renderer broadcast (#337).
+ *     Injected rather than imported because rebuilding the menu and tray is
+ *     main.js's composition-root job, not this module's.
+ *   - currentUiLanguage  reads back the concrete tag in force
  */
 
-function registerSettingsIpc({ ipcMain, runPythonScript, sendDebugLog }) {
+function registerSettingsIpc({
+  ipcMain,
+  runPythonScript,
+  sendDebugLog,
+  applyUiLanguage,
+  currentUiLanguage,
+}) {
   ipcMain.handle('get-keep-recordings', async () => {
     try {
       const result = await runPythonScript('simple_recorder.py', ['get-keep-recordings'], true);
@@ -174,6 +184,43 @@ function registerSettingsIpc({ ipcMain, runPythonScript, sendDebugLog }) {
       return { success: true, language: languageCode };
     } catch (error) {
       sendDebugLog(`Error setting language: ${error.message}`);
+      return { success: false, error: error.message };
+    }
+  });
+
+  /*
+   * Interface language (#337) — distinct from get-language/set-language above,
+   * which is the transcription/content language. The stored value may be the
+   * 'system' sentinel; `resolved` is the concrete tag actually in force, which
+   * is what the Settings UI needs to show alongside a "System default" choice.
+   */
+  ipcMain.handle('get-ui-language', async () => {
+    try {
+      const result = await runPythonScript('simple_recorder.py', ['get-ui-language'], true);
+      const jsonData = JSON.parse(result.trim());
+      return { success: true, ...jsonData, resolved: currentUiLanguage() };
+    } catch (error) {
+      sendDebugLog(`Error getting UI language setting: ${error.message}`);
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('set-ui-language', async (event, languageCode) => {
+    try {
+      sendDebugLog(`Setting UI language to: ${languageCode}`);
+      const result = await runPythonScript('simple_recorder.py', ['set-ui-language', languageCode]);
+      const jsonData = JSON.parse(result.trim());
+      if (!jsonData.success) {
+        // Python rejected the value; do not switch the running UI to something
+        // that will not survive a restart.
+        return { success: false, error: jsonData.error || 'Failed to persist UI language' };
+      }
+      // Persist first, then switch — so a crash between the two leaves the app
+      // agreeing with disk rather than showing a language it forgot.
+      const resolved = await applyUiLanguage(languageCode);
+      return { success: true, ...jsonData, resolved };
+    } catch (error) {
+      sendDebugLog(`Error setting UI language: ${error.message}`);
       return { success: false, error: error.message };
     }
   });

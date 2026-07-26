@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   Dialog,
   DialogClose,
@@ -27,14 +28,21 @@ export function ConfirmDialog({
   onOpenChange,
   title,
   description,
-  confirmLabel = 'Confirm',
-  cancelLabel = 'Cancel',
+  confirmLabel,
+  cancelLabel,
   destructive,
   onConfirm,
   isPending,
 }: ConfirmDialogProps) {
+  const { t } = useTranslation();
   const [busy, setBusy] = React.useState(false);
   const pending = busy || isPending;
+  // Defaults resolved here rather than in the parameter list: a default
+  // parameter is evaluated once per render with whatever `t` was in scope, but
+  // more importantly it cannot call a hook at all. Callers that pass their own
+  // label still win.
+  const confirmText = confirmLabel ?? t('common.confirm');
+  const cancelText = cancelLabel ?? t('common.cancel');
 
   const handleConfirm = async () => {
     setBusy(true);
@@ -55,7 +63,7 @@ export function ConfirmDialog({
         <DialogFooter>
           <DialogClose asChild>
             <Button variant="outline" disabled={pending}>
-              {cancelLabel}
+              {cancelText}
             </Button>
           </DialogClose>
           <Button
@@ -63,7 +71,7 @@ export function ConfirmDialog({
             onClick={() => void handleConfirm()}
             disabled={pending}
           >
-            {pending ? 'Working...' : confirmLabel}
+            {pending ? t('common.working') : confirmText}
           </Button>
         </DialogFooter>
       </DialogContent>

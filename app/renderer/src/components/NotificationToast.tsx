@@ -1,6 +1,8 @@
 import * as React from 'react';
+import { useTranslation } from 'react-i18next';
 import { ipc } from '@/lib/ipc';
 import { useTheme } from '@/hooks/useTheme';
+import { useUiLanguageSync } from '@/hooks/useUiLanguageSync';
 import { AppIcon } from '@/components/ui/app-icon';
 import { AlertCircle, CheckCircle2, Mic, Info } from 'lucide-react';
 
@@ -54,7 +56,13 @@ export function notificationIconMeta(
 }
 
 export function NotificationToast() {
+  const { t } = useTranslation();
   useTheme();
+  // This toast is its own window, mounted straight from main.tsx without the
+  // App tree, so it does not inherit App's language sync. Without this a toast
+  // already on screen when the user switches language would keep its old
+  // strings until it expired.
+  useUiLanguageSync();
   const [data, setData] = React.useState<NotificationData | null>(null);
 
   React.useLayoutEffect(() => {
@@ -138,7 +146,7 @@ export function NotificationToast() {
           <button
             onClick={handleClose}
             className="absolute -top-1.5 -left-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-white shadow-sm border border-gray-200 text-gray-500 opacity-0 transition-opacity hover:bg-gray-50 hover:text-gray-700 group-hover:opacity-100 dark:bg-[#2C2C2E] dark:border-white/10 dark:text-gray-400 dark:hover:bg-[#3C3C3E] dark:hover:text-gray-200"
-            title="Close"
+            title={t('toast.notification.close')}
           >
             <svg width="8" height="8" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
               <path d="M1 1L13 13M1 13L13 1" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
@@ -181,7 +189,7 @@ export function NotificationToast() {
                 className="flex items-center gap-2 rounded-[10px] border border-gray-200 bg-white px-3 py-1.5 text-[13px] font-medium text-gray-900 transition-all hover:bg-gray-50 hover:shadow-sm active:bg-gray-100 active:scale-[0.98] shrink-0 dark:border-white/10 dark:bg-[#2C2C2E] dark:text-gray-100 dark:hover:bg-[#3C3C3E] dark:active:bg-[#1C1C1E]"
               >
                 <ProfessionalCameraIcon className="h-5 w-5" backgroundColor={barColor} />
-                <span>Join &amp; take notes</span>
+                <span>{t('toast.notification.join')}</span>
               </button>
             ) : null
           ) : (

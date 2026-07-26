@@ -1,5 +1,6 @@
 // Shared helpers for the Chat tab + conversation view.
 
+import i18n from '@/lib/i18n';
 import type { AiProvider, CloudProvider } from '@/lib/ipc';
 
 /** The AI-provider config fields the active-model label reads. */
@@ -45,18 +46,23 @@ export function chatProviderReady(p: ChatProviderFields | undefined): boolean {
  * label can't lie. Returns 'Auto' until provider config has loaded.
  */
 export function formatActiveModel(p: ActiveModelFields | undefined): string {
-  if (!p) return 'Auto';
+  if (!p) return i18n.t('chat.model.auto');
   // Guard each interpolation: an optimistic provider switch can briefly leave the
   // cache holding {ai_provider} without the model fields, which would otherwise
   // render "Ollama · undefined" for a frame.
   switch (p.ai_provider) {
     case 'cloud':
-      return [p.cloud_provider, p.cloud_model].filter(Boolean).join(' · ') || 'Cloud';
+      return (
+        [p.cloud_provider, p.cloud_model].filter(Boolean).join(' · ') ||
+        i18n.t('chat.model.cloud')
+      );
     case 'remote':
-      return p.model ? `Remote Ollama · ${p.model}` : 'Remote Ollama';
+      return p.model
+        ? `${i18n.t('chat.model.remoteOllama')} · ${p.model}`
+        : i18n.t('chat.model.remoteOllama');
     case 'adapter':
       // The org adapter brokers the model server-side; the desktop has no id.
-      return 'Organisation';
+      return i18n.t('chat.model.organisation');
     case 'local':
     default:
       return p.model ? `Ollama · ${p.model}` : 'Ollama';
@@ -111,11 +117,11 @@ export function bucketKey(ts: number, now: number = Date.now()): string {
 }
 
 export function toBucketLabel(key: string): string {
-  if (key === 'today') return 'Today';
-  if (key === 'yesterday') return 'Yesterday';
-  if (key === 'this-week') return 'This week';
-  if (key === 'last-2-weeks') return 'Last 2 weeks';
-  if (key === 'this-month') return 'This month';
+  if (key === 'today') return i18n.t('chat.bucket.today');
+  if (key === 'yesterday') return i18n.t('chat.bucket.yesterday');
+  if (key === 'this-week') return i18n.t('chat.bucket.thisWeek');
+  if (key === 'last-2-weeks') return i18n.t('chat.bucket.last2Weeks');
+  if (key === 'this-month') return i18n.t('chat.bucket.thisMonth');
   if (key.startsWith('month-')) {
     const m = parseInt(key.slice(6), 10);
     return new Date(2000, m, 1).toLocaleString(undefined, { month: 'long' });
@@ -128,15 +134,15 @@ export function relativeTime(ts: number): string {
   const now = Date.now();
   const diff = Math.max(0, now - ts);
   const minutes = Math.floor(diff / 60000);
-  if (minutes < 1) return 'now';
-  if (minutes < 60) return `${minutes}m`;
+  if (minutes < 1) return i18n.t('chat.relative.now');
+  if (minutes < 60) return i18n.t('chat.relative.minutes', { n: minutes });
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h`;
+  if (hours < 24) return i18n.t('chat.relative.hours', { n: hours });
   const days = Math.floor(hours / 24);
-  if (days < 7) return `${days}d`;
+  if (days < 7) return i18n.t('chat.relative.days', { n: days });
   const weeks = Math.floor(days / 7);
-  if (weeks < 5) return `${weeks}w`;
+  if (weeks < 5) return i18n.t('chat.relative.weeks', { n: weeks });
   const months = Math.floor(days / 30);
-  if (months < 12) return `${months}mo`;
-  return `${Math.floor(months / 12)}y`;
+  if (months < 12) return i18n.t('chat.relative.months', { n: months });
+  return i18n.t('chat.relative.years', { n: Math.floor(months / 12) });
 }

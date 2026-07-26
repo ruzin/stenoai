@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { useTranslation } from 'react-i18next';
 import { Ban, FileAudio } from 'lucide-react';
 import { ipc } from '@/lib/ipc';
 import {
@@ -26,6 +27,7 @@ import { useRecording } from '@/hooks/useRecording';
  * This mirrors the picker button's `disabled={isRecording}` guard.
  */
 export function ImportDropZone() {
+  const { t } = useTranslation();
   const [dragging, setDragging] = React.useState(false);
 
   // The window-level listeners are bound once, so read the live recording
@@ -129,7 +131,7 @@ export function ImportDropZone() {
           <FileAudio className="size-8 text-muted-foreground" />
         )}
         <p className="text-sm font-medium">
-          {isRecording ? 'Stop recording to import' : 'Drop audio to import'}
+          {isRecording ? t('app.dropBlocked') : t('app.dropToImport')}
         </p>
       </div>
     </div>

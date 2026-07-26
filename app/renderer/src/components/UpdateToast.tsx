@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { useTranslation } from 'react-i18next';
 import { ArrowDownToLine, X } from 'lucide-react';
 import { ipc } from '@/lib/ipc';
 
@@ -11,6 +12,7 @@ import { ipc } from '@/lib/ipc';
  * version is still pending.
  */
 export function UpdateToast() {
+  const { t } = useTranslation();
   const [pendingVersion, setPendingVersion] = React.useState<string | null>(null);
   const [dismissed, setDismissed] = React.useState(false);
 
@@ -45,8 +47,11 @@ export function UpdateToast() {
       aria-live="polite"
     >
       <ArrowDownToLine size={13} style={{ color: 'var(--fg-2)' }} />
-      <span>
-        Update <span className="tabular-nums">v{pendingVersion}</span> ready
+      {/* tabular-nums sits on the whole sentence rather than a nested span so
+          the version number stays a placeholder a translator can move; the
+          feature only affects digits, so the surrounding words are unchanged. */}
+      <span className="tabular-nums">
+        {t('toast.update.ready', { version: pendingVersion })}
       </span>
       <button
         type="button"
@@ -57,12 +62,12 @@ export function UpdateToast() {
           color: 'var(--fg-inverse)',
         }}
       >
-        Restart
+        {t('toast.update.restart')}
       </button>
       <button
         type="button"
         onClick={() => setDismissed(true)}
-        aria-label="Dismiss update notification"
+        aria-label={t('toast.update.dismiss')}
         className="ml-0.5 inline-flex cursor-pointer items-center justify-center rounded-full border-0 bg-transparent p-1"
         style={{ color: 'var(--fg-2)' }}
       >

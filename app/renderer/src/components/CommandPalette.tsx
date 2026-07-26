@@ -1,4 +1,6 @@
 import * as React from 'react';
+import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import { Search } from 'lucide-react';
 import { useMeetings, LIVE_SUMMARY_PREFIX } from '@/hooks/useMeetings';
 import { searchNotes, snippet } from '@/lib/noteSearch';
@@ -38,11 +40,6 @@ interface SettingsEntry {
   tab: string;
   title: string;
   sub: string;
-  /** Settings that only render on macOS (behind `isMac` in GeneralTab):
-   *  "Record system audio" and "Hide dock icon". On Windows those rows don't
-   *  exist, so indexing them would jump to a tab where nothing's there —
-   *  filtered out below when not on mac (#405). */
-  macOnly?: boolean;
 }
 
 // Searchable index of the app's settings, mapped to the tab each one lives on
@@ -50,51 +47,64 @@ interface SettingsEntry {
 // settings now live on the AI tab, so they map to `ai`. Adapted from @Vassista's
 // PR #349 and retargeted to the current tab layout.
 //
-// Keep titles in sync with the rendered setting labels (GeneralTab/AiTab/
-// AboutTab etc.) — the T1 spec asserts a few titles still match, to catch the
-// index drifting out from under a renamed control.
-const SETTINGS_INDEX: SettingsEntry[] = [
-  { id: 'general-name', tab: 'general', title: 'Your name', sub: 'In-app greeting' },
-  { id: 'general-theme', tab: 'general', title: 'Appearance', sub: 'Light, dark, or system theme' },
-  { id: 'general-calendar', tab: 'general', title: 'Connect calendar', sub: 'Google, Outlook' },
-  { id: 'general-scheduled', tab: 'general', title: 'Scheduled meetings', sub: 'Upcoming calendar events' },
-  { id: 'general-autodetect', tab: 'general', title: 'Auto-detected meetings', sub: 'Notify when another app uses the microphone' },
-  { id: 'general-notifications', tab: 'general', title: 'Post meeting notifications', sub: 'Desktop notifications when notes are ready' },
-  { id: 'general-mic', tab: 'general', title: 'Microphone', sub: 'Input device' },
-  { id: 'general-system-audio', tab: 'general', title: 'Record system audio', sub: 'Capture other participants', macOnly: true },
-  { id: 'general-silence', tab: 'general', title: 'Auto-stop on silence', sub: 'End a recording when it goes quiet' },
-  { id: 'general-launch', tab: 'general', title: 'Launch on login', sub: 'Start Steno automatically' },
+// `key` names the `palette.settings.<key>` copy block (`.title` + `.sub`); `id`
+// stays a stable, untranslated row identity. Keep the copy in sync with the
+// rendered setting labels (GeneralTab/AiTab/AboutTab etc.) — the T1 spec asserts
+// a few titles still match, to catch the index drifting out from under a
+// renamed control.
+const SETTINGS_ROWS: Array<{
+  id: string;
+  tab: string;
+  key: string;
+  /** Settings that only render on macOS (behind `isMac` in GeneralTab):
+   *  "Record system audio" and "Hide dock icon". On Windows those rows don't
+   *  exist, so indexing them would jump to a tab where nothing's there —
+   *  filtered out below when not on mac (#405). */
+  macOnly?: boolean;
+}> = [
+  { id: 'general-name', tab: 'general', key: 'name' },
+  { id: 'general-theme', tab: 'general', key: 'theme' },
+  { id: 'general-calendar', tab: 'general', key: 'calendar' },
+  { id: 'general-scheduled', tab: 'general', key: 'scheduled' },
+  { id: 'general-autodetect', tab: 'general', key: 'autoDetect' },
+  { id: 'general-notifications', tab: 'general', key: 'notifications' },
+  { id: 'general-mic', tab: 'general', key: 'microphone' },
+  { id: 'general-system-audio', tab: 'general', key: 'systemAudio', macOnly: true },
+  { id: 'general-silence', tab: 'general', key: 'silence' },
+  { id: 'general-launch', tab: 'general', key: 'launch' },
   // Cross-platform row (Electron's Tray covers the macOS menu bar and the
-  // Windows system tray); its rendered label switches on platform, so mirror
-  // that here so the title matches whatever GeneralTab shows.
-  {
-    id: 'general-menubar',
-    tab: 'general',
-    title: isMac ? 'Show in menu bar' : 'Show in system tray',
-    sub: 'Quick-access icon in the menu bar or system tray',
-  },
-  { id: 'general-dock', tab: 'general', title: 'Hide dock icon', sub: 'Menu bar / tray icon only', macOnly: true },
-  { id: 'ai-language', tab: 'ai', title: 'Language', sub: 'Transcription and summary language' },
-  { id: 'ai-transcription', tab: 'ai', title: 'Transcription model', sub: 'Parakeet or Whisper' },
-  { id: 'ai-save-recordings', tab: 'ai', title: 'Save recordings', sub: 'Keep the audio files after transcription' },
-  { id: 'ai-autonotes', tab: 'ai', title: 'Generate notes automatically', sub: 'Summarise after transcription' },
-  { id: 'ai-provider', tab: 'ai', title: 'AI provider', sub: 'Local, private server, cloud, or organisation' },
-  { id: 'templates', tab: 'templates', title: 'Templates', sub: 'Custom note formats' },
-  { id: 'org', tab: 'organisation', title: 'Organisation', sub: 'Sign in and back up notes to your org' },
-  { id: 'advanced-storage', tab: 'advanced', title: 'Storage location', sub: 'Where notes and recordings are saved' },
-  { id: 'advanced-setup', tab: 'advanced', title: 'Setup wizard', sub: 'Re-run first-time setup' },
-  { id: 'advanced-clear', tab: 'advanced', title: 'Clear recording state', sub: 'Reset a stuck recording' },
-  { id: 'advanced-analytics', tab: 'advanced', title: 'Anonymous usage analytics', sub: 'Opt in or out' },
-  { id: 'developer', tab: 'developer', title: 'Developer', sub: 'Diagnostics and logs' },
-  { id: 'about', tab: 'about', title: 'About', sub: 'Version, release notes, check for updates' },
-  { id: 'about-discord', tab: 'about', title: 'Discord', sub: 'Join the community, ask questions, share feedback' },
+  // Windows system tray); its rendered label switches on platform, so the
+  // title key below does the same so it matches whatever GeneralTab shows.
+  { id: 'general-menubar', tab: 'general', key: isMac ? 'menuBar' : 'systemTray' },
+  { id: 'general-dock', tab: 'general', key: 'dockIcon', macOnly: true },
+  { id: 'ai-language', tab: 'ai', key: 'language' },
+  { id: 'ai-transcription', tab: 'ai', key: 'transcriptionModel' },
+  { id: 'ai-save-recordings', tab: 'ai', key: 'saveRecordings' },
+  { id: 'ai-autonotes', tab: 'ai', key: 'autoNotes' },
+  { id: 'ai-provider', tab: 'ai', key: 'aiProvider' },
+  { id: 'templates', tab: 'templates', key: 'templates' },
+  { id: 'org', tab: 'organisation', key: 'organisation' },
+  { id: 'advanced-storage', tab: 'advanced', key: 'storage' },
+  { id: 'advanced-setup', tab: 'advanced', key: 'setupWizard' },
+  { id: 'advanced-clear', tab: 'advanced', key: 'clearRecordingState' },
+  { id: 'advanced-analytics', tab: 'advanced', key: 'analytics' },
+  { id: 'developer', tab: 'developer', key: 'developer' },
+  { id: 'about', tab: 'about', key: 'about' },
+  { id: 'about-discord', tab: 'about', key: 'discord' },
 ];
 
 // Only the settings that actually render on this platform. macOS-only rows
 // ("Record system audio", "Hide dock icon") don't exist on Windows/Linux, so
 // they're dropped from the index there — otherwise selecting one would jump to
 // a tab where the row isn't shown (#405).
-const AVAILABLE_SETTINGS = SETTINGS_INDEX.filter((s) => !s.macOnly || isMac);
+function buildSettingsIndex(t: TFunction): SettingsEntry[] {
+  return SETTINGS_ROWS.filter((s) => !s.macOnly || isMac).map((s) => ({
+    id: s.id,
+    tab: s.tab,
+    title: t(`palette.settings.${s.key}.title`),
+    sub: t(`palette.settings.${s.key}.sub`),
+  }));
+}
 
 /**
  * Global ⌘K search. Provides `open()` to descendants (the sidebar trigger) and
@@ -113,6 +123,7 @@ export function CommandPaletteProvider({ children }: { children: React.ReactNode
 }
 
 function CommandPalette({ onClose }: { onClose: () => void }) {
+  const { t } = useTranslation();
   // Context-aware: while the Settings page is open, ⌘K searches settings and
   // jumps to the tab each one lives on; everywhere else it searches notes.
   const currentRoute = useRoute();
@@ -146,14 +157,16 @@ function CommandPalette({ onClose }: { onClose: () => void }) {
     return () => prev?.focus?.();
   }, []);
 
+  const availableSettings = React.useMemo(() => buildSettingsIndex(t), [t]);
+
   const settingsResults = React.useMemo<SettingsEntry[]>(() => {
     if (!isSettingsMode) return [];
-    if (!query.trim()) return AVAILABLE_SETTINGS;
+    if (!query.trim()) return availableSettings;
     const q = query.trim().toLowerCase();
-    return AVAILABLE_SETTINGS.filter(
+    return availableSettings.filter(
       (s) => s.title.toLowerCase().includes(q) || s.sub.toLowerCase().includes(q),
     );
-  }, [isSettingsMode, query]);
+  }, [isSettingsMode, query, availableSettings]);
 
   const noteResults = React.useMemo<Meeting[]>(() => {
     if (isSettingsMode) return [];
@@ -230,7 +243,7 @@ function CommandPalette({ onClose }: { onClose: () => void }) {
       <div
         role="dialog"
         aria-modal="true"
-        aria-label={isSettingsMode ? 'Search settings' : 'Search notes'}
+        aria-label={isSettingsMode ? t('palette.searchSettings') : t('palette.searchNotes')}
         className="relative mt-[12vh] w-[min(620px,92vw)] overflow-hidden rounded-xl shadow-[var(--shadow-md)]"
         style={{ background: 'var(--surface-raised)', border: '1px solid hsl(var(--border))' }}
         onMouseDown={(e) => e.stopPropagation()}
@@ -246,8 +259,10 @@ function CommandPalette({ onClose }: { onClose: () => void }) {
             data-testid="command-palette-input"
             className="w-full bg-transparent text-[14px] outline-none"
             style={{ color: 'var(--fg-1)', fontFamily: 'var(--font-sans)' }}
-            placeholder={isSettingsMode ? 'Search settings…' : 'Search notes…'}
-            aria-label={isSettingsMode ? 'Search settings' : 'Search notes'}
+            placeholder={
+              isSettingsMode ? t('palette.searchSettingsPlaceholder') : t('palette.searchNotesPlaceholder')
+            }
+            aria-label={isSettingsMode ? t('palette.searchSettings') : t('palette.searchNotes')}
             role="combobox"
             aria-expanded="true"
             aria-controls="cmdk-listbox"
@@ -264,7 +279,7 @@ function CommandPalette({ onClose }: { onClose: () => void }) {
           ref={listRef}
           id="cmdk-listbox"
           role="listbox"
-          aria-label="Search results"
+          aria-label={t('palette.results')}
           className="scrollbar-clean max-h-[50vh] overflow-auto py-1"
         >
           {resultCount === 0 ? (
@@ -273,10 +288,12 @@ function CommandPalette({ onClose }: { onClose: () => void }) {
               style={{ color: 'var(--fg-muted)' }}
             >
               {query.trim()
-                ? `No ${isSettingsMode ? 'settings' : 'notes'} match “${query.trim()}”`
+                ? isSettingsMode
+                  ? t('palette.noSettingsMatch', { query: query.trim() })
+                  : t('palette.noNotesMatch', { query: query.trim() })
                 : isSettingsMode
-                  ? 'No settings'
-                  : 'No notes yet'}
+                  ? t('palette.noSettings')
+                  : t('palette.noNotes')}
             </li>
           ) : isSettingsMode ? (
             settingsResults.map((s, i) => (
@@ -305,7 +322,7 @@ function CommandPalette({ onClose }: { onClose: () => void }) {
             ))
           ) : (
             noteResults.map((m, i) => {
-              const title = m.session_info.name || 'Untitled Meeting';
+              const title = m.session_info.name || t('palette.untitledMeeting');
               const sub = snippet(m.summary, query);
               return (
                 <li
@@ -345,9 +362,9 @@ function CommandPalette({ onClose }: { onClose: () => void }) {
             fontFamily: 'var(--font-sans)',
           }}
         >
-          <span>↑↓ navigate</span>
-          <span>↵ open</span>
-          <span>esc close</span>
+          <span>{t('palette.hintNavigate')}</span>
+          <span>{t('palette.hintOpen')}</span>
+          <span>{t('palette.hintClose')}</span>
         </div>
       </div>
     </div>
