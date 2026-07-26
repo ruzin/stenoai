@@ -9,7 +9,12 @@ from src.summarizer import OllamaSummarizer, MAP_PROMPT_OVERHEAD_TOKENS, MAP_OUT
 
 def _make_summarizer(model_name="llama3.2:3b"):
     cfg = Config()
-    return OllamaSummarizer(model_name=model_name, ai_provider="local", config=cfg)
+    # Patch out the Ollama readiness/start check during construction — these are
+    # unit tests for pure helpers (chunk budget, split, prompt build) and must
+    # not depend on a live Ollama server. Matches the pattern the sibling
+    # summarizer test modules already use, and keeps the suite hermetic in CI.
+    with mock.patch.object(OllamaSummarizer, "_ensure_ollama_ready"):
+        return OllamaSummarizer(model_name=model_name, ai_provider="local", config=cfg)
 
 
 class ChunkBudgetTests(unittest.TestCase):

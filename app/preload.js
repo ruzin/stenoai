@@ -58,7 +58,6 @@ const stenoai = {
 
   app: {
     getVersion: () => invoke('get-app-version'),
-    relaunch: () => invoke('relaunch-app'),
   },
 
   window: {
@@ -99,8 +98,6 @@ const stenoai = {
   perm: {
     checkMicrophone: () => invoke('check-microphone-permission'),
     requestMicrophone: () => invoke('request-microphone-permission'),
-    requestScreenRecording: () => invoke('request-screen-recording-permission'),
-    openScreenRecordingSettings: () => invoke('open-screen-recording-settings'),
   },
 
   recording: {
@@ -152,6 +149,9 @@ const stenoai = {
     update: (summaryFile, patch) => invoke('update-meeting', summaryFile, patch),
     revealFolder: (filePath) => invoke('reveal-meeting-folder', filePath),
     delete: (meeting) => invoke('delete-meeting', meeting),
+    undoDelete: (id) => invoke('undo-delete-meeting', id),
+    commitDelete: (id) => invoke('commit-delete-meeting', id),
+    listPendingDeletes: () => invoke('list-pending-deletes'),
     reprocess: (summaryFile, regenTitle, name) => invoke('reprocess-meeting', summaryFile, regenTitle, name),
     // Re-transcribe (#266): re-run ASR on the source recording then re-summarise
     // (regenTitle false; the retranscribe flag is the trailing arg).
@@ -253,6 +253,8 @@ const stenoai = {
     setKeepRecordings: (v) => invoke('set-keep-recordings', v),
     getAutoSummarize: () => invoke('get-auto-summarize'),
     setAutoSummarize: (v) => invoke('set-auto-summarize', v),
+    getAutoInstallWhenIdle: () => invoke('get-auto-install-when-idle'),
+    setAutoInstallWhenIdle: (v) => invoke('set-auto-install-when-idle', v),
     getSilenceAutoStop: () => invoke('get-silence-auto-stop'),
     setSilenceAutoStopEnabled: (v) => invoke('set-silence-auto-stop-enabled', v),
     setSilenceAutoStopMinutes: (v) => invoke('set-silence-auto-stop-minutes', v),

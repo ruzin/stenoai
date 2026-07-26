@@ -216,7 +216,8 @@ class Config:
         "nl": "Dutch",
         "pt": "Portuguese",
         "ja": "Japanese",
-        "zh": "Chinese",
+        "zh-Hans": "Chinese (Simplified)",
+        "zh-Hant": "Chinese (Traditional)",
         "ko": "Korean",
         "hi": "Hindi",
         "ar": "Arabic",
@@ -298,6 +299,7 @@ class Config:
         self._migrate_whisper_model()
         self._migrate_summary_model()
         self._migrate_transcription_engine()
+        self._migrate_language_zh()
         self._migrate_privacy_notice_seen()
         self._normalize_templates()
         self._seed_sample_template()
@@ -322,6 +324,21 @@ class Config:
                 self._config.pop(key)
                 removed = True
         if removed:
+            self._save()
+
+    def _migrate_language_zh(self) -> None:
+        """Migrate the legacy single ``"zh"`` language to Simplified (``zh-Hans``).
+
+        Chinese used to be one selectable entry ("zh"); it's now split into
+        ``zh-Hans`` (Simplified) and ``zh-Hant`` (Traditional). whisper.cpp
+        emits Simplified for "zh", so an existing "zh" user was effectively on
+        Simplified — map them there and leave the Traditional opt-in to the
+        Settings dropdown.
+        """
+        if self._load_failed:
+            return  # never persist defaults over a corrupt-but-recoverable file
+        if self._config.get("language") == "zh":
+            self._config["language"] = "zh-Hans"
             self._save()
 
     def _migrate_transcription_engine(self) -> None:
@@ -709,6 +726,12 @@ class Config:
             "storage_path": "",
             "keep_recordings": False,
             "auto_summarize_enabled": True,
+            # Default ON — when the app is idle and nothing is in flight, a
+            # downloaded update installs itself and relaunches so the user
+            # never has to click "Restart". The "update available/downloaded"
+            # notification is unchanged; this only removes the manual click,
+            # and main.js keeps autoInstallOnAppQuit as the safe fallback.
+            "auto_install_when_idle": True,
             "whisper_model": "large-v3-turbo",
             "transcription_engine": "parakeet",
             "version": "1.0"
@@ -1045,6 +1068,18 @@ class Config:
         self._config["keep_recordings"] = enabled
         return self._save()
 
+    def get_auto_install_when_idle(self) -> bool:
+        """Get whether a downloaded update auto-installs (and relaunches) when
+        the app is idle and nothing is in flight. Default on — removes the
+        manual "Restart" click; the download/notification behaviour and the
+        autoInstallOnAppQuit fallback are unaffected."""
+        return self._config.get("auto_install_when_idle", True)
+
+    def set_auto_install_when_idle(self, enabled: bool) -> bool:
+        """Set whether idle auto-install is enabled."""
+        self._config["auto_install_when_idle"] = enabled
+        return self._save()
+
     def get_auto_summarize_enabled(self) -> bool:
         """Get whether notes (summary/title/template report) are generated
         automatically after transcription. Default on — existing users keep
@@ -1175,6 +1210,33 @@ class Config:
         # transcript's language instead of silently defaulting to English (#281).
         return self._config.get("language", "auto")
 
+    def get_whisper_language(self) -> str:
+        """Map the UI language code to the code the ASR engine understands.
+
+        whisper.cpp (and Parakeet's language hint) only know ``"zh"`` for
+        Chinese — the Simplified/Traditional distinction is a post-transcription
+        conversion, not an ASR mode — so both ``zh-Hans`` and ``zh-Hant`` fold
+        to ``zh`` here. Every other code passes through unchanged.
+        """
+        code = self.get_language()
+        if code in ("zh-Hans", "zh-Hant"):
+            return "zh"
+        return code
+
+    def get_chinese_variant(self) -> Optional[str]:
+        """Return the target Chinese script for output conversion.
+
+        ``"traditional"`` for ``zh-Hant``, ``"simplified"`` for ``zh-Hans``,
+        and ``None`` for any non-Chinese language (no conversion needed).
+        Consumed by ``src.chinese.apply_variant``.
+        """
+        code = self.get_language()
+        if code == "zh-Hant":
+            return "traditional"
+        if code == "zh-Hans":
+            return "simplified"
+        return None
+
     def set_language(self, language_code: str) -> bool:
         """
         Set the language for transcription and summarization.
@@ -1185,6 +1247,11 @@ class Config:
         Returns:
             True if saved successfully, False otherwise
         """
+        # Legacy "zh" (pre Simplified/Traditional split) is still accepted and
+        # normalised to Simplified, matching the on-load migration.
+        if language_code == "zh":
+            language_code = "zh-Hans"
+
         if language_code not in self.SUPPORTED_LANGUAGES:
             logger.error(f"Unsupported language code: {language_code}")
             return False

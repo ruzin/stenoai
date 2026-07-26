@@ -1,4 +1,18 @@
-const { app, BrowserWindow, ipcMain, dialog, shell, systemPreferences, globalShortcut, safeStorage, Tray, Menu, nativeImage, powerMonitor, net, session, desktopCapturer } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, systemPreferences, globalShortcut, Tray, Menu, nativeImage, powerMonitor, net, session } = require('electron');
+
+// safeStorage is accessed lazily via getSafeStorage(), NOT destructured from the
+// require above. On macOS, merely retrieving the safeStorage binding at load
+// time used to register an app-ready observer that eagerly initialized OSCrypt
+// and touched the login Keychain — popping the "<app> Safe Storage" permission
+// dialog on every launch even for users who had no stored secret at all
+// (Electron 42.0.0 regression, made lazy again in 42.4.1). Keeping the binding
+// out of the top-level destructure means loading main.js can never trigger that
+// access; the first Keychain touch happens only when a credential helper below
+// actually runs (saving a cloud key, org sign-in, calendar connect). require()
+// is cached, so getSafeStorage() is cheap.
+function getSafeStorage() {
+  return require('electron').safeStorage;
+}
 
 // Prevent EPIPE crashes when stdout/stderr pipe is broken (e.g. launching terminal closed)
 process.stdout?.on('error', () => {});
@@ -42,6 +56,8 @@ const { createDebugLog } = require('./debug-log');
 const { createTeardownRegistry } = require('./teardown');
 const { registerFoldersIpc } = require('./folders-ipc');
 const { registerSettingsIpc } = require('./settings-ipc');
+const { isSafeToAutoInstall } = require('./update-idle-gate');
+const { isOSUpdateEligible, MIN_MACOS_FOR_AUTOUPDATE } = require('./update-os-gate');
 const processingLog = require('./processing-log');
 const { isMeetingApp, allowsDeviceLevelFallback, isMacos14Plus } = require('./meeting-detect');
 const { sweepOrphanedLiveSnapshots } = require('./live-snapshot-sweep');
@@ -117,6 +133,29 @@ if (!app.isPackaged) {
 // Windows that's irrelevant (Chromium uses WASAPI loopback) and passing it is
 // at best a no-op, so we don't.
 initMain({ forceCoreAudioTap: process.platform === 'darwin' });
+
+/*
+ * electron-audio-loopback's enable handler obtains a real screen source for
+ * the video track, which unnecessarily couples system-audio recording to the
+ * macOS Screen Recording permission. The renderer still requests video:true,
+ * so the callback must include request.frame: an audio-only response throws
+ * after consuming the one-shot callback. Electron also invokes the display
+ * media handler without awaiting it, so callback failures must be caught here
+ * to avoid an unhandled rejection crashing the main process.
+ *
+ * Keep this override platform-neutral: audio:'loopback' retains the package's
+ * semantics on Windows while avoiding the same callback crash landmine.
+ */
+ipcMain.removeHandler('enable-loopback-audio');
+ipcMain.handle('enable-loopback-audio', () => {
+  session.defaultSession.setDisplayMediaRequestHandler((request, callback) => {
+    try {
+      callback({ video: request.frame, audio: 'loopback' });
+    } catch (err) {
+      console.error('[loopback] display media callback failed:', err);
+    }
+  });
+});
 
 // Windows taskbar identity. Without an explicit AppUserModelID matching the
 // installer's, the taskbar shows a default/Electron icon (and groups the window
@@ -292,6 +331,10 @@ class Notification extends EventEmitter {
       },
     });
     notificationWindow = win;
+    // Deny window.open + block foreign navigation on the toast window too, so the
+    // security guards cover EVERY BrowserWindow (#377). allowExternalLinks lets a
+    // Join/meeting link route out via shell.openExternal.
+    hardenWindow(win, { allowExternalLinks: true });
     win._activeCustomNotification = this;
     // Also pin the window to the notification instance so a handler bound to
     // THIS notif (e.g. the pre-meeting 'close' dismissal-telemetry handler) can
@@ -360,13 +403,6 @@ let shortcutQueue = [];
 let pendingShortcutUrls = [];
 let rendererShortcutReady = false;
 let launchedByShortcut = false;
-// Screen Recording permission as of process launch, frozen once at startup.
-// macOS doesn't apply a mid-session grant to the running process — only a
-// relaunch picks it up — so gates that decide "is loopback usable this
-// session" must read this, not the live systemPreferences status, or a
-// mid-session grant re-enables a code path (electron-audio-loopback's
-// setDisplayMediaRequestHandler) that's still broken until the app restarts.
-let screenPermissionAtLaunch = 'granted';
 // true when this launch was triggered by the OS login item (auto-launch).
 // Set once at startup (before the app_opened event). On a login launch we
 // suppress the first window show so Steno starts hidden in the tray/menu bar,
@@ -1118,6 +1154,339 @@ function validateSafeFilePath(filepath, allowedBaseDirs) {
   }
 }
 
+// --- Soft-delete: single-summary tombstone deferred delete (#234) ----------
+// Deleting a note HIDES only its summary file, by renaming it into a hidden
+// sibling dir (`output/.pending-delete/<id>/`). Every backend scan identifies a
+// note SOLELY by its summary glob (`list_meetings` / global chat glob
+// `output/*_summary.{json,md}`, non-recursive), so hiding the summary makes the
+// note invisible to all of them via a SINGLE atomic same-filesystem rename — no
+// multi-file moves, no cross-volume copy, no manifest, no restore/purge/sweep.
+//
+// The transcript, recording and sidecars are NOT moved: they stay in place and
+// are unlinked only when the delete COMMITS (window elapsed / explicit dismiss /
+// clean quit). Undo renames the summary back. A crash mid-window leaves the
+// hidden summary on disk; startup recovery renames it back so the note REAPPEARS
+// (fail-safe: a lost undo window must never vanish a note, only ever un-delete).
+//
+// State is owned by MAIN (the renderer only shows a display-only countdown).
+// pendingDeletes maps an id -> its record; pendingDeleteBySummary indexes the
+// canonical original summary path -> id for dedup.
+const PENDING_DELETE_DIRNAME = '.pending-delete';
+const DELETE_WINDOW_MS = 8000;
+// id -> { id, meeting, summaryFileKey, hiddenDir, originalSummaryPath,
+//         hiddenSummaryPath, canonicalSummary, ancillaryPaths, deadline,
+//         state, timer }
+// A note names EXACTLY ONE summary_file; we hide that single file (one atomic
+// rename). No multi-variant/twin bookkeeping — see the delete handler's note on
+// the anomalous, fail-safe .json+.md twin edge.
+const pendingDeletes = new Map();
+// canonical(the note's original summary path) -> id, so a second delete of the
+// same summary is rejected.
+const pendingDeleteBySummary = new Map();
+
+// Canonicalize a path via realpath, falling back to a parent-realpath + basename
+// (for a path whose leaf no longer exists, e.g. an already-hidden summary) and
+// finally the lexical resolve. Used for identity comparisons only.
+function canonicalPathForCompare(p) {
+  const resolved = path.resolve(p);
+  try {
+    return fs.realpathSync(resolved);
+  } catch (_) {
+    try {
+      return path.join(fs.realpathSync(path.dirname(resolved)), path.basename(resolved));
+    } catch (_) {
+      return resolved;
+    }
+  }
+}
+
+// An id is generated by us (`<ts>-<hex>`) but comes back from the untrusted
+// renderer on undo/commit. We only ever use it as a Map key (undo/commit read
+// the hidden path from OUR record, never build a path from the renderer id), but
+// reject any separator/parent token as defense-in-depth.
+function isSafePendingId(id) {
+  return (
+    typeof id === 'string' &&
+    id.length > 0 &&
+    !id.includes('/') &&
+    !id.includes('\\') &&
+    !id.includes('..') &&
+    id !== '.' &&
+    id !== '..'
+  );
+}
+
+// Canonical STEM identity for a summary path: strip the `_summary.{md,json}`
+// suffix and keep the containing dir, so the two format variants of one note
+// (<stem>_summary.json / <stem>_summary.md) collapse to the SAME key. Used by
+// isSummaryBusy so deleting the .json while a job rewrites the .md (or vice
+// versa) is still seen as busy. Falls back to the full canonical path when the
+// basename isn't a summary variant (never matches an unrelated file).
+function summaryStemKey(summaryAbs) {
+  const canon = canonicalPathForCompare(summaryAbs);
+  const dir = path.dirname(canon);
+  const base = path.basename(canon);
+  for (const suf of ['_summary.md', '_summary.json']) {
+    if (base.endsWith(suf)) {
+      return path.join(dir, base.slice(0, -suf.length));
+    }
+  }
+  return canon;
+}
+
+// Is a note (by its summary path) currently in an active pipeline — recording
+// into, queued/processing, or reprocessing? A delete must be refused for such a
+// note, or a finishing job would rewrite (resurrect) or re-upload the summary we
+// just hid = the note reappears / leaks after the user deleted it. Compares by
+// canonical STEM (not exact path) so deleting one format variant while a job is
+// rewriting the other variant of the SAME note is still caught — otherwise the
+// job could resurrect the summary while commit unlinks the audio.
+function isSummaryBusy(summaryAbs) {
+  const target = summaryStemKey(summaryAbs);
+  const candidates = [];
+  for (const key of activeReprocessJobs.keys()) candidates.push(key);
+  if (currentRecordingAppendTarget) candidates.push(currentRecordingAppendTarget);
+  if (currentProcessingJob) {
+    if (currentProcessingJob.appendTo) candidates.push(currentProcessingJob.appendTo);
+    if (currentProcessingJob.summaryFile) candidates.push(currentProcessingJob.summaryFile);
+  }
+  for (const job of processingQueue) {
+    if (job && job.appendTo) candidates.push(job.appendTo);
+    if (job && job.summaryFile) candidates.push(job.summaryFile);
+  }
+  return candidates.some((c) => summaryStemKey(c) === target);
+}
+
+// A trashable meeting file must live directly in an allowed base's output/,
+// recordings/, or transcripts/ folder — NOT just anywhere under the broad
+// allowed roots. This rejects a crafted meeting whose audio_file points at,
+// say, <userData>/config.json (Codex C2): config.json is under an allowed base,
+// but its parent dir is not one of the meeting-file folders. realpath-resolving
+// both the candidate's parent and each leaf dir closes the symlink gap.
+function isAllowedMeetingSource(src, allowedBaseDirs) {
+  const leafDirs = [];
+  for (const base of allowedBaseDirs) {
+    for (const sub of ['output', 'recordings', 'transcripts']) {
+      const p = path.join(base, sub);
+      let real;
+      try {
+        real = fs.realpathSync(p);
+      } catch (_) {
+        real = path.resolve(p);
+      }
+      leafDirs.push(real);
+    }
+  }
+  const parent = path.dirname(src);
+  let realParent;
+  try {
+    realParent = fs.realpathSync(parent);
+  } catch (_) {
+    realParent = path.resolve(parent);
+  }
+  return leafDirs.includes(realParent);
+}
+
+// No-clobber occupancy test. Uses lstat (NOT existsSync) so a DANGLING symlink
+// at the path counts as occupied: existsSync follows the link and returns false
+// for a broken target, which would let a renameSync silently REPLACE the symlink
+// (and, if it weren't dangling, write THROUGH it out of the sandbox). Any lstat
+// success — regular file, dir, symlink, broken symlink — means "occupied".
+function pathIsOccupied(p) {
+  try {
+    fs.lstatSync(p);
+    return true;
+  } catch (err) {
+    // Only a genuine "not found" proves the path is free. A transient lstat
+    // error (EIO / EACCES / ...) must fail SAFE — treat the path as occupied so
+    // we never renameSync over something we couldn't inspect.
+    if (err && err.code === 'ENOENT') return false;
+    return true;
+  }
+}
+
+// Remove a hidden summary's `.pending-delete/<id>/` scaffold, then best-effort
+// remove the now-empty `.pending-delete/` parent (rmdir fails, harmlessly, if
+// another pending delete still occupies it). Keeps output/ tidy between windows.
+function removeHiddenScaffold(idDir) {
+  try {
+    fs.rmSync(idDir, { recursive: true, force: true });
+  } catch (_) {}
+  try {
+    fs.rmdirSync(path.dirname(idDir));
+  } catch (_) {}
+}
+
+// Commit a pending delete: PERMANENTLY unlink the hidden summary + every
+// ancillary file (transcript / recording(s) / reports sidecar), then the
+// `.pending-delete/<id>` scaffold. This is the FINAL delete — no rollback.
+// Called when the undo window elapses, on an explicit dismiss
+// (commit-delete-meeting), and synchronously for every entry at clean quit.
+// Best-effort + idempotent: a missing file / unknown id is fine.
+function commitPendingDelete(id) {
+  const entry = pendingDeletes.get(id);
+  if (!entry) return;
+  // Mark committing FIRST so a racing undo-delete-meeting loses (it checks state).
+  entry.state = 'committing';
+  if (entry.timer) {
+    clearTimeout(entry.timer);
+    entry.timer = null;
+  }
+  // Returns true if the file is gone after this call (unlinked or already
+  // absent), false if it survived every retry (e.g. a permanently locked file).
+  const unlinkBestEffort = (p) => {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        fs.unlinkSync(p);
+        return true;
+      } catch (err) {
+        if (err && err.code === 'ENOENT') return true; // already gone — done.
+        // Transient (EBUSY/EPERM on Windows): retry a couple of times, else give
+        // up (best-effort — a residual file is recovered/cleaned on next launch).
+      }
+    }
+    return false;
+  };
+  // The hidden summary IS the note. If it can't be permanently removed (e.g. a
+  // locked file), do NOT drop the pending record, remove the scaffold, or delete
+  // the ancillaries: leaving the hidden summary under .pending-delete/<id>/ lets
+  // startup recovery rename it back so the note REAPPEARS intact (fail-safe — the
+  // note un-deletes rather than half-committing with its transcript/recording
+  // already gone). Bailing before the ancillary unlinks keeps a full restore
+  // possible. A later quit-time sweep / next launch retries the commit.
+  if (!unlinkBestEffort(entry.hiddenSummaryPath)) {
+    console.warn(
+      `Commit: hidden summary unremovable, leaving for startup recovery: ${entry.hiddenSummaryPath}`,
+    );
+    return;
+  }
+  // Ancillary files (transcript / recording(s) / reports sidecar) are hygiene,
+  // not the note itself: a rare permanently-locked orphan is accepted (fail-safe
+  // direction — never risk the note over a stray file). Log any that survived.
+  for (const p of entry.ancillaryPaths) {
+    if (!unlinkBestEffort(p)) {
+      console.warn(`Commit: orphaned ancillary file (could not remove): ${p}`);
+    }
+  }
+  removeHiddenScaffold(entry.hiddenDir);
+  pendingDeletes.delete(id);
+  if (pendingDeleteBySummary.get(entry.canonicalSummary) === id) {
+    pendingDeleteBySummary.delete(entry.canonicalSummary);
+  }
+}
+
+// Synchronously commit EVERY pending delete. Called at clean quit — the undo
+// window ends at quit, so a still-pending delete becomes permanent. Electron
+// does NOT await quit handlers, so this does only synchronous fs work and never
+// blocks quit. A force-kill / crash that skips this leaves hidden summaries on
+// disk, which startup recovery turns back into visible notes (fail-safe).
+function commitAllPendingDeletesSync() {
+  for (const id of [...pendingDeletes.keys()]) {
+    try {
+      commitPendingDelete(id);
+    } catch (_) {}
+  }
+}
+
+// Startup RECOVERY (NON-destructive — replaces the old purge-on-launch). A hidden
+// summary still under `output/.pending-delete/<id>/` at launch is from a prior
+// session whose undo window was cut short by a crash / force-kill. RENAME it back
+// to output/ so the note REAPPEARS — a crash mid-window must never vanish a note,
+// only ever un-delete it. Then remove the empty scaffold. Best-effort; never
+// blocks launch. If the original path is occupied, LEAVE the hidden copy + log
+// (never clobber). Scans every allowed base's output/ (custom storage included).
+function recoverPendingDeletesOnLaunch() {
+  const outputDirs = new Set();
+  for (const base of getAllowedBaseDirs()) {
+    outputDirs.add(path.join(base, 'output'));
+  }
+  for (const outputDir of outputDirs) {
+    const pendingRoot = path.join(outputDir, PENDING_DELETE_DIRNAME);
+    let rootStat;
+    try {
+      rootStat = fs.lstatSync(pendingRoot);
+    } catch (_) {
+      continue; // No `.pending-delete` dir here — nothing to recover.
+    }
+    if (!rootStat.isDirectory()) {
+      console.warn('.pending-delete is not a real directory — skipping recovery:', pendingRoot);
+      continue;
+    }
+    let idDirs;
+    try {
+      idDirs = fs.readdirSync(pendingRoot);
+    } catch (_) {
+      continue;
+    }
+    for (const idDir of idDirs) {
+      const idPath = path.join(pendingRoot, idDir);
+      try {
+        if (!fs.lstatSync(idPath).isDirectory()) continue;
+        for (const name of fs.readdirSync(idPath)) {
+          const hidden = path.join(idPath, name);
+          // Only recover regular files (the only thing we ever hide is a summary).
+          if (!fs.lstatSync(hidden).isFile()) continue;
+          const original = path.join(outputDir, name);
+          // No-clobber (lstat, not existsSync, so a dangling symlink at the
+          // destination counts as occupied and is never replaced). The residual
+          // TOCTOU between this check and the renameSync is accepted: single-user
+          // desktop, synchronous handler, sub-ms window; Node has no atomic
+          // rename-no-replace.
+          if (pathIsOccupied(original)) {
+            console.warn(`Recovery: original occupied, leaving hidden copy: ${hidden}`);
+            continue;
+          }
+          fs.renameSync(hidden, original);
+          console.log(`Recovery: restored hidden summary -> ${original}`);
+        }
+      } catch (e) {
+        console.warn(`Recovery: failed for ${idPath} (non-fatal):`, e?.message);
+      }
+      // Remove the (now hopefully empty) `.pending-delete/<id>` scaffold. rmdir
+      // fails loudly-but-caught if a hidden copy was intentionally left behind.
+      try {
+        fs.rmdirSync(idPath);
+      } catch (_) {}
+    }
+    // Remove the empty `.pending-delete` root.
+    try {
+      fs.rmdirSync(pendingRoot);
+    } catch (_) {}
+  }
+}
+
+// #377 — harden every BrowserWindow against untrusted navigation. The renderer
+// routes all real external links through the `open-external` IPC (shell.openExternal),
+// so nothing legitimately relies on window.open or on navigating the window away
+// from the bundled renderer. Deny window.open outright, and cancel any full-page
+// navigation — the SPA uses in-app routing, so a will-navigate here is a
+// foreign/injected navigation, never a real route change. Interactive windows still
+// let a genuine http(s) link (a target=_blank "Report an issue", or a link
+// inside a note) open in the user's browser instead of silently dying.
+function hardenWindow(win, { allowExternalLinks = false } = {}) {
+  const wc = win.webContents;
+  wc.setWindowOpenHandler(({ url }) => {
+    // HTTP(S) only — matches the will-navigate branch below and the established
+    // `open-external` IPC policy (no mailto/other schemes; nothing legitimate in
+    // the renderer opens a non-http(s) popup). #377 review.
+    if (allowExternalLinks && /^https?:/i.test(url)) {
+      shell.openExternal(url);
+    }
+    return { action: 'deny' };
+  });
+  wc.on('will-navigate', (event) => {
+    // Electron 42: read the target off the event (the positional `url` arg is
+    // deprecated). will-navigate only fires on a real document navigation — the
+    // SPA's hash routing never reaches here, so anything that does is foreign.
+    const url = event.url;
+    if (url === wc.getURL()) return; // reload of the exact trusted document is fine
+    event.preventDefault();
+    if (allowExternalLinks && /^https?:/i.test(url)) {
+      shell.openExternal(url);
+    }
+  });
+}
+
 function createWindow(options = {}) {
   rendererShortcutReady = false;
 
@@ -1163,6 +1532,7 @@ function createWindow(options = {}) {
   }
 
   mainWindow = new BrowserWindow(windowOpts);
+  hardenWindow(mainWindow, { allowExternalLinks: true });
 
   const rendererDist = path.join(__dirname, 'renderer', 'dist', 'index.html');
   const hash = process.env.STENOAI_RENDERER_HASH;
@@ -1471,9 +1841,6 @@ if (!gotSingleInstanceLock) {
   });
 
   app.whenReady().then(async () => {
-    if (process.platform === 'darwin') {
-      try { screenPermissionAtLaunch = systemPreferences.getMediaAccessStatus('screen'); } catch (_) {}
-    }
     // Resolve whether this launch was an OS login-item auto-launch BEFORE the
     // app_opened event and the first window show below. macOS reports it via
     // wasOpenedAtLogin (the deprecated openAsHidden no longer works on 13+);
@@ -1642,6 +2009,15 @@ if (!gotSingleInstanceLock) {
     powerMonitor.on('suspend', freezeInactivityWatchdogsForSleep);
     powerMonitor.on('resume', promptResumeAfterWake);
     powerMonitor.on('resume', thawInactivityWatchdogsAfterWake);
+    // Re-evaluate the idle auto-install gate when the machine wakes or the
+    // screen unlocks — a downloaded update can then install the moment the
+    // user has stepped away, without waiting for the next 60s tick. Cheap and
+    // self-guarding (no-ops unless an update is staged). E2E-gated so the test
+    // suite never even wires it (belt-and-braces with the gate's own guards).
+    if (!IS_E2E) {
+      powerMonitor.on('lock-screen', () => { maybeAutoInstallWhenIdle().catch(() => {}); });
+      powerMonitor.on('resume', () => { maybeAutoInstallWhenIdle().catch(() => {}); });
+    }
     const protocolRegistered = registerShortcutProtocolClient();
     sendDebugLog(`Protocol handler registration (${SHORTCUT_PROTOCOL}): ${protocolRegistered}`);
 
@@ -1744,6 +2120,22 @@ if (!gotSingleInstanceLock) {
       }
     }
 
+    // Recover any soft-deleted notes whose undo window was cut short by a crash
+    // (#234): a hidden summary still under output/.pending-delete/ is renamed back
+    // so the note REAPPEARS (fail-safe — a lost window never vanishes a note).
+    // Best-effort — a failure here must never block launch. Cross-platform;
+    // getUserDataDir() honors STENOAI_USER_DATA_DIR so tests/e2e stay isolated.
+    // MUST run AFTER the custom storage path load above: recovery scans every
+    // getAllowedBaseDirs() output/ dir, and that list only includes the custom
+    // storage path once _cachedCustomStoragePath is set — sweeping earlier would
+    // miss a custom-storage user's hidden summaries, leaving a crash-orphaned
+    // note invisible (effectively lost) instead of restoring it.
+    try {
+      recoverPendingDeletesOnLaunch();
+    } catch (e) {
+      console.warn('pending-delete recovery on launch failed (non-fatal):', e?.message);
+    }
+
     // Clear any .import reservation markers orphaned by a crash mid-import. No
     // import is in flight at startup, so a leftover marker is always stale and
     // would otherwise force every future import of that stem to bump to -N.
@@ -1817,6 +2209,13 @@ if (!gotSingleInstanceLock) {
       killProcessTree(ollamaPid);
       ollamaPid = null;
     }
+    // Commit every pending soft-delete synchronously (#234): the undo window ends
+    // at quit, so a still-pending delete becomes permanent. Sync-only (Electron
+    // does not await quit handlers). A crash that skips this leaves hidden
+    // summaries that startup recovery turns back into notes (fail-safe).
+    try {
+      commitAllPendingDeletesSync();
+    } catch (_) {}
     // Drain the teardown registry (RFC #327 ground rule 4) BEFORE the async
     // telemetry shutdown — Electron does not await quit handlers, so work after
     // the first await is not a reliable barrier. Synchronous + idempotent;
@@ -1939,11 +2338,9 @@ ipcMain.handle('get-system-audio-support', async () => {
     // Windows loopback works but is pending hardware verification, so the UI
     // labels it experimental and ships it opt-in (default off).
     const experimental = process.platform === 'win32';
-    let screenPermission = 'unknown';
     let osVersion = '';
     if (process.platform === 'darwin') {
       try { osVersion = process.getSystemVersion(); } catch (_) {}
-      try { screenPermission = systemPreferences.getMediaAccessStatus('screen'); } catch (_) {}
     } else {
       try { osVersion = process.getSystemVersion(); } catch (_) {}
     }
@@ -1953,69 +2350,10 @@ ipcMain.handle('get-system-audio-support', async () => {
       experimental,
       platform: process.platform,
       osVersion,
-      screenPermission,
-      screenPermissionAtLaunch,
     };
   } catch (error) {
     return { success: false, error: error.message };
   }
-});
-
-// Safely triggers macOS's native Screen Recording permission prompt for a
-// 'not-determined' user, by calling desktopCapturer.getSources() directly in
-// a plain try/caught async handler. Deliberately NOT the same code path as
-// the recording capture flow: electron-audio-loopback's own request handler
-// makes this same call inside an async function passed straight to
-// session.setDisplayMediaRequestHandler, which Electron invokes without
-// awaiting/catching — a failure there becomes an unhandled rejection that
-// used to crash the whole app (see useSystemAudioCapture.ts's
-// screenPermissionOk gate). Calling it here, in an ordinary ipcMain.handle,
-// has no such landmine: a rejection is just a normal rejected promise this
-// handler catches like any other. Only meaningful on macOS — 'not-determined'
-// only exists there.
-ipcMain.handle('request-screen-recording-permission', async () => {
-  if (process.platform !== 'darwin') {
-    return { success: true, screenPermission: 'granted' };
-  }
-  try {
-    await desktopCapturer.getSources({ types: ['screen'] });
-  } catch (error) {
-    sendDebugLog(`[loopback] screen recording permission request failed: ${error.message}`);
-  }
-  let screenPermission = 'unknown';
-  try { screenPermission = systemPreferences.getMediaAccessStatus('screen'); } catch (_) {}
-  return { success: true, screenPermission };
-});
-
-// Once denied/restricted, macOS will not re-prompt — the user has to flip it
-// in System Settings themselves. Deep-links straight to the Screen Recording
-// pane. The URL is a fixed literal (not renderer-supplied), so this is safe
-// despite the generic 'open-external' handler restricting to http/https only.
-ipcMain.handle('open-screen-recording-settings', async () => {
-  if (process.platform !== 'darwin') {
-    return { success: false, error: 'macOS only' };
-  }
-  try {
-    await shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture');
-    return { success: true };
-  } catch (error) {
-    return { success: false, error: error.message };
-  }
-});
-
-// Screen Recording permission changes don't take effect for an already-running
-// process (unlike mic/camera) — macOS requires a full relaunch. Offered as a
-// one-click follow-up after granting so the user doesn't have to know that.
-ipcMain.handle('relaunch-app', async () => {
-  if (process.platform !== 'darwin') {
-    return { success: false, error: 'macOS only' };
-  }
-  // app.quit() (not app.exit()) so before-quit/will-quit still run: the
-  // recording-in-progress confirmation, WebM finalization, Ollama pid-tree
-  // kill, and telemetry flush all live there.
-  app.relaunch();
-  app.quit();
-  return { success: true };
 });
 
 // Debug functionality handled by side panel now
@@ -2803,6 +3141,13 @@ ipcMain.handle('regen-meeting-title', async (event, summaryFile, sessionName) =>
     }
     const { realPath } = validated;
 
+    // Register this job so isSummaryBusy() sees it: regen-title rewrites the
+    // ORIGINAL summary path after a model wait, so a delete during that wait would
+    // let the regen resurrect the summary while commit unlinks the hidden copy +
+    // ancillaries = a resurrected note with lost audio. Keyed on the original
+    // summaryFile (isSummaryBusy canonicalizes keys); cleared in the finally.
+    activeReprocessJobs.set(summaryFile, { summaryFile, sessionName: sessionName || null });
+
     const aiEnv = getAiEnv();
     const regenEnv = Object.keys(aiEnv).length > 0 ? { ...require('process').env, ...aiEnv } : undefined;
 
@@ -2840,6 +3185,8 @@ ipcMain.handle('regen-meeting-title', async (event, summaryFile, sessionName) =>
     return { success: true };
   } catch (error) {
     return { success: false, error: error.message };
+  } finally {
+    activeReprocessJobs.delete(summaryFile);
   }
 });
 
@@ -3408,6 +3755,10 @@ async function renderHtmlToPdf(html) {
       // renderer-supplied document to PDF.
     },
   });
+  // Background render of renderer-supplied HTML: deny any popup and block any
+  // navigation the document might attempt (no openExternal — this is not an
+  // interactive window and must never spawn a browser tab on its own).
+  hardenWindow(win);
   try {
     const render = (async () => {
       // Load the HTML directly as a data URL (self-contained: CSS, font, and
@@ -3735,84 +4086,340 @@ ipcMain.handle('reveal-meeting-folder', async (event, filePath) => {
   }
 });
 
+// Soft-delete a note (#234): atomically HIDE only its summary file (rename into
+// `output/.pending-delete/<id>/`) so every backend scan stops seeing it, while
+// its transcript / recording / sidecars stay in place. Returns an id so the
+// renderer can offer Undo; MAIN owns an 8 s timer that COMMITS (permanently
+// unlinks everything) when it fires. Nothing is destroyed here.
 ipcMain.handle('delete-meeting', async (event, meetingData) => {
   try {
-    const fs = require('fs');
-    const path = require('path');
-
-    // meetingData is the actual meeting object, not a file path
     const meeting = meetingData;
-
-    // Build correct file paths from the meeting data - convert to absolute paths
     const projectRoot = path.join(__dirname, '..');
-
-    // Define allowed base directories for file operations (includes custom storage)
     const allowedBaseDirs = getAllowedBaseDirs();
 
-    const summaryFile = meeting.session_info?.summary_file;
-    const transcriptFile = meeting.session_info?.transcript_file;
-    const audioFile = meeting.session_info?.audio_file;
-    const sessionName = meeting.session_info?.name;
+    const summaryFile = meeting?.session_info?.summary_file;
+    // (#234) We deliberately IGNORE meeting.session_info.transcript_file /
+    // audio_file: those are renderer-supplied and arbitrary, so trusting them
+    // would let a crafted delete of note A name note B's files as ancillaries and
+    // permanently unlink them at commit. ALL ancillaries are derived from the
+    // validated summary's own STEM below — the real transcript/recording of a note
+    // ARE the stem-derived paths, so nothing legitimate is lost and the
+    // cross-note-destruction surface is closed.
+    //
+    // SCOPE (#234): gating/unsharing an org upload on delete is a separate
+    // follow-up, out of scope here — org upload sends renderer-supplied content
+    // strings (not live file reads), and the busy-guard already refuses a delete
+    // while the note is locally recording/processing/reprocessing.
 
-    // Convert relative paths to absolute paths
-    const absolutePaths = [];
-    if (summaryFile) {
-      absolutePaths.push(path.isAbsolute(summaryFile) ? summaryFile : path.join(projectRoot, summaryFile));
-    }
-    if (transcriptFile) {
-      absolutePaths.push(path.isAbsolute(transcriptFile) ? transcriptFile : path.join(projectRoot, transcriptFile));
-    }
-    if (audioFile) {
-      absolutePaths.push(path.isAbsolute(audioFile) ? audioFile : path.join(projectRoot, audioFile));
-    }
-    if (summaryFile && sessionName) {
-      const outputDir = path.dirname(path.isAbsolute(summaryFile) ? summaryFile : path.join(projectRoot, summaryFile));
-      const safeName = sessionName.replace(/[^a-zA-Z0-9_-]/g, '_');
-      absolutePaths.push(path.join(outputDir, `${safeName}_notes.txt`));
+    if (!summaryFile) {
+      // Without a summary there's nothing for a backend scan to key off — no note
+      // to hide. Treat as a no-op success (mirrors "nothing to delete").
+      return { success: true, message: 'No summary file to delete' };
     }
 
-    console.log('Attempting to delete files:', absolutePaths);
+    const toAbs = (p) => (path.isAbsolute(p) ? p : path.join(projectRoot, p));
+    const summaryPath = toAbs(summaryFile);
+    const outputDir = path.dirname(summaryPath);
 
-    let deletedCount = 0;
-    let validationErrors = 0;
-
-    // Delete all related files with path validation
-    for (const file of absolutePaths) {
-      try {
-        // Security: Validate file path is within allowed directories
-        if (!validateSafeFilePath(file, allowedBaseDirs)) {
-          console.error(`Security: Blocked attempt to delete file outside allowed directories: ${file}`);
-          validationErrors++;
-          continue;
-        }
-
-        if (fs.existsSync(file)) {
-          fs.unlinkSync(file);
-          deletedCount++;
-          console.log(`Deleted: ${file}`);
-        } else {
-          console.log(`File not found (already deleted?): ${file}`);
-        }
-      } catch (err) {
-        console.warn(`Could not delete ${file}:`, err.message);
+    // Derive the note's stem from its summary basename (<stem>_summary.{json,md}).
+    // Every ancillary is bound to this stem (never taken raw from the meeting obj).
+    const summaryBase = path.basename(summaryPath);
+    let stem = null;
+    for (const suf of ['_summary.md', '_summary.json']) {
+      if (summaryBase.endsWith(suf)) {
+        stem = summaryBase.slice(0, -suf.length);
+        break;
       }
     }
 
-    if (validationErrors > 0) {
-      return {
-        success: false,
-        error: `Blocked ${validationErrors} file deletion(s) due to security validation`
-      };
+    // Refuse a delete for a note that's currently active (recording into /
+    // queued / processing / reprocessing): a finishing job would rewrite
+    // (resurrect) or re-upload the summary we're about to hide.
+    if (isSummaryBusy(summaryPath)) {
+      return { success: false, error: 'note is busy (recording/processing)' };
     }
 
-    return {
-      success: true,
-      message: `Deleted meeting and ${deletedCount} associated files`
+    // Dedup: one pending delete per summary. Reject rather than replace (a stale
+    // caller view must not silently supersede an in-flight window).
+    const canonicalSummary = canonicalPathForCompare(summaryPath);
+    if (pendingDeleteBySummary.has(canonicalSummary)) {
+      return { success: false, error: 'delete already pending' };
+    }
+
+    // --- Enumerate the ANCILLARY file set (unlinked only at commit), bound to
+    // this note's STEM ONLY (never the renderer-supplied transcript_file /
+    // audio_file): the <stem>_reports.json sidecar and the stem-derived
+    // transcript + recording(s). Only the SUMMARY file itself is hidden.
+    //
+    // Deliberately EXCLUDED: `<safeName>_notes.txt`. That draft-notes file is
+    // named from the renderer-controlled session title, NOT the stem, so two
+    // notes sharing a title share the file — committing this delete could
+    // permanently unlink another note's draft. It isn't safely bindable to this
+    // note's identity, so we leave it orphaned (the fail-safe direction).
+    const ancillaryCandidates = [];
+    // Reports sidecar: <stem>_summary.{md,json} -> <stem>_reports.json.
+    {
+      let sidecarBase = null;
+      for (const suf of ['_summary.md', '_summary.json']) {
+        if (summaryBase.endsWith(suf)) {
+          sidecarBase = summaryBase.slice(0, -suf.length) + '_reports.json';
+          break;
+        }
+      }
+      if (!sidecarBase) {
+        const ext = path.extname(summaryBase);
+        sidecarBase = summaryBase.slice(0, summaryBase.length - ext.length) + '_reports.json';
+      }
+      ancillaryCandidates.push(path.join(outputDir, sidecarBase));
+    }
+    // Derive the transcript + recording from the summary stem (FACT A). A normal
+    // .md note carries ONLY summary_file, so without this the transcript and the
+    // RECORDING would be orphaned, defeating the whole point of #234 (protect the
+    // audio). Naming mirrors the backend: <base>/transcripts/<stem>_transcript.txt
+    // and <base>/recordings/<stem>.<ext> (any extension — imports stay .m4a/.mp3,
+    // system-audio is .webm, native captures are .wav; Codex C5).
+    if (stem) {
+      const dataRoot = path.dirname(outputDir); // summary is in <base>/output/
+      ancillaryCandidates.push(path.join(dataRoot, 'transcripts', `${stem}_transcript.txt`));
+      const recordingsDir = path.join(dataRoot, 'recordings');
+      try {
+        for (const name of fs.readdirSync(recordingsDir)) {
+          if (path.parse(name).name === stem) {
+            ancillaryCandidates.push(path.join(recordingsDir, name));
+          }
+        }
+      } catch (_) {
+        // recordings/ may not exist (summary-only note) — nothing to add.
+      }
+    }
+
+    // --- Security pre-pass on the SUMMARY (the only file we move). Must pass the
+    // broad containment check, live in an allowed meeting folder, and be a real
+    // regular file (reject a dir/symlink so a crafted meeting can't redirect the
+    // rename). Any failure blocks the whole delete before anything is touched.
+    if (!validateSafeFilePath(summaryPath, allowedBaseDirs)) {
+      console.error(`Security: Blocked delete of summary outside allowed dirs: ${summaryPath}`);
+      return { success: false, error: 'Blocked delete due to security validation' };
+    }
+    if (!isAllowedMeetingSource(summaryPath, allowedBaseDirs)) {
+      console.error(`Security: summary is not in an allowed meeting folder: ${summaryPath}`);
+      return { success: false, error: 'Blocked delete due to security validation' };
+    }
+    let summaryStat;
+    try {
+      summaryStat = fs.lstatSync(summaryPath);
+    } catch (_) {
+      // Already gone from disk — nothing for a scan to see. No-op success.
+      return { success: true, message: 'No files to delete' };
+    }
+    if (!summaryStat.isFile()) {
+      return { success: false, error: 'Summary is not a regular file' };
+    }
+
+    // --- Twin edge (ANOMALOUS, FAIL-SAFE): a note names EXACTLY ONE
+    // summary_file, and we hide only that one. If a stem somehow has BOTH
+    // <stem>_summary.json AND <stem>_summary.md, hiding the named one leaves the
+    // other, and the `output/*_summary.{json,md}` scan keeps the note VISIBLE —
+    // so the delete under-hides (note REAPPEARS), never over-deletes: nothing is
+    // lost. This is accepted deliberately: the app's own writers only ever
+    // produce <stem>_summary.md (JSON summaries are legacy, read-only; reprocess
+    // rewrites in place without changing suffix), so a real twin can only arise
+    // from external/legacy state. Hiding all variants would be nicer, but NOT at
+    // the cost of the multi-file rename + rollback path (a failed rollback there
+    // can strand/destroy a summary) — for user AUDIO the single-file tombstone is
+    // the safer trade. A follow-up could hide every variant if it stays
+    // rollback-free.
+
+    // Filter ancillaries to the ones that EXIST, are regular files, and live in
+    // an allowed meeting folder — the only paths we'll unlink at commit. A bad
+    // one (missing, symlink, dir, out-of-folder) is skipped, never fatal. Exclude
+    // the summary itself (it's hidden, not unlinked as an ancillary).
+    const uniqueAncillary = [...new Set(ancillaryCandidates)].filter((p) => p !== summaryPath);
+    const ancillaryPaths = [];
+    for (const p of uniqueAncillary) {
+      if (!validateSafeFilePath(p, allowedBaseDirs)) {
+        console.warn(`Skipping ancillary outside allowed dirs (not tracked): ${p}`);
+        continue;
+      }
+      let st;
+      try {
+        st = fs.lstatSync(p);
+      } catch (_) {
+        continue; // Missing — nothing to unlink at commit.
+      }
+      if (!st.isFile()) {
+        console.warn(`Skipping non-regular-file ancillary (not tracked): ${p}`);
+        continue;
+      }
+      if (!isAllowedMeetingSource(p, allowedBaseDirs)) {
+        console.warn(`Skipping ancillary outside allowed meeting folders (not tracked): ${p}`);
+        continue;
+      }
+      ancillaryPaths.push(p);
+    }
+
+    // --- Atomically HIDE the single summary. `.pending-delete/<id>/` is a
+    // sibling of the summary under output/, so renameSync is atomic on the same
+    // filesystem (no EXDEV).
+    const id = `${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
+    const pendingRoot = path.join(outputDir, PENDING_DELETE_DIRNAME);
+
+    // Fail-closed if the `.pending-delete` root exists but is NOT a real directory
+    // (a symlink/file). mkdirSync would follow a symlinked root and move the
+    // summary OUT of the sandbox, and startup recovery skips a non-dir root — the
+    // note would be stranded/lost. This matches the guard in
+    // recoverPendingDeletesOnLaunch().
+    try {
+      const rootStat = fs.lstatSync(pendingRoot);
+      if (!rootStat.isDirectory()) {
+        return { success: false, error: 'invalid pending-delete root' };
+      }
+    } catch (err) {
+      // ONLY a genuinely-missing root is fine (mkdir creates it below). Any other
+      // lstat error (EACCES, EIO, ...) must fail-closed: we can't prove the root
+      // is a safe directory, so refuse rather than mkdir into an unknown state.
+      if (!err || err.code !== 'ENOENT') {
+        return { success: false, error: 'cannot access pending-delete root' };
+      }
+    }
+
+    const hiddenDir = path.join(pendingRoot, id);
+    try {
+      fs.mkdirSync(hiddenDir, { recursive: true });
+    } catch (err) {
+      // e.g. output/ is read-only (fail-closed): nothing moved, originals intact.
+      return { success: false, error: `Failed to prepare pending-delete: ${err.message}` };
+    }
+
+    // Hide the summary with ONE same-filesystem rename. On failure remove the
+    // scaffold; the original is untouched (rename either fully succeeds or leaves
+    // the source in place) so there is no partial state to roll back.
+    const hiddenSummaryPath = path.join(hiddenDir, path.basename(summaryPath));
+    if (!validateSafeFilePath(hiddenSummaryPath, allowedBaseDirs)) {
+      try {
+        fs.rmSync(hiddenDir, { recursive: true, force: true });
+      } catch (_) {}
+      return { success: false, error: 'Blocked delete due to security validation' };
+    }
+    try {
+      fs.renameSync(summaryPath, hiddenSummaryPath);
+    } catch (err) {
+      try {
+        fs.rmSync(hiddenDir, { recursive: true, force: true });
+      } catch (_) {}
+      return { success: false, error: `Failed to hide summary: ${err.message}` };
+    }
+
+    // Record the pending delete + start MAIN's deadline timer.
+    const deadline = Date.now() + DELETE_WINDOW_MS;
+    const entry = {
+      id,
+      meeting,
+      // The exact `summary_file` string the renderer's list is keyed on, so a
+      // rehydrating renderer can match this note.
+      summaryFileKey: summaryFile,
+      hiddenDir,
+      originalSummaryPath: summaryPath,
+      hiddenSummaryPath,
+      canonicalSummary,
+      ancillaryPaths,
+      deadline,
+      state: 'pending',
+      timer: null,
     };
+    entry.timer = setTimeout(() => {
+      try {
+        commitPendingDelete(id);
+      } catch (_) {}
+    }, DELETE_WINDOW_MS);
+    pendingDeletes.set(id, entry);
+    pendingDeleteBySummary.set(canonicalSummary, id);
+
+    return { success: true, id, deadline };
   } catch (error) {
     console.error('Delete meeting error:', error);
     return { success: false, error: error.message };
   }
+});
+
+// Undo a soft-delete (#234): rename the hidden summary back to its original path
+// so the note reappears in every backend scan. Near-infallible (one same-
+// filesystem rename). Loses only once the window has started committing.
+ipcMain.handle('undo-delete-meeting', async (event, id) => {
+  try {
+    if (!isSafePendingId(id)) {
+      return { success: false, error: 'Invalid delete id' };
+    }
+    const entry = pendingDeletes.get(id);
+    if (!entry || entry.state !== 'pending') {
+      // Missing or already committing — Undo loses once the commit starts.
+      return { success: false, error: 'nothing to undo' };
+    }
+    // No-clobber: if the original path is now occupied (e.g. the user re-recorded
+    // the same-stem note during the window), refuse — keep the tombstone intact.
+    // lstat (not existsSync) so a DANGLING symlink there also counts as occupied.
+    // The residual TOCTOU between this check and the renameSync below is accepted:
+    // single-user desktop, synchronous handler, sub-ms window; Node has no atomic
+    // rename-no-replace.
+    if (pathIsOccupied(entry.originalSummaryPath)) {
+      console.error(`Undo: original path occupied, refusing to clobber: ${entry.originalSummaryPath}`);
+      return { success: false, error: 'restore target already exists' };
+    }
+    // Restore the single summary with one same-filesystem rename.
+    try {
+      fs.renameSync(entry.hiddenSummaryPath, entry.originalSummaryPath);
+    } catch (err) {
+      return { success: false, error: `Undo failed: ${err.message}` };
+    }
+    // Success — clear the timer, drop the entry + its scaffold dir.
+    if (entry.timer) {
+      clearTimeout(entry.timer);
+      entry.timer = null;
+    }
+    removeHiddenScaffold(entry.hiddenDir);
+    pendingDeletes.delete(id);
+    if (pendingDeleteBySummary.get(entry.canonicalSummary) === id) {
+      pendingDeleteBySummary.delete(entry.canonicalSummary);
+    }
+    return { success: true, meeting: entry.meeting };
+  } catch (error) {
+    console.error('Undo delete meeting error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Explicit COMMIT (#234): the user dismissed the toast (or its window elapsed and
+// the renderer wants to finalize now). Permanently removes the note's files.
+// Idempotent: an unknown / already-committed id is a success (nothing to do).
+ipcMain.handle('commit-delete-meeting', async (event, id) => {
+  try {
+    if (!isSafePendingId(id)) {
+      return { success: false, error: 'Invalid delete id' };
+    }
+    commitPendingDelete(id);
+    return { success: true };
+  } catch (error) {
+    console.error('Commit delete meeting error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// List the notes with an in-flight soft-delete, so a freshly-loaded renderer can
+// rehydrate its Undo toasts (MAIN owns the deadline — the renderer must not
+// invent its own). Returns the exact `summary_file` string each note is listed
+// under, plus the id + deadline + meeting for the toast.
+ipcMain.handle('list-pending-deletes', async () => {
+  const pending = [];
+  for (const entry of pendingDeletes.values()) {
+    if (entry.state !== 'pending') continue;
+    pending.push({
+      id: entry.id,
+      summaryFile: entry.summaryFileKey,
+      deadline: entry.deadline,
+      meeting: entry.meeting,
+    });
+  }
+  return { success: true, pending };
 });
 
 // Queue status handler
@@ -4296,6 +4903,21 @@ function loadShowMenuBarIconEnabled() {
   }
 }
 
+// Sync read of the idle auto-install setting; default ON (matches the Python
+// config default). Read fresh on every gate tick so flipping the toggle in
+// Settings takes effect without a relaunch. Same no-subprocess JSON read as the
+// helpers above — the source of truth is the Python config.
+function loadAutoInstallWhenIdleEnabled() {
+  try {
+    const cfgPath = path.join(getUserDataDir(), 'config.json');
+    if (!fs.existsSync(cfgPath)) return true;
+    const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf-8'));
+    return cfg.auto_install_when_idle !== false;
+  } catch (_) {
+    return true;
+  }
+}
+
 // Global recording state management
 let systemAudioRecordingActive = false;  // Track system audio recording for tray/quit
 let currentRecordingProcess = null;
@@ -4373,6 +4995,12 @@ let currentProcessingStartedAtMs = null;
 // IPC overwrote A's entry, and A's finally would null the state out while
 // B was still running, hiding B's badge. Entries are removed in each IPC's
 // finally so a Python crash or spawn error doesn't leave them stuck.
+//
+// NOTE (pre-existing, out of #234 scope): keyed by summaryFile, so TWO jobs on
+// the SAME summary path still overwrite each other's marker (and the first
+// finally clears it while the second runs). The reprocess UI's re-entrancy
+// guards prevent concurrent same-note jobs, so this isn't triggerable today; not
+// changed here to avoid altering the shared map's semantics.
 const activeReprocessJobs = new Map();
 let recordingRuntimeState = {
   startedAtMs: null,
@@ -5506,6 +6134,127 @@ let pendingDownloadPercent = null;
 // starts (check / available / progress) or a download completes.
 let pendingUpdateError = null;
 
+// ── Idle auto-install ──
+// True once an update has finished downloading and is staged for install.
+// The safety gate (update-idle-gate.js) requires this before it will relaunch.
+let updateDownloadedReady = false;
+// The periodic idle checker's timer, and a one-shot latch so we call
+// quitAndInstall at most once even if a tick races the relaunch.
+let idleAutoInstallInterval = null;
+let autoInstallFired = false;
+// Idle threshold: the machine must have had no user input for this long before
+// we relaunch, so an auto-install never interrupts someone mid-task. 10 min.
+const IDLE_AUTO_INSTALL_THRESHOLD_SECONDS = 600;
+// How often to re-evaluate the gate. Cheap (a config read + a few booleans).
+const IDLE_AUTO_INSTALL_CHECK_MS = 60 * 1000;
+
+// Snapshot every input the safety gate needs, read fresh at call time. Kept in
+// one place so the initial check and the post-settle re-check (below) can't
+// drift — they must gather identical state or the re-check is meaningless.
+//   - streaming: in-flight AI query/summary/chat streams register a killable
+//     proc in activeQueryProcs.
+//   - otherJobsActive: reprocess (re-summarize), report generation, and title
+//     regeneration all run OUTSIDE isProcessing/processingQueue; each handler
+//     registers its job in activeReprocessJobs for the duration, so a non-empty
+//     map means one of those is in flight and a relaunch would kill it.
+function gatherIdleInstallState() {
+  return {
+    enabled: loadAutoInstallWhenIdleEnabled(),
+    updateReady: updateDownloadedReady,
+    isRecording: currentRecordingProcess !== null || systemAudioRecordingActive,
+    isProcessing,
+    queueLength: processingQueue.length,
+    liveActive: liveTranscribeProcess != null,
+    streaming: activeQueryProcs.size > 0,
+    otherJobsActive: activeReprocessJobs.size > 0,
+    idleSeconds: powerMonitor.getSystemIdleTime(),
+    idleThresholdSeconds: IDLE_AUTO_INSTALL_THRESHOLD_SECONDS,
+  };
+}
+
+// Gather the live in-flight state and, when the pure gate says it's safe,
+// relaunch into the downloaded update. Latches autoInstallFired to guarantee a
+// single quitAndInstall, clears the interval, and — critically — re-checks the
+// gate AFTER the autosave settle so a recording/job that started during that
+// window aborts the install (and re-arms the checker) instead of being killed.
+// No-op under E2E (never scheduled) and before an update is staged.
+async function maybeAutoInstallWhenIdle() {
+  if (autoInstallFired) return;
+  if (!isSafeToAutoInstall(gatherIdleInstallState())) return;
+
+  // Latch immediately (synchronously, before any await) so a second invocation
+  // — e.g. a powerMonitor resume firing during the settle — bails at the guard
+  // above and can't race us to a double quitAndInstall.
+  autoInstallFired = true;
+  if (idleAutoInstallInterval) {
+    clearInterval(idleAutoInstallInterval);
+    idleAutoInstallInterval = null;
+  }
+
+  sendDebugLog('Auto-updater: idle + nothing in flight — installing update and relaunching.');
+
+  // Best-effort: notes autosave in the renderer on every edit (there's no
+  // explicit flush IPC to await), so give any in-flight debounced autosave a
+  // short settle window before we relaunch. Never blocks the relaunch.
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  } catch (_) { /* best-effort only */ }
+
+  // Re-check after the await: work may have started during the 500ms settle
+  // (a recording, a queued/reprocess job, a chat stream). If it's no longer
+  // safe, ABORT rather than kill live work — reset the one-shot latch and
+  // re-arm the checker so a later idle window can retry.
+  if (!isSafeToAutoInstall(gatherIdleInstallState())) {
+    sendDebugLog('Auto-updater: work started during settle — aborting auto-install, will retry later.');
+    autoInstallFired = false;
+    startIdleAutoInstallChecker();
+    return;
+  }
+
+  trackEvent('update_auto_installed', {
+    version: pendingUpdateVersion || 'unknown',
+    idle_seconds: Math.round(powerMonitor.getSystemIdleTime()),
+  });
+
+  // Bypass the mainWindow 'close' handler's preventDefault+hide (same reason as
+  // the manual install-update path) so quitAndInstall actually quits + applies.
+  isQuitting = true;
+  // isSilent=true, isForceRunAfter=true — install without the wizard and
+  // relaunch the app afterwards.
+  autoUpdater.quitAndInstall(true, true);
+}
+
+// Start the periodic idle checker once an update is staged. Idempotent, and
+// inert under E2E (mirrors setupAutoUpdater's e2e no-op) so the suite never
+// schedules a timer or risks a quitAndInstall.
+function startIdleAutoInstallChecker() {
+  if (IS_E2E) return;
+  if (idleAutoInstallInterval || autoInstallFired) return;
+  idleAutoInstallInterval = setInterval(() => {
+    maybeAutoInstallWhenIdle().catch((e) => sendDebugLog(`Idle auto-install check failed: ${e.message}`));
+  }, IDLE_AUTO_INSTALL_CHECK_MS);
+  // Don't let this timer keep the event loop alive on its own.
+  if (idleAutoInstallInterval.unref) idleAutoInstallInterval.unref();
+}
+
+// Current OS version for the update gate, '' if it can't be read (→ fail open).
+function currentSystemVersionSafe() {
+  try { return process.getSystemVersion(); } catch (_) { return ''; }
+}
+
+// Whether electron-updater may run on this OS. See update-os-gate.js — darwin
+// below the 14.4 floor (MIN_MACOS_FOR_AUTOUPDATE) is blocked (so nothing
+// downloads and the idle installer has nothing to apply); non-darwin and
+// unparseable versions are eligible, with the manifest `minimumSystemVersion`
+// in latest-mac.yml as the authoritative backstop.
+function autoUpdateOSEligible() {
+  return isOSUpdateEligible({
+    platform: process.platform,
+    osVersion: currentSystemVersionSafe(),
+    minVersion: MIN_MACOS_FOR_AUTOUPDATE,
+  });
+}
+
 function setupAutoUpdater() {
   if (IS_E2E) {
     sendDebugLog('Auto-updater: skipped (E2E mode)');
@@ -5514,6 +6263,15 @@ function setupAutoUpdater() {
   // Don't check for updates in dev mode
   if (!app.isPackaged) {
     sendDebugLog('Auto-updater: skipped (dev mode)');
+    return;
+  }
+  // Never auto-download/install onto a Mac below the launch floor — the build
+  // wouldn't start, and with idle auto-install (#425) it would replace a
+  // working install unattended. Skipping the whole setup means no download
+  // ever fires, so `update-downloaded` never fires and the idle checker never
+  // arms. (latest-mac.yml's minimumSystemVersion is the second layer.)
+  if (!autoUpdateOSEligible()) {
+    sendDebugLog(`Auto-updater: skipped — macOS ${currentSystemVersionSafe()} is below the ${MIN_MACOS_FOR_AUTOUPDATE} floor; this build won't launch here (#432).`);
     return;
   }
 
@@ -5559,6 +6317,13 @@ function setupAutoUpdater() {
     if (mainWindow) {
       mainWindow.webContents.send('update-downloaded', { version: info.version });
     }
+    // The notification above is unchanged. Additionally, mark the update as
+    // staged and start the idle checker so it can install + relaunch on its
+    // own when the machine is idle and nothing is in flight. Try once right
+    // away in case the app is already idle (e.g. downloaded overnight).
+    updateDownloadedReady = true;
+    startIdleAutoInstallChecker();
+    maybeAutoInstallWhenIdle().catch(() => {});
   });
 
   autoUpdater.on('error', (err) => {
@@ -5599,6 +6364,15 @@ function setupAutoUpdater() {
 }
 
 ipcMain.on('install-update', () => {
+  // Defense in depth for #432: today the renderer only shows "Restart to
+  // Update" once a real 'update-downloaded' fired (impossible under the floor,
+  // since setupAutoUpdater is skipped), so this is unreachable on an under-floor
+  // Mac. Gate it here too so a future renderer change can't reintroduce an
+  // ungated quitAndInstall onto a build this OS can't launch.
+  if (!autoUpdateOSEligible()) {
+    sendDebugLog('install-update: ignored — OS below the auto-update floor (#432).');
+    return;
+  }
   // Bypass the mainWindow 'close' handler's preventDefault+hide so that
   // quitAndInstall's window-close step actually quits the app. Without this
   // the app just minimises and Squirrel never gets to apply the update.
@@ -7055,19 +7829,17 @@ ipcMain.handle('show-silence-auto-stop-notification', async (_event, payload) =>
   }
 });
 
-// Fired by useSystemAudioCapture.ts at the start of a recording whenever it's
-// about to fall back to mic-only specifically because Screen Recording
-// permission isn't granted (not when the user has the "Record system audio"
-// toggle off, and not on unsupported macOS versions — those are the user's
-// own choice / a hardware limit, not a surprise). Clicking it opens Settings
-// via the same tray-open-settings event the tray menu uses, so the user lands
-// on the row with the Grant Access / Open Settings actions.
+// Fired by useSystemAudioCapture.ts when an enabled loopback acquisition
+// genuinely fails (for example, System Audio Recording permission is denied).
+// It is not fired when the user turns system audio off or the OS is unsupported.
+// Clicking it opens Settings via the same tray-open-settings event the tray
+// menu uses.
 ipcMain.handle('show-system-audio-mic-only-notification', async () => {
   try {
     if (!(await notificationsEnabled())) return { success: true, shown: false };
     const notif = new Notification({
       title: 'Recording mic-only',
-      body: 'Screen Recording permission is needed to capture both sides of the call. Click to fix this in Settings.',
+      body: 'System audio could not be captured. Check Steno’s Screen & System Audio Recording access in System Settings.',
       iconType: 'alert',
     });
     notif.on('click', () => {
@@ -7477,7 +8249,7 @@ function saveCloudApiKey(key) {
     if (!fs.existsSync(keyDir)) {
       fs.mkdirSync(keyDir, { recursive: true });
     }
-    const encrypted = safeStorage.encryptString(key);
+    const encrypted = getSafeStorage().encryptString(key);
     fs.writeFileSync(getCloudKeyPath(), encrypted);
     return true;
   } catch (error) {
@@ -7492,7 +8264,7 @@ function loadCloudApiKey() {
     migrateLegacyCredentialFile(keyPath, '.cloud-api-key');
     if (!fs.existsSync(keyPath)) return null;
     const encrypted = fs.readFileSync(keyPath);
-    return safeStorage.decryptString(encrypted);
+    return getSafeStorage().decryptString(encrypted);
   } catch (error) {
     console.error('Failed to load cloud API key:', error.message);
     return null;
@@ -7559,6 +8331,7 @@ function validateLocalCliConfig(config) {
 function saveLocalCliConfig(config) {
   let tempPath = null;
   try {
+    const safeStorage = getSafeStorage();
     if (!safeStorage.isEncryptionAvailable()) return false;
     const configPath = getLocalCliConfigPath();
     fs.mkdirSync(path.dirname(configPath), { recursive: true });
@@ -7585,7 +8358,9 @@ function saveLocalCliConfig(config) {
 function loadLocalCliConfig() {
   try {
     const configPath = getLocalCliConfigPath();
-    if (!fs.existsSync(configPath) || !safeStorage.isEncryptionAvailable()) return null;
+    if (!fs.existsSync(configPath)) return null;
+    const safeStorage = getSafeStorage();
+    if (!safeStorage.isEncryptionAvailable()) return null;
     const encrypted = fs.readFileSync(configPath);
     const parsed = JSON.parse(safeStorage.decryptString(encrypted));
     const validated = validateLocalCliConfig(parsed);
@@ -8703,68 +9478,116 @@ async function findOllamaExecutable() {
   return null;
 }
 
-// Update checking functionality
+// Where the manual "Check for updates" reads the latest release from. Kept as a
+// named constant so the repo path has a single source of truth (and is the one
+// line to change if the repo is renamed/transferred — though the redirect
+// following below means an old build keeps working through GitHub's 301 too).
+const UPDATE_CHECK_URL = 'https://api.github.com/repos/ruzin/stenoai/releases/latest';
+
+// Update checking functionality. Follows HTTP redirects (301/302/307/308):
+// GitHub's REST API returns a 301 to the new owner/repo path when a repo is
+// renamed or transferred, and Node's https.request does NOT follow redirects on
+// its own — so without this, a transfer would silently break the manual update
+// check for every already-installed app.
 async function checkForUpdates() {
-  return new Promise((resolve) => {
-    const options = {
-      hostname: 'api.github.com',
-      path: '/repos/ruzin/stenoai/releases/latest',
-      method: 'GET',
-      headers: {
-        'User-Agent': 'Steno-Updater'
+  const MAX_REDIRECTS = 5;
+  // One 10s budget shared across the whole redirect chain, so a slow chain of
+  // hops can't keep the check hanging for redirects × 10s (each hop used to
+  // reset its own timeout).
+  const deadline = Date.now() + 10000;
+
+  function fetchLatest(urlStr, redirectsLeft) {
+    return new Promise((resolve) => {
+      let url;
+      try {
+        url = new URL(urlStr);
+      } catch (e) {
+        resolve({ success: false, error: 'Invalid update URL' });
+        return;
       }
-    };
+      const options = {
+        hostname: url.hostname,
+        path: url.pathname + url.search,
+        method: 'GET',
+        headers: { 'User-Agent': 'Steno-Updater' },
+      };
 
-    const req = https.request(options, (res) => {
-      let data = '';
-
-      res.on('data', (chunk) => {
-        data += chunk;
-      });
-
-      res.on('end', () => {
-        try {
-          const release = JSON.parse(data);
-          const latestVersion = release.tag_name.replace(/^v/, ''); // Remove 'v' prefix if present
-
-          // Get current version from package.json
-          const packagePath = path.join(__dirname, 'package.json');
-          const packageContent = JSON.parse(fs.readFileSync(packagePath, 'utf8'));
-          const currentVersion = packageContent.version;
-
-          console.log(`Current version: ${currentVersion}, Latest version: ${latestVersion}`);
-
-          // Simple version comparison (works for semantic versioning)
-          const isUpdateAvailable = compareVersions(currentVersion, latestVersion) < 0;
-
-          resolve({
-            success: true,
-            updateAvailable: isUpdateAvailable,
-            currentVersion: currentVersion,
-            latestVersion: latestVersion,
-            releaseUrl: release.html_url,
-            releaseName: release.name || `Version ${latestVersion}`,
-            downloadUrl: getDownloadUrl(release.assets)
-          });
-        } catch (error) {
-          console.error('Error parsing GitHub API response:', error);
-          resolve({ success: false, error: 'Failed to parse update data' });
+      const req = https.request(options, (res) => {
+        // Follow a redirect (repo rename/transfer → 301 to the new path).
+        if ([301, 302, 307, 308].includes(res.statusCode) && res.headers.location) {
+          res.resume(); // drain the response so the socket can be reused/freed
+          if (redirectsLeft <= 0) {
+            resolve({ success: false, error: 'Too many redirects' });
+            return;
+          }
+          // location may be relative; resolve it against the current URL. A
+          // malformed Location would make new URL() throw synchronously inside
+          // this callback (crashing the main process), so guard it and fail the
+          // check normally instead.
+          let next;
+          try {
+            next = new URL(res.headers.location, urlStr).toString();
+          } catch (e) {
+            resolve({ success: false, error: 'Invalid redirect URL' });
+            return;
+          }
+          resolve(fetchLatest(next, redirectsLeft - 1));
+          return;
         }
+
+        let data = '';
+        res.on('data', (chunk) => {
+          data += chunk;
+        });
+
+        res.on('end', () => {
+          try {
+            const release = JSON.parse(data);
+            const latestVersion = release.tag_name.replace(/^v/, ''); // Remove 'v' prefix if present
+
+            // Get current version from package.json
+            const packagePath = path.join(__dirname, 'package.json');
+            const packageContent = JSON.parse(fs.readFileSync(packagePath, 'utf8'));
+            const currentVersion = packageContent.version;
+
+            console.log(`Current version: ${currentVersion}, Latest version: ${latestVersion}`);
+
+            // Simple version comparison (works for semantic versioning)
+            const isUpdateAvailable = compareVersions(currentVersion, latestVersion) < 0;
+
+            resolve({
+              success: true,
+              updateAvailable: isUpdateAvailable,
+              currentVersion: currentVersion,
+              latestVersion: latestVersion,
+              releaseUrl: release.html_url,
+              releaseName: release.name || `Version ${latestVersion}`,
+              downloadUrl: getDownloadUrl(release.assets)
+            });
+          } catch (error) {
+            console.error('Error parsing GitHub API response:', error);
+            resolve({ success: false, error: 'Failed to parse update data' });
+          }
+        });
       });
-    });
 
-    req.on('error', (error) => {
-      console.error('Error checking for updates:', error);
-      resolve({ success: false, error: error.message });
-    });
+      req.on('error', (error) => {
+        console.error('Error checking for updates:', error);
+        resolve({ success: false, error: error.message });
+      });
 
-    req.setTimeout(10000, () => {
-      req.destroy();
-      resolve({ success: false, error: 'Update check timeout' });
-    });
+      // Share the single deadline across all hops (min 1ms so an already-expired
+      // budget still fires promptly rather than being treated as "no timeout").
+      req.setTimeout(Math.max(1, deadline - Date.now()), () => {
+        req.destroy();
+        resolve({ success: false, error: 'Update check timeout' });
+      });
 
-    req.end();
-  });
+      req.end();
+    });
+  }
+
+  return fetchLatest(UPDATE_CHECK_URL, MAX_REDIRECTS);
 }
 
 function compareVersions(current, latest) {
@@ -8808,16 +9631,21 @@ function getDownloadUrl(assets) {
 
 ipcMain.handle('check-for-updates', async () => {
   const result = await checkForUpdates();
+  const osEligible = autoUpdateOSEligible();
   // The GitHub comparison above is a read-only display poll — it never
   // itself starts a download. Kick the real autoUpdater check alongside it
   // so a manual "Check for Updates" click actually starts a background
   // download when one's available, instead of only reporting the latest
-  // tag and waiting for the next scheduled interval. Same guard as
-  // setupAutoUpdater() so this stays a no-op (and network-free) in e2e/dev.
-  if (!IS_E2E && app.isPackaged) {
+  // tag and waiting for the next scheduled interval. Same guards as
+  // setupAutoUpdater(): no-op (and network-free) in e2e/dev, and never on a
+  // Mac below the launch floor, which must not download a build it can't run (#432).
+  if (!IS_E2E && app.isPackaged && osEligible) {
     autoUpdater.checkForUpdates().catch(() => {});
   }
-  return result;
+  // Surface eligibility so the About tab can explain why an "update available"
+  // won't auto-install on an under-floor Mac, rather than offering a broken
+  // Restart. (Display-only; the safety is the gated kick above.)
+  return { ...result, osUpdateEligible: osEligible };
 });
 
 // Lets a freshly-(re)mounted About tab recover "an update already
@@ -8902,7 +9730,7 @@ function saveGoogleTokens(tokens) {
     if (!fs.existsSync(tokenDir)) {
       fs.mkdirSync(tokenDir, { recursive: true });
     }
-    const encrypted = safeStorage.encryptString(JSON.stringify(tokens));
+    const encrypted = getSafeStorage().encryptString(JSON.stringify(tokens));
     fs.writeFileSync(getTokenFilePath(), encrypted);
     console.log('Google tokens saved');
   } catch (error) {
@@ -8916,7 +9744,7 @@ function loadGoogleTokens() {
     migrateLegacyCredentialFile(tokenPath, '.google-tokens');
     if (!fs.existsSync(tokenPath)) return null;
     const encrypted = fs.readFileSync(tokenPath);
-    const decrypted = safeStorage.decryptString(encrypted);
+    const decrypted = getSafeStorage().decryptString(encrypted);
     return JSON.parse(decrypted);
   } catch (error) {
     console.error('Failed to load Google tokens:', error.message);
@@ -8950,7 +9778,7 @@ function saveOutlookTokens(tokens) {
     if (!fs.existsSync(tokenDir)) {
       fs.mkdirSync(tokenDir, { recursive: true });
     }
-    const encrypted = safeStorage.encryptString(JSON.stringify(tokens));
+    const encrypted = getSafeStorage().encryptString(JSON.stringify(tokens));
     fs.writeFileSync(getOutlookTokenFilePath(), encrypted);
     console.log('Outlook tokens saved');
   } catch (error) {
@@ -8964,7 +9792,7 @@ function loadOutlookTokens() {
     migrateLegacyCredentialFile(tokenPath, '.outlook-tokens');
     if (!fs.existsSync(tokenPath)) return null;
     const encrypted = fs.readFileSync(tokenPath);
-    const decrypted = safeStorage.decryptString(encrypted);
+    const decrypted = getSafeStorage().decryptString(encrypted);
     return JSON.parse(decrypted);
   } catch (error) {
     console.error('Failed to load Outlook tokens:', error.message);
@@ -10617,7 +11445,7 @@ function saveOrgSession(session) {
   try {
     const dir = path.dirname(getOrgSessionPath());
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    const encrypted = safeStorage.encryptString(JSON.stringify(session));
+    const encrypted = getSafeStorage().encryptString(JSON.stringify(session));
     fs.writeFileSync(getOrgSessionPath(), encrypted);
     orgSessionGeneration++;
     return true;
@@ -10631,7 +11459,7 @@ function saveOrgSession(session) {
 //   file missing        → { session: null, exists: false, decryptFailed: false }
 //   present, unreadable → { session: null, exists: true,  decryptFailed: true  }
 //   present, readable   → { session,      exists: true,  decryptFailed: false }
-// The middle state matters: safeStorage.decryptString throws while the
+// The middle state matters: getSafeStorage().decryptString throws while the
 // keychain is locked (right after wake / login, or a denied prompt after an
 // app re-sign) — treating that like "signed out" is exactly what used to
 // downgrade signed-in users to local AI via the stale-adapter recovery.
@@ -10647,7 +11475,7 @@ function loadOrgSessionEx() {
     // reset it moments before the decrypt throws, and the catch below
     // would restamp it to now on every call, so the grace window could
     // never elapse and the org lock would stay fail-closed forever.
-    const session = JSON.parse(safeStorage.decryptString(encrypted));
+    const session = JSON.parse(getSafeStorage().decryptString(encrypted));
     orgSessionDecryptFailingSince = null;
     return { session, exists: true, decryptFailed: false };
   } catch (e) {

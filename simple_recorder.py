@@ -99,6 +99,29 @@ def resolve_output_language(
     return "en"
 
 
+def _apply_chinese_variant(text: Optional[str]) -> Optional[str]:
+    """Convert ``text`` to the user's selected Chinese script, if any.
+
+    whisper.cpp and Parakeet (and the summariser LLM) emit Simplified for
+    Chinese; a user who picked Traditional (``zh-Hant``) gets an s2t pass here.
+    A thin, never-throwing hook: non-Chinese languages, a missing OpenCC, or a
+    conversion error all fall through to the input unchanged so transcription
+    is never broken by variant conversion.
+    """
+    if not text:
+        return text
+    try:
+        from src.config import get_config
+        from src.chinese import apply_variant
+
+        variant = get_config().get_chinese_variant()
+        if variant:
+            return apply_variant(text, variant)
+    except Exception as e:
+        logger.warning(f"Chinese variant conversion skipped: {e}")
+    return text
+
+
 def resolve_persisted_output_language(
     session_info: dict,
     transcript_text: Optional[str],
@@ -464,9 +487,12 @@ Summary output language: {config.get_language_name(output_language)}
 
         # Get configured language
         configured_language = config.get_language()
+        # ASR only knows "zh" for Chinese; the Simplified/Traditional choice is
+        # applied as a post-transcription conversion, not an ASR mode.
+        asr_language = config.get_whisper_language()
 
         # Transcribe with diarisation support (stereo → [You]/[Others])
-        transcript_result = self.transcriber.transcribe_diarised(audio_path, language=configured_language)
+        transcript_result = self.transcriber.transcribe_diarised(audio_path, language=asr_language)
 
         # A transcription crash (e.g. an OOM on a long file) is not silence:
         # propagate the flag and skip writing a normal transcript file so the
@@ -502,6 +528,10 @@ Summary output language: {config.get_language_name(output_language)}
         if isinstance(transcript_result, dict):
             is_diarised = transcript_result.get("is_diarised", False)
             diarised_text = transcript_result.get("diarised_text")
+
+        # Convert the transcript to the selected Chinese script (no-op otherwise).
+        transcript_text = _apply_chinese_variant(transcript_text)
+        diarised_text = _apply_chinese_variant(diarised_text)
 
         output_language = self._resolve_output_language(
             configured_language, detected_language, transcript_text=diarised_text or transcript_text
@@ -736,7 +766,7 @@ Summary output language: {config.get_language_name(output_language)}
             err_msg = str(e).replace('\n', ' ').replace('\r', ' ')
             print(f"STREAM_ERROR:{err_msg}", flush=True)
             raise
-        streamed_md = ''.join(streamed_chunks)
+        streamed_md = _apply_chinese_variant(''.join(streamed_chunks)) or ''
 
         print("STREAM_COMPLETE", flush=True)
 
@@ -748,6 +778,7 @@ Summary output language: {config.get_language_name(output_language)}
             generated_title = self.summarizer.generate_title(
                 streamed_md, transcript_text, language=output_language
             )
+            generated_title = _apply_chinese_variant(generated_title)
             if generated_title:
                 session_name = generated_title
                 print(f"TITLE:{session_name}", flush=True)
@@ -1282,7 +1313,7 @@ def process_streaming(audio_file, name, notes, live_transcript, append_to):
             print(f"STREAM_ERROR:{err_msg}", flush=True)
             sys.exit(1)
 
-        streamed_md = ''.join(streamed_chunks)
+        streamed_md = _apply_chinese_variant(''.join(streamed_chunks)) or ''
 
         print("STREAM_COMPLETE", flush=True)
 
@@ -1293,6 +1324,7 @@ def process_streaming(audio_file, name, notes, live_transcript, append_to):
                 generated_title = recorder.summarizer.generate_title(
                     streamed_md, transcript_text, language=output_language
                 )
+                generated_title = _apply_chinese_variant(generated_title)
                 if generated_title:
                     session_name = generated_title
                     print(f"TITLE:{session_name}", flush=True)
@@ -1634,6 +1666,26 @@ def set_keep_recordings_cmd(enabled: bool):
     config = get_config()
     if config.set_keep_recordings(enabled):
         print(json.dumps({"success": True, "keep_recordings": enabled}))
+    else:
+        print(json.dumps({"success": False, "error": "Failed to persist setting"}))
+
+
+@cli.command(name='get-auto-install-when-idle')
+def get_auto_install_when_idle_cmd():
+    """Get whether updates auto-install when the app is idle."""
+    from src.config import get_config
+    config = get_config()
+    print(json.dumps({"auto_install_when_idle": config.get_auto_install_when_idle()}))
+
+
+@cli.command(name='set-auto-install-when-idle')
+@click.argument('enabled', type=bool)
+def set_auto_install_when_idle_cmd(enabled: bool):
+    """Set whether updates auto-install when the app is idle."""
+    from src.config import get_config
+    config = get_config()
+    if config.set_auto_install_when_idle(enabled):
+        print(json.dumps({"success": True, "auto_install_when_idle": enabled}))
     else:
         print(json.dumps({"success": False, "error": "Failed to persist setting"}))
 
@@ -2943,7 +2995,7 @@ def reprocess(summary_file, regenerate_title, retranscribe):
             print(f"STREAM_ERROR:{err_msg}", flush=True)
             sys.exit(1)
 
-        streamed_md = ''.join(streamed_chunks)
+        streamed_md = _apply_chinese_variant(''.join(streamed_chunks)) or ''
 
         # Regenerate the title when explicitly forced OR when the note still has
         # an auto/placeholder name. The latter is the common case now that the
@@ -2963,6 +3015,7 @@ def reprocess(summary_file, regenerate_title, retranscribe):
             generated_title = recorder.summarizer.generate_title(
                 streamed_md, transcript, language=output_language
             )
+            generated_title = _apply_chinese_variant(generated_title)
             if generated_title:
                 session_name = generated_title
                 existing_data["session_info"]["name"] = generated_title
@@ -3202,7 +3255,7 @@ def generate_report(summary_file, template_id):
         print(f"STREAM_ERROR:{err_msg}", flush=True)
         sys.exit(1)
 
-    streamed_md = ''.join(streamed_chunks)
+    streamed_md = _apply_chinese_variant(''.join(streamed_chunks)) or ''
 
     # Do NOT persist an empty report — surface a stream error instead.
     if not streamed_md.strip():
@@ -3264,6 +3317,7 @@ def regen_title(summary_file):
             recorder.summarizer = OllamaSummarizer()
 
         generated_title = recorder.summarizer.generate_title(summary, transcript, language=output_language)
+        generated_title = _apply_chinese_variant(generated_title)
         if not generated_title:
             print("ERROR: Title generation returned empty result")
             sys.exit(1)

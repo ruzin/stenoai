@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { MainToolbar } from '@/components/MainToolbar';
 import { UpdateToast } from '@/components/UpdateToast';
+import { UndoDeleteToast } from '@/components/UndoDeleteToast';
 import { cn } from '@/lib/utils';
 import type { RecordingStatus } from '@/hooks/useRecording';
 
@@ -122,6 +123,10 @@ export function AppShell({
         id="toast-host"
         className="pointer-events-none fixed bottom-4 right-4 z-50 flex flex-col gap-2"
       />
+      {/* Bottom-right "Note deleted — Undo?" stack. Mounted here (not in a
+          route) so a toast survives MeetingDetail's post-delete navigate('/').
+          Portals into #toast-host above. */}
+      <UndoDeleteToast />
       {/* Top-right pill that announces a downloaded update and lets the
           user restart-to-install. Self-contained: subscribes to the
           electron-updater IPC events and renders only when there's a

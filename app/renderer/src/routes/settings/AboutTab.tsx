@@ -38,7 +38,11 @@ type CheckState =
   | { kind: 'checking' }
   | { kind: 'error'; message: string }
   | { kind: 'up-to-date' }
-  | { kind: 'update-available'; version: string; releaseUrl: string };
+  | { kind: 'update-available'; version: string; releaseUrl: string }
+  // An update exists on GitHub but this Mac is below the 14.4 launch floor, so
+  // it can't be installed here (#432). We explain it rather than offer a broken
+  // "View release" download nudge.
+  | { kind: 'update-blocked-os'; version: string };
 
 export function AboutTab() {
   const version = useAppVersion();
@@ -125,7 +129,11 @@ export function AboutTab() {
         setCheckState({ kind: 'error', message: result.error });
         return;
       }
-      if (result.updateAvailable) {
+      if (result.updateAvailable && result.osUpdateEligible === false) {
+        // Update exists but this macOS is below the launch floor (#432) — don't
+        // point the user at a DMG that won't run.
+        setCheckState({ kind: 'update-blocked-os', version: result.latestVersion });
+      } else if (result.updateAvailable) {
         setCheckState({
           kind: 'update-available',
           version: result.latestVersion,
@@ -161,7 +169,9 @@ export function AboutTab() {
   const checkDescription =
     checkState.kind === 'update-available'
       ? `${versionLabel} — Update available (v${checkState.version})`
-      : versionLabel;
+      : checkState.kind === 'update-blocked-os'
+        ? `${versionLabel} — v${checkState.version} requires a newer version of macOS`
+        : versionLabel;
 
   return (
     <section data-settings-tab="about">

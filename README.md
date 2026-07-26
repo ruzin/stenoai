@@ -42,10 +42,10 @@
 If you're looking for a hosted desktop recording API, consider checking out [Recall.ai](https://www.recall.ai/product/desktop-recording-sdk?utm_source=github&utm_medium=sponsorship&utm_campaign=ruzin-stenoai), an API that records Zoom, Google Meet, Microsoft Teams, in-person meetings, and more.
 
 ## 📢 What's New
-- **2026-07-24** 🔎 Settings search — press ⌘K on the Settings screen to search every setting and jump straight to the right tab.
-- **2026-07-24** 🔔 Cleaner notifications — meeting and note alerts now show as Steno's own in-app toast instead of native OS notifications.
-- **2026-07-24** ✨ Letter avatars — notes in the Previous list show their initial instead of a generic file icon.
-- **2026-07-24** 📅 Connected calendar — Calendar settings now show the account you've connected.
+- **2026-07-26** 🎙️ System audio without Screen Recording — record both sides of a call with no Screen Recording permission. Now requires macOS 14.4 or later.
+- **2026-07-26** ⬇️ Automatic updates — Steno installs a downloaded update while you're idle and relaunches, never mid-recording. Turn it off in Settings to keep the manual prompt.
+- **2026-07-26** ↩️ Undo delete + re-transcribe — restore a note right after deleting it, and re-transcribe an existing recording from its detail view.
+- **2026-07-26** 🌏 Chinese transcription — pick Simplified or Traditional Chinese when the Whisper engine is selected.
 
 
 ## Features
@@ -173,7 +173,7 @@ Have questions or suggestions? [Join our Discord](https://discord.gg/DZ6vcQnxxu)
 
 ## Installation
 
-Download the latest release (**Apple Silicon Mac, macOS 12 Monterey or later**):
+Download the latest release (**Apple Silicon Mac, macOS 14.4 or later**):
 
 - [Apple Silicon (M1-M5)](https://github.com/ruzin/stenoai/releases/latest/download/stenoAI-macos-arm64.dmg)
 
@@ -283,9 +283,9 @@ log stream --predicate 'eventMessage CONTAINS "ollama" OR process CONTAINS "Sten
 ### Common Issues
 
 - **Update didn't install**: Auto-updates are applied on next quit. Quit via the **Steno → Quit** menu (not just closing the window), then reopen.
-- **No system audio / no `[Others]` speaker labels**: macOS needs **Screen Recording** permission. Go to **System Settings → Privacy & Security → Screen & System Audio Recording**, enable Steno, and relaunch the app.
+- **No system audio / no `[Others]` speaker labels**: On macOS, allow Steno to record system audio in **System Settings → Privacy & Security → Screen & System Audio Recording**. Screen Recording access is not required.
 - **`stenoai://` deep link doesn't start recording**: Make sure Steno has launched at least once after install so the URL scheme is registered. If it still fails, check the terminal log for `Protocol handler registration` output.
-- **Recording stops early**: Check microphone permissions, Screen Recording permission (if using system audio), and available disk space.
+- **Recording stops early**: Check microphone permission, System Audio Recording permission (if recording system audio), and available disk space.
 - **"Processing failed"**: Usually an Ollama service or model issue — check the terminal logs.
 - **Empty transcripts**: Whisper couldn't detect speech — verify audio input levels.
 - **Slow processing**: Normal for longer recordings; Ollama is CPU-intensive. If summaries are unusually slow, switch to a lighter model in Settings → AI (Gemma 4 E2B is the lightest/fastest).

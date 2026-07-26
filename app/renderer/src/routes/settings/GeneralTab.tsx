@@ -24,15 +24,14 @@ import { isMac } from '@/lib/utils';
 import { useTheme } from '@/hooks/useTheme';
 import {
   useAutoDetectMeetingsSetting,
+  useAutoInstallWhenIdleSetting,
   useDockIconSetting,
   useLaunchOnLoginSetting,
   useMicrophoneSetting,
   useNotificationsSetting,
-  useOpenScreenRecordingSettings,
   usePremeetingNotificationsSetting,
-  useRelaunchApp,
-  useRequestScreenRecordingPermission,
   useSetAutoDetectMeetings,
+  useSetAutoInstallWhenIdle,
   useSetDockIcon,
   useSetLaunchOnLogin,
   useSetMicrophone,
@@ -67,32 +66,9 @@ export function GeneralTab() {
   const systemAudio = useSystemAudioSetting();
   const setSystemAudio = useSetSystemAudio();
   const systemAudioSupport = useSystemAudioSupport();
-  const requestScreenRecording = useRequestScreenRecordingPermission();
-  const openScreenRecordingSettings = useOpenScreenRecordingSettings();
-  const relaunchApp = useRelaunchApp();
-  // Screen Recording permission changes don't apply to an already-running
-  // process — `screenPermissionAtLaunch` is frozen main-side at startup, so
-  // comparing it to the live `screenPermission` tells apart "granted before
-  // launch" from "granted mid-session, needs a relaunch to take effect."
-  // (Deliberately not component state: that broke on tab remount, since a
-  // freshly-mounted component would re-seed its "initial" value from the
-  // now-live 'granted' status and silently lose the relaunch prompt.)
-  const needsRelaunchForScreenRecording =
-    systemAudioSupport.data?.screenPermissionAtLaunch !== 'granted' &&
-    systemAudioSupport.data?.screenPermission === 'granted';
-  const screenPermission = systemAudioSupport.data?.screenPermission;
   const systemAudioDescription = (() => {
     if (systemAudioSupport.data && !systemAudioSupport.data.supported) {
       return `Capture both sides of a call (requires macOS 14.4+, you're on ${systemAudioSupport.data.osVersion || 'an older version'}). Mic-only recording still works.`;
-    }
-    if (needsRelaunchForScreenRecording) {
-      return 'Screen Recording access granted — relaunch Steno to start capturing both sides of a call.';
-    }
-    if (screenPermission === 'not-determined') {
-      return 'Capture both sides of a call. Needs Screen Recording access first — mic-only recording still works either way.';
-    }
-    if (screenPermission === 'denied' || screenPermission === 'restricted') {
-      return 'Capture both sides of a call. Screen Recording access was denied — enable it in System Settings, then relaunch Steno. Mic-only recording still works either way.';
     }
     return 'Capture both sides of a call. Turn off to record your mic only.';
   })();
@@ -115,6 +91,8 @@ export function GeneralTab() {
   })();
   const launchOnLogin = useLaunchOnLoginSetting();
   const setLaunchOnLogin = useSetLaunchOnLogin();
+  const autoInstallWhenIdle = useAutoInstallWhenIdleSetting();
+  const setAutoInstallWhenIdle = useSetAutoInstallWhenIdle();
   const silenceAutoStop = useSilenceAutoStopSetting();
   const setSilenceAutoStopEnabled = useSetSilenceAutoStopEnabled();
   const setSilenceAutoStopMinutes = useSetSilenceAutoStopMinutes();
@@ -461,59 +439,11 @@ export function GeneralTab() {
           mic+system (toggle hidden), so this control isn't shown there. */}
       {isMac && (
         <SettingRow label="Record system audio" description={systemAudioDescription}>
-          <div className="flex items-center gap-2">
-            {/* Only offer permission actions when the OS actually supports the
-                feature — on an unsupported macOS version, screenPermission can
-                still read 'not-determined'/'denied' (that API predates the
-                14.4 loopback requirement), but granting it wouldn't do
-                anything: the toggle below is already disabled for OS reasons,
-                so the description explaining "requires macOS 14.4+" should be
-                the only thing shown, not an actionable-looking button. */}
-            {systemAudioSupport.data?.supported === false ? null : needsRelaunchForScreenRecording ? (
-              <Button
-                variant="outline"
-                size="sm"
-                className={COMPACT_BTN}
-                onClick={() => relaunchApp.mutate()}
-              >
-                Relaunch
-              </Button>
-            ) : screenPermission === 'not-determined' ? (
-              <Button
-                variant="outline"
-                size="sm"
-                className={COMPACT_BTN}
-                onClick={() => requestScreenRecording.mutate()}
-                disabled={requestScreenRecording.isPending}
-              >
-                Grant Access
-              </Button>
-            ) : screenPermission === 'denied' || screenPermission === 'restricted' ? (
-              <>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className={COMPACT_BTN}
-                  onClick={() => void systemAudioSupport.refetch()}
-                >
-                  Check Again
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className={COMPACT_BTN}
-                  onClick={() => openScreenRecordingSettings.mutate()}
-                >
-                  Open Settings
-                </Button>
-              </>
-            ) : null}
-            <Switch
-              checked={(systemAudio.data ?? true) && (systemAudioSupport.data?.supported ?? true)}
-              onCheckedChange={(v) => setSystemAudio.mutate(v)}
-              disabled={systemAudio.data === undefined || systemAudioSupport.data?.supported === false}
-            />
-          </div>
+          <Switch
+            checked={(systemAudio.data ?? true) && (systemAudioSupport.data?.supported ?? true)}
+            onCheckedChange={(v) => setSystemAudio.mutate(v)}
+            disabled={systemAudio.data === undefined || systemAudioSupport.data?.supported === false}
+          />
         </SettingRow>
       )}
 
@@ -559,6 +489,17 @@ export function GeneralTab() {
           checked={launchOnLogin.data ?? true}
           onCheckedChange={(v) => setLaunchOnLogin.mutate(v)}
           disabled={launchOnLogin.data === undefined}
+        />
+      </SettingRow>
+
+      <SettingRow
+        label="Install updates automatically"
+        description="When the app is idle and not recording, download and install updates in the background, then restart. You'll still be notified when an update is available."
+      >
+        <Switch
+          checked={autoInstallWhenIdle.data ?? true}
+          onCheckedChange={(v) => setAutoInstallWhenIdle.mutate(v)}
+          disabled={autoInstallWhenIdle.data === undefined}
         />
       </SettingRow>
 
