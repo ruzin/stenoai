@@ -44,6 +44,11 @@ type StenoWindow = Window & {
         command: string;
         timeoutSeconds: number;
       }) => Promise<Result>;
+      testLocalCli: (config: {
+        name: string;
+        command: string;
+        timeoutSeconds: number;
+      }) => Promise<Result>;
       setRemoteOllamaUrl: (url: string) => Promise<Result>;
       setCloudApiUrl: (url: string) => Promise<Result>;
       setCloudApiKey: (key: string) => Promise<Result>;
@@ -110,12 +115,28 @@ test("provider switch + cloud/bedrock config persist and round-trip through get-
     await page.evaluate(() => {
       window.location.hash = "#/settings?tab=ai";
     });
-    const saved = await page.evaluate(() =>
-      (window as StenoWindow).stenoai.ai.setLocalCliConfig({
-        name: "My meeting command",
-        command: "meeting-agent --stdin",
-        timeoutSeconds: 15 * 60,
-      }),
+    const localCliConfig = {
+      name: "My meeting command",
+      command:
+        "node -e \"process.stdin.resume();process.stdin.on('end',()=>console.log('## Summary\\\\nReady\\\\n## Key Topics\\\\nTest\\\\n## Key Points\\\\nPassed\\\\n## Action Items\\\\nNone'))\"",
+      timeoutSeconds: 15 * 60,
+    };
+    const rejectedBeforeTest = await page.evaluate(
+      (config) => (window as StenoWindow).stenoai.ai.setLocalCliConfig(config),
+      localCliConfig,
+    );
+    expect(rejectedBeforeTest).toMatchObject({
+      success: false,
+      error: "Test this command successfully before saving.",
+    });
+    const tested = await page.evaluate(
+      (config) => (window as StenoWindow).stenoai.ai.testLocalCli(config),
+      localCliConfig,
+    );
+    expect(tested.success).toBe(true);
+    const saved = await page.evaluate(
+      (config) => (window as StenoWindow).stenoai.ai.setLocalCliConfig(config),
+      localCliConfig,
     );
     expect(saved.success).toBe(true);
     const diskConfig = readUserConfig(userDataDir);
@@ -126,14 +147,14 @@ test("provider switch + cloud/bedrock config persist and round-trip through get-
       readFileSync(path.join(userDataDir, ".local-cli-config")).toString(
         "utf8",
       ),
-    ).not.toContain("meeting-agent --stdin");
+    ).not.toContain("process.stdin.resume");
     expect((await getProvider(page)).local_cli_name).toBe("My meeting command");
     expect((await getProvider(page)).local_cli_configured).toBe(true);
     expect((await getProvider(page)).local_cli_timeout_seconds).toBe(15 * 60);
     const guardedConfig = await page.evaluate(() =>
       (window as StenoWindow).stenoai.ai.getLocalCliConfig(),
     );
-    expect(guardedConfig.command).toBe("meeting-agent --stdin");
+    expect(guardedConfig.command).toBe(localCliConfig.command);
   } else {
     test.info().annotations.push({
       type: "skip-reason",

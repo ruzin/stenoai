@@ -152,6 +152,7 @@ function install({ ipcMain }) {
     localCliName: '',
     localCliCommand: '',
     localCliTimeoutSeconds: 35 * 60,
+    testedLocalCliConfig: '',
     orgSession: null, // { adapterUrl, email, name, orgId, exp } when signed in
     everSignedIn: false,
     model: 'gemma4:e2b-it-qat', // local/remote Ollama model (config.model)
@@ -333,16 +334,44 @@ function install({ ipcMain }) {
       ) {
         return { success: false, error: 'Invalid local CLI configuration.' };
       }
-      state.localCliName = config.name.trim();
-      state.localCliCommand = config.command.trim();
-      state.localCliTimeoutSeconds = config.timeoutSeconds;
+      const normalized = {
+        name: config.name.trim(),
+        command: config.command.trim(),
+        timeoutSeconds: config.timeoutSeconds,
+      };
+      if (state.testedLocalCliConfig !== JSON.stringify(normalized)) {
+        return {
+          success: false,
+          error: 'Test this command successfully before saving.',
+        };
+      }
+      state.localCliName = normalized.name;
+      state.localCliCommand = normalized.command;
+      state.localCliTimeoutSeconds = normalized.timeoutSeconds;
+      state.testedLocalCliConfig = '';
       return { success: true };
     },
 
-    'test-local-cli': async () =>
-      state.localCliCommand
-        ? { success: true, ok: true, message: 'Command returned a valid Steno summary.' }
-        : { success: false, error: 'Locally invoked CLI is not configured.' },
+    'test-local-cli': async (_event, config) => {
+      if (
+        !config ||
+        typeof config.name !== 'string' ||
+        typeof config.command !== 'string' ||
+        !config.name.trim() ||
+        !config.command.trim() ||
+        !Number.isInteger(config.timeoutSeconds) ||
+        config.timeoutSeconds < 30 ||
+        config.timeoutSeconds > 35 * 60
+      ) {
+        return { success: false, error: 'Invalid local CLI configuration.' };
+      }
+      state.testedLocalCliConfig = JSON.stringify({
+        name: config.name.trim(),
+        command: config.command.trim(),
+        timeoutSeconds: config.timeoutSeconds,
+      });
+      return { success: true, ok: true, message: 'Command returned a valid Steno summary.' };
+    },
 
     // Stateful idle auto-install toggle: set updates the in-memory value that
     // get returns, like the other stateful setting mocks — so a T1 flip is

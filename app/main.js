@@ -8281,6 +8281,7 @@ const LOCAL_CLI_TIMEOUT_MIN_SECONDS = 30;
 // command timeout below that combined ceiling so Python reports the real
 // timeout instead of Electron killing the whole processing job first.
 const LOCAL_CLI_TIMEOUT_MAX_SECONDS = 35 * 60;
+let testedLocalCliConfig = '';
 
 function getLocalCliConfigPath() {
   return path.join(getUserDataDir(), '.local-cli-config');
@@ -8750,26 +8751,11 @@ ipcMain.handle('set-local-cli-config', async (event, config) => {
       return { success: false, error: validated.error };
     }
     const payload = validated.value;
-    const current = loadLocalCliConfig();
-    const unchanged = current && JSON.stringify(current) === JSON.stringify(payload);
-    if (!unchanged && !IS_E2E) {
-      const confirmation = await dialog.showMessageBox(mainWindow, {
-        type: 'warning',
-        title: 'Allow a local command to receive meeting text?',
-        message: `Allow “${payload.name}” to receive transcripts and summaries?`,
-        detail:
-          'Steno cannot restrict this command’s tools, files, network access, or data retention. ' +
-          'Meeting text can contain instructions that influence enabled tools, and the command ' +
-          'may send that text to third parties. You are responsible for the command, provider ' +
-          'terms, participant consent, and all resulting data access.',
-        buttons: ['Cancel', 'Allow and save'],
-        defaultId: 0,
-        cancelId: 0,
-        noLink: true,
-      });
-      if (confirmation.response !== 1) {
-        return { success: false, error: 'Command change cancelled.' };
-      }
+    if (testedLocalCliConfig !== JSON.stringify(payload)) {
+      return {
+        success: false,
+        error: 'Test this command successfully before saving.',
+      };
     }
     if (!saveLocalCliConfig(payload)) {
       return {
@@ -8777,6 +8763,7 @@ ipcMain.handle('set-local-cli-config', async (event, config) => {
         error: 'Secure storage is unavailable; the command was not saved.',
       };
     }
+    testedLocalCliConfig = '';
     return { success: true };
   } catch (error) {
     return { success: false, error: error.message };
@@ -8799,7 +8786,7 @@ ipcMain.handle('get-local-cli-config', async (event) => {
   };
 });
 
-ipcMain.handle('test-local-cli', async (event) => {
+ipcMain.handle('test-local-cli', async (event, config) => {
   try {
     if (!isTrustedAiSettingsSender(event)) {
       return {
@@ -8807,10 +8794,42 @@ ipcMain.handle('test-local-cli', async (event) => {
         error: 'This command can only be tested from Settings > Summarisation & Chat.',
       };
     }
-    const env = getAiEnv();
-    if (!env.STENOAI_LOCAL_CLI_COMMAND) {
-      return { success: false, error: 'Locally invoked CLI is not configured.' };
+
+    const validated = validateLocalCliConfig(config);
+    if (!validated.value) {
+      return { success: false, error: validated.error };
     }
+    const payload = validated.value;
+    const current = loadLocalCliConfig();
+    const changed = !current || JSON.stringify(current) !== JSON.stringify(payload);
+    if (changed && !IS_E2E) {
+      const confirmation = await dialog.showMessageBox(mainWindow, {
+        type: 'warning',
+        title: 'Allow a local command to receive meeting text?',
+        message: `Allow “${payload.name}” to run and receive a test transcript?`,
+        detail:
+          'Testing executes this command but does not save it. Steno cannot restrict the ' +
+          'command’s tools, files, network access, or data retention. Meeting text can contain ' +
+          'instructions that influence enabled tools, and the command may send that text to ' +
+          'third parties. You are responsible for the command, provider terms, participant ' +
+          'consent, and all resulting data access.',
+        buttons: ['Cancel', 'Allow and test'],
+        defaultId: 0,
+        cancelId: 0,
+        noLink: true,
+      });
+      if (confirmation.response !== 1) {
+        return { success: false, error: 'Command test cancelled.' };
+      }
+    }
+
+    testedLocalCliConfig = '';
+    const env = {
+      ...getAiEnv(),
+      STENOAI_LOCAL_CLI_NAME: payload.name,
+      STENOAI_LOCAL_CLI_COMMAND: payload.command,
+      STENOAI_LOCAL_CLI_TIMEOUT_SECONDS: String(payload.timeoutSeconds),
+    };
     const result = await runPythonScript(
       'simple_recorder.py',
       ['test-local-cli'],
@@ -8818,7 +8837,13 @@ ipcMain.handle('test-local-cli', async (event) => {
       env,
     );
     const jsonMatch = result.match(/\{.*\}/s);
-    if (jsonMatch) return JSON.parse(jsonMatch[0]);
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0]);
+      if (parsed.success === true && parsed.ok === true) {
+        testedLocalCliConfig = JSON.stringify(payload);
+      }
+      return parsed;
+    }
     return { success: false, error: 'Invalid response while testing the command.' };
   } catch (error) {
     return { success: false, error: error.message };

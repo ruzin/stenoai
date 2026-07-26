@@ -68,7 +68,7 @@ export function useSetLocalCliConfig() {
 
 export function useTestLocalCli() {
   return useMutation({
-    mutationFn: async () => unwrap(await ipc().ai.testLocalCli()),
+    mutationFn: async (config: LocalCliConfig) => unwrap(await ipc().ai.testLocalCli(config)),
   });
 }
 

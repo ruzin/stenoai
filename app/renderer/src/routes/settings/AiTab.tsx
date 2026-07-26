@@ -498,11 +498,16 @@ function LocalCliConfigEditor({
 }) {
   const saveConfig = useSetLocalCliConfig();
   const testCommand = useTestLocalCli();
+  const [savedConfig, setSavedConfig] = React.useState(initialConfig);
+  const [editing, setEditing] = React.useState(!initialConfig.command);
   const [name, setName] = React.useState(initialConfig.name);
   const [command, setCommand] = React.useState(initialConfig.command);
   const [timeoutMinutes, setTimeoutMinutes] = React.useState(
     Math.round(initialConfig.timeoutSeconds / 60)
   );
+  const [testedConfig, setTestedConfig] = React.useState('');
+  const [feedback, setFeedback] = React.useState<{ ok: boolean; message: string } | undefined>();
+  const feedbackTimer = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const validationError = !name.trim()
     ? 'Enter a display name.'
@@ -517,37 +522,156 @@ function LocalCliConfigEditor({
     command: command.trim(),
     timeoutSeconds: timeoutMinutes * 60,
   };
+  const payloadKey = JSON.stringify(payload);
+  const canSave = !validationError && testedConfig === payloadKey;
 
-  const clearStatus = () => {
-    saveConfig.reset();
-    testCommand.reset();
+  React.useEffect(
+    () => () => {
+      if (feedbackTimer.current) clearTimeout(feedbackTimer.current);
+    },
+    []
+  );
+
+  const clearFeedback = () => {
+    if (feedbackTimer.current) clearTimeout(feedbackTimer.current);
+    feedbackTimer.current = undefined;
+    setFeedback(undefined);
   };
 
-  const onSave = () => {
-    if (!validationError) saveConfig.mutate(payload);
+  const showFeedback = (next: { ok: boolean; message: string }) => {
+    clearFeedback();
+    setFeedback(next);
+    feedbackTimer.current = setTimeout(() => {
+      setFeedback(undefined);
+      feedbackTimer.current = undefined;
+    }, 4000);
+  };
+
+  const draftChanged = () => {
+    setTestedConfig('');
+    clearFeedback();
+  };
+
+  const onSave = async () => {
+    if (!canSave) return;
+    clearFeedback();
+    try {
+      await saveConfig.mutateAsync(payload);
+      setSavedConfig(payload);
+      setTestedConfig('');
+      setEditing(false);
+    } catch (error) {
+      showFeedback({
+        ok: false,
+        message: error instanceof Error ? error.message : 'The command could not be saved.',
+      });
+    }
   };
 
   const onTest = async () => {
     if (validationError) return;
+    const testedPayloadKey = payloadKey;
+    clearFeedback();
+    setTestedConfig('');
     try {
-      await saveConfig.mutateAsync(payload);
-      testCommand.mutate();
-    } catch {
-      // The mutation renders its own safe error message below.
+      const result = await testCommand.mutateAsync(payload);
+      setTestedConfig(testedPayloadKey);
+      showFeedback({
+        ok: true,
+        message: result.message ?? 'Command returned a valid Steno summary.',
+      });
+    } catch (error) {
+      showFeedback({
+        ok: false,
+        message: error instanceof Error ? error.message : 'The command test failed.',
+      });
     }
   };
 
-  const mutationError = testCommand.isError
-    ? testCommand.error
-    : saveConfig.isError
-      ? saveConfig.error
-      : undefined;
+  const onEdit = () => {
+    setName(savedConfig.name);
+    setCommand(savedConfig.command);
+    setTimeoutMinutes(Math.round(savedConfig.timeoutSeconds / 60));
+    setTestedConfig('');
+    clearFeedback();
+    setEditing(true);
+  };
+
+  const onCancel = () => {
+    setName(savedConfig.name);
+    setCommand(savedConfig.command);
+    setTimeoutMinutes(Math.round(savedConfig.timeoutSeconds / 60));
+    setTestedConfig('');
+    clearFeedback();
+    setEditing(false);
+  };
+
+  if (!editing && savedConfig.command) {
+    return (
+      <div
+        className="space-y-3 py-4"
+        style={{ borderBottom: '1px solid var(--border-subtle)' }}
+        data-testid="local-cli-config"
+        data-state="collapsed"
+      >
+        <div
+          className="flex items-start gap-3 rounded-lg border px-3 py-3"
+          style={{ borderColor: 'var(--border-subtle)', background: 'var(--surface-raised)' }}
+        >
+          <div
+            className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-md"
+            style={{ background: 'var(--surface-hover)', color: 'var(--fg-2)' }}
+          >
+            <SquareTerminal className="size-4" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <span className="truncate text-[13px] font-medium" style={{ color: 'var(--fg-1)' }}>
+                {savedConfig.name}
+              </span>
+              <span
+                className="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium uppercase"
+                style={{
+                  letterSpacing: '0.05em',
+                  color: 'var(--fg-2)',
+                  background: 'var(--surface-hover)',
+                }}
+              >
+                Configured
+              </span>
+            </div>
+            <div
+              className="mt-1 truncate font-mono text-[11.5px]"
+              style={{ color: 'var(--fg-muted)' }}
+              title={savedConfig.command}
+              data-testid="local-cli-command-summary"
+            >
+              {savedConfig.command}
+            </div>
+            <div className="mt-1 text-[11px]" style={{ color: 'var(--fg-muted)' }}>
+              Timeout: {Math.round(savedConfig.timeoutSeconds / 60)} minutes
+            </div>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            className={cn(COMPACT_BTN, 'shrink-0')}
+            onClick={onEdit}
+          >
+            Edit
+          </Button>
+        </div>
+        <LocalCliComplianceNotice />
+      </div>
+    );
+  }
 
   return (
     <div
       className="space-y-3 py-4"
       style={{ borderBottom: '1px solid var(--border-subtle)' }}
       data-testid="local-cli-config"
+      data-state="editing"
     >
       <div>
         <label
@@ -560,8 +684,9 @@ function LocalCliConfigEditor({
           value={name}
           onChange={(event) => {
             setName(event.target.value);
-            clearStatus();
+            draftChanged();
           }}
+          disabled={busy}
           placeholder="My meeting command"
           maxLength={80}
           className={COMPACT_INPUT}
@@ -579,8 +704,9 @@ function LocalCliConfigEditor({
           value={command}
           onChange={(event) => {
             setCommand(event.target.value);
-            clearStatus();
+            draftChanged();
           }}
+          disabled={busy}
           placeholder="my-agent --print"
           maxLength={4096}
           spellCheck={false}
@@ -613,8 +739,9 @@ function LocalCliConfigEditor({
             value={timeoutMinutes}
             onChange={(event) => {
               setTimeoutMinutes(Number(event.target.value));
-              clearStatus();
+              draftChanged();
             }}
+            disabled={busy}
             className={cn(COMPACT_INPUT, 'w-24')}
             data-testid="local-cli-timeout"
           />
@@ -628,45 +755,62 @@ function LocalCliConfigEditor({
           variant="outline"
           size="sm"
           className={COMPACT_BTN}
-          onClick={onSave}
+          onClick={onTest}
           disabled={Boolean(validationError) || busy}
         >
-          {saveConfig.isPending ? 'Saving…' : 'Save'}
+          {testCommand.isPending
+            ? 'Testing…'
+            : testedConfig === payloadKey
+              ? 'Test again'
+              : 'Test command'}
         </Button>
         <Button
           variant="outline"
           size="sm"
           className={COMPACT_BTN}
-          onClick={onTest}
-          disabled={Boolean(validationError) || busy}
+          onClick={onSave}
+          disabled={!canSave || busy}
+          title={
+            !canSave && !validationError
+              ? 'Test the current command successfully first.'
+              : undefined
+          }
         >
-          {testCommand.isPending ? 'Testing…' : 'Test command'}
+          {saveConfig.isPending ? 'Saving…' : 'Save'}
         </Button>
-        <ConnectionStatus
-          ok={
-            testCommand.isSuccess
-              ? true
-              : mutationError
-                ? false
-                : saveConfig.isSuccess
-                  ? true
-                  : undefined
-          }
-          message={
-            mutationError instanceof Error
-              ? mutationError.message
-              : (testCommand.data?.message ?? (saveConfig.isSuccess ? 'Saved' : undefined))
-          }
-        />
+        {savedConfig.command && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className={COMPACT_BTN}
+            onClick={onCancel}
+            disabled={busy}
+          >
+            Cancel
+          </Button>
+        )}
+        <span aria-live="polite">
+          <ConnectionStatus ok={feedback?.ok} message={feedback?.message} />
+        </span>
       </div>
-      <div className="text-[12px] leading-[1.5]" style={{ color: 'var(--fg-2)' }}>
-        <strong style={{ color: 'var(--fg-1)' }}>You own compliance and access.</strong> The process
-        starts on this device, but Steno cannot restrict its tools, files, network access,
-        environment, or data retention. Meeting text may contain instructions that influence enabled
-        tools, and the command may send that text elsewhere. Use only provider-approved API or
-        business authentication, obtain participant consent, and never paste API keys into this
-        field.
-      </div>
+      {!validationError && !canSave && (
+        <div className="text-[11.5px]" style={{ color: 'var(--fg-muted)' }}>
+          Test the current command successfully to enable Save.
+        </div>
+      )}
+      <LocalCliComplianceNotice />
+    </div>
+  );
+}
+
+function LocalCliComplianceNotice() {
+  return (
+    <div className="text-[12px] leading-[1.5]" style={{ color: 'var(--fg-2)' }}>
+      <strong style={{ color: 'var(--fg-1)' }}>You own compliance and access.</strong> The process
+      starts on this device, but Steno cannot restrict its tools, files, network access,
+      environment, or data retention. Meeting text may contain instructions that influence enabled
+      tools, and the command may send that text elsewhere. Use only provider-approved API or
+      business authentication, obtain participant consent, and never paste API keys into this field.
     </div>
   );
 }

@@ -1051,7 +1051,7 @@ export interface StenoaiBridge {
     setProvider: RequestFn<[p: AiProvider], Result<Record<string, never>>>;
     getLocalCliConfig: RequestFn<[], Result<LocalCliConfig>>;
     setLocalCliConfig: RequestFn<[config: LocalCliConfig], Result<Record<string, never>>>;
-    testLocalCli: RequestFn<[], Result<{ ok: boolean; message?: string }>>;
+    testLocalCli: RequestFn<[config: LocalCliConfig], Result<{ ok: boolean; message?: string }>>;
     setRemoteOllamaUrl: RequestFn<[url: string], Result<Record<string, never>>>;
     testRemoteOllama: RequestFn<[url: string], Result<{ ok: boolean; message?: string }>>;
     setCloudApiUrl: RequestFn<[url: string], Result<Record<string, never>>>;
