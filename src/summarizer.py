@@ -12,7 +12,7 @@ import time
 from typing import Optional, Dict, Any
 from .models import MeetingTranscript, ActionItem, Decision
 from .config import Config, resolve_runtime_tag, BEDROCK_REGION_RE
-from .local_cli import run_local_cli, validate_summary_output
+from .local_cli import LocalCliError, run_local_cli, validate_summary_output
 from . import ollama_manager
 
 logger = logging.getLogger(__name__)
@@ -1183,7 +1183,7 @@ Return ONLY the response in this exact JSON format:
 
     def summarize_transcript(self, transcript: str, duration_minutes: int, language: str = "en", notes: str = None) -> Optional[MeetingTranscript]:
         """
-        Summarize a meeting transcript using Ollama.
+        Summarize a meeting transcript using the legacy structured-JSON path.
 
         Args:
             transcript: The meeting transcript text
@@ -1193,6 +1193,12 @@ Return ONLY the response in this exact JSON format:
         Returns:
             MeetingTranscript object or None if summarization failed
         """
+        if self.ai_provider == "local_cli":
+            raise LocalCliError(
+                "Locally invoked CLI does not support summarize_transcript(); "
+                "use summarize_transcript_streaming() for Markdown summaries."
+            )
+
         transcript = _strip_leading_timestamps(transcript)
         try:
             # Handle empty or None transcripts
@@ -1221,8 +1227,6 @@ Return ONLY the response in this exact JSON format:
                 response_text = self._adapter_chat(prompt, timeout_seconds)
             elif self.ai_provider == "cloud":
                 response_text = self._cloud_chat(prompt, timeout_seconds)
-            elif self.ai_provider == "local_cli":
-                response_text = self._local_cli_chat(prompt, timeout_seconds)
             else:
                 # Retry logic for Ollama API calls (local or remote)
                 max_retries = 3

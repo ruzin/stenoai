@@ -1,5 +1,25 @@
 import { test, expect } from "../fixtures/electron";
 
+type LocalCliConfig = {
+  name: string;
+  command: string;
+  timeoutSeconds: number;
+};
+
+type LocalCliResult = {
+  success?: boolean;
+  error?: string;
+};
+
+type StenoWindow = Window & {
+  stenoai: {
+    ai: {
+      setLocalCliConfig: (config: LocalCliConfig) => Promise<LocalCliResult>;
+      testLocalCli: (config: LocalCliConfig) => Promise<LocalCliResult>;
+    };
+  };
+};
+
 test("Locally invoked CLI reveals and persists a generic command", async ({
   launchApp,
 }) => {
@@ -69,4 +89,81 @@ test("Locally invoked CLI reveals and persists a generic command", async ({
     .locator('[data-testid="local-cli-command"]')
     .fill("meeting-agent --stdin --verbose");
   await expect(config.getByRole("button", { name: "Save" })).toBeDisabled();
+});
+
+test("mock local CLI test and save enforce the production validation limits", async ({
+  launchApp,
+}) => {
+  const { page } = await launchApp({ mockIpc: true });
+  const invalidConfigs = [
+    {
+      config: {
+        name: "Agent\u007fspoofed",
+        command: "meeting-agent --stdin",
+        timeoutSeconds: 300,
+      },
+      error: "Display name must be between 1 and 80 characters.",
+    },
+    {
+      config: {
+        name: "n".repeat(81),
+        command: "meeting-agent --stdin",
+        timeoutSeconds: 300,
+      },
+      error: "Display name must be between 1 and 80 characters.",
+    },
+    {
+      config: {
+        name: "Agent",
+        command: "meeting-agent\n--stdin",
+        timeoutSeconds: 300,
+      },
+      error: "Command must be a single line between 1 and 4096 characters.",
+    },
+    {
+      config: {
+        name: "Agent",
+        command: "x".repeat(4097),
+        timeoutSeconds: 300,
+      },
+      error: "Command must be a single line between 1 and 4096 characters.",
+    },
+    {
+      config: {
+        name: "Agent",
+        command: "meeting-agent --stdin",
+        timeoutSeconds: 29,
+      },
+      error: "Timeout must be between 30 and 2100 seconds.",
+    },
+    {
+      config: {
+        name: "Agent",
+        command: "meeting-agent --stdin",
+        timeoutSeconds: 2100.5,
+      },
+      error: "Timeout must be between 30 and 2100 seconds.",
+    },
+  ];
+
+  const results = await page.evaluate(async (cases) => {
+    const bridge = (window as StenoWindow).stenoai.ai;
+    return Promise.all(
+      cases.map(async ({ config }) => ({
+        test: await bridge.testLocalCli(config),
+        save: await bridge.setLocalCliConfig(config),
+      })),
+    );
+  }, invalidConfigs);
+
+  for (const [index, result] of results.entries()) {
+    expect(result.test).toMatchObject({
+      success: false,
+      error: invalidConfigs[index].error,
+    });
+    expect(result.save).toMatchObject({
+      success: false,
+      error: invalidConfigs[index].error,
+    });
+  }
 });

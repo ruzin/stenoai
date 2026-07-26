@@ -1,6 +1,12 @@
+import io
 import json
+import os
+import shlex
+import signal
 import subprocess
+import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -8,6 +14,8 @@ from unittest import mock
 from src.config import Config
 from src.local_cli import (
     LocalCliError,
+    _split_command_template,
+    _terminate_process,
     normalize_local_cli_config,
     run_local_cli,
     validate_summary_output,
@@ -15,21 +23,40 @@ from src.local_cli import (
 from src.summarizer import OllamaSummarizer
 
 
+class _RecordingInput:
+    def __init__(self):
+        self.data = bytearray()
+        self.closed = False
+
+    def write(self, data):
+        self.data.extend(data)
+        return len(data)
+
+    def flush(self):
+        pass
+
+    def close(self):
+        self.closed = True
+
+
 class _FakeProcess:
     def __init__(self, stdout="answer", stderr="", returncode=0, timeout=False):
-        self.stdout = stdout
-        self.stderr = stderr
+        self.stdin = _RecordingInput()
+        self.stdout = io.BytesIO(stdout.encode("utf-8"))
+        self.stderr = io.BytesIO(stderr.encode("utf-8"))
         self.returncode = returncode
         self.timeout = timeout
-        self.input = None
         self.terminated = False
         self.killed = False
 
-    def communicate(self, input=None, timeout=None):
-        self.input = input
-        if self.timeout:
+    @property
+    def input(self):
+        return bytes(self.stdin.data).decode("utf-8")
+
+    def wait(self, timeout=None):
+        if self.timeout and not self.terminated and not self.killed:
             raise subprocess.TimeoutExpired("local-cli", timeout)
-        return self.stdout, self.stderr
+        return self.returncode
 
     def poll(self):
         return self.returncode
@@ -42,12 +69,16 @@ class _FakeProcess:
         self.killed = True
         self.returncode = -9
 
-    def wait(self, timeout=None):
-        return self.returncode
-
 
 class LocalCliRunnerTests(unittest.TestCase):
     TEMPLATE = "meeting-agent --mode summary"
+
+    @staticmethod
+    def _python_command(script):
+        arguments = ["python", "-c", script]
+        if os.name == "nt":
+            return subprocess.list2cmdline(arguments)
+        return shlex.join(arguments)
 
     def _run(self, process, prompt="private meeting context", template=None):
         with mock.patch("src.local_cli.subprocess.Popen", return_value=process) as popen:
@@ -137,6 +168,21 @@ class LocalCliRunnerTests(unittest.TestCase):
         self.assertIn("could not authenticate", str(ctx.exception))
         self.assertNotIn("private meeting context", str(ctx.exception))
 
+    def test_nonzero_exit_preserves_safe_error(self):
+        process = _FakeProcess(
+            stderr="private diagnostic details",
+            returncode=7,
+        )
+        with mock.patch("src.local_cli.subprocess.Popen", return_value=process):
+            with self.assertRaisesRegex(LocalCliError, "failed with exit code 7") as ctx:
+                run_local_cli(
+                    self.TEMPLATE,
+                    "private meeting context",
+                    "My command",
+                    resolver=lambda _executable: "/bin/meeting-agent",
+                )
+        self.assertNotIn("private diagnostic details", str(ctx.exception))
+
     def test_timeout_terminates_process(self):
         process = _FakeProcess(returncode=None, timeout=True)
         with mock.patch("src.local_cli.subprocess.Popen", return_value=process):
@@ -168,6 +214,104 @@ class LocalCliRunnerTests(unittest.TestCase):
                     "prompt",
                     resolver=lambda _executable: "/bin/meeting-agent",
                 )
+
+    def test_stdout_flood_is_bounded_and_terminates_without_waiting_for_timeout(self):
+        command = self._python_command(
+            "import sys,time;"
+            "sys.stdout.buffer.write(b'x'*4096);"
+            "sys.stdout.buffer.flush();"
+            "time.sleep(30)"
+        )
+        started = time.monotonic()
+        with mock.patch("src.local_cli.MAX_OUTPUT_BYTES", 1024):
+            with self.assertRaisesRegex(LocalCliError, "more than 1,024 bytes"):
+                run_local_cli(
+                    command,
+                    "prompt",
+                    "Flooding command",
+                    timeout_seconds=30,
+                    resolver=lambda _executable: sys.executable,
+                )
+        self.assertLess(time.monotonic() - started, 10)
+
+    def test_stderr_flood_is_bounded_and_terminates_without_waiting_for_timeout(self):
+        command = self._python_command(
+            "import sys,time;"
+            "sys.stderr.buffer.write(b'x'*4096);"
+            "sys.stderr.buffer.flush();"
+            "time.sleep(30)"
+        )
+        started = time.monotonic()
+        with mock.patch("src.local_cli.MAX_STDERR_BYTES", 1024):
+            with self.assertRaisesRegex(
+                LocalCliError,
+                "more than 1,024 bytes to standard error",
+            ):
+                run_local_cli(
+                    command,
+                    "prompt",
+                    "Flooding command",
+                    timeout_seconds=30,
+                    resolver=lambda _executable: sys.executable,
+                )
+        self.assertLess(time.monotonic() - started, 10)
+
+    def test_posix_termination_force_stops_remaining_process_group(self):
+        process = _FakeProcess(returncode=None)
+        process.pid = 1234
+        with (
+            mock.patch("src.local_cli.os.name", "posix"),
+            mock.patch("src.local_cli.os.killpg") as kill_process_group,
+        ):
+            _terminate_process(process)
+
+        self.assertEqual(
+            kill_process_group.call_args_list,
+            [
+                mock.call(1234, signal.SIGTERM),
+                mock.call(1234, signal.SIGKILL),
+            ],
+        )
+
+    def test_windows_command_parsing_preserves_paths_and_quoted_arguments(self):
+        self.assertEqual(
+            _split_command_template(
+                r"C:\tools\agent.exe --mode summary",
+                platform="nt",
+            ),
+            [r"C:\tools\agent.exe", "--mode", "summary"],
+        )
+        self.assertEqual(
+            _split_command_template(
+                r'"C:\Program Files\Agent\agent.exe" --mode summary',
+                platform="nt",
+            ),
+            [r"C:\Program Files\Agent\agent.exe", "--mode", "summary"],
+        )
+        self.assertEqual(
+            _split_command_template(
+                r'agent.exe --label "weekly review" --path C:\meetings\today.txt',
+                platform="nt",
+            ),
+            [
+                "agent.exe",
+                "--label",
+                "weekly review",
+                "--path",
+                r"C:\meetings\today.txt",
+            ],
+        )
+        self.assertEqual(
+            _split_command_template(
+                r'agent.exe "say \"hello\"" "C:\Meeting Notes\\"',
+                platform="nt",
+            ),
+            [
+                "agent.exe",
+                'say "hello"',
+                "C:\\Meeting Notes\\",
+            ],
+        )
 
     def test_configuration_rejects_multiline_and_invalid_quoting(self):
         with self.assertRaisesRegex(LocalCliError, "single line"):
@@ -321,3 +465,17 @@ class LocalCliSummarizerTests(unittest.TestCase):
                         duration_minutes=1,
                     )
                 )
+
+    def test_legacy_json_summary_directs_local_cli_to_streaming_path(self):
+        summarizer = self._summarizer()
+        with mock.patch("src.summarizer.run_local_cli") as run:
+            with self.assertRaisesRegex(
+                LocalCliError,
+                r"use summarize_transcript_streaming\(\)",
+            ):
+                summarizer.summarize_transcript(
+                    "Alex: We will ship on Friday.",
+                    duration_minutes=1,
+                )
+
+        run.assert_not_called()

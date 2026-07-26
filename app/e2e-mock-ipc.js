@@ -143,6 +143,37 @@ const seededMeeting = () =>
     ? { ...SEED_MEETING, reports: [SEED_REPORT], active_report: seedActiveReport }
     : SEED_MEETING;
 
+const LOCAL_CLI_TIMEOUT_MIN_SECONDS = 30;
+const LOCAL_CLI_TIMEOUT_MAX_SECONDS = 35 * 60;
+
+function validateLocalCliConfig(config) {
+  const name = typeof config?.name === 'string' ? config.name.trim() : '';
+  const command = typeof config?.command === 'string' ? config.command.trim() : '';
+  const timeoutSeconds = Number(config?.timeoutSeconds);
+  if (!name || name.length > 80 || /[\u0000-\u001f\u007f]/.test(name)) {
+    return { error: 'Display name must be between 1 and 80 characters.' };
+  }
+  if (
+    !command ||
+    command.length > 4096 ||
+    command.includes('\0') ||
+    command.includes('\n') ||
+    command.includes('\r')
+  ) {
+    return { error: 'Command must be a single line between 1 and 4096 characters.' };
+  }
+  if (
+    !Number.isInteger(timeoutSeconds) ||
+    timeoutSeconds < LOCAL_CLI_TIMEOUT_MIN_SECONDS ||
+    timeoutSeconds > LOCAL_CLI_TIMEOUT_MAX_SECONDS
+  ) {
+    return {
+      error: `Timeout must be between ${LOCAL_CLI_TIMEOUT_MIN_SECONDS} and ${LOCAL_CLI_TIMEOUT_MAX_SECONDS} seconds.`,
+    };
+  }
+  return { value: { name, command, timeoutSeconds } };
+}
+
 function install({ ipcMain }) {
   // In-memory stand-in for the org session + provider config that the real
   // handlers persist to disk. Mutated by the org-login / org-logout / set-ai
@@ -322,23 +353,11 @@ function install({ ipcMain }) {
     }),
 
     'set-local-cli-config': async (_event, config) => {
-      if (
-        !config ||
-        typeof config.name !== 'string' ||
-        typeof config.command !== 'string' ||
-        !config.name.trim() ||
-        !config.command.trim() ||
-        !Number.isInteger(config.timeoutSeconds) ||
-        config.timeoutSeconds < 30 ||
-        config.timeoutSeconds > 35 * 60
-      ) {
-        return { success: false, error: 'Invalid local CLI configuration.' };
+      const validated = validateLocalCliConfig(config);
+      if (!validated.value) {
+        return { success: false, error: validated.error };
       }
-      const normalized = {
-        name: config.name.trim(),
-        command: config.command.trim(),
-        timeoutSeconds: config.timeoutSeconds,
-      };
+      const normalized = validated.value;
       if (state.testedLocalCliConfig !== JSON.stringify(normalized)) {
         return {
           success: false,
@@ -353,23 +372,11 @@ function install({ ipcMain }) {
     },
 
     'test-local-cli': async (_event, config) => {
-      if (
-        !config ||
-        typeof config.name !== 'string' ||
-        typeof config.command !== 'string' ||
-        !config.name.trim() ||
-        !config.command.trim() ||
-        !Number.isInteger(config.timeoutSeconds) ||
-        config.timeoutSeconds < 30 ||
-        config.timeoutSeconds > 35 * 60
-      ) {
-        return { success: false, error: 'Invalid local CLI configuration.' };
+      const validated = validateLocalCliConfig(config);
+      if (!validated.value) {
+        return { success: false, error: validated.error };
       }
-      state.testedLocalCliConfig = JSON.stringify({
-        name: config.name.trim(),
-        command: config.command.trim(),
-        timeoutSeconds: config.timeoutSeconds,
-      });
+      state.testedLocalCliConfig = JSON.stringify(validated.value);
       return { success: true, ok: true, message: 'Command returned a valid Steno summary.' };
     },
 

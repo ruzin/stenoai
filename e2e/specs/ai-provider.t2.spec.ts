@@ -68,7 +68,7 @@ test("provider switch + cloud/bedrock config persist and round-trip through get-
   userDataDir,
 }) => {
   const realDirBefore = fileSig(realUserDataDir());
-  const { app, page } = await launchApp();
+  const { page } = await launchApp();
 
   // Default snapshot is a coherent local config.
   const initial = await getProvider(page);
@@ -78,141 +78,187 @@ test("provider switch + cloud/bedrock config persist and round-trip through get-
   // (WS2). Fresh config → the registry default.
   expect(initial.model).toBe("gemma4:e2b-it-qat");
 
-  // Provider switches persist to config.ai_provider and reflect in the snapshot.
+  // Every provider switch persists to config.ai_provider; the final provider is
+  // verified through the single complete snapshot below.
   for (const provider of ["remote", "cloud", "local_cli", "local"]) {
-    await page.evaluate(
+    const result = await page.evaluate(
       (p) => (window as StenoWindow).stenoai.ai.setProvider(p),
       provider,
     );
+    expect(result.success).toBe(true);
     await expect
       .poll(() => readUserConfig(userDataDir).ai_provider)
       .toBe(provider);
-    expect((await getProvider(page)).ai_provider).toBe(provider);
   }
 
-  // The generic command is encrypted outside config.json and only writable
-  // from the AI Settings route. Some headless Linux runners have no usable
-  // safeStorage backend; keep the rest of this config-matrix test meaningful
-  // there and annotate the skipped encrypted-storage assertion.
+  // Cloud config: provider, url, model.
+  expect(
+    (
+      await page.evaluate(() =>
+        (window as StenoWindow).stenoai.ai.setCloudProvider("anthropic"),
+      )
+    ).success,
+  ).toBe(true);
+  expect(
+    (
+      await page.evaluate(() =>
+        (window as StenoWindow).stenoai.ai.setCloudApiUrl(
+          "https://api.example.test/v1",
+        ),
+      )
+    ).success,
+  ).toBe(true);
+  expect(
+    (
+      await page.evaluate(() =>
+        (window as StenoWindow).stenoai.ai.setCloudModel(
+          "claude-haiku-4-5-20251001",
+        ),
+      )
+    ).success,
+  ).toBe(true);
+
+  // Bedrock config.
+  expect(
+    (
+      await page.evaluate(() =>
+        (window as StenoWindow).stenoai.ai.setBedrockRegion("us-west-2"),
+      )
+    ).success,
+  ).toBe(true);
+  expect(
+    (
+      await page.evaluate(() =>
+        (window as StenoWindow).stenoai.ai.setBedrockInferenceProfile(
+          "my-profile",
+        ),
+      )
+    ).success,
+  ).toBe(true);
+
+  // Remote Ollama URL (no connectivity check — set only).
+  expect(
+    (
+      await page.evaluate(() =>
+        (window as StenoWindow).stenoai.ai.setRemoteOllamaUrl(
+          "http://ollama.example.test:11434",
+        ),
+      )
+    ).success,
+  ).toBe(true);
+
+  // Setters await the backend write, so one final snapshot is sufficient to
+  // verify the complete round-trip without repeatedly launching the bundled
+  // backend on Windows.
+  const snapshot = await getProvider(page);
+  expect(snapshot).toMatchObject({
+    success: true,
+    ai_provider: "local",
+    cloud_provider: "anthropic",
+    cloud_api_url: "https://api.example.test/v1",
+    cloud_model: "claude-haiku-4-5-20251001",
+    bedrock_region: "us-west-2",
+    bedrock_inference_profile: "my-profile",
+    remote_ollama_url: "http://ollama.example.test:11434",
+  });
+
+  // Keystone: the real user-data dir is byte-for-byte untouched.
+  expect(fileSig(realUserDataDir())).toBe(realDirBefore);
+});
+
+test("local CLI is Settings-only, test-gated, and stored encrypted", async ({
+  launchApp,
+  userDataDir,
+}) => {
+  const realDirBefore = fileSig(realUserDataDir());
+  const { app, page } = await launchApp();
+
+  // The generic command is encrypted outside config.json. Some headless Linux
+  // runners have no usable safeStorage backend, so skip this encryption-specific
+  // scenario loudly while preserving the real-user-data keystone.
   const encryptionAvailable = await app.evaluate(({ safeStorage }) =>
     safeStorage.isEncryptionAvailable(),
   );
-  if (encryptionAvailable) {
-    const rejectedOutsideSettings = await page.evaluate(() =>
-      (window as StenoWindow).stenoai.ai.setLocalCliConfig({
-        name: "Should not persist",
-        command: "untrusted-command",
-        timeoutSeconds: 60,
-      }),
+  if (!encryptionAvailable) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      "[t2] SKIPPED local-cli-config: safeStorage unavailable on this runner.",
     );
-    expect(rejectedOutsideSettings.success).toBe(false);
-    expect(
-      await page.evaluate(() =>
-        (window as StenoWindow).stenoai.ai.getLocalCliConfig(),
-      ),
-    ).toMatchObject({ success: false });
-
-    await page.evaluate(() => {
-      window.location.hash = "#/settings?tab=ai";
-    });
-    const localCliConfig = {
-      name: "My meeting command",
-      command:
-        "node -e \"process.stdin.resume();process.stdin.on('end',()=>console.log('## Summary\\\\nReady\\\\n## Key Topics\\\\nTest\\\\n## Key Points\\\\nPassed\\\\n## Action Items\\\\nNone'))\"",
-      timeoutSeconds: 15 * 60,
-    };
-    const rejectedBeforeTest = await page.evaluate(
-      (config) => (window as StenoWindow).stenoai.ai.setLocalCliConfig(config),
-      localCliConfig,
-    );
-    expect(rejectedBeforeTest).toMatchObject({
-      success: false,
-      error: "Test this command successfully before saving.",
-    });
-    const tested = await page.evaluate(
-      (config) => (window as StenoWindow).stenoai.ai.testLocalCli(config),
-      localCliConfig,
-    );
-    expect(tested.success).toBe(true);
-    const saved = await page.evaluate(
-      (config) => (window as StenoWindow).stenoai.ai.setLocalCliConfig(config),
-      localCliConfig,
-    );
-    expect(saved.success).toBe(true);
-    const diskConfig = readUserConfig(userDataDir);
-    expect(diskConfig.local_cli_name).toBeUndefined();
-    expect(diskConfig.local_cli_command).toBeUndefined();
-    expect(diskConfig.local_cli_timeout_seconds).toBeUndefined();
-    expect(
-      readFileSync(path.join(userDataDir, ".local-cli-config")).toString(
-        "utf8",
-      ),
-    ).not.toContain("process.stdin.resume");
-    expect((await getProvider(page)).local_cli_name).toBe("My meeting command");
-    expect((await getProvider(page)).local_cli_configured).toBe(true);
-    expect((await getProvider(page)).local_cli_timeout_seconds).toBe(15 * 60);
-    const guardedConfig = await page.evaluate(() =>
-      (window as StenoWindow).stenoai.ai.getLocalCliConfig(),
-    );
-    expect(guardedConfig.command).toBe(localCliConfig.command);
-  } else {
     test.info().annotations.push({
       type: "skip-reason",
       description:
         "safeStorage unavailable; encrypted local command assertion skipped",
     });
+    expect(fileSig(realUserDataDir())).toBe(realDirBefore);
   }
+  test.skip(!encryptionAvailable, "safeStorage unavailable on this runner");
 
-  // Cloud config: provider, url, model.
-  await page.evaluate(() =>
-    (window as StenoWindow).stenoai.ai.setCloudProvider("anthropic"),
+  const rejectedOutsideSettings = await page.evaluate(() =>
+    (window as StenoWindow).stenoai.ai.setLocalCliConfig({
+      name: "Should not persist",
+      command: "untrusted-command",
+      timeoutSeconds: 60,
+    }),
   );
-  await page.evaluate(() =>
-    (window as StenoWindow).stenoai.ai.setCloudApiUrl(
-      "https://api.example.test/v1",
+  expect(rejectedOutsideSettings.success).toBe(false);
+  expect(
+    await page.evaluate(() =>
+      (window as StenoWindow).stenoai.ai.getLocalCliConfig(),
     ),
-  );
-  await page.evaluate(() =>
-    (window as StenoWindow).stenoai.ai.setCloudModel(
-      "claude-haiku-4-5-20251001",
-    ),
-  );
+  ).toMatchObject({ success: false });
 
-  // Bedrock config.
-  await page.evaluate(() =>
-    (window as StenoWindow).stenoai.ai.setBedrockRegion("us-west-2"),
+  await page.evaluate(() => {
+    window.location.hash = "#/settings?tab=ai";
+  });
+  const localCliConfig = {
+    name: "My meeting command",
+    command:
+      "node -e \"process.stdin.resume();process.stdin.on('end',()=>console.log(['## Summary','Ready','## Key Topics','Test','## Key Points','Passed','## Action Items','None'].join(String.fromCharCode(10))))\"",
+    timeoutSeconds: 15 * 60,
+  };
+  const rejectedBeforeTest = await page.evaluate(
+    (config) => (window as StenoWindow).stenoai.ai.setLocalCliConfig(config),
+    localCliConfig,
   );
-  await page.evaluate(() =>
-    (window as StenoWindow).stenoai.ai.setBedrockInferenceProfile("my-profile"),
+  expect(rejectedBeforeTest).toMatchObject({
+    success: false,
+    error: "Test this command successfully before saving.",
+  });
+  const tested = await page.evaluate(
+    (config) => (window as StenoWindow).stenoai.ai.testLocalCli(config),
+    localCliConfig,
   );
+  expect(tested.success).toBe(true);
+  const saved = await page.evaluate(
+    (config) => (window as StenoWindow).stenoai.ai.setLocalCliConfig(config),
+    localCliConfig,
+  );
+  expect(saved.success).toBe(true);
 
-  // Remote Ollama URL (no connectivity check — set only).
-  await page.evaluate(() =>
-    (window as StenoWindow).stenoai.ai.setRemoteOllamaUrl(
-      "http://ollama.example.test:11434",
-    ),
-  );
+  const diskConfig = readUserConfig(userDataDir);
+  expect(diskConfig.local_cli_name).toBeUndefined();
+  expect(diskConfig.local_cli_command).toBeUndefined();
+  expect(diskConfig.local_cli_timeout_seconds).toBeUndefined();
+  expect(
+    readFileSync(path.join(userDataDir, ".local-cli-config")).toString("utf8"),
+  ).not.toContain("process.stdin.resume");
 
-  await expect
-    .poll(async () => {
-      const s = await getProvider(page);
-      return {
-        cloud_provider: s.cloud_provider,
-        cloud_api_url: s.cloud_api_url,
-        cloud_model: s.cloud_model,
-        bedrock_region: s.bedrock_region,
-        bedrock_inference_profile: s.bedrock_inference_profile,
-        remote_ollama_url: s.remote_ollama_url,
-      };
-    })
-    .toEqual({
-      cloud_provider: "anthropic",
-      cloud_api_url: "https://api.example.test/v1",
-      cloud_model: "claude-haiku-4-5-20251001",
-      bedrock_region: "us-west-2",
-      bedrock_inference_profile: "my-profile",
-      remote_ollama_url: "http://ollama.example.test:11434",
-    });
+  const snapshot = await getProvider(page);
+  expect(snapshot).toMatchObject({
+    success: true,
+    local_cli_name: "My meeting command",
+    local_cli_configured: true,
+    local_cli_timeout_seconds: 15 * 60,
+  });
+  const guardedConfig = await page.evaluate(() =>
+    (window as StenoWindow).stenoai.ai.getLocalCliConfig(),
+  );
+  expect(guardedConfig).toMatchObject({
+    success: true,
+    name: localCliConfig.name,
+    command: localCliConfig.command,
+    timeoutSeconds: localCliConfig.timeoutSeconds,
+  });
 
   // Keystone: the real user-data dir is byte-for-byte untouched.
   expect(fileSig(realUserDataDir())).toBe(realDirBefore);
