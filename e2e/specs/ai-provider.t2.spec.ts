@@ -63,6 +63,18 @@ type StenoWindow = Window & {
 const getProvider = (page: import("@playwright/test").Page) =>
   page.evaluate(() => (window as StenoWindow).stenoai.ai.getProvider());
 
+const goToAiSettings = async (page: import("@playwright/test").Page) => {
+  await page.evaluate(() => {
+    window.location.hash = "#/settings?tab=ai";
+  });
+  await expect
+    .poll(() => page.evaluate(() => window.location.hash), {
+      message:
+        "AI Settings route should be active before protected local CLI IPC",
+    })
+    .toBe("#/settings?tab=ai");
+};
+
 test("provider switch + cloud/bedrock config persist and round-trip through get-ai-provider", async ({
   launchApp,
   userDataDir,
@@ -207,9 +219,7 @@ test("local CLI is Settings-only, test-gated, and stored encrypted", async ({
     ),
   ).toMatchObject({ success: false });
 
-  await page.evaluate(() => {
-    window.location.hash = "#/settings?tab=ai";
-  });
+  await goToAiSettings(page);
   const localCliConfig = {
     name: "My meeting command",
     command:
@@ -228,12 +238,16 @@ test("local CLI is Settings-only, test-gated, and stored encrypted", async ({
     (config) => (window as StenoWindow).stenoai.ai.testLocalCli(config),
     localCliConfig,
   );
-  expect(tested.success).toBe(true);
+  expect(tested).toMatchObject({ success: true });
+
+  // Model-free CI may finish its one-shot onboarding redirect while the CLI
+  // subprocess is running. Restore Settings before invoking the guarded save.
+  await goToAiSettings(page);
   const saved = await page.evaluate(
     (config) => (window as StenoWindow).stenoai.ai.setLocalCliConfig(config),
     localCliConfig,
   );
-  expect(saved.success).toBe(true);
+  expect(saved).toMatchObject({ success: true });
 
   const diskConfig = readUserConfig(userDataDir);
   expect(diskConfig.local_cli_name).toBeUndefined();
