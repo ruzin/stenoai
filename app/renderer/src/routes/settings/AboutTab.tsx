@@ -88,6 +88,12 @@ export function AboutTab() {
     });
     const offDownloaded = ipc().on.updateDownloaded((evt) => {
       settledRef.current = true;
+      // Main clears the failure here too (both kinds — the bytes are on disk).
+      // Usually download-progress got there first, but a resumed or cached
+      // transfer can make this the first event this tab sees, and then the
+      // banner would sit next to "Restart to Update".
+      errorSeqRef.current += 1;
+      setDownloadError(null);
       setDownloadPercent(null);
       setDownloadedVersion(evt.version);
     });

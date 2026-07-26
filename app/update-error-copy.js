@@ -11,9 +11,14 @@
  * fragment in an interface that otherwise speaks in sentences, and one that
  * says "download" even when nothing was ever downloaded.
  *
- * So main.js maps the error to one sentence before it reaches the renderer, and
- * keeps the raw text in the debug log where it is actually useful. Pure and
+ * So main.js maps the error to prose before it reaches the renderer, and keeps
+ * the raw text in the debug log where it is actually useful. Pure and
  * unit-tested, mirroring update-idle-gate.js / update-os-gate.js.
+ *
+ * "Prose", not literally one sentence: rule 2 below often needs a second short
+ * clause to say what happens next, and splitting that off reads better than
+ * cramming it in. What is guaranteed is that no developer text survives — no
+ * errno, no net:: code, no path.
  *
  * Three rules the copy follows:
  *  - Name the phase that actually failed. A check that never got off the ground
@@ -153,6 +158,17 @@ function describeUpdateError(
     };
   }
   if (NETWORK_RE.test(msg)) {
+    // Three phases, three answers. Lumping install in with download was the
+    // same mislabelling this module exists to stop, one level down: applying a
+    // staged update touches no network, so a transport error surfacing then is
+    // not an interrupted transfer and telling the user to wait for a retry of
+    // one would be wrong.
+    if (phase === PHASE_INSTALL) {
+      return {
+        message: "The update couldn't be installed. Restart Steno to try again.",
+        sticky: true,
+      };
+    }
     return {
       message:
         phase === PHASE_CHECK

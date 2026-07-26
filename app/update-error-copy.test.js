@@ -203,3 +203,18 @@ test('permission copy stays sticky on every platform and phase', () => {
     }
   }
 });
+
+test('a transport error during install is not called an interrupted download', () => {
+  const out = describeUpdateError('net::ERR_CONNECTION_RESET', { phase: PHASE_INSTALL });
+  assert.doesNotMatch(out.message, /download/i);
+  assert.match(out.message, /couldn't be installed/i);
+  // An install that failed stays until something proves otherwise — a later
+  // clean check says nothing about whether the swap can be applied.
+  assert.strictEqual(out.sticky, true);
+});
+
+test('the same transport error still reads as a transfer problem while downloading', () => {
+  const out = describeUpdateError('net::ERR_CONNECTION_RESET', { phase: PHASE_DOWNLOAD });
+  assert.match(out.message, /download was interrupted/i);
+  assert.strictEqual(out.sticky, false);
+});
