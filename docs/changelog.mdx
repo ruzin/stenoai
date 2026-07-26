@@ -3,6 +3,26 @@ title: "Changelog"
 description: "What's new in Steno -- recent releases and notable changes."
 ---
 
+<Update label="v0.6.5" description="July 26, 2026">
+**New**
+- **System audio without the Screen Recording permission** — record both sides of a call without granting Screen Recording. This uses Core Audio Process Taps, so Steno now requires macOS 14.4 or later. (Turn the "Record system audio" toggle off any time to record the microphone only.)
+- **Automatic updates** — Steno now installs a downloaded update while your Mac is idle and relaunches on its own, and never while you're recording or processing. Turn off "Install updates automatically" in Settings → General to keep the manual "Restart to update" prompt.
+- **Re-transcribe a recording** — re-run transcription on an existing recording from its note, useful after switching engines or language.
+- **Undo a deleted note** — deleting a note now shows an Undo, so a note is soft-deleted and recoverable rather than gone immediately.
+- **Chinese transcription** — choose Simplified or Traditional Chinese when the Whisper transcription engine is selected in Settings → AI.
+- **Low-memory warning** — Settings now warns when a local summarization model may exceed your Mac's available memory before you switch to it.
+
+**Improved**
+- Deleting a note no longer asks for confirmation first, since Undo can restore it.
+
+**Fixed**
+- The macOS Keychain "Safe Storage" prompt no longer appears on every launch.
+- The manual check-for-updates now follows redirects, so it keeps working after the download location moves.
+- Opening Settings from a bare link now lands on General instead of stranding you on a stale tab.
+- The AI's internal reasoning tags no longer leak into your notes in a few remaining cases.
+- Fewer false "meeting detected" prompts.
+</Update>
+
 <Update label="v0.6.4" description="July 24, 2026">
 **New**
 - **Settings search** — Press ⌘K on the Settings screen to search every setting and jump straight to the tab it lives on.
