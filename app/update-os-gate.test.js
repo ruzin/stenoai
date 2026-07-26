@@ -5,7 +5,7 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const { isOSUpdateEligible } = require('./update-os-gate');
+const { isOSUpdateEligible, MIN_MACOS_FOR_AUTOUPDATE } = require('./update-os-gate');
 
 const FLOOR = '14.4.0';
 const eligible = (platform, osVersion) =>
@@ -99,9 +99,10 @@ test('package.json mac floor matches the runtime gate floor (single-source #432)
   const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8'));
   const mac = pkg.build && pkg.build.mac;
   assert.ok(mac, 'build.mac block present');
-  // Layer 1: electron-builder writes this into latest-mac.yml for electron-updater.
-  assert.strictEqual(mac.minimumSystemVersion, '14.4.0', 'mac.minimumSystemVersion set for the update manifest');
-  // And it must agree with the Info.plist launch floor, or a user could still
-  // be offered a build their OS refuses to launch.
-  assert.strictEqual(mac.extendInfo.LSMinimumSystemVersion, '14.4.0', 'LSMinimumSystemVersion agrees with the manifest floor');
+  // The runtime gate constant is the single source; the config floors must both
+  // equal it, or a user could be offered / installed a build their OS can't run.
+  // Layer 1: electron-builder writes minimumSystemVersion into latest-mac.yml.
+  assert.strictEqual(mac.minimumSystemVersion, MIN_MACOS_FOR_AUTOUPDATE, 'mac.minimumSystemVersion == runtime floor');
+  // The Info.plist launch floor must agree too.
+  assert.strictEqual(mac.extendInfo.LSMinimumSystemVersion, MIN_MACOS_FOR_AUTOUPDATE, 'LSMinimumSystemVersion == runtime floor');
 });

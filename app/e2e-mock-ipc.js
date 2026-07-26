@@ -588,14 +588,33 @@ function install({ ipcMain }) {
     // Read-only display poll for the About tab's "Check for Updates" button
     // (settings-about.t1). Fully hermetic — no real GitHub call under mock
     // IPC, so this is the only source of truth for that flow in T1.
-    'check-for-updates': {
-      success: true,
-      updateAvailable: false,
-      currentVersion: '0.0.0-e2e',
-      latestVersion: '0.0.0-e2e',
-      releaseUrl: '',
-      releaseName: '',
-      downloadUrl: null,
+    'check-for-updates': () => {
+      // STENOAI_E2E_SEED_UPDATE_BLOCKED_OS=1 simulates an under-floor Mac: an
+      // update exists on GitHub but this OS is below the 14.4 launch floor, so
+      // osUpdateEligible is false and the About tab must explain that instead of
+      // offering a broken install/download nudge (#432, settings-about.t1).
+      if (process.env.STENOAI_E2E_SEED_UPDATE_BLOCKED_OS === '1') {
+        return {
+          success: true,
+          updateAvailable: true,
+          currentVersion: '0.0.0-e2e',
+          latestVersion: '9.9.9',
+          releaseUrl: 'https://github.com/ruzin/stenoai/releases/latest',
+          releaseName: 'Version 9.9.9',
+          downloadUrl: null,
+          osUpdateEligible: false,
+        };
+      }
+      return {
+        success: true,
+        updateAvailable: false,
+        currentVersion: '0.0.0-e2e',
+        latestVersion: '0.0.0-e2e',
+        releaseUrl: '',
+        releaseName: '',
+        downloadUrl: null,
+        osUpdateEligible: true,
+      };
     },
     // AboutTab's mount-time re-seed effect. Without an explicit stub, both
     // fields fall through to the permissive default (undefined, not null),

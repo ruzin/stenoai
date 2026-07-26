@@ -33,6 +33,13 @@
  * @param {string} o.minVersion the floor, e.g. "14.4.0"
  * @returns {boolean} true when an auto-update may proceed on this OS
  */
+// The macOS auto-update floor — single source of truth. MUST equal the
+// Info.plist / update-manifest floor (`build.mac.minimumSystemVersion` and
+// `extendInfo.LSMinimumSystemVersion` in app/package.json); the unit test pins
+// all three together so they can't drift. main.js imports this rather than
+// redeclaring it.
+const MIN_MACOS_FOR_AUTOUPDATE = '14.4.0';
+
 function isOSUpdateEligible({ platform, osVersion, minVersion } = {}) {
   if (platform !== 'darwin') return true; // macOS-only floor; leave other platforms alone
   const cur = parseVersion(osVersion);
@@ -72,4 +79,4 @@ function compareVersion(a, b) {
   return 0;
 }
 
-module.exports = { isOSUpdateEligible };
+module.exports = { isOSUpdateEligible, MIN_MACOS_FOR_AUTOUPDATE };

@@ -28,6 +28,32 @@ test('About tab shows the version and resolves a Check for Updates click', async
   ).toBeVisible();
 });
 
+test('About tab explains an update that this macOS is too old to install', async ({
+  launchApp,
+}) => {
+  // Under-floor Mac (#432): the check reports an update, but osUpdateEligible
+  // is false, so the tab must say it needs a newer macOS and must NOT offer the
+  // "View release" download nudge (which would point at a DMG that won't run).
+  const { page } = await launchApp({
+    mockIpc: true,
+    env: { STENOAI_E2E_SEED_UPDATE_BLOCKED_OS: '1' },
+  });
+
+  await page.evaluate(() => {
+    window.location.hash = '#/settings?tab=about';
+  });
+
+  const aboutSection = page.locator('[data-settings-tab="about"]');
+  await expect(aboutSection).toBeVisible();
+
+  await aboutSection.getByRole('button', { name: 'Check for Updates' }).click();
+  await expect(
+    aboutSection.getByText(/v9\.9\.9 requires a newer version of macOS/),
+  ).toBeVisible();
+  // No download nudge on an OS that can't run the build.
+  await expect(aboutSection.getByRole('button', { name: 'View release' })).toHaveCount(0);
+});
+
 test('About tab rehydrates a persisted failed background update on mount', async ({
   launchApp,
 }) => {

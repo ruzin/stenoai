@@ -574,6 +574,10 @@ export type CheckForUpdatesResponse = Result<{
   releaseUrl: string;
   releaseName: string;
   downloadUrl: string | null;
+  // macOS only: false when this OS is below the app's launch floor (14.4), so
+  // an available update can't be auto-installed and the About tab explains that
+  // instead of offering a broken Restart (#432). Absent/true elsewhere.
+  osUpdateEligible?: boolean;
 }>;
 
 // downloadedVersion is null until a download finishes (or after one already

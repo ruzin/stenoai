@@ -57,7 +57,7 @@ const { createTeardownRegistry } = require('./teardown');
 const { registerFoldersIpc } = require('./folders-ipc');
 const { registerSettingsIpc } = require('./settings-ipc');
 const { isSafeToAutoInstall } = require('./update-idle-gate');
-const { isOSUpdateEligible } = require('./update-os-gate');
+const { isOSUpdateEligible, MIN_MACOS_FOR_AUTOUPDATE } = require('./update-os-gate');
 const processingLog = require('./processing-log');
 const { isMeetingApp, allowsDeviceLevelFallback, isMacos14Plus } = require('./meeting-detect');
 const { sweepOrphanedLiveSnapshots } = require('./live-snapshot-sweep');
@@ -6237,22 +6237,20 @@ function startIdleAutoInstallChecker() {
   if (idleAutoInstallInterval.unref) idleAutoInstallInterval.unref();
 }
 
-// Auto-update OS floor. MUST stay in lockstep with the Info.plist floor
-// (`build.mac.minimumSystemVersion` / `extendInfo.LSMinimumSystemVersion` in
-// app/package.json). The DMG won't LAUNCH below this, so we must never
-// download or install it onto an under-floor Mac (#432).
-const MIN_MACOS_FOR_AUTOUPDATE = '14.4.0';
+// Current OS version for the update gate, '' if it can't be read (→ fail open).
+function currentSystemVersionSafe() {
+  try { return process.getSystemVersion(); } catch (_) { return ''; }
+}
 
 // Whether electron-updater may run on this OS. See update-os-gate.js — darwin
-// below the floor is blocked (so nothing downloads and the idle installer has
-// nothing to apply); non-darwin and unparseable versions are eligible, with the
-// manifest `minimumSystemVersion` in latest-mac.yml as the authoritative backstop.
+// below the 14.4 floor (MIN_MACOS_FOR_AUTOUPDATE) is blocked (so nothing
+// downloads and the idle installer has nothing to apply); non-darwin and
+// unparseable versions are eligible, with the manifest `minimumSystemVersion`
+// in latest-mac.yml as the authoritative backstop.
 function autoUpdateOSEligible() {
-  let osVersion = '';
-  try { osVersion = process.getSystemVersion(); } catch (_) {}
   return isOSUpdateEligible({
     platform: process.platform,
-    osVersion,
+    osVersion: currentSystemVersionSafe(),
     minVersion: MIN_MACOS_FOR_AUTOUPDATE,
   });
 }
@@ -6273,9 +6271,7 @@ function setupAutoUpdater() {
   // ever fires, so `update-downloaded` never fires and the idle checker never
   // arms. (latest-mac.yml's minimumSystemVersion is the second layer.)
   if (!autoUpdateOSEligible()) {
-    let v = '';
-    try { v = process.getSystemVersion(); } catch (_) {}
-    sendDebugLog(`Auto-updater: skipped — macOS ${v} is below the ${MIN_MACOS_FOR_AUTOUPDATE} floor; this build won't launch here (#432).`);
+    sendDebugLog(`Auto-updater: skipped — macOS ${currentSystemVersionSafe()} is below the ${MIN_MACOS_FOR_AUTOUPDATE} floor; this build won't launch here (#432).`);
     return;
   }
 
@@ -6368,6 +6364,15 @@ function setupAutoUpdater() {
 }
 
 ipcMain.on('install-update', () => {
+  // Defense in depth for #432: today the renderer only shows "Restart to
+  // Update" once a real 'update-downloaded' fired (impossible under the floor,
+  // since setupAutoUpdater is skipped), so this is unreachable on an under-floor
+  // Mac. Gate it here too so a future renderer change can't reintroduce an
+  // ungated quitAndInstall onto a build this OS can't launch.
+  if (!autoUpdateOSEligible()) {
+    sendDebugLog('install-update: ignored — OS below the auto-update floor (#432).');
+    return;
+  }
   // Bypass the mainWindow 'close' handler's preventDefault+hide so that
   // quitAndInstall's window-close step actually quits the app. Without this
   // the app just minimises and Squirrel never gets to apply the update.
