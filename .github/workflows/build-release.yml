@@ -269,7 +269,7 @@ jobs:
 
           ### Requirements
           - **Apple Silicon Mac (M1 or later)** - Intel Macs are not supported (since v0.4.0)
-          - macOS 12 (Monterey) or later
+          - macOS 14.4 (Sonoma) or later
           - Internet connection for initial setup
           - Microphone access permissions
 
