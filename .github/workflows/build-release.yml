@@ -156,6 +156,67 @@ jobs:
         APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
         APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
 
+    # Write the macOS floor into the update manifest (#432). The runtime gate in
+    # app/update-os-gate.js cannot protect the installs that are actually at
+    # risk: it only runs inside a build that already meets the floor, while the
+    # machines that would be bricked are running the PREVIOUS release. Only
+    # latest-mac.yml reaches them — electron-updater checks its
+    # `minimumSystemVersion` before it reports an update or downloads one.
+    #
+    # electron-builder does NOT write that field. `mac.minimumSystemVersion`
+    # only reaches Info.plist (app-builder-lib macPackager.js) and `ReleaseInfo`
+    # in its schema is additionalProperties:false. Verified against 26.8.1: a
+    # build with mac.minimumSystemVersion set emits the plist key and a
+    # latest-mac.yml with zero occurrences of minimumSystemVersion.
+    #
+    # The value MUST be the DARWIN version — electron-updater compares against
+    # os.release(), which on macOS is the kernel version. The product floor
+    # 14.4.0 would be a silent no-op, since macOS 12 reports Darwin 21.6.0.
+    # darwinFloorForMacos() does the translation from the same constant the
+    # runtime gate uses, so the two can never disagree.
+    #
+    # Runs here rather than in the release job because `npm ci` has run, so the
+    # patched manifest can be re-parsed with a real YAML parser instead of being
+    # eyeballed. A missing js-yaml (electron-builder's, hoisted) fails the step —
+    # the right direction: never publish an ungated manifest.
+    - name: Write the macOS floor into the update manifest
+      working-directory: app
+      run: |
+        node -e "
+          const fs = require('fs');
+          const yaml = require('js-yaml');
+          const { darwinFloorForMacos, MIN_MACOS_FOR_AUTOUPDATE } = require('./update-os-gate');
+          const file = 'dist/latest-mac.yml';
+
+          const floor = darwinFloorForMacos(MIN_MACOS_FOR_AUTOUPDATE);
+          const before = fs.readFileSync(file, 'utf8');
+          const parsed = yaml.load(before);
+          if (!parsed || typeof parsed !== 'object') {
+            throw new Error('latest-mac.yml did not parse as a mapping');
+          }
+          if (parsed.minimumSystemVersion !== undefined) {
+            throw new Error('latest-mac.yml already carries minimumSystemVersion — electron-builder gained native support, so check the value is the DARWIN one before removing this step');
+          }
+
+          const patched = before.replace(/\n*\$/, '\n') + 'minimumSystemVersion: ' + floor + '\n';
+          // Re-parse: proves the append produced ONE valid document with the key
+          // at the root, whatever shape the serializer emitted (a document
+          // marker or a flow-style root would throw or land the key elsewhere).
+          const after = yaml.load(patched);
+          if (after.minimumSystemVersion !== floor) {
+            throw new Error('patched manifest reads back as ' + JSON.stringify(after.minimumSystemVersion));
+          }
+          for (const key of ['version', 'files', 'path', 'sha512', 'releaseDate']) {
+            if (JSON.stringify(after[key]) !== JSON.stringify(parsed[key])) {
+              throw new Error('patching altered ' + key);
+            }
+          }
+
+          fs.writeFileSync(file, patched);
+          console.log('Gated latest-mac.yml (minimumSystemVersion: ' + floor + ', i.e. macOS ' + MIN_MACOS_FOR_AUTOUPDATE + '):');
+          console.log(patched);
+        "
+
     - name: Upload build artifacts
       uses: actions/upload-artifact@v4
       with:
@@ -231,8 +292,21 @@ jobs:
         find artifacts -name "*.zip" -exec cp {} release/ \;
         # Single-arch release (arm64) as of v0.4.0 — the per-arch
         # latest-mac.yml from the build job is the published auto-update
-        # manifest as-is.
+        # manifest.
         cp artifacts/build-arm64/latest-mac.yml release/latest-mac.yml
+        # The build job writes the macOS floor into this manifest (#432).
+        # Re-derive it here and require an exact match, so a removed, reordered
+        # or half-applied step cannot publish a feed that offers the build to
+        # Macs which cannot launch it. update-os-gate.js is dependency-free, so
+        # this needs no node_modules in the release job.
+        MIN_DARWIN=$(node -e "
+          const m = require('./app/update-os-gate');
+          process.stdout.write(m.darwinFloorForMacos(m.MIN_MACOS_FOR_AUTOUPDATE));
+        ")
+        if ! grep -qx "minimumSystemVersion: ${MIN_DARWIN}" release/latest-mac.yml; then
+          echo "::error::latest-mac.yml does not carry 'minimumSystemVersion: ${MIN_DARWIN}' — refusing to publish an ungated update manifest (see #432)."
+          exit 1
+        fi
         echo "Published latest-mac.yml:"
         cat release/latest-mac.yml
         ls -la release/

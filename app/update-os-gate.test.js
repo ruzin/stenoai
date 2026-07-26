@@ -5,7 +5,11 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const { isOSUpdateEligible, MIN_MACOS_FOR_AUTOUPDATE } = require('./update-os-gate');
+const {
+  isOSUpdateEligible,
+  MIN_MACOS_FOR_AUTOUPDATE,
+  darwinFloorForMacos,
+} = require('./update-os-gate');
 
 const FLOOR = '14.4.0';
 const eligible = (platform, osVersion) =>
@@ -101,8 +105,39 @@ test('package.json mac floor matches the runtime gate floor (single-source #432)
   assert.ok(mac, 'build.mac block present');
   // The runtime gate constant is the single source; the config floors must both
   // equal it, or a user could be offered / installed a build their OS can't run.
-  // Layer 1: electron-builder writes minimumSystemVersion into latest-mac.yml.
+  // NOTE: mac.minimumSystemVersion only sets the Info.plist launch floor — it
+  // does NOT reach latest-mac.yml (verified against electron-builder 26.8.1).
+  // The manifest floor is written by the release workflow from
+  // darwinFloorForMacos(MIN_MACOS_FOR_AUTOUPDATE); see below.
   assert.strictEqual(mac.minimumSystemVersion, MIN_MACOS_FOR_AUTOUPDATE, 'mac.minimumSystemVersion == runtime floor');
   // The Info.plist launch floor must agree too.
   assert.strictEqual(mac.extendInfo.LSMinimumSystemVersion, MIN_MACOS_FOR_AUTOUPDATE, 'LSMinimumSystemVersion == runtime floor');
+});
+
+// --- the manifest floor: Darwin, not the product version (#432) ---
+// This is the layer that protects installs already in the field, so a wrong
+// value here is a SILENT no-op rather than a visible failure.
+
+test('the release manifest floor derives to the Darwin value that blocks macOS 12/13', () => {
+  assert.strictEqual(MIN_MACOS_FOR_AUTOUPDATE, '14.4.0');
+  assert.strictEqual(darwinFloorForMacos(MIN_MACOS_FOR_AUTOUPDATE), '23.4.0');
+});
+
+test('maps macOS product versions to their Darwin equivalents', () => {
+  assert.strictEqual(darwinFloorForMacos('14.4'), '23.4.0');
+  assert.strictEqual(darwinFloorForMacos('14.0'), '23.0.0');
+  assert.strictEqual(darwinFloorForMacos('12'), '21.0.0');
+  assert.strictEqual(darwinFloorForMacos('15.2'), '24.2.0');
+  // macOS 26 is Darwin 25 — the version jump that rules out `major + 9`.
+  assert.strictEqual(darwinFloorForMacos('26.1'), '25.1.0');
+});
+
+test('raising the floor to an unmapped major fails the release loudly', () => {
+  assert.throws(() => darwinFloorForMacos('27.0'), /No Darwin mapping for macOS 27/);
+});
+
+test('a malformed floor throws instead of deriving a plausible-looking value', () => {
+  for (const bad of ['sonoma', '14x.4y', '14.', '', '14.4-beta']) {
+    assert.throws(() => darwinFloorForMacos(bad), /Unparseable macOS version/, `accepted: ${bad}`);
+  }
 });
