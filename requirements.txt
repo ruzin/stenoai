@@ -40,3 +40,8 @@ pydantic>=2.5.0
 python-dateutil>=2.8.0
 openai>=1.0.0
 anthropic>=0.18.0
+# OpenCC (pure-Python reimplementation) converts Chinese Simplified ↔ Traditional
+# for the zh-Hans / zh-Hant language options. Cross-platform, no native deps.
+# PINNED to an exact version — this ships inside the signed/notarised binary, and
+# its dictionary JSON is bundled via collect_data_files('opencc') in stenoai.spec.
+opencc-python-reimplemented==0.1.7
