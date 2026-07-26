@@ -57,6 +57,7 @@ const { createTeardownRegistry } = require('./teardown');
 const { registerFoldersIpc } = require('./folders-ipc');
 const { registerSettingsIpc } = require('./settings-ipc');
 const { isSafeToAutoInstall } = require('./update-idle-gate');
+const { isOSUpdateEligible } = require('./update-os-gate');
 const processingLog = require('./processing-log');
 const { isMeetingApp, allowsDeviceLevelFallback, isMacos14Plus } = require('./meeting-detect');
 const { sweepOrphanedLiveSnapshots } = require('./live-snapshot-sweep');
@@ -6236,6 +6237,26 @@ function startIdleAutoInstallChecker() {
   if (idleAutoInstallInterval.unref) idleAutoInstallInterval.unref();
 }
 
+// Auto-update OS floor. MUST stay in lockstep with the Info.plist floor
+// (`build.mac.minimumSystemVersion` / `extendInfo.LSMinimumSystemVersion` in
+// app/package.json). The DMG won't LAUNCH below this, so we must never
+// download or install it onto an under-floor Mac (#432).
+const MIN_MACOS_FOR_AUTOUPDATE = '14.4.0';
+
+// Whether electron-updater may run on this OS. See update-os-gate.js — darwin
+// below the floor is blocked (so nothing downloads and the idle installer has
+// nothing to apply); non-darwin and unparseable versions are eligible, with the
+// manifest `minimumSystemVersion` in latest-mac.yml as the authoritative backstop.
+function autoUpdateOSEligible() {
+  let osVersion = '';
+  try { osVersion = process.getSystemVersion(); } catch (_) {}
+  return isOSUpdateEligible({
+    platform: process.platform,
+    osVersion,
+    minVersion: MIN_MACOS_FOR_AUTOUPDATE,
+  });
+}
+
 function setupAutoUpdater() {
   if (IS_E2E) {
     sendDebugLog('Auto-updater: skipped (E2E mode)');
@@ -6244,6 +6265,17 @@ function setupAutoUpdater() {
   // Don't check for updates in dev mode
   if (!app.isPackaged) {
     sendDebugLog('Auto-updater: skipped (dev mode)');
+    return;
+  }
+  // Never auto-download/install onto a Mac below the launch floor — the build
+  // wouldn't start, and with idle auto-install (#425) it would replace a
+  // working install unattended. Skipping the whole setup means no download
+  // ever fires, so `update-downloaded` never fires and the idle checker never
+  // arms. (latest-mac.yml's minimumSystemVersion is the second layer.)
+  if (!autoUpdateOSEligible()) {
+    let v = '';
+    try { v = process.getSystemVersion(); } catch (_) {}
+    sendDebugLog(`Auto-updater: skipped — macOS ${v} is below the ${MIN_MACOS_FOR_AUTOUPDATE} floor; this build won't launch here (#432).`);
     return;
   }
 
@@ -9390,16 +9422,21 @@ function getDownloadUrl(assets) {
 
 ipcMain.handle('check-for-updates', async () => {
   const result = await checkForUpdates();
+  const osEligible = autoUpdateOSEligible();
   // The GitHub comparison above is a read-only display poll — it never
   // itself starts a download. Kick the real autoUpdater check alongside it
   // so a manual "Check for Updates" click actually starts a background
   // download when one's available, instead of only reporting the latest
-  // tag and waiting for the next scheduled interval. Same guard as
-  // setupAutoUpdater() so this stays a no-op (and network-free) in e2e/dev.
-  if (!IS_E2E && app.isPackaged) {
+  // tag and waiting for the next scheduled interval. Same guards as
+  // setupAutoUpdater(): no-op (and network-free) in e2e/dev, and never on a
+  // Mac below the launch floor, which must not download a build it can't run (#432).
+  if (!IS_E2E && app.isPackaged && osEligible) {
     autoUpdater.checkForUpdates().catch(() => {});
   }
-  return result;
+  // Surface eligibility so the About tab can explain why an "update available"
+  // won't auto-install on an under-floor Mac, rather than offering a broken
+  // Restart. (Display-only; the safety is the gated kick above.)
+  return { ...result, osUpdateEligible: osEligible };
 });
 
 // Lets a freshly-(re)mounted About tab recover "an update already

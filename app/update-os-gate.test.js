@@ -1,0 +1,107 @@
+'use strict';
+
+const { test } = require('node:test');
+const assert = require('node:assert');
+const fs = require('node:fs');
+const path = require('node:path');
+
+const { isOSUpdateEligible } = require('./update-os-gate');
+
+const FLOOR = '14.4.0';
+const eligible = (platform, osVersion) =>
+  isOSUpdateEligible({ platform, osVersion, minVersion: FLOOR });
+
+// --- darwin below the floor: BLOCKED (the whole point of #432) ---
+
+test('darwin macOS 12 blocked', () => {
+  assert.strictEqual(eligible('darwin', '12.7.6'), false);
+});
+
+test('darwin macOS 13 blocked', () => {
+  assert.strictEqual(eligible('darwin', '13.6.9'), false);
+});
+
+test('darwin 14.0 blocked (below 14.4, not just below 14)', () => {
+  assert.strictEqual(eligible('darwin', '14.0'), false);
+});
+
+test('darwin 14.3.1 blocked (minor-version aware)', () => {
+  assert.strictEqual(eligible('darwin', '14.3.1'), false);
+});
+
+// --- darwin at/above the floor: ALLOWED ---
+
+test('darwin 14.4.0 boundary allowed', () => {
+  assert.strictEqual(eligible('darwin', '14.4.0'), true);
+});
+
+test('darwin 14.4 (no patch) allowed', () => {
+  assert.strictEqual(eligible('darwin', '14.4'), true);
+});
+
+test('darwin 14.4.1 allowed', () => {
+  assert.strictEqual(eligible('darwin', '14.4.1'), true);
+});
+
+test('darwin 14.5 allowed', () => {
+  assert.strictEqual(eligible('darwin', '14.5'), true);
+});
+
+test('darwin 15.x allowed', () => {
+  assert.strictEqual(eligible('darwin', '15.1.1'), true);
+});
+
+test('darwin 26.x allowed (future naming)', () => {
+  assert.strictEqual(eligible('darwin', '26.0'), true);
+});
+
+// --- non-darwin: always eligible (macOS-only floor, Windows untouched) ---
+
+test('win32 always eligible regardless of version', () => {
+  assert.strictEqual(eligible('win32', '10.0.19045'), true);
+  assert.strictEqual(eligible('win32', '6.1.7601'), true);
+});
+
+test('linux always eligible', () => {
+  assert.strictEqual(eligible('linux', '0.0.0'), true);
+});
+
+// --- fail-open on a parse hiccup (manifest gate is the backstop) ---
+
+test('darwin empty version fails open (eligible)', () => {
+  assert.strictEqual(eligible('darwin', ''), true);
+});
+
+test('darwin garbled version fails open (eligible)', () => {
+  assert.strictEqual(eligible('darwin', 'not-a-version'), true);
+  assert.strictEqual(eligible('darwin', '14.x.0'), true);
+  assert.strictEqual(eligible('darwin', '14a'), true);
+});
+
+test('darwin non-string version fails open (eligible)', () => {
+  assert.strictEqual(eligible('darwin', undefined), true);
+  assert.strictEqual(eligible('darwin', null), true);
+  assert.strictEqual(eligible('darwin', 14.4), true);
+});
+
+test('unparseable minVersion fails open (eligible)', () => {
+  assert.strictEqual(isOSUpdateEligible({ platform: 'darwin', osVersion: '12.0.0', minVersion: 'oops' }), true);
+});
+
+test('no args does not throw and is eligible', () => {
+  assert.strictEqual(isOSUpdateEligible(), true);
+  assert.strictEqual(isOSUpdateEligible({}), true);
+});
+
+// --- config assertion: the runtime floor MUST match the Info.plist/manifest floor ---
+
+test('package.json mac floor matches the runtime gate floor (single-source #432)', () => {
+  const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8'));
+  const mac = pkg.build && pkg.build.mac;
+  assert.ok(mac, 'build.mac block present');
+  // Layer 1: electron-builder writes this into latest-mac.yml for electron-updater.
+  assert.strictEqual(mac.minimumSystemVersion, '14.4.0', 'mac.minimumSystemVersion set for the update manifest');
+  // And it must agree with the Info.plist launch floor, or a user could still
+  // be offered a build their OS refuses to launch.
+  assert.strictEqual(mac.extendInfo.LSMinimumSystemVersion, '14.4.0', 'LSMinimumSystemVersion agrees with the manifest floor');
+});
