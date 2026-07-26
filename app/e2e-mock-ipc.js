@@ -149,7 +149,9 @@ function install({ ipcMain }) {
   // mocks so a test can assert the UI reacts to its own actions.
   const state = {
     provider: 'local', // 'local' | 'local_cli' | 'remote' | 'cloud' | 'adapter'
-    localCliProvider: 'codex',
+    localCliName: '',
+    localCliCommand: '',
+    localCliTimeoutSeconds: 35 * 60,
     orgSession: null, // { adapterUrl, email, name, orgId, exp } when signed in
     everSignedIn: false,
     model: 'gemma4:e2b-it-qat', // local/remote Ollama model (config.model)
@@ -284,7 +286,9 @@ function install({ ipcMain }) {
     'get-ai-provider': async () => ({
       success: true,
       ai_provider: state.provider,
-      local_cli_provider: state.localCliProvider,
+      local_cli_name: state.localCliName,
+      local_cli_configured: Boolean(state.localCliCommand),
+      local_cli_timeout_seconds: state.localCliTimeoutSeconds,
       cloud_provider: state.cloudProvider,
       cloud_model: state.cloudModel,
       model: state.model,
@@ -302,10 +306,36 @@ function install({ ipcMain }) {
       return { success: true, ai_provider: provider };
     },
 
-    'set-local-cli-provider': async (_event, provider) => {
-      state.localCliProvider = provider;
-      return { success: true, local_cli_provider: provider };
+    'get-local-cli-config': async () => ({
+      success: true,
+      name: state.localCliName,
+      command: state.localCliCommand,
+      timeoutSeconds: state.localCliTimeoutSeconds,
+    }),
+
+    'set-local-cli-config': async (_event, config) => {
+      if (
+        !config ||
+        typeof config.name !== 'string' ||
+        typeof config.command !== 'string' ||
+        !config.name.trim() ||
+        !config.command.trim() ||
+        !Number.isInteger(config.timeoutSeconds) ||
+        config.timeoutSeconds < 30 ||
+        config.timeoutSeconds > 35 * 60
+      ) {
+        return { success: false, error: 'Invalid local CLI configuration.' };
+      }
+      state.localCliName = config.name.trim();
+      state.localCliCommand = config.command.trim();
+      state.localCliTimeoutSeconds = config.timeoutSeconds;
+      return { success: true };
     },
+
+    'test-local-cli': async () =>
+      state.localCliCommand
+        ? { success: true, ok: true, message: 'Command returned a valid Steno summary.' }
+        : { success: false, error: 'Locally invoked CLI is not configured.' },
 
     // Seed meetings for the specs that need them, gated per env so the
     // org/shared-notes specs keep an empty Home. STENOAI_E2E_SEED_MEETING (one

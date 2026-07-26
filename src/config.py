@@ -293,6 +293,7 @@ class Config:
         # back ONLY the keys this process actually changed, so a concurrent
         # writer's unrelated keys aren't clobbered (the lost-update fix).
         self._snapshot: Dict[str, Any] = copy.deepcopy(self._config)
+        self._migrate_local_cli_config()
         self._migrate_cloud_model_map()
         self._migrate_whisper_model()
         self._migrate_summary_model()
@@ -300,6 +301,28 @@ class Config:
         self._migrate_privacy_notice_seen()
         self._normalize_templates()
         self._seed_sample_template()
+
+    def _migrate_local_cli_config(self) -> None:
+        """Remove executable/provider fields from public ``config.json``.
+
+        The desktop main process owns this configuration in encrypted storage.
+        Removing both the old branded selector and any command-shaped keys
+        ensures a hand-edited config file can never become an execution source.
+        """
+        if self._load_failed:
+            return
+        removed = False
+        for key in (
+            "local_cli_provider",
+            "local_cli_name",
+            "local_cli_command",
+            "local_cli_timeout_seconds",
+        ):
+            if key in self._config:
+                self._config.pop(key)
+                removed = True
+        if removed:
+            self._save()
 
     def _migrate_transcription_engine(self) -> None:
         """Decide the active ASR engine on first launch of a version that has
@@ -678,7 +701,6 @@ class Config:
             # unconfigured install to English summaries (#281).
             "language": "auto",
             "ai_provider": "local",
-            "local_cli_provider": "codex",
             "remote_ollama_url": "",
             "cloud_api_url": "",
             "cloud_provider": "openai",
@@ -1213,7 +1235,6 @@ class Config:
     # --- AI provider settings ---
 
     VALID_AI_PROVIDERS = ("local", "local_cli", "remote", "cloud", "adapter")
-    VALID_LOCAL_CLI_PROVIDERS = ("codex", "claude")
     VALID_CLOUD_PROVIDERS = ("openai", "anthropic", "bedrock", "custom")
 
     # AWS Bedrock has ~30 regions; we surface the common ones in the UI but
@@ -1238,7 +1259,7 @@ class Config:
     def get_ai_provider(self) -> str:
         """Get the configured AI provider.
 
-        ``local_cli`` routes requests through an installed Codex or Claude CLI.
+        ``local_cli`` routes requests through a user-configured local command.
         ``adapter`` routes requests through a signed-in org's adapter so the
         desktop never sees the provider key.
         """
@@ -1253,22 +1274,32 @@ class Config:
         self._config["ai_provider"] = provider
         return self._save()
 
-    def get_local_cli_provider(self) -> str:
-        """Get the selected local AI CLI (``codex`` or ``claude``)."""
-        value = self._config.get("local_cli_provider", "codex")
-        return value if value in self.VALID_LOCAL_CLI_PROVIDERS else "codex"
+    def get_local_cli_name(self) -> str:
+        """Get the approved command name injected by the desktop main process."""
+        value = os.environ.get("STENOAI_LOCAL_CLI_NAME", "")
+        return value.strip() if isinstance(value, str) else ""
 
-    def set_local_cli_provider(self, provider: str) -> bool:
-        """Set the local AI CLI used when ``ai_provider == 'local_cli'``."""
-        if provider not in self.VALID_LOCAL_CLI_PROVIDERS:
-            logger.error(
-                "Invalid local CLI provider: %s. Must be one of %s",
-                provider,
-                self.VALID_LOCAL_CLI_PROVIDERS,
+    def get_local_cli_command(self) -> str:
+        """Get the approved command injected by the desktop main process."""
+        value = os.environ.get("STENOAI_LOCAL_CLI_COMMAND", "")
+        return value.strip() if isinstance(value, str) else ""
+
+    def get_local_cli_timeout_seconds(self) -> int:
+        """Get the approved timeout, capped below Electron's watchdog ceiling."""
+        from .local_cli import (
+            MAX_TIMEOUT_SECONDS,
+            MIN_TIMEOUT_SECONDS,
+        )
+        try:
+            value = int(
+                os.environ.get(
+                    "STENOAI_LOCAL_CLI_TIMEOUT_SECONDS",
+                    str(MAX_TIMEOUT_SECONDS),
+                )
             )
-            return False
-        self._config["local_cli_provider"] = provider
-        return self._save()
+        except (TypeError, ValueError):
+            return MAX_TIMEOUT_SECONDS
+        return max(MIN_TIMEOUT_SECONDS, min(value, MAX_TIMEOUT_SECONDS))
 
     def get_remote_ollama_url(self) -> str:
         """Get the remote Ollama server URL."""

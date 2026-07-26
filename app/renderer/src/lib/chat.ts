@@ -1,6 +1,6 @@
 // Shared helpers for the Chat tab + conversation view.
 
-import type { AiProvider, CloudProvider, LocalCliProvider } from '@/lib/ipc';
+import type { AiProvider, CloudProvider } from '@/lib/ipc';
 
 /** The AI-provider config fields the active-model label reads. */
 type ActiveModelFields = {
@@ -8,7 +8,7 @@ type ActiveModelFields = {
   cloud_provider: CloudProvider;
   cloud_model: string;
   model: string;
-  local_cli_provider: LocalCliProvider;
+  local_cli_name: string;
 };
 
 /** Provider-readiness fields the chat composer gates on. */
@@ -16,6 +16,7 @@ type ChatProviderFields = {
   ai_provider: AiProvider;
   cloud_api_key_set?: boolean;
   remote_ollama_url?: string;
+  local_cli_configured?: boolean;
 };
 
 /**
@@ -28,8 +29,9 @@ export function chatProviderReady(p: ChatProviderFields | undefined): boolean {
   if (!p) return false;
   switch (p.ai_provider) {
     case 'local':
-    case 'local_cli':
       return true;
+    case 'local_cli':
+      return !!p.local_cli_configured;
     case 'remote':
       return !!p.remote_ollama_url;
     case 'cloud':
@@ -60,7 +62,7 @@ export function formatActiveModel(p: ActiveModelFields | undefined): string {
       // The org adapter brokers the model server-side; the desktop has no id.
       return 'Organisation';
     case 'local_cli':
-      return p.local_cli_provider === 'claude' ? 'Claude CLI' : 'Codex CLI';
+      return p.local_cli_name || 'Locally invoked CLI';
     case 'local':
     default:
       return p.model ? `Ollama · ${p.model}` : 'Ollama';

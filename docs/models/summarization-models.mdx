@@ -3,7 +3,7 @@ title: "Summarization models"
 description: "Steno generates meeting summaries using local Ollama models by default, with optional cloud model support. Choose a model based on your hardware, privacy requirements, and the quality of notes you need."
 ---
 
-After transcription, Steno passes the transcript to a language model to generate structured notes: a summary paragraph, key topics, and action items. By default, this uses a local model running via [Ollama](https://ollama.com) entirely on your Mac. You can optionally use an installed Codex or Claude CLI, or configure a cloud model (OpenAI, Anthropic, AWS Bedrock, or a custom endpoint).
+After transcription, Steno passes the transcript to a language model to generate structured notes: a summary paragraph, key topics, and action items. By default, this uses a local model running via [Ollama](https://ollama.com) entirely on your Mac. You can optionally configure a locally invoked command or use a cloud model (OpenAI, Anthropic, AWS Bedrock, or a custom endpoint).
 
 ## Available models
 
@@ -46,16 +46,40 @@ To configure a cloud model:
 
 Cloud models are off by default. If you work with confidential recordings, use a local model.
 
-## Using Codex CLI or Claude CLI
+## Using a locally invoked CLI
 
-Steno can use an existing [Codex CLI](https://learn.chatgpt.com/docs/non-interactive-mode) or [Claude CLI](https://code.claude.com/docs/en/headless) installation for summaries, titles, and chat:
+This advanced option runs a command installed on your computer for summaries, titles, and chat. Steno sends the complete request to the command on standard input and reads the final answer from standard output.
 
-1. Install the CLI and run `codex` or `claude` once in Terminal to sign in
-2. Open **Settings → AI**
-3. Select **Local CLI (on-device)**
-4. Choose **Codex CLI** or **Claude CLI**
+1. Install and configure a CLI that supports non-interactive standard input
+2. Configure **API or business authentication outside Steno**
+3. Open **Settings → AI → Summarisation & Chat**
+4. Select **Locally invoked CLI**
+5. Enter a display name, command, and timeout
+6. Review the security confirmation, save, then select **Test command**
 
-Steno uses the CLI's current login and default model. It sends meeting text to the service used by that CLI, so this option is not offline in the way the built-in Ollama provider is. Prompts run non-interactively from an isolated temporary directory and are not saved as resumable agent sessions. Steno also ignores configured hooks, MCP servers, and other user or project automation for these one-shot requests. Claude's tools are disabled; Codex runs in its read-only sandbox because its built-in tool cannot be removed.
+The approved command is encrypted using the operating system credential store. It is not saved in `config.json`, accepted through `stenoai://` links, or configurable through the backend CLI.
+
+### Command examples
+
+These examples intentionally use API-key authentication. Consumer subscription login or included subscription rate limits are not a supported integration path. Set the named environment variable in the CLI's environment or use a wrapper that reads it from your operating system's credential store. Never paste an API key into Steno's command field.
+
+| CLI | Command in Steno | Required authentication |
+| --- | --- | --- |
+| [Codex CLI](https://learn.chatgpt.com/docs/non-interactive-mode) | `codex exec --ephemeral --skip-git-repo-check --sandbox read-only -` | `CODEX_API_KEY` |
+| [Claude CLI](https://code.claude.com/docs/en/headless) | `claude --bare -p` | `ANTHROPIC_API_KEY` |
+| [Gemini CLI](https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/tutorials/automation.md) | `gemini -p "Follow the complete request supplied on stdin and print only the final answer"` | `GEMINI_API_KEY` |
+
+Other commands work when they follow the same input and output contract:
+
+- Configure one executable and its arguments. Shell pipes, redirects, substitutions, and inline environment assignments are not interpreted.
+- Read the complete UTF-8 prompt from standard input.
+- Print only the final UTF-8 answer to standard output.
+- Write diagnostics to standard error and exit non-zero on failure.
+- For standard meeting notes, return non-empty `## Summary`, `## Key Topics`, `## Key Points`, and `## Action Items` sections.
+
+**You are responsible for this integration.** Steno cannot restrict the command's tools, filesystem or environment access, network access, provider-side retention, or downstream actions. Treat transcript content as untrusted input: meeting text can contain instructions that influence tools enabled by the command. The process starts locally, but it may send meeting text to third parties. You must comply with the command and provider terms, use an authentication method permitted for product integration, and obtain any participant consent required for meeting data.
+
+The configurable timeout is capped at 35 minutes so the command fails cleanly before Steno's outer processing watchdog can terminate a silent summarisation job.
 
 ---
 

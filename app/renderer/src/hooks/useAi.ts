@@ -1,12 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ipc } from '@/lib/ipc';
 import { unwrap } from '@/lib/result';
-import type { AiProvider, CloudProvider, LocalCliProvider } from '@/lib/ipc';
+import type { AiProvider, CloudProvider, LocalCliConfig } from '@/lib/ipc';
 import { modelsKeys } from '@/hooks/useModels';
 
 export const aiKeys = {
   all: ['ai'] as const,
   provider: () => [...aiKeys.all, 'provider'] as const,
+  localCliConfig: () => [...aiKeys.all, 'local-cli-config'] as const,
 };
 
 export function useAiProvider() {
@@ -47,11 +48,27 @@ export function useSetRemoteOllamaUrl() {
   });
 }
 
-export function useSetLocalCliProvider() {
+export function useLocalCliConfig() {
+  return useQuery({
+    queryKey: aiKeys.localCliConfig(),
+    queryFn: async () => unwrap(await ipc().ai.getLocalCliConfig()),
+  });
+}
+
+export function useSetLocalCliConfig() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (p: LocalCliProvider) => unwrap(await ipc().ai.setLocalCliProvider(p)),
-    onSuccess: () => qc.invalidateQueries({ queryKey: aiKeys.provider() }),
+    mutationFn: async (config: LocalCliConfig) => unwrap(await ipc().ai.setLocalCliConfig(config)),
+    onSuccess: (_data, config) => {
+      qc.invalidateQueries({ queryKey: aiKeys.provider() });
+      qc.setQueryData(aiKeys.localCliConfig(), config);
+    },
+  });
+}
+
+export function useTestLocalCli() {
+  return useMutation({
+    mutationFn: async () => unwrap(await ipc().ai.testLocalCli()),
   });
 }
 

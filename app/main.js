@@ -7503,16 +7503,115 @@ function hasCloudApiKey() {
   return fs.existsSync(getCloudKeyPath());
 }
 
+const LOCAL_CLI_TIMEOUT_MIN_SECONDS = 30;
+// The summary heartbeat runs for ~30 minutes and the outer processing
+// inactivity watchdog waits another 8 minutes. Keep the user-configurable
+// command timeout below that combined ceiling so Python reports the real
+// timeout instead of Electron killing the whole processing job first.
+const LOCAL_CLI_TIMEOUT_MAX_SECONDS = 35 * 60;
+
+function getLocalCliConfigPath() {
+  return path.join(getUserDataDir(), '.local-cli-config');
+}
+
+function isTrustedAiSettingsSender(event) {
+  const senderUrl = event?.sender?.getURL?.() || '';
+  try {
+    return Boolean(
+      mainWindow &&
+      !mainWindow.isDestroyed() &&
+      event.sender === mainWindow.webContents &&
+      new URL(senderUrl).hash === '#/settings?tab=ai'
+    );
+  } catch {
+    return false;
+  }
+}
+
+function validateLocalCliConfig(config) {
+  const name = typeof config?.name === 'string' ? config.name.trim() : '';
+  const command = typeof config?.command === 'string' ? config.command.trim() : '';
+  const timeoutSeconds = Number(config?.timeoutSeconds);
+  if (!name || name.length > 80 || /[\u0000-\u001f\u007f]/.test(name)) {
+    return { error: 'Display name must be between 1 and 80 characters.' };
+  }
+  if (
+    !command ||
+    command.length > 4096 ||
+    command.includes('\0') ||
+    command.includes('\n') ||
+    command.includes('\r')
+  ) {
+    return { error: 'Command must be a single line between 1 and 4096 characters.' };
+  }
+  if (
+    !Number.isInteger(timeoutSeconds) ||
+    timeoutSeconds < LOCAL_CLI_TIMEOUT_MIN_SECONDS ||
+    timeoutSeconds > LOCAL_CLI_TIMEOUT_MAX_SECONDS
+  ) {
+    return {
+      error: `Timeout must be between ${LOCAL_CLI_TIMEOUT_MIN_SECONDS} and ${LOCAL_CLI_TIMEOUT_MAX_SECONDS} seconds.`,
+    };
+  }
+  return { value: { name, command, timeoutSeconds } };
+}
+
+function saveLocalCliConfig(config) {
+  let tempPath = null;
+  try {
+    if (!safeStorage.isEncryptionAvailable()) return false;
+    const configPath = getLocalCliConfigPath();
+    fs.mkdirSync(path.dirname(configPath), { recursive: true });
+    const encrypted = safeStorage.encryptString(JSON.stringify(config));
+    tempPath = `${configPath}.${process.pid}.tmp`;
+    fs.writeFileSync(tempPath, encrypted, { mode: 0o600 });
+    fs.renameSync(tempPath, configPath);
+    tempPath = null;
+    return true;
+  } catch (error) {
+    console.error('Failed to save local CLI configuration:', error.message);
+    return false;
+  } finally {
+    if (tempPath) {
+      try {
+        fs.unlinkSync(tempPath);
+      } catch {
+        // Best-effort cleanup after a failed atomic save.
+      }
+    }
+  }
+}
+
+function loadLocalCliConfig() {
+  try {
+    const configPath = getLocalCliConfigPath();
+    if (!fs.existsSync(configPath) || !safeStorage.isEncryptionAvailable()) return null;
+    const encrypted = fs.readFileSync(configPath);
+    const parsed = JSON.parse(safeStorage.decryptString(encrypted));
+    const validated = validateLocalCliConfig(parsed);
+    return validated.value || null;
+  } catch (error) {
+    console.error('Failed to load local CLI configuration:', error.message);
+    return null;
+  }
+}
+
 // Build the env additions a Python AI-driven subprocess needs. Merges
 // the encrypted-on-disk cloud key (decrypted only here, never written
-// to the env if absent) AND the org adapter URL+JWT when a session
-// exists. Either or both may be empty — the Python summariser picks
+// to the env if absent), the approved local command, AND the org adapter
+// URL+JWT when a session exists. Any may be empty — the Python summariser picks
 // the right path based on the configured ai_provider, and we just
 // surface whatever's available.
 function getAiEnv() {
   const env = {};
   const cloudKey = loadCloudApiKey();
   if (cloudKey) env.STENOAI_CLOUD_API_KEY = cloudKey;
+  const localCli = loadLocalCliConfig();
+  if (localCli) {
+    env.STENOAI_LOCAL_CLI_NAME = localCli.name;
+    env.STENOAI_LOCAL_CLI_COMMAND = localCli.command;
+    env.STENOAI_LOCAL_CLI_TIMEOUT_SECONDS = String(localCli.timeoutSeconds);
+  }
   const session = loadOrgSession();
   if (session && session.adapterUrl && session.token && !isJwtExpired(session.token)) {
     env.STENOAI_ADAPTER_URL = session.adapterUrl;
@@ -7762,6 +7861,14 @@ ipcMain.handle('get-ai-provider', async () => {
     const jsonData = JSON.parse(result.trim());
     // Override cloud_api_key_set with safeStorage check
     jsonData.cloud_api_key_set = hasCloudApiKey();
+    // The command is encrypted outside config.json and only decrypted in the
+    // desktop main process. The backend get-ai-provider command cannot expose
+    // or mutate it.
+    const localCli = loadLocalCliConfig();
+    jsonData.local_cli_name = localCli?.name || '';
+    jsonData.local_cli_configured = Boolean(localCli);
+    jsonData.local_cli_timeout_seconds =
+      localCli?.timeoutSeconds || LOCAL_CLI_TIMEOUT_MAX_SECONDS;
 
     // Reconcile the provider with org-session reality before answering, so
     // the renderer's first paint already reflects a working provider:
@@ -7854,15 +7961,90 @@ ipcMain.handle('set-ai-provider', async (event, provider) => {
   }
 });
 
-ipcMain.handle('set-local-cli-provider', async (_event, provider) => {
+ipcMain.handle('set-local-cli-config', async (event, config) => {
   try {
+    if (!isTrustedAiSettingsSender(event)) {
+      return {
+        success: false,
+        error: 'This command can only be changed from Settings > Summarisation & Chat.',
+      };
+    }
+
+    const validated = validateLocalCliConfig(config);
+    if (!validated.value) {
+      return { success: false, error: validated.error };
+    }
+    const payload = validated.value;
+    const current = loadLocalCliConfig();
+    const unchanged = current && JSON.stringify(current) === JSON.stringify(payload);
+    if (!unchanged && !IS_E2E) {
+      const confirmation = await dialog.showMessageBox(mainWindow, {
+        type: 'warning',
+        title: 'Allow a local command to receive meeting text?',
+        message: `Allow “${payload.name}” to receive transcripts and summaries?`,
+        detail:
+          'Steno cannot restrict this command’s tools, files, network access, or data retention. ' +
+          'Meeting text can contain instructions that influence enabled tools, and the command ' +
+          'may send that text to third parties. You are responsible for the command, provider ' +
+          'terms, participant consent, and all resulting data access.',
+        buttons: ['Cancel', 'Allow and save'],
+        defaultId: 0,
+        cancelId: 0,
+        noLink: true,
+      });
+      if (confirmation.response !== 1) {
+        return { success: false, error: 'Command change cancelled.' };
+      }
+    }
+    if (!saveLocalCliConfig(payload)) {
+      return {
+        success: false,
+        error: 'Secure storage is unavailable; the command was not saved.',
+      };
+    }
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('get-local-cli-config', async (event) => {
+  if (!isTrustedAiSettingsSender(event)) {
+    return {
+      success: false,
+      error: 'This command can only be viewed from Settings > Summarisation & Chat.',
+    };
+  }
+  const localCli = loadLocalCliConfig();
+  return {
+    success: true,
+    name: localCli?.name || '',
+    command: localCli?.command || '',
+    timeoutSeconds: localCli?.timeoutSeconds || LOCAL_CLI_TIMEOUT_MAX_SECONDS,
+  };
+});
+
+ipcMain.handle('test-local-cli', async (event) => {
+  try {
+    if (!isTrustedAiSettingsSender(event)) {
+      return {
+        success: false,
+        error: 'This command can only be tested from Settings > Summarisation & Chat.',
+      };
+    }
+    const env = getAiEnv();
+    if (!env.STENOAI_LOCAL_CLI_COMMAND) {
+      return { success: false, error: 'Locally invoked CLI is not configured.' };
+    }
     const result = await runPythonScript(
       'simple_recorder.py',
-      ['set-local-cli-provider', provider],
+      ['test-local-cli'],
+      true,
+      env,
     );
     const jsonMatch = result.match(/\{.*\}/s);
     if (jsonMatch) return JSON.parse(jsonMatch[0]);
-    return { success: true, local_cli_provider: provider };
+    return { success: false, error: 'Invalid response while testing the command.' };
   } catch (error) {
     return { success: false, error: error.message };
   }

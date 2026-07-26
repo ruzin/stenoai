@@ -12,7 +12,7 @@ import time
 from typing import Optional, Dict, Any
 from .models import MeetingTranscript, ActionItem, Decision
 from .config import Config, resolve_runtime_tag, BEDROCK_REGION_RE
-from .local_cli import run_local_cli
+from .local_cli import run_local_cli, validate_summary_output
 from . import ollama_manager
 
 logger = logging.getLogger(__name__)
@@ -157,14 +157,16 @@ class OllamaSummarizer:
         self.bedrock_api_key: Optional[str] = None
         self.bedrock_region: str = ""
         self.bedrock_inference_profile: str = ""
-        self.local_cli_provider: Optional[str] = None
+        self.local_cli_name: Optional[str] = None
+        self.local_cli_command: Optional[str] = None
+        self.local_cli_timeout_seconds: int = 300
 
         if self.ai_provider == "local_cli":
-            self.local_cli_provider = config.get_local_cli_provider()
-            self.model_name = (
-                "Codex CLI" if self.local_cli_provider == "codex" else "Claude CLI"
-            )
-            logger.info("Local CLI provider initialized: %s", self.local_cli_provider)
+            self.local_cli_name = config.get_local_cli_name()
+            self.local_cli_command = config.get_local_cli_command()
+            self.local_cli_timeout_seconds = config.get_local_cli_timeout_seconds()
+            self.model_name = self.local_cli_name or "Locally invoked CLI"
+            logger.info("Local CLI command initialized: %s", self.model_name)
 
         elif self.ai_provider == "adapter":
             # Adapter mode: route every AI request through the customer's
@@ -788,12 +790,16 @@ class OllamaSummarizer:
 
     def _local_cli_chat(self, prompt: str, timeout_seconds: int = 300) -> str:
         """Send one prompt through the configured non-interactive local CLI."""
-        if not self.local_cli_provider:
-            raise ValueError("Local CLI provider is not configured.")
+        if not self.local_cli_command:
+            raise ValueError(
+                "Locally invoked CLI is not configured. "
+                "Set a command under Settings > Summarisation & Chat."
+            )
         return run_local_cli(
-            self.local_cli_provider,
+            self.local_cli_command,
             prompt,
-            timeout_seconds=timeout_seconds,
+            self.local_cli_name or "Locally invoked CLI",
+            timeout_seconds=min(timeout_seconds, self.local_cli_timeout_seconds),
         )
 
     def _openai_chat(self, prompt: str, timeout_seconds: int = 300) -> str:
@@ -1591,7 +1597,10 @@ TRANSCRIPT:
             prompt = self._create_template_report_prompt(transcript, template_prompt, language, notes)
             inner = self._stream_completion(prompt)
             empty_message = "Model returned an empty report"
-        elif self._needs_chunking(transcript, notes):
+        elif self.ai_provider in ("local", "remote") and self._needs_chunking(
+            transcript,
+            notes,
+        ):
             inner = self._map_reduce_streaming(transcript, language, notes, progress_callback)
             empty_message = "Model returned an empty summary"
         else:
@@ -1605,12 +1614,17 @@ TRANSCRIPT:
         # saving an empty summary/report. (_map_reduce_streaming already raises on
         # an empty reduce, so wrapping it here is harmless.)
         saw_content = False
+        local_cli_standard_chunks = []
         for chunk in inner:
             if chunk and chunk.strip():
                 saw_content = True
+            if self.ai_provider == "local_cli" and not template_prompt:
+                local_cli_standard_chunks.append(chunk)
             yield chunk
         if not saw_content:
             raise ValueError(empty_message)
+        if local_cli_standard_chunks:
+            validate_summary_output("".join(local_cli_standard_chunks))
 
     def test_connection(self) -> bool:
         """
@@ -1909,7 +1923,7 @@ ANSWER:"""
                         yield content
         except Exception as e:
             logger.error(f"Streaming query failed: {e}")
-            yield f"\n[Error: {e}]"
+            raise
 
     def query_transcript(self, transcript: str, question: str, language: str = "en") -> Optional[str]:
         """

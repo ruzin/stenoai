@@ -4626,7 +4626,6 @@ def get_ai_provider():
 
     result = {
         "ai_provider": config.get_ai_provider(),
-        "local_cli_provider": config.get_local_cli_provider(),
         "remote_ollama_url": config.get_remote_ollama_url(),
         "cloud_api_url": config.get_cloud_api_url(),
         "cloud_api_key_set": bool(config.get_cloud_api_key()),
@@ -4665,27 +4664,39 @@ def set_ai_provider(provider):
 
 
 @cli.command()
-@click.argument('provider')
-def set_local_cli_provider(provider):
-    """Set the local AI CLI (codex or claude)."""
+def test_local_cli():
+    """Require the configured command to produce a parseable Steno summary."""
     from src.config import get_config
-    config = get_config()
+    from src.local_cli import (
+        LocalCliError,
+        run_local_cli,
+        validate_summary_output,
+    )
 
-    if provider not in config.VALID_LOCAL_CLI_PROVIDERS:
-        print(json.dumps({
-            "success": False,
-            "error": (
-                f"Invalid local CLI provider: {provider}. Must be one of: "
-                f"{', '.join(config.VALID_LOCAL_CLI_PROVIDERS)}"
-            )
-        }))
+    config = get_config()
+    try:
+        output = run_local_cli(
+            config.get_local_cli_command(),
+            (
+                "Summarise this short test transcript as markdown. Output only "
+                "these four sections with content: ## Summary, ## Key Topics, "
+                "## Key Points, and ## Action Items.\n\n"
+                "TRANSCRIPT:\nAlex: We will ship the documentation on Friday.\n"
+                "Sam: I will review it on Thursday."
+            ),
+            config.get_local_cli_name(),
+            timeout_seconds=min(config.get_local_cli_timeout_seconds(), 120),
+        )
+        validate_summary_output(output)
+    except LocalCliError as exc:
+        print(json.dumps({"success": False, "error": str(exc)}))
         return
 
-    success = config.set_local_cli_provider(provider)
-    if success:
-        print(json.dumps({"success": True, "local_cli_provider": provider}))
-    else:
-        print(json.dumps({"success": False, "error": "Failed to save local CLI provider"}))
+    print(json.dumps({
+        "success": True,
+        "ok": True,
+        "message": "Command returned a valid Steno summary.",
+    }))
 
 
 @cli.command()

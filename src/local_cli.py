@@ -1,13 +1,16 @@
-"""Non-interactive Codex/Claude CLI adapter for meeting AI tasks.
+"""Generic non-interactive CLI adapter for meeting AI tasks.
 
-Steno assembles the complete prompt before calling this module.  The external
-CLI receives that prompt on stdin and runs from an empty temporary directory,
-so it never needs a path to the user's recordings or notes.
+Steno assembles the complete prompt before calling this module. The configured
+command runs from an empty temporary directory and receives the prompt on
+standard input, so it never needs paths to recordings or notes. Commands are
+always executed directly (never through an implicit shell).
 """
 
 from __future__ import annotations
 
 import os
+import re
+import shlex
 import shutil
 import signal
 import subprocess
@@ -17,11 +20,20 @@ from pathlib import Path
 from typing import Callable, Optional
 
 
-VALID_LOCAL_CLI_PROVIDERS = ("codex", "claude")
+MAX_DISPLAY_NAME_LENGTH = 80
+MAX_COMMAND_TEMPLATE_LENGTH = 4096
+MAX_TIMEOUT_SECONDS = 35 * 60
+MIN_TIMEOUT_SECONDS = 30
+MAX_OUTPUT_BYTES = 2_000_000
+MAX_STDERR_BYTES = 64_000
+DEFAULT_DISPLAY_NAME = "Locally invoked CLI"
 STENO_SECRET_ENV_VARS = (
     "STENOAI_ADAPTER_TOKEN",
     "STENOAI_ADAPTER_URL",
     "STENOAI_CLOUD_API_KEY",
+    "STENOAI_LOCAL_CLI_NAME",
+    "STENOAI_LOCAL_CLI_COMMAND",
+    "STENOAI_LOCAL_CLI_TIMEOUT_SECONDS",
 )
 
 
@@ -47,79 +59,123 @@ def _candidate_directories() -> list[Path]:
     )
 
     appdata = os.environ.get("APPDATA")
-    localappdata = os.environ.get("LOCALAPPDATA")
     if appdata:
         candidates.append(Path(appdata) / "npm")
-    if localappdata:
-        candidates.extend(
-            [
-                Path(localappdata) / "Programs" / "Claude",
-                Path(localappdata) / "Programs" / "Codex",
-            ]
-        )
     return candidates
 
 
-def find_local_cli(provider: str) -> Optional[str]:
-    """Resolve a supported CLI without invoking a shell."""
-    if provider not in VALID_LOCAL_CLI_PROVIDERS:
+def find_local_cli(executable: str) -> Optional[str]:
+    """Resolve a configured executable without invoking a shell."""
+    expanded = os.path.expanduser(executable)
+    candidate_path = Path(expanded)
+    if candidate_path.is_absolute():
+        return str(candidate_path) if candidate_path.is_file() else None
+    if candidate_path.parent != Path("."):
         return None
 
-    on_path = shutil.which(provider)
+    on_path = shutil.which(expanded)
     if on_path:
         return on_path
 
     suffixes = ("", ".exe", ".cmd", ".bat") if os.name == "nt" else ("",)
     for directory in _candidate_directories():
         for suffix in suffixes:
-            candidate = directory / f"{provider}{suffix}"
+            candidate = directory / f"{expanded}{suffix}"
             if candidate.is_file():
                 return str(candidate)
     return None
 
 
-def _command(provider: str, executable: str) -> list[str]:
-    if provider == "codex":
-        return [
-            executable,
-            "exec",
-            "--ignore-user-config",
-            "--ephemeral",
-            "--skip-git-repo-check",
-            "--sandbox",
-            "read-only",
-            "--ignore-rules",
-            "-",
-        ]
-    if provider == "claude":
-        return [
-            executable,
-            "-p",
-            "--tools",
-            "",
-            "--disable-slash-commands",
-            "--no-session-persistence",
-            "--setting-sources",
-            "",
-            "--strict-mcp-config",
-            "--mcp-config",
-            '{"mcpServers":{}}',
-            "--output-format",
-            "text",
-        ]
-    raise LocalCliError(f"Unsupported local CLI provider: {provider}")
+def normalize_local_cli_config(
+    display_name: str,
+    command_template: str,
+    timeout_seconds: int,
+) -> tuple[str, str, int]:
+    """Validate and normalize user-facing local CLI configuration."""
+    name = (display_name or "").strip()
+    template = (command_template or "").strip()
+
+    if not name:
+        raise LocalCliError("Enter a display name for the command.")
+    if len(name) > MAX_DISPLAY_NAME_LENGTH:
+        raise LocalCliError(
+            f"The display name must be {MAX_DISPLAY_NAME_LENGTH} characters or fewer."
+        )
+    if any(ord(character) < 32 or ord(character) == 127 for character in name):
+        raise LocalCliError("The display name cannot contain control characters.")
+    if not template:
+        raise LocalCliError("Enter a command that reads its prompt from standard input.")
+    if len(template) > MAX_COMMAND_TEMPLATE_LENGTH:
+        raise LocalCliError(
+            f"The command must be {MAX_COMMAND_TEMPLATE_LENGTH} characters or fewer."
+        )
+    if "\x00" in template or "\n" in template or "\r" in template:
+        raise LocalCliError("The command must be a single line without null bytes.")
+    try:
+        tokens = shlex.split(template, posix=True)
+    except ValueError as exc:
+        raise LocalCliError(f"The command has invalid quoting: {exc}") from exc
+    if not tokens:
+        raise LocalCliError("Enter an executable and its arguments.")
+    try:
+        timeout = int(timeout_seconds)
+    except (TypeError, ValueError) as exc:
+        raise LocalCliError("The timeout must be a whole number of seconds.") from exc
+    if timeout < MIN_TIMEOUT_SECONDS or timeout > MAX_TIMEOUT_SECONDS:
+        raise LocalCliError(
+            f"The timeout must be between {MIN_TIMEOUT_SECONDS} and "
+            f"{MAX_TIMEOUT_SECONDS} seconds."
+        )
+
+    return name, template, timeout
+
+
+def _command(
+    command_template: str,
+    *,
+    resolver: Callable[[str], Optional[str]] = find_local_cli,
+) -> list[str]:
+    """Build an argv list without shell expansion."""
+    _, template, _ = normalize_local_cli_config(
+        DEFAULT_DISPLAY_NAME,
+        command_template,
+        MIN_TIMEOUT_SECONDS,
+    )
+    tokens = shlex.split(template, posix=True)
+    executable = resolver(tokens[0])
+    if not executable:
+        raise LocalCliError(
+            "The configured executable was not found. Install it or use an absolute path."
+        )
+    return [executable, *tokens[1:]]
+
+
+def validate_summary_output(output: str) -> None:
+    """Require the standard Steno summary contract from a configured command."""
+    required = ("Summary", "Key Topics", "Key Points", "Action Items")
+    for heading in required:
+        section = re.search(
+            rf"(?ms)^## {re.escape(heading)}[ \t]*\r?\n(.*?)(?=^## |\Z)",
+            output,
+        )
+        if not section:
+            raise LocalCliError(
+                f"The command output is missing the required '## {heading}' section."
+            )
+        if not section.group(1).strip():
+            if heading == "Summary":
+                raise LocalCliError("The command returned an empty summary section.")
+            raise LocalCliError(
+                f"The command returned an empty '{heading}' section."
+            )
 
 
 def _sanitized_environment() -> dict[str, str]:
-    """Keep normal CLI authentication without forwarding Steno credentials."""
+    """Keep CLI authentication without forwarding Steno-owned credentials."""
     environment = os.environ.copy()
     for variable in STENO_SECRET_ENV_VARS:
         environment.pop(variable, None)
     return environment
-
-
-def _display_name(provider: str) -> str:
-    return "Codex CLI" if provider == "codex" else "Claude CLI"
 
 
 def _looks_like_auth_error(stderr: str) -> bool:
@@ -130,7 +186,6 @@ def _looks_like_auth_error(stderr: str) -> bool:
         "authentication required",
         "authentication failed",
         "unauthorized",
-        "please run",
         "api key",
     )
     return any(marker in lowered for marker in markers)
@@ -171,47 +226,43 @@ def _terminate_process(process: subprocess.Popen) -> None:
 
 
 def run_local_cli(
-    provider: str,
+    command_template: str,
     prompt: str,
+    display_name: str = DEFAULT_DISPLAY_NAME,
     timeout_seconds: int = 300,
     *,
     resolver: Callable[[str], Optional[str]] = find_local_cli,
 ) -> str:
-    """Run a one-shot local AI CLI call and return its final text response."""
-    if provider not in VALID_LOCAL_CLI_PROVIDERS:
-        raise LocalCliError(f"Unsupported local CLI provider: {provider}")
+    """Run a one-shot configured CLI call and return its final text response."""
+    name, template, timeout = normalize_local_cli_config(
+        display_name,
+        command_template,
+        timeout_seconds,
+    )
     if not prompt or not prompt.strip():
         raise LocalCliError("The local CLI prompt is empty.")
+    if "\x00" in prompt:
+        raise LocalCliError("The local CLI prompt contains an unsupported null byte.")
 
-    executable = resolver(provider)
-    name = _display_name(provider)
-    if not executable:
-        raise LocalCliError(
-            f"{name} was not found. Install it and run `{provider}` once in "
-            "Terminal to sign in, then try again."
-        )
-
+    command = _command(template, resolver=resolver)
     creationflags = 0
     if os.name == "nt":
         creationflags = (
             subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP
         )
 
-    cli_prompt = prompt
-    if provider == "codex":
-        cli_prompt = (
-            "Answer the request directly from the supplied text. Do not run "
-            "commands or use tools.\n\n"
-            f"{prompt}"
-        )
-
-    with tempfile.TemporaryDirectory(prefix="steno-local-cli-") as cwd:
+    output_too_large = False
+    with (
+        tempfile.TemporaryDirectory(prefix="steno-local-cli-") as cwd,
+        tempfile.TemporaryFile() as stdout_sink,
+        tempfile.TemporaryFile() as stderr_sink,
+    ):
         try:
             process = subprocess.Popen(
-                _command(provider, executable),
+                command,
                 stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                stdout=stdout_sink,
+                stderr=stderr_sink,
                 text=True,
                 encoding="utf-8",
                 errors="replace",
@@ -236,14 +287,14 @@ def run_local_cli(
             signal.signal(signal.SIGTERM, handle_sigterm)
 
         try:
-            stdout, stderr = process.communicate(
-                input=cli_prompt,
-                timeout=timeout_seconds,
+            returned_stdout, returned_stderr = process.communicate(
+                input=prompt,
+                timeout=timeout,
             )
         except subprocess.TimeoutExpired as exc:
             _terminate_process(process)
             raise LocalCliError(
-                f"{name} timed out after {timeout_seconds} seconds."
+                f"{name} timed out after {timeout} seconds."
             ) from exc
         except KeyboardInterrupt:
             _terminate_process(process)
@@ -252,17 +303,43 @@ def run_local_cli(
             if can_install_handler and previous_sigterm is not None:
                 signal.signal(signal.SIGTERM, previous_sigterm)
 
+        if returned_stdout is None:
+            output_size = os.fstat(stdout_sink.fileno()).st_size
+            output_too_large = output_size > MAX_OUTPUT_BYTES
+            stdout_sink.seek(0)
+            stdout = stdout_sink.read(MAX_OUTPUT_BYTES + 1).decode(
+                "utf-8",
+                errors="replace",
+            )
+        else:
+            # Test doubles may return captured strings even though production
+            # subprocesses write to the bounded temporary file.
+            stdout = returned_stdout
+            output_too_large = len(stdout.encode("utf-8")) > MAX_OUTPUT_BYTES
+
+        if returned_stderr is None:
+            stderr_sink.seek(0)
+            stderr = stderr_sink.read(MAX_STDERR_BYTES).decode(
+                "utf-8",
+                errors="replace",
+            )
+        else:
+            stderr = returned_stderr[:MAX_STDERR_BYTES]
+
     if process.returncode != 0:
         if _looks_like_auth_error(stderr):
             raise LocalCliError(
-                f"{name} is not signed in. Run `{provider}` in Terminal, "
-                "complete sign-in, and try again."
+                f"{name} could not authenticate. Check its setup outside Steno."
             )
         raise LocalCliError(
-            f"{name} failed with exit code {process.returncode}. Run "
-            f"`{provider}` in Terminal to check its setup."
+            f"{name} failed with exit code {process.returncode}. "
+            "Run the configured command outside Steno to check its setup."
         )
 
+    if output_too_large:
+        raise LocalCliError(
+            f"{name} returned more than {MAX_OUTPUT_BYTES:,} bytes."
+        )
     response = stdout.strip()
     if not response:
         raise LocalCliError(f"{name} returned an empty response.")

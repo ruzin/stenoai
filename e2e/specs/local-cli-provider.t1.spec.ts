@@ -1,36 +1,45 @@
-import { test, expect } from '../fixtures/electron';
+import { test, expect } from "../fixtures/electron";
 
-test('Local CLI reveals and persists the Codex/Claude selector', async ({
+test("Locally invoked CLI reveals and persists a generic command", async ({
   launchApp,
 }) => {
   const { page } = await launchApp({ mockIpc: true });
   await page.evaluate(() => {
-    window.location.hash = '#/settings?tab=ai';
+    window.location.hash = "#/settings?tab=ai";
   });
 
   const provider = page.locator('[data-testid="ai-provider-select"]');
   await expect(provider).toBeVisible();
-  await expect(
-    page.locator('[data-testid="local-cli-provider-select"]'),
-  ).toHaveCount(0);
+  await expect(page.locator('[data-testid="local-cli-config"]')).toHaveCount(0);
 
   await provider.click();
-  await page.getByRole('option', { name: /Local CLI \(on-device\)/ }).click();
+  await page.getByRole("option", { name: "Locally invoked CLI" }).click();
 
-  const cli = page.locator('[data-testid="local-cli-provider-select"]');
-  await expect(cli).toBeVisible();
-  await expect(cli).toContainText('Codex CLI');
+  const config = page.locator('[data-testid="local-cli-config"]');
+  await expect(config).toBeVisible();
+  await expect(config).not.toContainText("Codex");
+  await expect(config).not.toContainText("Claude");
 
-  await cli.click();
-  await page.getByRole('option', { name: 'Claude CLI' }).click();
-  await expect(cli).toContainText('Claude CLI');
+  await page
+    .locator('[data-testid="local-cli-name"]')
+    .fill("My meeting command");
+  await page
+    .locator('[data-testid="local-cli-command"]')
+    .fill("meeting-agent --stdin");
+  await config.getByRole("button", { name: "Save" }).click();
+  await expect(config).toContainText("Saved");
 
-  // Switching away hides the secondary control without losing the choice.
+  // Switching away hides the setup without losing the saved command.
   await provider.click();
-  await page.getByRole('option', { name: /^Local \(on-device\)/ }).click();
-  await expect(cli).toHaveCount(0);
+  await page.getByRole("option", { name: /^Local \(on-device\)/ }).click();
+  await expect(config).toHaveCount(0);
 
   await provider.click();
-  await page.getByRole('option', { name: /Local CLI \(on-device\)/ }).click();
-  await expect(cli).toContainText('Claude CLI');
+  await page.getByRole("option", { name: "Locally invoked CLI" }).click();
+  await expect(page.locator('[data-testid="local-cli-name"]')).toHaveValue(
+    "My meeting command",
+  );
+  await expect(page.locator('[data-testid="local-cli-command"]')).toHaveValue(
+    "meeting-agent --stdin",
+  );
 });

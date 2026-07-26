@@ -30,7 +30,7 @@ import { GoogleIcon } from '@/components/ui/google-icon';
 import { MetaIcon } from '@/components/ui/meta-icon';
 import { QwenIcon } from '@/components/ui/qwen-icon';
 import { cn } from '@/lib/utils';
-import type { AiProvider, CloudProvider, LocalCliProvider } from '@/lib/ipc';
+import type { AiProvider, CloudProvider } from '@/lib/ipc';
 import {
   useAiProvider,
   useSetAiProvider,
@@ -40,9 +40,11 @@ import {
   useSetCloudApiUrl,
   useSetCloudModel,
   useSetCloudProvider,
-  useSetLocalCliProvider,
+  useLocalCliConfig,
+  useSetLocalCliConfig,
   useSetRemoteOllamaUrl,
   useTestCloudApi,
+  useTestLocalCli,
   useTestRemoteOllama,
 } from '@/hooks/useAi';
 import {
@@ -391,9 +393,9 @@ function SummarisationSection() {
             <SelectItem
               value="local_cli"
               icon={<SquareTerminal className="size-4" />}
-              description="Use an installed Codex or Claude CLI with its current login and model."
+              description="Run your own command locally. It may send transcript text to an external service."
             >
-              Local CLI (on-device)
+              Locally invoked CLI
             </SelectItem>
             <SelectItem
               value="remote"
@@ -425,7 +427,7 @@ function SummarisationSection() {
         </Select>
       </SettingRow>
 
-      {current === 'local_cli' && <LocalCliProviderConfig />}
+      {current === 'local_cli' && <LocalCliConfig />}
       {current === 'remote' && <RemoteProviderConfig />}
       {current === 'cloud' && <CloudProviderConfig />}
       {current === 'adapter' && <AdapterProviderInfo signedIn={orgSignedIn} />}
@@ -459,37 +461,213 @@ function SummarisationSection() {
   );
 }
 
-function LocalCliProviderConfig() {
-  const provider = useAiProvider();
-  const setLocalCliProvider = useSetLocalCliProvider();
-  const current = provider.data?.local_cli_provider ?? 'codex';
+function LocalCliConfig() {
+  const localConfig = useLocalCliConfig();
+
+  if (localConfig.isPending) {
+    return (
+      <div
+        className="py-4 text-[12px]"
+        style={{ borderBottom: '1px solid var(--border-subtle)', color: 'var(--fg-2)' }}
+      >
+        Loading command configuration…
+      </div>
+    );
+  }
+  if (localConfig.isError) {
+    return (
+      <div
+        className="py-4 text-[12px]"
+        style={{
+          borderBottom: '1px solid var(--border-subtle)',
+          color: 'var(--accent-danger, var(--fg-1))',
+        }}
+      >
+        {localConfig.error.message}
+      </div>
+    );
+  }
+
+  return <LocalCliConfigEditor initialConfig={localConfig.data} />;
+}
+
+function LocalCliConfigEditor({
+  initialConfig,
+}: {
+  initialConfig: { name: string; command: string; timeoutSeconds: number };
+}) {
+  const saveConfig = useSetLocalCliConfig();
+  const testCommand = useTestLocalCli();
+  const [name, setName] = React.useState(initialConfig.name);
+  const [command, setCommand] = React.useState(initialConfig.command);
+  const [timeoutMinutes, setTimeoutMinutes] = React.useState(
+    Math.round(initialConfig.timeoutSeconds / 60)
+  );
+
+  const validationError = !name.trim()
+    ? 'Enter a display name.'
+    : !command.trim()
+      ? 'Enter a command.'
+      : !Number.isInteger(timeoutMinutes) || timeoutMinutes < 1 || timeoutMinutes > 35
+        ? 'Timeout must be a whole number between 1 and 35 minutes.'
+        : undefined;
+  const busy = saveConfig.isPending || testCommand.isPending;
+  const payload = {
+    name: name.trim(),
+    command: command.trim(),
+    timeoutSeconds: timeoutMinutes * 60,
+  };
+
+  const clearStatus = () => {
+    saveConfig.reset();
+    testCommand.reset();
+  };
+
+  const onSave = () => {
+    if (!validationError) saveConfig.mutate(payload);
+  };
+
+  const onTest = async () => {
+    if (validationError) return;
+    try {
+      await saveConfig.mutateAsync(payload);
+      testCommand.mutate();
+    } catch {
+      // The mutation renders its own safe error message below.
+    }
+  };
+
+  const mutationError = testCommand.isError
+    ? testCommand.error
+    : saveConfig.isError
+      ? saveConfig.error
+      : undefined;
 
   return (
-    <SettingRow
-      label="CLI"
-      description="Uses the CLI's current login and default model. Meeting text is sent to that CLI's service; Steno does not save an agent session."
+    <div
+      className="space-y-3 py-4"
+      style={{ borderBottom: '1px solid var(--border-subtle)' }}
+      data-testid="local-cli-config"
     >
-      <Select
-        value={current}
-        onValueChange={(value) => setLocalCliProvider.mutate(value as LocalCliProvider)}
-        disabled={!provider.data || setLocalCliProvider.isPending}
-      >
-        <SelectTrigger
-          className={cn(COMPACT_TRIGGER, 'min-w-[180px]')}
-          data-testid="local-cli-provider-select"
+      <div>
+        <label
+          className="mb-1 block text-[12px] font-medium uppercase"
+          style={{ letterSpacing: '0.06em', color: 'var(--fg-muted)' }}
         >
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="codex" icon={<OpenAiIcon className="size-4" />}>
-            Codex CLI
-          </SelectItem>
-          <SelectItem value="claude" icon={<AnthropicIcon className="size-4" />}>
-            Claude CLI
-          </SelectItem>
-        </SelectContent>
-      </Select>
-    </SettingRow>
+          Display name
+        </label>
+        <Input
+          value={name}
+          onChange={(event) => {
+            setName(event.target.value);
+            clearStatus();
+          }}
+          placeholder="My meeting command"
+          maxLength={80}
+          className={COMPACT_INPUT}
+          data-testid="local-cli-name"
+        />
+      </div>
+      <div>
+        <label
+          className="mb-1 block text-[12px] font-medium uppercase"
+          style={{ letterSpacing: '0.06em', color: 'var(--fg-muted)' }}
+        >
+          Command
+        </label>
+        <Input
+          value={command}
+          onChange={(event) => {
+            setCommand(event.target.value);
+            clearStatus();
+          }}
+          placeholder="my-agent --print"
+          maxLength={4096}
+          spellCheck={false}
+          className={cn(COMPACT_INPUT, 'font-mono')}
+          data-testid="local-cli-command"
+        />
+        <div
+          className="mt-1 text-[11.5px] leading-[1.45]"
+          style={{
+            color: validationError ? 'var(--accent-danger, var(--fg-1))' : 'var(--fg-muted)',
+          }}
+        >
+          {validationError ??
+            'Executable and arguments only—no shell pipes or redirects. Steno sends the complete prompt on standard input; print only the final answer to standard output.'}
+        </div>
+      </div>
+      <div>
+        <label
+          className="mb-1 block text-[12px] font-medium uppercase"
+          style={{ letterSpacing: '0.06em', color: 'var(--fg-muted)' }}
+        >
+          Timeout
+        </label>
+        <div className="flex items-center gap-2">
+          <Input
+            type="number"
+            min={1}
+            max={35}
+            step={1}
+            value={timeoutMinutes}
+            onChange={(event) => {
+              setTimeoutMinutes(Number(event.target.value));
+              clearStatus();
+            }}
+            className={cn(COMPACT_INPUT, 'w-24')}
+            data-testid="local-cli-timeout"
+          />
+          <span className="text-[12px]" style={{ color: 'var(--fg-2)' }}>
+            minutes (35 maximum)
+          </span>
+        </div>
+      </div>
+      <div className="flex items-center gap-3">
+        <Button
+          variant="outline"
+          size="sm"
+          className={COMPACT_BTN}
+          onClick={onSave}
+          disabled={Boolean(validationError) || busy}
+        >
+          {saveConfig.isPending ? 'Saving…' : 'Save'}
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          className={COMPACT_BTN}
+          onClick={onTest}
+          disabled={Boolean(validationError) || busy}
+        >
+          {testCommand.isPending ? 'Testing…' : 'Test command'}
+        </Button>
+        <ConnectionStatus
+          ok={
+            testCommand.isSuccess
+              ? true
+              : mutationError
+                ? false
+                : saveConfig.isSuccess
+                  ? true
+                  : undefined
+          }
+          message={
+            mutationError instanceof Error
+              ? mutationError.message
+              : (testCommand.data?.message ?? (saveConfig.isSuccess ? 'Saved' : undefined))
+          }
+        />
+      </div>
+      <div className="text-[12px] leading-[1.5]" style={{ color: 'var(--fg-2)' }}>
+        <strong style={{ color: 'var(--fg-1)' }}>You own compliance and access.</strong> The process
+        starts on this device, but Steno cannot restrict its tools, files, network access,
+        environment, or data retention. Meeting text may contain instructions that influence enabled
+        tools, and the command may send that text elsewhere. Use only provider-approved API or
+        business authentication, obtain participant consent, and never paste API keys into this
+        field.
+      </div>
+    </div>
   );
 }
 

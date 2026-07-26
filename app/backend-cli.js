@@ -97,7 +97,10 @@ function createBackendCli({
       const backendPath = getBackendPath();
 
       // Log the command being executed (unless silent)
-      console.log('Running:', `${backendPath} ${args.join(' ')}`);
+      // Use the same privacy filter for terminal logs as the in-app debug
+      // panel. Command templates may contain private paths or accidentally
+      // pasted credentials and must not be echoed verbatim.
+      console.log('Running:', `${backendPath} ${sanitizeArgsForLog(args)}`);
       if (!silent) {
         // Sanitize the echoed argv: denylisted commands (query, save-template,
         // set-user-name/storage-path, folder + URL setters) carry content/PII in
