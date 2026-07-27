@@ -34,3 +34,24 @@ export function classifyCompletionNotification(input: {
   const hasNotes = Boolean(input.notesGenerated) || Boolean(input.notesAlreadyExist);
   return hasNotes || isFailed ? 'note-ready' : 'transcript-ready';
 }
+
+/**
+ * Whether the completed job's note ALREADY had notes (the M2 append case).
+ *
+ * Subtle: the backend only ever writes `notes_generated: false` (a transcript-
+ * only note) or OMITS the key entirely (a note that has notes) — it is never
+ * written `true`. So "has notes" is `notes_generated !== false`, NOT
+ * `notes_generated === true` (which is always false and was the ineffective
+ * first fix). Guard on meetingData presence: when the completion event carries
+ * no meetingData (the rare list-lookup-failed fallback, and the reprocess/report
+ * paths), return false so we fall back to the transient `notesGenerated` signal
+ * rather than defaulting a transcript-only note to "has notes". `notes_stale`
+ * is NOT a substitute — an append sets it unconditionally, including on
+ * transcript-only notes.
+ */
+export function meetingAlreadyHasNotes(
+  meetingData?: { session_info?: { notes_generated?: boolean } } | null,
+): boolean {
+  if (!meetingData) return false;
+  return meetingData.session_info?.notes_generated !== false;
+}

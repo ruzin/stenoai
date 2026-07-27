@@ -8,7 +8,7 @@ import { useLiveDraftStore } from './liveDraftStore';
 import { navigate, routeFromHash } from '@/lib/router';
 import { composeShareBody, pickTranscriptForShare } from '@/routes/MeetingDetail';
 import { streamCache } from '@/lib/meetingDetailState';
-import { classifyCompletionNotification } from '@/lib/completionNotification';
+import { classifyCompletionNotification, meetingAlreadyHasNotes } from '@/lib/completionNotification';
 import type { Meeting, QueueStatus, RecordingTrigger } from '@/lib/ipc';
 
 export type RecordingStatus = 'idle' | 'recording' | 'paused' | 'processing';
@@ -508,8 +508,9 @@ export function useRecordingProcessingEffects() {
             notesGenerated: data.notesGenerated,
             // Continue-recording (append) skips summarization but the note it
             // appended to already has notes — treat as note-ready, not
-            // "generate notes?" (M2).
-            notesAlreadyExist: data.meetingData?.session_info.notes_generated,
+            // "generate notes?" (M2). meetingAlreadyHasNotes encodes the subtle
+            // notes_generated frontmatter semantics (absent = has notes).
+            notesAlreadyExist: meetingAlreadyHasNotes(data.meetingData),
             transcriptionFailed: data.transcriptionFailed,
             meetingTranscriptionFailed: data.meetingData?.session_info.transcription_failed,
           });
