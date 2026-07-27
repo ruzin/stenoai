@@ -260,7 +260,8 @@ export function useRecording() {
     recordingSummaryFile: queue.data?.recordingSummaryFile ?? null,
     /** The real note file the live recording/processing session produces.
      *  useMeetings dedupes the synthetic live row against it so one recording
-     *  never shows as two entries (#bug4). Null for Whisper/import and idle. */
+     *  never shows as two entries (#bug4). Only Parakeet writes the placeholder
+     *  it points at, so dedup only bites there; null when idle. */
     liveSummaryFile: queue.data?.liveSummaryFile ?? null,
     /** Set of summary files whose `reprocess-meeting` IPC is currently
      *  in flight. Used by useMeetings to flip the matching existing
@@ -505,6 +506,10 @@ export function useRecordingProcessingEffects() {
             Boolean(data.meetingData?.session_info.transcription_failed);
           const kind = classifyCompletionNotification({
             notesGenerated: data.notesGenerated,
+            // Continue-recording (append) skips summarization but the note it
+            // appended to already has notes — treat as note-ready, not
+            // "generate notes?" (M2).
+            notesAlreadyExist: data.meetingData?.session_info.notes_generated,
             transcriptionFailed: data.transcriptionFailed,
             meetingTranscriptionFailed: data.meetingData?.session_info.transcription_failed,
           });

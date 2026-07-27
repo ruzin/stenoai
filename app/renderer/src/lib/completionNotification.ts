@@ -14,15 +14,23 @@
  * A failed transcription is deliberately routed to `note-ready` (with the
  * caller's `failed` flag), NOT `transcript-ready`: there's nothing to summarise
  * on a failed transcript, so we never offer "generate notes" there.
+ *
+ * `notesAlreadyExist` covers the continue-recording (append) case: the backend
+ * always prints SUMMARY_SKIPPED for an append (deferring to on-demand
+ * regenerate), so `notesGenerated` is false — but the note it appended to
+ * already has notes (now stale). Prompting "generate notes?" for a note that
+ * already has them is wrong, so a note that already has notes is `note-ready`.
  */
 export type CompletionNotificationKind = 'note-ready' | 'transcript-ready';
 
 export function classifyCompletionNotification(input: {
   notesGenerated?: boolean;
+  notesAlreadyExist?: boolean;
   transcriptionFailed?: boolean;
   meetingTranscriptionFailed?: boolean;
 }): CompletionNotificationKind {
   const isFailed =
     Boolean(input.transcriptionFailed) || Boolean(input.meetingTranscriptionFailed);
-  return input.notesGenerated || isFailed ? 'note-ready' : 'transcript-ready';
+  const hasNotes = Boolean(input.notesGenerated) || Boolean(input.notesAlreadyExist);
+  return hasNotes || isFailed ? 'note-ready' : 'transcript-ready';
 }

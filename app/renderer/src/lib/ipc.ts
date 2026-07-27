@@ -373,7 +373,9 @@ export interface QueueStatus {
    *  instant-stop placeholder, then rewritten by the pipeline). Deterministic
    *  from the audio stem and stable across record→process, so useMeetings can
    *  dedupe the synthetic "__live__/…" row against the real note once it exists
-   *  (one recording, one row — #bug4). Null for Whisper/import and when idle. */
+   *  (one recording, one row — #bug4). Only the Parakeet instant-stop path
+   *  writes that placeholder, so dedup only bites there; Whisper/import have no
+   *  placeholder (dedup is a no-op even when this is set), and it's null idle. */
   liveSummaryFile?: string | null;
 }
 

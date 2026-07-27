@@ -4459,14 +4459,25 @@ ipcMain.handle('get-queue-status', async () => {
       (currentRecordingProcess !== null || systemAudioRecordingActive)
         ? (currentRecordingAppendTarget || null)
         : null,
-    // The real note file this recording/processing session produces (the
+    // The real note file the CURRENT recording/processing session produces (the
     // instant-stop placeholder written at stop, then rewritten in place by the
     // pipeline). Lets useMeetings dedupe the synthetic "__live__/…" row against
     // the real note once it exists, so one recording is never shown twice
     // (#bug4). Deterministic from the audio stem, so it's the same key across
-    // the recording → processing phases. Null for Whisper/import (no instant
-    // placeholder) and when idle.
-    liveSummaryFile: currentProcessingJob?.summaryFile || activeSysAudioSummaryFile || null,
+    // this session's recording → processing phases.
+    //
+    // Precedence matters: prefer the ACTIVE recording's key over a PROCESSING
+    // job's. In the supported back-to-back flow (stop meeting A → immediately
+    // start meeting B while A is still processing), `sessionName` reports B (the
+    // recording), so liveSummaryFile must also be B's — otherwise it'd be A's,
+    // A's note is already in the list, and B's live row would be wrongly dropped
+    // (B shows no row at all). At B's own stop, teardown nulls
+    // activeSysAudioSummaryFile before currentProcessingJob is set to B, so the
+    // fallback still yields B and the intended dedup against B's placeholder
+    // fires. Only the Parakeet instant-stop path writes a placeholder, so this
+    // only actually bites there; Whisper/import have no placeholder (dedup is a
+    // no-op) and it's null when idle.
+    liveSummaryFile: activeSysAudioSummaryFile || currentProcessingJob?.summaryFile || null,
   };
 });
 
@@ -6667,6 +6678,13 @@ function showMeetingEndedNotification(appName) {
   // action and a body tap wrap up (low stakes now — it only stops, it doesn't
   // start AI processing), and neither steals focus (background, like
   // requestAutoRecord).
+  //
+  // Gating (deliberate): like the meeting-detected toast, this is an
+  // auto-detect *lifecycle* prompt gated by the auto_detect_meetings toggle,
+  // NOT by notificationsEnabled() — that gate covers the result toasts
+  // (note-ready / transcript-ready / silence). Splitting lifecycle vs result
+  // toasts is intentional so turning off result notifications doesn't strand a
+  // paused auto-detected recording with no way to wrap it up.
   notif.on('action', (_evt, _index) => requestWrapUp());
   notif.on('click', () => requestWrapUp());
   trackNotificationLifecycle(notif, 'meeting_ended');

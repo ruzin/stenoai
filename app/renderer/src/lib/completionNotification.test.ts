@@ -34,4 +34,16 @@ describe('classifyCompletionNotification (#bug2/#bug3)', () => {
       classifyCompletionNotification({ notesGenerated: true, transcriptionFailed: true }),
     ).toBe('note-ready');
   });
+
+  it('append/continue: no new notes but the note already has them → note-ready (M2)', () => {
+    expect(
+      classifyCompletionNotification({ notesGenerated: false, notesAlreadyExist: true }),
+    ).toBe('note-ready');
+  });
+
+  it('append into a still-transcript-only note (no notes either way) → transcript-ready', () => {
+    expect(
+      classifyCompletionNotification({ notesGenerated: false, notesAlreadyExist: false }),
+    ).toBe('transcript-ready');
+  });
 });
