@@ -39,18 +39,21 @@ logger = logging.getLogger(__name__)
 BEDROCK_REGION_RE = re.compile(r"[a-z]{2}(-gov)?-[a-z]+-[0-9]{1,2}")
 
 
-def _atomic_write_json(path: Path, payload) -> None:
-    """Write `payload` as JSON to `path` atomically.
+def _atomic_write(path: Path, render, encoding: str = 'utf-8') -> None:
+    """Durably replace `path` with whatever `render(fh)` writes.
 
-    The shared atomic writer for every JSON file the CLI persists —
-    config.json here, recorder_state.json and the final summary JSON via
-    the re-export in simple_recorder. tempfile + os.replace in the same
-    directory keeps the rename a single filesystem operation on POSIX and
-    Windows, so a crash mid-write leaves the prior file intact rather
-    than a half-written one. config.json in particular is read by many
-    concurrent CLI subprocesses; a plain truncate-and-rewrite lets a
-    reader see a torn file, fall back to defaults, and (pre-fix) persist
-    those defaults over the user's real settings.
+    The shared core behind _atomic_write_json and _atomic_write_text: a
+    tempfile in the SAME directory (so the rename can't cross a filesystem
+    boundary), flush + fsync so the bytes are on the platter before the
+    rename, then os.replace — a single filesystem operation on POSIX and
+    Windows. A crash, a full disk, or a killed process mid-write therefore
+    leaves the previous file intact rather than a half-written one, and a
+    concurrent reader sees either the old file or the new one, never a torn
+    mix. The temp file is removed on any failure so a failed write leaves
+    no debris next to the real file.
+
+    `render` takes the open text handle and writes the payload; anything it
+    raises propagates to the caller after cleanup.
     """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -60,10 +63,10 @@ def _atomic_write_json(path: Path, payload) -> None:
         prefix=f'.{path.name}.',
         suffix='.tmp',
         delete=False,
-        encoding='utf-8',
+        encoding=encoding,
     )
     try:
-        json.dump(payload, tmp, indent=2)
+        render(tmp)
         tmp.flush()
         os.fsync(tmp.fileno())
         tmp.close()
@@ -88,6 +91,36 @@ def _atomic_write_json(path: Path, payload) -> None:
         except OSError:
             pass
         raise
+
+
+def _atomic_write_json(path: Path, payload) -> None:
+    """Write `payload` as JSON to `path` atomically.
+
+    The shared atomic writer for every JSON file the CLI persists —
+    config.json and folders.json here, recorder_state.json and the final
+    summary JSON via the re-export in simple_recorder. config.json in
+    particular is read by many concurrent CLI subprocesses; a plain
+    truncate-and-rewrite lets a reader see a torn file, fall back to
+    defaults, and (pre-fix) persist those defaults over the user's real
+    settings. See _atomic_write for the durability mechanics.
+    """
+    _atomic_write(path, lambda fh: json.dump(payload, fh, indent=2))
+
+
+def _atomic_write_text(path: Path, text: str, encoding: str = 'utf-8') -> None:
+    """Write `text` to `path` atomically — the Path.write_text replacement.
+
+    The summary Markdown is the app's primary user artifact and is rewritten
+    in place on every reprocess, retranscribe, title regeneration and live
+    append. Plain write_text truncates first, so a crash (or a full disk)
+    between truncate and write leaves the user with an empty or half-written
+    note and no previous version to fall back to. See _atomic_write.
+
+    Note: the .md and its sidecar .json are each written atomically but are
+    NOT written as one transaction — a crash between the two can still leave
+    them disagreeing. Out of scope here; the individual files stay readable.
+    """
+    _atomic_write(path, lambda fh: fh.write(text), encoding=encoding)
 
 
 def get_user_data_dir() -> Path:
