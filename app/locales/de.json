@@ -373,10 +373,43 @@
     }
   },
   "menu": {
+    "about": "Über {{app}}",
+    "close": "Fenster schließen",
+    "copy": "Kopieren",
+    "cut": "Ausschneiden",
+    "delete": "Löschen",
+    "edit": "Bearbeiten",
     "file": "&Datei",
+    "fileMac": "Ablage",
+    "forceReload": "Neu laden erzwingen",
+    "front": "Alle nach vorne bringen",
+    "hide": "{{app}} ausblenden",
+    "hideOthers": "Andere ausblenden",
     "learnMore": "Mehr erfahren",
+    "minimize": "Im Dock ablegen",
+    "paste": "Einsetzen",
+    "pasteAndMatchStyle": "Einsetzen und Stil anpassen",
+    "quit": "{{app}} beenden",
+    "redo": "Wiederholen",
+    "reload": "Neu laden",
     "reportBug": "Fehler melden",
-    "settings": "Einstellungen…"
+    "resetZoom": "Originalgröße",
+    "selectAll": "Alles auswählen",
+    "services": "Dienste",
+    "settings": "Einstellungen…",
+    "speech": "Sprachausgabe",
+    "startSpeaking": "Sprachausgabe starten",
+    "stopSpeaking": "Sprachausgabe stoppen",
+    "substitutions": "Ersetzungen",
+    "toggleDevTools": "Entwicklerwerkzeuge ein- oder ausblenden",
+    "toggleFullScreen": "Vollbild ein oder aus",
+    "undo": "Widerrufen",
+    "unhide": "Alle einblenden",
+    "view": "Darstellung",
+    "window": "Fenster",
+    "zoom": "Zoomen",
+    "zoomIn": "Vergrößern",
+    "zoomOut": "Verkleinern"
   },
   "nav": {
     "allNotes": "Alle Notizen",
@@ -915,6 +948,31 @@
       "partial": "teilweise übersetzt",
       "system": "Systemsprache"
     },
+    "languages": {
+      "ar": "Arabisch",
+      "auto": "Automatisch",
+      "autoMulti": "Mehrsprachig",
+      "de": "Deutsch",
+      "en": "Englisch",
+      "es": "Spanisch",
+      "fr": "Französisch",
+      "hi": "Hindi",
+      "hint": {
+        "auto": "Erkennt pro Aufnahme automatisch (europäische Sprachen)",
+        "de": "Auf Deutsch transkribieren und zusammenfassen",
+        "en": "Beste Genauigkeit, wenn Meetings immer auf Englisch sind",
+        "es": "Auf Spanisch transkribieren und zusammenfassen",
+        "fr": "Auf Französisch transkribieren und zusammenfassen",
+        "nl": "Auf Niederländisch transkribieren und zusammenfassen",
+        "pt": "Auf Portugiesisch transkribieren und zusammenfassen"
+      },
+      "ja": "Japanisch",
+      "ko": "Koreanisch",
+      "nl": "Niederländisch",
+      "pt": "Portugiesisch",
+      "zh-Hans": "Chinesisch (vereinfacht)",
+      "zh-Hant": "Chinesisch (traditionell)"
+    },
     "model": {
       "default": "Standard",
       "deleteAria": "Modell löschen",
@@ -925,8 +983,8 @@
       "fasterBuildBlocked": "Erst den laufenden Wechsel abschließen",
       "fasterBuildRetry": "Erneut versuchen: zum schnelleren Build wechseln",
       "fasterBuildSwitch": "Zum schnelleren Build wechseln",
-      "memoryWarningBadge": "Speicher könnte knapp werden",
-      "memoryWarningTitle": "Dieses Modell braucht womöglich mehr Speicher, als auf deinem Mac verfügbar ist, und läuft dann langsam oder schlägt fehl.",
+      "memoryWarningBadge": "RAM knapp",
+      "memoryWarningTitle": "Dieses Modell braucht womöglich mehr Arbeitsspeicher, als auf deinem Mac verfügbar ist, und läuft dann langsam oder schlägt fehl.",
       "mlxBadge": "MLX-Modell",
       "mlxTitleDirect": "Direkt als MLX-Build ({{tag}}) heruntergeladen - {{name}} wurde nie geladen",
       "mlxTitleGguf": "Läuft als MLX-Build ({{tag}}) statt als {{name}}",
@@ -999,6 +1057,9 @@
       "save": "Vorlage speichern",
       "saveFailed": "Speichern fehlgeschlagen",
       "saving": "Wird gespeichert…",
+      "seeded": {
+        "shareableSummary": "Weitergabe-Zusammenfassung"
+      },
       "systemPrompt": "System-Prompt",
       "usesStructuredFormat": "Nutzt strukturiertes Format"
     }

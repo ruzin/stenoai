@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { Check, ChevronLeft, Loader2, Lock, Plus, Trash2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { templateDisplayName } from '@/lib/templateName';
 import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Input, Textarea } from '@/components/ui/input';
@@ -22,6 +23,7 @@ import {
 } from '@/hooks/useTemplates';
 import { COMPACT_BTN } from './primitives';
 import { LANGUAGES_WHISPER, type LangOption } from './languages';
+import { languageLabel } from '@/lib/transcription-languages';
 
 // ---------------------------------------------------------------------------
 // Templates tab — manage summary report templates (CRUD + default pick) as a
@@ -151,7 +153,7 @@ export function TemplatesTab({
                     className="truncate text-[13px] font-medium"
                     style={{ color: 'var(--fg-1)' }}
                   >
-                    {t.name}
+                    {templateDisplayName(t)}
                   </span>
                   {isDefault && (
                     <span
@@ -432,7 +434,7 @@ function TemplateEditor({
             <SelectContent>
               {TEMPLATE_LANGUAGES.map((l) => (
                 <SelectItem key={l.value} value={l.value}>
-                  {l.label}
+                  {languageLabel(l.value, l.label)}
                 </SelectItem>
               ))}
             </SelectContent>

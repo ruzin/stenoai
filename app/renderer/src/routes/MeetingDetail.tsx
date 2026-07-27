@@ -1,6 +1,7 @@
 import * as React from 'react';
 import ReactMarkdown from 'react-markdown';
 import { Trans, useTranslation } from 'react-i18next';
+import { templateDisplayName } from '@/lib/templateName';
 import {
   Calendar as CalendarIcon,
   Check,
@@ -1516,7 +1517,7 @@ function NoteViewToggle({
                     style={{ color: 'var(--fg-1)' }}
                   >
                     <FileText className="size-[13px] shrink-0" style={{ color: 'var(--fg-2)' }} />
-                    <span className="truncate">{t.name}</span>
+                    <span className="truncate">{templateDisplayName(t)}</span>
                   </button>
                 ))}
               </>

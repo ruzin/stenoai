@@ -1688,38 +1688,107 @@ function buildAppMenu() {
       { label: i18n.t('menu.reportBug'), click: () => shell.openExternal('https://discord.gg/DZ6vcQnxxu') }
     ]
   };
+  /*
+   * The composite roles (fileMenu/editMenu/viewMenu/windowMenu) are expanded
+   * into their items so each can carry a translated label.
+   *
+   * This looks like it should be unnecessary — the assumption when this landed
+   * was Electron's, that a role supplies a platform-appropriate localised
+   * label. Measured on a fully German Mac (getLocale=de, systemLocale=de-DE),
+   * it does not: bare roles render "Undo", "Cut", "Select All" in English. So
+   * a German UI showed one German "Einstellungen…" in an otherwise English
+   * menu, which reads more broken than either language on its own.
+   *
+   * Every item keeps its `role`, so behaviour and the platform accelerator
+   * still come from Electron — only the text is ours. Verified that overriding
+   * a role's label leaves its accelerator intact (quit still binds ⌘Q).
+   *
+   * The German wording is Apple's own macOS terminology: "Ablage" rather than
+   * "Datei" for File, "Widerrufen" for Undo, "Einsetzen" for Paste, "Im Dock
+   * ablegen" for Minimize. Windows/Linux use "Datei", which is correct there.
+   */
+  const appName = app.name;
+  const editSubmenu = [
+    { role: 'undo', label: i18n.t('menu.undo') },
+    { role: 'redo', label: i18n.t('menu.redo') },
+    { type: 'separator' },
+    { role: 'cut', label: i18n.t('menu.cut') },
+    { role: 'copy', label: i18n.t('menu.copy') },
+    { role: 'paste', label: i18n.t('menu.paste') },
+    ...(process.platform === 'darwin'
+      ? [
+          { role: 'pasteAndMatchStyle', label: i18n.t('menu.pasteAndMatchStyle') },
+          { role: 'delete', label: i18n.t('menu.delete') },
+          { role: 'selectAll', label: i18n.t('menu.selectAll') },
+          { type: 'separator' },
+          {
+            label: i18n.t('menu.speech'),
+            submenu: [
+              { role: 'startSpeaking', label: i18n.t('menu.startSpeaking') },
+              { role: 'stopSpeaking', label: i18n.t('menu.stopSpeaking') }
+            ]
+          }
+        ]
+      : [
+          { role: 'delete', label: i18n.t('menu.delete') },
+          { type: 'separator' },
+          { role: 'selectAll', label: i18n.t('menu.selectAll') }
+        ])
+  ];
+  const viewSubmenu = [
+    { role: 'reload', label: i18n.t('menu.reload') },
+    { role: 'forceReload', label: i18n.t('menu.forceReload') },
+    { role: 'toggleDevTools', label: i18n.t('menu.toggleDevTools') },
+    { type: 'separator' },
+    { role: 'resetZoom', label: i18n.t('menu.resetZoom') },
+    { role: 'zoomIn', label: i18n.t('menu.zoomIn') },
+    { role: 'zoomOut', label: i18n.t('menu.zoomOut') },
+    { type: 'separator' },
+    { role: 'togglefullscreen', label: i18n.t('menu.toggleFullScreen') }
+  ];
+  const windowSubmenu = [
+    { role: 'minimize', label: i18n.t('menu.minimize') },
+    ...(process.platform === 'darwin'
+      ? [
+          { role: 'zoom', label: i18n.t('menu.zoom') },
+          { type: 'separator' },
+          { role: 'front', label: i18n.t('menu.front') }
+        ]
+      : [{ role: 'close', label: i18n.t('menu.close') }])
+  ];
+
   const appMenu = Menu.buildFromTemplate(
     process.platform === 'darwin'
       ? [
           {
             // Custom appMenu to add Settings… with the conventional ⌘,
             // shortcut (the default `{ role: 'appMenu' }` omits Settings).
-            label: app.name,
+            label: appName,
             submenu: [
-              { role: 'about' },
+              { role: 'about', label: i18n.t('menu.about', { app: appName }) },
               { type: 'separator' },
               settingsItem,
               { type: 'separator' },
-              { role: 'services' },
+              { role: 'services', label: i18n.t('menu.services') },
               { type: 'separator' },
-              { role: 'hide' },
-              { role: 'hideOthers' },
-              { role: 'unhide' },
+              { role: 'hide', label: i18n.t('menu.hide', { app: appName }) },
+              { role: 'hideOthers', label: i18n.t('menu.hideOthers') },
+              { role: 'unhide', label: i18n.t('menu.unhide') },
               { type: 'separator' },
-              { role: 'quit' }
+              { role: 'quit', label: i18n.t('menu.quit', { app: appName }) }
             ]
           },
-          { role: 'fileMenu' },
-          { role: 'editMenu' },
-          { role: 'viewMenu' },
-          { role: 'windowMenu' },
+          { label: i18n.t('menu.fileMac'), submenu: [{ role: 'close', label: i18n.t('menu.close') }] },
+          { label: i18n.t('menu.edit'), submenu: editSubmenu },
+          { label: i18n.t('menu.view'), submenu: viewSubmenu },
+          { label: i18n.t('menu.window'), submenu: windowSubmenu },
           helpSubmenu
         ]
       : [
-          { label: i18n.t('menu.file'), submenu: [settingsItem, { type: 'separator' }, { role: 'quit' }] },
-          { role: 'editMenu' },
-          { role: 'viewMenu' },
-          { role: 'windowMenu' },
+          { label: i18n.t('menu.file'), submenu: [settingsItem, { type: 'separator' }, { role: 'quit', label: i18n.t('menu.quit', { app: appName }) }] },
+          { label: i18n.t('menu.edit'), submenu: editSubmenu },
+          { label: i18n.t('menu.view'), submenu: viewSubmenu },
+          { label: i18n.t('menu.window'), submenu: windowSubmenu },
           helpSubmenu
         ]
   );

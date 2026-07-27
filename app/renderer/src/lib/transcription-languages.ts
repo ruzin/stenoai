@@ -1,3 +1,5 @@
+import i18n from '@/lib/i18n';
+
 // Single source of truth for which languages the Parakeet engine offers.
 //
 // Parakeet TDT v3 is language-agnostic at inference (the decoder ignores the
@@ -36,3 +38,36 @@ export const PARAKEET_LANGUAGES: readonly ParakeetLanguageOption[] = [
 export const PARAKEET_LANGUAGE_CODES: ReadonlySet<string> = new Set(
   PARAKEET_LANGUAGES.map((l) => l.code),
 );
+
+/*
+ * Display labels for the language pickers (#337).
+ *
+ * The arrays above stay the source of truth for WHICH languages exist and what
+ * their codes are; only the presentation is localised, keyed by code. The
+ * English `label`/`hint` fields remain as the fallback, so a code without a
+ * translation still renders a real word rather than a key.
+ *
+ * German uses exonyms ("Spanisch"), not endonyms ("Español"). The convention
+ * differs by purpose: an OS language picker shows endonyms so speakers can find
+ * their own language in a UI they cannot yet read. Here the reader is already in
+ * a German UI, saying "my meetings are in Spanish" — so they scan for the German
+ * word.
+ *
+ * `auto` deliberately has two labels: the Whisper picker calls it
+ * "Auto (detect)", the Parakeet one "Multi-language", because Parakeet is
+ * language-agnostic at inference rather than detecting per recording.
+ */
+export function languageLabel(
+  code: string,
+  fallback: string,
+  variant: 'detect' | 'multi' = 'detect',
+): string {
+  const key = code === 'auto' && variant === 'multi' ? 'autoMulti' : code;
+  const translated = i18n.t(`settings.languages.${key}`, { defaultValue: '' });
+  return translated || fallback;
+}
+
+export function languageHint(code: string, fallback: string): string {
+  const translated = i18n.t(`settings.languages.hint.${code}`, { defaultValue: '' });
+  return translated || fallback;
+}

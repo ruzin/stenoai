@@ -61,6 +61,7 @@ import { COMPACT_BTN, COMPACT_INPUT, COMPACT_TRIGGER, SectionHeading, SettingRow
 import { ModelCard, formatModelSize, isDefaultModel, parsePullPercent } from './model-card';
 import { modelMayExceedMemory } from './model-memory';
 import { LANGUAGES_PARAKEET, LANGUAGES_WHISPER } from './languages';
+import { languageLabel } from '@/lib/transcription-languages';
 
 export function AiTab() {
   const { t } = useTranslation();
@@ -128,7 +129,7 @@ function TranscriptionSection() {
           <SelectContent>
             {options.map((l) => (
               <SelectItem key={l.value} value={l.value}>
-                {l.label}
+                {languageLabel(l.value, l.label)}
               </SelectItem>
             ))}
           </SelectContent>

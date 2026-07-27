@@ -8,7 +8,7 @@ import { cn } from '@/lib/utils';
 import { useLiveTranscript } from '@/hooks/useLiveTranscript';
 import { useRecording } from '@/hooks/useRecording';
 import { useLanguageSetting, useSetLanguage } from '@/hooks/useSettings';
-import { PARAKEET_LANGUAGES } from '@/lib/transcription-languages';
+import { PARAKEET_LANGUAGES, languageHint, languageLabel } from '@/lib/transcription-languages';
 import { useLiveTranscriptOpen } from '@/hooks/liveTranscriptOpenStore';
 import { formatElapsed } from '@/lib/utils';
 
@@ -427,11 +427,11 @@ function LanguageSelector() {
                 className="flex w-full items-center justify-between text-[13px] font-medium"
                 style={{ color: 'var(--fg-1)' }}
               >
-                {opt.label}
+                {languageLabel(opt.code, opt.label, 'multi')}
                 {active && <Check size={13} />}
               </span>
               <span className="text-[11.5px]" style={{ color: 'var(--fg-2)' }}>
-                {opt.hint}
+                {languageHint(opt.code, opt.hint)}
               </span>
             </button>
           );

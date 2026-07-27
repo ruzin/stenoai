@@ -373,10 +373,43 @@
     }
   },
   "menu": {
+    "about": "About {{app}}",
+    "close": "Close Window",
+    "copy": "Copy",
+    "cut": "Cut",
+    "delete": "Delete",
+    "edit": "Edit",
     "file": "&File",
+    "fileMac": "File",
+    "forceReload": "Force Reload",
+    "front": "Bring All to Front",
+    "hide": "Hide {{app}}",
+    "hideOthers": "Hide Others",
     "learnMore": "Learn More",
+    "minimize": "Minimize",
+    "paste": "Paste",
+    "pasteAndMatchStyle": "Paste and Match Style",
+    "quit": "Quit {{app}}",
+    "redo": "Redo",
+    "reload": "Reload",
     "reportBug": "Report a Bug",
-    "settings": "Settings…"
+    "resetZoom": "Actual Size",
+    "selectAll": "Select All",
+    "services": "Services",
+    "settings": "Settings…",
+    "speech": "Speech",
+    "startSpeaking": "Start Speaking",
+    "stopSpeaking": "Stop Speaking",
+    "substitutions": "Substitutions",
+    "toggleDevTools": "Toggle Developer Tools",
+    "toggleFullScreen": "Toggle Full Screen",
+    "undo": "Undo",
+    "unhide": "Show All",
+    "view": "View",
+    "window": "Window",
+    "zoom": "Zoom",
+    "zoomIn": "Zoom In",
+    "zoomOut": "Zoom Out"
   },
   "nav": {
     "allNotes": "All notes",
@@ -915,6 +948,31 @@
       "partial": "partly translated",
       "system": "System default"
     },
+    "languages": {
+      "ar": "Arabic",
+      "auto": "Auto (detect)",
+      "autoMulti": "Multi-language",
+      "de": "German",
+      "en": "English",
+      "es": "Spanish",
+      "fr": "French",
+      "hi": "Hindi",
+      "hint": {
+        "auto": "Auto-detect per recording (European languages)",
+        "de": "Transcribe and summarise in German",
+        "en": "Best accuracy when meetings are always in English",
+        "es": "Transcribe and summarise in Spanish",
+        "fr": "Transcribe and summarise in French",
+        "nl": "Transcribe and summarise in Dutch",
+        "pt": "Transcribe and summarise in Portuguese"
+      },
+      "ja": "Japanese",
+      "ko": "Korean",
+      "nl": "Dutch",
+      "pt": "Portuguese",
+      "zh-Hans": "Chinese (Simplified)",
+      "zh-Hant": "Chinese (Traditional)"
+    },
     "model": {
       "default": "Default",
       "deleteAria": "Delete model",
@@ -999,6 +1057,9 @@
       "save": "Save Template",
       "saveFailed": "Save failed",
       "saving": "Saving…",
+      "seeded": {
+        "shareableSummary": "Shareable summary"
+      },
       "systemPrompt": "System Prompt",
       "usesStructuredFormat": "Uses structured format"
     }
