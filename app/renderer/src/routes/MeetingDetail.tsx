@@ -2,6 +2,7 @@ import * as React from 'react';
 import ReactMarkdown from 'react-markdown';
 import { Trans, useTranslation } from 'react-i18next';
 import { templateDisplayName } from '@/lib/templateName';
+import { meetingDisplayTitle } from '@/lib/meetingTitle';
 import {
   Calendar as CalendarIcon,
   Check,
@@ -1031,7 +1032,11 @@ function DetailContent({
             </span>
           ) : (
             <span className="cursor-text" onClick={() => setIsEditingTitle(true)}>
-              {info.name}
+              {/* Display only. The contentEditable branch above deliberately
+                  keeps info.name raw: the placeholder is a protocol token the
+                  backend replaces with a generated title, and saving a
+                  translated version would break that match forever. */}
+              {meetingDisplayTitle(info.name)}
             </span>
           )}
         </h1>

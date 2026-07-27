@@ -386,7 +386,11 @@ function LanguageSelector() {
   // out-of-list pin (e.g. a Whisper-only language set in Settings) shows its
   // code rather than being mislabelled "Multi" and silently reset.
   const display =
-    current === 'auto' ? t('dock.languageMulti') : (selected?.label ?? current.toUpperCase());
+    current === 'auto'
+      ? t('dock.languageMulti')
+      : selected
+        ? languageLabel(selected.code, selected.label, 'multi')
+        : current.toUpperCase();
 
   const pick = (code: string) => {
     setLanguage.mutate(code);

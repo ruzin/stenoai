@@ -315,6 +315,10 @@
     },
     "participantCount_one": "{{count}} person",
     "participantCount_other": "{{count}} people",
+    "placeholderTitle": {
+      "meeting": "Meeting",
+      "note": "Note"
+    },
     "processing": {
       "body": "Your transcript is captured — refining it and generating notes in the background. You can read and edit <strong>My notes</strong> now.",
       "title": "Finishing up"
@@ -383,6 +387,7 @@
     "fileMac": "File",
     "forceReload": "Force Reload",
     "front": "Bring All to Front",
+    "help": "Help",
     "hide": "Hide {{app}}",
     "hideOthers": "Hide Others",
     "learnMore": "Learn More",

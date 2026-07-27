@@ -15,6 +15,12 @@ build/
 !app/build/
 app/build/*
 !app/build/entitlements.mac.plist
+# Localised macOS permission-prompt bodies (#337). app/build/* above is an
+# allowlist, so these need an explicit exception - without it a clean CI
+# checkout has no de.lproj, electron-builder only warns, and the signed
+# release ships English prompts while local builds look correct.
+!app/build/lproj/
+!app/build/lproj/**
 !app/build/icon.icns
 !app/build/icon-dragonfly.icns
 !app/build/icon.ico

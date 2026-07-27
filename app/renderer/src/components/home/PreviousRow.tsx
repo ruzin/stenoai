@@ -1,5 +1,6 @@
 import { Folder as FolderIcon, Loader2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { meetingDisplayTitle } from '@/lib/meetingTitle';
 import type { TFunction } from 'i18next';
 import type { Meeting } from '@/lib/ipc';
 import { navigate } from '@/lib/router';
@@ -34,7 +35,7 @@ export function PreviousRow({ meeting, folderName }: PreviousRowProps) {
       ? '/meetings/processing'
       : `/meetings/${encodeURIComponent(info.summary_file)}`;
 
-  const title = info.name || t('home.previousRow.untitledNote');
+  const title = meetingDisplayTitle(info.name) || t('home.previousRow.untitledNote');
 
   return (
     <div

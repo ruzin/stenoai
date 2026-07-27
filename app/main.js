@@ -1682,7 +1682,11 @@ function buildAppMenu() {
     }
   };
   const helpSubmenu = {
-    role: 'help',
+    // A plain submenu rather than { role: 'help' }: the role's own label does
+    // not follow the chosen language (same measured behaviour as the other
+    // roles), and `help` is documented as macOS-specific while this object is
+    // also used in the Windows/Linux template.
+    label: i18n.t('menu.help'),
     submenu: [
       { label: i18n.t('menu.learnMore'), click: () => shell.openExternal('https://github.com/ruzin/stenoai') },
       { label: i18n.t('menu.reportBug'), click: () => shell.openExternal('https://discord.gg/DZ6vcQnxxu') }

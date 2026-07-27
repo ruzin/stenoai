@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { useTranslation } from 'react-i18next';
+import { meetingDisplayTitle } from '@/lib/meetingTitle';
 import type { TFunction } from 'i18next';
 import { Search } from 'lucide-react';
 import { useMeetings, LIVE_SUMMARY_PREFIX } from '@/hooks/useMeetings';
@@ -322,7 +323,8 @@ function CommandPalette({ onClose }: { onClose: () => void }) {
             ))
           ) : (
             noteResults.map((m, i) => {
-              const title = m.session_info.name || t('palette.untitledMeeting');
+              const title =
+                meetingDisplayTitle(m.session_info.name) || t('palette.untitledMeeting');
               const sub = snippet(m.summary, query);
               return (
                 <li

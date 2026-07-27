@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { useTranslation } from 'react-i18next';
+import { meetingDisplayTitle } from '@/lib/meetingTitle';
 import { AppShell } from '@/components/AppShell';
 import {
   Sidebar,
@@ -480,7 +481,7 @@ function buildSidebar({ meetings, folders, search, activeSummaryFile }: BuildArg
 function meetingToSidebar(meeting: Meeting, activeSummaryFile: string | null): SidebarMeeting {
   return {
     summaryFile: meeting.session_info.summary_file,
-    title: meeting.session_info.name,
+    title: meetingDisplayTitle(meeting.session_info.name),
     dateLabel: formatDateLabel(meeting.session_info),
     active: meeting.session_info.summary_file === activeSummaryFile,
   };

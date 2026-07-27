@@ -315,6 +315,10 @@
     },
     "participantCount_one": "{{count}} Person",
     "participantCount_other": "{{count}} Personen",
+    "placeholderTitle": {
+      "meeting": "Meeting",
+      "note": "Notiz"
+    },
     "processing": {
       "body": "Dein Transkript ist gesichert. Im Hintergrund wird es verfeinert und es entstehen die Notizen. <strong>Meine Notizen</strong> kannst du jetzt schon lesen und bearbeiten.",
       "title": "Fast fertig"
@@ -383,6 +387,7 @@
     "fileMac": "Ablage",
     "forceReload": "Neu laden erzwingen",
     "front": "Alle nach vorne bringen",
+    "help": "Hilfe",
     "hide": "{{app}} ausblenden",
     "hideOthers": "Andere ausblenden",
     "learnMore": "Mehr erfahren",

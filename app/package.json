@@ -163,6 +163,10 @@
         {
           "from": "../bin/mic-monitor",
           "to": "mic-monitor"
+        },
+        {
+          "from": "build/lproj/de.lproj/InfoPlist.strings",
+          "to": "de.lproj/InfoPlist.strings"
         }
       ],
       "extendInfo": {
