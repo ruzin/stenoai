@@ -812,6 +812,7 @@ Summary output language: {config.get_language_name(output_language)}
             md_lines.append('')
             md_lines.append(notes_text)
         summary_path.write_text('\n'.join(md_lines), encoding='utf-8')
+        _write_original_snapshot(summary_path, parsed)
 
         # Clean up
         from src.config import get_config
@@ -838,6 +839,37 @@ Summary output language: {config.get_language_name(output_language)}
                 "summary_file": str(summary_path),
             }
         }
+
+
+def _write_original_snapshot(summary_path, parsed) -> None:
+    """Persist the model's own output next to a freshly written note.
+
+    The note file is rebuilt from scratch by reprocess, so the snapshot cannot
+    live inside it. It is the diff base the note editor needs in order to warn
+    before a regenerate discards user corrections, and it is best-effort: a
+    failure here must never fail a pipeline run that produced a good note.
+    """
+    try:
+        snapshot_path = Path(str(summary_path).replace('_summary.md', '_original.json'))
+        payload = {
+            'version': 1,
+            'captured_at': datetime.now().isoformat(),
+            'capture': 'generation',
+            'original': {
+                'summary': parsed.get('summary', ''),
+                'key_points': parsed.get('key_points', []),
+                'action_items': parsed.get('action_items', []),
+                'discussion_areas': parsed.get('discussion_areas', []),
+                'participants': parsed.get('participants', []),
+            },
+            # A regenerated note starts clean: its corrections were either
+            # confirmed as discarded by the user or never existed.
+            'edited_fields': [],
+            'edited_at': None,
+        }
+        snapshot_path.write_text(json.dumps(payload, indent=2), encoding='utf-8')
+    except Exception as exc:
+        logger.warning(f"Could not write original snapshot for {summary_path}: {exc}")
 
 
 def generate_default_template_report(summary_path, transcript, notes, language,
@@ -1371,6 +1403,7 @@ def process_streaming(audio_file, name, notes, live_transcript, append_to):
             md_lines.append('')
             md_lines.append(notes_text)
         summary_path.write_text('\n'.join(md_lines), encoding='utf-8')
+        _write_original_snapshot(summary_path, parsed)
 
         # Clean up audio. When we fell back to the live transcript the batch
         # transcription was empty/failed, so KEEP the audio regardless of the
@@ -3100,6 +3133,11 @@ def reprocess(summary_file, regenerate_title, retranscribe):
                 md_lines.append('')
                 md_lines.append(notes_text)
             summary_path.write_text('\n'.join(md_lines), encoding='utf-8')
+            # The .md rebuild above writes the raw streamed markdown rather than
+            # structured fields, so parse it here (mirrors the JSON branch below)
+            # to get the dict the snapshot needs.
+            parsed = recorder._parse_streamed_markdown(streamed_md)
+            _write_original_snapshot(summary_path, parsed)
         else:
             # JSON format: parse streamed markdown into structured fields
             parsed = recorder._parse_streamed_markdown(streamed_md)
